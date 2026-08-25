@@ -238,6 +238,29 @@ STATE_DIFF=$("$LHD" tool diff "lg:$W/stateful_cold_lg" "lg:$W/lg" --structural -
 STATE_TEXT=$("$LHD" tool diff "lg:$W/stateful_cold_lg" "lg:$W/lg" --top leaf.add1 -q)
 [ "$STATE_DIFF" = identical ] || fail "statefulness dirty cone differs from cold: $STATE_DIFF; $STATE_TEXT"
 
+# The inverse mixed cone is equally load-bearing: keep the stateful child clean
+# (its cached concrete mod has only a metadata stub) and edit the parent. The
+# restored child must retain its declares-reg/reset facts so the freshly lowered
+# parent still mints and forwards the implicit clock/reset ABI.
+python3 - "$W/src/top.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace(
+    "mod top(x:u8) -> (y:u9@[]) { y = leaf.add1(a=x) }",
+    "mod top(x:u8) -> (y:u9@[]) { const changed = x ^ 1; y = leaf.add1(a=changed) }"))
+PY
+compile "$W/stateful_parent_edit.json"
+[ "$(field "$W/stateful_parent_edit.json" incremental.compile.misses)" = 1 ] \
+  || fail "stateful-child parent edit did not miss exactly the parent"
+[ "$(field "$W/stateful_parent_edit.json" incremental.compile.hits)" -ge 1 ] \
+  || fail "stateful-child parent edit did not restore the clean child"
+grep -q 'input.*clock' "$W/v/"*.v || fail "restored stateful child lost the parent clock ABI"
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/stateful_parent_edit_cold_lg" \
+  --workdir "$W/stateful_parent_edit_cold_w" --set lhd.incremental=false -q \
+  --result-json "$W/stateful_parent_edit_cold.json" || fail "stateful-child parent-edit cold reference failed"
+[ "$("$LHD" tool diff "lg:$W/stateful_parent_edit_cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
+  || fail "restored stateful child with dirty parent differs from cold"
+
 # Tier-A damage is also a refused cold miss. Remove the exact source snapshot
 # for one unchanged unit; the compile must reparse and republish it cleanly.
 SNAPSHOT=$(python3 - "$SCOPE/inventory.json" <<'PY'

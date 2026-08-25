@@ -1345,7 +1345,7 @@ std::string lnast_unit_dir(std::string_view snapshot_file) {
 
 std::string lowered_lnast_dir(size_t index) { return std::format("unit_{:08}", index); }
 
-constexpr std::string_view kCompactLnastMagic{"lhd.cln5"};
+constexpr std::string_view kCompactLnastMagic{"lhd.cln6"};
 
 // The header pairs the magic with the stored body's semantic hash. The defer
 // hit path compares it against the inventory row, so a snapshot that was
@@ -1402,6 +1402,21 @@ void save_compact_lnast(const std::shared_ptr<Lnast>& ln, const fs::path& dir, b
   write_pod<uint8_t>(os, meta_flags);
   write_string(os, ln->get_lambda_kind());
   write_string(os, ln->get_lg_name());
+  // A restored concrete mod/pipe stores a metadata-only body because its
+  // authoritative implementation is the cached LGraph. Preserve the leaf ABI
+  // scans separately: an empty stub cannot reveal that the child declares
+  // registers, and a freshly lowered dirty caller still needs to transitively
+  // mint the clock/reset inputs it forwards to that restored child.
+  uint8_t tolg_flags = 0;
+  if (const auto declares_reg = ln->tolg_declares_reg(); declares_reg.has_value()) {
+    tolg_flags |= 1;
+    tolg_flags |= *declares_reg ? 2 : 0;
+  }
+  if (const auto declares_reset_reg = ln->tolg_declares_reset_reg(); declares_reset_reg.has_value()) {
+    tolg_flags |= 4;
+    tolg_flags |= *declares_reset_reg ? 8 : 0;
+  }
+  write_pod<uint8_t>(os, tolg_flags);
   auto write_strings = [&](const std::vector<std::string>& strings) {
     write_pod<uint32_t>(os, static_cast<uint32_t>(strings.size()));
     for (const auto& text : strings) {
@@ -1535,6 +1550,17 @@ std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_vi
   ln->set_package_unit((meta_flags & 8) != 0);
   ln->set_lambda_kind(read_string(is));
   ln->set_lg_name(read_string(is));
+  const auto tolg_flags = read_pod<uint8_t>(is);
+  if ((tolg_flags & ~uint8_t{15}) != 0 || ((tolg_flags & 2) != 0 && (tolg_flags & 1) == 0)
+      || ((tolg_flags & 8) != 0 && (tolg_flags & 4) == 0)) {
+    throw Lhd_error{"config", "compact compile-cache LNAST has invalid tolg flags", "the unit will be rebuilt cold"};
+  }
+  if ((tolg_flags & 1) != 0) {
+    ln->set_tolg_declares_reg((tolg_flags & 2) != 0);
+  }
+  if ((tolg_flags & 4) != 0) {
+    ln->set_tolg_declares_reset_reg((tolg_flags & 8) != 0);
+  }
   auto read_strings = [&]() {
     const auto count = read_pod<uint32_t>(is);
     if (count > (1U << 20)) {
@@ -1886,7 +1912,7 @@ void store_cache(Options& opts, Result& res, const std::string& scope, const std
       try {
         const auto&     unit = units[index];
         std::error_code unit_ec;
-        const auto      old     = prior.units.find(unit.name);
+        const auto      old = prior.units.find(unit.name);
         const auto old_snapshot = old == prior.units.end() ? fs::path{} : fs::path(scope) / "pyrope" / old->second.snapshot_file;
         const auto new_snapshot = py_new / unit.snapshot_file;
         if (unit.exact_snapshot_match && old != prior.units.end() && fs::is_regular_file(old_snapshot, unit_ec) && !unit_ec) {

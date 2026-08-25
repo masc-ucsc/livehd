@@ -599,9 +599,16 @@ public:
   // Each is a deterministic function of this (immutable-during-tolg) tree, yet
   // the analyses are otherwise re-walked once per phase (register_io + run) and
   // once per ancestor that reaches this module as a clock/reset callee. The
-  // cache collapses all of that to a single walk. In-memory only; not cloned
-  // (a fresh clone re-derives lazily — the scans are cheap on first touch).
-  Tolg_scan_cache& tolg_scan_cache() const noexcept { return tolg_scan_cache_; }
+  // cache collapses all of that to a single walk. Fresh clones re-derive the
+  // facts lazily. The compact compile cache preserves the two declaration
+  // facts because a graph-restored mod/pipe intentionally has a metadata-only
+  // body; re-scanning that stub would otherwise lose its hidden clock/reset
+  // ABI when a dirty parent is lowered beside it.
+  Tolg_scan_cache&    tolg_scan_cache() const noexcept { return tolg_scan_cache_; }
+  std::optional<bool> tolg_declares_reg() const noexcept { return tolg_scan_cache_.declares_reg; }
+  std::optional<bool> tolg_declares_reset_reg() const noexcept { return tolg_scan_cache_.declares_reset_reg; }
+  void                set_tolg_declares_reg(bool value) const noexcept { tolg_scan_cache_.declares_reg = value; }
+  void                set_tolg_declares_reset_reg(bool value) const noexcept { tolg_scan_cache_.declares_reset_reg = value; }
 
   // ── deferred template (stamped by func_extract; cleared on a
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
