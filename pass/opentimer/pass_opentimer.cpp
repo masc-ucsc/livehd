@@ -29,6 +29,13 @@ void Pass_opentimer::setup() {
                         "(`lhd pass opentimer` defaults it to <workdir>/timing.json when --workdir is set)",
                         "");
   m1.add_label_optional("stats", "report one timing row per pass.abc (definition, color), including resynth=1|0", "false");
+  m1.add_label_optional("cache_dir",
+                        "INTERNAL kernel plumbing: the INCREMENTAL STA result cache directory, always <workdir>/sta_cache "
+                        "(set after user --set merging, so it is not customizable). An analysis whose NETLIST digest, "
+                        "timing-file content and options are unchanged since a prior run replays the stored report "
+                        "instead of re-timing; salted by a content hash of this pass plus the @opentimer pin. "
+                        "Empty = no user --workdir, or `lhd.incremental=false` = no cache",
+                        "");
 
   register_pass(m1);
 
@@ -44,13 +51,13 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   auto n_lib_read = 0;
 
   for (const auto f : absl::StrSplit(files, ',')) {
+    if (!f.empty()) {
+      timing_file_list.emplace_back(f);
+    }
     if (str_tools::ends_with(f, ".lib")) {
-      std::print("opentimer using liberty file '{}'\n", f);
-      if (n_lib_read == 0) {
-        timer.read_celllib(f);
-      } else {
-        timer.read_celllib(f, ot::MIN);
-      }
+      // DEFERRED to ensure_libs(): parsing sky130 is ~0.7 s and a STA cache hit
+      // needs neither the library nor the timer.
+      lib_file_list.emplace_back(f);
       n_lib_read++;
     } else if (str_tools::ends_with(f, ".spef")) {
       spef_file_list.emplace_back(f);
@@ -92,6 +99,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   margin_delay = 0;
 
   qor_path               = var.get("qor", "");
+  cache_dir_             = var.get("cache_dir", "");
   top_filter             = var.get("top", "");
   hier_setting_          = var.get("hier", "true");
   const auto stats_label = std::string{var.get("stats", "false")};
@@ -105,7 +113,21 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
         .msg("hier expects true|false|stitch, got '{}'", hier_setting_)
         .fatal();
   }
+}
 
+void Pass_opentimer::ensure_libs() {
+  if (libs_loaded_) {
+    return;
+  }
+  libs_loaded_ = true;
+  for (size_t i = 0; i < lib_file_list.size(); ++i) {
+    std::print("opentimer using liberty file '{}'\n", lib_file_list[i]);
+    if (i == 0) {
+      timer.read_celllib(lib_file_list[i]);
+    } else {
+      timer.read_celllib(lib_file_list[i], ot::MIN);
+    }
+  }
   // Flush the (lineage-queued) read_celllib so build_circuit can validate cell
   // names against the loaded library at queue time. The design is still empty,
   // so this is a no-op timing update.

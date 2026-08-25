@@ -95,8 +95,14 @@ uint64_t sig_str(uint64_t h, std::string_view s) {
   return h;
 }
 
+// `truncated` reports that this value was cut short by the depth cap or the
+// cycle guard, i.e. it depends on the PATH that reached `pin`, not on `pin`
+// alone. Only an untruncated value is memoized, which makes the memo a pure
+// function of the graph -- and therefore shareable across regions (name_ports
+// keeps one memo for the whole def; a per-region memo re-walked the same cones
+// once per region, O(regions x def) on a heavily partitioned design).
 uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_class, uint64_t>& memo,
-                  absl::flat_hash_set<hhds::Node_class>& on_path, int depth) {
+                  absl::flat_hash_set<hhds::Node_class>& on_path, int depth, bool& truncated) {
   if (auto it = memo.find(pin); it != memo.end()) {
     return it->second;
   }
@@ -133,12 +139,14 @@ uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_clas
   // memoized, since it is path-dependent); regions that hit it stay reuse-safe
   // via a conservative miss, never a wrong reuse.
   if (depth <= 0 || on_path.contains(master)) {
+    truncated = true;
     return sig_mix(node, 0x9e37U);
   }
   on_path.insert(master);
   std::vector<uint64_t> ops;
+  bool                  cut = false;
   for (const auto& e : master.inp_edges()) {
-    uint64_t child = cone_sig(e.driver, memo, on_path, depth - 1);
+    uint64_t child = cone_sig(e.driver, memo, on_path, depth - 1, cut);
     ops.push_back(sig_mix(child, static_cast<uint64_t>(e.sink.get_port_id())));
   }
   std::sort(ops.begin(), ops.end());
@@ -147,7 +155,11 @@ uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_clas
   }
   node = sig_mix(node, static_cast<uint64_t>(pin.get_port_id()));  // which output pin of the node
   on_path.erase(master);
-  memo[pin] = node;
+  if (cut) {
+    truncated = true;  // a truncated child makes THIS value path-dependent too
+  } else {
+    memo[pin] = node;
+  }
   return node;
 }
 
@@ -163,14 +175,16 @@ uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_clas
 // Get_mask/Set_mask bit ranges that pick the lane) + sink port. Reproducible
 // (nid-free) and symmetric to cone_sig, so old/new recompiles agree.
 uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::Pin_class, uint64_t>& memo,
-                      absl::flat_hash_set<hhds::Node_class>& on_path, int depth) {
+                      absl::flat_hash_set<hhds::Node_class>& on_path, int depth, bool& truncated) {
   if (auto it = memo.find(driver); it != memo.end()) {
     return it->second;
   }
   constexpr uint64_t kSeed = 0x84222325cbf29ce4ULL;
   if (depth <= 0) {
+    truncated = true;
     return sig_mix(kSeed, 0x5a17U);  // depth cap: coarse, path-dependent, not memoized
   }
+  bool                  cut = false;  // see cone_sig: only a pure value is memoized
   std::vector<uint64_t> uses;
   for (const auto& e : driver.out_edges()) {
     const auto& snk = e.sink;
@@ -182,7 +196,8 @@ uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::P
       if (gu::has_name(cm)) {  // named consumer (register/wire/state): a stable anchor
         u = sig_mix(sig_str(sig_mix(kSeed, 2), gu::node_name_of(cm)), static_cast<uint64_t>(snk.get_port_id()));
       } else if (on_path.contains(cm)) {  // cycle: coarse op anchor
-        u = sig_mix(sig_mix(kSeed, 3), static_cast<uint64_t>(type_op_of(cm)));
+        cut = true;
+        u   = sig_mix(sig_mix(kSeed, 3), static_cast<uint64_t>(type_op_of(cm)));
       } else {
         on_path.insert(cm);
         // consumer op + which sink port we feed + its CONSTANT operands (the
@@ -204,7 +219,7 @@ uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::P
         absl::flat_hash_set<int> seen;
         for (const auto& oe : cm.out_edges()) {
           if (seen.insert(static_cast<int>(oe.driver.get_port_id())).second) {
-            outs.push_back(fwd_cone_sig(oe.driver, memo, on_path, depth - 1));
+            outs.push_back(fwd_cone_sig(oe.driver, memo, on_path, depth - 1, cut));
           }
         }
         std::sort(outs.begin(), outs.end());
@@ -222,7 +237,11 @@ uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::P
   for (uint64_t u : uses) {
     h = sig_mix(h, u);
   }
-  memo[driver] = h;
+  if (cut) {
+    truncated = true;
+  } else {
+    memo[driver] = h;
+  }
   return h;
 }
 
@@ -590,6 +609,16 @@ void Partitioner::name_ports() {
   out_index_.clear();  // rebuilt below after the sort settles indices
   region_reuse_ok_.assign(region_nodes_.size(), 1);
 
+  // Stable, nid-free content signatures for the boundary drivers, memoized for
+  // the WHOLE def rather than per region. Both walks read only `g_`, and the
+  // memos now hold only path-independent values (see cone_sig's `truncated`),
+  // so the value a pin gets does not depend on which region asked first --
+  // recompile stability is unchanged while a shared cone is walked ONCE instead
+  // of once per region. On xs_renametable (464 regions on one def) the forward
+  // walk alone was ~15 s of a 20 s all-cache-hit `pass.abc`.
+  absl::flat_hash_map<hhds::Pin_class, uint64_t> sig_memo;
+  absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_memo;
+
   // A boundary port becomes a wire in the region module; it must not collide
   // with a recreated internal node's name. The classic failure is a flop whose
   // q is a region output: the port would otherwise take the flop's own
@@ -685,14 +714,12 @@ void Partitioner::name_ports() {
       continue;
     }
 
-    // Stable, nid-free content signatures for this region's boundary drivers:
-    // the cached body is stitched into a freshly rebuilt wrapper BY PORT NAME,
-    // so the name must be reproducible across recompiles (not `<op>_<nid>`). The
-    // memo is shared across inputs+outputs so a shared cone is walked once.
-    absl::flat_hash_map<hhds::Pin_class, uint64_t> sig_memo;
-    auto                                           sig_of = [&](const hhds::Pin_class& drv) {
+    // The cached body is stitched into a freshly rebuilt wrapper BY PORT NAME,
+    // so the name must be reproducible across recompiles (not `<op>_<nid>`).
+    auto sig_of = [&](const hhds::Pin_class& drv) {
       absl::flat_hash_set<hhds::Node_class> on_path;
-      return cone_sig(drv, sig_memo, on_path, 512);
+      bool                                  truncated = false;
+      return cone_sig(drv, sig_memo, on_path, 512, truncated);
     };
     // Proposal 2: a boundary INPUT is identified by BOTH its producer cone
     // (sig_of, backward) AND its consumer cone (fwd_sig_of, forward). Producer
@@ -700,10 +727,10 @@ void Partitioner::name_ports() {
     // differently downstream (different packed-state bit ranges) collide; adding
     // the consumer side separates them, so a distinguishable lane gets a distinct,
     // reproducible name instead of an arbitrary-tiebreak _k suffix.
-    absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_memo;
-    auto                                           fwd_sig_of = [&](const hhds::Pin_class& drv) {
+    auto fwd_sig_of = [&](const hhds::Pin_class& drv) {
       absl::flat_hash_set<hhds::Node_class> on_path;
-      return fwd_cone_sig(drv, fwd_memo, on_path, 256);
+      bool                                  truncated = false;
+      return fwd_cone_sig(drv, fwd_memo, on_path, 256, truncated);
     };
 
     {

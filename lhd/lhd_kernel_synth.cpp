@@ -332,6 +332,11 @@ void synth_command(Options& opts, Result& res) {
     if (opts.stats) {
       labels["stats"] = "true";
     }
+    // Incremental STA reuse: <workdir>/sta_cache, under the same gate as the
+    // compile and abc tiers. Set after merge_sets, so it is kernel-owned.
+    if (user_workdir && opts.incremental) {
+      labels["cache_dir"] = (fs::path(opts.workdir) / "sta_cache").string();
+    }
     run_step("pass.opentimer", net, labels, opts, res);
     sta_qor = slurp_json(timing_path);
     if (user_workdir && !sta_qor.empty()) {
@@ -348,7 +353,8 @@ void synth_command(Options& opts, Result& res) {
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
                              sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor));
-  harvest_abc_incremental(res);  // the envelope's `incremental.abc` (one place for every reuse tier)
+  harvest_abc_incremental(res);           // the envelope's `incremental.abc` (one place for every reuse tier)
+  harvest_sta_incremental(res, sta_qor);  // ... and `incremental.sta`
   if (report_emit != nullptr) {
     // --emit-dir report:DIR — the sidecars as files, for a run with no
     // --workdir to keep them in (or a build system that declares outputs).

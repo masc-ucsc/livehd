@@ -271,6 +271,20 @@ struct Result {
     uint64_t store_failed{0};
   } abc_incr;
 
+  // pass.opentimer's incremental STA reuse (`lhd synth` / `lhd pass opentimer`),
+  // harvested from the embedded sta report exactly like abc_incr. ONE analysis
+  // per run, so `hits`/`misses` are 0/1 or 1/0; `digestable` is false when the
+  // netlist could not be given a reproducible identity (an anonymous state
+  // cell), which is the one way the tier is enabled and still never hits.
+  struct Sta_incr_stats {
+    bool     present{false};
+    bool     enabled{false};
+    uint64_t hits{0};
+    uint64_t misses{0};
+    bool     digestable{true};
+    double   lookup_ms{0.0};
+  } sta_incr;
+
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph
   // restore/store). Not serialized; the public machine contract is the stats
   // object above. A graph inventory independently records this closure key, so

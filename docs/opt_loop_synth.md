@@ -170,6 +170,14 @@ CI, but resolve rather than require.
   pass, not another synthesis.
 - **M0.3c** — decide the gate cadence: STA on the routine set every iteration
   if it is cheap, otherwise on the land gate only. Measure in M0.3a.
+  **Answered 2026-08-24 (docs/opt_loop_incr.md I-7): every iteration, provided
+  the iteration reuses.** A cold STA is the dominant synthesis cost (47-97% of
+  `lhd synth` on the big blocks: `xs_renametable` 50 s of a 72 s run, minion
+  49 s of 96 s), so it is NOT cheap per se — but it is now content-cached at
+  `<workdir>/sta_cache/`, keyed on the netlist digest. An iteration that does
+  not change the netlist replays the gate for ~1 s; an iteration that changes
+  one region pays the full STA, which is the honest price of moving the number
+  the gate is about.
 
 ### M0.4 — the result ledger
 

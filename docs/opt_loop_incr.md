@@ -159,12 +159,13 @@ whether it lands or reverts.
 | `pass.formal` (in the O1 recipe) | **none** | — | — | — | never |
 | LEC / `formal verify` | `<wd>/formal_cache.json` | 128-bit 2-lane Merkle canonical digest **pair** + options | digest only | **auto** `kFormalSrcSalt` (`lhd/BUILD:17` genrule over `pass/lec` + `pass/semdiff` + the cvc5 pin) | user `--workdir` **and** `lec.cache` |
 | synthesis `pass.abc` | `<wd>/abc_cache/` + `abc_cache_pre/` (two GraphLibraries + json) | region **module name** `<top>__c<N>` + verbatim recipe | **exact structural compare vs the stored old graph**, traversal-bijection fallback | **manual** `"abc-incr-v6"` + liberty content + modes (`pass/abc/abc_incr.cpp:528`) | user `--workdir` **and** `lhd.incremental` |
+| STA `pass.opentimer` (**I-7, landed 2026-08-24**) | `<wd>/sta_cache/sta_cache.json` (one record per netlist, 32 max) | 128-bit **netlist** canonical digest (Merkle, through every region body) + a 64-bit environment hash (timing-file CONTENT, `--top`, `hier`, `margin`, `--stats`) | digest only | **auto** `kStaSrcSalt` (`pass/opentimer/BUILD` genrule over the pass + `pass/partition` + the `@opentimer` pin) | user `--workdir` **and** `lhd.incremental` |
 | sim `inou.cgen.sim` | `<odir>/gen_digests.json` | module name | **64-bit single-lane FNV**, traversal-order and name sensitive, **not hierarchical** (`inou/cgen/cgen_sim.cpp:1994`) | **manual** `kSimGenVersion = "simgen-62"` (`cgen_sim.cpp:2110`) | any `--emit-dir sim:` odir; `--workdir` only indirectly |
 | sim host build | `<wd>/sim/build.ninja` | mtime + depfile | — | — | ninja on PATH |
 | color kernel reuse (intra-run) | memory | 128-bit class hash | occurrence verify | — | always |
 | `color_reduce` (intra-run) | memory | private 2-lane digest | exact walk | — | `pass.color reduce` |
 
-All four flows now implement the target rules somewhere, and `compile` — which
+All five flows now implement the target rules somewhere, and `compile` — which
 implemented none of them when this table was first written — is the only one on
 the §5.2 shared layout. No two components implement them the same way yet; that
 convergence is still L7.
@@ -308,6 +309,56 @@ convergence is still L7.
   depends on internal names, generator options, hierarchy-derived clock/reset
   roles and the color plan. Sharing the store is correct; hard-wiring every
   caller to `semdiff::Canonical_digest` plus one traversal is not.
+
+### New — measured on the synthesis rows (2026-08-24)
+
+- **F23 — `pass.opentimer` had NO reuse tier at all, and it is 47-97% of a warm
+  `lhd synth`.** The synthesis rows on `current_opt_loop_incr.html` read as an
+  abc-cache problem and are not one: on the comment-only pass `pass.abc` hits
+  **542/545** regions on minion, **370/370** on `xs_exu` and **464/464** on
+  `xs_renametable`, and its wall time drops 67.5 s → 3.0 s / 113.8 s → 3.6 s.
+  What was left standing was STA, unchanged between full, cold, incremental and
+  edit on every single target (minion 191.0 / 187.5 / 189.9 / 197.7 s), which is
+  exactly why whole-flow synth reuse measured 1.2-1.4x on the big blocks while
+  every other tier was doing its job. **Colors are neither forgotten nor
+  shifted** — the tier that had no cache was the one nobody had looked at.
+  **FIXED — see the iteration log, I-7.**
+
+- **F24 — half of that STA was a quadratic re-scan of a materializing hhds
+  view.** `hier=true` structurally flattens the design first, and
+  `Flattener::resolve_driver`'s hop-up re-scanned `ctx->inst.inp_edges()` once
+  per child input port. `inp_edges()` MATERIALIZES (it copies the node's whole
+  edge set into a fresh vector), so an instance with P input ports paid O(P^2)
+  edge copies -- 58% of `pass.opentimer` on `xs_renametable`, half of it inside
+  `inp_edges` alone. Same family as the `out_pins()` lazy-view trap. **FIXED
+  (I-7).**
+
+- **F25 — a warm `pass.abc` spent 76% of its time re-deriving port names it
+  had already derived.** `Partitioner::name_ports` allocates the `cone_sig` /
+  `fwd_cone_sig` memos INSIDE the per-region loop, and those walks are not
+  region-local (they run over the whole def, to depth 512/256). With 464 regions
+  on one def that is O(regions x def): 15 s of a 20 s all-cache-hit `pass.abc`,
+  and the same 15 s on the cold path. The memos could not simply be hoisted
+  because the depth cap and the cycle guard made a memoized value depend on the
+  PATH that reached it. **FIXED (I-7)** by propagating a `truncated` flag and
+  memoizing only path-independent values, which makes the memo a pure function
+  of the graph and therefore safe to share.
+
+- **F26 — the synthesis memory peak is ALL STA, and half of it was one net
+  name copied per bit.** Asked whether `pass.abc` frees its per-color memory:
+  it does, and there is nothing to fix there — on minion, compile + color + abc
+  + netlist save peaks at **0.92 GB** with every cache off (the report's
+  `abc_peak_rss_kb` of 60 MB per color is accurate). The whole 44 GB is
+  `pass.opentimer`, and LGraph/LNAST are not the reason either: entering STA in
+  the fused flow the resident footprint is **0.75 GB**, so serializing and
+  freeing the design would buy a rounding error. Stage RSS on minion
+  (1.97 M gates) was: entry 1.0 GB → after flatten 3.4 → after `build_circuit`
+  16.0 (peak 26.6) → after `compute_timing` 23.6 (peak 40.6). `build_circuit`'s
+  16 GB was almost entirely `Pin_tracker`: **145 M bit slots each holding its
+  own `std::string` copy of the driving net name**, 15.8 GB of duplicated
+  strings against 0.26 GB of distinct names. **FIXED (I-7)** by interning: a
+  `Pin_pos` now borrows a `const Pin*` from a `node_hash_set` (pointer-stable),
+  so it is 16 bytes whatever the hierarchical name's length.
 
 ### New — measured while scoping the XiangShan targets (2026-08-17)
 
@@ -1955,6 +2006,119 @@ because the partial restore is refused. Per-graph diagnostic attribution — the
 pipeline tagging each record with the graph it concerns — is the one missing
 piece, and it is now the top item in the queue below.
 
+### I-7 — the synthesis loop: STA reuse + two quadratic walks — **LANDED**
+
+The synthesis rows of `current_opt_loop_incr.html` (2026-08-24) reported
+1.2-1.4x incremental on the three big blocks and looked like a coloring/abc
+problem. It is not one: on the comment-only pass `pass.abc` hits **542/545**
+(minion), **370/370** (`xs_exu`) and **464/464** (`xs_renametable`) regions, and
+its wall time collapses (minion 67.5 s → 3.0 s, `xs_exu` 113.8 s → 3.6 s). The
+colors are neither forgotten nor shifted. `pass.opentimer` simply had no reuse
+tier, and it is 47-97% of the warm wall on every target (F23). Two hot walks
+inside the passes made it worse (F24, F25).
+
+**Three changes, all measured on this host with `lhd synth`:**
+
+1. **`pass.opentimer` gets an STA result cache** (`pass/opentimer/sta_cache.*`,
+   `<workdir>/sta_cache/`, under the same `lhd.incremental` switch). The key is
+   the NETLIST — `semdiff::canonical_digest` over the timed top, Merkle-folded
+   through every region body — plus the timing-file CONTENT, `--top`, `hier`,
+   `margin`, `--stats` and `kStaSrcSalt` (a `//pass/opentimer:sta_salt` content
+   hash of the pass + `pass/partition` + the `@opentimer` pin). Keying on the
+   netlist, not on the sources, is what makes it sound: `pass.abc`'s intra-run
+   cross-name reuse means cold and warm can legitimately produce slightly
+   different netlists, and only the graph about to be timed decides the timing.
+   A hit replays the pass's whole observable output — report block, the
+   `slowest delay:` line, the `--stats` color rows and the
+   `native-comb-boundary` warning — and never parses the Liberty (`read_celllib`
+   is now lazy, the I-3 rule applied to OpenTimer). `resynth` is the ONE field
+   re-stamped from this run: it describes what `pass.abc` did, not what the
+   netlist is. Only an error-free analysis is stored, at most 32 per workdir.
+
+2. **`flatten_hierarchy` stopped re-scanning a materializing view** (F24). One
+   `port_id -> parent-side driver` map per instance context, built once, instead
+   of an `inst.inp_edges()` scan per child input port. Standalone STA on the
+   `xs_renametable` netlist: **51.8 s → 37.1 s**, byte-identical `timing.json`.
+   This one helps `full`, `cold`, `incremental` and `edit` alike.
+
+4. **`Pin_tracker` interns its net names** (F26). A `Pin_pos` held its own
+   `Pin` copy, so a net name was duplicated once per BIT — 145 M bit slots
+   carrying 15.8 GB of `std::string` on minion, against 0.26 GB of distinct
+   names, and that WAS `pass.opentimer`'s footprint. It now borrows a
+   `const Pin*` from a pointer-stable `node_hash_set` and is 16 bytes regardless
+   of name length; `.id` became `.id()` at its 24 call sites. Standalone STA on
+   minion: peak **40.9 → 29.7 GB** and 50.5 → 44.4 s, with a byte-identical
+   report. This one also helps `full`, `cold` and `edit`.
+
+3. **`Partitioner::name_ports` shares its cone-signature memos across regions**
+   (F25). `cone_sig`/`fwd_cone_sig` now propagate a `truncated` flag and memoize
+   only path-independent values, so one memo per DEF is exactly as reproducible
+   as the per-region ones were — and a shared cone is walked once instead of
+   once per region. Warm `pass.abc` on `xs_renametable`: **20.4 s → 7.2 s**;
+   cold **37.2 s → 24.7 s**.
+
+**Result.** One sitting on one host, shipped binary, `lhd synth` over full
+(`lhd.incremental=false`) → cold (caches on, empty) → warm (comment-only touch).
+Ratios to trust; absolute numbers comparable only inside this table (I11).
+`max_delay` and `gates` are IDENTICAL cold-vs-warm on every row.
+
+| target | colors | full ms | cold ms | warm ms | full→warm | full RSS | warm RSS |
+|---|---:|---:|---:|---:|---|---:|---:|
+| dino | 16 | 4,309 | 4,546 | **186** | **23.2×** | 0.9 GB | 0.1 GB |
+| xs_alu | 13 | 2,180 | 2,205 | **148** | **14.7×** | 0.4 GB | 0.1 GB |
+| xs_div | 17 | 1,607 | 1,699 | **176** | **9.1×** | 0.4 GB | 0.1 GB |
+| xs_renametable | 464 | 65,670 | 76,494 | **10,914** | **6.0×** | 23.3 GB | 1.9 GB |
+| minion | 545 | 86,362 | 91,850 | **2,497** | **34.6×** | 31.6 GB | 1.1 GB |
+
+The page's own before-numbers for this phase were 1.3× (minion), 1.4×
+(`xs_renametable`), 2.0× (`xs_alu`), 1.9× (`xs_div`) on mada4 — compare the
+RATIO column only.
+
+Where the warm time goes now, `xs_renametable` (464 colors, 1.41 M gates):
+`pass.opentimer` 50,189 → **1,379 ms** (1,300 ms of it the netlist digest the
+hit pays for), `pass.abc` 20,418 → **7,308 ms**, `pass.color` 1,304 ms, compile
+~30 ms. minion's warm run is `pass.abc` 1,297 + `pass.opentimer` 826 +
+`pass.color` 211 ms. **The RSS column is the other half of the result**: a warm
+run never builds a timing graph, so `xs_renametable` peaks at 1.9 GB instead of
+31.1 GB and minion at 1.1 GB instead of 44.3 GB — which matters to the
+synthesis resource policy as much as the seconds do.
+
+The cold column is worth reading too: fixes 2-4 also cut the honest `full`
+path — `xs_renametable`'s `pass.abc` from 37.2 s to 20.0 s and its STA from
+50.2 s to 29.7 s; minion's STA from 49.6 s to 42.5 s and its whole-flow peak RSS
+from 44.3 GB to 31.6 GB.
+
+**Reuse discipline is unchanged where it must be.** A real one-line edit to
+`RenameTable.prp` re-maps exactly **1 of 464** regions (port names stayed
+reproducible across the recompile despite the shared memo) and correctly MISSES
+the STA cache, re-timing in 35.3 s. A revert hits the earlier netlist's stored
+analysis. `lhd.incremental=false` re-times and produces the same report the
+cache replays — asserted in the new test.
+
+The bench harness gained the tier (`bench/common.sh sta_incr_counts`,
+`bench/synth.sh report_sta_incr` → `<label>_sta_cache_hits/_misses/_lookup_ms`)
+plus a gate on the comment-only pass, deliberately **conditional on the abc
+tier**: the STA key is the netlist, so a region that legitimately re-mapped may
+have produced a different one (dino has two reuse-ineligible regions whose remap
+is not byte-reproducible, and it re-times honestly). What the gate forbids is
+the actual bug class — every region reused and STA still re-timed.
+
+**Gate (§8).** `max_delay` / `gates` / `area` are identical between full, cold
+and warm on every target above; `timing.json` is identical cold-vs-warm except
+the run's own `incremental` telemetry and the re-stamped `resynth` flags;
+`bazel test //...` **2072/2072** (the new `//lhd/tests:lhd_sta_incr_test` pins
+all seven properties, including "a hit never parses the Liberty" and "only
+`resynth` is re-stamped"). `xs_exu` and this checkout's `cva6` (5.4 M gates)
+could not be re-measured here at all — with **every cache off** their STA dies
+`std::bad_alloc` at ~50 GB on this 64 GB host, which is a pre-existing host
+ceiling and not a regression (the flatten fix strictly *reduces* STA's
+footprint). `xs_exu`'s profile on mada4 is minion's — STA 97% of the warm wall —
+so it is the same fix.
+
+**Not covered.** The STA cache is whole-design: a real edit re-times everything,
+because one changed region can move any path. Cone-level incremental timing is
+the next lever if the `edit` column ever becomes the target.
+
 ### Still open after I-1 … I-6 — the current queue
 
 Ranked by where the 2026-08-18 rows actually show the time going. **The front
@@ -1982,9 +2146,24 @@ end, which headed this list, is closed by I-5/I-6.**
 5. **`pass.abc` region shape (L5).** Warm synthesis is already 30–39× on the big
    targets, but `xs_renametable` re-does 1,134 ms of *hit* validation across 25
    regions, and `xs_rob`'s first region still exceeds the 30-minute cap (I9).
+   *Partly addressed by I-7 (the port-naming walk), but the residue is now the
+   top synthesis cost: warm `pass.abc` on `xs_renametable` is 7.2 s, of which
+   3.5 s is per-region hit validation and the rest is rebuilding the region
+   shells and pre-bodies the compare needs.*
 6. **L11, the residual fine-color cycle.** Unchanged and still negative (I-2):
    the slice resolver needs to become iterative. It is what blocks `xs_backend`
    sim outright.
+7. **`pass.opentimer` on a MISS — time and memory (new after I-7).** Reuse
+   removes the cost, it does not reduce it: a real edit still pays a full STA,
+   and that is now the most expensive single thing in the flow. Time:
+   `build_circuit` ~54% (`Occurrence_node::out_edges()`, the remaining string
+   churn), OpenTimer's own engine ~33%, flatten ~10%. Memory after the
+   interning fix, minion stage peaks: 1.0 GB entering → 3.4 after flatten →
+   12.8 after `build_circuit` → 29.7 after `compute_timing`. The next items are
+   the 145 M `Pin_tracker` bit slots (2.3 GB, and a run-length representation
+   would collapse the identity buses that dominate them) and `ot::Timer`'s own
+   string-keyed pin/net tables. This is the `edit`-column lever, not the
+   `incremental` one.
 
 **Correctness, not performance, but it sits in this loop's routine set:**
 minion LEC records `refuted` in all three modes. That is a real failure of the

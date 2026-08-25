@@ -164,7 +164,8 @@ std::vector<Set_option> list_set_options() {
                  "lhd",
                  "true",
                  "the ONE switch for every persistent reuse tier: the Pyrope compile cache (unchanged parse and lowered graph "
-                 "units), pass.abc's per-region cache (abc_cache/), and the formal/lec verdict cache (formal_cache.json). Reuse "
+                 "units), pass.abc's per-region cache (abc_cache/), pass.opentimer's STA result cache (sta_cache/), and the "
+                 "formal/lec verdict cache (formal_cache.json). Reuse "
                  "needs a user-named --workdir to live under, so this only matters with one. false forces an honest cold run "
                  "with byte-identical outputs (reuse is a speedup, never an oracle) while the --result-json telemetry keeps "
                  "reporting enabled=false. There is no per-tier switch"});

@@ -35,6 +35,17 @@ struct Ictx {
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   pin_cache;  // src driver pin -> flat driver pin
   absl::flat_hash_set<hhds::Pin_class>                    resolving;  // cycle guard for resolve_driver
 
+  // Parent-side driver of each connected input port of `inst`, built ONCE on
+  // the first hop-up (empty and unused for the top context).
+  //
+  // `inp_edges()` is a MATERIALIZING hhds view: every call copies the node's
+  // whole edge set into a fresh vector. Re-scanning it per child input port
+  // made a hop-up cost O(ports^2) edge copies per instance, which is why
+  // `flatten_hierarchy` was 58% of whole-design `pass.opentimer` on the
+  // XiangShan blocks (hundreds of mapped regions, hundreds of ports each).
+  absl::flat_hash_map<uint32_t, hhds::Pin_class> inst_drivers;  // sink port id -> parent-side driver pin
+  bool                                           inst_drivers_built = false;
+
   // Child-decl port-id <-> name maps (lazy, per context; needed to hop a module
   // boundary: a Sub sink/driver port id pairs with the child GraphIO decl).
   absl::flat_hash_map<std::string, uint32_t> in_name2pid;   // this def's INPUT decls
@@ -277,16 +288,20 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
       // Hop UP: find the parent-side edge feeding this port of the instance.
       auto pit = ctx->in_name2pid.find(std::string{gu::pin_name_of(d)});
       if (pit != ctx->in_name2pid.end()) {
-        for (const auto& e : ctx->inst.inp_edges()) {
-          if (static_cast<uint32_t>(e.sink.get_port_id()) != pit->second) {
-            continue;
+        if (!ctx->inst_drivers_built) {
+          ctx->inst_drivers_built = true;
+          // try_emplace, so a multi-driver sink port keeps the FIRST edge in
+          // iteration order — what the per-port scan-and-break took.
+          for (const auto& e : ctx->inst.inp_edges()) {
+            ctx->inst_drivers.try_emplace(static_cast<uint32_t>(e.sink.get_port_id()), e.driver);
           }
-          if (gu::is_const_pin(e.driver)) {
-            res = gu::create_const(*flat_, gu::hydrate_const(e.driver));
+        }
+        if (auto eit = ctx->inst_drivers.find(pit->second); eit != ctx->inst_drivers.end()) {
+          if (gu::is_const_pin(eit->second)) {
+            res = gu::create_const(*flat_, gu::hydrate_const(eit->second));
           } else {
-            res = resolve_driver(ctx->parent, e.driver);
+            res = resolve_driver(ctx->parent, eit->second);
           }
-          break;
         }
       }
       // No edge: the parent left the port unconnected — stay invalid.

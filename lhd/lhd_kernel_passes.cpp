@@ -587,6 +587,54 @@ void harvest_abc_incremental(Result& res) {
   }
 }
 
+void harvest_sta_incremental(Result& res, std::string_view sta_json) {
+  if (sta_json.empty()) {
+    return;
+  }
+  rapidjson::Document d;
+  d.Parse(sta_json.data(), sta_json.size());
+  if (d.HasParseError() || !d.IsObject()) {
+    return;
+  }
+  const rapidjson::Value* sta = &d;
+  // A fused `lhd synth` envelope wraps it; `lhd pass opentimer` emits it bare.
+  if (auto k = d.FindMember("kind");
+      k != d.MemberEnd() && k->value.IsString() && std::string_view{k->value.GetString()} == "synth") {
+    auto a = d.FindMember("sta");
+    if (a == d.MemberEnd() || !a->value.IsObject()) {
+      return;
+    }
+    sta = &a->value;
+  }
+  auto inc = sta->FindMember("incremental");
+  if (inc == sta->MemberEnd() || !inc->value.IsObject()) {
+    return;
+  }
+  res.sta_incr.present = true;
+  if (auto it = inc->value.FindMember("enabled"); it != inc->value.MemberEnd() && it->value.IsBool()) {
+    res.sta_incr.enabled = it->value.GetBool();  // false = an honest re-time, not a missing report
+  }
+  auto num = [](const rapidjson::Value& v, const char* key, double& out) {
+    auto it = v.FindMember(key);
+    if (it == v.MemberEnd() || !it->value.IsNumber()) {
+      return false;
+    }
+    out = it->value.GetDouble();
+    return true;
+  };
+  double v = 0;
+  if (num(inc->value, "hits", v)) {
+    res.sta_incr.hits = static_cast<uint64_t>(v);
+  }
+  if (num(inc->value, "misses", v)) {
+    res.sta_incr.misses = static_cast<uint64_t>(v);
+  }
+  num(inc->value, "lookup_ms", res.sta_incr.lookup_ms);
+  if (auto it = inc->value.FindMember("digestable"); it != inc->value.MemberEnd() && it->value.IsBool()) {
+    res.sta_incr.digestable = it->value.GetBool();
+  }
+}
+
 void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
@@ -837,8 +885,15 @@ void pass_command(Options& opts, Result& res) {
     if (opts.stats) {
       labels["stats"] = "true";
     }
+    // Incremental STA reuse, same gate as `lhd synth`'s: a user --workdir plus
+    // lhd.incremental. An ephemeral scratch workdir gets no cache (it is gone
+    // after the run, so a cache there could only cost time).
+    if (!opts.workdir.empty() && opts.incremental) {
+      labels["cache_dir"] = (fs::path(opts.workdir) / "sta_cache").string();
+    }
     run_step("pass.opentimer", var, labels, opts, res);
     embed_qor_sidecar(labels, res);
+    harvest_sta_incremental(res, res.qor_json);
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
       // The scratch-dir sidecar only exists to feed the report renderer: keep
       // the embedded qor JSON but do not advertise the ephemeral path as an

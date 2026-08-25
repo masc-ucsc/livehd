@@ -1,11 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <algorithm>
+#include <chrono>
 #include <concepts>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -25,6 +27,8 @@
 #include "pass_opentimer.hpp"
 #include "pass_partition.hpp"
 #include "pin_tracker.hpp"
+#include "semdiff.hpp"
+#include "sta_salt.hpp"
 #include "str_tools.hpp"
 
 // WARNING: opentimer has a nasty "define has_member" that overlaps with perfetto methods
@@ -375,6 +379,30 @@ void Pass_opentimer::time_work(Eprp_var& var) {
       return std::tie(lhs.module, lhs.color) < std::tie(rhs.module, rhs.color);
     });
   }
+  // ---- STA reuse (sta_cache.hpp) -------------------------------------------
+  // Keyed on the NETLIST (canonical digest, Merkle-folded through every region
+  // body) plus the timing environment, so it hits exactly when re-timing would
+  // reproduce the stored report. Placed before the occurrence expansion and the
+  // hierarchy flatten: those are deterministic functions of `g` (the digest
+  // folds each compact Sub's loop descriptor), so a hit skips them too -- and
+  // they, plus build_circuit, are where the seconds are.
+  std::unique_ptr<livehd::opentimer::Sta_cache> sta_cache;
+  std::string                                   sta_key;
+  if (!pass.cache_dir_.empty()) {
+    const auto t0         = std::chrono::steady_clock::now();
+    pass.cache_enabled_   = true;
+    sta_cache             = std::make_unique<livehd::opentimer::Sta_cache>(pass.cache_dir_, livehd::opentimer::kStaSrcSalt);
+    sta_key               = pass.cache_key(g);
+    const auto* rec       = sta_key.empty() ? nullptr : sta_cache->lookup(sta_key);
+    pass.cache_lookup_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (rec != nullptr) {
+      pass.cache_hit_ = true;
+      pass.replay(*rec);
+      pass.write_qor();
+      return;
+    }
+  }
+
   bool has_compact = false;
   for (const auto& def : design_defs) {
     for (auto n : def->body().nodes()) {
@@ -483,11 +511,32 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   }
 
   pass.setup_hier(g);
-  pass.build_circuit(g);
+  pass.build_circuit(g);  // ensure_libs() runs here: a cache hit above never parses a Liberty
   pass.read_sdc_spef();
   pass.compute_timing(g);
   pass.populate_table(g);
+  {
+    // The Liberty time unit as a label, for the report and the cache record.
+    if (auto u = pass.timer.time_unit(); u) {
+      auto         near = [](double a, double b) { return a > b * 0.999 && a < b * 1.001; };
+      const double v    = u->value();
+      if (near(v, 1e-6)) {
+        pass.time_unit_label_ = "us";
+      } else if (near(v, 1e-9)) {
+        pass.time_unit_label_ = "ns";
+      } else if (near(v, 1e-12)) {
+        pass.time_unit_label_ = "ps";
+      }
+    }
+  }
   pass.write_qor();
+  // Store only an ERROR-FREE analysis: an incomplete timing graph (an
+  // unconnected Liberty pin, a non-converging pin tracker) already failed the
+  // run, and caching its report would replay the failure's numbers as a pass.
+  if (sta_cache && !sta_key.empty() && !pass.qor_blocks_.empty() && !livehd::diag::sink().has_errors()) {
+    sta_cache->insert(sta_key, pass.snapshot());
+    sta_cache->save();
+  }
 
   if (scratch) {
     scratch_lib->delete_graph(scratch);
@@ -626,7 +675,45 @@ void Pass_opentimer::set_output_delays(const std::string& pname) {
   timer.set_rat(pname, ot::MAX, ot::RISE, 0.0);
 }
 
+// The `native-comb-boundary` warning, from the counters build_circuit filled.
+// Factored out so a STA cache hit re-emits the identical diagnostic instead of
+// dropping it (docs/opt_loop_incr.md: a warm run must be diagnostic-equal).
+void Pass_opentimer::emit_boundary_warning() const {
+  if (opaque_logic_nodes_ == 0) {
+    return;
+  }
+  auto w = livehd::diag::warn("pass.opentimer", "native-comb-boundary", "unsupported");
+  w.msg(
+      "pass.opentimer cut {} native combinational-logic node(s) into zero-arrival timing boundaries; the reported delay "
+      "covers mapped cones around them but is not an end-to-end score through the cut",
+      opaque_logic_nodes_);
+  if (!opaque_logic_examples_.empty()) {
+    w.hint("remove the combinational feedback to obtain an all-standard-cell netlist and complete timing");
+  }
+  if (ambiguous_or_nodes_ != 0) {
+    w.hint("technology-map overlapping OR inputs before pass.opentimer to model their Boolean delay");
+    w.note(std::format("{} timing boundary node(s) contain overlapping live OR inputs", ambiguous_or_nodes_));
+  }
+  for (const auto& name : opaque_logic_examples_) {
+    w.note(std::format("timing boundary: {}", name));
+  }
+  if (opaque_logic_nodes_ > opaque_logic_examples_.size()) {
+    w.note(std::format("... and {} more node(s)", opaque_logic_nodes_ - opaque_logic_examples_.size()));
+  }
+  for (const auto& name : ambiguous_or_examples_) {
+    w.note(std::format("overlapping OR timing boundary: {}", name));
+  }
+  w.emit();
+}
+
 void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
+  // The Liberty parse is DEFERRED to here (a ~0.7 s sky130 read the STA reuse
+  // cache must not pay on a hit), and this is the first place that needs it:
+  // the queued cell names are validated against the loaded library. Every
+  // caller — time_work and power_work — goes through here, so no caller has to
+  // remember. Idempotent.
+  ensure_libs();
+
   TRACE_EVENT("pass", "OPENTIMER_build_circuit");
 
   overwrite_dpin2net.clear();
@@ -945,18 +1032,21 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // that actually encounters such a dependency. This keeps the common path at
   // one hierarchy-resolving edge walk per operand; a separate readiness scan
   // doubles OpenTimer setup time on Minion's 1.5-million-node mapped design.
-  auto                     pending_nodes      = forward_nodes();
-  size_t                   opaque_logic_nodes = 0;
-  std::vector<std::string> opaque_logic_examples;
-  size_t                   ambiguous_or_nodes = 0;
-  std::vector<std::string> ambiguous_or_examples;
+  auto       pending_nodes          = forward_nodes();
+  // Members, not locals: the STA reuse cache has to replay this warning on a
+  // hit, so its payload must outlive build_circuit (a hit that silently dropped
+  // the diagnostic would be a cache that changes what the run reports).
+  auto&      opaque_logic_nodes     = opaque_logic_nodes_;
+  auto&      opaque_logic_examples  = opaque_logic_examples_;
+  auto&      ambiguous_or_nodes     = ambiguous_or_nodes_;
+  auto&      ambiguous_or_examples  = ambiguous_or_examples_;
   // Counting is per NODE (the warning says "node(s)"), while the cut itself is
   // per DRIVER NET, so the counter lives outside the boundary builder: a node
   // with several output nets is counted, and named in the examples, once.
   // record_example=false keeps the feedback-specific example list (whose hint
   // says "remove the combinational feedback") free of boundaries cut for a
   // different reason; the COUNT still includes them, so the total stays honest.
-  const auto               note_opaque_logic_node = [&](const hhds::Occurrence_node& node, bool& counted, bool record_example) {
+  const auto note_opaque_logic_node = [&](const hhds::Occurrence_node& node, bool& counted, bool record_example) {
     if (counted) {
       return;
     }
@@ -1357,10 +1447,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
               continue;
             }
             if (pv[0].pos) {
-              auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
+              auto bus_bit_name = absl::StrCat(pv[0].id(), ".", str_tools::to_s(pv[0].pos));
               set_overwrite(dnet, dpin, bus_bit_name);
             } else {
-              set_overwrite(dnet, dpin, pv[0].id);
+              set_overwrite(dnet, dpin, pv[0].id());
             }
           } else if (pv.size() > 1 && pv[0].pos < 0 && !is_overwritten(dnet, dpin)) {
             set_overwrite(dnet, dpin, std::string{kZeroNet});
@@ -1372,9 +1462,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             // Get_mask, which resolves inside the tracker (not via this overwrite);
             // the is_overwritten guard keeps a phase-2 primary-output net intact.
             if (pv[0].pos) {
-              set_overwrite(dnet, dpin, absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos)));
+              set_overwrite(dnet, dpin, absl::StrCat(pv[0].id(), ".", str_tools::to_s(pv[0].pos)));
             } else {
-              set_overwrite(dnet, dpin, pv[0].id);
+              set_overwrite(dnet, dpin, pv[0].id());
             }
           }
         } else if (native_comb_boundary) {
@@ -1433,30 +1523,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
     pending_nodes = std::move(deferred_nodes);
   }
-  if (opaque_logic_nodes != 0) {
-    auto w = livehd::diag::warn("pass.opentimer", "native-comb-boundary", "unsupported");
-    w.msg(
-        "pass.opentimer cut {} native combinational-logic node(s) into zero-arrival timing boundaries; the reported delay "
-        "covers mapped cones around them but is not an end-to-end score through the cut",
-        opaque_logic_nodes);
-    if (!opaque_logic_examples.empty()) {
-      w.hint("remove the combinational feedback to obtain an all-standard-cell netlist and complete timing");
-    }
-    if (ambiguous_or_nodes != 0) {
-      w.hint("technology-map overlapping OR inputs before pass.opentimer to model their Boolean delay");
-      w.note(std::format("{} timing boundary node(s) contain overlapping live OR inputs", ambiguous_or_nodes));
-    }
-    for (const auto& name : opaque_logic_examples) {
-      w.note(std::format("timing boundary: {}", name));
-    }
-    if (opaque_logic_nodes > opaque_logic_examples.size()) {
-      w.note(std::format("... and {} more node(s)", opaque_logic_nodes - opaque_logic_examples.size()));
-    }
-    for (const auto& name : ambiguous_or_examples) {
-      w.note(std::format("overlapping OR timing boundary: {}", name));
-    }
-    w.emit();
-  }
+  emit_boundary_warning();
 
   // 4th: create every sequential-boundary PI BEFORE queuing any gate
   // connection. leaf_nodes() is deliberately not ordered in flat mode, so a
@@ -1691,8 +1758,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     return;
   }
 
-  max_delay = 0;
-  std::string max_pin;
+  max_delay     = 0;
+  auto& max_pin = max_pin_;  // member: the STA cache replays this summary line
+  max_pin.clear();
 
   const auto& pins = timer.pins();
 
@@ -1926,55 +1994,160 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
     j += "}";
   }
-  j += "]";
-  if (stats_) {
-    j += ",\"colors\":[";
-    for (size_t i = 0; i < color_qor_.size(); ++i) {
-      const auto& row = color_qor_[i];
-      if (i != 0) {
-        j += ",";
-      }
-      j += std::format("{{\"module\":\"{}\",\"color\":{},\"cells\":{},\"resynth\":{}",
-                       jesc(row.module),
-                       row.color,
-                       row.cells,
-                       row.resynth ? 1 : 0);
-      if (row.max_arrival >= 0) {
-        j += std::format(",\"max_arrival\":{:.6g},\"critical_pin\":\"{}\"", row.max_arrival, jesc(row.critical_pin));
-        if (!row.critical_src.empty()) {
-          j += std::format(",\"critical_src\":\"{}\"", jesc(row.critical_src));
-        }
-      }
-      j += "}";
-    }
-    j += "]";
-  }
-  j += "}";
+  j          += "]";
+  // The design block ends here; the per-color `--stats` tail is rendered
+  // separately so the STA reuse cache can store the block verbatim and re-stamp
+  // each row's `resynth` (which describes what pass.abc did in THIS run, not
+  // the netlist) on a hit.
+  sta_block_  = j;
+  j          += render_colors();
+  j          += "}";
   qor_blocks_.push_back(std::move(j));
+}
+
+std::string Pass_opentimer::render_colors() const {
+  if (!stats_) {
+    return {};
+  }
+  auto jesc = [](std::string_view in) {
+    std::string out;
+    out.reserve(in.size() + 8);
+    for (char c : in) {
+      switch (c) {
+        case '"' : out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default  : out += c; break;
+      }
+    }
+    return out;
+  };
+  std::string j = ",\"colors\":[";
+  for (size_t i = 0; i < color_qor_.size(); ++i) {
+    const auto& row = color_qor_[i];
+    if (i != 0) {
+      j += ",";
+    }
+    j += std::format("{{\"module\":\"{}\",\"color\":{},\"cells\":{},\"resynth\":{}",
+                     jesc(row.module),
+                     row.color,
+                     row.cells,
+                     row.resynth ? 1 : 0);
+    if (row.max_arrival >= 0) {
+      j += std::format(",\"max_arrival\":{:.6g},\"critical_pin\":\"{}\"", row.max_arrival, jesc(row.critical_pin));
+      if (!row.critical_src.empty()) {
+        j += std::format(",\"critical_src\":\"{}\"", jesc(row.critical_src));
+      }
+    }
+    j += "}";
+  }
+  j += "]";
+  return j;
+}
+
+// ---- STA reuse cache: key, replay, snapshot --------------------------------
+
+std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) const {
+  auto  io  = g ? g->get_io() : nullptr;
+  auto* lib = io ? io->get_library() : nullptr;
+  if (lib == nullptr) {
+    return {};
+  }
+  // Merkle fold: an edited region body must change the top's digest, because
+  // the timed design is the whole hierarchy flattened into one module. The map
+  // holds each resolved child's shared_ptr so the raw pointers the resolver
+  // hands out stay alive for the whole walk.
+  absl::flat_hash_map<hhds::Gid, std::shared_ptr<hhds::Graph>> resolved;
+  livehd::semdiff::Digest_resolver                             resolve = [&](hhds::Gid gid) -> hhds::Graph* {
+    if (auto it = resolved.find(gid); it != resolved.end()) {
+      return it->second.get();
+    }
+    auto child = lib->get_graph(gid);
+    resolved.emplace(gid, child);
+    return child.get();
+  };
+  const auto d = livehd::semdiff::canonical_digest(g.get(), resolve, livehd::semdiff::Sub_fold::merkle, /*matching_io_names=*/true);
+  if (!d.valid) {
+    // An anonymous state cell keys off a per-run debug nid: not reproducible, so
+    // this netlist is deliberately not cacheable. Re-time, every run.
+    cache_digestable_ = false;
+    return {};
+  }
+  const uint64_t env = livehd::opentimer::Sta_cache::env_hash(timing_file_list, top_filter, hier_setting_, margin, stats_);
+  return std::format("{:016x}{:016x}{:016x}", d.h0, d.h1, env);
+}
+
+void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {
+  time_unit_label_ = rec.time_unit;
+  max_delay        = static_cast<float>(rec.max_delay);
+  max_pin_         = rec.max_pin;
+
+  // `resynth` is THIS run's pass.abc verdict, never the cache's: color_qor_ was
+  // already seeded from the graph (module/color/resynth) before the lookup, so
+  // only the timing half of each row comes from the record.
+  absl::flat_hash_map<std::string, const livehd::opentimer::Sta_record::Color_row*> by_key;
+  by_key.reserve(rec.colors.size());
+  for (const auto& row : rec.colors) {
+    by_key.emplace(std::format("{}\x1f{}", row.module, row.color), &row);
+  }
+  for (auto& row : color_qor_) {
+    auto it = by_key.find(std::format("{}\x1f{}", row.module, row.color));
+    if (it == by_key.end()) {
+      continue;
+    }
+    row.cells        = it->second->cells;
+    row.max_arrival  = static_cast<float>(it->second->max_arrival);
+    row.critical_pin = it->second->critical_pin;
+    row.critical_src = it->second->critical_src;
+  }
+
+  opaque_logic_nodes_    = rec.opaque_nodes;
+  ambiguous_or_nodes_    = rec.ambiguous_nodes;
+  opaque_logic_examples_ = rec.opaque_examples;
+  ambiguous_or_examples_ = rec.or_examples;
+  emit_boundary_warning();
+
+  if (!max_pin_.empty()) {
+    if (margin) {
+      margin_delay = (max_delay / 100.0F) * static_cast<float>(100 - margin);
+      std::print("slowest delay:{} pin:{} margin:{}% (margin_delay:{})\n", max_delay, max_pin_, margin, margin_delay);
+    } else {
+      std::print("slowest delay:{} pin:{} NO MARGIN selected\n", max_delay, max_pin_);
+    }
+  }
+  sta_block_ = rec.block;
+  qor_blocks_.push_back(rec.block + render_colors() + "}");
+}
+
+livehd::opentimer::Sta_record Pass_opentimer::snapshot() const {
+  livehd::opentimer::Sta_record rec;
+  rec.time_unit       = time_unit_label_;
+  rec.max_delay       = max_delay;
+  rec.max_pin         = max_pin_;
+  rec.block           = sta_block_;
+  rec.opaque_nodes    = opaque_logic_nodes_;
+  rec.ambiguous_nodes = ambiguous_or_nodes_;
+  rec.opaque_examples = opaque_logic_examples_;
+  rec.or_examples     = ambiguous_or_examples_;
+  for (const auto& row : color_qor_) {
+    rec.colors.push_back({row.module, row.color, row.cells, row.max_arrival, row.critical_pin, row.critical_src});
+  }
+  return rec;
 }
 
 void Pass_opentimer::write_qor() const {
   if (qor_path.empty()) {
     return;
   }
-  // The Liberty time unit as a label (arrivals are plain numbers in this
-  // unit), so the pretty renderer can print real units. Omitted when the
-  // library declares none / an uncommon one.
-  std::string tu;
-  if (auto u = timer.time_unit(); u) {
-    auto         near = [](double a, double b) { return a > b * 0.999 && a < b * 1.001; };
-    const double v    = u->value();
-    if (near(v, 1e-6)) {
-      tu = "us";
-    } else if (near(v, 1e-9)) {
-      tu = "ns";
-    } else if (near(v, 1e-12)) {
-      tu = "ps";
-    }
-  }
+  // The Liberty time unit as a label (arrivals are plain numbers in this unit),
+  // so the pretty renderer can print real units. Computed in the live path
+  // (time_unit_label_) and REPLAYED from the cache on a hit, which never parses
+  // a Liberty at all.
   std::string j = "{\"schema_version\":1,\"kind\":\"sta\",";
-  if (!tu.empty()) {
-    j += std::format("\"time_unit\":\"{}\",", tu);
+  if (!time_unit_label_.empty()) {
+    j += std::format("\"time_unit\":\"{}\",", time_unit_label_);
   }
   j += "\"designs\":[";
   for (size_t i = 0; i < qor_blocks_.size(); ++i) {
@@ -1983,7 +2156,19 @@ void Pass_opentimer::write_qor() const {
     }
     j += qor_blocks_[i];
   }
-  j += "]}";
+  j += "]";
+  // The reuse tier's own counters, in the same place pass.abc puts its
+  // `incremental` object, so one harvester serves every tier. Emitted even when
+  // the tier is OFF (enabled=false + zero counters), for the same reason
+  // pass.abc does: a benchmark row must be able to tell an honestly disabled
+  // cache from an old binary that reports no telemetry at all.
+  j += std::format(",\"incremental\":{{\"enabled\":{},\"hits\":{},\"misses\":{},\"digestable\":{},\"lookup_ms\":{:.3f}}}",
+                   cache_enabled_ ? "true" : "false",
+                   cache_hit_ ? 1 : 0,
+                   (cache_enabled_ && !cache_hit_) ? 1 : 0,
+                   cache_digestable_ ? "true" : "false",
+                   cache_lookup_ms_);
+  j += "}";
   std::ofstream ofs(qor_path, std::ios::binary | std::ios::trunc);
   if (!ofs) {
     livehd::diag::err("pass.opentimer", "qor-write", "io").msg("pass.opentimer: cannot write timing file '{}'", qor_path).fatal();

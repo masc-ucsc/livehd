@@ -525,6 +525,14 @@ void write_pretty(const Options& opts, const Result& res) {
                  res.abc_incr.miss_ms,
                  res.abc_incr.store_failed);
     }
+    if (res.sta_incr.present) {
+      std::print("  incremental[stats]: sta enabled={} hits={} misses={} digestable={} lookup={:.1f}ms\n",
+                 res.sta_incr.enabled,
+                 res.sta_incr.hits,
+                 res.sta_incr.misses,
+                 res.sta_incr.digestable,
+                 res.sta_incr.lookup_ms);
+    }
     if (!res.phase_ms.empty()) {
       // One row, execution order, duplicates summed (a step that ran twice
       // is one number here, as the JSON consumer is told to sum it).
@@ -718,7 +726,7 @@ void write_result(const Options& opts, const Result& res) {
   // compile tier is the kernel's own; pass.abc's counters ride the embedded
   // "qor" member (its `incremental` object) and the formal verdict cache its
   // own report lines.
-  if (res.compile_cache.present || res.abc_incr.present) {
+  if (res.compile_cache.present || res.abc_incr.present || res.sta_incr.present) {
     w.Key("incremental");
     w.StartObject();
     if (res.compile_cache.present) {
@@ -760,6 +768,23 @@ void write_result(const Options& opts, const Result& res) {
       w.Uint64(res.abc_incr.regions);
       w.Key("store_failed");
       w.Uint64(res.abc_incr.store_failed);
+      w.EndObject();
+    }
+    if (res.sta_incr.present) {
+      // Mirrors the sta report's own `incremental` object (qor.sta).
+      w.Key("sta");
+      w.StartObject();
+      w.Key("enabled");
+      w.Bool(res.sta_incr.enabled);
+      w.Key("hits");
+      w.Uint64(res.sta_incr.hits);
+      w.Key("misses");
+      w.Uint64(res.sta_incr.misses);
+      w.Key("digestable");
+      w.Bool(res.sta_incr.digestable);
+      w.Key("lookup_ms");
+      const auto look_txt = std::format("{:.3f}", res.sta_incr.lookup_ms);
+      w.RawValue(look_txt.data(), look_txt.size(), rapidjson::kNumberType);
       w.EndObject();
     }
     w.EndObject();

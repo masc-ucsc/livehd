@@ -303,6 +303,9 @@ void        embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res);
 // Fill res.abc_incr from the abc-map report in res.qor_json (a bare abc-map
 // or the `abc` member of a synth report); no-op when there is none.
 void        harvest_abc_incremental(Result& res);
+// pass.opentimer's STA reuse counters, from the `sta` qor object (its own
+// report, or the `sta` member of a fused synth envelope) into res.sta_incr.
+void        harvest_sta_incremental(Result& res, std::string_view sta_json);
 // `lhd synth`: compile -> pass.color reduce -> pass.color synth -> pass.abc ->
 // pass.opentimer over
 // ONE in-memory design (lhd_kernel_synth.cpp).

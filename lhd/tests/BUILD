@@ -1257,6 +1257,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# INCREMENTAL pass.opentimer: the whole-design STA result cache under --workdir,
+# keyed on the netlist's canonical digest + the timing environment. An unchanged
+# netlist replays a byte-identical timing.json without parsing the Liberty; a
+# re-mapped netlist, a changed option and a salt mismatch all re-time; and a warm
+# `lhd synth --stats` re-stamps only `resynth`.
+sh_test(
+    name = "lhd_sta_incr_test",
+    size = "large",
+    srcs = ["lhd_sta_incr_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2opt-freq B: `{ ::[abc='…', color=N] … }` block-scoped synthesis attributes —
 # LEC-invariant annotation, own region + per-region flow override (with and
 # without a pass.color run: seeded precedence), netlist LEC vs the partition

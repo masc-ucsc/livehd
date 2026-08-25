@@ -65,12 +65,23 @@ lhd synth foo.prp --top foo --workdir W --stats   # compile -> color synth -> ab
 lg:` / `verilog:` for the mapped netlist, `report:` for the sidecars); the
 individual `lhd pass color|abc|opentimer` steps remain for any other
 coloring or for inspecting intermediates. Every persistent reuse tier (the
-compile cache, `abc_cache/`, the formal verdict cache) lives under a
+compile cache, `abc_cache/`, `sta_cache/`, the formal verdict cache) lives under a
 user-named `--workdir` and follows the ONE switch `--set
 lhd.incremental=true|false` (default true) — there is no per-tier cache flag.
 Internally lhd drives the registered EPRP methods (conceptually the pipe
 `inou.yosys.tolg |> pass.cprop |> inou.cgen.verilog`); pass/inou names in
 `--set` and the step logs use that vocabulary.
+
+**Measuring reuse after a rebuild — read this before believing a cache miss.**
+Each tier is salted by a build-time content hash of the code that produces what
+it stores, so **the first run after you touch that code is a full miss, by
+design**: `//pass/abc:abc_salt` hashes `pass/abc` + `pass/partition` +
+`MODULE.bazel`, `//pass/opentimer:sta_salt` hashes `pass/opentimer` +
+`pass/partition` + `MODULE.bazel`, `//lhd:formal_salt` and `//lhd:compile_salt`
+likewise. Even a `clang-format -i` counts. Always run the warm command **twice**
+after a rebuild and read the second number, and never rebuild in the middle of a
+measurement sweep — a cold pass stored under salt A and a warm pass loaded under
+salt B looks exactly like "the cache forgot everything".
 
 ## Compiler Warnings Policy
 
