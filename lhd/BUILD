@@ -153,6 +153,7 @@ cc_binary(
     copts = COPTS,
     data = [
         ":sim_runtime_hdrs",
+        "//inou/cgen:llvm_sim_link",
         "//inou/yosys:scripts",
     ],
     # `--export-dynamic` lets the dlopen'd yosys-slang plugin bind to the Yosys

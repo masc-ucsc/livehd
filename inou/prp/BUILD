@@ -16,6 +16,7 @@ exports_files([
     "tests/sim/packed_update_chain.prp",
     "tests/sim/cond_call_always_consumer.prp",
     "tests/sim/color_kernel_multiwrite.prp",
+    "tests/sim/color_kernel_llvm_scalar.prp",
     "tests/sim/color_kernel_llvm_reg.prp",
     "tests/sim/color_kernel_llvm_reg_const.prp",
     "tests/sim/color_kernel_llvm_wide.prp",

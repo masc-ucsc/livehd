@@ -15,8 +15,39 @@ code{background:#f4f4f4;padding:0 .2rem}
 dt{font-weight:bold;margin-top:.4rem}
 </style>
 <h1>Incremental rebuild loop — full vs cold vs incremental</h1>
-<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-25 15:21. Derived, never authored — re-run <code>bazel run //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --baseline compile.unroll=false-20260824 --current compile.unroll=false-20260824 --host mada4 --also-current compile.unroll=true-20260824</code> to refresh. Verdicts use an epsilon of <b>3.0%</b>; anything inside it is not a win. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
+<p>The ledger sections were generated from <code>bench/ledger.jsonl</code> at 2026-08-25 15:21; re-run <code>bazel run //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --baseline compile.unroll=false-20260824 --current compile.unroll=false-20260824 --host mada4 --also-current compile.unroll=true-20260824</code> to refresh them. The focused LLVM backend experiment immediately below was measured separately on the current tree. Verdicts use an epsilon of <b>3.0%</b>; anything inside it is not a win. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
 <p>Synthesis resource policy: one shared color sizing for every design; ABC uses soft per-color guards of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is the maximum conservative per-color RSS growth before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic and is <b>not</b> a benchmark rejection threshold. Whole-process RSS may exceed 16 GiB during STA; only an actual tool failure marks the run failed. Incremental simulation runs a uniform <b>100-cycle correctness check</b> after each build, so its wall clock measures setup/codegen and host compilation instead of each core's normal simulation workload.</p>
+<h2>Current simulator backend decision — generated C++ vs selective LLVM</h2>
+<p><b>Verdict: LLVM mode is now faster or equal on both focused benchmarks.</b> It uses an inlined scalar ABI for profitable regions and the normal Slop evaluator for wide, multi-output, and small control-heavy regions. On <code>matched_filter</code> LLVM is <span class="better">11.9% faster</span>; on DINO the selected evaluator is byte-for-byte identical to Slop. Keep LLVM opt-in until the same profitability rule has been measured over the wider suite.</p>
+<p>This focused run used <code>matched_filter</code> and the DINO CPU on <code>mada4</code>, optimized <code>lhd</code>, Clang 19.1.7, VCD disabled, and the same generated driver and inputs for both modes. “Code ready” includes simulator code generation plus host compile/link. The LLVM host build compiles each calling evaluator TU to bitcode, then a helper linked to lhd's LLVM version inlines its color kernels and lowers one ordinary native object; this avoids the system Clang 19 linker trying to consume LLVM 22 bitcode.</p>
+<table><tr><th>target</th><th>backend</th><th>sim codegen (ms)</th><th>host C++ compile/link (ms)</th><th>code ready (ms)</th><th>delta</th></tr>
+<tr><td>matched_filter</td><td>C++ / Slop</td><td>101.328</td><td>10,225.541</td><td>10,326.869</td><td>reference</td></tr>
+<tr><td>matched_filter</td><td>selective LLVM</td><td>202.852</td><td>9,819.386</td><td>10,022.238</td><td class="better">&minus;2.9%</td></tr>
+<tr><td>dino</td><td>C++ / Slop</td><td>203.797</td><td>8,133.594</td><td>8,337.391</td><td>reference</td></tr>
+<tr><td>dino</td><td>LLVM mode / Slop fallback</td><td>213.282</td><td>8,348.246</td><td>8,561.528</td><td class="noise">+2.7%</td></tr>
+</table>
+<p>The throughput check copied each already-built matched-filter driver to the same pathname and ran three million cycles three times, avoiding code-layout differences caused by executing identical PIE binaries from different paths. DINO's two generated drivers have the same SHA-256, so their throughput is equal by construction.</p>
+<table><tr><th>target</th><th>cycles</th><th>C++ times (s)</th><th>LLVM times (s)</th><th>C++ cycles/s</th><th>LLVM cycles/s</th><th>LLVM throughput delta</th></tr>
+<tr><td>matched_filter</td><td>3,000,000</td><td>4.90 / 4.89 / 4.91</td><td>4.34 / 4.38 / 4.38</td><td>612,245</td><td>684,932</td><td class="better">+11.9%</td></tr>
+<tr><td>dino</td><td>8,000,000</td><td colspan="2">byte-identical driver</td><td>equal</td><td>equal</td><td class="noise">0%</td></tr>
+</table>
+<p>Both modes produced the same result in each target: checksum <code>532572435767257259</code> for <code>matched_filter</code>, and <code>x2=100 -x3=102</code> with completion at cycle 521 and IPC 641 for DINO.</p>
+<h3>Compile iteration and runtime diagnosis</h3>
+<p>The initial LLVM implementation emitted one native object and one C++ wrapper per color. Removing the wrappers was insufficient: matched-filter still retired 38.31 billion instructions versus Slop's 23.41 billion. A direct scalar ABI reduced that to 30.55 billion, identifying the remaining per-color call boundary. Full LTO proved the opportunity (about 4.0 seconds), but system LLVM 19 cannot read lhd's LLVM 22 bitcode. The embedded-version helper now performs only the necessary per-module bitcode link, always-inline pass, bounded scalar cleanup, and native lowering.</p>
+<p>Likely/unlikely annotations are not the missing lever. The slow all-LLVM DINO binary missed only 0.38% of branches; forcing short-circuit wide comparisons removed 4.6 billion instructions but did not improve wall time. Wide arbitrary-width colors remained slower, so LLVM mode now selects only scalar single-output regions with demonstrated amortization and falls back to Slop elsewhere. For the inverse direction, rebuilding matched-filter's hot Slop TU at <code>-O3</code> measured 4.70 / 4.72 / 4.71 seconds versus <code>-O2</code>'s 4.68 / 4.67 / 4.79—no retained gain. Slop already carries <code>[[likely]]</code> on its hot equality/update paths.</p>
+<details><summary><b>Reproduction commands</b></summary>
+<pre><code>bazel build -c opt //lhd:lhd
+./bazel-bin/lhd/lhd sim ../lhdsuite/matched_filter/pyrope/matched_filter.prp \
+  ../lhdsuite/matched_filter/sim/matched_filter_tb.prp --setup-only \
+  --set sim.backend=slop --set sim.vcd=false --workdir /tmp/lhd-mf-slop
+./bazel-bin/lhd/lhd sim ../lhdsuite/matched_filter/pyrope/matched_filter.prp \
+  ../lhdsuite/matched_filter/sim/matched_filter_tb.prp --run-only \
+  --arg cycles=15000000 --set sim.backend=slop --set sim.ninja=false \
+  --set sim.vcd=false --workdir /tmp/lhd-mf-slop
+# Repeat both commands with sim.backend=llvm and a distinct workdir.
+# Then run each workdir's sim/drv.bin --cycles 3000000 three times.
+# Repeat for DINO's PipelinedDualIssueCPU.prp + dino_prog_tb.prp at 8M cycles.</code></pre>
+</details>
 <h2>At a glance</h2>
 <h3>configuration: <code>compile.unroll=false-20260824</code></h3>
 <table><tr><th>target</th><th>phase</th><th>full (ms)</th><th>cold (ms)</th><th>incremental (ms)</th><th>incr speedup</th></tr>

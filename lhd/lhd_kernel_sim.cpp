@@ -1956,6 +1956,48 @@ void sim_command(Options& opts, Result& res) {
     }
   }
 
+  // LLVM color kernels are bitcode, grouped with the generated evaluator TU
+  // that calls them. Compile that TU to host-compiler bitcode, then let the
+  // companion LLVM binary inline all of its kernels and lower one native
+  // object. Keeping this boundary per module preserves the parallel/incremental
+  // host build and avoids asking the system linker to understand lhd's LLVM
+  // bitcode version.
+  std::vector<std::vector<std::string>> llvm_kernels(tus.size());
+  for (const auto& kernel : direct_objects) {
+    const auto filename = fs::path(kernel).filename().string();
+    size_t     matches  = 0;
+    for (size_t i = 0; i < bodies.size(); ++i) {
+      const auto prefix = fs::path(tus[i]).stem().string() + ".color-kernel-";
+      if (filename.starts_with(prefix)) {
+        llvm_kernels[i].push_back(kernel);
+        ++matches;
+      }
+    }
+    if (matches != 1) {
+      res.status        = "fail";
+      res.error_class   = "internal";
+      res.error_message = std::format("could not associate LLVM simulator kernel {} with exactly one module", kernel);
+      res.exit_code     = exit_code_for(res.error_class);
+      return;
+    }
+  }
+  std::vector<std::string> compile_objs = objs;
+  bool                     has_llvm     = false;
+  for (size_t i = 0; i < tus.size(); ++i) {
+    if (!llvm_kernels[i].empty()) {
+      compile_objs[i] = fs::path(objs[i]).replace_extension(".bc").string();
+      has_llvm        = true;
+    }
+  }
+  const std::string llvm_link_tool = has_llvm ? sim_llvm_link_tool() : std::string{};
+  if (has_llvm && llvm_link_tool.empty()) {
+    res.status        = "fail";
+    res.error_class   = "dependency";
+    res.error_message = "could not locate llvm_sim_link in lhd's runfiles";
+    res.exit_code     = exit_code_for(res.error_class);
+    return;
+  }
+
   // build.ninja, ALWAYS written (even when the build below does not use ninja).
   // It is the escape hatch that works: `ninja -C <simdir>` reproduces exactly
   // what lhd did. That matters because the OTHER generated build file, the
@@ -2017,6 +2059,7 @@ void sim_command(Options& opts, Result& res) {
        << "# Regenerated on every build, so edits here are lost.\n"
        << "ninja_required_version = 1.3\n\n"
        << "cxx = " << cxx << "\n"
+       << "llvm_link = " << shell_quote(llvm_link_tool) << "\n"
        << "cflags = " << nflags
        << "\n\n"
        // $in/$out are NOT shell-quoted here: ninja already shell-escapes each
@@ -2031,17 +2074,34 @@ void sim_command(Options& opts, Result& res) {
        << "  description = CC $out\n"
        << "  depfile = $out.d\n"
        << "  deps = gcc\n\n"
+       << "rule cc_bc\n"
+       << "  command = $cxx $cflags -emit-llvm -MD -MF $out.d -c $in -o $out\n"
+       << "  description = BC $out\n"
+       << "  depfile = $out.d\n"
+       << "  deps = gcc\n\n"
+       << "rule llvm_inline\n"
+       << "  command = $llvm_link $out $in\n"
+       << "  description = LLVM-LINK $out\n\n"
        << "rule link\n"
        << "  command = $cxx $in -pthread -o $out\n"
        << "  description = LINK $out\n\n";
     for (size_t i = 0; i < tus.size(); ++i) {
-      nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]) << "\n";
+      if (llvm_kernels[i].empty()) {
+        nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]) << "\n";
+      } else {
+        nf << "build " << nesc(compile_objs[i]) << ": cc_bc " << nesc(tus[i]) << "\n";
+        nf << "build " << nesc(objs[i]) << ": llvm_inline " << nesc(compile_objs[i]);
+        for (const auto& kernel : llvm_kernels[i]) {
+          nf << " " << nesc(kernel);
+        }
+        // The helper is an implicit input as well as the command. Otherwise a
+        // rebuilt helper at the same path leaves Ninja's command hash unchanged
+        // and silently reuses a native object produced by the old optimizer.
+        nf << " | " << nesc(llvm_link_tool) << "\n";
+      }
     }
     nf << "\nbuild " << nesc(exe) << ": link";
     for (const auto& o : objs) {
-      nf << " " << nesc(o);
-    }
-    for (const auto& o : direct_objects) {
       nf << " " << nesc(o);
     }
     nf << "\n\ndefault " << nesc(exe) << "\n";
@@ -2151,7 +2211,12 @@ void sim_command(Options& opts, Result& res) {
       std::atomic<size_t> cursor{0};
       auto                worker = [&] {
         for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          cmds[i] = std::format("{} {} -c {} -o {} 2>&1", shell_quote(cxx), cflags, shell_quote(tus[i]), shell_quote(objs[i]));
+          cmds[i] = std::format("{} {}{} -c {} -o {} 2>&1",
+                                shell_quote(cxx),
+                                cflags,
+                                llvm_kernels[i].empty() ? "" : " -emit-llvm",
+                                shell_quote(tus[i]),
+                                shell_quote(compile_objs[i]));
           outs[i] = capture(cmds[i], rcs[i]);
         }
       };
@@ -2178,11 +2243,49 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
 
+    // Inline/lower each LLVM-bearing evaluator after all host compiles. These
+    // are independent module objects, so retain the same bounded fan-out as
+    // the C++ compilation stage.
+    std::vector<std::string> llvm_cmds(tus.size()), llvm_outs(tus.size());
+    std::vector<int>         llvm_rcs(tus.size(), 0);
+    {
+      std::atomic<size_t> cursor{0};
+      auto                worker = [&] {
+        for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
+          if (llvm_kernels[i].empty()) {
+            continue;
+          }
+          llvm_cmds[i] = std::format("{} {} {}", shell_quote(llvm_link_tool), shell_quote(objs[i]), shell_quote(compile_objs[i]));
+          for (const auto& kernel : llvm_kernels[i]) {
+            llvm_cmds[i] += " " + shell_quote(kernel);
+          }
+          llvm_cmds[i] += " 2>&1";
+          llvm_outs[i]  = capture(llvm_cmds[i], llvm_rcs[i]);
+        }
+      };
+      livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
+    }
+    shown.clear();
+    n_failed = 0;
+    for (size_t i = 0; i < tus.size(); ++i) {
+      if (llvm_cmds[i].empty()) {
+        continue;
+      }
+      log_body += llvm_cmds[i] + "\n\n" + llvm_outs[i] + "\n";
+      if (llvm_rcs[i] != 0 && n_failed++ == 0) {
+        shown = llvm_outs[i];
+      }
+    }
+    if (n_failed != 0) {
+      if (n_failed > 1) {
+        shown += std::format("({} more LLVM module(s) also failed; see build.log)\n", n_failed - 1);
+      }
+      fail_build(log_body, shown);
+      return;
+    }
+
     std::string link = shell_quote(cxx);
     for (const auto& o : objs) {
-      link += " " + shell_quote(o);
-    }
-    for (const auto& o : direct_objects) {
       link += " " + shell_quote(o);
     }
     link          += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture

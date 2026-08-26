@@ -15,6 +15,8 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -24,14 +26,18 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
+#include "llvm/Transforms/IPO/AlwaysInliner.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/ADCE.h"
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
@@ -75,21 +81,33 @@ public:
   std::vector<std::pair<uint32_t, bool>> input_types;
   std::vector<Output>                    output_values;
   std::string                            error;
+  bool                                   scalar_abi = false;
 
-  Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc)
-      : module(std::make_unique<llvm::Module>("livehd.sim.color", context)), builder(context), input_types(input_desc) {
-    auto* i64_ptr = llvm::PointerType::getUnqual(context);
-    auto* fn_type = llvm::FunctionType::get(builder.getVoidTy(), {i64_ptr, i64_ptr, i64_ptr, i64_ptr}, false);
+  Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc, bool use_scalar_abi)
+      : module(std::make_unique<llvm::Module>("livehd.sim.color", context))
+      , builder(context)
+      , input_types(input_desc)
+      , scalar_abi(use_scalar_abi) {
+    auto*                          i64_ptr = llvm::PointerType::getUnqual(context);
+    llvm::SmallVector<llvm::Type*> argument_types;
+    if (scalar_abi) {
+      argument_types.assign(input_types.size(), builder.getInt64Ty());
+      argument_types.push_back(i64_ptr);
+    } else {
+      argument_types.assign(4, i64_ptr);
+    }
+    auto* fn_type = llvm::FunctionType::get(scalar_abi ? builder.getInt64Ty() : builder.getVoidTy(), argument_types, false);
     function      = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage, llvm::StringRef(function_name), *module);
+    function->addFnAttr(llvm::Attribute::AlwaysInline);
     auto argument = function->arg_begin();
-    inputs        = &*argument++;
-    outputs       = &*argument++;
-    changed       = &*argument++;
-    owner         = &*argument;
-    inputs->setName("inputs");
-    outputs->setName("outputs");
-    changed->setName("changed");
-    owner->setName("owner");
+    if (!scalar_abi) {
+      inputs  = &*argument++;
+      outputs = &*argument++;
+      changed = &*argument++;
+      inputs->setName("inputs");
+      outputs->setName("outputs");
+      changed->setName("changed");
+    }
     auto* entry = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(entry);
 
@@ -102,9 +120,17 @@ public:
         error = "LLVM color inputs must have a non-zero width";
         return;
       }
-      values.push_back(load_packed(inputs, word_offset, width, "in"));
+      if (scalar_abi) {
+        auto* value = &*argument++;
+        value->setName("in");
+        values.push_back(cast_integer(builder, value, width, true));
+      } else {
+        values.push_back(load_packed(inputs, word_offset, width, "in"));
+      }
       word_offset += word_count(width);
     }
+    owner = &*argument;
+    owner->setName("owner");
   }
 
   llvm::Value* load_packed(llvm::Value* base, size_t offset, uint32_t width, llvm::StringRef name) {
@@ -170,8 +196,8 @@ public:
   }
 };
 
-Cgen_llvm::Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs)
-    : impl_(std::make_unique<Impl>(function_name, inputs)) {}
+Cgen_llvm::Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi)
+    : impl_(std::make_unique<Impl>(function_name, inputs, scalar_abi)) {}
 
 Cgen_llvm::~Cgen_llvm()                               = default;
 Cgen_llvm::Cgen_llvm(Cgen_llvm&&) noexcept            = default;
@@ -266,8 +292,7 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
     // bitwidth pass legitimately narrows `a >> k`'s result below `a`'s width,
     // and truncating first would shift the very bits the node selects out of
     // existence (Slop shifts the untruncated carrier and lands the result).
-    const unsigned work_width
-        = op == Binary_op::shl ? result_width : std::max<unsigned>(lhs.width, result_width);
+    const unsigned work_width    = op == Binary_op::shl ? result_width : std::max<unsigned>(lhs.width, result_width);
     left                         = cast_integer(impl_->builder, left, work_width, lhs.unsign);
     const unsigned compare_width = std::max<unsigned>(rhs.width, 32);
     auto*          count         = cast_integer(impl_->builder, right, compare_width, true);
@@ -286,13 +311,13 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
 
   const bool comparison = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
                           || op == Binary_op::gt || op == Binary_op::ge;
-  const bool ordered    = op == Binary_op::lt || op == Binary_op::le || op == Binary_op::gt || op == Binary_op::ge;
+  const bool ordered         = op == Binary_op::lt || op == Binary_op::le || op == Binary_op::gt || op == Binary_op::ge;
   // An ORDERED compare is sign-aware and a mixed-sign pair has no common
   // interpretation at max(width): the unsigned side's top bit would be read as
   // a sign. One extra bit gives each side room to extend by its OWN rule, which
   // is exactly the `cw += 1` the reference Slop lowering applies. EQ is a
   // bit-pattern compare and must NOT get the headroom.
-  unsigned operation_width = comparison ? std::max(lhs.width, rhs.width) : result_width;
+  unsigned   operation_width = comparison ? std::max(lhs.width, rhs.width) : result_width;
   if (ordered && (!lhs.unsign || !rhs.unsign)) {
     ++operation_width;
   }
@@ -536,26 +561,34 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
       return false;
     }
   }
-  auto*        i64           = impl_->builder.getInt64Ty();
-  const size_t changed_words = std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())));
-  for (size_t word = 0; word < changed_words; ++word) {
-    auto* ptr = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word);
-    impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), ptr);
+  if (impl_->scalar_abi) {
+    if (impl_->output_values.size() != 1 || impl_->output_values.front().value.width > 64) {
+      error = "scalar LLVM ABI requires exactly one output no wider than 64 bits";
+      return false;
+    }
+    impl_->builder.CreateRet(cast_integer(impl_->builder, impl_->get(impl_->output_values.front().value), 64, true));
+  } else {
+    auto*        i64           = impl_->builder.getInt64Ty();
+    const size_t changed_words = std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())));
+    for (size_t word = 0; word < changed_words; ++word) {
+      auto* ptr = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word);
+      impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), ptr);
+    }
+    size_t output_word_offset = 0;
+    for (const auto& output : impl_->output_values) {
+      auto*        value = impl_->get(output.value);
+      auto*        old   = impl_->load_packed(impl_->outputs, output_word_offset, output.value.width, "out.old");
+      auto*        diff  = impl_->builder.CreateICmpNE(old, value);
+      auto*        ptr   = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, output.index / 64);
+      llvm::Value* bits  = impl_->builder.CreateLoad(i64, ptr, "changed.old");
+      auto*        flag  = llvm::ConstantInt::get(i64, uint64_t{1} << (output.index % 64));
+      bits               = impl_->builder.CreateOr(bits, impl_->builder.CreateSelect(diff, flag, llvm::ConstantInt::get(i64, 0)));
+      impl_->builder.CreateStore(bits, ptr);
+      impl_->store_packed(value, impl_->outputs, output_word_offset, output.value.width);
+      output_word_offset += word_count(output.value.width);
+    }
+    impl_->builder.CreateRetVoid();
   }
-  size_t output_word_offset = 0;
-  for (const auto& output : impl_->output_values) {
-    auto*        value = impl_->get(output.value);
-    auto*        old   = impl_->load_packed(impl_->outputs, output_word_offset, output.value.width, "out.old");
-    auto*        diff  = impl_->builder.CreateICmpNE(old, value);
-    auto*        ptr   = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, output.index / 64);
-    llvm::Value* bits  = impl_->builder.CreateLoad(i64, ptr, "changed.old");
-    auto*        flag  = llvm::ConstantInt::get(i64, uint64_t{1} << (output.index % 64));
-    bits               = impl_->builder.CreateOr(bits, impl_->builder.CreateSelect(diff, flag, llvm::ConstantInt::get(i64, 0)));
-    impl_->builder.CreateStore(bits, ptr);
-    impl_->store_packed(value, impl_->outputs, output_word_offset, output.value.width);
-    output_word_offset += word_count(output.value.width);
-  }
-  impl_->builder.CreateRetVoid();
 
   if (llvm::verifyModule(*impl_->module, &llvm::errs())) {
     error = "LLVM rejected the generated simulator module";
@@ -566,6 +599,7 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
   std::call_once(initialize_target, [] {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
+    llvm::InitializeNativeTargetAsmParser();
   });
 
   const llvm::Triple  triple(llvm::sys::getDefaultTargetTriple());
@@ -575,18 +609,18 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
     error = lookup_error;
     return false;
   }
-  llvm::TargetOptions options;
+  llvm::TargetOptions                  options;
   // PIC, explicitly. The object is linked into an executable the host driver
   // builds, and every mainstream Linux toolchain defaults that link to PIE:
   // the Static model LLVM picks for a null reloc model emits absolute
   // relocations the PIE link then refuses.
   std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple,
-                                                                          "generic",
-                                                                          "",
-                                                                          options,
-                                                                          llvm::Reloc::PIC_,
-                                                                          std::nullopt,
-                                                                          llvm::CodeGenOptLevel::Aggressive));
+                                                                           "generic",
+                                                                           "",
+                                                                           options,
+                                                                           llvm::Reloc::PIC_,
+                                                                           std::nullopt,
+                                                                           llvm::CodeGenOptLevel::Aggressive));
   if (!machine) {
     error = "LLVM could not create a native target machine";
     return false;
@@ -630,19 +664,123 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
   // was the lone hole, and it is why the LLVM backend could never reach a
   // no-work warm rebuild.
   //
-  // Object files are the smallest thing in that tree (the C++ they replace is
-  // far larger), so buffering one is a cheaper trade than the relink it avoids.
-  llvm::SmallVector<char, 0>  buffer;
-  llvm::raw_svector_ostream   object(buffer);
-  llvm::legacy::PassManager   emit;
-  if (machine->addPassesToEmitFile(emit, object, nullptr, llvm::CodeGenFileType::ObjectFile)) {
-    error = "LLVM target cannot emit object files";
-    return false;
-  }
-  emit.run(*impl_->module);
+  // Bitcode files are small compared with the C++ they replace, so buffering
+  // one is cheaper than forcing a relink on every warm simulation build.
+  llvm::SmallVector<char, 0> object_buffer;
+  llvm::raw_svector_ostream  object(object_buffer);
+  llvm::WriteBitcodeToFile(*impl_->module, object);
   {
     File_output out{path};
-    out.append(std::string_view(buffer.data(), buffer.size()));
+    out.append(std::string_view(object_buffer.data(), object_buffer.size()));
   }
+  return true;
+}
+
+bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vector<std::string>& kernel_paths,
+                                    std::string_view object_path, std::string& error) {
+  llvm::LLVMContext context;
+  const auto        read_module = [&](std::string_view path) -> std::unique_ptr<llvm::Module> {
+    auto buffer = llvm::MemoryBuffer::getFile(path);
+    if (!buffer) {
+      error = std::string(path) + ": " + buffer.getError().message();
+      return nullptr;
+    }
+    auto parsed = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+    if (!parsed) {
+      error = std::string(path) + ": " + llvm::toString(parsed.takeError());
+      return nullptr;
+    }
+    return std::move(*parsed);
+  };
+
+  auto module = read_module(host_path);
+  if (!module) {
+    return false;
+  }
+  llvm::Linker linker(*module);
+  for (const auto& path : kernel_paths) {
+    auto kernel = read_module(path);
+    if (!kernel) {
+      return false;
+    }
+    kernel->setTargetTriple(module->getTargetTriple());
+    kernel->setDataLayout(module->getDataLayout());
+    if (linker.linkInModule(std::move(kernel))) {
+      error = "LLVM failed to link color bitcode " + path;
+      return false;
+    }
+  }
+
+  static std::once_flag initialize_target;
+  std::call_once(initialize_target, [] {
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmPrinter();
+    llvm::InitializeNativeTargetAsmParser();
+  });
+  llvm::Triple triple(module->getTargetTriple());
+  if (triple.getTriple().empty()) {
+    triple = llvm::Triple(llvm::sys::getDefaultTargetTriple());
+    module->setTargetTriple(triple);
+  }
+  std::string         lookup_error;
+  const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, lookup_error);
+  if (target == nullptr) {
+    error = lookup_error;
+    return false;
+  }
+  llvm::TargetOptions                  options;
+  std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple,
+                                                                           "generic",
+                                                                           "",
+                                                                           options,
+                                                                           llvm::Reloc::PIC_,
+                                                                           std::nullopt,
+                                                                           llvm::CodeGenOptLevel::Aggressive));
+  if (!machine) {
+    error = "LLVM could not create a native target machine for linked simulator bitcode";
+    return false;
+  }
+  module->setDataLayout(machine->createDataLayout());
+
+  llvm::LoopAnalysisManager     loop_analyses;
+  llvm::FunctionAnalysisManager function_analyses;
+  llvm::CGSCCAnalysisManager    cgscc_analyses;
+  llvm::ModuleAnalysisManager   module_analyses;
+  llvm::PassBuilder             pass_builder(machine.get());
+  pass_builder.registerModuleAnalyses(module_analyses);
+  pass_builder.registerCGSCCAnalyses(cgscc_analyses);
+  pass_builder.registerFunctionAnalyses(function_analyses);
+  pass_builder.registerLoopAnalyses(loop_analyses);
+  pass_builder.crossRegisterProxies(loop_analyses, function_analyses, cgscc_analyses, module_analyses);
+  llvm::FunctionPassManager functions;
+  functions.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
+  functions.addPass(llvm::EarlyCSEPass());
+  functions.addPass(llvm::InstCombinePass());
+  functions.addPass(llvm::SimplifyCFGPass());
+  functions.addPass(llvm::ADCEPass());
+  llvm::ModulePassManager pipeline;
+  pipeline.addPass(llvm::AlwaysInlinerPass());
+  pipeline.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(functions)));
+  pipeline.run(*module, module_analyses);
+
+  for (auto& function : module->functions()) {
+    if (!function.isDeclaration() && function.getName().starts_with("__lhd_color_kernel_")) {
+      function.setLinkage(llvm::GlobalValue::InternalLinkage);
+    }
+  }
+  llvm::ModulePassManager cleanup;
+  cleanup.addPass(llvm::GlobalDCEPass());
+  cleanup.run(*module, module_analyses);
+
+  llvm::SmallVector<char, 0> native_buffer;
+  llvm::raw_svector_ostream  native(native_buffer);
+  llvm::legacy::PassManager  emit;
+  if (machine->addPassesToEmitFile(emit, native, nullptr, llvm::CodeGenFileType::ObjectFile)) {
+    error = "LLVM target cannot emit linked simulator objects";
+    return false;
+  }
+  emit.run(*module);
+  File_output out{object_path};
+  out.append(std::string_view(native_buffer.data(), native_buffer.size()));
   return true;
 }

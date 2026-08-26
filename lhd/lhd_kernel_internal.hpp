@@ -224,6 +224,7 @@ std::string              sim_hlop_include_dir(const Options& opts);
 std::string              find_header_in_runfiles(std::string_view header);
 std::string              sim_iassert_include_dir(const Options& opts);
 std::string              sim_host_cxx();
+std::string              sim_llvm_link_tool();
 void                     emit_sim_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_lean_outputs(Options& opts, Result& res, Eprp_var& var);

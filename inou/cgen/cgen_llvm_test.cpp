@@ -8,17 +8,17 @@
 
 #include "gtest/gtest.h"
 
-TEST(CgenLlvm, EmitsNativeObject) {
+TEST(CgenLlvm, EmitsBitcode) {
   Cgen_llvm   llvm("lhd_llvm_add",
                    {
-                       {8, true},
-                       {8, true}
+                     {8, true},
+                     {8, true}
   });
   auto        sum = llvm.binary(Cgen_llvm::Binary_op::add, llvm.input(0), llvm.input(1), 9, true);
   std::string error;
   ASSERT_TRUE(llvm.add_output(0, sum, error)) << error;
 
-  const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-llvm-test.o";
+  const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-llvm-test.bc";
   ASSERT_TRUE(llvm.write_object(path.string(), error)) << error;
   EXPECT_TRUE(std::filesystem::is_regular_file(path));
   EXPECT_GT(std::filesystem::file_size(path), 0u);
@@ -48,7 +48,7 @@ TEST(CgenLlvm, VerifiesArbitraryWidthOperations) {
   ASSERT_TRUE(llvm.add_output(1, any, error)) << error;
   ASSERT_TRUE(llvm.add_output(2, lut, error)) << error;
 
-  const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-llvm-wide-test.o";
+  const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-llvm-wide-test.bc";
   ASSERT_TRUE(llvm.write_object(path.string(), error)) << error;
   EXPECT_TRUE(std::filesystem::is_regular_file(path));
   EXPECT_GT(std::filesystem::file_size(path), 0u);

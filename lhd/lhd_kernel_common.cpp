@@ -1632,7 +1632,7 @@ std::string find_header_in_runfiles(std::string_view header) {
         ec.clear();
         continue;
       }
-      for (const char* sub : {"", "hlop", "src", "ot"}) {
+      for (const char* sub : {"", "hlop", "src", "ot", "inou/cgen"}) {
         fs::path cand = (*sub != 0) ? it->path() / sub / header : it->path() / header;
         if (::access(cand.c_str(), R_OK) == 0) {
           result = cand.parent_path().string();
@@ -1756,6 +1756,21 @@ std::string sim_host_cxx() {
     }
   }
   return "c++";  // last resort (POSIX): let exec resolve it
+}
+
+// The LLVM simulator emits bitcode with the LLVM linked into lhd. A host
+// compiler may use a different LLVM version, so its linker cannot safely read
+// those files. This companion binary uses lhd's exact LLVM to inline the color
+// kernels into a host-compiler bitcode TU and emits one ordinary native object.
+std::string sim_llvm_link_tool() {
+  const auto dir = find_header_in_runfiles("llvm_sim_link");
+  if (!dir.empty()) {
+    const auto path = dir + "/llvm_sim_link";
+    if (::access(path.c_str(), X_OK) == 0) {
+      return path;
+    }
+  }
+  return {};
 }
 
 // `--emit-dir sim:DIR/` — inou.cgen.sim (TODO 3d). Writes a standalone Bazel

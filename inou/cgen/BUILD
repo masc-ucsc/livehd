@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
@@ -45,7 +45,10 @@ cc_library(
     name = "inou_cgen",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*_test.cpp"],
+        exclude = [
+            "*_test.cpp",
+            "llvm_sim_link.cpp",
+        ],
     ) + ["cgen_salt.hpp"],
     hdrs = glob(
         ["*.hpp"],
@@ -57,19 +60,40 @@ cc_library(
     deps = [
         "//graph",
         "//pass/common:pass",
+        "@llvm-project//llvm:BitReader",
+        "@llvm-project//llvm:BitWriter",
         "@llvm-project//llvm:CodeGen",
         "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:IPO",
+        "@llvm-project//llvm:Linker",
         "@llvm-project//llvm:MC",
         "@llvm-project//llvm:Passes",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:Target",
         "@llvm-project//llvm:TargetParser",
     ] + select({
-        "@platforms//cpu:aarch64": ["@llvm-project//llvm:AArch64CodeGen"],
-        "@platforms//cpu:x86_64": ["@llvm-project//llvm:X86CodeGen"],
-        "//conditions:default": ["@llvm-project//llvm:AllTargetsCodeGens"],
+        "@platforms//cpu:aarch64": [
+            "@llvm-project//llvm:AArch64AsmParser",
+            "@llvm-project//llvm:AArch64CodeGen",
+        ],
+        "@platforms//cpu:x86_64": [
+            "@llvm-project//llvm:X86AsmParser",
+            "@llvm-project//llvm:X86CodeGen",
+        ],
+        "//conditions:default": [
+            "@llvm-project//llvm:AllTargetsAsmParsers",
+            "@llvm-project//llvm:AllTargetsCodeGens",
+        ],
     }),
     alwayslink = True,
+)
+
+cc_binary(
+    name = "llvm_sim_link",
+    srcs = ["llvm_sim_link.cpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":inou_cgen"],
 )
 
 cc_test(

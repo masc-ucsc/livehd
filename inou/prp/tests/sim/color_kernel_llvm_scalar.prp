@@ -1,0 +1,26 @@
+/*
+:name: color_kernel_llvm_scalar
+:type: simulation
+*/
+// A multi-node, single-output region exercises the profitable scalar LLVM ABI
+// and the host-bitcode inliner. Unlike the wide fixtures, this must emit LLVM
+// bitcode instead of deliberately selecting the Slop fallback.
+pub mod llvm_scalar(d:u32, e:u32) -> (result:u32@[0]) {
+  const sum   = d + e
+  const mixed = (sum * 13) ^ (d << 7)
+  result = (mixed + (e >> 3))#[0..=31]
+}
+
+test llvm_scalar.inline_region {
+  mut dut = llvm_scalar
+  tick 8 {
+    const dv = 0x1234 + clock
+    const ev = 0x5678 ^ (clock * 17)
+    dut.d = dv
+    dut.e = ev
+    step
+    const sum   = dv + ev
+    const mixed = (sum * 13) ^ (dv << 7)
+    assert(dut.result == (mixed + (ev >> 3))#[0..=31])
+  }
+}

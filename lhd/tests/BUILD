@@ -964,6 +964,7 @@ sh_test(
     srcs = ["sim_color_llvm_smoke.sh"],
     data = [
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg_const.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",

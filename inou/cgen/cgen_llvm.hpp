@@ -40,7 +40,7 @@ public:
     ge,
   };
 
-  explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs);
+  explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi = false);
   ~Cgen_llvm();
 
   Cgen_llvm(const Cgen_llvm&)            = delete;
@@ -74,16 +74,20 @@ public:
   // output widths when the object is finalized.
   bool add_output(size_t index, Value value, std::string& error);
 
-  // Verify and emit a native relocatable object with aggressive target-machine
-  // code generation. The object
+  // Verify, optimize, and emit LLVM bitcode. The module
   // exports:
   //   void function_name(const uint64_t* inputs,
   //                      uint64_t* outputs,
   //                      uint64_t* changed,
   //                      void* owner)
   // `changed` is a packed bitset with one bit per logical output. LLVM uses
-  // arbitrary-width integers internally; uint64_t is only the stable C ABI.
+  // exact-width integers internally; uint64_t is only the stable packed ABI.
   bool write_object(std::string_view path, std::string& error);
+
+  // Inline the emitted color bitcode into one host-C++ bitcode translation
+  // unit and lower the combined module to a native relocatable object.
+  static bool link_bitcode_object(std::string_view host_path, const std::vector<std::string>& kernel_paths,
+                                  std::string_view object_path, std::string& error);
 
 private:
   class Impl;

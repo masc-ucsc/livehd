@@ -9541,22 +9541,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       return false;
     };
-    // Same void*-type-pun contract as the read side, for the kinds whose
-    // storage a write binds. A `state_pending` slot binds `<member>_din`, whose
-    // declared width came from the Q pin -- a slot narrower or wider than that
-    // member would have the adapter write through a DIFFERENT Slop<W>.
-    const auto kernel_write_is_addressable = [&](const Direct_kernel_write& write) {
-      const auto& slot = color_plan_->boundary_slots()[write.slot_index];
-      if (slot.kind != livehd::sim::Color_plan::Boundary_kind::state_pending) {
-        return true;
-      }
-      if (slot.owner_site == livehd::sim::Color_plan::invalid_index || slot.producer_shift != 0
-          || slot.producer_extract_hi > slot.producer_extract_lo) {
-        return false;
-      }
-      const auto pin = color_plan_->sites()[slot.owner_site].node.base_node().get_driver_pin(slot.producer_port);
-      return !pin.is_invalid() && static_cast<uint32_t>(std::max(1, wbits_of(pin))) == slot.width;
-    };
     const auto kernel_name = [&](std::string_view signature) {
       std::string name = absl::StrCat("__lhd_color_kernel_", mod, "_");
       for (const char c : signature) {
@@ -9910,6 +9894,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     std::vector<bool>        llvm_inline_kernel(color_plan_->colors().size(), false);
+    std::vector<bool>        llvm_scalar_kernel(color_plan_->colors().size(), false);
     std::vector<std::string> llvm_inline_raw_name(color_plan_->colors().size());
 
     // One digest-named TU per verified canonical class. Occurrence-specific
@@ -9923,7 +9908,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (size_t color_index = 0; color_index < direct_kernel.size(); ++color_index) {
       const auto* kernel = direct_kernel[color_index];
       if (kernel != nullptr) {
-        expected_kernel_files.insert(kernel_instance_file_stem(color_index, kernel->signature) + ".cpp");
+        // LLVM adapters are emitted at their typed occurrence in the module
+        // evaluator.  Keeping a tiny C++ TU beside every native object made
+        // the host build parse slop.hpp hundreds of redundant times.
+        if (!llvm_backend_) {
+          expected_kernel_files.insert(kernel_instance_file_stem(color_index, kernel->signature) + ".cpp");
+        }
         expected_llvm_objects.insert(kernel_instance_file_stem(color_index, kernel->signature) + ".llvm.o");
       }
     }
@@ -10112,7 +10102,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto&  abi            = direct_abi[representative];
       const auto   instance_name  = kernel_instance_name(color_index, kernel->signature);
       const auto   instance_stem  = kernel_instance_file_stem(color_index, kernel->signature);
-      kernel_header->append("void ", instance_name, "(void*, void**, std::uint64_t*);\n");
+      if (!llvm_backend_) {
+        kernel_header->append("void ", instance_name, "(void*, void**, std::uint64_t*);\n");
+      }
       const std::string kernel_path = instance_stem + ".cpp";
       auto              kernel_out  = open_out(kernel_path);
       const auto        slot_is_u
@@ -10126,8 +10118,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto slot_type = [&](size_t slot_index, uint32_t width) {
         return slot_is_u(slot_index) ? absl::StrCat("Slop_u<", width, ">") : absl::StrCat("Slop<", width, ">");
       };
-      const auto packed_words = [](uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; };
-
+      // Single-node scalar regions pay off in modules with enough independent
+      // colors for Slop's repeated exact-width wrapper work to dominate (the
+      // matched-filter shape). On small control-heavy modules (DINO), keeping
+      // those cases in the already-inline Slop evaluator is faster. Multi-node
+      // scalar regions still benefit directly from LLVM folding.
+      constexpr size_t llvm_scalar_module_threshold = 64;
+      const bool       llvm_scalar_abi
+          = abi.writes.size() == 1 && color_plan_->boundary_slots()[abi.writes.front().slot_index].width <= 64
+            && std::ranges::all_of(
+                abi.reads,
+                [&](const Direct_kernel_read& read) { return color_plan_->boundary_slots()[read.slot_index].width <= 64; })
+            && (color_plan_->colors()[representative].members.size() > 1
+                || color_plan_->colors().size() >= llvm_scalar_module_threshold);
       // The C++ adapter is ABI glue only. Values are packed into little-endian
       // limbs at the boundary; every operation remains an exact-width LLVM iN.
       const std::string llvm_raw_name    = instance_name + "_llvm";
@@ -10139,6 +10142,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         };
         if (!llvm_backend_) {
           return false;  // the reference backend: the shared C++ body below IS the kernel, not a fallback
+        }
+        if (!llvm_scalar_abi) {
+          return reject("wide, multi-output, or unamortized single-node region remains faster through Slop C++");
         }
         for (const auto& read : abi.reads) {
           const auto& slot = color_plan_->boundary_slots()[read.slot_index];
@@ -10159,7 +10165,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           const auto& slot = color_plan_->boundary_slots()[read.slot_index];
           input_types.emplace_back(slot.width, slot.unsign);
         }
-        Cgen_llvm                                       llvm_kernel(llvm_raw_name, input_types);
+        Cgen_llvm                                       llvm_kernel(llvm_raw_name, input_types, llvm_scalar_abi);
         absl::flat_hash_map<uint64_t, Cgen_llvm::Value> llvm_inputs;
         absl::flat_hash_map<size_t, Cgen_llvm::Value>   llvm_outputs;
         absl::flat_hash_set<size_t>                     llvm_preextracted_get_masks;
@@ -11000,101 +11006,38 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         std::filesystem::remove(absl::StrCat(odir, "/", llvm_object), ec);
       }
       if (llvm_emitted) {
-        kernel_header->append("extern \"C\" void ",
-                              llvm_raw_name,
-                              "(const std::uint64_t*, std::uint64_t*, std::uint64_t*, void*);\n");
-        const bool inline_adapter = !std::ranges::all_of(abi.reads, kernel_read_is_addressable)
-                                    || !std::ranges::all_of(abi.writes, kernel_write_is_addressable);
-        if (inline_adapter) {
-          kernel_out->append("// Generated simulator ABI is inlined at the occurrence; bit operations are in the LLVM object.\n");
-          llvm_inline_kernel[color_index]   = true;
-          llvm_inline_raw_name[color_index] = llvm_raw_name;
-          direct_kernel[color_index]        = nullptr;
-          continue;
-        }
-        kernel_out->append(
-            "// Generated simulator ABI adapter. Bit operations are in the linked LLVM object.\n"
-            "#include <cstddef>\n#include <cstdint>\n"
-            "#include \"slop.hpp\"\n\n");
-        kernel_out->append("extern \"C\" void ",
-                           llvm_raw_name,
-                           "(const std::uint64_t*, std::uint64_t*, std::uint64_t*, void*);\n\n");
-        kernel_out->append("void ", instance_name, "(void* __owner, void** __bind, std::uint64_t* __changed) {\n");
-        size_t input_words = 0;
-        for (const auto& read : abi.reads) {
-          input_words += packed_words(color_plan_->boundary_slots()[read.slot_index].width);
-        }
-        size_t output_words = 0;
-        for (const auto& write : abi.writes) {
-          output_words += packed_words(color_plan_->boundary_slots()[write.slot_index].width);
-        }
-        kernel_out->append("  std::uint64_t __inputs[", std::to_string(std::max<size_t>(input_words, 1)), "]{};\n");
-        size_t input_word = 0;
-        for (size_t i = 0; i < abi.reads.size(); ++i) {
-          const auto& slot = color_plan_->boundary_slots()[abi.reads[i].slot_index];
-          kernel_out->append(absl::StrCat("  static_cast<const ",
-                                          slot_type(abi.reads[i].slot_index, slot.width),
-                                          "*>(__bind[",
-                                          i,
-                                          "])->copy_packed_words(__inputs + ",
-                                          input_word,
-                                          ");\n"));
-          input_word += packed_words(slot.width);
-        }
-        kernel_out->append("  std::uint64_t __outputs[", std::to_string(std::max<size_t>(output_words, 1)), "]{};\n");
-        size_t output_word = 0;
-        for (size_t i = 0; i < abi.writes.size(); ++i) {
-          const auto& write = abi.writes[i];
-          const auto& slot  = color_plan_->boundary_slots()[write.slot_index];
-          kernel_out->append(absl::StrCat("  auto& __out_",
-                                          i,
-                                          " = *static_cast<",
-                                          slot_type(write.slot_index, slot.width),
-                                          "*>(__bind[",
-                                          abi.reads.size() + i,
-                                          "]);\n"));
-          size_t current_read = abi.reads.size();
-          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
-            for (size_t read_index = 0; read_index < abi.reads.size(); ++read_index) {
-              const auto& read = abi.reads[read_index];
-              if (read.consumer.version_site == write.version && read.consumer.input == direct_state_current_input) {
-                current_read = read_index;
-                break;
-              }
-            }
+        if (llvm_scalar_abi) {
+          kernel_header->append("extern \"C\" std::uint64_t ", llvm_raw_name, "(");
+          for (size_t input = 0; input < abi.reads.size(); ++input) {
+            kernel_header->append(input == 0 ? "std::uint64_t" : ", std::uint64_t");
           }
-          if (current_read != abi.reads.size()) {
-            const auto& current_slot = color_plan_->boundary_slots()[abi.reads[current_read].slot_index];
-            kernel_out->append(absl::StrCat("  static_cast<const ",
-                                            slot_type(abi.reads[current_read].slot_index, current_slot.width),
-                                            "*>(__bind[",
-                                            current_read,
-                                            "])->copy_packed_words(__outputs + ",
-                                            output_word,
-                                            ");\n"));
-          } else {
-            kernel_out->append(absl::StrCat("  __out_", i, ".copy_packed_words(__outputs + ", output_word, ");\n"));
-          }
-          output_word += packed_words(slot.width);
+          kernel_header->append(abi.reads.empty() ? "void*);\n" : ", void*);\n");
+        } else {
+          kernel_header->append("extern \"C\" void ",
+                                llvm_raw_name,
+                                "(const std::uint64_t*, std::uint64_t*, std::uint64_t*, void*);\n");
         }
-        kernel_out->append("  ", llvm_raw_name, "(__inputs, __outputs, __changed, __owner);\n");
-        output_word = 0;
-        for (size_t i = 0; i < abi.writes.size(); ++i) {
-          const auto& slot = color_plan_->boundary_slots()[abi.writes[i].slot_index];
-          kernel_out->append(absl::StrCat("  __out_",
-                                          i,
-                                          " = ",
-                                          slot_type(abi.writes[i].slot_index, slot.width),
-                                          "::from_packed_words(__outputs + ",
-                                          output_word,
-                                          ");\n"));
-          output_word += packed_words(slot.width);
+        // The evaluator already has the typed expressions for this exact
+        // occurrence, so always inline the packing adapter.  A standalone
+        // wrapper repeats the same work behind a void** ABI and adds one host
+        // C++ compile action per LLVM object.
+        kernel_out->abort();
+        if (!odir.empty()) {
+          std::error_code ec;
+          std::filesystem::remove(absl::StrCat(odir, "/", kernel_path), ec);
         }
-        kernel_out->append("}\n");
+        llvm_inline_kernel[color_index]   = true;
+        llvm_scalar_kernel[color_index]   = llvm_scalar_abi;
+        llvm_inline_raw_name[color_index] = llvm_raw_name;
+        direct_kernel[color_index]        = nullptr;
         continue;
       }
       if (llvm_backend_) {
-        kernel_out->append("// No supported LLVM kernel for this color; emitted in the module evaluator.\n");
+        kernel_out->abort();
+        if (!odir.empty()) {
+          std::error_code ec;
+          std::filesystem::remove(absl::StrCat(odir, "/", kernel_path), ec);
+        }
         direct_kernel[color_index] = nullptr;
         continue;
       }
@@ -11517,9 +11460,69 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       seq_volatile_.clear();
 
       if (llvm_inline_kernel[color_index]) {
-        const auto& abi         = direct_abi[color_index];
-        const auto  llvm_words  = [](uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; };
-        size_t      input_words = 0;
+        const auto& abi        = direct_abi[color_index];
+        const auto  llvm_words = [](uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; };
+        if (llvm_scalar_kernel[color_index]) {
+          I(abi.writes.size() == 1);
+          for (size_t input = 0; input < abi.reads.size(); ++input) {
+            const auto& read = abi.reads[input];
+            const auto& slot = color_plan_->boundary_slots()[read.slot_index];
+            const auto  expr = direct_read_expr(slot, read.slot_index);
+            I(!expr.empty() && slot.width <= 64);
+            fout->append(absl::StrCat("  std::uint64_t __llvm_input_",
+                                      input,
+                                      ";\n  (",
+                                      expr,
+                                      ").copy_packed_words(&__llvm_input_",
+                                      input,
+                                      ");\n"));
+          }
+          const auto& write    = abi.writes.front();
+          const auto& slot     = color_plan_->boundary_slots()[write.slot_index];
+          auto        old_expr = direct_write_expr(slot, write.slot_index);
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
+            for (const auto& read : abi.reads) {
+              if (read.consumer.version_site == write.version && read.consumer.input == direct_state_current_input) {
+                old_expr = direct_read_expr(color_plan_->boundary_slots()[read.slot_index], read.slot_index);
+                break;
+              }
+            }
+          }
+          I(!old_expr.empty() && slot.width <= 64);
+          fout->append("  std::uint64_t __llvm_old;\n  (", old_expr, ").copy_packed_words(&__llvm_old);\n");
+          if (slot.width < 64) {
+            fout->append("  __llvm_old &= UINT64_C(", std::to_string((uint64_t{1} << slot.width) - 1), ");\n");
+          }
+          fout->append("  const std::uint64_t __llvm_value = ", llvm_inline_raw_name[color_index], "(");
+          for (size_t input = 0; input < abi.reads.size(); ++input) {
+            fout->append(input == 0 ? "__llvm_input_" : ", __llvm_input_", std::to_string(input));
+          }
+          fout->append(abi.reads.empty() ? "this);\n" : ", this);\n");
+          fout->append("  const bool __llvm_value_changed = __llvm_value != __llvm_old;\n");
+          const auto expr      = direct_write_expr(slot, write.slot_index);
+          const bool canonical = direct_slot_is_u[write.slot_index];
+          fout->append(absl::StrCat("  ",
+                                    expr,
+                                    " = ",
+                                    canonical ? "Slop_u<" : "Slop<",
+                                    slot.width,
+                                    ">::from_packed_words(&__llvm_value);\n"));
+          if (color_dirty_ && slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+            fout->append("  if (__llvm_value_changed) {\n");
+            emit_serial_dirty_consumers(write.slot_index, "    ");
+            fout->append("  }\n");
+          }
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
+            emit_state_commit_flag(write.version, "__llvm_value_changed");
+          }
+          for (const size_t member : kernel_memory_commit_members(color_index)) {
+            emit_commit_flag_at("  ", member);
+          }
+          close_case();
+          fout->append("    return;\n  }\n");
+          continue;
+        }
+        size_t input_words = 0;
         for (const auto& read : abi.reads) {
           input_words += llvm_words(color_plan_->boundary_slots()[read.slot_index].width);
         }
