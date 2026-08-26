@@ -1872,10 +1872,44 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       auto pname = sink_pin_name(e);
       if (pname == "din") {
         flop_din[node_id(fn)] = e.driver;
-      } else if (pname == "reset_pin" || pname == "negreset") {
+      } else if (pname == "reset_pin") {
         flop_reset[node_id(fn)] = e.driver;
       } else if (pname == "enable") {
         flop_enable[node_id(fn)] = e.driver;
+      } else if (pname == "clock_pin") {
+        // Modeled implicitly: `_next` IS "the state after one edge", so the clock
+        // net itself carries no value in this model.  pass.single_edge has already
+        // normalized latches and negedge state away.
+      } else {
+        // No silent drop -- the same rule graph/cell.cpp's Memory pins already get
+        // (see parse_memory_info's else-arm).  The Flop cell has pins
+        //   0 async  1 initial  2 clock_pin  3 din  4 enable  5 negreset  6 posclk
+        //   7 reset_pin   (+ the pipe_min/pipe_max depth range)
+        // and the arms above cover three of them.  Every other pin CHANGES the
+        // cell's meaning, and falling through emitted a model that silently
+        // disagrees with the RTL:
+        //
+        //   `initial`  is the reset VALUE.  flop_next is called with lit_zero(fw)
+        //              at both emission sites, so a flop resetting to a non-zero
+        //              value was modeled as resetting to zero.
+        //   `negreset` is an ACTIVE-LOW reset.  It used to share the `reset_pin`
+        //              arm, so `reset_e = bitvec_nonzero(driver)` inverted the
+        //              polarity.
+        //   `async`    distinguishes async from sync reset; a `_next`-only model
+        //              cannot express the async case at all.
+        //   `posclk`   is clock polarity -- pass.single_edge's job, but nothing
+        //              here checked that it ran.
+        //   pipe_min / pipe_max make ONE Flop cell an N-deep shift register; this
+        //              model would treat it as depth 1.
+        //
+        // Neither gate above catches any of these: step 5 compares two Lean models
+        // that share the hardcoding, and the LEC gate compares the LGraph to the
+        // RTL, not this model to either.  So refuse loudly instead.
+        fatal(ctx,
+              "flop n_" + std::to_string(node_id(fn)) + " drives unsupported pin `" + std::string(pname)
+                  + "`. pass.lean models only din / reset_pin / enable (reset value hardcoded to 0, "
+                    "synchronous, depth 1). `initial` (reset value), `negreset` (active-low reset), `async`, "
+                    "`posclk` and the pipeline-depth range change the cell's meaning and are not modeled.");
       }
     }
   }
