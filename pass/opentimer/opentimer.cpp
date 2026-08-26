@@ -2064,6 +2064,14 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     if (auto it = resolved.find(gid); it != resolved.end()) {
       return it->second.get();
     }
+    // Mapped netlists legitimately contain Liberty cells and other leaf Subs
+    // whose GraphIO has no LiveHD body. The canonical digest treats an
+    // unresolved Sub as a black box; do not call GraphLibrary::get_graph for
+    // one, because its contract asserts that the gid has a materialized (or
+    // pending) graph body.
+    if (!lib->has_graph(gid)) {
+      return nullptr;
+    }
     auto child = lib->get_graph(gid);
     resolved.emplace(gid, child);
     return child.get();
