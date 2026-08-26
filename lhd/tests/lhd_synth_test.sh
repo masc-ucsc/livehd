@@ -105,6 +105,29 @@ run "${SYNTH[@]}" --workdir "$W/w" --set lhd.incremental=false --emit verilog:"$
 [ -z "$(jget "$W/r.json" qor.abc.incremental.hits)" ] || fail "lhd.incremental=false still ran the abc region cache"
 [ "$(jget "$W/r.json" incremental.abc.enabled)" = false ] || fail "incremental.abc.enabled must be false on a cold map"
 cmp -s "$W/net0.v" "$W/net2.v" || fail "cold (incremental=false) netlist differs from the cached one"
+
+# ... and on a design whose region boundary has ANONYMOUS crossings, which is
+# where the two used to diverge. hier_seq above cannot see this: every one of its
+# crossings is a named wire, so both port schemes spell it the same way and the
+# cmp passes no matter what. abc_block_attr has unnamed crossings, so a
+# regression shows up as a reordered port list plus `o_n<nid>_p<pid>` in place of
+# the content hash -- and pass.abc creates its ABC POs in that order, so a
+# different order is a different AIG and a different (equally correct) mapping.
+# That is how `lhd.incremental` silently stopped being QoR-neutral: measured on
+# cva6 at 5,364,322 gates cache-off vs 5,366,128 cache-on, and on dino at a
+# 50.6705 vs 51.0985 critical path, from a byte-identical pre-ABC design.
+ANON=inou/prp/tests/pyrope/abc_block_attr.prp
+run synth "$ANON" --workdir "$W/wa_on" --set synth.liberty="$LIB" --set synth.opentimer=false \
+    --emit verilog:"$W/anon_on.v"
+run synth "$ANON" --workdir "$W/wa_off" --set synth.liberty="$LIB" --set synth.opentimer=false \
+    --set lhd.incremental=false --emit verilog:"$W/anon_off.v"
+# Vacuity guard on the DEFAULT run (the one whose scheme is not what regressed):
+# if this fixture ever loses its anonymous crossings, the cmp below can no longer
+# fail and would pass for the wrong reason.
+grep -qE '[.]o_[0-9a-f]{16}\(' "$W/anon_on.v" \
+  || fail "the anonymous-crossing fixture stopped producing content-hashed ports -- this gate is now vacuous"
+cmp -s "$W/anon_on.v" "$W/anon_off.v" \
+  || fail "lhd.incremental changed the NETLIST on a design with anonymous region crossings: $(diff "$W/anon_on.v" "$W/anon_off.v" | head -6 | tr '\n' ' ')"
 echo "PASS: lhd.incremental=false disables every tier with identical output"
 
 # --- 4. no --workdir: scratch; --emit-dir lg:/report:; opentimer off ----------

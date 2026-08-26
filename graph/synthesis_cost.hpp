@@ -13,25 +13,24 @@
 
 namespace livehd::graph_util {
 
-// mappable_ge_weight already accounts for bit width and important type effects
-// (for example Mult is width squared and Sub instances are black boxes).
-// Runtime shifts need one more dimension: ABC expands one mux level per shift-
-// amount bit. For SRA, a narrow constant Get_mask can reduce result demand
-// because pass.abc builds only that prefix when both nodes share a region.
-[[nodiscard]] inline uint64_t synthesis_ge_weight(const hhds::Node_class& node) {
-  const uint64_t full = mappable_ge_weight(node);
-  const auto     op   = type_op_of(node);
+// Structural 2:1 MUX count that pass/abc/abc_arith.hpp emits for `node`'s
+// barrel network, or 0 when `node` is not a RUNTIME shift (not a SHL/SRA, or a
+// constant/absent amount -- the mapper wires those directly).
+//
+// Factored out of synthesis_ge_weight so the cones predictor
+// (graph/predict_abc_size.hpp) charges the SAME structural replay at its own
+// per-mux rate. The x6 below stays in synthesis_ge_weight alone: it is an ABC
+// TIME safety factor, not part of the structure.
+[[nodiscard]] inline uint64_t shift_mux_count(const hhds::Node_class& node) {
+  const auto op = type_op_of(node);
   if (op != Ntype_op::SRA && op != Ntype_op::SHL) {
-    return full;
+    return 0;
   }
-
   const auto amount = get_driver_of_sink_name(node, "b");
-  if (amount.is_invalid()) {
-    return full;
+  if (amount.is_invalid() || is_const_pin(amount)) {
+    return 0;
   }
-  if (is_const_pin(amount)) {
-    return 1;  // mapper wires a constant shift directly; no barrel network
-  }
+  const uint64_t full = mappable_ge_weight(node);
 
   // A RIGHT shift's barrel is built at abc's shift width `cw = max(operand,
   // result)` and then truncated (abc_map), NOT at the result width: a 1024-bit
@@ -77,12 +76,7 @@ namespace livehd::graph_util {
     }
   }
 
-  // abc_arith builds one 2:1 mux level per amount bit; a Boolean mux is two
-  // ANDs plus one OR. ROB calibration showed that counting those three gates
-  // still grouped shift-heavy colors whose ABC optimization time was more than
-  // twice the 15-minute ceiling. A 2x shift-complexity safety factor captures
-  // that super-linear optimization cost while leaving non-shift logic at the
-  // higher shared QoR ceiling.
+  // abc_arith builds one 2:1 mux level per amount bit.
   //
   // A sliced demand does NOT scale every stage. build_shr_prefix (abc_arith.hpp)
   // trims BACKWARDS: the last stage produces `demand` bits, but stage k still
@@ -111,6 +105,36 @@ namespace livehd::graph_util {
     // the right shift is built at cw = max(operand, result).
     muxes = full * stages;
   }
+  return muxes;
+}
+
+// mappable_ge_weight already accounts for bit width and important type effects
+// (for example Mult is width squared and Sub instances are black boxes).
+// Runtime shifts need one more dimension: ABC expands one mux level per shift-
+// amount bit. For SRA, a narrow constant Get_mask can reduce result demand
+// because pass.abc builds only that prefix when both nodes share a region.
+[[nodiscard]] inline uint64_t synthesis_ge_weight(const hhds::Node_class& node) {
+  const uint64_t full = mappable_ge_weight(node);
+  const auto     op   = type_op_of(node);
+  if (op != Ntype_op::SRA && op != Ntype_op::SHL) {
+    return full;
+  }
+
+  const auto amount = get_driver_of_sink_name(node, "b");
+  if (amount.is_invalid()) {
+    return full;
+  }
+  if (is_const_pin(amount)) {
+    return 1;  // mapper wires a constant shift directly; no barrel network
+  }
+
+  // A Boolean mux is two ANDs plus one OR. ROB calibration showed that counting
+  // those three gates still grouped shift-heavy colors whose ABC optimization
+  // time was more than twice the 15-minute ceiling. A 2x shift-complexity safety
+  // factor captures that super-linear optimization cost while leaving non-shift
+  // logic at the higher shared QoR ceiling. This factor is a TIME correction, so
+  // it lives here and not in shift_mux_count's structural replay.
+  const uint64_t     muxes           = shift_mux_count(node);
   constexpr uint64_t mux_gate_factor = 6;
   if (muxes > std::numeric_limits<uint64_t>::max() / mux_gate_factor) {
     return std::numeric_limits<uint64_t>::max();

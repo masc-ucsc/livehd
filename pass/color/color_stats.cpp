@@ -54,6 +54,9 @@ void Color_stats::add(std::string_view def, const Def_color_sizes& sizes, uint64
     if (auto n = sizes.color_max_node_const_shift.find(color); n != sizes.color_max_node_const_shift.end()) {
       p.max_node_const_shift = n->second;
     }
+    if (auto n = sizes.color_pred.find(color); n != sizes.color_pred.end()) {
+      p.pred = n->second;
+    }
     partitions_.emplace_back(std::move(p));
   }
 }
@@ -106,7 +109,7 @@ void Color_stats::print_histogram(const std::vector<uint64_t>& ge_desc) {
   }
 }
 
-void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, uint64_t max_ge) const {
+void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, uint64_t max_ge, uint64_t max_gate) const {
   const auto sizes = sizes_desc(false);
   if (sizes.empty()) {
     std::print(stderr, "color[stats]: alg {} -- no partitions ({} node(s), all uncolored)\n", alg, total_nodes_);
@@ -210,6 +213,27 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
         }
       }
     }
+  }
+  // cones mode is thresholded in PREDICTED AIG size, not in GE, so its escapes
+  // are a separate line -- the GE report above still describes the same regions
+  // in the unit pass.abc's tiers and Region_qor::input_ge use.
+  if (max_gate != 0) {
+    uint64_t   pmax = 0, ptotal = 0;
+    ptrdiff_t  over = 0;
+    for (const auto& p : partitions_) {
+      pmax    = std::max(pmax, p.pred);
+      ptotal += p.pred;
+      if (p.pred > max_gate) {
+        ++over;
+      }
+    }
+    std::print(stderr,
+               "color[stats]: cones     max_gate {} -- {} color(s) over; predicted AIG max {}, avg {:.1f}, total {}\n",
+               max_gate,
+               over,
+               pmax,
+               partitions_.empty() ? 0.0 : static_cast<double>(ptotal) / static_cast<double>(partitions_.size()),
+               ptotal);
   }
   if (absorbed_defs_ != 0) {
     std::print(stderr, "color[stats]: absorb    {} def(s) inlined into their parents (below min)\n", absorbed_defs_);

@@ -44,6 +44,7 @@
 #include "host_mem.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
+#include "predict_abc_size.hpp"
 #include "synthesis_cost.hpp"
 
 // clang-format off
@@ -833,8 +834,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // being compared, while these two values describe the invariant input cone.
   const uint64_t input_nodes = rb.nodes.size();
   uint64_t       input_ge    = 0;
+  uint64_t       pred_aig    = 0;
   for (const auto& node : rb.nodes) {
     input_ge += gu::synthesis_ge_weight(node);
+    pred_aig += gu::predict_abc_size(node);
   }
 
   uint64_t register_bits = 0;
@@ -927,6 +930,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     q.color       = rb.color;
     q.input_nodes = input_nodes;
     q.input_ge    = input_ge;
+    q.pred_aig    = pred_aig;
     q.cache       = hit ? "hit" : "miss";
     q.resynth     = !hit;
     qor_.push_back(std::move(q));
@@ -942,6 +946,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         q.color        = rb.color;
         q.input_nodes  = input_nodes;
         q.input_ge     = input_ge;
+        q.pred_aig     = pred_aig;
         q.gates        = res.row->gates;
         q.area         = res.row->area;
         q.delay        = res.row->delay;
@@ -1464,6 +1469,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       q.color       = rb.color;
       q.input_nodes = input_nodes;
       q.input_ge    = input_ge;
+      q.pred_aig    = pred_aig;
       q.gates       = 0;
       q.area        = 0;
       q.delay       = 0;
@@ -2955,6 +2961,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     q.color       = rb.color;
     q.input_nodes = input_nodes;
     q.input_ge    = input_ge;
+    q.pred_aig    = pred_aig;
     for (const auto& bb : bboxes) {
       if (bb.op == Ntype_op::Div || bb.op == Ntype_op::Rem) {
         ++q.div_blackbox;  // unmapped cone: the region score is partial

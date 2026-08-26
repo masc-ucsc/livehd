@@ -15,6 +15,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/BasicBlock.h"
@@ -24,6 +25,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/Linker.h"
@@ -711,6 +713,31 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
     }
   }
 
+  // The host bitcode was produced by the HOST compiler, and lhd -- not that
+  // compiler -- now lowers it. A frontend may therefore have requested a stack
+  // probe this LLVM's backend cannot emit: Apple clang stamps
+  // `"probe-stack"="__chkstk_darwin"` on every function with a large frame (the
+  // generated evaluator's Slop locals reach that easily), and
+  // AArch64FunctionInfo hard-fails with `report_fatal_error("Unsupported stack
+  // probing method")` on any value but "inline-asm". That is an abort inside
+  // llvm_sim_link, not a diagnosable error, so it must be normalized here.
+  //
+  // REWRITTEN, not dropped: the probe exists so a frame larger than a guard page
+  // touches every page on the way down. LLVM's own "inline-asm" probing does the
+  // same job with code this backend can emit, so protection is preserved.
+  const auto normalize_stack_probe = [](llvm::Module& m) {
+    if (const auto* flag = llvm::dyn_cast_or_null<llvm::MDString>(m.getModuleFlag("probe-stack"));
+        flag != nullptr && flag->getString() != "inline-asm") {
+      m.setModuleFlag(llvm::Module::Override, "probe-stack", llvm::MDString::get(m.getContext(), "inline-asm"));
+    }
+    for (auto& function : m.functions()) {
+      if (function.hasFnAttribute("probe-stack") && function.getFnAttribute("probe-stack").getValueAsString() != "inline-asm") {
+        function.addFnAttr("probe-stack", "inline-asm");  // replaces the existing string attribute
+      }
+    }
+  };
+  normalize_stack_probe(*module);
+
   static std::once_flag initialize_target;
   std::call_once(initialize_target, [] {
     llvm::InitializeNativeTarget();
@@ -742,6 +769,26 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   }
   module->setDataLayout(machine->createDataLayout());
 
+  // Which kernels does THIS module actually call? Recorded BEFORE the inliner
+  // runs, because afterwards every in-module call site is gone and use_empty()
+  // can no longer tell "inlined away here" from "called from another TU".
+  //
+  // cgen_sim SHARDS the evaluator above ~16k version sites
+  // (direct_color_eval_shards) and emits those color bodies -- the inlined LLVM
+  // ABI call included -- into `<mod>.color-eval-<n>.cpp`, which the host build
+  // compiles to an ORDINARY object. The kernel bitcode is still grouped with
+  // `<mod>.cpp`, so for a sharded color this module holds the DEFINITION and
+  // never the call. Internalizing every kernel regardless, and letting GlobalDCE
+  // reclaim what the inliner emptied, deleted the definition the shard object
+  // still names -- an undefined-symbol link failure that appears only on a
+  // design big enough to shard.
+  llvm::StringSet<> locally_called;
+  for (auto& function : module->functions()) {
+    if (!function.isDeclaration() && function.getName().starts_with("__lhd_color_kernel_") && !function.use_empty()) {
+      locally_called.insert(function.getName());
+    }
+  }
+
   llvm::LoopAnalysisManager     loop_analyses;
   llvm::FunctionAnalysisManager function_analyses;
   llvm::CGSCCAnalysisManager    cgscc_analyses;
@@ -764,8 +811,8 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   pipeline.run(*module, module_analyses);
 
   for (auto& function : module->functions()) {
-    if (!function.isDeclaration() && function.getName().starts_with("__lhd_color_kernel_")) {
-      function.setLinkage(llvm::GlobalValue::InternalLinkage);
+    if (!function.isDeclaration() && locally_called.contains(function.getName())) {
+      function.setLinkage(llvm::GlobalValue::InternalLinkage);  // inlined here; GlobalDCE below reclaims it
     }
   }
   llvm::ModulePassManager cleanup;

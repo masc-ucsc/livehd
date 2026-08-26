@@ -1171,6 +1171,23 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
+# 2c-color-synthcones: `pass.color synth --set synth_alg=cones` -- one BACKWARD
+# cone per register din/enable, merged by shared logic under a predicted-AIG
+# threshold. The gtests pin the walk and the merge; this pins the plumbing they
+# cannot reach: the --set spelling, the recorded coloring_info (synth_alg,
+# max_gate, and the unconditional "packed":true a first-wins cone needs), that
+# pass.partition and pass.abc accept the result, and that the partitioned design
+# is still LEC-equivalent.
+sh_test(
+    name = "lhd_color_cones_test",
+    size = "large",
+    srcs = ["lhd_color_cones_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:hier_tests",
+    ],
+)
+
 # `pass.color reduce`: repeated combinational cones become ONE shared def
 # instantiated at every site (in-place rewrite, fewer total nodes). The test
 # that matters is end-to-end: a pat_* module appears, instantiated at every

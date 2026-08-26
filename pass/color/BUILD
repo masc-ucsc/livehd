@@ -36,6 +36,7 @@ cc_library(
     "color_acyclic_test",
     "color_cgen_test",
     "color_synth_test",
+    "color_synth_cones_test",
     "color_path_test",
     "color_mincut_test",
     "color_flat_test",

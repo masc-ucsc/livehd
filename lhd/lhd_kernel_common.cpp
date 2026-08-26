@@ -1844,9 +1844,27 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   // library. ThinLTO is gated to `-c opt`: it restores the cross-module inlining
   // the old header-only form got for release builds, while dev/incremental
   // builds (fastbuild/dbg) skip LTO and stay fast.
+  //
+  // `.llvm.o` is NOT in srcs, and must not be: under `sim.backend=llvm` those
+  // files hold lhd-version LLVM BITCODE (Cgen_llvm::write_object writes it with
+  // WriteBitcodeToFile), not relocatable objects, and bazel would hand a `.o`
+  // in srcs straight to the system linker. Lowering them needs `llvm_sim_link`,
+  // lhd's version-matched companion, which a standalone bazel module cannot
+  // reach -- so this scaffold describes the SLOP backend only, and says so in
+  // the file it writes. `lhd sim` runs its own build.ninja (the `llvm_inline`
+  // rule) and never reads this BUILD, so it is unaffected either way.
   {
     std::ofstream ofs(std::format("{}/BUILD", dir));
     ofs << "load(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n";
+    if (!color_objects.empty()) {
+      ofs << "# INCOMPLETE: this design was generated with --set sim.backend=llvm, whose color\n"
+             "# kernels are LLVM bitcode (*.llvm.o) that only lhd's version-matched llvm_sim_link\n"
+             "# can lower to a native object. They are deliberately NOT in srcs -- bazel would pass\n"
+             "# bitcode to the system linker -- so this target is missing every\n"
+             "# __lhd_color_kernel_*_llvm definition the evaluator calls and will not link.\n"
+             "# Re-run with --set sim.backend=slop for a standalone bazel module, or use `lhd sim`,\n"
+             "# which links the bitcode itself.\n\n";
+    }
     ofs << "config_setting(\n    name = \"opt\",\n    values = {\"compilation_mode\": \"opt\"},\n)\n\n";
     ofs << "cc_library(\n    name = \"sim\",\n    srcs = [\n";
     for (const auto& n : names) {
@@ -1854,9 +1872,6 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     }
     for (const auto& source : color_aux_sources) {
       ofs << std::format("        \"{}\",\n", source);
-    }
-    for (const auto& object : color_objects) {
-      ofs << std::format("        \"{}\",\n", object);
     }
     ofs << "    ],\n";
     ofs << "    hdrs = glob([\"*.hpp\"]),\n";

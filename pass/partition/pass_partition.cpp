@@ -647,73 +647,32 @@ void Partitioner::name_ports() {
       used.insert(sanitize(gu::default_instance_name(n)));
     }
 
-    // Stable cone hashes are needed only by a region that is actually COMPARED:
-    // a cached (or same-run reused) body is stitched into a wrapper built from a
-    // different graph, so its port names/order must be reproducible content
-    // signatures -- and the automorphism refusal below, which keeps a symmetric
-    // boundary from being reused with swapped ports, only exists on that path.
-    // A region with no pre-body is never compared: the wrapper and the mapped
-    // region are both built from this exact graph in one invocation, so cheap
-    // nid-derived names are enough. Taking the cheap path there avoids
-    // recursively hashing both sides of every boundary, which repeatedly
-    // revisits very large cones on heavily partitioned designs (Rob.Rob spent
-    // minutes here after the preceding region callback).
-    if (hook_ && !build_pre_) {
-      auto pin_less = [](const auto& a, const auto& b) {
-        auto an = a.driver.get_master_node().get_debug_nid();
-        auto bn = b.driver.get_master_node().get_debug_nid();
-        if (an != bn) {
-          return an < bn;
-        }
-        return a.driver.get_port_id() < b.driver.get_port_id();
-      };
-
-      auto& inputs = module_inputs_[r];
-      std::sort(inputs.begin(), inputs.end(), pin_less);
-      for (auto& p : inputs) {
-        std::string base;
-        if (p.from_primary && !p.primary_name.empty()) {
-          base = p.primary_name;
-        } else if (auto pn = gu::pin_name_of(p.driver); !pn.empty()) {
-          base = std::string{pn};
-        } else {
-          base = std::format("i_n{}_p{}", p.driver.get_master_node().get_debug_nid(), p.driver.get_port_id());
-        }
-        base           = sanitize(base.empty() ? std::string{"in"} : base);
-        std::string nm = base;
-        int         k  = 1;
-        while (used.contains(nm)) {
-          nm = base + "_" + std::to_string(k++);
-        }
-        used.insert(nm);
-        p.name = std::move(nm);
-      }
-
-      auto& outputs = module_outputs_[r];
-      std::sort(outputs.begin(), outputs.end(), pin_less);
-      for (size_t i = 0; i < outputs.size(); ++i) {
-        std::string base;
-        if (auto pn = gu::pin_name_of(outputs[i].driver); !pn.empty()) {
-          base = std::string{pn};
-        } else {
-          base = std::format("o_n{}_p{}", outputs[i].driver.get_master_node().get_debug_nid(), outputs[i].driver.get_port_id());
-        }
-        base = sanitize(base.empty() ? std::string{"out"} : base);
-        if (gu::is_type_register(outputs[i].driver.get_master_node())) {
-          base += "_o";
-        }
-        std::string nm = base;
-        int         k  = 1;
-        while (used.contains(nm)) {
-          nm = base + "_" + std::to_string(k++);
-        }
-        used.insert(nm);
-        outputs[i].name               = std::move(nm);
-        out_index_[outputs[i].driver] = {r, i};
-      }
-      continue;
-    }
-
+    // ONE boundary scheme, always -- names AND order. There used to be a second,
+    // cheaper one here (sort by `debug_nid`, name anonymous crossings
+    // `i_n<nid>_p<pid>`), taken whenever no pre-body was being built, on the
+    // reasoning that a region nobody COMPARES does not need reproducible names.
+    // That reasoning was right about names and wrong about consequences: this
+    // loop also fixes the ORDER of `module_outputs_`, pass.abc creates its ABC
+    // POs in exactly that order (abc_map.cpp, `__po<i>_<name>_b<b>`) and creates
+    // each PI lazily during the PO walk, so the AIG that `&dc4; &dch -f; &nf`
+    // sees is a different graph under the two orders and ABC returns a
+    // different -- equally correct -- mapping.
+    //
+    // `build_pre_` is `mapper.incremental()`, i.e. "the abc reuse cache is
+    // attached". So the old split made `--set lhd.incremental=false` synthesize
+    // a DIFFERENT netlist from the default run, with no cache involved on either
+    // side: measured on cva6, byte-identical pre-ABC input, 5,364,322 gates
+    // without the cache vs 5,366,128 with it, and on dino a critical path of
+    // 50.6705 vs 51.0985. That breaks the one thing `lhd.incremental=false`
+    // promises -- "an honest cold run, same outputs" -- and makes every
+    // full-vs-cold benchmark column a comparison of two different designs.
+    //
+    // The cheap path's cost argument still stands (hashing both sides of every
+    // boundary revisits very large cones; Rob.Rob spent minutes here), but it
+    // buys speed only on the NON-default path: incremental is on by default, so
+    // production runs already pay this, and the run that must be comparable to
+    // them is exactly the one that was skipping it.
+    //
     // The cached body is stitched into a freshly rebuilt wrapper BY PORT NAME,
     // so the name must be reproducible across recompiles (not `<op>_<nid>`).
     auto sig_of = [&](const hhds::Pin_class& drv) {

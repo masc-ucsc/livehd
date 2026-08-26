@@ -36,6 +36,17 @@ done
 
 echo "PASS: all pass.color algorithms run through the lhd CLI"
 
+# `synth` has three boundary modes behind one --set. cones is the cone-seeded
+# one (todo/livehd/2c-color-synthcones.html); its own end-to-end coverage is
+# lhd_color_cones_test.sh, this only keeps the mode in the CLI smoke loop.
+for SALG in pipe synth cones; do
+  D="$W/synth_$SALG"
+  mkdir -p "$D"
+  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run pass color synth --top "$TOP" --set color.synth_alg="$SALG" lg:"$D/lg" --workdir "$D/w2"
+  echo "PASS: color synth synth_alg=$SALG ran"
+done
+
 # `flat` must yield exactly ONE color across the WHOLE hierarchy (the flatten
 # equivalent) -- both the top and every sub-def, even with continuous requested.
 FD="$W/flat_one"

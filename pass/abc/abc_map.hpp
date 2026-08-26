@@ -102,6 +102,13 @@ struct Region_qor {
   int         color       = 0;
   uint64_t    input_nodes = 0;      // source-region nodes before bit blasting
   uint64_t    input_ge    = 0;      // graph_util synthesis-GE estimate before ABC
+  // Predicted generic-AIG size of the same cone (graph/predict_abc_size.hpp),
+  // the unit `pass.color synth --set synth_alg=cones` thresholds on. Reported
+  // NEXT TO input_ge, never instead of it: the two are different estimates of
+  // the same input, and the only ground truth for either is `gates` below --
+  // there is no per-op post-ABC attribution, so a region sum is the whole
+  // measurement. Every production run therefore validates both predictors.
+  uint64_t    pred_aig    = 0;
   int         gates       = 0;      // mapped standard cells
   double      area        = 0.0;    // sum of Liberty cell areas
   float       delay       = -1.0f;  // critical arrival in library time units; <0 => unavailable

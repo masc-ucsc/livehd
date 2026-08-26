@@ -2053,6 +2053,12 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
   auto  io  = g ? g->get_io() : nullptr;
   auto* lib = io ? io->get_library() : nullptr;
   if (lib == nullptr) {
+    // Same contract as the `!d.valid` bail below: an empty key means this run
+    // cannot be cached, and `cache_digestable_` is the ONE field that tells a
+    // benchmark row "the netlist was undigestable" apart from "the digest was
+    // fine and simply missed". Returning empty without stamping it reported a
+    // permanently-uncacheable run as a plain miss, run after run.
+    cache_digestable_ = false;
     return {};
   }
   // Merkle fold: an edited region body must change the top's digest, because

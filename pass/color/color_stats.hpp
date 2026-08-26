@@ -43,7 +43,10 @@ public:
   // `per_def` also prints the per-def table (pass.color.verbose).
   // `min_ge`/`max_ge` are the requested size window (0 = that half disabled);
   // when either is set the report says how many regions still violate it.
-  void report(std::string_view alg, bool per_def, uint64_t min_ge = 0, uint64_t max_ge = 0) const;
+  // `max_gate` is cones mode's PREDICTED-AIG threshold (0 = not cones mode). It
+  // is reported next to -- never instead of -- the GE columns: the two are
+  // different units, and the gap between them IS the finding the A/B is after.
+  void report(std::string_view alg, bool per_def, uint64_t min_ge = 0, uint64_t max_ge = 0, uint64_t max_gate = 0) const;
 
 private:
   struct Partition {
@@ -54,6 +57,7 @@ private:
     uint64_t    max_node_ge   = 0;
     uint64_t    max_node_bits = 0;
     uint64_t    max_node_id   = 0;
+    uint64_t    pred          = 0;  // predicted generic-AIG size (cones only; 0 elsewhere)
     std::string max_node_op;
     bool        max_node_const_shift = false;
   };

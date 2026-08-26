@@ -35,6 +35,7 @@ cc_library(
         "inline_sub.hpp",
         "node_util.hpp",
         "port_reach.hpp",
+        "predict_abc_size.hpp",
         "occurrence_materialize.hpp",
         "split_selfref.hpp",
         "synthesis_cost.hpp",
@@ -61,6 +62,7 @@ cc_library(
 ) for test_name in [
     "node_count_test",
     "ge_weight_smoke",
+    "predict_abc_size_smoke",
     "const_pin_test",
     "latch_contract_test",
     "occurrence_materialize_test",

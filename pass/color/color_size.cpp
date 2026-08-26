@@ -10,6 +10,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "color_region_graph.hpp"
 #include "node_util.hpp"
 
 namespace livehd::color {
@@ -17,20 +18,6 @@ namespace livehd::color {
 namespace {
 
 using livehd::graph_util::bits_of;
-
-// Would pass_partition give this crossing driver a stable (recompile-invariant)
-// port name? Mirrors wire_name: a graph input, a user-named pin, or a named
-// master node (register/instance). Anything else falls to <op>_<nid>.
-[[nodiscard]] bool crossing_is_nameable(const hhds::Pin_class& d) {
-  namespace gu = livehd::graph_util;
-  return gu::is_graph_input_pin(d) || !gu::pin_name_of(d).empty() || gu::has_name(d.get_master_node());
-}
-// The window weighs what ABC will BLAST, not what the region touches: a Sub
-// counts ~1 (synthesis_ge_weight). With Sub port bits in the weight,
-// a 2-node glue+instance region "weighs" thousands of GE, dodges the min floor
-// forever, and XSCore ends up with tens of thousands of zero-logic regions the
-// mapper pays call overhead for.
-constexpr int NO_REGION = -1;
 
 // A region whose adjacency is larger than this never ACTS as a merge initiator
 // (it still receives). Acting means one best_partner scan over the whole
@@ -42,163 +29,6 @@ constexpr int NO_REGION = -1;
 // O(own-degree) scan, so the hub still fills past the floor purely by
 // receiving. Degree is a function of the input graph: deterministic.
 constexpr size_t kActor_degree_cap = 4096;
-
-// The region graph: one vertex per region, one weighted edge per adjacent pair.
-//
-// Region ids are DENSE (0..n-1) and minted in body().nodes(hhds::Node_order::forward) order, so every
-// loop below is deterministic without sorting a hash map. Merging is a union-find
-// over region ids -- never a rescan of the node map, which is what makes a merge
-// O(neighbours) instead of O(nodes) (the shape that makes color_acyclic's merge
-// quadratic).
-class Region_graph {
-public:
-  Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weight = 1);
-
-  [[nodiscard]] size_t   size() const { return weight_.size(); }
-  [[nodiscard]] bool     alive(int r) const { return alive_[r]; }
-  [[nodiscard]] uint64_t weight(int r) const { return weight_[r]; }
-
-  [[nodiscard]] int find(int r) {
-    while (rep_[r] != r) {
-      rep_[r] = rep_[rep_[r]];  // path halving; iterative by mandate (color_common.hpp)
-      r       = rep_[r];
-    }
-    return r;
-  }
-
-  [[nodiscard]] const absl::flat_hash_map<int, uint64_t>& neighbours(int r) const { return adj_[r]; }
-  [[nodiscard]] const std::vector<hhds::Node_class>&      members(int r) const { return members_[r]; }
-
-  // Fold one region into the other; the LARGER-degree side survives (tie:
-  // smaller id) so the fold iterates the smaller neighbour map -- see the
-  // definition for why. Returns the surviving region id.
-  int merge(int a, int b);
-
-  // Region of `n`, resolved through the union-find.
-  [[nodiscard]] int region_of(const hhds::Node_class& n) {
-    auto it = node2region_.find(n);
-    return it == node2region_.end() ? NO_REGION : find(it->second);
-  }
-
-private:
-  std::vector<uint64_t>                           weight_;
-  std::vector<bool>                               alive_;
-  std::vector<int>                                rep_;
-  std::vector<absl::flat_hash_map<int, uint64_t>> adj_;      // region -> neighbour -> crossing bits
-  std::vector<std::vector<hhds::Node_class>>      members_;  // forward_class order
-  absl::flat_hash_map<hhds::Node_class, int>      node2region_;
-};
-
-Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weight) {
-  // 1. Components: two same-id nodes joined by a direct edge are one region. This
-  //    is split_continuous's rule -- a color that is two disjoint clouds is two
-  //    regions to pass.partition, so it must be two vertices here too.
-  Union_find uf;
-  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
-    auto it = node2id.find(n);
-    if (it == node2id.end()) {
-      continue;
-    }
-    uf.find(n);  // present even when isolated
-    for (const auto& e : n.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      auto sit   = node2id.find(snode);
-      if (sit != node2id.end() && sit->second == it->second) {
-        uf.merge(n, snode);
-      }
-    }
-  }
-
-  // 2. Mint dense ids in body().nodes(hhds::Node_order::forward) first-encounter order.
-  absl::flat_hash_map<hhds::Node_class, int> root2region;
-  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
-    if (!node2id.contains(n)) {
-      continue;
-    }
-    auto root = uf.find(n);
-    auto it   = root2region.find(root);
-    if (it == root2region.end()) {
-      it = root2region.emplace(root, static_cast<int>(weight_.size())).first;
-      weight_.emplace_back(0);
-      alive_.emplace_back(true);
-      rep_.emplace_back(static_cast<int>(rep_.size()));
-      adj_.emplace_back();
-      members_.emplace_back();
-    }
-    const int r      = it->second;
-    node2region_[n]  = r;
-    weight_[r]      += synthesis_ge_weight(n);
-    members_[r].emplace_back(n);
-  }
-
-  // 3. Edges: weight = total driver bits crossing the boundary. Bits, not edge
-  //    count -- a 64-bit bus binds two regions far more tightly than a 1-bit
-  //    enable, and cutting it costs 64 ports.
-  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
-    auto it = node2region_.find(n);
-    if (it == node2region_.end()) {
-      continue;
-    }
-    const int r = it->second;
-    for (const auto& e : n.out_edges()) {
-      auto sit = node2region_.find(e.sink.get_master_node());
-      if (sit == node2region_.end() || sit->second == r) {
-        continue;
-      }
-      uint64_t bits = static_cast<uint64_t>(std::max(bits_of(e.driver), 1));
-      // Name-weight tilt: an anonymous crossing (would mint `<op>_<nid>`) binds
-      // name_weight x tighter, so the window prefers to swallow it; a nameable
-      // crossing keeps its plain weight and is likelier to survive as a boundary.
-      if (name_weight > 1 && !crossing_is_nameable(e.driver)) {
-        bits *= static_cast<uint64_t>(name_weight);
-      }
-      adj_[r][sit->second] += bits;
-      adj_[sit->second][r] += bits;
-    }
-  }
-}
-
-int Region_graph::merge(int a, int b) {
-  a = find(a);
-  b = find(b);
-  if (a == b) {
-    return a;
-  }
-  // Survivor is the LARGER-degree side (tie: smaller id): folding iterates the
-  // dissolved side's neighbour map, so the merge costs the SMALLER degree. The
-  // old smaller-id rule iterated a hub's whole adjacency (a reset/clock cone
-  // touches tens of thousands of regions) on every second merge into it --
-  // quadratic the moment the window makes hub-adjacent singletons mergeable.
-  // Still deterministic (degree and id are functions of the input graph), and
-  // the caller-visible ids only feed the final forward_class renumber anyway.
-  if (adj_[b].size() > adj_[a].size() || (adj_[b].size() == adj_[a].size() && b < a)) {
-    std::swap(a, b);  // a survives, b dissolves
-  }
-  weight_[a] += weight_[b];
-  // Append the SHORTER member list (the vectors are freely swappable: nothing
-  // after a merge relies on members order beyond determinism, and split_large's
-  // MFFC only ever sees pre-merge regions).
-  if (members_[b].size() > members_[a].size()) {
-    std::swap(members_[a], members_[b]);
-  }
-  members_[a].insert(members_[a].end(), members_[b].begin(), members_[b].end());
-  members_[b].clear();
-  members_[b].shrink_to_fit();
-
-  adj_[a].erase(b);
-  for (const auto& [nb, w] : adj_[b]) {
-    if (nb == a) {
-      continue;
-    }
-    adj_[a][nb] += w;
-    adj_[nb].erase(b);
-    adj_[nb][a] += w;
-  }
-  adj_[b].clear();
-  alive_[b] = false;
-  rep_[b]   = a;
-  return a;
-}
 
 // Best-Choice score (ISPD'05): connectivity normalized by the size of what it
 // would produce, so a merge prefers a tightly bound SMALL neighbour over a

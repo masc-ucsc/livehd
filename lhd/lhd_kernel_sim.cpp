@@ -2072,6 +2072,26 @@ void sim_command(Options& opts, Result& res) {
     res.exit_code     = exit_code_for(res.error_class);
     return;
   }
+  // The `cc_bc` rule below hands the host compiler `-emit-llvm`, which is a
+  // CLANG flag. sim_host_cxx() prefers clang++ but falls back to c++/g++/$CXX,
+  // so a gcc-only host reaches this path and dies inside ninja as a `compile`
+  // error over generated code -- pointing the user at the simulator instead of
+  // at their toolchain. Probe once and name the real problem, the same way the
+  // missing-llvm_sim_link case above does.
+  if (has_llvm) {
+    int probe_rc = 0;
+    (void)capture(std::format("{} -x c++ -emit-llvm -c - -o /dev/null < /dev/null 2>/dev/null", shell_quote(cxx)), probe_rc);
+    if (probe_rc != 0) {
+      res.status        = "fail";
+      res.error_class   = "dependency";
+      res.error_message = std::format(
+          "the host C++ compiler ({}) does not accept -emit-llvm, which sim.backend=llvm needs to compile the "
+          "evaluator to bitcode; use a clang++ (set $CXX) or re-run with --set sim.backend=slop",
+          cxx);
+      res.exit_code = exit_code_for(res.error_class);
+      return;
+    }
+  }
 
   // build.ninja, ALWAYS written (even when the build below does not use ninja).
   // It is the escape hatch that works: `ninja -C <simdir>` reproduces exactly

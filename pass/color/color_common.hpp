@@ -121,6 +121,12 @@ struct Def_color_sizes {
   absl::flat_hash_map<int, uint64_t>    color_max_node_id;
   absl::flat_hash_map<int, std::string> color_max_node_op;
   absl::flat_hash_map<int, bool>        color_max_node_const_shift;
+  // Predicted generic-AIG size per color (graph/predict_abc_size.hpp), filled
+  // ONLY by cones mode -- it is the unit that mode's max_gate threshold is
+  // expressed in, so the report can say how many colors escaped it. Same keys as
+  // `color_nodes`, and only for colors the ALGORITHM owns: a source-seeded
+  // region is outside the cones policy and must not be reported as an escape.
+  absl::flat_hash_map<int, uint64_t>    color_pred;
   uint64_t                              partitionable = 0;  // nodes the algorithm was allowed to color
   uint64_t                              uncolored     = 0;  // ... that it left without a color
 };
@@ -164,6 +170,34 @@ struct Color_opts {
   // neutral (minion: delay unchanged, area/gates -0.25%). Inert here (1) like
   // min_ge/max_ge; the shipped policy (4) lives on the pass.color CLI label.
   int name_weight = 1;
+
+  // cones mode's clustering threshold, in PREDICTED generic-AIG size
+  // (graph/predict_abc_size.hpp), NOT gate equivalents: the cone walk stops
+  // expanding a root past it, and two colors merge only while their union stays
+  // under it. Soft and heuristic -- lowering it usually yields more, smaller
+  // (and possibly worse) regions, but neither side of it guarantees that
+  // pass.abc will or will not succeed; pass.abc's own memory/time guards remain
+  // the backstop.
+  //
+  // 0 is INERT, the same contract min_ge/max_ge carry: RAW cones, no walk budget
+  // and no merge at all. The shipped policy (30000) lives on the pass.color
+  // label so a direct caller or unit test still gets what it asked for.
+  uint64_t max_gate = 0;
+
+  // cones mode's PHASE-2 forward merge across the register: "", "pair" or
+  // "all". Empty (the default, INERT like max_gate) leaves the backward cones
+  // exactly as they were.
+  //
+  // It runs only AFTER the backward overlap merge, so the cones ABC actually
+  // optimizes get first claim on the max_gate budget and forward merging spends
+  // only the remainder. Candidates are ordered by SMALLEST combined size (there
+  // is no overlap to rank by) and keep firing while they fit. Following a
+  // register's Q into another register counts only through its `din` -- never
+  // enable/clock/reset, which would re-weld the control cone the walk split off.
+  //
+  // "pair" ranks one consumer color at a time; "all" ranks the whole qualifying
+  // Q fanout as one all-or-nothing candidate. Which wins is an open measurement.
+  std::string forward;
 
   // `--stats` sink for the def currently being colored, or nullptr. It rides on
   // the options so every algorithm reports without each one growing a

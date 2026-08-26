@@ -236,6 +236,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   int      tdivbb            = 0;  // blackboxed div/mod cones (the score under-reports)
   uint64_t tinput_nodes      = 0;
   uint64_t tinput_ge         = 0;
+  uint64_t tpred_aig         = 0;
   uint64_t peak_rss_kb       = 0;
   uint64_t color_peak_rss_kb = 0;
   int      worst             = -1;  // index of the region with the worst delay
@@ -251,6 +252,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     tdivbb       += qor[r].div_blackbox;
     tinput_nodes += qor[r].input_nodes;
     tinput_ge    += qor[r].input_ge;
+    tpred_aig    += qor[r].pred_aig;
     if (qor[r].resynth) {
       peak_rss_kb       = std::max(peak_rss_kb, qor[r].peak_rss_kb);
       color_peak_rss_kb = std::max(color_peak_rss_kb, qor[r].color_peak_rss_kb);
@@ -306,11 +308,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   // `gates`/`area` are PHYSICAL (region x instantiations); `module_gates`/
   // `module_area` are the per-mapped-module sums (what abc worked on once).
   j += std::format(
-      "\"total\":{{\"regions\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},"
+      "\"total\":{{\"regions\":{},\"input_nodes\":{},\"input_ge\":{},\"pred_aig\":{},\"gates\":{},\"area\":{:.4f},"
       "\"module_gates\":{},\"module_area\":{:.4f}",
       qor.size(),
       tinput_nodes,
       tinput_ge,
+      tpred_aig,
       tgates_phys,
       tarea_phys,
       tgates,
@@ -352,12 +355,13 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       j += ",";
     }
     j += std::format(
-        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},\"instances\":{},"
-        "\"ms\":{:.1f},\"resynth\":{}",
+        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"pred_aig\":{},\"gates\":{},"
+        "\"area\":{:.4f},\"instances\":{},\"ms\":{:.1f},\"resynth\":{}",
         jesc(q.module),
         q.color,
         q.input_nodes,
         q.input_ge,
+        q.pred_aig,
         q.gates,
         q.area,
         inst_of(q),
@@ -806,7 +810,9 @@ void Pass_abc::work(Eprp_var& var) {
         .msg("{}", *refusal)
         .hint(std::format("re-color into SMALLER regions with a tighter size window, then check them first: "
                           "`lhd pass color synth --top {} lg:... --set color.max_ge=<smaller> --stats` "
-                          "(the region-splitting ceiling; lower it until the region fits)",
+                          "(the region-splitting ceiling; lower it until the region fits). Under "
+                          "`--set color.synth_alg=cones` the knob is `color.max_gate` instead -- max_ge does not "
+                          "shape a cones coloring",
                           top))
         .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
         .hint(
@@ -827,7 +833,8 @@ void Pass_abc::work(Eprp_var& var) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)
         .hint(std::format("re-color into more, smaller regions: `lhd pass color synth --top {} lg:... "
-                          "--set color.max_ge=<smaller>`; full/cold may take longer, warm runs should reuse the extra colors",
+                          "--set color.max_ge=<smaller>` (or `--set color.max_gate=<smaller>` when the coloring used "
+                          "synth_alg=cones); full/cold may take longer, warm runs should reuse the extra colors",
                           top))
         .fatal();
   }

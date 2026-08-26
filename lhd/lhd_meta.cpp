@@ -925,7 +925,11 @@ int help_pass(const std::string& sub) {
         "           and never propagates its own, so a register cannot weld its din cone to\n"
         "           its enable/stall cone (nor its fan-out cones to each other). State\n"
         "           (flop/mem/latch/stateful sub) always cuts; synth mode also cuts mult/div\n"
-        "           and >8-bit adders (--set synth_alg=pipe|synth; pipe = state only)\n"
+        "           and >8-bit adders (--set synth_alg=pipe|synth; pipe = state only). The\n"
+        "           third mode, --set synth_alg=cones, inverts the walk: one BACKWARD cone\n"
+        "           per register din and per register enable, cones record how much logic\n"
+        "           they share, and the most-sharing pairs merge while the union stays under\n"
+        "           --set max_gate (a PREDICTED generic-AIG size, not the GE size window)\n"
         "  path     register-to-register regions: seed every flop/reg/mem and color its\n"
         "           backward+forward cone up to real (non-clk/rst) wire names; --set\n"
         "           instance=a,b instead seeds named nodes forward-only, bounded by the\n"
@@ -956,7 +960,8 @@ int help_pass(const std::string& sub) {
         "examples:\n"
         "  lhd pass color acyclic --top m lg:dir\n"
         "  lhd pass color flat --top m lg:dir      # whole hierarchy -> one color\n"
-        "  lhd pass color synth --top m lg:dir --set pass.color.synth_alg=pipe --stats\n");
+        "  lhd pass color synth --top m lg:dir --set pass.color.synth_alg=pipe --stats\n"
+        "  lhd pass color synth --top m lg:dir --set color.synth_alg=cones --set color.max_gate=30000\n");
     return print_options_section({"pass.color."});
   }
   if (sub == "partition") {

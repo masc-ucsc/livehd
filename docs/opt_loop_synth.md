@@ -335,11 +335,12 @@ today, for the record:
 | `pass.abc.block_size` | `0` (auto) | `pass_abc.cpp:74` |
 | `pass.abc.multiplier` | `array` (only kind implemented) | `abc_map.hpp:44` |
 | `pass.abc.register` / `memory` | `true` / `false` | `pass_abc.cpp:59,63` |
-| `pass.color.synth_alg` | `synth` | `pass_color.cpp:56` |
-| `pass.color.min_ge` | `1000` GE | `pass_color.cpp:61` |
-| `pass.color.max_ge` | `30_000_000` GE (~1 GB ABC peak @ ~30 B/GE) | `pass_color.cpp:70` |
-| `pass.color.absorb` | `true` | `pass_color.cpp:74` |
-| `pass.color.name_weight` | `4` | `pass_color.cpp:79` |
+| `pass.color.synth_alg` | `synth` (`pipe` \| `synth` \| `cones`) | `pass_color.cpp:56` |
+| `pass.color.min_ge` | `1000` GE | `pass_color.cpp:65` |
+| `pass.color.max_ge` | `25_000` synthesis GE (16 GiB / 15-min per-color calibration) | `pass_color.cpp:89` |
+| `pass.color.max_gate` | `30_000` PREDICTED AIG (`synth_alg=cones` only) | `pass_color.cpp:102` |
+| `pass.color.absorb` | `true` | `pass_color.cpp:107` |
+| `pass.color.name_weight` | `4` | `pass_color.cpp:112` |
 
 Known starting point (minion, 3-pass incremental, pre-PDK-change):
 
@@ -421,7 +422,79 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
   crossings specifically to keep boundaries on names the incremental cache can
   reuse, and is documented "QoR-neutral at the default". Verify that claim — it
   is a W4 (cache) knob sitting inside a W1 (QoR) mechanism.
-- **W1.4 `synth_alg=pipe` vs `synth`.** Measure; it is a one-flag experiment.
+- **W1.4 `synth_alg=pipe` vs `synth` vs `cones`.** Measure; it is a one-flag
+  experiment. `cones` (todo/livehd/2c-color-synthcones.html) decides region SIZE
+  while it decides region SHAPE: one backward cone per register `din` and per
+  register `enable`, ranked and merged by how much logic the cones share, capped
+  by `max_gate` in *predicted generic-AIG size* rather than in synthesis GE.
+  The unit is the point — over 1930 lhdsuite regions, GE predicted mapped gates
+  with a median error of 1.8x and a p90 of 5.6x in both directions, while ABC's
+  runtime correlates with mapped gates at r≈0.9 and with GE at only r≈0.31.
+  Every `pass.abc` run now records both estimates per region (`input_ge` and
+  `pred_aig` in `qor.json`, next to the mapped `gates`), so the predictor can be
+  recalibrated from any production run. Both algorithms are kept; `synth` stays
+  the default until the A/B says otherwise.
+
+  A/B recipe (from `../lhdsuite`, same sitting, same `-c opt` build; the
+  `_incremental` targets are the ones that carry both a cold `full` leg and the
+  cache counters, and they skip minion's `flat` leg, which fails on an unrelated
+  `pass.opentimer` netlist defect):
+
+  ```
+  bazel test -c opt \
+    //bench:dino_synth //bench:xs_alu_synth //bench:xs_renametable_synth \
+    //bench:dino_synth_incremental //bench:minion_synth_incremental \
+    //bench:xs_alu_synth_incremental //bench:xs_renametable_synth_incremental \
+    --override_module=livehd=../livehd --test_output=summary --nocache_test_results
+  # ... then repeat with:
+  #   --test_env=BENCH_COLOR_SYNTH_ALG=cones --test_env=BENCH_COLOR_MAX_GATE=30000
+  ```
+
+  **Measured 2026-08-26** (cold `full` leg, sky130, both rounds from the same
+  `-c opt` binary; `cones/synth`, so <1 is cones winning):
+
+  | design | regions | gates | area | ABC max_delay | STA delay | color ms | abc ms |
+  |---|---|---|---|---|---|---|---|
+  | dino           | 2.31x | 0.989x | 1.013x | 1.000x | 1.001x | 0.80x | 0.91x |
+  | minion         | 4.81x | 0.968x | 0.974x | 1.000x | (blocked) | 0.85x | 0.94x |
+  | xs_alu         | 1.62x | 0.975x | 0.987x | 1.000x | 1.000x | 0.67x | 1.13x |
+  | xs_renametable | 3.49x | 1.046x | 1.037x | 1.125x | **0.256x** | 0.63x | 1.07x |
+
+  Reading it:
+
+  - **QoR is a wash on gates/area and a large win on one design's whole-design
+    timing.** Three of four designs map 1–3% *fewer* gates; xs_renametable maps
+    4.7% more. Per-region ABC delay is identical on three designs. The one big
+    move is xs_renametable's `pass.opentimer` delay, 735.1 ns → 188.5 ns (3.9x):
+    cones cuts at register cones, so a long combinational path is far likelier
+    to sit inside one region and be optimized whole, where the GE window chops
+    it by size and ABC then optimizes the pieces independently.
+  - **Coloring itself is cheaper**, 0.63–0.85x, on every design — the cached
+    fan-in/fan-out CSR keeps the per-cone walk off the graph's edge lists.
+  - **Region count is 1.6–4.8x higher**, and the per-color GE histogram shows
+    where: minion's `<1k GE` bucket goes 324 → 2479, xs_renametable's 31 → 1476.
+    This is ruling 4 (no floor) doing exactly what it says — a zero-overlap cone
+    is its own ABC block, and a register fed by a primary input or by another
+    register has no overlap with anything. ABC absorbs it (peak RSS and
+    `max_region_ms` both *improve* on the two large designs), but it is the first
+    thing to revisit if cones is ever considered for the default.
+  - **Incremental cache-name stability is the real regression.** dino, xs_alu and
+    xs_renametable are unaffected (a one-line edit still misses 4–5 regions out
+    of 21–1621). Minion goes from 2 misses of 550 to **416 misses of 2640**, and
+    `abc_warm_speedup` 169x → 67x. This is the chaos the task's §G predicted: a
+    global most-overlap-first merge order renumbers many colors after a small
+    edit and `abc_incr` keys on `<def>__c<id>`.
+  - **Predictor quality** (from the new per-region `pred_aig` column, measured
+    against the mapped `gates` on the same runs): predicted AIG correlates with
+    mapped gates far better than GE does — r = +0.95/+0.99/+0.67 vs GE's
+    +0.82/+0.59/+0.60 on dino/xs_alu/minion — and its whole-design ratio to
+    mapped gates is 2.8–4.5x across all four designs where GE's spans 1.4–6.4x.
+    So `predict_abc_size` is a *consistent* ~3x over-count of mapped cells, which
+    is what a single shared threshold needs; GE is not.
+
+  Verdict: no default flip (ruling 8). Both algorithms stay; `synth` remains the
+  default. The two things to fix before cones could be a candidate are the
+  under-min tail (ruling 4 would have to be revisited) and the cache-name churn.
 
 ### W2 — abc: recipe and arithmetic (delay)
 

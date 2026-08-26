@@ -13,8 +13,14 @@ using livehd::graph_util::type_op_of;
 
 Color_synth::Color_synth(Color_opts opts_, std::string_view alg) : opts(opts_) {
   // The driver (Pass_color::color) validates the name, so anything reaching
-  // here is one of the two.
-  synth = alg != "pipe";
+  // here is one of the three.
+  if (alg == "pipe") {
+    mode = Mode::pipe;
+  } else if (alg == "cones") {
+    mode = Mode::cones;
+  } else {
+    mode = Mode::synth;
+  }
 }
 
 void Color_synth::set_id(const hhds::Node_class& node, int id) {
@@ -38,7 +44,7 @@ void Color_synth::force_id(const hhds::Node_class& node, int id) {
 // whose region does not matter) or pass.color ran before pass.bitwidth. An
 // unknown width simply is not a boundary, which makes the region larger, never
 // wrong.
-static int driver_bits(const hhds::Node_class& n) {
+int Color_synth::driver_bits(const hhds::Node_class& n) {
   for (const auto& e : n.out_edges()) {
     if (auto b = bits_of(e.driver); b != 0) {
       return b;
@@ -47,13 +53,7 @@ static int driver_bits(const hhds::Node_class& n) {
   return 0;
 }
 
-bool Color_synth::is_cut(const hhds::Node_class& node) const {
-  if (node.is_loop_break()) {
-    return true;  // flop/mem/latch/stateful sub: the pipeline-stage boundary
-  }
-  if (!synth) {
-    return false;  // "pipe": stages are cut at state only
-  }
+bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
   auto op = type_op_of(node);
   if (op == Ntype_op::Mult || op == Ntype_op::Div) {
     return true;
@@ -62,6 +62,16 @@ bool Color_synth::is_cut(const hhds::Node_class& node) const {
   // has not run, and an unknown width is not a boundary -- the region is merely
   // larger, never wrong.
   return op == Ntype_op::Sum && driver_bits(node) > 8;
+}
+
+bool Color_synth::is_cut(const hhds::Node_class& node) const {
+  if (node.is_loop_break()) {
+    return true;  // flop/mem/latch/stateful sub: the pipeline-stage boundary
+  }
+  if (mode == Mode::pipe) {
+    return false;  // "pipe": stages are cut at state only
+  }
+  return is_arith_cut(node);
 }
 
 // The id a cut node joins: the region of the data it registers, if it has a
@@ -141,6 +151,11 @@ void Color_synth::label(hhds::Graph* g) {
   flat_node2id.clear();
   uf     = Int_union_find{};
   seeded = has_seeded_coloring(g);
+
+  if (mode == Mode::cones) {
+    label_cones(g);  // owns its own merge, renumber and apply_coloring
+    return;
+  }
 
   mark_ids(g);
   merge_ids();

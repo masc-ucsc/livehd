@@ -53,7 +53,11 @@ void Pass_color::setup() {
   // `seed` label), not a per-pass --set option.
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
-  m.add_label_optional("synth_alg", "synth: pipe|synth boundary mode", "synth");
+  m.add_label_optional("synth_alg",
+                       "synth: pipe|synth|cones boundary mode. pipe/synth propagate one id forward and cut at state "
+                       "(synth also at large arithmetic), then reshape with the min_ge/max_ge GE window; cones seeds one "
+                       "BACKWARD cone per register din/enable and merges the most-sharing cones under `max_gate`",
+                       "synth");
   // The size window. Synthesis gate equivalents (synthesis_ge_weight:
   // Sub instances count ~1 -- their logic is weighed in their own def), not
   // nodes: ABC's memory scales with the BIT-BLASTED gate count, so a 200k-node
@@ -86,6 +90,31 @@ void Pass_color::setup() {
                        "synth: split a region above this many synthesis gate-equivalents (0 => no upper bound). "
                        "Default 25k synthesis GE, calibrated for the 16 GiB / 15-minute per-color soft bounds",
                        "25000");
+  // cones mode's clustering threshold. A DIFFERENT unit from max_ge: predicted
+  // generic-AIG size (graph/predict_abc_size.hpp), which tracks what ABC will
+  // actually build. Over 1930 lhdsuite regions, synthesis GE predicted mapped
+  // gates with a median error of 1.8x and a p90 of 5.6x in both directions --
+  // runtime shifts 24x over (its x6 is an ABC TIME factor), Sum ~5x under,
+  // register-file arrays 8-11x under. 30k is the shipped starting point for the
+  // A/B evaluation, not a claim that 30k is universally safe: the threshold is
+  // SOFT (it shapes granularity), and pass.abc's own RSS/time guards remain the
+  // admission backstop.
+  m.add_label_optional("max_gate",
+                       "synth: cones mode -- soft bound on a color's PREDICTED AIG size; merge the most-sharing cones "
+                       "while their union stays under it, and stop a cone's walk past it. 0 = raw cones, no merge. "
+                       "Distinct from max_ge, which is the GE size window of the synth/pipe modes",
+                       "30000");
+  // Phase 2 of cones' merge. A FLAT leaf, like max_gate: the kernel splits a
+  // --set key at the LAST dot, so `pass.color.forward` is expressible and
+  // `pass.color.synth.forward` is not (it would read as a pass named
+  // `pass.color.synth`).
+  m.add_label_optional("forward",
+                       "synth: cones mode -- after the backward overlap merge, also merge a register's color FORWARD "
+                       "across its Q into the colors it drives (through `din` only, never enable/clock/reset), smallest "
+                       "combined size first, while it still fits under max_gate. `pair` takes one consumer color at a "
+                       "time; `all` takes the whole qualifying Q fanout as one all-or-nothing candidate. "
+                       "false = off (default)",
+                       "false");
   m.add_label_optional("absorb",
                        "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
                        "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
@@ -164,16 +193,24 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   } else if (alg == "synth") {
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
-    s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
-                     var.get("synth_alg", "synth"),
+    const auto salg  = std::string{var.get("synth_alg", "synth")};
+    s               += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
+                     salg,
                      opts.min_ge,
                      opts.max_ge,
                      opts.name_weight);
-    if (opts.min_ge != 0) {
-      // The window bin-packs isolated under-min leftovers, so a color id MAY
-      // span several disconnected clouds. pass.partition keys its same-color
-      // anchor union off this flag; without it the component split would
-      // silently shred the bins back into per-cloud modules.
+    if (salg == "cones") {
+      s += std::format(",\"max_gate\":{},\"forward\":\"{}\"", opts.max_gate, opts.forward.empty() ? "false" : opts.forward);
+    }
+    // A color id MAY span several disconnected clouds. pass.partition keys its
+    // same-color anchor union off this flag; without it the component split
+    // would silently shred those back into per-cloud modules.
+    //
+    // The GE window bin-packs isolated under-min leftovers, so it needs the flag
+    // only with a floor. A CONES color is first-wins, so an earlier owner can
+    // split a later cone in two (flopB <- n1 <- n2[A] <- n3 leaves B = {flopB,
+    // n1, n3}) whatever the thresholds -- hence unconditionally there.
+    if (salg == "cones" || opts.min_ge != 0) {
       s += ",\"packed\":true";
     }
   } else if (alg == "mincut") {
@@ -241,11 +278,26 @@ void Pass_color::color(Eprp_var& var) {
   // A silent fallback here is a wrong ANSWER, not a wrong flag: `synth_alg=pipe`
   // and `synth_alg=synth` cut at different boundaries, and a typo used to mean
   // "synth" -- so it colored, exited 0, and reported nothing.
-  if (auto synth_alg = std::string{var.get("synth_alg", "synth")}; alg == "synth" && synth_alg != "synth" && synth_alg != "pipe") {
+  // A silent fallback here would be a wrong ANSWER, not a wrong flag -- and
+  // `true` is deliberately NOT accepted while the pair-vs-all question is still
+  // an open measurement: it would have to guess which one the user meant.
+  const auto forward = std::string{var.get("forward", "false")};
+  if (alg == "synth" && forward != "false" && forward != "off" && forward != "0" && forward != "pair" && forward != "all") {
+    livehd::diag::err("pass.color", "bad-forward", "unsupported")
+        .msg("unknown forward '{}' (expected false|pair|all)", forward)
+        .hint("pair: rank one Q-consumer color at a time, smallest combined size first")
+        .hint("all: rank the whole qualifying Q fanout as one all-or-nothing candidate")
+        .hint("forward only applies to synth_alg=cones; it runs AFTER the backward overlap merge")
+        .fatal();
+  }
+
+  const auto synth_alg = std::string{var.get("synth_alg", "synth")};
+  if (alg == "synth" && synth_alg != "synth" && synth_alg != "pipe" && synth_alg != "cones") {
     livehd::diag::err("pass.color", "bad-synth-alg", "unsupported")
-        .msg("unknown synth_alg '{}' (expected synth|pipe)", synth_alg)
+        .msg("unknown synth_alg '{}' (expected synth|pipe|cones)", synth_alg)
         .hint("synth: cut at state AND large arithmetic (Mult/Div, Sum wider than 8)")
         .hint("pipe: cut at state only -- one region per pipeline stage")
+        .hint("cones: one backward cone per register din/enable, merged by shared logic under `max_gate`")
         .fatal();
   }
 
@@ -259,6 +311,8 @@ void Pass_color::color(Eprp_var& var) {
   opts.min_ge       = parse_ge_bound(var, "min_ge", "1000");
   opts.max_ge       = parse_ge_bound(var, "max_ge", "25000");
   opts.name_weight  = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
+  opts.max_gate     = parse_ge_bound(var, "max_gate", "30000");
+  opts.forward      = forward == "pair" || forward == "all" ? forward : std::string{};
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
     livehd::diag::err("pass.color", "bad-size-window", "io")
@@ -474,7 +528,14 @@ void Pass_color::color(Eprp_var& var) {
 
   if (stats) {
     stats_acc.set_absorbed_defs(absorbed.defs_absorbed);
-    stats_acc.report(alg, opts.verbose, opts.min_ge, opts.max_ge);
+    // cones does not run apply_size_window, so min_ge/max_ge bound NOTHING about
+    // the regions it produced: reporting "N region(s) under min, M over max" plus
+    // "OVER-MAX regions remain -- pass.abc admission may refuse this design"
+    // would claim a bound nothing enforced (the same reason the window is not
+    // printed under `acyclic`). max_gate is its threshold and gets its own line.
+    // `min_ge` still shaped the INPUT through absorb, which reports separately.
+    const bool cones = alg == "synth" && synth_alg == "cones";
+    stats_acc.report(alg, opts.verbose, cones ? 0 : opts.min_ge, cones ? 0 : opts.max_ge, cones ? opts.max_gate : 0);
   }
 
   if (top_g != nullptr) {
