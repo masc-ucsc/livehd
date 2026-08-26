@@ -494,10 +494,34 @@ def denoteNode (G : GraphCert) (sourceEnv : Nat → BV) (n : Nat) : BV :=
   | none => sourceEnv n
   | some c => denote_op c.op c.width (c.deps.map sourceEnv)
 
-def evalNode (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
+/-- Per-node semantics for one value domain.  The graph traversal below is
+written ONCE against this class; `BV` and `CertVal` are instances.  Before this,
+`evalNode`/`evalGraph` and `evalNodeC`/`evalGraphC` were character-identical
+except for the type and one function name -- two copies to keep in sync, and a
+third for every future domain. -/
+class NodeSemantics (V : Type) where
+  interpOp : LGraphOp → Nat → List V → V
+
+instance instNodeSemanticsBV : NodeSemantics BV := ⟨eval_op⟩
+
+/-- The one traversal.  Node lookup, dependency mapping and environment update
+are domain-independent; only `interpOp` varies. -/
+def evalNodeG {V : Type} [NodeSemantics V] (G : GraphCert) (rho : Nat → V) (n : Nat) : V :=
   match G.nodes n with
   | none => rho n
-  | some c => eval_op c.op c.width (c.deps.map rho)
+  | some c => NodeSemantics.interpOp c.op c.width (c.deps.map rho)
+
+def envSetG {V : Type} (rho : Nat → V) (n : Nat) (v : V) : Nat → V :=
+  fun m => if m = n then v else rho m
+
+def evalGraphG {V : Type} [NodeSemantics V] : List Nat → GraphCert → (Nat → V) → Nat → V
+  | [], _G, rho => rho
+  | n :: ns, G, rho => evalGraphG ns G (envSetG rho n (evalNodeG G rho n))
+
+/-- `BV` instance of the generic traversal.  Definitionally the old definition,
+so every existing theorem and all 16 proven designs still elaborate. -/
+def evalNode (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
+  evalNodeG G rho n
 
 def denoteNodeEnv (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
   match G.nodes n with
@@ -505,11 +529,10 @@ def denoteNodeEnv (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
   | some c => denote_op c.op c.width (c.deps.map rho)
 
 def envSet (rho : Nat → BV) (n : Nat) (v : BV) : Nat → BV :=
-  fun m => if m = n then v else rho m
+  envSetG rho n v
 
-def evalGraph : List Nat → GraphCert → (Nat → BV) → Nat → BV
-  | [], _G, rho => rho
-  | n :: ns, G, rho => evalGraph ns G (envSet rho n (evalNode G rho n))
+def evalGraph : List Nat → GraphCert → (Nat → BV) → Nat → BV :=
+  evalGraphG
 
 def denoteGraph : List Nat → GraphCert → (Nat → BV) → Nat → BV
   | [], _G, rho => rho
@@ -527,8 +550,8 @@ theorem eval_op_correct (oper : LGraphOp) (w : Nat) (args : List BV) :
 
 theorem evalNode_eq_denoteNodeEnv (G : GraphCert) (rho : Nat → BV) (n : Nat) :
     evalNode G rho n = denoteNodeEnv G rho n := by
-  unfold evalNode denoteNodeEnv
-  split <;> simp [eval_op_correct]
+  unfold evalNode evalNodeG denoteNodeEnv
+  split <;> simp [NodeSemantics.interpOp, eval_op_correct]
 
 theorem evalGraph_eq_denoteGraph (order : List Nat) (G : GraphCert) (rho : Nat → BV) :
     evalGraph order G rho = denoteGraph order G rho := by
@@ -536,7 +559,12 @@ theorem evalGraph_eq_denoteGraph (order : List Nat) (G : GraphCert) (rho : Nat �
   | nil =>
       rfl
   | cons n ns ih =>
-      simp [evalGraph, denoteGraph, evalNode_eq_denoteNodeEnv, ih]
+      -- `evalGraph` is now an alias of the generic traversal, so its recursive
+      -- equation is stated about `evalGraphG`.  One `show` puts the goal back in
+      -- alias form (the two are definitionally equal) and the original proof runs.
+      show evalGraph ns G (envSet rho n (evalNode G rho n))
+         = denoteGraph ns G (envSet rho n (denoteNodeEnv G rho n))
+      rw [evalNode_eq_denoteNodeEnv, ih]
 
 theorem evalGraphCorrect (order : List Nat) (G : GraphCert) (sourceEnv : Nat → BV) :
     envCorrectOn order
@@ -563,14 +591,14 @@ theorem evalGraphCorrectForCert (G : GraphCert) (sourceEnv : Nat → BV) :
 -- discharge them -- are shared verbatim between the two paths.
 --------------------------------------------------------------------------------
 
+instance instNodeSemanticsCertVal : NodeSemantics CertVal := ⟨eval_op_cert⟩
+
+/-- `CertVal` instance of the SAME traversal.  Previously a hand-copied twin. -/
 def evalNodeC (G : GraphCert) (rho : Nat → CertVal) (n : Nat) : CertVal :=
-  match G.nodes n with
-  | none => rho n
-  | some c => eval_op_cert c.op c.width (c.deps.map rho)
+  evalNodeG G rho n
 
 def envSetC (rho : Nat → CertVal) (n : Nat) (v : CertVal) : Nat → CertVal :=
-  fun m => if m = n then v else rho m
+  envSetG rho n v
 
-def evalGraphC : List Nat → GraphCert → (Nat → CertVal) → Nat → CertVal
-  | [], _G, rho => rho
-  | n :: ns, G, rho => evalGraphC ns G (envSetC rho n (evalNodeC G rho n))
+def evalGraphC : List Nat → GraphCert → (Nat → CertVal) → Nat → CertVal :=
+  evalGraphG
