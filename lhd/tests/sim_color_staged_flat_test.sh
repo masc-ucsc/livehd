@@ -80,6 +80,7 @@ grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evalu
 
 [ ! -e "$work/setup/sim/runtime/taskflow" ] || fail "generated tree still stages Taskflow"
 refute "standalone BUILD still references Taskflow" -q 'runtime/taskflow' "$work/setup/sim/BUILD"
+refute "standalone BUILD requests toolchain-specific ThinLTO" -q 'thin_lto' "$work/setup/sim/BUILD"
 
 # Host-compile and execute the exact generated source, including checkpointing.
 "$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 --workdir "$work/run" -q >/dev/null

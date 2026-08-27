@@ -1841,9 +1841,10 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   // module's body recompiles only that .o (the per-module bodies no longer live
   // in headers). srcs is an explicit generated list (not glob) so a stray .cpp
   // dropped in the dir — e.g. a hand-written test driver — is not swept into the
-  // library. ThinLTO is gated to `-c opt`: it restores the cross-module inlining
-  // the old header-only form got for release builds, while dev/incremental
-  // builds (fastbuild/dbg) skip LTO and stay fast.
+  // library. Do not request Bazel's `thin_lto` feature here: its implementation
+  // is toolchain-specific (and expands to Clang-only flags in some GCC-selected
+  // toolchains). The caller's compilation mode still supplies the usual
+  // optimization flags.
   //
   // `.llvm.o` is NOT in srcs, and must not be: under `sim.backend=llvm` those
   // files hold lhd-version LLVM BITCODE (Cgen_llvm::write_object writes it with
@@ -1865,7 +1866,6 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
              "# Re-run with --set sim.backend=slop for a standalone bazel module, or use `lhd sim`,\n"
              "# which links the bitcode itself.\n\n";
     }
-    ofs << "config_setting(\n    name = \"opt\",\n    values = {\"compilation_mode\": \"opt\"},\n)\n\n";
     ofs << "cc_library(\n    name = \"sim\",\n    srcs = [\n";
     for (const auto& n : names) {
       ofs << std::format("        \"{}.cpp\",\n", n);
@@ -1877,11 +1877,7 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     ofs << "    hdrs = glob([\"*.hpp\"]),\n";
     ofs << "    copts = [\"-std=c++23\", \"-pthread\"],\n"
            "    linkopts = [\"-pthread\"],\n";
-    ofs << "    features = select({\n"
-           "        \":opt\": [\"thin_lto\"],\n"
-           "        \"//conditions:default\": [],\n"
-           "    }),\n"
-           "    deps = [\"@hlop//hlop\"],\n"
+    ofs << "    deps = [\"@hlop//hlop\"],\n"
            "    visibility = [\"//visibility:public\"],\n"
            ")\n";
   }
