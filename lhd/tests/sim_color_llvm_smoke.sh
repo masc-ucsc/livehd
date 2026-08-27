@@ -51,5 +51,23 @@ grep -q '__state_commit.*= true' "$work"/llvm-color_kernel_llvm_reg/sim/color_ke
 adapters=("$work"/llvm-*/sim/*.color-kernel-*.cpp)
 [ ! -e "${adapters[0]}" ] \
   || fail "sim.backend=llvm emitted redundant per-color C++ ABI adapters"
+! grep -q 'color-kernel-[^"]*\.cpp"' "$work"/llvm-color_kernel_llvm_scalar/sim/gen_digests.json \
+  || fail "LLVM generation manifest recorded a deleted C++ kernel adapter"
+
+# A large module puts kernel calls in separate color-eval shards. Reproduce
+# that host-build boundary without checking in a 16k-node fixture: setup the
+# scalar design, rename its one call-bearing TU exactly like a generated shard,
+# and verify --run-only links the kernel into that TU rather than the absent
+# unsplit module object.
+shard_work="$work/llvm-sharded-association"
+"$LHD" sim inou/prp/tests/sim/color_kernel_llvm_scalar.prp --setup-only \
+  --set sim.backend=llvm --workdir "$shard_work" -q
+module_cpp="$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.cpp"
+shard_cpp="$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.color-eval-0.cpp"
+mv "$module_cpp" "$shard_cpp"
+"$LHD" sim inou/prp/tests/sim/color_kernel_llvm_scalar.prp --run-only \
+  --set sim.backend=llvm --workdir "$shard_work" -q
+grep -q 'color-eval-0.o: llvm_inline' "$shard_work/sim/build.ninja" \
+  || fail "LLVM kernel was not associated with its evaluator shard"
 
 echo "PASS: profitable scalar LLVM regions inline, wide regions fall back to Slop, and both match Slop assertions"

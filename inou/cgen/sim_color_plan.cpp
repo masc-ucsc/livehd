@@ -3229,9 +3229,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   const bool         collect_hier_reuse       = nversions > kExactConvexVersionLimit && plan.summary_.version_dag_acyclic;
   constexpr uint64_t kHierReuseMinGe          = 2'048;
   constexpr uint64_t kHierReuseMaxGe          = 12'000;
-  constexpr uint64_t kHierReuseMaxCutBits     = 128;
-  constexpr size_t   kHierReuseMaxCutSlots    = 8;
-  constexpr uint64_t kHierReuseMinScore       = 200;
+  constexpr uint64_t kHierReuseMinScore       = 64;
+  constexpr size_t   kHierReuseMaxCutSlots    = 64;
   constexpr size_t   kHierReuseMinOccurrences = 4;
   constexpr size_t   kHierReuseMaxOccurrences = 128;
   struct Reuse_path_node {
@@ -3429,15 +3428,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   // A repeated human module with a compact, uniform hierarchical closure is a
   // useful coarsening boundary: its live value cut is usually much smaller than
   // an arbitrary graph cut, and preserving the closure gives cgen a stable unit
-  // for generated-code reuse and incremental regeneration. Keep this much
-  // stricter than local-body reuse; isolating large or lightly repeated modules
-  // prevents profitable fusion in their callers. Each closure is an induced
-  // subset of the already validated version DAG, so it is acyclic by construction.
+  // for generated-code reuse and incremental regeneration. Each closure is an
+  // induced subset of the already validated version DAG, so it is acyclic by
+  // construction. Context-dependent boundary vertices are dissolved below.
   const hhds::Graph* selected_hier_reuse = nullptr;
   for (const auto& candidate : hier_reuse_candidates) {
     if (candidate.uniform && candidate.subtree_ge >= kHierReuseMinGe && candidate.subtree_ge <= kHierReuseMaxGe
-        && candidate.max_cut_bits <= kHierReuseMaxCutBits && candidate.max_cut_slots <= kHierReuseMaxCutSlots
-        && candidate.score >= kHierReuseMinScore && candidate.occurrences >= kHierReuseMinOccurrences
+        && candidate.score >= kHierReuseMinScore && candidate.max_cut_slots <= kHierReuseMaxCutSlots
+        && candidate.occurrences >= kHierReuseMinOccurrences
         && candidate.occurrences <= kHierReuseMaxOccurrences) {
       selected_hier_reuse = candidate.definition;
       break;
@@ -3463,6 +3461,30 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       const auto  node = reuse_path_node.find(path);
       if (node != reuse_path_node.end()) {
         version_hierarchy_owner[version] = hierarchy_owner[node->second];
+      }
+    }
+    // Applying one instance's partition template to every sibling can create
+    // partition-DAG cycles through their different external contexts. Dissolve
+    // the fine vertices touching those contexts, leaving only the hierarchy's
+    // interior protected for canonical coarsening. The dissolved shell remains
+    // in the ordinary whole-design partitioner and can adapt per occurrence.
+    std::vector<bool> hierarchy_boundary_version(nversions, false);
+    for (const auto& edge : plan.version_dependencies_) {
+      const auto producer_owner = version_hierarchy_owner[edge.producer];
+      const auto consumer_owner = version_hierarchy_owner[edge.consumer];
+      if (producer_owner == consumer_owner) {
+        continue;
+      }
+      if (producer_owner != Color_plan::invalid_index) {
+        hierarchy_boundary_version[edge.producer] = true;
+      }
+      if (consumer_owner != Color_plan::invalid_index) {
+        hierarchy_boundary_version[edge.consumer] = true;
+      }
+    }
+    for (size_t version = 0; version < nversions; ++version) {
+      if (hierarchy_boundary_version[version]) {
+        version_hierarchy_owner[version] = Color_plan::invalid_index;
       }
     }
   }

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -1959,26 +1960,100 @@ void sim_command(Options& opts, Result& res) {
   // LLVM color kernels are bitcode, grouped with the generated evaluator TU
   // that calls them. Compile that TU to host-compiler bitcode, then let the
   // companion LLVM binary inline all of its kernels and lower one native
-  // object. Keeping this boundary per module preserves the parallel/incremental
-  // host build and avoids asking the system linker to understand lhd's LLVM
-  // bitcode version.
+  // object. Keeping this boundary per evaluator preserves the
+  // parallel/incremental host build and avoids asking the system linker to
+  // understand lhd's LLVM bitcode version.
+  //
+  // Large modules split their evaluator into `<module>.color-eval-N.cpp`
+  // shards. A filename-prefix association would put every kernel into the
+  // unsplit `<module>.cpp` object even though the calls live in those shards;
+  // the inliner then quite correctly DCEs the unreferenced definitions and the
+  // final native link reports them undefined. The generated symbol spelling is
+  // deterministic, so associate each bitcode file with the ONE TU containing
+  // its call instead.
+  //
+  // ONE pass per body, into a symbol -> TU index: a per-kernel full-text search
+  // would be O(kernels x TUs x bytes), and the sharded designs this association
+  // exists for are exactly the ones with hundreds of kernels over hundreds of
+  // megabytes of generated C++. Nothing is read at all when the design has no
+  // bitcode kernels (every `sim.backend=slop` run), so no body text is ever
+  // resident for the host build and simulation that follow.
   std::vector<std::vector<std::string>> llvm_kernels(tus.size());
-  for (const auto& kernel : direct_objects) {
-    const auto filename = fs::path(kernel).filename().string();
-    size_t     matches  = 0;
+  if (!direct_objects.empty()) {
+    constexpr std::string_view                 kernel_prefix = "__lhd_color_kernel_";
+    std::map<std::string, std::vector<size_t>> symbol_tus;
     for (size_t i = 0; i < bodies.size(); ++i) {
-      const auto prefix = fs::path(tus[i]).stem().string() + ".color-kernel-";
-      if (filename.starts_with(prefix)) {
-        llvm_kernels[i].push_back(kernel);
-        ++matches;
+      std::ifstream body(bodies[i]);
+      if (!body) {
+        res.status        = "fail";
+        res.error_class   = "internal";
+        res.error_message = std::format("could not read generated sim body {}", bodies[i]);
+        res.exit_code     = exit_code_for(res.error_class);
+        return;
+      }
+      std::stringstream text;
+      text << body.rdbuf();
+      const std::string body_text = std::move(text).str();
+      for (auto pos = body_text.find(kernel_prefix); pos != std::string::npos;
+           pos      = body_text.find(kernel_prefix, pos + kernel_prefix.size())) {
+        auto end = pos;
+        while (end < body_text.size() && (std::isalnum(static_cast<unsigned char>(body_text[end])) != 0 || body_text[end] == '_')) {
+          ++end;
+        }
+        auto& owners = symbol_tus[body_text.substr(pos, end - pos)];
+        if (owners.empty() || owners.back() != i) {
+          owners.push_back(i);  // bodies are visited in order, so this dedups
+        }
       }
     }
-    if (matches != 1) {
-      res.status        = "fail";
-      res.error_class   = "internal";
-      res.error_message = std::format("could not associate LLVM simulator kernel {} with exactly one module", kernel);
-      res.exit_code     = exit_code_for(res.error_class);
-      return;
+    // `Cgen_sim::cpp_id`, spelled once here: a graph name that sanitizes to
+    // nothing or starts with a digit gains a leading '_' in the emitted symbol,
+    // and the file stem it is recovered from does not carry that.
+    const auto cpp_id = [](std::string_view text) {
+      std::string id;
+      id.reserve(text.size() + 1);
+      for (const char c : text) {
+        id.push_back(std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_' ? c : '_');
+      }
+      if (id.empty() || std::isdigit(static_cast<unsigned char>(id.front())) != 0) {
+        id.insert(id.begin(), '_');
+      }
+      return id;
+    };
+    for (const auto& kernel : direct_objects) {
+      const auto                 filename   = fs::path(kernel).filename().string();
+      constexpr std::string_view marker     = ".color-kernel-";
+      constexpr std::string_view suffix     = ".llvm.o";
+      const auto                 marker_pos = filename.find(marker);
+      if (marker_pos == std::string::npos || !filename.ends_with(suffix)
+          || marker_pos + marker.size() + suffix.size() > filename.size()) {
+        res.status        = "fail";
+        res.error_class   = "internal";
+        res.error_message = std::format("malformed LLVM simulator kernel filename {}", kernel);
+        res.exit_code     = exit_code_for(res.error_class);
+        return;
+      }
+      // `<stem>.color-kernel-<signature>-color-<n>.llvm.o` was minted from
+      // `__lhd_color_kernel_<cpp_id(stem)>_<signature>_color_<n>_llvm`, where
+      // cgen mapped every non-alphanumeric signature character to '_'.
+      std::string instance(filename, marker_pos + marker.size(), filename.size() - (marker_pos + marker.size()) - suffix.size());
+      for (char& c : instance) {
+        if (std::isalnum(static_cast<unsigned char>(c)) == 0) {
+          c = '_';
+        }
+      }
+      const auto symbol = std::format("{}{}_{}_llvm", kernel_prefix, cpp_id(filename.substr(0, marker_pos)), instance);
+
+      const auto found = symbol_tus.find(symbol);
+      if (found == symbol_tus.end() || found->second.size() != 1) {
+        res.status      = "fail";
+        res.error_class = "internal";
+        res.error_message
+            = std::format("could not associate LLVM simulator kernel {} ({}) with exactly one evaluator", kernel, symbol);
+        res.exit_code = exit_code_for(res.error_class);
+        return;
+      }
+      llvm_kernels[found->second.front()].push_back(kernel);
     }
   }
   std::vector<std::string> compile_objs = objs;

@@ -12,6 +12,7 @@ exports_files([
     "tests/sim/flop_feeds_transparent_high_latch.prp",
     "tests/sim/flop_sim_negedge_sole_clock.prp",
     "tests/sim/mem_color_direct.prp",
+    "tests/sim/mem_whole.prp",
     "tests/sim/mem_none_color_random.prp",
     "tests/sim/packed_update_chain.prp",
     "tests/sim/cond_call_always_consumer.prp",

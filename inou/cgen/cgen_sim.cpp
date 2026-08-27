@@ -10105,9 +10105,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (!llvm_backend_) {
         kernel_header->append("void ", instance_name, "(void*, void**, std::uint64_t*);\n");
       }
-      const std::string kernel_path = instance_stem + ".cpp";
-      auto              kernel_out  = open_out(kernel_path);
-      const auto        slot_is_u
+      const std::string            kernel_path = instance_stem + ".cpp";
+      // LLVM kernels are native objects with an inline adapter; they never
+      // need a C++ kernel translation unit.  Opening one here used to record a
+      // phantom .cpp in gen_digests.json before aborting and deleting it.  That
+      // made every otherwise-warm LLVM generation fail the artifact-complete
+      // check and bypass the early module deduplication.
+      std::shared_ptr<File_output> kernel_out;
+      if (!llvm_backend_) {
+        kernel_out = open_out(kernel_path);
+      }
+      const auto slot_is_u
           = [&](size_t slot_index) { return slot_index < direct_slot_is_u.size() && direct_slot_is_u[slot_index]; };
       // The ABI is a void* type-pun: the cast has to name the type the binding
       // site took the address of. `direct_slot_is_u` is the ONE authority that
@@ -10136,8 +10144,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const std::string llvm_raw_name    = instance_name + "_llvm";
       const std::string llvm_object      = instance_stem + ".llvm.o";
       const auto        emit_llvm_object = [&]() -> bool {
+        // The LLVM kernel has no C++ translation unit to record the reason in
+        // (see above), so keep the fallback explanation reachable the way the
+        // other LLVM eligibility tallies are.
         const auto reject = [&](std::string_view reason) {
-          kernel_out->append("// LLVM fallback: ", reason, "\n");
+          if (llvm_state_debug) {
+            std::fprintf(stderr,
+                         "sim llvm: color %zu falls back to Slop: %.*s\n",
+                         color_index,
+                         static_cast<int>(reason.size()),
+                         reason.data());
+          }
           return false;
         };
         if (!llvm_backend_) {
@@ -11021,11 +11038,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // occurrence, so always inline the packing adapter.  A standalone
         // wrapper repeats the same work behind a void** ABI and adds one host
         // C++ compile action per LLVM object.
-        kernel_out->abort();
-        if (!odir.empty()) {
-          std::error_code ec;
-          std::filesystem::remove(absl::StrCat(odir, "/", kernel_path), ec);
-        }
         llvm_inline_kernel[color_index]   = true;
         llvm_scalar_kernel[color_index]   = llvm_scalar_abi;
         llvm_inline_raw_name[color_index] = llvm_raw_name;
@@ -11033,11 +11045,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         continue;
       }
       if (llvm_backend_) {
-        kernel_out->abort();
-        if (!odir.empty()) {
-          std::error_code ec;
-          std::filesystem::remove(absl::StrCat(odir, "/", kernel_path), ec);
-        }
         direct_kernel[color_index] = nullptr;
         continue;
       }
@@ -12531,18 +12538,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
             }
             I(!source_expr.empty());
-          } else if (op == Ntype_op::Memory && slot.producer_port == Ntype::Memory_readall_pid) {
-            I(direct_memory(site) != nullptr);
-            source_expr = absl::StrCat(occurrence_member(site), ".read_all()");
           } else if (!member_value.empty() && slot.producer_port == version.output_port) {
             // The value was materialized by this exact version just above. Use
             // that occurrence-local temporary directly: looking the definition
             // pin up again is ambiguous for multi-output cells (notably Memory,
             // whose canonical read pin need not appear in out_pins()).
-            const int source_width = wbits_of(source);
+            // Both sides of this assignment are answered by the emission that
+            // ran, NOT by a second lookup through `source`: asking
+            // `slop_u_values_` about the definition pin is the same ambiguous
+            // multi-output lookup this branch exists to avoid (a Memory's
+            // read_all pin is not the pin the temporary was bound to, so a
+            // canonical whole-array value read as `Slop_u<W>` looked signed here
+            // and was wrapped back through `Slop<W>` on its way into Slop_u
+            // storage). `member_value_is_u` is the type the temporary was
+            // actually declared with; `direct_slot_is_u` is the destination's
+            // DECLARED storage type, the same authority `range_extract_expr`
+            // above and the LLVM `from_packed_words` landing below consult.
+            const int  source_width = wbits_of(source);
+            const bool value_is_u   = slop_u_ && (member_value_is_u || slop_u_values_.contains(source.get_class_index()));
             if (source_width == static_cast<int>(slot.width)) {
-              if (slop_u_values_.contains(source.get_class_index())) {
-                source_expr = slop_u_ && slot.unsign ? member_value : absl::StrCat("Slop<", slot.width, ">{", member_value, "}");
+              if (value_is_u) {
+                source_expr
+                    = direct_slot_is_u[slot_index] ? member_value : absl::StrCat("Slop<", slot.width, ">{", member_value, "}");
               } else if (is_unsign(source)) {
                 source_expr = absl::StrCat("Slop<", slot.width, ">{", member_value, "}");
               } else {
@@ -12553,6 +12570,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             } else {
               source_expr = absl::StrCat("Slop<", slot.width, ">{", member_value, "}");
             }
+          } else if (op == Ntype_op::Memory && slot.producer_port == Ntype::Memory_readall_pid) {
+            I(direct_memory(site) != nullptr);
+            source_expr = absl::StrCat(occurrence_member(site), ".read_all()");
           } else {
             source_expr = operand(source, slot.width);
           }

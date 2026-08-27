@@ -30,4 +30,20 @@ grep -q '\.read<' "$body" || fail "memory read ports were not materialized as ve
 
 "$LHD" sim "$PRP" --workdir "$work/run" -q >/dev/null
 
+# A whole-memory value that crosses a color boundary must reuse the value read
+# by its producer. Calling read_all() once for its side effect and again for the
+# boundary used to double every whole-array read in memory-heavy designs.
+whole_prp="inou/prp/tests/sim/mem_whole.prp"
+"$LHD" sim "$whole_prp" --setup-only --workdir "$work/whole" -q >/dev/null
+whole_body="$(ls "$work"/whole/sim/*whole_sim.cpp | head -1)"
+! grep -q 'read_all();  // value unused' "$whole_body" \
+  || fail "whole-memory boundary emitted a duplicate discarded read_all"
+grep -Eq 'auto __color_tmp_[0-9]+ = .*\.read_all\(\);' "$whole_body" \
+  || fail "whole-memory boundary did not materialize its producer value"
+# ...and hands that already-canonical value straight to the Slop_u boundary
+# storage. A `Slop<80>{...}` landing here is the same wasted round-trip the
+# per-entry assertion above guards against, one spelling further out.
+! grep -q 'allout = Slop<' "$whole_body" \
+  || fail "canonical whole-memory value was converted back through signed Slop"
+
 echo "PASS: deterministic registered memories execute in the occurrence-wide scheduler"

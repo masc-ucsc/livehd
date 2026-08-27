@@ -913,6 +913,7 @@ sh_test(
     srcs = ["sim_color_memory_test.sh"],
     data = [
         "//inou/prp:tests/sim/mem_color_direct.prp",
+        "//inou/prp:tests/sim/mem_whole.prp",
         "//lhd",
     ],
 )
