@@ -17,6 +17,8 @@ LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
 LAKE="${LAKE:-lake}"
 RUN_LEAN="${RUN_LEAN:-false}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
+# B1+B2 branch: `verified_compiler` makes pass.lean emit ONLY <Top>_designCert.
+LEAN_MODE="${LEAN_MODE:-legacy}"
 # Step-5 fast-view bridge (<Top>_comb/_next/_step = _cert).  Default off, matching
 # the pass default, because a bridge-enabled file is much more expensive to
 # typecheck.  Requires EMIT_CERT=true and a memory-free module.
@@ -153,6 +155,7 @@ set +e
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \
   --set formal.lean.max_width=1048576 \
+  --set formal.lean.mode="$LEAN_MODE" \
   -- \
   "${SLANG_FLAGS[@]}" \
   > "$RUN_LOG" 2>&1

@@ -34,6 +34,11 @@ EMIT_CERT="${LEAN_EMIT_CERT:-true}"
 EMIT_FAST_BRIDGE="${LEAN_EMIT_FAST_BRIDGE:-true}"
 CERT_WF="${LEAN_CERT_WF:-skip}"
 MAX_WIDTH="${LEAN_MAX_WIDTH:-1048576}"
+# B1+B2 branch: `verified_compiler` makes pass.lean emit ONLY <Top>_designCert.
+# It overrides emit_cert/emit_fast_bridge/cert_wf inside the pass, so the three
+# knobs above become inert -- passing them anyway keeps this script's interface
+# unchanged for the legacy mode.
+LEAN_MODE="${LEAN_MODE:-legacy}"
 LEAN_JOBS="${LEAN_JOBS:-8}"
 LEAN_CPUSET="${LEAN_CPUSET:-0-7}"
 # emit | single_edge | lec | lean  -- stop the pipeline early (census sweeps use `emit`)
@@ -162,6 +167,7 @@ fi
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \
   --set formal.lean.max_width="$MAX_WIDTH" \
+  --set formal.lean.mode="$LEAN_MODE" \
   > "$LOG_DIR/lhd_lean.log" 2>&1
 lean_emit_status=$?
 echo "lean emit exit=$lean_emit_status"

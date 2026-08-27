@@ -6,6 +6,7 @@
 //  incrementally.
 
 #include "pass_lean.hpp"
+#include "design_cert_export.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -1196,6 +1197,9 @@ struct CertBuild {
   std::map<uint32_t, std::string> source_leaf;  // BitVec expr: i.f / s.f / BitVec.ofInt w c
   std::map<uint32_t, int>         source_kind;  // 0 = input, 1 = const, 2 = flop
   std::map<uint32_t, uint32_t>    source_width; // BitVec width of the source leaf
+  // Verified-compiler exporter: the constant's Lean `Int` text, kept verbatim so
+  // `SourceDesc.const` need not re-parse it out of `source_exprs`.
+  std::map<uint32_t, std::string> source_const_int;
   uint32_t next_synth_id = 1000000000;
 
   // ---- Memory decomposition (step 5 memory path) --------------------------
@@ -1238,6 +1242,7 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
     build.source_exprs[sid] = "mk_bv " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
     build.source_leaf[sid]  = "BitVec.ofInt " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
     build.source_kind[sid]  = 1;
+    build.source_const_int[sid] = int_of_const(ctx, n, pin_const_value(pin));
     build.source_width[sid] = expected_w;
     return sid;
   }
@@ -1691,6 +1696,15 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
   auto efb = var.get("emit_fast_bridge");
   emit_fast_bridge = (efb == "true") ? true : false;
 
+  // `mode=verified_compiler` (B1+B2 branch): emit ONLY `<Top>_designCert`, and
+  // let the once-and-for-all-proved `Compiler.compileDesign` produce the model.
+  // No `<Top>_comb`/`_next`/`_step`, no per-node proof scripts.
+  verified_compiler = (var.get("mode") == "verified_compiler");
+  if (verified_compiler) {
+    emit_cert        = true;   // the DesignCert IS the certificate
+    emit_fast_bridge = false;  // there is no fast model to bridge to
+  }
+
   top = std::string(var.get("top"));
   cert_wf = parse_cert_wf_mode(var.get("cert_wf"));
   cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
@@ -1733,6 +1747,10 @@ void Pass_lean::setup() {
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
   m1.add_label_optional("emit_fast_bridge", "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5). Non-memory only.", "false");
+  m1.add_label_optional("mode",
+                        "legacy|verified_compiler. verified_compiler emits ONLY <Top>_designCert; the model comes from "
+                        "the proved compiler Compiler.compileDesign instead of from this pass.",
+                        "legacy");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
@@ -1831,6 +1849,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // state field.  Mirrors pass.isabelle parse_memory_info + memory field naming.
   for (auto& mn : memory_nodes) {
     auto mi = parse_memory_info(ctx, mn);
+    if (verified_compiler && mi.sync) {
+      fatal(ctx,
+            "verified_compiler does not yet export synchronous-read memory state: the registered read-data value "
+            "must be represented as an explicit DesignCert flop/source and next-state update");
+    }
     std::string mem_raw;
     for (const auto& e : mn.out_edges()) {
       auto wn = livehd::graph_util::wire_name(e.driver);
@@ -1867,6 +1890,12 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   }
 
   std::map<uint32_t, Node_pin> flop_din, flop_reset, flop_enable;
+  // Verified-compiler mode can MODEL these two, because `FlopDesc` carries
+  // `resetValue` and `resetActiveLow` and `flopNext`/`srcFlopNext` both read
+  // them.  The legacy path hardcodes reset value 0 and active-high, so for it
+  // they remain a hard error rather than a silent mis-model.
+  std::map<uint32_t, std::string> flop_initial;   // nid -> Lean Int (reset value)
+  std::map<uint32_t, Node_pin>    flop_negreset;  // nid -> active-LOW reset pin
   for (auto& fn : flop_nodes) {
     for (const auto& e : inp_edges_ordered(fn)) {
       auto pname = sink_pin_name(e);
@@ -1874,6 +1903,18 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         flop_din[node_id(fn)] = e.driver;
       } else if (pname == "reset_pin") {
         flop_reset[node_id(fn)] = e.driver;
+      } else if (pname == "initial" && verified_compiler) {
+        if (!pin_is_const(e.driver)) {
+          fatal(ctx, "flop n_" + std::to_string(node_id(fn))
+                         + " has a non-constant `initial` pin; a reset VALUE must be a constant.");
+        }
+        flop_initial[node_id(fn)] = int_of_const(ctx, pin_node(e.driver), pin_const_value(e.driver));
+      } else if (pname == "negreset" && verified_compiler) {
+        if (flop_reset.count(node_id(fn))) {
+          fatal(ctx, "flop n_" + std::to_string(node_id(fn))
+                         + " drives both `reset_pin` and `negreset`; one reset polarity per flop.");
+        }
+        flop_negreset[node_id(fn)] = e.driver;
       } else if (pname == "enable") {
         flop_enable[node_id(fn)] = e.driver;
       } else if (pname == "clock_pin") {
@@ -2016,12 +2057,181 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (auto it = flop_reset.find(fid); it != flop_reset.end()) {
         flop_reset_cert_ids[fid] = cert_dep_id(ctx, cert_build, it->second, 1);
       }
+      if (auto it = flop_negreset.find(fid); it != flop_negreset.end()) {
+        flop_reset_cert_ids[fid] = cert_dep_id(ctx, cert_build, it->second, 1);
+      }
       if (auto it = flop_enable.find(fid); it != flop_enable.end()) {
         flop_enable_cert_ids[fid] = cert_dep_id(ctx, cert_build, it->second, 1);
       }
     }
 
     source_ids.assign(cert_build.source_ids.begin(), cert_build.source_ids.end());
+  }
+
+  // ---------------------------------------------------------------------------
+  // mode=verified_compiler: emit ONLY `<Top>_designCert` and stop.
+  //
+  // Everything above is REUSED, not reimplemented -- the same topo walk, the same
+  // `cert_node_expr` operator spellings, the same memory decomposition.  All this
+  // adds is the remap onto the dense slot space and the formatting; the model and
+  // its correctness proof come from `Compiler.compileDesign`, proved once for all
+  // designs.  See pass/lean/design_cert_export.hpp.
+  // ---------------------------------------------------------------------------
+  if (verified_compiler) {
+    lean_design_cert::DesignIn din;
+
+    // Ordinals must match the runtime arrays: `RuntimeInput[k]`, `.flops[k]`,
+    // `.mems[k]`.  Both maps below are std::map, so the order is deterministic.
+    std::map<uint32_t, uint32_t> input_ordinal;   // source id -> input index
+    {
+      uint32_t k = 0;
+      for (const auto& kv : ctx.input_field) {
+        if (auto it = ctx.input_source_id.find(kv.first); it != ctx.input_source_id.end()) {
+          input_ordinal[it->second] = k++;
+        }
+      }
+    }
+    std::map<uint32_t, uint32_t> flop_ordinal;    // flop nid (== its Q source id) -> index
+    std::vector<uint32_t>        flop_order;
+    {
+      uint32_t k = 0;
+      for (const auto& kv : ctx.flop_field) {
+        flop_ordinal[kv.first] = k++;
+        flop_order.push_back(kv.first);
+      }
+    }
+    std::map<uint32_t, uint32_t> mem_ordinal;     // array_src id -> index
+    std::vector<uint32_t>        mem_order;
+    {
+      uint32_t k = 0;
+      for (const auto& kv : mem_cert_ids) {
+        mem_ordinal[kv.second.array_src] = k++;
+        mem_order.push_back(kv.first);
+      }
+    }
+
+    for (auto sid : source_ids) {
+      lean_design_cert::SourceIn s;
+      s.id    = sid;
+      auto width_it = cert_build.source_width.find(sid);
+      if (width_it == cert_build.source_width.end()) {
+        fatal(ctx, "internal: certificate source id " + std::to_string(sid) + " has no width");
+      }
+      s.width = width_it->second;
+      auto kind_it = cert_build.source_kind.find(sid);
+      const int kind = kind_it == cert_build.source_kind.end() ? -1 : kind_it->second;
+      switch (kind) {
+        case 0:
+          s.kind    = lean_design_cert::SourceKind::Input;
+          if (auto it = input_ordinal.find(sid); it != input_ordinal.end()) {
+            s.ordinal = it->second;
+          } else {
+            fatal(ctx, "internal: input source id " + std::to_string(sid) + " has no input ordinal");
+          }
+          break;
+        case 1:
+          s.kind      = lean_design_cert::SourceKind::Const;
+          if (auto it = cert_build.source_const_int.find(sid); it != cert_build.source_const_int.end()) {
+            s.const_int = it->second;
+          } else {
+            fatal(ctx, "internal: constant source id " + std::to_string(sid) + " has no value");
+          }
+          break;
+        case 2:
+          s.kind    = lean_design_cert::SourceKind::Flop;
+          if (auto it = flop_ordinal.find(sid); it != flop_ordinal.end()) {
+            s.ordinal = it->second;
+          } else {
+            fatal(ctx, "internal: flop source id " + std::to_string(sid) + " has no flop ordinal");
+          }
+          break;
+        case 3: {
+          s.kind    = lean_design_cert::SourceKind::MemImage;
+          if (auto it = mem_ordinal.find(sid); it != mem_ordinal.end()) {
+            s.ordinal = it->second;
+          } else {
+            fatal(ctx, "internal: memory source id " + std::to_string(sid) + " has no memory ordinal");
+          }
+          // address width of the owning memory
+          bool found_owner = false;
+          for (const auto& kv : mem_cert_ids) {
+            if (kv.second.array_src == sid) {
+              s.addr_w = ctx.memory_info.at(kv.first).addr_width;
+              found_owner = true;
+              break;
+            }
+          }
+          if (!found_owner) {
+            fatal(ctx, "internal: memory source id " + std::to_string(sid) + " has no owning memory");
+          }
+          break;
+        }
+        default:
+          fatal(ctx, "internal: certificate source id " + std::to_string(sid) + " has no kind");
+      }
+      din.sources.push_back(s);
+    }
+
+    for (size_t i = 0; i < cert_infos.size(); ++i) {
+      const auto& ci = cert_infos[i];
+      din.nodes.push_back({ci.nid, ci.op_expr, ci.width, ci.deps});
+    }
+
+    for (const auto& kv : ctx.output_field) {
+      auto it = output_cert_ids.find(kv.first);
+      if (it == output_cert_ids.end()) {
+        continue;  // undriven output: no slot to name
+      }
+      din.outputs.push_back({it->second, ctx.output_width.at(kv.first)});
+    }
+
+    for (auto fid : flop_order) {
+      lean_design_cert::FlopIn f;
+      f.width = ctx.flop_width.at(fid);
+      if (auto it = flop_din_cert_ids.find(fid); it != flop_din_cert_ids.end()) {
+        f.din = it->second;
+      } else {
+        fatal(ctx, "flop n_" + std::to_string(fid) + " has no `din` driver.");
+      }
+      if (auto it = flop_enable_cert_ids.find(fid); it != flop_enable_cert_ids.end()) {
+        f.enable = it->second;
+      }
+      if (auto it = flop_reset_cert_ids.find(fid); it != flop_reset_cert_ids.end()) {
+        f.reset_pin = it->second;
+      }
+      if (auto it = flop_initial.find(fid); it != flop_initial.end()) {
+        f.reset_value = it->second;
+      }
+      f.reset_active_low = flop_negreset.count(fid) != 0;
+      din.flops.push_back(f);
+    }
+
+    for (auto mnid : mem_order) {
+      const auto& mi = ctx.memory_info.at(mnid);
+      din.memories.push_back({mi.addr_width, mi.bits, mem_cert_ids.at(mnid).next_chain});
+    }
+
+    const std::string vc_tmp = lean_path + ".tmp";
+    std::ofstream     vofs(vc_tmp);
+    if (!vofs) {
+      livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not write {}", vc_tmp).emit();
+      return;
+    }
+    lean_design_cert::RemapError err;
+    if (!lean_design_cert::emit_design_cert(base_name, din, vofs, err)) {
+      vofs.close();
+      std::remove(vc_tmp.c_str());
+      fatal(ctx, "verified_compiler export: " + err.message);
+    }
+    vofs.close();
+    if (std::rename(vc_tmp.c_str(), lean_path.c_str()) != 0) {
+      livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", vc_tmp).emit();
+      return;
+    }
+    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (verified_compiler: " << din.sources.size()
+              << " sources, " << din.nodes.size() << " nodes, " << din.flops.size() << " flops, "
+              << din.memories.size() << " memories)\n";
+    return;
   }
 
 

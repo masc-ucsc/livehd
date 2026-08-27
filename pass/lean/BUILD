@@ -9,6 +9,7 @@ cc_library(
         "pass_lean.cpp",
     ],
     hdrs = [
+        "design_cert_export.hpp",
         "pass_lean.hpp",
     ],
     copts = COPTS,
