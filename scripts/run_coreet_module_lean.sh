@@ -185,6 +185,49 @@ generated="$LEAN_DIR/${TOP}_Lgraph.lean"
 #    and replace hours of discovery.  pass/lean/README.md "Static gates first".
 # ---------------------------------------------------------------------------
 gate_status=0
+if [[ "$LEAN_MODE" == "verified_compiler" ]]; then
+  # Different output, different gates.  op_census.py and const_parity.py read the
+  # LEGACY shape (`nodes_of_list` / `BT.nd` trees, per-node fast bodies); a
+  # verified_compiler file has none of that, so they report 0 nodes and fail.
+  #
+  # What IS worth gating here is cheap and specific:
+  {
+    echo "== shape =="
+    n_src="$(grep -c 'SourceDesc\.' "$generated" || true)"
+    n_nod="$(grep -c 'origin :=' "$generated" || true)"
+    echo "sources=$n_src nodes=$n_nod"
+    [[ "$n_nod" -gt 0 ]] || { echo "FAIL: no nodes emitted"; gate_status=1; }
+
+    echo "== required declarations =="
+    for d in _designCert _step _compiles _step_correct; do
+      grep -q "${TOP}${d}" "$generated" || { echo "FAIL: missing ${TOP}${d}"; gate_status=1; }
+    done
+
+    echo "== recursion/heartbeat options =="
+    # Without these the thousands-element literal exhausts maxRecDepth while
+    # ELABORATING, `<Top>_designCert` becomes noncomputable, and every later
+    # declaration fails in a way that reads like a proof failure.
+    grep -q 'set_option maxRecDepth' "$generated" || { echo "FAIL: no maxRecDepth"; gate_status=1; }
+    grep -q 'set_option maxHeartbeats' "$generated" || { echo "FAIL: no maxHeartbeats"; gate_status=1; }
+
+    echo "== no ResidualProgram in a theorem statement =="
+    # THE expensive mistake, catchable in milliseconds.  A theorem naming a
+    # ResidualProgram makes the kernel reduce `compileDesign`, and Array.push is
+    # `<toList ++ [a]>`, so N bindings cost O(N^2) kernel terms.  Measured on
+    # SingleCycleCPU: OOM at 27 min / 27 GB under a 40 GB cap, 120 GB uncapped.
+    if grep -nE '^theorem .*_residual' "$generated"; then
+      echo "FAIL: a theorem statement names a ResidualProgram (kernel-defeq blowup)"
+      gate_status=1
+    fi
+
+    echo "== sorry / TODO =="
+    n_sorry="$(grep -cw sorry "$generated" || true)"
+    echo "sorry=$n_sorry"
+    [[ "$n_sorry" == "0" ]] || gate_status=1
+
+    echo "gate_status=$gate_status"
+  } > "$LOG_DIR/static_gates.log" 2>&1
+else
 {
   echo "== op census =="
   python3 "$LIVEHD_ROOT/pass/lean/scripts/op_census.py" "$generated" || gate_status=1
@@ -202,8 +245,9 @@ gate_status=0
   fi
   echo "gate_status=$gate_status"
 } > "$LOG_DIR/static_gates.log" 2>&1
+fi
 echo "static gates: gate_status=$gate_status ($LOG_DIR/static_gates.log)"
-grep -E '^(PASS|FAIL|cert nodes|state fields|node output widths)' "$LOG_DIR/static_gates.log" | head -8
+grep -E '^(PASS|FAIL|cert nodes|state fields|node output widths|sources=|sorry=)' "$LOG_DIR/static_gates.log" | head -8
 [[ "$gate_status" -eq 0 ]] || { echo "FATAL: static gates failed; not starting a typecheck" >&2; exit 3; }
 [[ "$STOP_AFTER" == "lean" ]] && exit 0
 

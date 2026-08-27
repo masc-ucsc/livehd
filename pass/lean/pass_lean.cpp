@@ -607,6 +607,46 @@ std::string input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin) {
   return {};
 }
 
+// Follow width-only reshaping back to the pin that really drives a signal.
+//
+// After yosys + cprop a top-level port does not reach its consumers directly: it
+// arrives through resize nodes -- an arity-1 Or, or a Get_mask against an
+// all-ones constant mask (get_mask(a,-1) == zext(a), per the LiveHD spec).  Both
+// preserve the value, so for the purpose of asking "is this signal a primary
+// input?" they are transparent.  Testing the immediate driver instead reports
+// "computed inside the design" for what is plainly a port.
+//
+// Only single-input reshaping is followed; anything else stops the walk, and a
+// bounded loop count guards against a malformed graph.
+Node_pin resolve_resize_chain(const Node_pin& start) {
+  Node_pin cur = start;
+  for (int guard = 0; guard < 32; ++guard) {
+    if (cur.is_invalid() || pin_is_input(cur) || pin_is_const(cur)) {
+      return cur;
+    }
+    auto n  = pin_node(cur);
+    auto op = node_op(n);
+    auto es = inp_edges_ordered(n);
+    if (op == Ntype_op::Or && es.size() == 1) {
+      cur = es[0].driver;  // arity-1 Or is the emitter's resize
+      continue;
+    }
+    if (op == Ntype_op::Get_mask && es.size() == 2) {
+      // Transparent only when the mask is a constant all-ones: get_mask(a,-1) is zext(a).
+      const auto& mask = es[1].driver;
+      if (pin_is_const(mask)) {
+        auto v = pin_const_value(mask);
+        if (v.is_just_i64() && v.to_just_i64() == -1) {
+          cur = es[0].driver;
+          continue;
+        }
+      }
+    }
+    return cur;
+  }
+  return cur;
+}
+
 std::string driver_expr_at(const LeanCtx& ctx, const Node_pin& dpin, uint32_t expected_w);
 
 std::string ucast_expr(const std::string& expr, uint32_t w) {
@@ -1894,6 +1934,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // `resetValue` and `resetActiveLow` and `flopNext`/`srcFlopNext` both read
   // them.  The legacy path hardcodes reset value 0 and active-high, so for it
   // they remain a hard error rather than a silent mis-model.
+  std::set<uint32_t>              flop_async;      // nids with an ASYNCHRONOUS reset
+  std::set<uint32_t>              flop_active_low;  // nids whose reset is ACTIVE LOW (`negreset` = 1)
   std::map<uint32_t, std::string> flop_initial;   // nid -> Lean Int (reset value)
   std::map<uint32_t, Node_pin>    flop_negreset;  // nid -> active-LOW reset pin
   for (auto& fn : flop_nodes) {
@@ -1903,18 +1945,69 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         flop_din[node_id(fn)] = e.driver;
       } else if (pname == "reset_pin") {
         flop_reset[node_id(fn)] = e.driver;
-      } else if (pname == "initial" && verified_compiler) {
-        if (!pin_is_const(e.driver)) {
-          fatal(ctx, "flop n_" + std::to_string(node_id(fn))
-                         + " has a non-constant `initial` pin; a reset VALUE must be a constant.");
+      } else if (pname == "async") {
+        // VALUE-AWARE, not presence-aware.  cgen_verilog does the same
+        // (cgen_verilog.cpp:2548): a driven `async` pin whose constant is FALSE
+        // means the reset is synchronous -- exactly what this model assumes -- so
+        // refusing on the pin merely being connected is a FALSE refusal.  It cost
+        // 15 CORE-ET modules.
+        if (const_pin_int_or(e.driver, 0) != 0) {
+          if (!verified_compiler) {
+            fatal(ctx, "flop n_" + std::to_string(node_id(fn))
+                           + " has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from "
+                             "the stored state, giving SYNCHRONOUS semantics; use "
+                             "formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies "
+                             "the reset to the combinational read as well.");
+          }
+          flop_async.insert(node_id(fn));
         }
-        flop_initial[node_id(fn)] = int_of_const(ctx, pin_node(e.driver), pin_const_value(e.driver));
-      } else if (pname == "negreset" && verified_compiler) {
-        if (flop_reset.count(node_id(fn))) {
+      } else if (pname == "posclk") {
+        // `posclk` = 1 (the default) IS posedge, which is what the model assumes.
+        if (const_pin_int_or(e.driver, 1) == 0) {
           fatal(ctx, "flop n_" + std::to_string(node_id(fn))
-                         + " drives both `reset_pin` and `negreset`; one reset polarity per flop.");
+                         + " is a NEGEDGE flop (`posclk` = 0). pass.single_edge is supposed to "
+                           "normalize negedge state away before this pass; it evidently did not run.");
         }
-        flop_negreset[node_id(fn)] = e.driver;
+      } else if (pname == "pipe_min" || pname == "pipe_max") {
+        // One Flop cell models a whole N-deep shift register (graph/cell.cpp).
+        // Depth 1 is what this model assumes; unset also means depth 1.
+        if (const_pin_int_or(e.driver, 1) != 1) {
+          fatal(ctx, "flop n_" + std::to_string(node_id(fn)) + " has pipeline depth `" + std::string(pname)
+                         + "` = " + std::to_string(const_pin_int_or(e.driver, 1))
+                         + ". One Flop cell then models an N-deep shift register, which needs N state "
+                           "elements per flop; this model has one.");
+        }
+      } else if (pname == "initial") {
+        if (verified_compiler) {
+          if (!pin_is_const(e.driver)) {
+            fatal(ctx, "flop n_" + std::to_string(node_id(fn))
+                           + " has a non-constant `initial` pin; a reset VALUE must be a constant.");
+          }
+          flop_initial[node_id(fn)] = int_of_const(ctx, pin_node(e.driver), pin_const_value(e.driver));
+        } else if (const_pin_int_or(e.driver, 0) != 0) {
+          // The legacy path hardcodes reset value 0 at both flop_next call sites.
+          fatal(ctx, "flop n_" + std::to_string(node_id(fn)) + " has a NONZERO reset value (`initial` = "
+                         + std::to_string(const_pin_int_or(e.driver, 0))
+                         + "). The legacy model hardcodes 0; use formal.lean.mode=verified_compiler, "
+                           "which carries `resetValue` in FlopDesc.");
+        }
+      } else if (pname == "negreset") {
+        // `negreset` is a comptime POLARITY FLAG, not the reset net -- cgen_verilog
+        // reads it with `hydrate_const` (cgen_verilog.cpp:2544).  The reset NET is
+        // always `reset_pin`.  An earlier version of this code stored the flag's
+        // driver as if it were the reset signal, which wired FlopDesc.resetPin to
+        // the wrong net entirely.
+        if (const_pin_int_or(e.driver, 0) == 0) {
+          continue;  // constant-false: not active-low, nothing to record
+        }
+        if (!verified_compiler) {
+          fatal(ctx, "flop n_" + std::to_string(node_id(fn))
+                         + " has an ACTIVE-LOW reset (`negreset` = 1). The legacy model treats every "
+                           "reset as active-high, inverting the polarity; use "
+                           "formal.lean.mode=verified_compiler, which carries `resetActiveLow` in "
+                           "FlopDesc.");
+        }
+        flop_active_low.insert(node_id(fn));
       } else if (pname == "enable") {
         flop_enable[node_id(fn)] = e.driver;
       } else if (pname == "clock_pin") {
@@ -2137,14 +2230,56 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
             fatal(ctx, "internal: constant source id " + std::to_string(sid) + " has no value");
           }
           break;
-        case 2:
+        case 2: {
           s.kind    = lean_design_cert::SourceKind::Flop;
           if (auto it = flop_ordinal.find(sid); it != flop_ordinal.end()) {
             s.ordinal = it->second;
           } else {
             fatal(ctx, "internal: flop source id " + std::to_string(sid) + " has no flop ordinal");
           }
+          // `sid` IS the flop's nid (see cert_dep_id's flop arm).  An ASYNCHRONOUS
+          // reset changes Q immediately, so a combinational reader in the same
+          // cycle must already see the reset value -- a plain `flopQ`, which reads
+          // only the stored state, would give SYNCHRONOUS semantics.
+          if (flop_async.count(sid) != 0) {
+            // `sourceValue` runs before any slot exists, so it can only read
+            // `RuntimeInput`; the async reset must therefore be a primary input.
+            // That is the hardware pattern (`negedge rst_ni` off a top-level
+            // port).  Anything else is refused, never modeled as synchronous.
+            Node_pin rp;
+            if (auto it2 = flop_reset.find(sid); it2 != flop_reset.end()) {
+              rp = it2->second;
+            } else {
+              fatal(ctx, "flop n_" + std::to_string(sid)
+                             + " is marked `async` but drives no `reset_pin` net.");
+            }
+            // Follow width-only reshaping.  After cprop a top-level `rst_ni` reaches
+            // the flop through resize nodes (arity-1 Op_Or / all-ones Op_GetMask),
+            // so testing the immediate driver for graph-input-ness reports "computed
+            // inside the design" for what is plainly a port.
+            Node_pin src = resolve_resize_chain(rp);
+            if (!pin_is_input(src)) {
+              fatal(ctx, "flop n_" + std::to_string(sid)
+                             + " has an ASYNCHRONOUS reset that is not driven by a primary input. "
+                               "`SourceDesc.flopQAsync` reads the reset out of RuntimeInput, so it cannot "
+                               "express a reset computed inside the design.");
+            }
+            const auto rname = input_name_for_pin(ctx, src);
+            auto       rsid  = ctx.input_source_id.find(rname);
+            if (rsid == ctx.input_source_id.end() || input_ordinal.count(rsid->second) == 0) {
+              fatal(ctx, "flop n_" + std::to_string(sid) + " async reset input `" + std::string(rname)
+                             + "` has no input ordinal.");
+            }
+            const bool active_low = flop_active_low.count(sid) != 0;
+            s.async_reset      = true;
+            s.reset_input      = input_ordinal.at(rsid->second);
+            s.reset_active_low = active_low;
+            if (auto it3 = flop_initial.find(sid); it3 != flop_initial.end()) {
+              s.reset_value = it3->second;
+            }
+          }
           break;
+        }
         case 3: {
           s.kind    = lean_design_cert::SourceKind::MemImage;
           if (auto it = mem_ordinal.find(sid); it != mem_ordinal.end()) {

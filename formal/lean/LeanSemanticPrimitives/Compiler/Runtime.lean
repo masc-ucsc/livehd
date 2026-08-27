@@ -46,6 +46,10 @@ def sourceValue (i : RuntimeInput) (s : RuntimeState) : SourceDesc → CertVal
   | .input  idx w    => .bv (bv_resize w (i[idx]?.getD (mk_bv w 0)))
   | .const  w v      => .bv (mk_bv w v)
   | .flopQ  idx w    => .bv (bv_resize w (s.flops[idx]?.getD (mk_bv w 0)))
+  | .flopQAsync idx w ri rv al =>
+      let r : BV := i[ri]?.getD (mk_bv 1 0)
+      let asserted : Bool := if al then !(bv_nonzero r) else bv_nonzero r
+      .bv (if asserted then mk_bv w rv else bv_resize w (s.flops[idx]?.getD (mk_bv w 0)))
   | .memImg idx _ _  => .mem (s.mems[idx]?.getD (fun _ => mk_bv 0 0))
 
 /-- The initial slot environment: every source slot, in order. -/

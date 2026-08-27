@@ -175,7 +175,16 @@ generated="$LEAN_DIR/${TOP}_Lgraph.lean"
 # replace hours of discovery.  See pass/lean/README.md "Static gates first".
 # ---------------------------------------------------------------------------
 gate_status=0
-if [[ -r "$generated" ]]; then
+if [[ -r "$generated" && "$LEAN_MODE" == "verified_compiler" ]]; then
+  # Different output shape, different gates: op_census.py / const_parity.py read
+  # the LEGACY per-node fast bodies, which this mode does not emit.
+  {
+    echo "== verified_compiler gates =="
+    python3 "$LIVEHD_ROOT/pass/lean/scripts/vc_gates.py" "$generated" "$TOP" || gate_status=1
+    echo "gate_status=$gate_status"
+  } > "$LOG_DIR/static_gates.log" 2>&1
+  echo "Static gates: $LOG_DIR/static_gates.log (gate_status=$gate_status)"
+elif [[ -r "$generated" ]]; then
   {
     echo "== op census =="
     python3 "$LIVEHD_ROOT/pass/lean/scripts/op_census.py" "$generated" || gate_status=1

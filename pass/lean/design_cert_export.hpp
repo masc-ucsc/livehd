@@ -43,6 +43,14 @@ struct SourceIn {
   uint32_t    addr_w   = 0;  // MemImage only
   std::string const_int;     // Const only: a Lean `Int` expression
   uint32_t    ordinal  = 0;  // index into RuntimeInput / .flops / .mems
+  // Flop only, and only for an ASYNCHRONOUS reset: a plain `flopQ` reads the
+  // stored state and therefore gives SYNCHRONOUS semantics, so a combinational
+  // reader in the same cycle would not see the reset value.  These carry the
+  // reset so `sourceValue` can apply it.
+  bool        async_reset      = false;
+  uint32_t    reset_input      = 0;    // ORDINAL of the driving primary input
+  std::string reset_value      = "0";  // Lean `Int`
+  bool        reset_active_low = false;
 };
 
 struct NodeIn {
@@ -174,7 +182,13 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
         src_lines.push_back("SourceDesc.const " + std::to_string(s.width) + " (" + s.const_int + ")");
         break;
       case SourceKind::Flop:
-        src_lines.push_back("SourceDesc.flopQ " + std::to_string(s.ordinal) + " " + std::to_string(s.width));
+        if (s.async_reset) {
+          src_lines.push_back("SourceDesc.flopQAsync " + std::to_string(s.ordinal) + " "
+                              + std::to_string(s.width) + " " + std::to_string(s.reset_input) + " ("
+                              + s.reset_value + ") " + (s.reset_active_low ? "true" : "false"));
+        } else {
+          src_lines.push_back("SourceDesc.flopQ " + std::to_string(s.ordinal) + " " + std::to_string(s.width));
+        }
         break;
       case SourceKind::MemImage:
         src_lines.push_back("SourceDesc.memImg " + std::to_string(s.ordinal) + " " + std::to_string(s.addr_w) + " "

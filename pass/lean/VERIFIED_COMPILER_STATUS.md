@@ -28,6 +28,13 @@ runtime ordinal zero.  Synchronous-read memories are now rejected in verified
 compiler mode until their registered read-data sources and next-state updates
 are represented explicitly in `DesignCert`.
 
+An independent Lean audit also checked `slot < D.numSlots` for every output,
+flop `din`/enable/reset reference, and memory `nextImg` in each generated DINO
+certificate. All three passed. The reusable check and concrete probes are under
+`generated/b1_b2_verified_compiler_review/slot_checks/`. This establishes the
+property for these artifacts; it does not remove the need for `compileDesign`
+to reject bad shell references generically.
+
 ## The theorem
 
 ```lean
@@ -301,6 +308,70 @@ the dense slot space and the formatting.
 in this mode instead of a `fatal()`, because the Lean side can now model them.
 The legacy path still refuses them, since it hardcodes reset value 0 and
 active-high polarity.
+
+## Flop pins: what LiveHD supports, this now supports
+
+The guard added by `b3268de66` refused six Flop pins. Asking why — LiveHD's own
+`cgen_verilog`/`cgen_sim` handle all of them — found three defects in it.
+
+| pin | before | now |
+|---|---|---|
+| `negreset` | the FLAG's driver was stored as if it were the reset NET, wiring `FlopDesc.resetPin` to the wrong signal | comptime polarity flag; the net comes from `reset_pin` |
+| `async` = 1 | refused | **modeled** — `SourceDesc.flopQAsync` |
+| `async` = 0 | refused (presence-aware) | accepted — it *means* synchronous |
+| `posclk` = 1 | refused | accepted — it *means* posedge |
+| `pipe_min/max` = 1 | refused | accepted — it *means* depth 1 |
+| `initial` | unread (reset value silently 0) | carried in `FlopDesc.resetValue` |
+
+`negreset` was the worst of the three: `cgen_verilog.cpp:2544` reads it with
+`hydrate_const`, so it is a *polarity flag*, and the reset net is always
+`reset_pin`. Storing the flag's driver as the reset signal is a wrong-signal bug,
+not a coverage gap.
+
+The second defect was a category error: the guard tested pin *presence* where
+`cgen_verilog` tests pin *value*. `async=0`, `posclk=1`, `pipe_min=1` all mean
+"exactly what this model assumes", and all were refused for being connected.
+
+### Modeling async reset
+
+An async reset changes Q **immediately**, so a combinational reader in the same
+cycle must already see the reset value — which is why a plain `flopQ`, reading
+only the stored state, can only give *synchronous* semantics. The next-state rule
+was already right (`flopNext` has reset priority); the gap was the combinational
+read.
+
+```lean
+| flopQAsync (idx width : Nat) (resetInput : Nat) (resetValue : Int) (activeLow : Bool)
+```
+
+The reset is named by **input ordinal**, because `sourceValue` runs before any
+slot exists. That is no real restriction — the pattern is
+`always_ff @(posedge clk_i or negedge rst_ni)` off a top-level port — and a reset
+computed inside the design is refused with that reason given.
+
+Finding the port needed `resolve_resize_chain`: after yosys + cprop a top-level
+`rst_ni` reaches the flop through resize nodes (arity-1 `Or`, or `Get_mask`
+against an all-ones mask, since `get_mask(a,-1) == zext(a)`). Testing the
+immediate driver reported "computed inside the design" for what is plainly a port.
+
+**No Lean proof changed** — `sourceValue` is opaque to `srcEnv_agree`, so a new
+`SourceDesc` constructor is free on the proof side.
+
+**Effect: 15 of 122 CORE-ET modules (12%) were blocked solely on `async`.** All 15
+are genuinely asynchronous, so the value-aware fix alone unblocked none of them —
+the model change was required. All 15 now emit and the ones typechecked so far are
+PROVEN (5.7 s–76.7 s).
+
+### What remains genuinely out of reach
+
+**Multi-clock.** A single `_next` function is one edge of one clock;
+`pass.single_edge` refuses such designs upstream of this pass. Supporting it needs
+clock-ratio unrolling or an event-driven model — a different model shape, not a
+missing pin. One CORE-ET module (`core_top`) is blocked this way.
+
+**`posclk` = 0 and pipe depth > 1** are implementable and nothing is currently
+blocked on them: negedge is `pass.single_edge`'s job, and depth > 1 would need N
+state elements per flop (`FlopDesc.depth` plus a per-flop state list).
 
 ## Not done
 

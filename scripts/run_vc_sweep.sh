@@ -11,16 +11,22 @@ set -uo pipefail
 #                run_lean_queue.sh.  Concurrency is not an option here: this box
 #                is a shared NFS server and each Lean is multi-GB.
 #
-# The verdict is bucketed against the MANUAL path's census
-# (generated/core-et/coreet_census.tsv), because "this module fails" is only a
-# finding if the manual path managed it:
+# The baseline is a SAME-BINARY legacy run, not the stored census.
 #
-#   proven            typecheck exit 0, no sorryAx
-#   blocked-upstream  the manual census also failed before pass.lean -- filelist,
-#                     compile or single_edge.  Not this branch's problem.
-#   blocked-here      the manual census reached pass.lean (or READY) but the
-#                     verified compiler did not.  THIS is what counts against the
-#                     branch.
+# generated/core-et/coreet_census.tsv is dated 2026-08-20; the flop-pin guard
+# landed 2026-08-25 (b3268de66) and refuses `async` / `posclk` / pipe-depth pins
+# in BOTH modes.  Comparing against the stored census therefore reports modules
+# as "blocked-here" when today's legacy binary refuses them identically -- which
+# is how `minion_dcache_miss_handler_unit` first looked like a regression and was
+# not one.  So PHASE=legacy re-emits every module with LEAN_MODE=legacy using the
+# same binary, and the report compares against that.
+#
+#   proven            verified emitted AND typechecked (exit 0, no sorryAx)
+#   blocked-upstream  NEITHER mode emitted -- a shared pass.lean or front-end
+#                     limitation.  Not this branch's problem.
+#   blocked-here      legacy emitted but verified did not, or verified emitted but
+#                     failed to typecheck.  THIS counts against the branch.
+#   verified-only     verified emitted where legacy did not.  Worth noting.
 #
 # Usage:
 #   scripts/run_vc_sweep.sh <module-list-file> [emit-jobs]
@@ -31,9 +37,10 @@ LIST="${1:?usage: run_vc_sweep.sh <module-list> [emit-jobs]}"
 JOBS="${2:-6}"
 PHASE="${PHASE:-all}"
 
-OUTDIR="$ROOT/generated/vc_sweep"
+OUTDIR="${VC_OUTDIR:-$ROOT/generated/vc_sweep}"
 LEANDIR="$OUTDIR/lean"
 EMIT_TSV="$OUTDIR/emit.tsv"
+LEGACY_TSV="$OUTDIR/legacy_emit.tsv"
 PROVE_TSV="$OUTDIR/prove.tsv"
 SWEEP_TSV="${SWEEP_TSV:-$ROOT/pass/lean/SWEEP_b1-b2.tsv}"
 CENSUS="${CENSUS:-$ROOT/generated/core-et/coreet_census.tsv}"
@@ -76,6 +83,32 @@ if [[ "$PHASE" == "all" || "$PHASE" == "emit" ]]; then
   echo "[vc-sweep] emit done: $(tail -n +2 "$EMIT_TSV" | grep -c EMITTED) emitted, $(tail -n +2 "$EMIT_TSV" | grep -c NO_EMIT) not"
 fi
 
+# ------------------------------------------------- phase 1b: same-binary legacy
+legacy_one() {
+  local m="$1" log="$OUTDIR/$m.legacy.log"
+  LEAN_MODE=legacy LEAN_EMIT_FAST_BRIDGE=false RUN_LEAN=false RUN_LEC_GATE=false \
+    STOP_AFTER=lean COREET_TOP="$m" OUT="$OUTDIR/legacy/$m" \
+    "$ROOT/scripts/run_coreet_module_lean.sh" > "$log" 2>&1
+  local f
+  f="$(find "$OUTDIR/legacy/$m" -name "${m}_Lgraph.lean" 2>/dev/null | head -1)"
+  if [[ -n "$f" && -s "$f" ]]; then
+    printf '%s\tEMITTED\n' "$m"
+  else
+    local why
+    why="$(grep -oP '"message":"\K[^"]*' "$OUTDIR/legacy/$m/logs/lhd_lean_result.json" 2>/dev/null \
+            | head -1 | cut -c1-110)"
+    printf '%s\tNO_EMIT\t%s\n' "$m" "${why:-}"
+  fi
+}
+export -f legacy_one
+
+if [[ "$PHASE" == "all" || "$PHASE" == "legacy" ]]; then
+  printf 'module\temit\treason\n' > "$LEGACY_TSV"
+  grep -v '^\s*#' "$LIST" | grep -v '^\s*$' \
+    | xargs -P "$JOBS" -I{} bash -c 'legacy_one "$@"' _ {} >> "$LEGACY_TSV"
+  echo "[vc-sweep] legacy baseline: $(tail -n +2 "$LEGACY_TSV" | grep -c EMITTED) emitted"
+fi
+
 # --------------------------------------------------------------- phase 2: prove
 if [[ "$PHASE" == "all" || "$PHASE" == "prove" ]]; then
   mapfile -t files < <(tail -n +2 "$EMIT_TSV" | awk -F'\t' '$2=="EMITTED"{print $1}' \
@@ -89,25 +122,29 @@ fi
 
 # -------------------------------------------------------------- phase 3: report
 if [[ "$PHASE" == "all" || "$PHASE" == "report" ]]; then
-  printf 'module\tverdict\tbucket\tsources\tnodes\tflops\tmemories\twall_s\tpeak_rss_kb\tmanual_census\tdetail\n' > "$SWEEP_TSV"
+  printf 'module\tverdict\tbucket\tsources\tnodes\tflops\tmemories\twall_s\tpeak_rss_kb\tlegacy_emit\tdetail\n' > "$SWEEP_TSV"
   tail -n +2 "$EMIT_TSV" | while IFS=$'\t' read -r m emit src nodes flops mems; do
-    manual="$(awk -F'\t' -v M="$m" '$1==M{print $2"/"$3}' "$CENSUS" 2>/dev/null | head -1)"
-    [[ -z "$manual" ]] && manual="not-in-census"
+    legacy="$(awk -F'\t' -v M="$m" '$1==M{print $2}' "$LEGACY_TSV" 2>/dev/null | head -1)"
+    reason="$(awk -F'\t' -v M="$m" '$1==M{print $3}' "$LEGACY_TSV" 2>/dev/null | head -1)"
+    [[ -z "$legacy" ]] && legacy="not-run"
     prove="$(awk -F'\t' -v M="${m}_Lgraph" '$1==M{print $7"\t"$8"\t"$9"\t"$5"\t"$6}' "$PROVE_TSV" 2>/dev/null | head -1)"
     exitc="$(cut -f1 <<<"$prove")"; ax="$(cut -f2 <<<"$prove")"
     verd="$(cut -f3 <<<"$prove")"; wall="$(cut -f4 <<<"$prove")"; rss="$(cut -f5 <<<"$prove")"
 
-    if [[ "$emit" == "EMITTED" && "$exitc" == "0" && "$ax" != *sorryAx* ]]; then
-      bucket=proven; verdict=PROVEN
-    elif [[ "$emit" != "EMITTED" ]] && [[ "$manual" == filelist/* || "$manual" == compile/* || "$manual" == single_edge/* || "$manual" == */FAIL ]]; then
+    if   [[ "$emit" == "EMITTED" && "$exitc" == "0" && "$ax" != *sorryAx* ]]; then
+      bucket=proven;           verdict=PROVEN
+    elif [[ "$emit" == "EMITTED" && "$legacy" != "EMITTED" ]]; then
+      # emitted here but not by legacy: still needs a typecheck verdict to be proven
+      bucket=verified-only;    verdict="${verd:-NO_PROVE}"
+    elif [[ "$emit" != "EMITTED" && "$legacy" != "EMITTED" ]]; then
       bucket=blocked-upstream; verdict="$emit"
     elif [[ "$emit" != "EMITTED" ]]; then
-      bucket=blocked-here; verdict="$emit"
+      bucket=blocked-here;     verdict="$emit"
     else
-      bucket=blocked-here; verdict="${verd:-NO_PROVE}"
+      bucket=blocked-here;     verdict="${verd:-NO_PROVE}"
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$m" "$verdict" "$bucket" "$src" "$nodes" "$flops" "$mems" "$wall" "$rss" "$manual" "${ax:-}"
+      "$m" "$verdict" "$bucket" "$src" "$nodes" "$flops" "$mems" "$wall" "$rss" "$legacy" "${ax:-$reason}"
   done >> "$SWEEP_TSV"
 
   echo "[vc-sweep] $SWEEP_TSV"

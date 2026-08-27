@@ -37,6 +37,26 @@ inductive SourceDesc where
   | const  (width : Nat) (value : Int)
   /-- current (pre-edge) value of flop `idx` -/
   | flopQ  (idx : Nat) (width : Nat)
+  /-- current value of flop `idx`, which has an ASYNCHRONOUS reset.
+
+  An async reset changes Q immediately rather than at the clock edge, so a
+  combinational reader in the SAME cycle must already see the reset value —
+  which is why a plain `flopQ` (reading only the stored state) gives synchronous
+  semantics and cannot express it.
+
+  `resetInput` is the ORDINAL of the primary input driving the reset, not a slot:
+  `sourceValue` runs before any slot exists.  That is not a real restriction —
+  the hardware pattern is `always_ff @(posedge clk or negedge rst_ni)` with
+  `rst_ni` a top-level port — and the exporter refuses loudly when the async
+  reset is driven by anything else.
+
+  Note `FlopDesc.resetPin` (a slot) and `resetInput` (an ordinal) name the same
+  signal by two routes, because `flopNext` has a slot environment and
+  `sourceValue` does not.  Keeping them consistent is the exporter's job, and so
+  falls under the LGraph → DesignCert trust boundary like any other
+  transcription. -/
+  | flopQAsync (idx : Nat) (width : Nat) (resetInput : Nat) (resetValue : Int)
+               (activeLow : Bool)
   /-- current (pre-edge) image of memory `idx` -/
   | memImg (idx : Nat) (aw dw : Nat)
 deriving Repr, Inhabited, DecidableEq
