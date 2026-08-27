@@ -82,6 +82,30 @@ for entry in "${DESIGNS[@]}"; do
   echo "PASS: $FIX cones -> partition -> LEC-equivalent"
 done
 
+# Phase 2, the forward merge across Q. Both modes must reach pass.partition and
+# stay LEC-equivalent; `forward` is inert by default, so the runs above already
+# covered the off case.
+for MODE in pair all; do
+  D="$W/fwd_$MODE"
+  mkdir -p "$D"
+  run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile lg:"$D/lg" --top hier_seq.top --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+  run pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate=40 \
+      --set color.forward="$MODE" lg:"$D/lg" --workdir "$D/w3"
+  LC_ALL=C grep -raq -- "\"forward\":\"$MODE\"" "$D/lg" || fail "forward=$MODE not recorded in coloring_info"
+  run pass partition --top hier_seq.top lg:"$D/lg" --emit-dir lg:"$D/part" --workdir "$D/w4"
+  run compile lg:"$D/part" --top hier_seq.top --recipe O0 --emit verilog:"$D/post.v" --workdir "$D/w5"
+  run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top hier_seq.top --workdir "$D/c"
+  echo "PASS: cones forward=$MODE -> partition -> LEC-equivalent"
+done
+
+# A typo must be refused, not silently treated as off.
+if "$LHD" pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.forward=maybe \
+     lg:"$W/hier_seq/lg" --workdir "$W/negf" -q --result-json "$W/negf.json" 2>/dev/null; then
+  fail "an unknown forward mode was accepted"
+fi
+echo "PASS: unknown forward mode is refused"
+
 # max_gate=0 is RAW cones: no merge at all, so it must produce at least as many
 # colors as a capped run. This is the contract Color_opts documents (0 = inert),
 # and the one a user reaches for when debugging a partition.

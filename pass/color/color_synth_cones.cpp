@@ -72,6 +72,24 @@ constexpr uint8_t kArithCut     = 16;   // Mult/Div, Sum wider than 8: its own c
 constexpr uint8_t kConstMaskGet = 32;   // Get_mask with a CONSTANT mask
 constexpr uint8_t kRuntimeSra   = 64;   // SRA with a runtime amount (barrel)
 
+// The register / memory sink pids this file decodes, spelled ONCE. Not asked of
+// Ntype::get_sink_pid: that lookup's fast path derives the pid from the leading
+// char for 'a'..'f' and then ASSERTS the name round-trips, so
+// `get_sink_pid(Fflop, "enable")` -- a pin an Fflop does not have -- trips a
+// debug assert instead of returning invalid (the same reason
+// graph/predict_abc_size.hpp's `ctrl_pids` spells them out). Keep the two in
+// lockstep with graph/cell.cpp.
+constexpr uint32_t kPidDin    = 3;  // Flop/Latch/Fflop din, and a Memory port's din
+constexpr uint32_t kPidEnable = 4;  // Flop/Latch enable, and a Memory port's enable (Fflop has none)
+constexpr uint32_t kPidAddr   = 0;  // a Memory port's addr
+// Memory whole-array write: `update` / `update_enable`, offsets inside one
+// Memory_port_stride block rather than a per-port pin.
+constexpr uint32_t kPidUpdate    = 12;
+constexpr uint32_t kPidUpdateEn  = 13;
+
+[[nodiscard]] constexpr bool is_mem_port_off(uint32_t off) { return off == kPidAddr || off == kPidDin || off == kPidEnable; }
+[[nodiscard]] constexpr bool is_mem_whole_array_off(uint32_t off) { return off == kPidUpdate || off == kPidUpdateEn; }
+
 // Phase-2 forward merge (todo/livehd/2c-color-synthcones.html, forward option).
 // `pair` ranks one (register color, ONE consumer color) candidate at a time;
 // `all` ranks the register against the WHOLE qualifying Q fanout at once and
@@ -83,7 +101,7 @@ struct Cone_stats {
   uint64_t roots = 0, r_din = 0, r_en = 0, r_mem = 0, r_sub = 0, r_cut = 0, r_out = 0, r_sweep = 0;
   uint64_t truncated = 0;  // roots whose walk hit the max_gate budget
   uint64_t merges = 0, refused = 0;
-  uint64_t colors = 0, max_pred = 0, over_max = 0;
+  uint64_t max_pred = 0, over_max = 0;
   uint64_t fwd_merges = 0, fwd_refused = 0, fwd_max_chain = 0;
 };
 
@@ -155,7 +173,8 @@ struct Cones {
       return;
     }
     const uint64_t key = (static_cast<uint64_t>(std::min(a, b)) << 32) | std::max(a, b);
-    pair_w[key]       += w;
+    auto&          acc = pair_w[key];
+    acc                = graph_util::sat_add(acc, w);
   }
 
   // ---- A3: one root's backward walk --------------------------------------
@@ -193,7 +212,7 @@ struct Cones {
         record_pair(owner[n], c, pred[n]);  // the shared sub-cone, in predicted AIG
       }
 
-      traversed += pred[n];
+      traversed = graph_util::sat_add(traversed, pred[n]);
       if (max_gate != 0 && traversed > max_gate) {
         // The popped node stays claimed and counted; nothing already queued is
         // visited after the crossing. Shared logic deeper than max_gate could
@@ -245,7 +264,7 @@ struct Cones {
       return true;
     }
     for (uint32_t k = fin_start[m]; k < fin_start[m] + fin_cnt[m]; ++k) {
-      if (fin_drv[k] == n && fin_pid[k] == 3) {
+      if (fin_drv[k] == n && fin_pid[k] == kPidDin) {
         return true;  // reached through din
       }
     }
@@ -312,9 +331,9 @@ void collect_roots(Cones& cn) {
       uint32_t en_drv = 0;
       bool     has_en = false;
       for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
-        if (cn.fin_pid[k] == 3) {  // din
+        if (cn.fin_pid[k] == kPidDin) {
           cn.push_seed(cn.fin_drv[k]);
-        } else if (cn.fin_pid[k] == 4) {  // enable (Fflop has no pid 4)
+        } else if (cn.fin_pid[k] == kPidEnable) {  // Fflop has no enable pin, so this never fires for one
           en_drv = cn.fin_drv[k];
           has_en = true;
         }
@@ -342,11 +361,11 @@ void collect_roots(Cones& cn) {
       bool                  whole_array = false;
       for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
         const uint32_t off = cn.fin_pid[k] % stride;
-        if (off == 12 || off == 13) {  // update / update_enable: the whole-array write
+        if (is_mem_whole_array_off(off)) {  // update / update_enable: the whole-array write
           whole_array = true;
           continue;
         }
-        if (off == 0 || off == 3 || off == 4) {  // addr / din / enable
+        if (is_mem_port_off(off)) {  // addr / din / enable
           ports.emplace_back(cn.fin_pid[k] / stride);
         }
       }
@@ -357,7 +376,7 @@ void collect_roots(Cones& cn) {
         ++cn.st.r_mem;
         for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
           const uint32_t off = cn.fin_pid[k] % stride;
-          if (cn.fin_pid[k] / stride == p && (off == 0 || off == 3 || off == 4)) {
+          if (cn.fin_pid[k] / stride == p && is_mem_port_off(off)) {
             cn.push_seed(cn.fin_drv[k]);
           }
         }
@@ -367,7 +386,7 @@ void collect_roots(Cones& cn) {
         ++cn.st.r_mem;
         for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
           const uint32_t off = cn.fin_pid[k] % stride;
-          if (off == 12 || off == 13) {
+          if (is_mem_whole_array_off(off)) {
             cn.push_seed(cn.fin_drv[k]);
           }
         }
@@ -429,8 +448,8 @@ void place_state_and_sweep(Cones& cn) {
     }
     uint32_t placed = it->second;
     for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
-      if (cn.fin_pid[k] != 3) {
-        continue;  // din
+      if (cn.fin_pid[k] != kPidDin) {
+        continue;
       }
       const uint32_t d = cn.fin_drv[k];
       // "Owned NON-CUT node" in both senses of cut. A register fed by another
@@ -639,8 +658,13 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
       if (tt == survivor) {
         continue;  // an earlier target in this same candidate already absorbed it
       }
-      const int      a      = survivor;  // capture BEFORE merge: rg.merge picks the survivor
-      const uint64_t folded = chain[a] + chain[tt] + 1;
+      const int a = survivor;  // capture BEFORE merge: rg.merge picks the survivor
+      // Two LOOKUPS, never two `operator[]`s inside one expression: `chain[a]`
+      // and `chain[tt]` both INSERT, the operands of `+` are unsequenced, and a
+      // rehash from the second call dangles the reference the first returned.
+      const auto     ia     = chain.find(a);
+      const auto     itt    = chain.find(tt);
+      const uint64_t folded = (ia == chain.end() ? 0 : ia->second) + (itt == chain.end() ? 0 : itt->second) + 1;
       chain.erase(a);
       chain.erase(tt);
       survivor        = rg.merge(a, tt);
@@ -674,7 +698,8 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
   std::vector<uint64_t> weight(n_colors, 0);
   for (uint32_t i = 0; i < cn.owner.size(); ++i) {
     if (cn.owner[i] != 0) {
-      weight[cn.owner[i] - 1] += cn.pred[i];
+      auto& w = weight[cn.owner[i] - 1];
+      w       = graph_util::sat_add(w, cn.pred[i]);
     }
   }
   std::vector<absl::flat_hash_map<int, uint64_t>> adj(n_colors);

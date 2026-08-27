@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "node_util.hpp"
+#include "predict_abc_size.hpp"  // sat_add
 
 namespace livehd::color {
 
@@ -140,7 +141,11 @@ int Region_graph::merge(int a, int b) {
   if (dissolved_side(a, b) == a) {
     std::swap(a, b);  // a survives, b dissolves
   }
-  weight_[a] += weight_[b];
+  // Saturating: a vertex weight can already be the clamped uint64 max (a
+  // predict_abc_size overflow, see predict_abc_size.hpp), and a plain `+=`
+  // would wrap it back to a SMALL number -- the merge cap would then admit
+  // exactly the monster region the clamp exists to keep out.
+  weight_[a] = livehd::graph_util::sat_add(weight_[a], weight_[b]);
   // Append the SHORTER member list (the vectors are freely swappable: nothing
   // after a merge relies on members order beyond determinism, and split_large's
   // MFFC only ever sees pre-merge regions).

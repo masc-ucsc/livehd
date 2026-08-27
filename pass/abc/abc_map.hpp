@@ -22,6 +22,11 @@ class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
+  // Cap on the fanout of any net ABC MAPS, enforced by appending
+  // `buffer -N <n>; upsize; dnsize` to a built-in flow. 0 disables the tail.
+  // Nets driven by native (unblasted) nodes are outside ABC and keep their
+  // fanout regardless. Default 16.
+  uint32_t          max_fanout = 16;
   // Optional size-tiered flow. Regions in [`small_min_ge`, `small_ge`] use it;
   // explicit color-keyed region_opts still win. This lets large replicated
   // logic use a deliberately cheap mapper without sacrificing the QoR of
@@ -195,6 +200,10 @@ private:
   bool                                          flat_       = false;
   void*                                         pabc_       = nullptr;  // Abc_Frame_t*
   bool                                          lib_loaded_ = false;
+  // One-shot: the Liberty gave ABC no SCL library, so the max_fanout tail
+  // cannot run (see the strip in map_region). Warn once per Mapper, not once
+  // per region.
+  bool                                          warned_no_scl_ = false;
   // Plain posedge D-flop found in the Liberty (register mapping target). Empty
   // when map_register is off or the library has no DFF cell — the read-back then
   // keeps flops native. Detected once in start().
@@ -240,6 +249,8 @@ private:
 
   [[nodiscard]] std::string comb_flow() const;
   [[nodiscard]] std::string seq_flow() const;
+  [[nodiscard]] std::string resolve_flow(std::string_view builtin) const;
+  [[nodiscard]] std::string subst_flow(std::string f) const;
 
   // The resolved per-region ABC recipe, serialized VERBATIM for the incremental
   // cache's recipe gate: the pre-ABC lgraph does not encode it, so two regions

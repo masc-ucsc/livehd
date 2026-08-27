@@ -675,7 +675,7 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // v6: the formal-assume don't-care inputs left the salt with the EXDC item
   // (2026-08-01) -- a v5 salt mixed in two bools that no longer exist.
   // v7: rows carry canonical digests and same-run cross-name reuse is enabled.
-  uint64_t h = hstr("abc-incr-v7");
+  uint64_t h = hstr("abc-incr-v8");
   h          = hcombine(h, kAbcSrcSalt);
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {

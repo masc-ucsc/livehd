@@ -6341,6 +6341,64 @@ private:
     return static_cast<int32_t>(w);
   }
 
+  // A concat lane that names a DECLARED ARRAY: its (entry count, element
+  // width), or nullopt when the lane is not one. Both array storage classes
+  // answer here — a `mut`/`const` comb array is an Array_scalar_view and a
+  // `reg` array is a Memory — because both carry the declared extent and a
+  // single scalar element width.
+  //
+  // The entry count is the FLAT one (`[4][8]u8` splices 32 windows), which is
+  // what both records already hold.
+  [[nodiscard]] std::optional<std::pair<int64_t, int32_t>> concat_array_extent(const Lnast_nid& v) const {
+    if (v.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(v))) {
+      return std::nullopt;
+    }
+    // The packed bus is size*elem_mw bits and every downstream width here is
+    // int32, so an extent whose product does not fit is declined rather than
+    // truncated -- a wrapped packed_mw would silently mis-slice every entry.
+    auto extent = [](int64_t size, int32_t elem_mw) -> std::optional<std::pair<int64_t, int32_t>> {
+      if (size <= 0 || elem_mw <= 0 || size > std::numeric_limits<int32_t>::max() / elem_mw) {
+        return std::nullopt;
+      }
+      return std::pair<int64_t, int32_t>{size, elem_mw};
+    };
+    const std::string name{lnast_->get_name(v)};
+    if (auto it = array_scalar_views_.find(name); it != array_scalar_views_.end()) {
+      if (auto e = extent(it->second.size, it->second.elem_mw)) {
+        return e;
+      }
+    }
+    if (auto it = mem_map_.find(name); it != mem_map_.end()) {
+      if (auto e = extent(it->second.size, it->second.elem_mw)) {
+        return e;
+      }
+    }
+    return std::nullopt;
+  }
+
+  // Entry `index` of a packed array bus: the elem_mw-bit window at
+  // index*elem_mw. The raw UNSIGNED bit pattern is what a concat lane wants —
+  // a signed element still occupies exactly its own elem_mw bits, the same rule
+  // that makes a Verilog concat operand self-determined — so no sign extension
+  // rides along (unlike the element READ in lower_tuple_get, whose result feeds
+  // an arithmetic consumer).
+  [[nodiscard]] Pin array_entry_slice(const Pin& packed, int32_t packed_mw, int64_t index, int32_t elem_mw) {
+    Pin src = packed;
+    if (index > 0) {
+      auto sra = make_node(Ntype_op::SRA);
+      setup_sink_by_name(sra, "a").connect_driver(packed);
+      setup_sink_by_name(sra, "b").connect_driver(create_const(*g_, *Dlop::create_integer(index * elem_mw)));
+      src = sra.create_driver_pin(0);
+      set_ubits(src, packed_mw);
+    }
+    auto gm = make_node(Ntype_op::Get_mask);
+    setup_sink_by_name(gm, "a").connect_driver(src);
+    setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(elem_mw)));
+    auto out = gm.create_driver_pin(0);
+    set_ubits(out, elem_mw);  // an unsized pin emits as ONE bit
+    return out;
+  }
+
   void lower_concat(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -6351,9 +6409,11 @@ private:
     // minted, so a rejected concat leaves no half-wired node behind.
     struct Lane {
       Lnast_nid nid;
-      int32_t   width;
+      int32_t   width;    // one window
+      int64_t   entries;  // 0 = a scalar lane; >0 = SPLICE that many windows of an array
     };
     std::vector<Lane> lanes;
+    size_t            n_windows = 0;
     for (auto v = lnast_->get_sibling_next(dst); !v.is_invalid();) {
       auto w = lnast_->get_sibling_next(v);
       if (w.is_invalid()) {
@@ -6362,8 +6422,18 @@ private:
                  "upass.tolg: concat lane '{}' has no width operand — every lane is a (value, width) PAIR",
                  lnast_->get_name(v));
       }
-      const auto bound = concat_bound_width(w);
-      if (!bound) {
+      if (const auto bound = concat_bound_width(w)) {
+        lanes.push_back(Lane{v, *bound, 0});
+        n_windows += 1;
+      } else if (const auto ext = concat_array_extent(v)) {
+        // An ARRAY lane splices its entries, entry 0 MOST significant — the
+        // positional-tuple rule (docs/pyrope/10-internals.md, "Bit selection
+        // and concatenation"). It occupies no SINGLE window, which is why its
+        // own width operand is still the `nil` sentinel and why this arm sits
+        // ahead of the untyped-lane error rather than after it.
+        lanes.push_back(Lane{v, ext->second, ext->first});
+        n_windows += static_cast<size_t>(ext->first);
+      } else {
         error_at(nid,
                  {"concat-untyped-lane", "type"},
                  "upass.tolg: concat lane '{}' has no declared bit width — a concat window is sized by the lane's "
@@ -6371,21 +6441,34 @@ private:
                  "every lane above it (bind it to a typed name first: `const w:u4 = <expr>`)",
                  lnast_->get_name(v));
       }
-      lanes.push_back(Lane{v, *bound});
       v = lnast_->get_sibling_next(w);
     }
-    if (lanes.empty()) {
+    if (lanes.empty() || n_windows == 0) {
       error_at(nid, {"concat-empty", "type"}, "upass.tolg: concat needs at least one lane");
     }
 
-    auto    node   = make_node(Ntype_op::Concat);
-    int32_t sum_mw = 0;
-    for (size_t i = 0; i < lanes.size(); ++i) {
-      auto v = leaf(lanes[i].nid);
-      node.create_sink_pin(static_cast<hhds::Port_id>(2 * i)).connect_driver(v.pin);
-      node.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1))
-          .connect_driver(create_const(*g_, *Dlop::create_integer(lanes[i].width)));
-      sum_mw += lanes[i].width;
+    auto          node   = make_node(Ntype_op::Concat);
+    int32_t       sum_mw = 0;
+    hhds::Port_id pid    = 0;
+    for (const auto& l : lanes) {
+      if (l.entries == 0) {
+        auto v = leaf(l.nid);
+        node.create_sink_pin(pid++).connect_driver(v.pin);
+        node.create_sink_pin(pid++).connect_driver(create_const(*g_, *Dlop::create_integer(l.width)));
+        sum_mw += l.width;
+        continue;
+      }
+      // The packed bus holds entry 0 in the LOW element window (graph/cell.cpp
+      // pid 12, and the layout Array_scalar_view's indexed read assumes), so
+      // walking the entries UP the bus emits them MSB-first — the splice is a
+      // per-entry REVERSAL of the packed word, not a copy of it.
+      auto          packed    = leaf(l.nid);
+      const int32_t packed_mw = static_cast<int32_t>(l.entries * l.width);
+      for (int64_t e = 0; e < l.entries; ++e) {
+        node.create_sink_pin(pid++).connect_driver(array_entry_slice(packed.pin, packed_mw, e, l.width));
+        node.create_sink_pin(pid++).connect_driver(create_const(*g_, *Dlop::create_integer(l.width)));
+        sum_mw += l.width;
+      }
     }
 
     auto out = node.create_driver_pin(0);

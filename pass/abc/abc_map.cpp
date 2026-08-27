@@ -43,8 +43,8 @@
 #include "hhds/graph.hpp"
 #include "host_mem.hpp"
 #include "node_util.hpp"
-#include "rapidjson/document.h"
 #include "predict_abc_size.hpp"
+#include "rapidjson/document.h"
 #include "synthesis_cost.hpp"
 
 // clang-format off
@@ -57,6 +57,7 @@ extern "C" {
 #include "base/cmd/cmd.h"
 #include "aig/hop/hop.h"
 #include "map/mio/mio.h"
+#include "map/scl/sclLib.h"  // SC_Lib::vTempls (the `buffer`/`upsize` timing gate)
 #include "misc/extra/extra.h"
 }
 // clang-format on
@@ -67,8 +68,30 @@ namespace livehd::abc {
 
 namespace {
 
-// Built-in combinational flow (task default). {D}/{L} substituted from opts.
-constexpr std::string_view kCombFlow = "strash; &get -n; &dc4; &dch -f; &nf {D}; &put";
+// Built-in combinational flow (task default). {D}/{L}/{F} substituted from opts.
+//
+// `&fraig -x; &put; dc2` ahead of the `&dch -f; &nf` map is worth its runtime:
+// measured on dino it takes 54,564 gates to 52,185 (-4.4%) and whole-design STA
+// 51.1 -> 44.4 ns, for ~1.3x the ABC time.
+//
+// The `{F}` tail is the fanout fix. Without it ABC leaves nets far past the
+// Liberty's characterized load -- dino had 283 nets over 32 sinks and a mapped
+// net with 384 -- and `pass.opentimer` then EXTRAPOLATES off the end of the NLDM
+// table (an `a21oi_1` came out at 3090 ns against a ~0.05 ns intrinsic delay).
+// `buffer -N` caps mapped fanout exactly, and `upsize`/`dnsize` re-size around
+// the inserted buffers. Together with the flow above: dino STA 51.1 -> 35.0 ns
+// (-32%) for +2.8% area. These are SCL commands: they need a MAPPED network, so
+// they must follow `&put`, and they need `pLibScl`, which `read_lib -s` loads.
+//
+// It cannot fix everything: a net driven by a NATIVE (unblasted) node -- a wide
+// SRA, packed wiring, a region boundary -- never reaches ABC, so its fanout
+// survives. Those are the residual over-limit nets.
+constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put";
+
+// Appended to a BUILT-IN flow when max_fanout != 0. Not part of the constants
+// above so that max_fanout=0 yields a clean unbuffered string rather than a
+// stripped one; a custom flow places `{F}` (the bare number) itself.
+constexpr std::string_view kBufferTail = "; buffer -N {F}; upsize; dnsize";
 
 // Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow; the
 // latches only carry the registers across ABC so it can optimize the logic
@@ -82,7 +105,7 @@ constexpr std::string_view kCombFlow = "strash; &get -n; &dc4; &dch -f; &nf {D};
 // forbids. Opt in explicitly per run or per region when that is understood:
 // `--set pass.abc.flow="strash; &get -n; &dc4; dretime; &dch -f; &nf {D};
 // &put"` (the read-back stays robust to reshaped latches).
-constexpr std::string_view kSeqFlow = "strash; &get -n; &dc4; &dch -f; &nf {D}; &put";
+constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put";
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -170,18 +193,29 @@ std::string flag_subst(std::string f, std::string_view tok, char flag, const std
 }
 }  // namespace
 
-std::string Mapper::comb_flow() const {
-  std::string f = opts_.flow.empty() ? std::string{kCombFlow} : opts_.flow;
-  f             = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
-  f             = flag_subst(std::move(f), "{L}", 'L', opts_.load);
+// A built-in flow gains the buffering tail; a caller-supplied flow does not (it
+// owns its own command list and may place `{F}` where it wants).
+std::string Mapper::resolve_flow(std::string_view builtin) const {
+  std::string f = std::string{builtin};
+  if (opts_.max_fanout != 0) {
+    f += kBufferTail;
+  }
   return f;
 }
 
+std::string Mapper::subst_flow(std::string f) const {
+  f = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
+  f = flag_subst(std::move(f), "{L}", 'L', opts_.load);
+  // {F} is the bare fanout NUMBER (buffer's -N takes it), not a flag.
+  return subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
+}
+
+std::string Mapper::comb_flow() const {
+  return subst_flow(opts_.flow.empty() ? resolve_flow(kCombFlow) : opts_.flow);
+}
+
 std::string Mapper::seq_flow() const {
-  std::string f = opts_.flow.empty() ? std::string{kSeqFlow} : opts_.flow;
-  f             = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
-  f             = flag_subst(std::move(f), "{L}", 'L', opts_.load);
-  return f;
+  return subst_flow(opts_.flow.empty() ? resolve_flow(kSeqFlow) : opts_.flow);
 }
 
 std::string Mapper::resolve_recipe() const {
@@ -837,7 +871,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   uint64_t       pred_aig    = 0;
   for (const auto& node : rb.nodes) {
     input_ge += gu::synthesis_ge_weight(node);
-    pred_aig += gu::predict_abc_size(node);
+    pred_aig  = gu::sat_add(pred_aig, gu::predict_abc_size(node));
   }
 
   uint64_t register_bits = 0;
@@ -861,7 +895,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // invariant source-logic cost, unlike mapped gates, so cache recipes and
   // threshold decisions remain stable when the mapping flow changes.
   if (opts_.small_ge != 0 && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
-    opts_.flow = opts_.small_flow;
+    // resolve_flow, not the raw string: the size TIERS are tool-chosen defaults
+    // like kCombFlow, so max_fanout's buffering tail applies to them too. Only
+    // an explicit user `flow` is left alone (it owns its command list and can
+    // place `{F}` itself). Without this a region over large_ge silently mapped
+    // with NO fanout cap -- minion kept a 3562-sink mapped net that way while
+    // dino, which has no such region, capped correctly at 16.
+    opts_.flow = resolve_flow(opts_.small_flow);
     if (opts_.verbose) {
       std::print("[pass.abc] region '{}': small_flow selected ({} <= {} GE <= {})\n",
                  rb.module_name,
@@ -871,7 +911,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
   if (opts_.flow.empty() && opts_.large_ge != 0 && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
-    opts_.flow = opts_.large_flow;
+    opts_.flow = resolve_flow(opts_.large_flow);  // see the small_flow note above
     if (opts_.verbose) {
       std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
     }
@@ -2936,6 +2976,39 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // while retaining the parsed Liberty library and command aliases.
   Abc_FrameReplaceCurrentNetwork(frame, pLogic);
   auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
+  // The `{F}` tail is SCL: `buffer`/`upsize`/`dnsize` TIME the mapped network,
+  // walking the per-pin NLDM tables of `pAbc->pLibScl`. A Liberty with no
+  // `lu_table_template` builds none -- ABC says exactly that ("Templates are not
+  // defined.") and then read_lib still returns 0, so `start()` above saw a
+  // successful load. Running the tail on such a library does NOT fail the
+  // command: Abc_SclTimeNode ASSERTS (sclSize.c, `assert(pCell->n_outputs > 1)`)
+  // and aborts the whole lhd process with no diagnostic. Every small hermetic
+  // test Liberty has this shape, so the shipped max_fanout=16 default took down
+  // `lhd synth`/`pass abc` on all of them.
+  //
+  // Strip the tail rather than predicting it: the decision is a pure function of
+  // the Liberty, and the Liberty content is already folded into the incremental
+  // cache salt (Incr_cache::make_salt), so a recipe that still names the tail
+  // cannot be reused across a library where the answer differs.
+  if (opts_.max_fanout != 0) {
+    const auto*       scl  = static_cast<const SC_Lib*>(Abc_FrameReadLibScl());
+    const bool        able = scl != nullptr && Vec_PtrSize(const_cast<Vec_Ptr_t*>(&scl->vTempls)) > 0;
+    const std::string tail = subst_flow(std::string{kBufferTail});
+    if (!tail.empty() && flow.ends_with(tail) && !able) {
+      flow.resize(flow.size() - tail.size());
+      if (!warned_no_scl_) {
+        warned_no_scl_ = true;
+        // A plain note, not a diagnostic: this is a property of the LIBRARY, not
+        // of the design, so it must not move `diagnostics_count` for every run
+        // against a template-less Liberty (the same channel the register_max_bits
+        // fallback above uses).
+        std::print("[pass.abc] max_fanout={}: '{}' declares no Liberty timing templates, so ABC cannot size cells -- "
+                   "skipping `buffer -N`/`upsize`/`dnsize`; mapped fanout is NOT capped\n",
+                   opts_.max_fanout,
+                   startup_opts_.library);
+      }
+    }
+  }
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;

@@ -57,6 +57,7 @@
 #include <cstdlib>
 #include <format>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -1296,6 +1297,41 @@ bool uPass_runner::emit_concrete_type_slot() {
   return true;
 }
 
+// The DECLARED bit width of ONE element of a positional array, or 0 when the
+// bundle carries no element envelope. The envelope rides the bundle as the
+// internal `__elem_max`/`__elem_min` attrs the array declare bakes.
+static uint32_t array_elem_declared_bits(const Bundle& b) {
+  const auto& elem_max = b.get_attr("__elem_max");
+  const auto& elem_min = b.get_attr("__elem_min");
+  if (!elem_max.is_integer() || !elem_min.is_integer()) {
+    return 0;
+  }
+  if (elem_min.is_negative()) {
+    return static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()));
+  }
+  return elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1);
+}
+
+// The total width of a DECLARED positional array spliced as ONE concat lane:
+// every entry of the array, each a window of the element type. Returns 0 when
+// the bundle is not a declared array or its extent is unresolved -- fail
+// closed, never a guess, because a wrong extent relocates every lane above it.
+//
+// Reads the FLAT entry count (`__array_flat_size`), not the outer
+// `__array_size`: `[4][8]u8` splices 32 windows, not 4.
+static uint64_t concat_array_lane_bits(const Bundle& b) {
+  const auto& flat = b.get_attr("__array_flat_size");
+  if (!flat.is_integer() || !flat.is_just_i64()) {
+    return 0;
+  }
+  const int64_t  n  = flat.to_just_i64();
+  const uint32_t eb = array_elem_declared_bits(b);
+  if (n <= 0 || eb == 0) {
+    return 0;
+  }
+  return static_cast<uint64_t>(n) * eb;
+}
+
 // Report every `concat` lane that declares no width.
 //
 // Deliberately NOT folded into resolve_concat_widths, which runs on the EMIT
@@ -1373,18 +1409,11 @@ void uPass_runner::check_concat_lanes() {
     // stays structural unless a later pass can materialize it; no width is
     // guessed from field values.
     if (lane_bundle && (lane_field_count > 1 || lane_bundle->has_named_top())) {
-      const auto  logical         = concat_logical_name(lane_name);
-      const auto  root            = logical.empty() ? std::string_view(lane_name) : logical;
-      uint32_t    array_elem_bits = 0;
-      const auto& elem_max        = lane_bundle->get_attr("__elem_max");
-      const auto& elem_min        = lane_bundle->get_attr("__elem_min");
-      if (elem_max.is_integer() && elem_min.is_integer()) {
-        array_elem_bits = elem_min.is_negative()
-                              ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()))
-                              : (elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1));
-      }
-      uint64_t tuple_total = 0;
-      bool     complete    = true;
+      const auto     logical         = concat_logical_name(lane_name);
+      const auto     root            = logical.empty() ? std::string_view(lane_name) : logical;
+      const uint32_t array_elem_bits = array_elem_declared_bits(*lane_bundle);
+      uint64_t       tuple_total     = 0;
+      bool           complete        = true;
       for (const auto& field : lane_bundle->top_levels()) {
         if (field.has_leafs || (field.pos < 0 && field.name.empty())) {
           complete = false;
@@ -1402,6 +1431,19 @@ void uPass_runner::check_concat_lanes() {
       }
       if (complete && tuple_total > 0) {
         total += tuple_total;
+        continue;
+      }
+    }
+    // A DECLARED array whose entries are not bundle FIELDS. A `reg
+    // stages:[4]u8` is one persistent memory, so nothing ever materializes
+    // `stages.0`..`stages.3` in the table and the top_levels walk above finds
+    // nothing to sum -- the lane read as undeclared even though `[4]u8` states
+    // its 32 bits exactly. The declared extent + element envelope ride the
+    // bundle as attrs, which is the one source that survives for every array
+    // storage class.
+    if (lane_bundle) {
+      if (const auto ab = concat_array_lane_bits(*lane_bundle); ab != 0) {
+        total += ab;
         continue;
       }
     }
@@ -10218,6 +10260,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   Dlop        elem_max;  // array declares: the ELEMENT envelope ([4][8]u8 → u8)
   Dlop        elem_min;
   Dlop        array_size;                        // outer declared extent (for static bounds checks)
+  Dlop        array_flat_size;                   // ALL dims multiplied ([4][8]u8 -> 32); invalid when any dim is unresolved
   upass::Kind elem_kind = upass::Kind::unknown;  // array declares: the element KIND (integer vs boolean)
   std::string type_name;
   upass::Mode mode       = upass::Mode::unknown;
@@ -10242,26 +10285,30 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       // against them). Entry-0 decl_max/min stay untouched: stamping them
       // would make the array read as a scalar of the element type
       // (decl_facts/try_decl_type consumers).
-      int depth = 0;
+      int     depth   = 0;
+      int64_t flat    = 1;     // running product of EVERY dim, for __array_flat_size
+      bool    flat_ok = true;  // one unresolved dim poisons the whole product
       while (Lnast_ntype::is_comp_type_array(lm->get_raw_ntype()) && lm->has_child()) {
-        if (depth == 0) {
-          const auto arr_nid = lm->get_current_nid();
-          const auto elem_n  = lm->get_lnast()->get_first_child(arr_nid);
-          const auto dim_n   = elem_n.is_invalid() ? elem_n : lm->get_lnast()->get_sibling_next(elem_n);
-          if (!dim_n.is_invalid()
-              && (Lnast_ntype::is_const(lm->get_lnast()->get_type(dim_n))
-                  || Lnast_ntype::is_ref(lm->get_lnast()->get_type(dim_n)))) {
-            std::string_view dim = lm->get_lnast()->get_name(dim_n);
-            if (dim.size() >= 2 && dim.front() == '[' && dim.back() == ']') {
-              dim.remove_prefix(1);
-              dim.remove_suffix(1);
-            }
-            int64_t n = 0;
-            if (auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), n);
-                ec == std::errc{} && ptr == dim.end() && n >= 0) {
+        const auto arr_nid = lm->get_current_nid();
+        const auto elem_n  = lm->get_lnast()->get_first_child(arr_nid);
+        const auto dim_n   = elem_n.is_invalid() ? elem_n : lm->get_lnast()->get_sibling_next(elem_n);
+        int64_t    n       = -1;
+        if (!dim_n.is_invalid()
+            && (Lnast_ntype::is_const(lm->get_lnast()->get_type(dim_n)) || Lnast_ntype::is_ref(lm->get_lnast()->get_type(dim_n)))) {
+          std::string_view dim = lm->get_lnast()->get_name(dim_n);
+          if (dim.size() >= 2 && dim.front() == '[' && dim.back() == ']') {
+            dim.remove_prefix(1);
+            dim.remove_suffix(1);
+          }
+          int64_t parsed = 0;
+          if (auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), parsed);
+              ec == std::errc{} && ptr == dim.end() && parsed >= 0) {
+            n = parsed;
+            if (depth == 0) {
               array_size = *Dlop::create_integer(n);
-            } else if (auto fv = try_fold_ref(std::string(dim));
-                       fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
+            }
+          } else if (depth == 0) {
+            if (auto fv = try_fold_ref(std::string(dim)); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
               // `mut v:[N]T` with a comptime-named dim: prp2lnast keeps the
               // written text (`const '[N]'` / `ref N`), the declare is copied
               // VERBATIM into staging, and every downstream reader takes the
@@ -10273,9 +10320,23 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
               lm->get_lnast()->set_name(dim_n, "[" + std::to_string(n) + "]");
             }
           }
+          // A named INNER dim is deliberately NOT folded here: nothing rewrites
+          // the nested dim node, so tolg would still read the raw `[N]` text.
+          // Leaving the product unresolved keeps the two in agreement instead
+          // of publishing an extent tolg does not share.
+        }
+        // Fail closed on an overflowing product too: `__array_flat_size` sizes
+        // `concat(a)`, and a wrapped extent would relocate every lane above it.
+        if (n > 0 && flat <= std::numeric_limits<int64_t>::max() / n) {
+          flat *= n;
+        } else {
+          flat_ok = false;
         }
         lm->move_to_child();  // child0 = element (possibly a nested array)
         ++depth;
+      }
+      if (flat_ok && flat > 0) {
+        array_flat_size = *Dlop::create_integer(flat);
       }
       if (Lnast_ntype::is_prim_type_int(lm->get_raw_ntype()) && lm->has_child()) {
         elem_kind = upass::Kind::integer;
@@ -10531,6 +10592,13 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
     bundle->set_attr("__array_size", array_size);
   }
 
+  // The FLAT entry count (every dim multiplied). `__array_size` is the OUTER
+  // extent -- what an `a[i]` bounds check compares against -- so it is the
+  // wrong number for anything that wants the whole array's storage, such as
+  // sizing `concat(a)`.
+  if (!array_flat_size.is_invalid()) {
+    bundle->set_attr("__array_flat_size", array_flat_size);
+  }
   // Back-flow: when this dst is a tuple_get extraction tmp (`___2 = ___1.a`
   // then `type_spec(___2, T)` / `declare(___2, …, mut)` — the typed-tuple-
   // literal lowering), copy the facts onto the SOURCE field entry too, so

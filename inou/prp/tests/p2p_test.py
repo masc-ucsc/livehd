@@ -31,7 +31,9 @@ CHECK_TIMEOUT = 20  # seconds; a timeout is inconclusive, not a failure
 
 def _v_top(vpath):
     with open(vpath) as f:
-        m = re.search(r"\bmodule\s+\\?([^\s(]+)", f.read())
+        # Anchored at the START OF A LINE: an unanchored `\bmodule\s+` also matches the
+        # word inside a golden's own prose comment. See prplib.PrpRunner._verilog_modules.
+        m = re.search(r"^\s*module\s+\\?([^\s(]+)", f.read(), re.M)
     return m.group(1) if m else None
 
 

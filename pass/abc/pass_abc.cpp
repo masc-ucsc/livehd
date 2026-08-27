@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <print>
 #include <string>
@@ -22,6 +23,7 @@
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
+#include "predict_abc_size.hpp"  // sat_add
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
@@ -56,6 +58,16 @@ void Pass_abc::setup() {
       "command/alias reference: https://github.com/berkeley-abc/abc/blob/master/abc.rc "
       "(and `<cmd> -h` inside an ABC shell for each command's switches)",
       "");
+  // Fanout cap for anything ABC MAPS. Without it ABC leaves nets far past the
+  // Liberty's characterized load and pass.opentimer extrapolates off the end of
+  // the NLDM table -- an `a21oi_1` measured 3090 ns against a ~0.05 ns intrinsic
+  // delay. 16 measured best on dino: mapped fanout capped exactly at 16,
+  // whole-design STA 51.1 -> 35.0 ns, +2.8% area, ~2x ABC time. Nets driven by
+  // NATIVE (unblasted) nodes never reach ABC and keep their fanout regardless.
+  m.add_label_optional("max_fanout",
+                       "cap the fanout of every net ABC maps, by appending `buffer -N <n>; upsize; dnsize` to the "
+                       "built-in flow (0 disables it). A custom `flow` places `{F}` -- the bare number -- itself",
+                       "16");
   m.add_label_optional("small_flow",
                        "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
                        "[small_min_ge, small_ge]; "
@@ -252,7 +264,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     tdivbb       += qor[r].div_blackbox;
     tinput_nodes += qor[r].input_nodes;
     tinput_ge    += qor[r].input_ge;
-    tpred_aig    += qor[r].pred_aig;
+    tpred_aig     = livehd::graph_util::sat_add(tpred_aig, qor[r].pred_aig);
     if (qor[r].resynth) {
       peak_rss_kb       = std::max(peak_rss_kb, qor[r].peak_rss_kb);
       color_peak_rss_kb = std::max(color_peak_rss_kb, qor[r].color_peak_rss_kb);
@@ -585,6 +597,26 @@ void Pass_abc::work(Eprp_var& var) {
       return;
     }
   }
+  // No silent fallback: a mis-typed cap would quietly change every mapped
+  // netlist's fanout and, through it, every reported delay.
+  uint64_t max_fanout = 16;
+  {
+    const auto s_mf = std::string{var.get("max_fanout", "16")};
+    auto*      b    = s_mf.data();
+    auto*      e    = s_mf.data() + s_mf.size();
+    auto [p, ec]    = std::from_chars(b, e, max_fanout);
+    // The RANGE check is part of "no silent fallback": Map_options::max_fanout is
+    // a uint32_t, so an out-of-range value would truncate -- 2^32 lands on 0,
+    // which silently means "no fanout cap at all", the exact opposite of what was
+    // asked for.
+    if (ec != std::errc{} || p != e || max_fanout > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-max-fanout", "io")
+          .msg("pass.abc: max_fanout must be an integer in [0, {}], got '{}'", std::numeric_limits<uint32_t>::max(), s_mf)
+          .hint("0 disables the `buffer -N` tail on the built-in flow")
+          .fatal();
+      return;
+    }
+  }
   uint64_t register_max_bits = 4096;
   {
     auto* b      = register_max_bits_s.data();
@@ -612,6 +644,7 @@ void Pass_abc::work(Eprp_var& var) {
 
   livehd::abc::Map_options opts;
   opts.flow              = flow;
+  opts.max_fanout        = static_cast<uint32_t>(max_fanout);
   opts.small_flow        = small_flow;
   opts.small_min_ge      = small_min_ge;
   opts.small_ge          = small_ge;

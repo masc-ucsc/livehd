@@ -1302,6 +1302,7 @@ _V2PRP2V_VERILOG_FIXME = [
         "pipe_state_acc",      # pipe with feedback state
         "mod_delay3",          # @[N] landing-cycle on a mod output
         "reg_out_feedforward",  # feedforward reg output
+        "concat_array_lane",   # runtime array `concat` lane -> per-entry shift/or
     ]
 ]
 

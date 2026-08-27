@@ -13,25 +13,14 @@
 
 namespace livehd::graph_util {
 
-// Structural 2:1 MUX count that pass/abc/abc_arith.hpp emits for `node`'s
-// barrel network, or 0 when `node` is not a RUNTIME shift (not a SHL/SRA, or a
-// constant/absent amount -- the mapper wires those directly).
-//
-// Factored out of synthesis_ge_weight so the cones predictor
-// (graph/predict_abc_size.hpp) charges the SAME structural replay at its own
-// per-mux rate. The x6 below stays in synthesis_ge_weight alone: it is an ABC
-// TIME safety factor, not part of the structure.
-[[nodiscard]] inline uint64_t shift_mux_count(const hhds::Node_class& node) {
-  const auto op = type_op_of(node);
-  if (op != Ntype_op::SRA && op != Ntype_op::SHL) {
-    return 0;
-  }
-  const auto amount = get_driver_of_sink_name(node, "b");
-  if (amount.is_invalid() || is_const_pin(amount)) {
-    return 0;
-  }
-  const uint64_t full = mappable_ge_weight(node);
+namespace shift_detail {
 
+// The replay itself, given what the callers have ALREADY resolved. Both entry
+// points below have to know `op`, the `b` driver and `mappable_ge_weight` just
+// to decide whether a barrel exists at all, so re-deriving all three inside the
+// replay made synthesis_ge_weight walk the node's edges twice per runtime shift
+// -- in the pass.color / pass.abc per-node loops.
+[[nodiscard]] inline uint64_t mux_count(const hhds::Node_class& node, Ntype_op op, const hhds::Pin_class& amount, uint64_t full) {
   // A RIGHT shift's barrel is built at abc's shift width `cw = max(operand,
   // result)` and then truncated (abc_map), NOT at the result width: a 1024-bit
   // operand read as 20 bits still costs a 1024-bit-deep network per stage. This
@@ -108,6 +97,28 @@ namespace livehd::graph_util {
   return muxes;
 }
 
+}  // namespace shift_detail
+
+// Structural 2:1 MUX count that pass/abc/abc_arith.hpp emits for `node`'s
+// barrel network, or 0 when `node` is not a RUNTIME shift (not a SHL/SRA, or a
+// constant/absent amount -- the mapper wires those directly).
+//
+// Factored out of synthesis_ge_weight so the cones predictor
+// (graph/predict_abc_size.hpp) charges the SAME structural replay at its own
+// per-mux rate. The x6 in synthesis_ge_weight stays there: it is an ABC TIME
+// safety factor, not part of the structure.
+[[nodiscard]] inline uint64_t shift_mux_count(const hhds::Node_class& node) {
+  const auto op = type_op_of(node);
+  if (op != Ntype_op::SRA && op != Ntype_op::SHL) {
+    return 0;
+  }
+  const auto amount = get_driver_of_sink_name(node, "b");
+  if (amount.is_invalid() || is_const_pin(amount)) {
+    return 0;
+  }
+  return shift_detail::mux_count(node, op, amount, mappable_ge_weight(node));
+}
+
 // mappable_ge_weight already accounts for bit width and important type effects
 // (for example Mult is width squared and Sub instances are black boxes).
 // Runtime shifts need one more dimension: ABC expands one mux level per shift-
@@ -134,7 +145,7 @@ namespace livehd::graph_util {
   // factor captures that super-linear optimization cost while leaving non-shift
   // logic at the higher shared QoR ceiling. This factor is a TIME correction, so
   // it lives here and not in shift_mux_count's structural replay.
-  const uint64_t     muxes           = shift_mux_count(node);
+  const uint64_t     muxes           = shift_detail::mux_count(node, op, amount, full);
   constexpr uint64_t mux_gate_factor = 6;
   if (muxes > std::numeric_limits<uint64_t>::max() / mux_gate_factor) {
     return std::numeric_limits<uint64_t>::max();

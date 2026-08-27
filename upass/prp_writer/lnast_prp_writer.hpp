@@ -253,12 +253,20 @@ private:
   // array-to-array copy (`d = q`) into per-element stores (the recompile has
   // no lowering for a multi-element store between memories).
   absl::flat_hash_map<std::string, int64_t>     array_decl_size_;
+  // The ELEMENT window of those same arrays, for a `concat(arr)` lane: the
+  // splice has no single width operand of its own (each entry is its own
+  // window), so render_concat_rhs sizes the entries from here.
+  struct Array_elem {
+    int64_t bits      = 0;
+    bool    is_signed = false;
+  };
+  absl::flat_hash_map<std::string, Array_elem> array_decl_elem_;
   // The reader lowers `lhs = rhs@[N]` into a timecheck statement followed by
   // the store.  The immutable LNAST is indexed once so write_store never walks
   // all preceding siblings to rediscover the matching timecheck.
-  absl::flat_hash_map<int64_t, Lnast_nid>       store_timechecks_;
-  void                                          index_store_timechecks();
-  std::string                                   render_timecheck_suffix(Lnast_nid check) const;
+  absl::flat_hash_map<int64_t, Lnast_nid>      store_timechecks_;
+  void                                         index_store_timechecks();
+  std::string                                  render_timecheck_suffix(Lnast_nid check) const;
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
   // type suffix without moving the cursor: "" for prim_type_none, "bool",

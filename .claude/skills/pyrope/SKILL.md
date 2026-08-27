@@ -152,11 +152,23 @@ v#sext[0..=2]    // sign-extended slice
 v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce, popcount (lower to int 0/1)
 trans#[0] = v#[1]   // LHS bit assign; every dest bit driven exactly once
 const onehot = 1 << (1, 4, 3)        // == 0ub01_1010
+const z:u9 = concat(a, b, c)         // a:u4, b:u3, c:u2 — `a` lands in [8..5]
 ```
 
 `#[]` is bits, `[]` is tuple/array elements, `@[N]` is a cycle typecheck —
-never mix them. Bit concatenation = explicit per-range LHS assigns into a typed
-destination (no `{a,b}` form). Runtime bit indices (`a#[i]`) work.
+never mix them. Runtime bit indices (`a#[i]`) work.
+
+Two ways to pack bits: `concat(a, b, c)` — MSB-first, Verilog's `{a,b,c}` — or
+explicit per-range LHS assigns into a typed destination. A concat lane's window
+is its **declared type**, never its value or a literal's spelling (so a literal
+operand is an error — bind it to a typed name first), and the destination must
+declare the exact lane sum. A positional tuple or array lane splices its fields
+with **field 0 most significant**, so `concat(arr)` is the per-entry REVERSE of
+the whole-array read `x = arr` (which puts entry 0 in the LOW bits). A named
+bundle lane is rejected: names have identity but no order — select the fields
+yourself, `concat(t.hi, t.lo)`. Splicing a **`reg` array** reads it whole, which
+`inou.cgen` refuses unless the array is `:[ordering="old"]` (a whole read has no
+same-cycle forwarding model).
 
 ## Statements
 
@@ -487,7 +499,7 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 | `always @(posedge clk)` / `@(*)` | implicit — `reg` vs `mut` |
 | `case (x) ... endcase` | `match x { == v {...} else {...} }` |
 | `x[6:3]` | `x#[3..=6]` |
-| `{a, b}` concat | per-range LHS bit assigns into a typed dest |
+| `{a, b}` concat | `concat(a, b)`, or per-range LHS bit assigns into a typed dest |
 | `4'b10x?` / `x` value | `0ub10??` / `0sb?` |
 | one-hot mux / tri-state bus | `unique if` (lowers to `__hotmux`) |
 | Verilog reg memory read semantics | `reg mem:[N]T:[ordering="old"]` |

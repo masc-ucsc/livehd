@@ -1449,6 +1449,7 @@ void Lnast_prp_writer::write_module() {
     // it too, so an array the reader declared inside an `if` (and that the
     // prologue hoists to the function top) is registered like a top-level one.
     array_decl_size_.clear();
+    array_decl_elem_.clear();
     auto record_array_decl_size = [this](Lnast_nid c0, Lnast_nid ty) -> void {
       if (ty.is_invalid() || lnast->get_type(ty) != Lnast_ntype::Lnast_ntype_comp_type_array) {
         return;
@@ -1468,7 +1469,31 @@ void Lnast_prp_writer::write_module() {
       int64_t n = 0;
       if (auto [p, ec] = std::from_chars(sz.data() + 1, sz.data() + sz.size() - 1, n);
           ec == std::errc() && p == sz.data() + sz.size() - 1 && n > 0) {
-        array_decl_size_[std::string(strip_prefix(lnast->get_name(c0)))] = n;
+        const std::string nm(strip_prefix(lnast->get_name(c0)));
+        array_decl_size_[nm] = n;
+        // The element's declared WINDOW. `prim_type_int` carries its envelope
+        // as (max, min) consts: a negative min means a signed element, whose
+        // window is the wider of the two magnitudes; otherwise max's own width
+        // less its sign slot. Only a sized integer element qualifies -- an
+        // unsized or non-integer one states no window, and a concat window may
+        // never be guessed.
+        if (lnast->get_type(elem) == Lnast_ntype::Lnast_ntype_prim_type_int) {
+          auto mx = lnast->get_child(elem);
+          auto mn = mx.is_invalid() ? mx : lnast->get_sibling_next(mx);
+          if (!mx.is_invalid() && !mn.is_invalid() && Lnast_ntype::is_const(lnast->get_type(mx))
+              && Lnast_ntype::is_const(lnast->get_type(mn))) {
+            auto dmax = Dlop::from_pyrope(std::string(lnast->get_name(mx)));
+            auto dmin = Dlop::from_pyrope(std::string(lnast->get_name(mn)));
+            if (dmax && dmin && dmax->is_integer() && dmin->is_integer() && !dmax->has_unknowns() && !dmin->has_unknowns()) {
+              const bool    sgn  = dmin->is_negative();
+              const int64_t bits = sgn ? std::max<int64_t>(dmax->get_bits(), dmin->get_bits())
+                                       : (dmax->is_known_zero() ? 0 : dmax->get_bits() - 1);
+              if (bits > 0) {
+                array_decl_elem_[nm] = Array_elem{bits, sgn};
+              }
+            }
+          }
+        }
       }
     };
     for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
@@ -6362,7 +6387,8 @@ std::string Lnast_prp_writer::render_concat_rhs(Lnast_nid c0, bool operand_ctx) 
     std::string expr;
     int64_t     width  = 0;
     int64_t     offset = 0;
-    Lnast_nid   nid;  // the lane's value node (for the width/sign queries below)
+    Lnast_nid   nid;             // the lane's value node (for the width/sign queries below)
+    bool        fits_u = false;  // the window is known to hold the value unsigned already
   };
   std::vector<W_lane> wl;
   int64_t             total = 0;
@@ -6376,6 +6402,32 @@ std::string Lnast_prp_writer::render_concat_rhs(Lnast_nid c0, bool operand_ctx) 
     if (!wtxt.empty() && wtxt != "nil") {
       if (auto d = Dlop::from_pyrope(wtxt); d && d->is_integer() && d->is_just_i64()) {
         bits = d->to_just_i64();
+      }
+    }
+    // An ARRAY lane splices its entries, entry 0 MOST significant, so it never
+    // had a single window of its own -- its width operand is still the `nil`
+    // sentinel, and a `bits == 0` lane is DROPPED by the term loop below (the
+    // whole splice silently became 0). Spell it as the per-entry reads it
+    // means: `arr[k]` re-parses as the same lane list, and each entry's window
+    // is the element type the declaration states.
+    if (bits == 0 && Lnast_ntype::is_ref(lnast->get_type(v))) {
+      const std::string nm(strip_prefix(lnast->get_name(v)));
+      auto              sz = array_decl_size_.find(nm);
+      auto              el = array_decl_elem_.find(nm);
+      // No entry-count cap: the extent came from a declared `[N]`, so the
+      // netlist already carries N entries and N terms is proportional to it.
+      // A cap here would put the silent `= 0` back for exactly the arrays that
+      // are too big to notice it on.
+      if (sz != array_decl_size_.end() && el != array_decl_elem_.end() && sz->second > 0) {
+        for (int64_t k = 0; k < sz->second; ++k) {
+          // An unsigned element already sits inside its own window, so it
+          // enters the OR tree as itself; a signed one still needs the slice +
+          // `unsigned()` the term loop applies, or its sign would bleed into
+          // every entry above it.
+          wl.push_back(W_lane{std::format("{}[{}]", nm, k), el->second.bits, 0, Lnast_nid{}, !el->second.is_signed});
+        }
+        v = lnast->get_sibling_next(w);
+        continue;
       }
     }
     wl.push_back(W_lane{render_value(v, /*operand_ctx=*/true), bits, 0, v});
@@ -6434,7 +6486,7 @@ std::string Lnast_prp_writer::render_concat_rhs(Lnast_nid c0, bool operand_ctx) 
         continue;
       }
       term = *k;
-    } else if (fits_unsigned_bits(l.nid, l.width)) {
+    } else if (l.fits_u || fits_unsigned_bits(l.nid, l.width)) {
       term = l.expr;
     } else {
       term = std::format("unsigned({})", fmt_bit_range("(" + l.expr + ")", 0, static_cast<int>(l.width) - 1));

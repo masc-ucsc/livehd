@@ -278,19 +278,6 @@ void Pass_color::color(Eprp_var& var) {
   // A silent fallback here is a wrong ANSWER, not a wrong flag: `synth_alg=pipe`
   // and `synth_alg=synth` cut at different boundaries, and a typo used to mean
   // "synth" -- so it colored, exited 0, and reported nothing.
-  // A silent fallback here would be a wrong ANSWER, not a wrong flag -- and
-  // `true` is deliberately NOT accepted while the pair-vs-all question is still
-  // an open measurement: it would have to guess which one the user meant.
-  const auto forward = std::string{var.get("forward", "false")};
-  if (alg == "synth" && forward != "false" && forward != "off" && forward != "0" && forward != "pair" && forward != "all") {
-    livehd::diag::err("pass.color", "bad-forward", "unsupported")
-        .msg("unknown forward '{}' (expected false|pair|all)", forward)
-        .hint("pair: rank one Q-consumer color at a time, smallest combined size first")
-        .hint("all: rank the whole qualifying Q fanout as one all-or-nothing candidate")
-        .hint("forward only applies to synth_alg=cones; it runs AFTER the backward overlap merge")
-        .fatal();
-  }
-
   const auto synth_alg = std::string{var.get("synth_alg", "synth")};
   if (alg == "synth" && synth_alg != "synth" && synth_alg != "pipe" && synth_alg != "cones") {
     livehd::diag::err("pass.color", "bad-synth-alg", "unsupported")
@@ -298,6 +285,29 @@ void Pass_color::color(Eprp_var& var) {
         .hint("synth: cut at state AND large arithmetic (Mult/Div, Sum wider than 8)")
         .hint("pipe: cut at state only -- one region per pipeline stage")
         .hint("cones: one backward cone per register din/enable, merged by shared logic under `max_gate`")
+        .fatal();
+  }
+
+  // Same rule for the cones phase-2 knob, and `true` is deliberately NOT
+  // accepted while the pair-vs-all question is still an open measurement: it
+  // would have to guess which one the user meant. Asking for it under a mode
+  // that cannot honor it is refused for the same reason a typo is: `cones` is
+  // the only reader, so accepting it anywhere else would report a forward merge
+  // that never ran.
+  const auto forward    = std::string{var.get("forward", "false")};
+  const bool forward_on = forward == "pair" || forward == "all";
+  if (alg == "synth" && !forward_on && forward != "false" && forward != "off" && forward != "0") {
+    livehd::diag::err("pass.color", "bad-forward", "unsupported")
+        .msg("unknown forward '{}' (expected false|pair|all)", forward)
+        .hint("pair: rank one Q-consumer color at a time, smallest combined size first")
+        .hint("all: rank the whole qualifying Q fanout as one all-or-nothing candidate")
+        .hint("forward only applies to synth_alg=cones; it runs AFTER the backward overlap merge")
+        .fatal();
+  }
+  if (alg == "synth" && forward_on && synth_alg != "cones") {
+    livehd::diag::err("pass.color", "bad-forward", "unsupported")
+        .msg("forward '{}' needs synth_alg=cones; synth_alg is '{}', which has no forward merge", forward, synth_alg)
+        .hint("add --set color.synth_alg=cones, or drop --set color.forward")
         .fatal();
   }
 
@@ -312,7 +322,7 @@ void Pass_color::color(Eprp_var& var) {
   opts.max_ge       = parse_ge_bound(var, "max_ge", "25000");
   opts.name_weight  = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
   opts.max_gate     = parse_ge_bound(var, "max_gate", "30000");
-  opts.forward      = forward == "pair" || forward == "all" ? forward : std::string{};
+  opts.forward      = forward_on ? forward : std::string{};
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
     livehd::diag::err("pass.color", "bad-size-window", "io")

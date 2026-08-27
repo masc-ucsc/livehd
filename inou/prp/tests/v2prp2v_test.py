@@ -70,7 +70,9 @@ def _header(prp_path, key):
 def _modules(vpath):
     try:
         with open(vpath) as f:
-            return re.findall(r"\bmodule\s+\\?([^\s(]+)", f.read())
+            # Anchored at the START OF A LINE: an unanchored `\bmodule\s+` also matches the
+            # word inside a golden's own prose comment. See prplib.PrpRunner._verilog_modules.
+            return re.findall(r"^\s*module\s+\\?([^\s(]+)", f.read(), re.M)
     except OSError:
         return []
 

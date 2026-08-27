@@ -426,7 +426,11 @@ class PrpRunner:
                 text = f.read()
         except OSError:
             return []
-        return re.findall(r'\bmodule\s+\\?([^\s(]+)', text)
+        # Anchored at the START OF A LINE, deliberately: an unanchored `\bmodule\s+`
+        # matches the word inside a golden's own PROSE COMMENT ("the module carries"
+        # -> top 'carries'), which is a header comment away from silently picking the
+        # wrong top. Every Verilog module declaration begins its line.
+        return re.findall(r'^\s*module\s+\\?([^\s(]+)', text, re.M)
 
     @staticmethod
     def _verilog_top_module(vpath):

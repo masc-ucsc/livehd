@@ -37,11 +37,12 @@
 
 namespace livehd::graph_util {
 
-namespace predict_detail {
-
-// Every product and sum below saturates: a 1024-bit Mult inside a 64-bit
-// accumulator would otherwise wrap to a SMALL score and let the merge fold a
-// monster region.
+// Every product and sum in the table below saturates: a 1024-bit Mult inside a
+// 64-bit accumulator would otherwise wrap to a SMALL score and let the merge
+// fold a monster region. Public (not `predict_detail`) because the saturation
+// is only worth anything if the CONSUMERS keep it: a cone budget, a per-color
+// weight sum or a qor.json total that accumulates with a plain `+=` throws the
+// clamp away on its first add.
 [[nodiscard]] inline uint64_t sat_mul(uint64_t a, uint64_t b) {
   if (a == 0 || b == 0) {
     return 0;
@@ -58,6 +59,8 @@ namespace predict_detail {
   }
   return a + b;
 }
+
+namespace predict_detail {
 
 // An unknown required width degrades to 1 -- it must never make a LIVE
 // operation free, which is how a mis-ordered pass (color before bitwidth) would

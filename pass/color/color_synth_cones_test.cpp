@@ -48,6 +48,12 @@ Color_opts capped_opts(uint64_t max_gate) {
   return o;
 }
 
+Color_opts fwd_opts(uint64_t max_gate, const char* mode) {
+  Color_opts o = capped_opts(max_gate);
+  o.forward    = mode;
+  return o;
+}
+
 // A flop whose `din` is driven by `d`. Q width is stamped so the predictor sees
 // a real register rather than the unknown-width degradation.
 hhds::Node_class make_flop(hhds::Graph& g, const hhds::Pin_class& d, int32_t bits) {
@@ -624,4 +630,212 @@ TEST(ColorSynthCones, RuntimeSraKeepsItsConstantMaskSlice) {
   EXPECT_EQ(node_color_of(slice), node_color_of(sra)) << "a runtime SRA keeps its constant-mask slice";
   EXPECT_EQ(node_color_of(flop_wide), node_color_of(other));
   EXPECT_NE(node_color_of(flop_narrow), livehd::color::NO_COLOR);
+}
+
+
+// ---------------------------------------------------------------------------
+// The forward option (phase 2)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// data -> regA -> regB -> regC, a plain shift register. Each stage after the
+// first is a ONE-NODE color by ruling 4 (its din driver is a register, so its
+// root's walk claims nothing and it records no overlap) -- exactly the singleton
+// tail the forward option exists to collect.
+struct Chain_fixture {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             data, ra, rb, rc;
+};
+
+Chain_fixture shift_chain(const char* dir) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("cones_fwd_chain");
+  gio->add_input("a", 8);
+  gio->add_input("b", 8);
+  auto g = gio->create_graph();
+  set_bits(g->get_input_pin("a"), 8);
+  set_bits(g->get_input_pin("b"), 8);
+  auto data = create_typed_node(*g, Ntype_op::Xor, 8);  // 24
+  g->get_input_pin("a").connect_sink(data.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(data.create_sink_pin(0));
+  auto ra = make_flop(*g, data.create_driver_pin(0), 8);
+  auto rb = make_flop(*g, ra.create_driver_pin(0), 8);
+  auto rc = make_flop(*g, rb.create_driver_pin(0), 8);
+  return {g, data, ra, rb, rc};
+}
+
+}  // namespace
+
+// Inert by default: without the option the chain stays as one color per stage,
+// because none of those colors shares a sub-cone with anything.
+TEST(ColorSynthCones, ForwardIsOffByDefault) {
+  auto f = shift_chain("lgdb_cones_fwd_off");
+  Color_synth(capped_opts(100000), "cones").label(f.g.get());
+
+  EXPECT_EQ(node_color_of(f.ra), node_color_of(f.data));
+  EXPECT_NE(node_color_of(f.rb), node_color_of(f.ra));
+  EXPECT_NE(node_color_of(f.rc), node_color_of(f.rb));
+  EXPECT_EQ(color_count(f.g.get()), 3u);
+}
+
+// With the option on, the chain packs: each register merges across its Q into
+// the color it drives, smallest combined size first, and keeps going while it
+// fits. A shift-register flop predicts ZERO AIG, so nothing here ever stops it.
+TEST(ColorSynthCones, ForwardFusesARegisterChain) {
+  for (const char* mode : {"pair", "all"}) {
+    auto f = shift_chain(std::string{"lgdb_cones_fwd_on_"}.append(mode).c_str());
+    Color_synth(fwd_opts(100000, mode), "cones").label(f.g.get());
+
+    EXPECT_EQ(node_color_of(f.ra), node_color_of(f.rb)) << "mode " << mode;
+    EXPECT_EQ(node_color_of(f.rb), node_color_of(f.rc)) << "mode " << mode;
+    EXPECT_EQ(color_count(f.g.get()), 1u) << "mode " << mode;
+  }
+}
+
+// "merge forward between Q and DIN (not enable)". Following Q into a register's
+// enable would re-weld the control cone that the backward walk deliberately
+// split off, so an enable-only consumer is not a forward candidate at all.
+TEST(ColorSynthCones, ForwardNeverFollowsEnable) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cones_fwd_en");
+  auto  gio = lib.create_io("cones_fwd_en");
+  gio->add_input("a", 8);
+  gio->add_input("b", 8);
+  auto g = gio->create_graph();
+  set_bits(g->get_input_pin("a"), 8);
+  set_bits(g->get_input_pin("b"), 8);
+
+  auto da = create_typed_node(*g, Ntype_op::Xor, 8);
+  g->get_input_pin("a").connect_sink(da.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(da.create_sink_pin(0));
+  auto ra = make_flop(*g, da.create_driver_pin(0), 8);
+
+  auto db = create_typed_node(*g, Ntype_op::And, 8);
+  g->get_input_pin("a").connect_sink(db.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(db.create_sink_pin(0));
+  auto rb = make_flop(*g, db.create_driver_pin(0), 8);
+  ra.create_driver_pin(0).connect_sink(rb.create_sink_pin(4));  // Q -> ENABLE only
+
+  Color_synth(fwd_opts(100000, "pair"), "cones").label(g.get());
+
+  EXPECT_NE(node_color_of(ra), node_color_of(rb)) << "Q reached rb only through its enable";
+  EXPECT_EQ(node_color_of(ra), node_color_of(da));
+  EXPECT_EQ(node_color_of(rb), node_color_of(db));
+}
+
+namespace {
+
+// flopA <- xorA <- shared -> andB -> flopB   (the two share `shared`, overlap 24)
+// flopA.Q -> fwd -> flopC                    (no overlap with anything)
+// weights: A = xorA 24 + shared 24 = 48, B = andB 8 = 8, C = fwd 8 = 8.
+struct Order_fixture {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             xor_a, and_b, fwd, fa, fb, fc;
+};
+
+Order_fixture order_fixture(const char* dir) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("cones_fwd_order");
+  gio->add_input("i0", 8);
+  gio->add_input("i1", 8);
+  auto g = gio->create_graph();
+  set_bits(g->get_input_pin("i0"), 8);
+  set_bits(g->get_input_pin("i1"), 8);
+
+  auto shared = create_typed_node(*g, Ntype_op::Xor, 8);  // 24
+  g->get_input_pin("i0").connect_sink(shared.create_sink_pin(0));
+  g->get_input_pin("i1").connect_sink(shared.create_sink_pin(0));
+  auto xor_a = create_typed_node(*g, Ntype_op::Xor, 8);  // 24
+  shared.create_driver_pin(0).connect_sink(xor_a.create_sink_pin(0));
+  g->get_input_pin("i0").connect_sink(xor_a.create_sink_pin(0));
+  auto and_b = create_typed_node(*g, Ntype_op::And, 8);  // 8
+  shared.create_driver_pin(0).connect_sink(and_b.create_sink_pin(0));
+  g->get_input_pin("i1").connect_sink(and_b.create_sink_pin(0));
+
+  auto fa = make_flop(*g, xor_a.create_driver_pin(0), 8);
+  auto fb = make_flop(*g, and_b.create_driver_pin(0), 8);
+  auto fwd = create_typed_node(*g, Ntype_op::And, 8);  // 8
+  fa.create_driver_pin(0).connect_sink(fwd.create_sink_pin(0));
+  g->get_input_pin("i1").connect_sink(fwd.create_sink_pin(0));
+  auto fc = make_flop(*g, fwd.create_driver_pin(0), 8);
+  return {g, xor_a, and_b, fwd, fa, fb, fc};
+}
+
+}  // namespace
+
+// THE ordering ruling. At max_gate=56 exactly one merge fits, and the two orders
+// disagree about which:
+//   forward first  -> A(48)+C(8) = 56 fits, then A'(56)+B(8) = 64 refused: the
+//                     shared backward sub-cone stays SPLIT.
+//   backward first -> A(48)+B(8) = 56 fits, then A'(56)+C(8) = 64 refused.
+// The backward cones are what ABC optimizes, so they get first claim on the
+// budget and forward spends only the remainder.
+TEST(ColorSynthCones, BackwardMergeGetsTheBudgetBeforeForward) {
+  auto f = order_fixture("lgdb_cones_fwd_order");
+  Color_synth(fwd_opts(56, "pair"), "cones").label(f.g.get());
+
+  EXPECT_EQ(node_color_of(f.xor_a), node_color_of(f.and_b)) << "the overlapping backward pair merged first";
+  EXPECT_NE(node_color_of(f.fwd), node_color_of(f.xor_a)) << "the forward candidate was left the leftover budget, and 64 > 56";
+}
+
+// One predicted gate of headroom is all it takes: at 64 the forward merge fires
+// after the backward one, and the whole thing becomes a single color.
+TEST(ColorSynthCones, ForwardSpendsWhateverTheBackwardMergeLeaves) {
+  auto f = order_fixture("lgdb_cones_fwd_order_room");
+  Color_synth(fwd_opts(64, "pair"), "cones").label(f.g.get());
+
+  EXPECT_EQ(node_color_of(f.xor_a), node_color_of(f.and_b));
+  EXPECT_EQ(node_color_of(f.fwd), node_color_of(f.xor_a));
+  EXPECT_EQ(node_color_of(f.fc), node_color_of(f.fa));
+}
+
+// pair vs all, on the shape that separates them. regA (24) drives two colors
+// off its Q: a small one X (8) and a big one Y (96). Nothing overlaps, so the
+// backward phase merges nothing and this isolates phase 2. At max_gate=100:
+//   pair -> ranks (A,X)=32 and (A,Y)=120; the small one fires, the big one is
+//           then refused at 32+96=128. regA ends up with X.
+//   all  -> one all-or-nothing candidate {A,X,Y} = 128 > 100, so NOTHING fires.
+// This is exactly the trade the lhdsuite A/B has to settle: `all` keeps the Q
+// net whole at the cost of firing far less often.
+TEST(ColorSynthCones, PairFiresWhereAllRefuses) {
+  const auto build = [](const char* dir, const char* mode) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("cones_fwd_pva");
+    gio->add_input("a", 32);
+    gio->add_input("b", 32);
+    auto g = gio->create_graph();
+    set_bits(g->get_input_pin("a"), 32);
+    set_bits(g->get_input_pin("b"), 32);
+
+    auto da = create_typed_node(*g, Ntype_op::Xor, 8);  // 24
+    g->get_input_pin("a").connect_sink(da.create_sink_pin(0));
+    g->get_input_pin("b").connect_sink(da.create_sink_pin(0));
+    auto ra = make_flop(*g, da.create_driver_pin(0), 8);
+
+    auto n1 = create_typed_node(*g, Ntype_op::And, 8);  // 8
+    ra.create_driver_pin(0).connect_sink(n1.create_sink_pin(0));
+    g->get_input_pin("b").connect_sink(n1.create_sink_pin(0));
+    auto rb = make_flop(*g, n1.create_driver_pin(0), 8);
+
+    auto n2 = create_typed_node(*g, Ntype_op::Xor, 32);  // 96
+    ra.create_driver_pin(0).connect_sink(n2.create_sink_pin(0));
+    g->get_input_pin("b").connect_sink(n2.create_sink_pin(0));
+    auto rc = make_flop(*g, n2.create_driver_pin(0), 32);
+
+    Color_synth(fwd_opts(100, mode), "cones").label(g.get());
+    struct R {
+      int ra, n1, n2;
+    };
+    (void)rb;
+    (void)rc;
+    return R{node_color_of(ra), node_color_of(n1), node_color_of(n2)};
+  };
+
+  const auto p = build("lgdb_cones_pva_pair", "pair");
+  EXPECT_EQ(p.ra, p.n1) << "pair merged the small Q consumer";
+  EXPECT_NE(p.ra, p.n2) << "and then refused the big one at 128 > 100";
+
+  const auto a = build("lgdb_cones_pva_all", "all");
+  EXPECT_NE(a.ra, a.n1) << "all-or-nothing: the whole Q fanout is 128 > 100, so nothing merged";
+  EXPECT_NE(a.ra, a.n2);
 }
