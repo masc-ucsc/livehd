@@ -57,7 +57,8 @@ extern "C" {
 #include "base/cmd/cmd.h"
 #include "aig/hop/hop.h"
 #include "map/mio/mio.h"
-#include "map/scl/sclLib.h"  // SC_Lib::vTempls (the `buffer`/`upsize` timing gate)
+#include "map/scl/sclLib.h"  // SC_Lib: the parsed NLDM (the `buffer`/`upsize` + QoR timing gate)
+#include "map/scl/sclSize.h"  // SC_Man: physical NLDM QoR after sizing
 #include "misc/extra/extra.h"
 }
 // clang-format on
@@ -191,6 +192,34 @@ namespace {
 std::string flag_subst(std::string f, std::string_view tok, char flag, const std::string& val) {
   return subst(std::move(f), tok, val.empty() ? std::string{} : std::format("-{} {}", flag, val));
 }
+
+// `read_lib` retains scalar timing arcs too, but a physical GENLIB needs actual
+// slew/load surfaces. Its vTempls vector is not a capability flag: the
+// Liberty reader consumes templates while constructing the per-pin surfaces,
+// so a valid NLDM library such as ASAP7 can leave it empty. Inspect the parsed
+// inverter timing surface instead.
+//
+// This is the ONE library-capability predicate for every SCL command the pass
+// drives (the `buffer`/`upsize`/`dnsize` tail and the `stime`-shaped QoR
+// timer). It is deliberately STRICTER than ABC's own `Abc_SclHasDelayInfo`,
+// which is satisfied by a scalar-only arc: the SCL timer walks 2-D surfaces,
+// so a scalar Liberty that happens to declare `lu_table_template` must NOT be
+// accepted (the old vTempls proxy accepted exactly that, and rejected ASAP7).
+// `Abc_SclFindInvertor` cannot be trusted to return NULL when the library has
+// no inverter -- its `Vec_PtrForEachEntry` loop leaves the LAST cell class
+// assigned when nothing matches -- so re-check that the cell really is a
+// one-input inverter before indexing its timing arcs.
+bool lib_has_nldm_timing(const SC_Lib* lib) {
+  if (lib == nullptr) {
+    return false;
+  }
+  auto* inv = Abc_SclFindInvertor(const_cast<SC_Lib*>(lib), 0);
+  if (inv == nullptr || inv->n_inputs != 1) {
+    return false;
+  }
+  auto* timing = Scl_CellPinTime(inv, 0);
+  return timing != nullptr && Vec_FltSize(&timing->pCellRise.vIndex0) > 1 && Vec_FltSize(&timing->pCellRise.vIndex1) > 1;
+}
 }  // namespace
 
 // A built-in flow gains the buffering tail; a caller-supplied flow does not (it
@@ -210,12 +239,27 @@ std::string Mapper::subst_flow(std::string f) const {
   return subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
 }
 
-std::string Mapper::comb_flow() const {
-  return subst_flow(opts_.flow.empty() ? resolve_flow(kCombFlow) : opts_.flow);
-}
+std::string Mapper::comb_flow() const { return subst_flow(opts_.flow.empty() ? resolve_flow(kCombFlow) : opts_.flow); }
 
-std::string Mapper::seq_flow() const {
-  return subst_flow(opts_.flow.empty() ? resolve_flow(kSeqFlow) : opts_.flow);
+std::string Mapper::seq_flow() const { return subst_flow(opts_.flow.empty() ? resolve_flow(kSeqFlow) : opts_.flow); }
+
+bool Mapper::nldm_requested() const {
+  // The GENLIB is installed ONCE, in start(), before any region maps: swapping
+  // it mid-run would delete the Mio library that cell_descs_ is keyed on. So a
+  // delay target anywhere in the run-level options or the CLI region_opts must
+  // be visible here, not just `opts_.delay` for the current region.
+  //
+  // Graph-embedded overrides (coloring_info "region_opts") are NOT visible at
+  // startup -- they are parsed from each source graph inside map_region -- so a
+  // delay target supplied only through that channel still resolves against the
+  // unit-delay GENLIB. Use --set pass.abc.delay / pass.abc.region_opts for a
+  // physical delay model.
+  if (!startup_opts_.delay.empty()) {
+    return true;
+  }
+  return std::any_of(region_opts_cli_.begin(), region_opts_cli_.end(), [](const auto& kv) {
+    return kv.second.delay.has_value() && !kv.second.delay->empty();
+  });
 }
 
 std::string Mapper::resolve_recipe() const {
@@ -223,12 +267,21 @@ std::string Mapper::resolve_recipe() const {
   // under a different recipe. Both flow strings are pinned (map_region picks one
   // by mode, and the mode is in the salt); '|' separates fields that never
   // contain '|'.
-  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}",
+  //
+  // `nldm` is NOT derivable from the flow string: a region whose region_opts
+  // override `delay` back to empty maps with the run's gain-100 GENLIB yet
+  // spells the same `&nf` command as a plain unit-delay run. Without this field
+  // the incremental cache would hand that netlist (and its picosecond QoR row)
+  // to a later run that never installed the physical GENLIB. The Liberty
+  // content is already in Incr_cache::make_salt, so the request is the only
+  // missing half of the decision.
+  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}",
                      comb_flow(),
                      seq_flow(),
                      static_cast<int>(opts_.adder),
                      opts_.block_size,
-                     static_cast<int>(opts_.multiplier));
+                     static_cast<int>(opts_.multiplier),
+                     nldm_requested() ? 1 : 0);
 }
 
 bool Mapper::start() {
@@ -260,6 +313,44 @@ bool Mapper::start() {
   }
   lib_loaded_ = true;
 
+  if (nldm_requested()) {
+    auto* scl = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
+    if (lib_has_nldm_timing(scl)) {
+      // Gain 0 (read_lib's default) intentionally creates a unit-delay GENLIB
+      // (every pin 1.00), so every mapped delay is logic depth. Reinstall the
+      // GENLIB from the parsed NLDM at ABC's conventional gain=100 operating
+      // point; slew=0 asks ABC to choose a representative slew from the
+      // library. Keep every drive strength (fUseAll) so the SCL upsize/dnsize
+      // tail can find every cell it introduces. A representative-only GENLIB
+      // makes dnsize abort after upsize selects a non-representative ASAP7 cell.
+      const void* before_mio = Abc_FrameReadLibGen();
+      Abc_SclInstallGenlib(scl, 0.0f, 100.0f, 1, 0);
+      Mio_LibraryTransferCellIds();
+      // `Abc_SclInstallGenlib` is void: when the derived GENLIB fails to parse
+      // it only PRINTS and leaves the previous library installed. And ABC's SCL
+      // timer bails out of `Abc_SclMioGates2SclGates` with a null gate vector
+      // -- which the very next timing walk dereferences -- when the active
+      // GENLIB has no buffer cell. Verify both before trusting the physical
+      // path, or a "successful" install silently degrades into wrong numbers
+      // (or a segfault) later.
+      auto* mio = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
+      if (mio == nullptr || static_cast<const void*>(mio) == before_mio) {
+        std::print("[pass.abc] delay target: ABC could not derive a gain GENLIB from '{}'; keeping unit delay\n",
+                   startup_opts_.library);
+      } else if (Mio_LibraryReadBuf(mio) == nullptr) {
+        std::print(
+            "[pass.abc] delay target: '{}' has no buffer cell, so ABC cannot time a mapped network; "
+            "keeping unit delay\n",
+            startup_opts_.library);
+      } else {
+        nldm_genlib_loaded_ = true;
+      }
+    } else {
+      std::print("[pass.abc] delay target: '{}' has no 2-D slew/load NLDM tables; ABC is using unit delay\n",
+                 startup_opts_.library);
+    }
+  }
+
   // Register mapping target: scan the Liberty for a plain posedge D-flop (ABC's
   // read_lib already dropped it, so this is a separate text scan). A missing DFF
   // cell is not fatal — the read-back keeps flops native (the same shape as
@@ -280,7 +371,11 @@ bool Mapper::start() {
 void Mapper::stop() {
   if (pabc_ != nullptr) {
     Abc_Stop();
-    pabc_ = nullptr;
+    pabc_               = nullptr;
+    // The frame owned the derived GENLIB; a later start() must re-decide.
+    // (`lib_loaded_` deliberately survives -- work() reads abc_started() AFTER
+    // stop() to report whether ABC ran at all.)
+    nldm_genlib_loaded_ = false;
 #if defined(__APPLE__)
     // Abc_Stop releases the frame's last networks to malloc, but Darwin may
     // retain those pages and their xzone reservations. A large final color can
@@ -722,7 +817,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-      "(was {} MiB, color added {} MiB){}, {}{}",
+                     "(was {} MiB, color added {} MiB){}, {}{}",
       region,
       blasted,
       total,
@@ -1132,12 +1227,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   constexpr size_t kMaxRefusals = 10;
   size_t           refusals     = 0;
   const auto       refuse       = [&](const hhds::Node_class& bad,
-                                      std::string_view        code,
-                                      std::string_view        category,
-                                      std::string_view        what,
-                                      std::string_view        hint     = {},
-                                      const hhds::Pin_class&  note_pin = {},
-                                      std::string_view        note_msg = {}) {
+                          std::string_view        code,
+                          std::string_view        category,
+                          std::string_view        what,
+                          std::string_view        hint     = {},
+                          const hhds::Pin_class&  note_pin = {},
+                          std::string_view        note_msg = {}) {
     unsupported = true;
     if (refusals++ >= kMaxRefusals) {
       return;  // counted; the post-loop summary reports the total
@@ -2991,8 +3086,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // cache salt (Incr_cache::make_salt), so a recipe that still names the tail
   // cannot be reused across a library where the answer differs.
   if (opts_.max_fanout != 0) {
+    // Same predicate the GENLIB install uses. `vTempls` was a proxy for it and
+    // is wrong in BOTH directions: the Liberty reader consumes the templates
+    // while building the per-pin surfaces, so ASAP7 leaves it empty (the tail
+    // was silently dropped and fanout left uncapped), while a scalar-only
+    // Liberty that merely declares a template passed it and drove the SCL timer
+    // into its abort.
     const auto*       scl  = static_cast<const SC_Lib*>(Abc_FrameReadLibScl());
-    const bool        able = scl != nullptr && Vec_PtrSize(const_cast<Vec_Ptr_t*>(&scl->vTempls)) > 0;
+    const bool        able = lib_has_nldm_timing(scl);
     const std::string tail = subst_flow(std::string{kBufferTail});
     if (!tail.empty() && flow.ends_with(tail) && !able) {
       flow.resize(flow.size() - tail.size());
@@ -3002,10 +3103,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         // of the design, so it must not move `diagnostics_count` for every run
         // against a template-less Liberty (the same channel the register_max_bits
         // fallback above uses).
-        std::print("[pass.abc] max_fanout={}: '{}' declares no Liberty timing templates, so ABC cannot size cells -- "
-                   "skipping `buffer -N`/`upsize`/`dnsize`; mapped fanout is NOT capped\n",
-                   opts_.max_fanout,
-                   startup_opts_.library);
+        std::print(
+            "[pass.abc] max_fanout={}: '{}' has no 2-D slew/load NLDM timing tables, so ABC cannot size "
+            "cells -- skipping `buffer -N`/`upsize`/`dnsize`; mapped fanout is NOT capped\n",
+            opts_.max_fanout,
+            startup_opts_.library);
       }
     }
   }
@@ -3041,11 +3143,34 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
     if (auto* pMappedLogic = Abc_FrameReadNtk(frame); pMappedLogic != nullptr && Abc_NtkIsMappedLogic(pMappedLogic)) {
-      q.delay          = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
-      q.area           = Abc_NtkGetMappedArea(pMappedLogic);
-      q.gates          = Abc_NtkNodeNum(pMappedLogic);
+      q.delay = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
+      q.area  = Abc_NtkGetMappedArea(pMappedLogic);
+      q.gates = Abc_NtkNodeNum(pMappedLogic);
+      if (nldm_genlib_loaded_) {
+        // Abc_NtkDelayTrace uses the gain-model GENLIB. Once the sizing tail has
+        // selected concrete drive strengths, time the resulting network with
+        // those cells' actual NLDM surfaces, matching ABC's `stime` command
+        // (Abc_SclTimePerform). `stime` first REFUSES a network that is not in
+        // topo order or has dangling nodes: the SCL timer propagates in
+        // object-id order, so without that gate a bad network yields a silently
+        // wrong number instead of the honest delay-trace estimate.
+        auto* timing_ntk = pMappedLogic->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(pMappedLogic) : pMappedLogic;
+        if (Abc_SclCheckNtk(timing_ntk, 0)) {
+          auto* timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_ntk, 0, 1, 0.0f, 0);
+          q.delay      = timing->MaxDelay0;
+          q.area       = timing->SumArea0;
+          Abc_SclManFree(timing);
+        }
+        if (timing_ntk != pMappedLogic) {
+          Abc_NtkDelete(timing_ntk);
+        }
+      }
       // Worst-arrival REGION output (the delay trace leaves per-node arrivals
       // behind; POs beyond po_order are blackbox-input cuts, not outputs).
+      // NOTE: these arrivals are the GAIN-model ones -- the SCL timer's per-node
+      // times die with its SC_Man above -- so with a physical GENLIB
+      // `crit_output`/`crit_src` name the gain-model worst output, which need
+      // not be the one that sets `q.delay`.
       float      worst = -1.0f;
       int        wpo   = -1;
       Abc_Obj_t* pPo   = nullptr;

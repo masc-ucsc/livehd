@@ -53,6 +53,15 @@ struct Semdiff_options {
   // must not invalidate the parent (mirrors the digest path's interface mode).
   // UNSOUND for general LEC, where a comb Sub's input->output relation matters.
   bool                                             blackbox_subs     = false;
+  // When false, structural_match runs the byte-identical analysis and returns the
+  // byte-identical Match_result, but writes NO `match` attribute on either graph:
+  // the call becomes strictly READ-ONLY on its two inputs. Required by any caller
+  // that runs concurrently over graphs it shares with another thread (the
+  // top-down hierarchical LEC driver) -- a stamp mints/grows the shared graph's
+  // attr_stores_ vector, which is not safe against a concurrent reader.
+  // id_granularity=="region" needs the stamps to read ids back, so it is a no-op
+  // when this is false.
+  bool                                             stamp_matches     = true;
   // Explicit cross-side state correspondence supplied by the caller (lec.match):
   // {a_name, b_name} raw hier names. Each resolvable pair becomes a tier-1
   // anchor (a resolved point) exactly like a name match, so the tier-2
@@ -202,7 +211,9 @@ struct Match_result {
 // This is the RICH path: it stamps every node (the greppable diff), builds the
 // tier-2 state pairs, and fills the diverged-memory lists that lec's solver path
 // consumes when the match is NOT full. Use it when you need the correspondence,
-// not just the verdict.
+// not just the verdict. `opts.stamp_matches = false` keeps the analysis and the
+// Match_result byte-identical while suppressing only the two graph writes, for a
+// caller that shares its inputs with another thread.
 Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
 
 // FAST boolean: are `a` and `b` structurally identical? Same analysis and same
@@ -229,7 +240,7 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // one index use per lane, no activation/nesting, and a chain/single-reduction
 // composition. Every output cone and every live node must canonicalize under
 // the descriptor's virtual occurrences; unsupported shapes return false.
-[[nodiscard]] bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled);
+[[nodiscard]] bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool stamp_matches = true);
 
 // EXACT structural-equivalence proof by anchored parallel traversal -- the
 // verify-on-inconclusive fallback for abc incremental region reuse. Where

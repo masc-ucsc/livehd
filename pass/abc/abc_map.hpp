@@ -99,14 +99,18 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 
 // Per-region quality-of-results read back from ABC after mapping (2opt-freq A).
 // `delay` is ABC's mapped-delay estimate from the Liberty pin-to-pin data
-// (Abc_NtkDelayTrace) — the phase-1 frequency oracle. Per-region only: paths
+// (Abc_NtkDelayTrace) — the phase-1 frequency oracle. With a delay target and
+// an NLDM Liberty the mapper installs a physical gain-100 GENLIB, and then
+// `delay`/`area` come from ABC's SCL timer (`stime`) instead, in PICOSECONDS
+// (ABC normalizes every SCL library to ps/ff on read) rather than the
+// unit-delay logic depth an unset delay target reports. Per-region only: paths
 // crossing region/blackbox boundaries are invisible here (pass.opentimer is
 // the whole-design scorer).
 struct Region_qor {
   std::string module;  // region module name (<top>__c<color>)
   int         color       = 0;
-  uint64_t    input_nodes = 0;      // source-region nodes before bit blasting
-  uint64_t    input_ge    = 0;      // graph_util synthesis-GE estimate before ABC
+  uint64_t    input_nodes = 0;  // source-region nodes before bit blasting
+  uint64_t    input_ge    = 0;  // graph_util synthesis-GE estimate before ABC
   // Predicted generic-AIG size of the same cone (graph/predict_abc_size.hpp),
   // the unit `pass.color synth --set synth_alg=cones` thresholds on. Reported
   // NEXT TO input_ge, never instead of it: the two are different estimates of
@@ -116,7 +120,7 @@ struct Region_qor {
   uint64_t    pred_aig    = 0;
   int         gates       = 0;      // mapped standard cells
   double      area        = 0.0;    // sum of Liberty cell areas
-  float       delay       = -1.0f;  // critical arrival in library time units; <0 => unavailable
+  float       delay       = -1.0f;  // critical arrival (unit-delay depth, or ps with an NLDM GENLIB); <0 => unavailable
   std::string crit_output;          // region output port with the worst arrival
   std::string crit_src;             // "file:line" of that output's original driver (may be empty)
   // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
@@ -197,13 +201,16 @@ private:
   // (notably register_max_bits can turn register mapping off for one region).
   Map_options                                   startup_opts_;
   Map_options                                   opts_;
-  bool                                          flat_       = false;
-  void*                                         pabc_       = nullptr;  // Abc_Frame_t*
-  bool                                          lib_loaded_ = false;
+  bool                                          flat_               = false;
+  void*                                         pabc_               = nullptr;  // Abc_Frame_t*
+  bool                                          lib_loaded_         = false;
+  // The active GENLIB contains all cells with physical NLDM-derived delays, so
+  // ABC's sizing tail may safely introduce any SCL drive-strength variant.
+  bool                                          nldm_genlib_loaded_ = false;
   // One-shot: the Liberty gave ABC no SCL library, so the max_fanout tail
   // cannot run (see the strip in map_region). Warn once per Mapper, not once
   // per region.
-  bool                                          warned_no_scl_ = false;
+  bool                                          warned_no_scl_      = false;
   // Plain posedge D-flop found in the Liberty (register mapping target). Empty
   // when map_register is off or the library has no DFF cell — the read-back then
   // keeps flops native. Detected once in start().
@@ -246,6 +253,11 @@ private:
     std::vector<std::string>       input_names;
   };
   absl::flat_hash_map<const void*, Cell_desc> cell_descs_;
+
+  // Whether this run asks for a physical (gain-based NLDM) GENLIB: a run-level
+  // `delay`, or a CLI region_opts delay override. Constant for the whole run
+  // (the GENLIB is installed once in start()) and folded into resolve_recipe.
+  [[nodiscard]] bool nldm_requested() const;
 
   [[nodiscard]] std::string comb_flow() const;
   [[nodiscard]] std::string seq_flow() const;

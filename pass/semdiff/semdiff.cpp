@@ -1656,7 +1656,9 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
       } else {
         ++unmatched;
       }
-      stamp(node, id);
+      if (opts.stamp_matches) {
+        stamp(node, id);
+      }
     }
   };
   assign(sa, res.a_matched, res.a_unmatched);
@@ -1688,14 +1690,16 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
       stamp(node, id);
     }
   };
-  stamp_transparent(sa);
-  stamp_transparent(sb);
+  if (opts.stamp_matches) {
+    stamp_transparent(sa);
+    stamp_transparent(sb);
+  }
   res.regions = next_id - 1;
 
   // id_granularity=region: union ids that are adjacent through a matched edge in
   // `a`, then renumber. Ids are shared across sides, so the remap applies to b
   // too — re-stamp both graphs by reading back the pair id.
-  if (opts.id_granularity == "region" && res.regions > 0) {
+  if (opts.stamp_matches && opts.id_granularity == "region" && res.regions > 0) {
     std::vector<uint32_t> uf(res.regions + 1);
     for (uint32_t i = 0; i <= res.regions; ++i) {
       uf[i] = i;
@@ -2344,7 +2348,7 @@ int graph_input_uses(const hhds::Pin_class& root, const hhds::Pin_class& wanted,
 
 }  // namespace
 
-bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled) {
+bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool stamp_matches) {
   if (!same_io_contract(compact, unrolled)) {
     return false;
   }
@@ -2466,12 +2470,14 @@ bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled) {
 
   // The only mutation is an inspectable correspondence attribute after every
   // hard gate has discharged. No nodes or edges are added/removed.
-  gu::set_match(loop, 1);
-  for (const auto& node : body->body().nodes(hhds::Node_order::forward)) {
-    gu::set_match(node, 1);
-  }
-  for (const auto& node : unrolled->body().nodes(hhds::Node_order::forward)) {
-    gu::set_match(node, 1);
+  if (stamp_matches) {
+    gu::set_match(loop, 1);
+    for (const auto& node : body->body().nodes(hhds::Node_order::forward)) {
+      gu::set_match(node, 1);
+    }
+    for (const auto& node : unrolled->body().nodes(hhds::Node_order::forward)) {
+      gu::set_match(node, 1);
+    }
   }
   return true;
 }

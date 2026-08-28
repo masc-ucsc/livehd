@@ -23,6 +23,7 @@ set -u
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
+TIMING_LIB=inou/prp/tests/abc/timing.lib
 PRP=inou/prp/tests/pyrope/abc_comb.prp
 TOP=abc_comb.abc_comb
 W="${TEST_TMPDIR:-/tmp/lhd_abc_$$}"
@@ -90,6 +91,33 @@ if "$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref veril
 fi
 
 echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative control)"
+
+# A delay target must switch ABC from read_lib's default unit-delay GENLIB to a
+# GENLIB derived from the Liberty's 2-D NLDM tables. Without that conversion,
+# `&nf -D 1000` constrains logic depth and the reported delay stays a small
+# integer. The timed run also exercises the SCL sizing tail with two NAND drive
+# strengths; ABC must be able to find every cell that upsize/dnsize introduces.
+T="$W/timing"
+mkdir -p "$T"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/unit" --set abc.library="$TIMING_LIB" \
+    --set abc.max_fanout=0 --workdir "$T/w_unit"
+unit_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/timed" --set abc.library="$TIMING_LIB" \
+    --set abc.delay=1000 --workdir "$T/w_timed"
+timed_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
+awk -v unit="$unit_delay" -v timed="$timed_delay" 'BEGIN { exit !(unit > 0 && unit < 10 && timed > 10) }' \
+  || fail "delay target did not activate NLDM timing (unit=$unit_delay timed=$timed_delay)"
+# Every Liberty cell must appear (all drive strengths), plus ABC's two constant
+# gates. Derived from the .lib so adding a cell does not silently break this.
+want_gates=$(( $(grep -c '^  cell(' "$TIMING_LIB") + 2 ))
+grep -q "Derived GENLIB library .* with $want_gates gates .* gain 100.00" "$T/w_timed/logs/"*_lhd_pass_abc.log \
+  || fail "timed mapping did not derive an all-drive-strength gain-100 GENLIB ($want_gates gates expected)"
+run compile lg:"$T/timed" --top "$TOP" --recipe O0 --emit-dir verilog:"$T/netv" --workdir "$T/w_emit"
+run pass liberty gensim "$TIMING_LIB" --emit-dir lg:"$T/models" --workdir "$T/w_models"
+run compile lg:"$T/models" --recipe O0 --emit-dir verilog:"$T/modelsv" --workdir "$T/w_modelsv"
+cat "$T/netv/"*.v "$T/modelsv/"*.v > "$T/impl.v"
+run lec --set formal.solver=lgyosys --impl verilog:"$T/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$T/w_lec"
+echo "PASS: pass.abc delay target uses physical NLDM delays (unit=$unit_delay ps, timed=$timed_delay ps)"
 
 # ---------------------------------------------------------------------------
 # No prior coloring: `pass abc` must run WITHOUT `pass color` first. Color 0 (an

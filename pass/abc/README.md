@@ -131,6 +131,32 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
 | `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |
 
+When a delay target is requested (`delay`, or a `region_opts` `delay` supplied
+through `--set`) and the Liberty contains 2-D NLDM slew/load tables, `pass.abc`
+replaces `read_lib -s`'s default **unit-delay** GENLIB (every pin 1.00, so every
+mapped delay is logic depth) with one derived from the parsed NLDM at ABC's
+conventional gain-100 operating point. All drive strengths remain available so
+the built-in `upsize`/`dnsize` tail can optimize the mapped cells using their
+NLDM surfaces, and the reported regional delay/area are recomputed with the same
+physical SCL timer ABC's `stime` uses. Libraries containing only scalar delays
+retain unit-delay mapping and produce a note, as does a library whose derived
+GENLIB fails to build or has no buffer cell (ABC's SCL timer requires one).
+
+Two caveats, both about `{D}` itself:
+
+- The numbers are **picoseconds regardless of the Liberty's `time_unit`** — ABC
+  normalizes every SCL library to ps/ff on read (`Abc_SclLibNormalize`), so a
+  `time_unit : "1ns"` Liberty still reports and consumes ps here.
+- The pinned ABC revision's `&nf` **parses `-D` but never reads it**
+  (`giaNf.c` only consults `MapDelayTarget`, which `-D` does not set), so today
+  `delay` selects the delay *model* and the QoR units — it is not yet a binding
+  constraint on the mapper. A per-output required time would have to come from
+  ABC's `read_constr`/`Scl_Con` channel.
+
+A delay target that arrives ONLY through the graph-embedded `coloring_info`
+`region_opts` channel does not switch the GENLIB: it is parsed per region, while
+the GENLIB must be installed once before the first region maps.
+
 ### Per-region overrides (`region_opts`, 2opt-freq C)
 
 `flow`/`delay`/`load`/`adder`/`block_size`/`multiplier` can be overridden **per
@@ -187,8 +213,11 @@ link. Keep `kAbcAliases` and that help text in sync.
 After each region's flow, while ABC still holds the mapped *logic* network, the
 pass reads back the region's **gates / Liberty area / critical delay**
 (`Abc_NtkDelayTrace` over the Liberty pin-to-pin data — the same estimate ABC's
-`print_stats` shows after mapping) plus the **worst-arrival region output**,
-source-attributed to `file:line` through the output driver's `srcid`. One line
+`print_stats` shows after mapping; with a physical NLDM GENLIB installed, see
+`delay` above, the delay/area are instead retimed with ABC's SCL `stime` engine)
+plus the **worst-arrival region output**, which stays the `Abc_NtkDelayTrace`
+worst output, source-attributed to `file:line` through the output driver's
+`srcid`. One line
 per region goes to the step log, a `pass.abc qor:` summary follows the region
 loop, and with `qor=FILE` the whole thing is written as JSON:
 

@@ -1662,6 +1662,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       so.matching_names             = true;  // anchor flops/mems by hier name (lec's correspondence basis)
       so.state_pairing              = want_pairing;
       so.seed_pairs                 = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
+      // Defs run CONCURRENTLY (dispatch_dag below: top_down emits no edges at
+      // all, and bottom_up still runs siblings in parallel) over graphs they all
+      // share, and a parent's mixed-loop normalization deep-copies its children's
+      // bodies out of the same library. semdiff must therefore not stamp: a
+      // `match` write grows the shared graph's attr_stores_ under another
+      // worker's clone_attr_stores_from. Nothing in this driver reads the mark.
+      so.stamp_matches              = false;
       // `kids_proven` is as load-bearing here as it is for the plain structural
       // skip below: the normalization inlines ONLY the lifted loop bodies, so
       // every other child Sub stays an opaque node matched by name/def identity
@@ -1672,7 +1679,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       if (o.semdiff != "none" && kids_proven && !o.design_assumes && mixed_loop_repr) {
         auto* compact            = ref_loop ? ref_by_name[name] : impl_by_name[name];
         auto* unrolled           = ref_loop ? impl_by_name[name] : ref_by_name[name];
-        virtual_loop_fold        = livehd::semdiff::folded_loop_identical(compact, unrolled);
+        virtual_loop_fold        = livehd::semdiff::folded_loop_identical(compact, unrolled, /*stamp_matches=*/false);
         normalized_loop_identity = virtual_loop_fold || mixed_loop_structural_identity(compact, unrolled, so);
       }
       if (normalized_loop_identity) {
