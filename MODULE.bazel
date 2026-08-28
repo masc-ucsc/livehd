@@ -49,7 +49,7 @@ llvm_configure(name = "llvm-project", targets = ["AArch64", "X86"])
 
 bazel_dep(name = "abseil-cpp", version = "20250814.2") # version = "20240722.1")
 bazel_dep(name = "google_benchmark", version = "1.9.5")
-bazel_dep(name = "googletest", version = "1.18.0")
+bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 
 # Taskflow (the formal proof DAG and OpenTimer) is consumed via
 # @opentimer//:taskflow — the copy OpenTimer bundles under ot/taskflow — NOT a
