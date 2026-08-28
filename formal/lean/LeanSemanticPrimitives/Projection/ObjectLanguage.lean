@@ -87,8 +87,13 @@ inductive Prim where
   | ltI  | leI  | eqI
   -- booleans
   | andB | orB | notB
-  -- lists
-  | isNil | hd | tl
+  -- lists.  `consP` is the only way to BUILD one: `ctorT` has a static field
+  -- count, so variable-length data has to be a cons chain, and a chain that
+  -- cannot be extended is useless.
+  | isNil | hd | tl | consP
+  -- structural equality on values, which `mix`'s memo table is keyed on and
+  -- which `eqI` (integers only) cannot provide
+  | eqV
   -- bit vectors, as LGraphModel's BV = ⟨width, value⟩
   | bvMk | bvWidth | bvUint | bvBit
   | bvAnd | bvOr | bvXor | bvNot
@@ -103,6 +108,7 @@ def Prim.arity : Prim → Nat
   | .andB | .orB                          => 2
   | .notB                                 => 1
   | .isNil | .hd | .tl                    => 1
+  | .consP | .eqV                         => 2
   | .bvMk                                 => 2
   | .bvWidth | .bvUint                    => 1
   | .bvBit                                => 2

@@ -75,6 +75,8 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
   | .isNil, [v] => .ok (.bool (match v with | .nil => true | _ => false))
   | .hd, [.cons a _] => .ok a
   | .tl, [.cons _ d] => .ok d
+  | .consP, [a, d]   => .ok (.cons a d)
+  | .eqV, [a, b]     => .ok (.bool (Val.beq a b))
   | .bvMk,    [.int w, .int v] => .ok (bvNorm w v)
   | .bvWidth, [v] => match asBV v with | some (w, _) => .ok (.int w) | none => .error "bvWidth: not a BV"
   | .bvUint,  [v] => match asBV v with
