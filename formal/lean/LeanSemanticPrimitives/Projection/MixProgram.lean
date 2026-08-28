@@ -75,6 +75,12 @@ private def pair_ (a b : SExp) := cons_ a b
 private def fst_ (e : SExp) := hd_ e
 private def snd_ (e : SExp) := tl_ e
 
+/-- Triples, for `mixUArgsL`, which returns results, argument codes and requests. -/
+private def triple_ (a b c : SExp) := cons_ a (cons_ b c)
+private def t1_ (e : SExp) := hd_ e
+private def t2_ (e : SExp) := hd_ (tl_ e)
+private def t3_ (e : SExp) := tl_ (tl_ e)
+
 /-! ### Encoded `Term` constructors, as the residual program's syntax -/
 
 private def eLit   (v : SExp)          := SExp.mk tagLit   [v]
@@ -234,25 +240,28 @@ private def mixTermAlts : List SAlt :=
                      (C "appendL" [R "q", cons_ (R "req") nil_])))
 
         , (tagAUcall, ["b", "f", "ts"],
-            .letN "o" (C "mixTerms" [R "A", R "reqs", R "D", R "env", R "ts"]) <|
-            .letN "rs" (fst_ (R "o")) <|
-            .letN "q" (snd_ (R "o")) <|
             .letN "fd" (C "fnOf" [R "A", R "f"]) <|
             .letN "ps" (C "funParams" [R "fd"]) <|
             .ite (eq_ (R "b") (K 0))
-              (.letN "o2" (C "mixTerm"
+              (.letN "o" (C "mixTerms" [R "A", R "reqs", R "D", R "env", R "ts"]) <|
+               .letN "o2" (C "mixTerm"
                   [R "A", R "reqs", R "ps",
-                   C "mapPStat" [C "allStaticL" [R "rs"]], C "funBody" [R "fd"]])
-                (pair_ (fst_ (R "o2")) (C "appendL" [R "q", snd_ (R "o2")])))
-              -- inline: bind each dynamic argument once, then specialize the body
-              (.letN "dts" (C "splitDyns" [R "ps", R "rs"]) <|
+                   C "mapPStat" [C "allStaticL" [fst_ (R "o")]], C "funBody" [R "fd"]]) <|
+               pair_ (fst_ (R "o2")) (C "appendL" [snd_ (R "o"), snd_ (R "o2")]))
+              -- inline: bind each dynamic argument once, then specialize the
+              -- body.  The arguments go through mixUArgsL, which threads the
+              -- residual scope -- argument j sits under the binders of the
+              -- dynamic arguments before it.
+              (.letN "u" (C "mixUArgsL"
+                  [R "A", R "reqs", R "D", R "env", R "ps", R "ts"]) <|
+               .letN "dts" (t2_ (R "u")) <|
                .letN "kk"  (C "dynCountL" [R "ps"]) <|
                .letN "o2" (C "mixTerm"
                    [R "A", R "reqs", R "ps",
-                    C "inlineEnvL" [R "ps", R "rs", R "kk", K 0],
+                    C "inlineEnvL" [R "ps", t1_ (R "u"), R "kk", K 0],
                     C "funBody" [R "fd"]]) <|
                pair_ (rCode (C "wrapLetsL" [R "dts", C "toCode" [fst_ (R "o2")]]))
-                     (C "appendL" [R "q", snd_ (R "o2")]))) ]
+                     (C "appendL" [t3_ (R "u"), snd_ (R "o2")]))) ]
 
 /-! ## The program -/
 
@@ -509,6 +518,31 @@ def mixS : SProgram where
               C "appendL" [C "mapPStat" [P1 .ctorFieldsP (R "sv")], R "env"],
               C "altBody" [R "a"]])
            (C "mixCaseSel" [R "A", R "reqs", R "D", R "env", tl_ (R "as"), R "sv"])) }
+
+  -- Arguments of an UNFOLDED call, with the residual scope threaded.
+  --
+  -- mixTerms mixes every argument in the same environment, which is right
+  -- wherever the residual node introduces no binder.  Unfolding wraps one let
+  -- per dynamic argument, so argument j sits under the binders of arguments
+  -- 0..j-1: mixed in the caller's environment its de Bruijn indices come out
+  -- short by the number of preceding dynamic arguments and it reads the wrong
+  -- variable.  Static arguments do not shift, so mixing them deeper is
+  -- harmless.
+  , { name := "mixUArgsL", params := ["A", "reqs", "D", "env", "params", "ts"]
+    , body := .ite (isNil_ (R "params")) (triple_ nil_ nil_ nil_)
+        (.letN "o1" (C "mixTerm" [R "A", R "reqs", R "D", R "env", hd_ (R "ts")]) <|
+         .ite (eq_ (hd_ (R "params")) (K 0))
+           (.letN "o2" (C "mixUArgsL"
+               [R "A", R "reqs", R "D", R "env", tl_ (R "params"), tl_ (R "ts")]) <|
+            triple_ (cons_ (fst_ (R "o1")) (t1_ (R "o2")))
+                    (t2_ (R "o2"))
+                    (C "appendL" [snd_ (R "o1"), t3_ (R "o2")]))
+           (.letN "o2" (C "mixUArgsL"
+               [R "A", R "reqs", R "D", C "shiftEnv" [K 1, R "env"],
+                tl_ (R "params"), tl_ (R "ts")]) <|
+            triple_ (cons_ (fst_ (R "o1")) (t1_ (R "o2")))
+                    (cons_ (C "toCode" [fst_ (R "o1")]) (t2_ (R "o2")))
+                    (C "appendL" [snd_ (R "o1"), t3_ (R "o2")]))) }
 
   , { name := "mixTerms", params := ["A", "reqs", "D", "env", "ts"]
     , body := .ite (isNil_ (R "ts")) (pair_ nil_ nil_)

@@ -230,4 +230,51 @@ theorem buildEnv_Compat : ∀ (ps : Div) (svs pre ds : List Val) (env : PEnv) (�
   | .dyn :: _,   _,       _, [],     _, _, _,  hs => by simp [srcArgs] at hs
   | [],          [],      _, _ :: _, _, _, _,  hs => by simp [srcArgs] at hs
 
+/-! ## The residual function table
+
+`generate` produces one residual function per request, in order, so residual
+function `i` is the specialization of request `i`. -/
+
+theorem generateFrom_spec {stepFuel : Nat} {A : AProgram} {idx : SpecRequest → Option Nat} :
+    ∀ (rs : List SpecRequest) (funs : List FunDef),
+      generateFrom stepFuel A idx rs = .ok funs →
+      ∀ (i : Nat) (req : SpecRequest), rs[i]? = some req →
+        ∃ fd rq, mixFun stepFuel A idx req = .ok (fd, rq) ∧ funs[i]? = some fd
+  | [],      _,    h, i, _,   hi => by simp at hi
+  | r :: rs, funs, h, i, req, hi => by
+      simp only [generateFrom] at h
+      split at h <;> try contradiction
+      rename_i fd rq fds hfd hfds
+      cases h
+      cases i with
+      | zero =>
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at hi
+          cases hi
+          exact ⟨fd, rq, hfd, by simp⟩
+      | succ n =>
+          obtain ⟨fd', rq', h1, h2⟩ :=
+            generateFrom_spec rs fds hfds n req (by simpa using hi)
+          exact ⟨fd', rq', h1, by simpa using h2⟩
+
+/-! ## What it means for the residual table to be right
+
+`SpecOK … m` is the statement indexed by SOURCE FUEL, and that is what makes the
+knot untieable.  A specialized function's correctness depends on the correctness
+of the functions it calls -- including itself -- so no structural induction
+closes the loop.  Source fuel does: a call evaluates its callee at strictly less
+fuel, so `SpecOK m` needs only `SpecOK k` for `k < m`, and the whole family
+follows by strong induction on `m`.
+
+Note the direction: this is PRESERVATION -- whatever the source computes, the
+residual computes too.  Soundness (the residual computes nothing else) is the
+mirror statement indexed by residual fuel. -/
+
+def SpecOK (A : AProgram) (Pr : Program) (reqs : List SpecRequest) (m : Nat) : Prop :=
+  ∀ (i : Nat) (req : SpecRequest), reqs[i]? = some req →
+    ∃ fd afd, Pr.funs[i]? = some fd ∧ A.fn req.funIdx = some afd ∧
+      ∀ (ds ρs : List Val) (v : Val),
+        srcArgs afd.params req.staticArgs ds = some ρs →
+        evalFuel m (eraseProgram A) ρs (erase afd.body) = .value v →
+        Eval Pr ds fd.body v
+
 end Projection

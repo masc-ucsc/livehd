@@ -192,6 +192,52 @@ def residual2P : Program := match residual2 with | .ok p => p | .error _ => ⟨[
 #guard evalFuel 200 residual2P [] (.call 0 [.lit sampleEnv]) == .value (.int 56)
 #guard ((residual2P.funs.map (fun fd => countCaseT fd.body)).foldl (· + ·) 0) == 0
 
+/-! ## Regression: an unfolded call with TWO dynamic arguments
+
+Unfolding wraps one residual `let` per dynamic argument, so argument 1 is
+evaluated underneath argument 0's binder.  Mixed in the caller's environment its
+de Bruijn indices come out one short and it reads the wrong variable.
+
+Nothing above catches this: `interp` and `nth` each take exactly one dynamic
+argument, and with one argument there is one binder and no shift.  The check
+below is the smallest program that does catch it -- `sub` is unfolded with two
+dynamic arguments that must NOT be confused, and `subI` is not commutative, so
+swapping them changes the answer. -/
+
+open Surface in
+def twoArgS : SProgram where
+  entry := "main"
+  funs :=
+    [ { name := "main", params := ["s", "x", "y"]
+      , body := .call "sub" [.prim .addI [.ref "x", .ref "s"], .ref "y"] }
+    , { name := "sub", params := ["a", "b"], inline := true
+      , body := .prim .subI [.ref "a", .ref "b"] } ]
+
+def twoArgResolved : Except String (Program × List Bool) := Surface.resolveProgram twoArgS
+#guard twoArgResolved.toOption.isSome
+
+def twoArgP   : Program   := match twoArgResolved with | .ok (p, _) => p | .error _ => ⟨[], 0⟩
+def twoArgInl : List Bool := match twoArgResolved with | .ok (_, i) => i | .error _ => []
+
+-- `s` static, `x` and `y` dynamic
+def twoArgA : AProgram :=
+  match bta twoArgP twoArgInl [.stat, .dyn, .dyn] 50 with
+  | .ok a => a | .error _ => ⟨[], 0⟩
+
+#guard wfAProgram twoArgA
+
+def twoArgRes : Program :=
+  match mixDriver 500 100 twoArgA [.int 10] with | .ok p => p | .error _ => ⟨[], 0⟩
+
+-- source:  main 10 7 2  =  sub (7 + 10) 2  =  15
+#guard evalFuel 500 twoArgP [] (.call 0 [.lit (.int 10), .lit (.int 7), .lit (.int 2)])
+         == .value (.int 15)
+
+-- residual, on the dynamic arguments alone.  With the arguments mixed in the
+-- caller's environment this yielded the wrong value, because argument 1 read
+-- argument 0's binder.
+#guard evalFuel 500 twoArgRes [] (.call 0 [.lit (.int 7), .lit (.int 2)])
+         == .value (.int 15)
 
 end Demo
 end Projection

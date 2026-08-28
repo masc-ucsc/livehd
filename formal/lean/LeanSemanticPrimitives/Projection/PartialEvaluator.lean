@@ -205,6 +205,18 @@ def wrapLets : List Term → Term → Term
   | [],      body => body
   | e :: es, body => .letIn e (wrapLets es body)
 
+/-- Is every parameter static?
+
+Checked rather than assumed.  A call whose RESULT is static must be unfolded in
+an environment `mix` fully knows, which is only possible if the callee has no
+dynamic parameter.  Well-annotatedness already guarantees it -- the congruence
+rule forces every operand of a static node static -- but checking here means
+`mix_sound` needs no `wfAProgram` hypothesis, and the cost is one `Bool`. -/
+def allStatDiv : Div → Bool
+  | []          => true
+  | .stat :: bs => allStatDiv bs
+  | .dyn :: _   => false
+
 def findAAlt : List AAlt → Nat → Option AAlt
   | [],      _ => none
   | a :: as, t => if a.tag = t then some a else findAAlt as t
@@ -313,10 +325,12 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | some fd =>
         match b with
         -- a static result cannot come out of a residual call, so unfold
-        | .stat => do
+        | .stat =>
+          if allStatDiv fd.params then do
             let vs ← allStatic rs
             let (r, rq₂) ← mixTerm n A idx fd.params (vs.map PVal.stat) fd.body
             .ok (r, rq₁ ++ rq₂)
+          else .error (.illAnnotated "static call to a function with a dynamic parameter")
         -- ask the driver for a specialized copy and emit a call to it
         | .dyn => do
             let (svs, dts) ← splitArgs fd.params rs
@@ -324,27 +338,63 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
             match idx req with
             | none   => .error (.noSpec f)
             | some k => .ok (.code (.call k dts), rq₁ ++ [req])
-    | .ucall b f ts => do
-      let (rs, rq₁) ← mixTerms n A idx Δ env ts
+    | .ucall b f ts =>
       match A.fn f with
       | none => .error (.unknownFun f)
       | some fd =>
         match b with
         | .stat => do
+          let (rs, rq₁) ← mixTerms n A idx Δ env ts
+          if allStatDiv fd.params then do
             let vs ← allStatic rs
             let (r, rq₂) ← mixTerm n A idx fd.params (vs.map PVal.stat) fd.body
             .ok (r, rq₁ ++ rq₂)
+          else .error (.illAnnotated "static unfold of a function with a dynamic parameter")
         -- inline into residual code.  Each dynamic argument is `let`-bound
         -- once, which is both what keeps `PVal.dyn` a plain index -- the body
         -- is specialized in a scope whose shape we chose -- and what stops an
         -- argument expression being duplicated at each of its uses.
         | .dyn => do
-            let dts ← dynArgCodes fd.params rs
-            let env' ← inlineEnv fd.params rs dts.length 0
-            let (r, rq₂) ← mixTerm n A idx fd.params env' fd.body
+            let (rs', dts, rq₂) ← mixUArgs n A idx Δ env fd.params ts
+            let env' ← inlineEnv fd.params rs' dts.length 0
+            let (r, rq₃) ← mixTerm n A idx fd.params env' fd.body
             match r with
-            | .code b' => .ok (.code (wrapLets dts b'), rq₁ ++ rq₂)
+            | .code b' => .ok (.code (wrapLets dts b'), rq₂ ++ rq₃)
             | .stat _  => .error (.illAnnotated "ucall: dynamic unfold with a static body")
+
+/-- Arguments of an UNFOLDED call, mixed left to right with the residual scope
+threaded.
+
+`mixTerms` mixes every argument in the same environment, which is right
+everywhere a residual node introduces no binder -- `prim`, `ctorT`, a
+residualized `call`, the branches of an `ite`.  It is WRONG here.  Unfolding
+wraps one `let` per dynamic argument, so argument `j` is evaluated underneath
+the binders of arguments `0 … j-1`: mixed in the caller's environment its de
+Bruijn indices come out short by exactly the number of preceding dynamic
+arguments, and it silently reads the wrong variables.
+
+Shifting the emitted terms afterwards would also work and would need a de Bruijn
+weakening operation on residual terms, plus its correctness lemma.  Threading
+the environment instead costs one `shiftBy` and no new theory: each argument is
+mixed in the environment that already accounts for the binders in front of it.
+
+Static arguments do not shift -- `shiftBy` leaves static entries alone -- so
+mixing them one binder deeper produces the same value. -/
+def mixUArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → Div →
+    List ATerm → Except MixError (List PRes × List Term × List SpecRequest)
+  | _, _, _, _, _, [], [] => .ok ([], [], [])
+  | n, A, idx, Δ, env, .stat :: ps, t :: ts => do
+      let (r, rq₁)        ← mixTerm n A idx Δ env t
+      let (rs, dts, rq₂)  ← mixUArgs n A idx Δ env ps ts
+      .ok (r :: rs, dts, rq₁ ++ rq₂)
+  | n, A, idx, Δ, env, .dyn :: ps, t :: ts => do
+      let (r, rq₁)        ← mixTerm n A idx Δ env t
+      -- this argument becomes a residual binder, so everything after it is
+      -- mixed one binder deeper
+      let (rs, dts, rq₂)  ← mixUArgs n A idx Δ (env.shiftBy 1) ps ts
+      .ok (r :: rs, r.toCode :: dts, rq₁ ++ rq₂)
+  | _, _, _, _, _, _, _ =>
+      .error (.badArity "unfold: argument count does not match the division")
 
 def mixTerms : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → List ATerm →
     Except MixError (List PRes × List SpecRequest)

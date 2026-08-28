@@ -26,7 +26,7 @@ open MixProg
 /-! ## (a) `mixProgram` against the Lean specializer -/
 
 #guard mixResolved.toOption.isSome
-#guard mixProgram.funs.length == 52
+#guard mixProgram.funs.length == 53
 
 /-- Run the object-level specializer on the toy interpreter and the sample
 expression -- the same inputs `Demo.residual2` gave the Lean specializer. -/
@@ -50,6 +50,13 @@ def objP : Program := objProgram.getD ⟨[], 0⟩
 
 -- and it computes what the interpreter computed
 #guard evalFuel 200 objP [] (.call 0 [.lit Demo.sampleEnv]) == .value (.int 56)
+
+-- the two-dynamic-argument unfold, through the OBJECT specializer too
+def objTwoArg : EvalResult :=
+  evalFuel 100000 mixProgram []
+    (.call mixProgram.entry [.lit (encAProgram Demo.twoArgA), .lit (encVals [.int 10])])
+
+#guard (match objTwoArg with | .value v => decProgram v | _ => none) == some Demo.twoArgRes
 
 /-! ## (b) The second projection
 
