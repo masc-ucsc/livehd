@@ -13,7 +13,7 @@ pub mod llvm_reg(en:bool, d:u130) -> (q:u130@[0], lane:u2@[0]) {
   // concat's original [5,7) coordinates to the already narrow two-bit lane.
   const state_lane:u2 = state#[9..=10]
   const data_lane:u5  = d#[0..=4]
-  lane = concat(state_lane, data_lane)#[5..=6]
+  lane = (data_lane, state_lane)#[5..=6]
   if en {
     state = ((d << 17) ^ (d >> 7) ^ (1 << 125))#[0..=129]
   }

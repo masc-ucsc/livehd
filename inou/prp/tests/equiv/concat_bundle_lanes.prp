@@ -74,14 +74,14 @@ pub comb top(p:(hi:u4, lo:s3), c:u2) -> (zu:u9, zs:s9, wu:u12, ws:s12, nest:u9, 
   const l:s3 = p.lo
   const k:u4 = 1     // value needs 1 bit; the LANE is the declared 4
 
-  const packed_u:u9 = concat(h, l, c)   // 4+3+2 = 9
-  const packed_s:s9 = concat(h, l, c)   // same lanes, signed destination
+  const packed_u:u9 = (c, l, h)#[..]   // 4+3+2 = 9
+  const packed_s:s9 = (c, l, h)#[..]   // same entries, signed destination
 
   zu   = packed_u
   zs   = packed_s
   wu   = packed_u                 // 9 -> 12: zero-extend
   ws   = packed_s                 // 9 -> 12: ALSO zero-extend
-  nest = concat(concat(h, l), c)  // (4+3) + 2 = 9, same layout as zu
-  kz   = concat(k, c)             // 4+2 = 6
+  nest = (c, (l, h)#[..])#[..]    // (4+3) + 2 = 9, same layout as zu
+  kz   = (c, k)#[..]              // 4+2 = 6
   sx   = l                        // the same signed field as a VALUE: sign-extended
 }

@@ -157,6 +157,10 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap,
         "bins",
         "binsof",
         "bit",
+        // NOT IEEE: `bool` is an Icarus extension keyword. `iverilog -g2012`
+        // rejects a bare `reg [7:0] bool;` (verilator/yosys/slang accept it),
+        // and livehd runs iverilog in its emission tests, so escape it too.
+        "bool",
         "break",
         "buf",
         "bufif0",
@@ -478,6 +482,21 @@ std::string Cgen_verilog::get_wire_or_const(const hhds::Pin_class& dpin, int wid
   return get_wire_or_const(dpin);
 }
 
+// Strip the LNAST backtick wrapper BEFORE anything is appended to a name.
+// get_scaped_name() only unwraps quotes that surround the WHOLE string, so
+// `StrCat(name, "_o2")` on a quoted name buries the backticks INSIDE the escaped
+// identifier (`\`a-b`_o2 `) -- and a backtick inside a Verilog identifier is a
+// macro reference: iverilog expands it, so two distinct nets collapse onto the
+// same wrong name ("'-b' has already been declared"). memory_instance_name()
+// unwrapped by hand for exactly this reason; the derived-net sites now share it.
+static std::string_view unquote_prp_name(std::string_view name) {
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    name.remove_prefix(1);
+    name.remove_suffix(1);
+  }
+  return name;
+}
+
 std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   std::string res_name;
   if (name.empty()) {
@@ -485,10 +504,7 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   }
   // LNAST backtick-quoted names (`a[0]`) carry the ORIGINAL verilog escaped
   // identifier inside the quotes; strip them before re-escaping.
-  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
-    name.remove_prefix(1);
-    name.remove_suffix(1);
-  }
+  name = unquote_prp_name(name);
   if (reserved_keyword.contains(name)) {
     return absl::StrCat("\\", name, " ");
   } else {
@@ -1664,7 +1680,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   } else {  // array
     // Distinct storage name: a zero-write-port array (ROM) puts its dout on
     // driver pid 0, whose wire is named after the node — `iname` itself.
-    const auto aname = get_scaped_name(absl::StrCat(iraw, "_data"));
+    const auto aname = get_scaped_name(absl::StrCat(unquote_prp_name(iraw), "_data"));
     fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", aname, "[", mem_size - 1, ":0];\n"));
 
     if (first_array_block) {
@@ -2921,8 +2937,8 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
             if (base.empty()) {
               base = absl::StrCat("u_", sub_io->get_name(), "__li", occurrence.ordinal());
             }
-            auto           wire_name = get_unique_decl_name(get_scaped_name(absl::StrCat(base, "_i", input.port_id)));
-            const uint32_t bits      = std::max<uint32_t>(input.bits, 1);
+            auto wire_name      = get_unique_decl_name(get_scaped_name(absl::StrCat(unquote_prp_name(base), "_i", input.port_id)));
+            const uint32_t bits = std::max<uint32_t>(input.bits, 1);
             if (bits <= 1) {
               fout->append("wire signed ", wire_name, ";\n");
             } else {
@@ -3651,7 +3667,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             // re-declaration. reserve_instance_names only pre-seeds the bare
             // instance name, not these derivatives.
             auto name2 = get_unique_decl_name(
-                get_scaped_name(absl::StrCat(default_instance_name(node), "_dout_", e2.driver.get_port_id())));
+                get_scaped_name(absl::StrCat(unquote_prp_name(default_instance_name(node)), "_dout_", e2.driver.get_port_id())));
             pin2var.insert({dout.get_class_index(), name2});
             {
               int bits2 = bits_of(dout);
@@ -3728,7 +3744,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // name it hands back, so computing it for a pin another site already
           // bound would burn a `_cgenN` counter on a name never declared.
           if (!pin2var.contains(cdpin.get_class_index())) {
-            auto name2 = get_unique_decl_name(get_scaped_name(absl::StrCat(default_instance_name(node), "_o", pid)));
+            auto name2
+                = get_unique_decl_name(get_scaped_name(absl::StrCat(unquote_prp_name(default_instance_name(node)), "_o", pid)));
             pin2var.insert({cdpin.get_class_index(), name2});
             const bool out_unsigned = is_unsign(cdpin);
             if (out_unsigned) {
@@ -3819,7 +3836,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
       auto a_spin  = find_sink_pin(node, "a");
-      name         = get_scaped_name(absl::StrCat(pin_wire_name(dpin), "_u"));
+      name         = get_scaped_name(absl::StrCat(unquote_prp_name(pin_wire_name(dpin)), "_u"));
       out_unsigned = true;
       auto a_dpin  = get_driver(a_spin);
       if (!a_dpin.is_invalid() && !pin2var.contains(a_dpin.get_class_index())) {

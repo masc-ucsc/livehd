@@ -13,6 +13,9 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//lnast",
+        # The emitter's reserved-word escape set IS the parser's keyword table
+        # (prpparse/prp_keywords.def) — see is_pyrope_reserved_ident.
+        "@prpparse//:prp_keywords",
     ],
 )
 
@@ -37,6 +40,19 @@ sh_test(
     args = ["-i", "$(location tests/comb_inst_name.v)"],
     data = [
         "tests/comb_inst_name.v",
+        "//lhd",
+    ],
+)
+
+# A Verilog signal named for a Pyrope reserved word (`stage`, `tick`, `formal`,
+# …) must be backtick-escaped on emit, or the writer's own output stops
+# re-parsing. Verilog -> Pyrope -> re-compile.
+sh_test(
+    name = "keyword_ident_test",
+    srcs = ["tests/keyword_ident_test.py"],
+    args = ["-i", "$(location tests/keyword_ident.v)"],
+    data = [
+        "tests/keyword_ident.v",
         "//lhd",
     ],
 )

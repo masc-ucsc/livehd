@@ -1285,9 +1285,52 @@ private:
   // (struct-scope reg). `write` rejects read-only targets. `w_out` (when given)
   // receives the member's DECLARED Slop width, so a read can be re-expressed at
   // the port's own width instead of through a scalar.
-  std::string field_storage(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr,
+  // A name whose text collides with a Pyrope keyword is spelled `` `in` `` in the
+  // source, but every consumer downstream of the lexer sees the bare `in` -- the
+  // generated header member, the port manifest, the lg net. A test that drives
+  // such a port (`acc.`in` = s & 0xf`, the natural spelling for a Verilog design
+  // whose port really is named `in`) arrives here with the quotes still on, so
+  // strip them per DOT SEGMENT before any lookup. A normal name is untouched.
+  //
+  // A dot INSIDE backticks is part of the identifier, not a separator (`` `a.b` ``
+  // is ONE name), so the scan tracks the quote state rather than splitting on
+  // every '.'.
+  static std::string unquote_field_path(std::string_view path) {
+    std::string out;
+    out.reserve(path.size());
+    size_t pos = 0;
+    while (pos <= path.size()) {
+      // End of this segment: the next '.' that is NOT inside a backtick pair.
+      size_t end    = pos;
+      bool   quoted = false;
+      while (end < path.size() && (quoted || path[end] != '.')) {
+        if (path[end] == '`') {
+          quoted = !quoted;
+        }
+        ++end;
+      }
+      std::string_view seg = path.substr(pos, end - pos);
+      if (seg.size() >= 2 && seg.front() == '`' && seg.back() == '`') {
+        seg.remove_prefix(1);
+        seg.remove_suffix(1);
+      }
+      out.append(seg);
+      if (end >= path.size()) {
+        break;
+      }
+      out.push_back('.');
+      pos = end + 1;
+    }
+    return out;
+  }
+
+  std::string field_storage(const std::string& var_raw, const std::string& fld_raw, bool write, int* w_out = nullptr,
                             bool* signed_out = nullptr) {
-    auto width = [&](int w) {
+    // Both sides need the strip: the INSTANCE may be named for a keyword too
+    // (`` `reg`.din ``), and every consumer below the lexer sees the bare name.
+    const std::string var   = unquote_field_path(var_raw);
+    const std::string fld   = unquote_field_path(fld_raw);
+    auto              width = [&](int w) {
       if (w_out != nullptr) {
         *w_out = w;
       }

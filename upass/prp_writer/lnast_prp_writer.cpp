@@ -439,19 +439,30 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
 }
 
 // A bare Pyrope reserved word used as a variable identifier (e.g. a Verilog
-// signal named `wrap`/`sat`/`reg`/`enum`) re-parses as a keyword and breaks the
+// signal named `wrap`/`sat`/`reg`/`stage`) re-parses as a keyword and breaks the
 // recompile leg (`wrap = x` parses as the overflow modifier + a broken
 // assignment -> "expected an expression").  Such a name must be backtick-escaped
 // on emit; the lexer strips the backticks back to the identical name, so the lg
-// name (and LEC matching) is unaffected.  The list is the keyword set that
-// actually breaks as an identifier (confirmed empirically) plus the obvious
-// type/contextual keywords for safety — over-quoting a non-keyword is harmless.
+// name (and LEC matching) is unaffected.
+//
+// The set is prpparse's OWN keyword table (the same X-macro the lexer reads),
+// not a hand-kept copy.  The copy this replaces had drifted 13 words behind the
+// parser — `case`, `does`, `equals`, `formal`, `has`, `implies`, `integer`,
+// `sext`, `signed`, `stage`, `tick`, `unsigned`, `zext` — and each one emitted a
+// file lhd could not re-parse.  `stage` was the expensive one: a Verilog shift
+// register named `stage` (bedrock's br_delay_valid) emits `stage[0] = a`, which
+// re-parses as a `stage[N]` pipelining declaration ("expected an expression").
 static bool is_pyrope_reserved_ident(std::string_view s) {
-  static const absl::flat_hash_set<std::string_view> kw
-      = {"wrap",  "sat",  "not",   "ref",    "enum",     "and",      "or",   "in",   "else",     "elif",   "for", "while",
-         "mod",   "comb", "pipe",  "reg",    "mut",      "const",    "wire", "type", "import",   "return", "pub", "test",
-         "spawn", "true", "false", "nil",    "break",    "continue", "loop", "impl", "comptime", "fluid",  "if",  "match",
-         "where", "step", "as",    "unique", "priority", "defer",    "int",  "uint", "bool",     "string"};
+  // clang-format off: the `#include` inside the braced list makes clang-format
+  // break the hand-added words one per line, which buries them.
+  static const absl::flat_hash_set<std::string_view> kw = {
+      // Reserved by the docs or held for future syntax, so absent from the
+      // parser's table; over-quoting a non-keyword is harmless.
+      "nil", "where", "priority", "defer", "async", "await", "cpp",
+#define PRP_KEYWORD(name) #name,
+#include "prpparse/prp_keywords.def"
+  };
+  // clang-format on
   return kw.contains(s);
 }
 
@@ -6350,6 +6361,16 @@ std::string Lnast_prp_writer::render_get_mask_rhs(Lnast_nid c0, bool operand_ctx
       }
     } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
       std::string mt(lnast->get_name(mask));
+      // An all-ones mask IS `#[..]`, the full bit vector, and that is the only
+      // spelling that re-parses for every source kind. `contiguous_run` cannot
+      // describe it (there is no highest set bit), so without this the fallback
+      // below emits `x & -1` -- which re-parses as an ordinary `&` and is a hard
+      // type error the moment the source is a tuple or an array
+      // (`operator & requires integer operands (lanes:tuple, …)`), exactly the
+      // shape a packed array round-trips as.
+      if (mt == "-1") {
+        return wrap_operand(std::format("{}#[..]", srctxt(true)), operand_ctx, /*loose=*/false);
+      }
       if (auto run = contiguous_run(mt)) {
         if (is_whole_width_mask(src, run->first, run->second)) {
           return srctxt(operand_ctx);  // selects every bit of the source: a no-op
@@ -6404,12 +6425,18 @@ std::string Lnast_prp_writer::render_concat_rhs(Lnast_nid c0, bool operand_ctx) 
         bits = d->to_just_i64();
       }
     }
-    // An ARRAY lane splices its entries, entry 0 MOST significant, so it never
+    // An ARRAY lane splices its entries, entry 0 LEAST significant, so it never
     // had a single window of its own -- its width operand is still the `nil`
     // sentinel, and a `bits == 0` lane is DROPPED by the term loop below (the
     // whole splice silently became 0). Spell it as the per-entry reads it
     // means: `arr[k]` re-parses as the same lane list, and each entry's window
     // is the element type the declaration states.
+    //
+    // The entries go out HIGHEST INDEX FIRST because `wl` is MSB-first while a
+    // packed array puts entry 0 at bit 0 (docs/pyrope/10-internals.md, "Bit
+    // selection and packing") -- the same flip upass.tolg's lower_concat makes
+    // when it emits the array windows. Walking these two loops in opposite
+    // directions is what would silently reverse an array in the round trip.
     if (bits == 0 && Lnast_ntype::is_ref(lnast->get_type(v))) {
       const std::string nm(strip_prefix(lnast->get_name(v)));
       auto              sz = array_decl_size_.find(nm);
@@ -6419,7 +6446,7 @@ std::string Lnast_prp_writer::render_concat_rhs(Lnast_nid c0, bool operand_ctx) 
       // A cap here would put the silent `= 0` back for exactly the arrays that
       // are too big to notice it on.
       if (sz != array_decl_size_.end() && el != array_decl_elem_.end() && sz->second > 0) {
-        for (int64_t k = 0; k < sz->second; ++k) {
+        for (int64_t k = sz->second - 1; k >= 0; --k) {
           // An unsigned element already sits inside its own window, so it
           // enters the OR tree as itself; a signed one still needs the slice +
           // `unsigned()` the term loop applies, or its sign would bleed into

@@ -1332,6 +1332,76 @@ static uint64_t concat_array_lane_bits(const Bundle& b) {
   return static_cast<uint64_t>(n) * eb;
 }
 
+// A named bundle has field IDENTITY but deliberately has no field ORDER:
+// Bundle's canonical traversal sorts its keys so `(hi=3, lo=2)` and
+// `(lo=2, hi=3)` are the same value. Packing such a value would silently turn
+// that implementation order into a bit-layout contract. A one-field named
+// bundle is unambiguous; positional tuples and arrays retain their explicit
+// order and remain legal.
+//
+// Try both the exact ref and its source-level SSA base. Compiler temps are
+// useful here too: `((hi=3, lo=2), c)#[..]` names the literal through one.
+bool uPass_runner::named_bundle_without_bit_order(std::string_view name) const {
+  if (name.empty()) {
+    return false;
+  }
+  std::shared_ptr<Bundle> b = symbol_table_.get_bundle(name);
+  if (!b) {
+    const auto logical = concat_logical_name(name);
+    if (logical.empty()) {
+      return false;
+    }
+    b = symbol_table_.get_bundle(logical);
+    if (!b) {
+      return false;
+    }
+  }
+  return b->has_named_top() && (b->named_top_count() + b->unnamed_top_count()) > 1;
+}
+
+// `x#[..]` where `x` is a multi-field NAMED bundle. Same rule as a concat
+// lane (see named_bundle_without_bit_order), reached by the other spelling:
+// `#[..]` is the full bit vector of its operand.
+//
+// Without this the operand simply never resolves and tolg reports `unresolved
+// reference 'x'`, which names neither the rule nor the fix. A ONE-field named
+// bundle is unambiguous and stays legal, as do positional tuples and arrays.
+void uPass_runner::check_bitsel_named_bundle() {
+  if (!lm->has_child()) {
+    return;
+  }
+  // PYROPE ONLY, like every other member of this rule family (check_concat_dest,
+  // upass.tolg's twin). "a packing needs a written bit order" is a rule about
+  // Pyrope SOURCE; slang resolves its own layouts and emits get_mask nodes
+  // (fit_wrap truncation) over whatever it likes, so applying this to imported
+  // RTL would reject legal Verilog.
+  if (lm->get_lnast() && lm->get_lnast()->is_verilog_origin()) {
+    return;
+  }
+  const auto nid = lm->get_current_nid();
+  if (!bitsel_checked_.insert(nid).second) {
+    return;  // the runner may revisit a node across iterations; report once
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();  // child 0 = dst ref
+  if (lm->move_to_sibling()) {
+    const std::string src_name(lm->current_text());
+    if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref && named_bundle_without_bit_order(src_name)) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "concat-named-bundle-lane",
+          .category = "type",
+          .pass     = "upass.runner",
+          .message  = std::format("`{}` is a named bundle with multiple fields, which has no bit order", src_name),
+          .span     = lm->current_span(),
+          .hint     = "select the fields explicitly in the order you want (for example, `(x.lo, x.hi)#[..]`, entry 0 "
+                      "at bit 0); positional tuples and arrays already have an order",
+      });
+    }
+  }
+  lm->restore_cursor(saved);
+}
+
 // Report every `concat` lane that declares no width.
 //
 // Deliberately NOT folded into resolve_concat_widths, which runs on the EMIT
@@ -1370,15 +1440,8 @@ void uPass_runner::check_concat_lanes() {
       }
       continue;
     }
-    // A named bundle has field IDENTITY but deliberately has no field ORDER:
-    // Bundle's canonical traversal sorts its keys so `(hi=3, lo=2)` and
-    // `(lo=2, hi=3)` are the same value. Packing such a value as one concat
-    // lane would silently turn that implementation order into a bit-layout
-    // contract. A one-field named bundle is unambiguous; positional tuples and
-    // arrays retain their explicit order and remain legal.
-    //
-    // Try both the exact ref and its source-level SSA base. Compiler temps are
-    // useful here too: `concat((hi=3, lo=2))` names the literal through one.
+    // A multi-field named bundle has no bit order -- see
+    // named_bundle_without_bit_order, which the `x#[..]` spelling shares.
     std::shared_ptr<Bundle> lane_bundle = lane_is_ref ? symbol_table_.get_bundle(lane_name) : nullptr;
     if (!lane_bundle && lane_is_ref) {
       const auto logical = concat_logical_name(lane_name);
@@ -1396,8 +1459,8 @@ void uPass_runner::check_concat_lanes() {
           .pass     = "upass.runner",
           .message  = std::format("concat lane `{}` is a named bundle with multiple fields, which has no bit order", lane_name),
           .span     = std::move(span),
-          .hint     = "select the fields explicitly in the desired order (for example, `concat(x.hi, x.lo)`, most "
-                      "significant first); positional tuples and arrays already have an order",
+          .hint     = "select the fields explicitly in the order you want (for example, `(x.lo, x.hi)#[..]`, entry 0 "
+                      "at bit 0); positional tuples and arrays already have an order",
       });
       bad = true;
       continue;
@@ -1461,7 +1524,7 @@ void uPass_runner::check_concat_lanes() {
         .span     = std::move(span),
         .hint     = "a concat window is sized by the lane's DECLARED type -- never by its value, an inferred range, "
                     "or a literal's spelling -- because narrowing one lane would shift every lane above it; bind it to "
-                    "a typed name first (`const w:u4 = <expr>` then `concat(..., w, ...)`)",
+                    "a typed name first (`const w:u4 = <expr>` then `(..., w, ...)#[..]`)",
     });
     bad = true;
   }
@@ -2321,6 +2384,8 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
   }
   if (Lnast_ntype::is_concat(lm->get_raw_ntype())) {
     check_concat_lanes();  // dispatch path: runs in EVERY tier, unlike emission
+  } else if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_get_mask) {
+    check_bitsel_named_bundle();  // same rule, reached through `x#[..]`
   }
   const bool vote_drop = dispatch_push(fn, rn);
   // task 2n Phase B: record the just-defined variable into the LSP semantic

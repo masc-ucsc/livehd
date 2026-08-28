@@ -5325,9 +5325,11 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
 // type; upass.tolg owns the `concat-untyped-lane` error when nothing could).
 //
 // An ORDERED POSITIONAL tuple/array lane splices its fields into the layout
-// (field 0 most significant), each field carrying its own window — that is what
-// makes `concat(my_array)` legal. A multi-field named bundle has no bit order
-// and is rejected by the runner; callers spell its fields as separate lanes.
+// (field 0 LEAST significant — `X#[..]` puts entry 0 at bit 0, so the fields go
+// into this MSB-first lane list reversed), each field carrying its own window —
+// that is what makes `(..., my_array)#[..]` legal. A multi-field named bundle
+// has no bit order and is rejected by the runner; callers spell its fields as
+// separate entries.
 // Here the positional splice is a FOLD-TIME expansion only: it feeds Dlop's n-ary
 // concat_op, it does not re-shape the LNAST node. Re-shaping would need to
 // insert operands in the MIDDLE of the node's child list, and the pinned HHDS
@@ -5402,6 +5404,12 @@ upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& d
                               ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()))
                               : (elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1));
       }
+      // Collected separately so the whole lane can be appended REVERSED: the
+      // enclosing lane list is MSB-first (Verilog `{a,b}` order, which is what
+      // inou.slang also produces), while a spliced tuple/array puts its field 0
+      // at the BOTTOM of its own window (docs/pyrope/10-internals.md, "Bit
+      // selection and packing"). Same flip upass.tolg's array expansion does.
+      std::vector<Fold_lane> tuple_lanes;
       for (const auto& tl : b->top_levels()) {
         if (tl.has_leafs || tl.leaf_count != 1 || (tl.pos < 0 && tl.name.empty())) {
           return classify_vote();  // nested or malformed field: no single window
@@ -5417,14 +5425,32 @@ upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& d
         if (!is_numeric(tl.scalar) || !concat_lane_fits(tl.scalar, static_cast<int>(field_bits))) {
           return classify_vote();  // over-wide field: decline rather than trip concat_op's fit assert
         }
-        lanes.push_back(Fold_lane{tl.scalar, static_cast<int>(field_bits)});
+        tuple_lanes.push_back(Fold_lane{tl.scalar, static_cast<int>(field_bits)});
       }
+      lanes.insert(lanes.end(), tuple_lanes.rbegin(), tuple_lanes.rend());
       continue;
     }
 
-    const auto w = bound_width(wo);
+    auto w = bound_width(wo);
     if (!w) {
-      return classify_vote();  // width still `nil` — leave the node for tolg
+      // The width operand is still the `nil` sentinel: prp2lnast emits every
+      // window unbound because it has no type information, and upass.tolg is
+      // what normally binds them from the lane's declared type. Fold anyway
+      // when the lane NAMES something declared — same rule, same declared
+      // facts, just applied early — so a comptime packing such as
+      // `cassert((a, b)#[..] == 0ub0000_0001_0101)` resolves during
+      // elaboration instead of surviving as a graph node no `cassert` can
+      // read. A lane with no declared width is still left alone: guessing one
+      // would silently relocate every lane above it.
+      if (!vo.name.empty()) {
+        if (const auto f = upass::decl_facts::lookup(st(), lm->get_lnast().get(), vo.name);
+            f && f->bits > 0 && f->bits <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+          w = static_cast<int>(f->bits);
+        }
+      }
+      if (!w) {
+        return classify_vote();  // width still `nil` — leave the node for tolg
+      }
     }
     // is_numeric, not foldable: unknowns are per-lane and POSITIONAL in
     // concat_op (a lane's x-bits land in that lane's window and nowhere else),

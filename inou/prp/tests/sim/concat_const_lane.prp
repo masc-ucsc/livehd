@@ -20,7 +20,7 @@ comb pack(a:u3) -> (z:u13) {
   const c4:u4 = 4
   const c6:u3 = 6
   const c1:u3 = 1
-  z = concat(a, c4, c6, c1)
+  z = (c1, c6, c4, a)#[..]
 }
 
 test pack.const_lanes {

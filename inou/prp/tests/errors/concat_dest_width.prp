@@ -10,5 +10,5 @@
 // padding would be a layout the source never wrote. (Signedness is free --
 // `z:s12` would be accepted -- because only the 12-bit field width is checked.)
 comb concat_dest_width(a:u4, b:u8) -> (z:u16) {
-  z = concat(a, b)
+  z = (b, a)#[..]
 }

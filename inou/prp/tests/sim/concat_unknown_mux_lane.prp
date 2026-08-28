@@ -22,7 +22,7 @@ pub comb concat_unknown_mux_lane(sel:u2) -> (z:u2) {
     }
   }
   const lo:u1 = 1
-  z = concat(hi, lo)
+  z = (lo, hi)#[..]
 }
 
 test concat_unknown_mux_lane.payload_width {

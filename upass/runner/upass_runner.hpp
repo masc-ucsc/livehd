@@ -340,6 +340,11 @@ protected:
   // not its window, so a width derived after that fold would be wrong.
   [[nodiscard]] static std::string_view      concat_logical_name(std::string_view name);
   void                                       check_concat_lanes();
+  void                                       check_bitsel_named_bundle();
+  // Shared by both spellings of the packing rule (a concat lane and `x#[..]`):
+  // true when `name` resolves to a NAMED bundle with more than one field, which
+  // has field identity but deliberately no field ORDER.
+  [[nodiscard]] bool                         named_bundle_without_bit_order(std::string_view name) const;
   void                                       check_concat_dest(std::string_view dest_name, std::string_view value_name);
   [[nodiscard]] uint32_t                     concat_lane_declared_bits(std::string_view lane_name) const;
   [[nodiscard]] std::vector<std::string>     resolve_concat_widths(std::string& dst_name);
@@ -351,6 +356,7 @@ protected:
   // construction, which is what makes `concat(concat(a,b), c)` legal.
   absl::flat_hash_map<std::string, uint32_t> concat_result_bits_;
   absl::flat_hash_set<Lnast_nid>             concat_checked_;  // report each concat once, not per runner iteration
+  absl::flat_hash_set<Lnast_nid>             bitsel_checked_;  // report each `#[..]` once, not per runner iteration
   absl::flat_hash_set<Lnast_nid>             concat_dest_checked_;
 
   // A declare/type_spec type slot that is a `ref` to a SCALAR named-type alias

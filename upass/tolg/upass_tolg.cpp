@@ -6426,11 +6426,16 @@ private:
         lanes.push_back(Lane{v, *bound, 0});
         n_windows += 1;
       } else if (const auto ext = concat_array_extent(v)) {
-        // An ARRAY lane splices its entries, entry 0 MOST significant — the
+        // An ARRAY lane splices its entries, entry 0 LEAST significant — the
         // positional-tuple rule (docs/pyrope/10-internals.md, "Bit selection
-        // and concatenation"). It occupies no SINGLE window, which is why its
-        // own width operand is still the `nil` sentinel and why this arm sits
+        // and packing"). It occupies no SINGLE window, which is why its own
+        // width operand is still the `nil` sentinel and why this arm sits
         // ahead of the untyped-lane error rather than after it.
+        //
+        // Only a Pyrope array reaches here: concat_array_extent matches a
+        // DECLARED array ref, and an unpacked array is not a legal Verilog
+        // concatenation operand — so flipping this order cannot disturb a
+        // Verilog-origin concat.
         lanes.push_back(Lane{v, ext->second, ext->first});
         n_windows += static_cast<size_t>(ext->first);
       } else {
@@ -6458,13 +6463,15 @@ private:
         sum_mw += l.width;
         continue;
       }
-      // The packed bus holds entry 0 in the LOW element window (graph/cell.cpp
-      // pid 12, and the layout Array_scalar_view's indexed read assumes), so
-      // walking the entries UP the bus emits them MSB-first — the splice is a
-      // per-entry REVERSAL of the packed word, not a copy of it.
+      // The packed bus already holds entry 0 in the LOW element window
+      // (graph/cell.cpp pid 12, and the layout Array_scalar_view's indexed read
+      // assumes), and a spliced array keeps exactly that order, so walking the
+      // entries DOWN the bus emits them MSB-first into this MSB-first lane
+      // list. The splice is a COPY of the packed word, not a per-entry
+      // reversal of it.
       auto          packed    = leaf(l.nid);
       const int32_t packed_mw = static_cast<int32_t>(l.entries * l.width);
-      for (int64_t e = 0; e < l.entries; ++e) {
+      for (int64_t e = l.entries - 1; e >= 0; --e) {
         node.create_sink_pin(pid++).connect_driver(array_entry_slice(packed.pin, packed_mw, e, l.width));
         node.create_sink_pin(pid++).connect_driver(create_const(*g_, *Dlop::create_integer(l.width)));
         sum_mw += l.width;

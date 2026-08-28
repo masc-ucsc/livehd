@@ -1,4 +1,4 @@
-pub comb PopCnt::[lg="PopCnt", hdl](in:u32) -> (res:u6) {
+pub comb PopCnt::[lg="PopCnt", hdl](`in`:u32) -> (res:u6) {
   mut inPadded = 0
   mut tree_0_genblk1_iSums = 0
   mut tree_1_genblk1_genblk1_0_iSums = 0
@@ -6,7 +6,7 @@ pub comb PopCnt::[lg="PopCnt", hdl](in:u32) -> (res:u6) {
   mut tree_3_genblk1_genblk1_0_iSums = 0
   mut tree_4_genblk1_genblk1_0_iSums = 0
   mut tree_5_genblk1_genblk1_0_iSums = 0
-  mut inPadded__w1 = in | 0
+  mut inPadded__w1 = `in` | 0
   mut tree_0_genblk1_iSums__w1 = inPadded__w1
   tree_1_genblk1_genblk1_0_iSums = 0ub????????????????????????????????
   mut tree_1_genblk1_genblk1_0_iSums__w1 = tree_1_genblk1_genblk1_0_iSums

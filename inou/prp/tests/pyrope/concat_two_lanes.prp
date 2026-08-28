@@ -17,5 +17,5 @@
 // z is u6 = 4 + 2 (the lane sum), with `a` occupying bits [5..2]; the result of
 // a concat is always non-negative, hence unsigned.
 comb concat_two_lanes(a:u4, b:u2) -> (z:u6) {
-  z = concat(a, b)
+  z = (b, a)#[..]
 }

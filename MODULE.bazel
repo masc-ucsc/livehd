@@ -13,6 +13,10 @@ bazel_dep(name = "bazel_skylib", version = "1.9.2")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+# The two local_repository rules are currently UNUSED on purpose: every sibling
+# is on its pinned archive so a fresh clone builds with no checkout next to it.
+# They stay declared because each pin's comment documents a one-line swap to a
+# local path for co-development, and that swap should not also need this line.
 local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
@@ -208,18 +212,29 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# Pinned to ace9553 (top of tree; adds the 2opt-freq B `{ ::[abc=…, color=…] … }`
-# scope-attribute grammar — "block attributes" — on top of the 2f-verify
-# `formal name.dotted {}` block grammar and the 3g generics grammar).
+# Pinned to 2f9c5e2 (top of tree; "update parser" on top of ace9553's 2opt-freq
+# B `{ ::[abc=…, color=…] … }` scope-attribute grammar — "block attributes" —
+# the 2f-verify `formal name.dotted {}` block grammar and the 3g generics
+# grammar).
+#
+# The co-development swap to the local ../tree-sitter-pyrope checkout is OVER:
+# the grammar work is pushed, so this is the pinned archive again and livehd is
+# self-contained (a fresh clone builds with no sibling checkout). To swap back
+# for parser co-development, replace the http_archive with:
+#   new_local_repository(
+#       name = "prpparse",
+#       build_file = "//packages:prpparse.BUILD",
+#       path = "../tree-sitter-pyrope/prpparse",
+#   )
+# ...and remember the build then depends on that working tree. @tree_sitter_pyrope
+# below unzips the SAME archive, so both blocks move together.
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-PV4CvLc7fw7bx0JgUGlAu9jy1XLveVo1QX1uVbUFU50=",  # ace9553 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-ace9553099006b5e301cbae7ec741a90baad1911/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ace9553099006b5e301cbae7ec741a90baad1911.zip"],
+    integrity = "sha256-fa2x4YpVdiv3IfJnhFvX2i4lykaStywqtnly/DKGUOE=",  # 2f9c5e2 (same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-2f9c5e2ac4994c2d9e7308af783e97df94020094/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/2f9c5e2ac4994c2d9e7308af783e97df94020094.zip"],
 )
-# For local co-development swap the http_archive above for:
-# new_local_repository(name = "prpparse", build_file = "//packages:prpparse.BUILD", path = "../tree-sitter-pyrope/prpparse")
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -251,9 +266,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-PV4CvLc7fw7bx0JgUGlAu9jy1XLveVo1QX1uVbUFU50=",  # ace9553
-    strip_prefix = "tree-sitter-pyrope-ace9553099006b5e301cbae7ec741a90baad1911",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ace9553099006b5e301cbae7ec741a90baad1911.zip"],
+    integrity = "sha256-fa2x4YpVdiv3IfJnhFvX2i4lykaStywqtnly/DKGUOE=",  # 2f9c5e2
+    strip_prefix = "tree-sitter-pyrope-2f9c5e2ac4994c2d9e7308af783e97df94020094",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/2f9c5e2ac4994c2d9e7308af783e97df94020094.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(

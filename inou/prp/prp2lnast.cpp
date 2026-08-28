@@ -8850,7 +8850,96 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   if (ts_node_is_null(arg)) {
     arg = ts_node_named_child(n, 0);
   }
-  Lnast_node base = expr_to_node(arg);
+
+  // A positional tuple literal used as a bit-selection base IS a bit packing:
+  // `(a, b)#[..]` is the packed word with entry 0 at bit 0
+  // (docs/pyrope/10-internals.md, "Bit selection and packing"). Emitting the
+  // n-ary `concat` node here -- rather than a tuple value plus a get_mask --
+  // is what gives every entry its DECLARED window: upass.tolg sizes each lane
+  // from the lane's declared type and rejects an untyped one, which a tuple
+  // VALUE cannot do, because a field carries a value and a value's magnitude
+  // is exactly what a layout may not be sized by. It also means every modifier
+  // (`#sext`, `#|`, `#+`, a sub-range) applies to the packed word for free:
+  // they read whatever this base evaluates to.
+  //
+  // The lanes go out REVERSED. The LNAST concat node is MSB-first -- lane 0 is
+  // the most significant window, the order inou.slang also produces for a
+  // Verilog `{a, b}` -- while a packed tuple puts entry 0 at bit 0. Reversing
+  // here, at the one producer that means the other order, keeps the node's
+  // meaning single and leaves every Verilog-origin concat alone.
+  //
+  // Declined, so the ordinary tuple path still handles them:
+  //   * a single item with NO trailing comma is parenthesization -- `(x+1)#[3]`
+  //     must keep meaning a bit select of `x+1`, not a one-lane pack of an
+  //     expression that has no declared width;
+  //   * any NAMED or DECLARATION-shaped item -- the named rule (one field packs,
+  //     two or more have no bit order) already lives on the bundle path, which
+  //     sees the names, and a `(const 3, 4)` / `(x:u4, …)` field is a tuple
+  //     declaration, not a positional pack.
+  std::optional<Lnast_node> packed_base;
+  if (std::string_view(ts_node_type(arg)) == "tuple") {
+    auto is_spread = [&](TSNode c) {
+      if (std::string_view(ts_node_type(c)) != "unary_expression") {
+        return false;
+      }
+      TSNode op_n = child_by_field(c, "operator");
+      return !ts_node_is_null(op_n) && std::string_view(ts_node_type(op_n)) == "op_spread";
+    };
+    std::vector<TSNode> items;
+    bool                declined   = false;
+    bool                has_spread = false;
+    for (TSNode c : ts_node_named_children(arg)) {
+      std::string_view t(ts_node_type(c));
+      if (t == "comment") {
+        // Comments are tree-sitter `extras`, so they surface as named children
+        // even inside a tuple. Skip them -- counted as items they would both
+        // turn `(x /*c*/)#[3]` into a two-lane pack and lower a comment into a
+        // spurious lane, silently relocating every entry above it.
+        continue;
+      }
+      if (t == "assignment" || t == "arg_assignment" || t == "typed_field" || t == "var_or_let_or_reg" || t == "lambda") {
+        declined = true;
+        break;
+      }
+      has_spread = has_spread || is_spread(c);
+      items.push_back(c);
+    }
+    // A REAL trailing comma: text after the last item, the same test the tuple
+    // grouping rule in expr_to_node uses. Scanning the child list for any `,`
+    // would also fire on the separators of a multi-item tuple (harmless there,
+    // but it says something the source does not).
+    bool trailing_comma = false;
+    if (!items.empty()) {
+      const auto tail = text_between(ts_node_end_byte(items.back()), ts_node_end_byte(arg));
+      trailing_comma  = tail.find(',') != std::string_view::npos;
+    }
+    if (!declined && !items.empty() && (items.size() > 1 || has_spread || trailing_comma)) {
+      // Evaluate every entry in SOURCE order before minting the concat node, so
+      // the statements each entry emits land ahead of it (and in the order the
+      // source wrote them, which side effects depend on); only the LANE list is
+      // reversed, below.
+      std::vector<Lnast_node> vals;
+      vals.reserve(items.size());
+      for (TSNode c : items) {
+        vals.push_back(expr_to_node(is_spread(c) ? child_by_field(c, "argument") : c));
+      }
+      auto cidx = builder.add_child(Lnast_ntype::create_concat());
+      auto cref = builder.mint_tmp_ref();
+      lnast->add_child(cidx, cref);
+      // Every width goes out as the `nil` sentinel -- prp2lnast has no type
+      // information, and a later pass binds each window from the entry's
+      // declared type. A `...` spread contributes its INNER ref as one lane;
+      // upass.tolg expands a declared array into its entries, entry 0 lowest.
+      for (auto it = vals.rbegin(); it != vals.rend(); ++it) {
+        lnast->add_child(cidx, *it);
+        lnast->add_child(cidx, Lnast_node::create_const("nil"));
+      }
+      attach_loc(cidx, n);
+      packed_base = cref;
+    }
+  }
+
+  Lnast_node base = packed_base ? *packed_base : expr_to_node(arg);
 
   // The `select` field is `multiple: true` (covers the `#` token, optional
   // reduction, and the inner select node) — `child_by_field` returns the
@@ -8868,6 +8957,25 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   TSNode ext_node  = child_by_field(n, "extension");
 
   Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
+
+  // `(a, b)#[..]` selects every bit of the packing, so the mask is a no-op --
+  // and applying it anyway would COST the layout its declared width. The concat
+  // node records sum(window) as its result's declared type; a get_mask temp
+  // records nothing. That width is exactly what makes a nested pack a legal
+  // entry of an outer one (`(c, (l, h)#[..])#[..]`) and what the
+  // destination-width check compares a declared `z:u12` against, so the mask
+  // must not sit between them.
+  //
+  // Only the bare whole-vector select takes this path. A narrower select really
+  // is a select, and a reduction or `#sext` needs the ordinary node below to
+  // stamp its own result width -- neither can be an entry of an outer pack, so
+  // neither needs the declared width this preserves.
+  if (packed_base && ts_node_is_null(type_node) && ts_node_is_null(ext_node) && mask_ref.is_const()) {
+    const auto& mv = Dlop::from_pyrope_cached(mask_ref.get_name());
+    if (!mv.is_invalid() && mv.is_integer() && mv.is_just_i64() && mv.to_just_i64() == -1) {
+      return *packed_base;
+    }
+  }
 
   auto idx = builder.add_child(Lnast_ntype::create_get_mask());
   auto ref = builder.mint_tmp_ref();
@@ -9266,59 +9374,27 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     }
   }
 
-  // Bit concatenation `concat(a, b, c)` — call-shaped in the grammar (no syntax
-  // was added for it) but NEVER a real call: emit the n-ary LNAST `concat` node
-  // directly. Going through func_call would lose what makes the op work — the
-  // lane ORDER, which is the only thing that says which operand is significant,
-  // and the one-node-per-concat shape upass.tolg needs to size every lane from
-  // its DECLARED type in a single pass. Argument 0 is the MOST significant lane
-  // (Verilog `{a,b,c}` order), so LNAST children 1..N are the args in source
-  // order. `concat(concat(a,b), c)` needs no special care: the inner call
-  // already lowered to a tmp whose declared width is the inner lane sum.
+  // `concat(a, b, c)` was the positional bit-packing builtin -- what
+  // SystemVerilog spells `{a, b, c}` -- and it was REMOVED
+  // (docs/pyrope/21-deprecated.md). It read like `{a, b}` and was the only bit
+  // spelling in Pyrope that ran high-to-low, while `#[0]` is the low bit, a bit
+  // range is written low-to-high, and the string encoding puts the first
+  // characters in the low bits. `(...)#[..]` covers what it did, in the
+  // language's own direction.
+  //
+  // A hard error rather than a silent parse failure, and it must name the
+  // ORDER: the migration is not a rename, the argument list REVERSES, so
+  // anything mechanical that keeps the order miscompiles rather than fails.
   if (!has_receiver && func_ref.is_ref() && func_ref.get_name() == "concat") {
-    auto concat_args = collect_call_args(arg);
-    if (concat_args.empty()) {
-      report_error(n,
-                   "concat-empty",
-                   "type",
-                   "`concat()` needs at least one lane",
-                   "write `concat(a, b)` — argument 0 is the most significant lane");
-    }
-    for (const auto& ca : concat_args) {
-      if (ca.is_assign) {
-        // A lane's position IS its significance, so a named binding has no
-        // meaning here; accepting it would silently drop the key and pretend
-        // the source said something it did not.
-        report_error(n,
-                     "concat-named-lane",
-                     "name",
-                     "`concat` lanes are positional — a named argument has no meaning",
-                     "pass the lanes positionally: `concat(a, b)`, most significant first");
-      }
-    }
-    auto idx = builder.add_child(Lnast_ntype::create_concat());
-    auto ref = builder.mint_tmp_ref();
-    lnast->add_child(idx, ref);
-    // Children are INTERLEAVED (value, width) pairs, and every width goes out
-    // as the `nil` sentinel: prp2lnast has NO type information, so it cannot
-    // size a single window. The slot still has to exist from the start -- a
-    // later pass binds each `nil` from the lane's DECLARED type, and having the
-    // operand already in place means nothing has to re-shape the node (and,
-    // more importantly, that constant-folding a lane cannot erase its width,
-    // since the width is a sibling rather than a property of the value).
-    //
-    // An ORDERED positional tuple/array lane (`concat(my_array)`) expands by
-    // position, field 0 most significant — also not here: prp2lnast cannot
-    // tell an aggregate ref from a scalar one, so the argument rides through
-    // as one lane and the later passes either expand it or reject a multi-field
-    // named bundle. Same reason the "lane has no declared type" check lives in
-    // upass.tolg (concat-untyped-lane).
-    for (const auto& ca : concat_args) {
-      lnast->add_child(idx, ca.value);
-      lnast->add_child(idx, Lnast_node::create_const("nil"));
-    }
-    attach_loc(idx, n);
-    return ref;
+    report_error(n,
+                 "concat-removed",
+                 "type",
+                 "`concat` was removed — a bit packing is written `(...)#[..]`",
+                 "the argument order REVERSES, because entry 0 of a packing is at bit 0: `concat(a, b)` is "
+                 "`(b, a)#[..]`. An argument that was a tuple or an array becomes a `...` splice, and its entries "
+                 "reverse too — `concat(arr, x)` is `(x, arr[N-1], …, arr[0])#[..]`, or `(x, ...arr)#[..]` when the "
+                 "natural entry-0-at-bit-0 order is what was wanted");
+    return builder.mint_tmp_ref();
   }
 
   auto call_args    = collect_call_args(arg);

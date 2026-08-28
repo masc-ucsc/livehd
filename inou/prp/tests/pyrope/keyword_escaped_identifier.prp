@@ -1,0 +1,19 @@
+/*
+:name: keyword_escaped_identifier
+:type: compile
+*/
+
+// Backticks are how Pyrope spells an identifier whose text collides with a
+// reserved word, and any sequence may sit between them ("Using the backtick,
+// Pyrope can use any string as an identifier, even reserved keywords" --
+// docs/pyrope/02-basics.md). This is the compiling counterpart of the
+// keyword_as_identifier error fixture, and the shape `pass.prp_writer` emits for
+// a Verilog signal named for a keyword (bedrock's br_delay_valid: `stage`).
+pub mod keyword_escaped_identifier(a:u8) -> (o:u8@[0]) {
+  reg `stage`:[2]u8 = 0
+  reg `tick`:u8 = 0
+
+  `stage`[0] = a
+  `tick`     = a ^ 0x5a
+  o          = `stage`[1] ^ `tick`
+}

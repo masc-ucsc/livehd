@@ -2,14 +2,14 @@
 :name: concat_named_bundle_lane
 :type: error
 :error: named bundle with multiple fields, which has no bit order
-:help: select the fields explicitly in the desired order
+:help: select the fields explicitly in the order you want
 */
 
 // Named-bundle equality is by key, independent of spelling order. Packing the
 // whole bundle would therefore expose the compiler's canonical alphabetical
 // key order as a surprising bit layout. Select the fields explicitly instead:
-// `concat(x.hi, x.lo)` or `concat(x.lo, x.hi)`.
+// `(x.lo, x.hi)#[..]` or `(x.hi, x.lo)#[..]`.
 comb concat_named_bundle_lane() -> (z:u12) {
   const x = (const hi:u4=3, const lo:u8=2)
-  z = concat(x)
+  z = x#[..]
 }

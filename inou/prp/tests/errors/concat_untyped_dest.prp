@@ -11,6 +11,6 @@
 // against. `w` here is an untyped local, so there is no declared width to
 // compare the 12-bit result to.
 comb concat_untyped_dest(a:u4, b:u8) -> (z:u12) {
-  const w = concat(a, b)
+  const w = (b, a)#[..]
   z = w
 }

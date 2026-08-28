@@ -36,3 +36,14 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = ["@hhds//hhds:core"],
 )
+
+# Keyword table only (the textual X-macro header the prpparse lexer reads).
+# livehd's Pyrope EMITTER (//upass/prp_writer) must backtick-escape exactly the
+# words the parser reserves; depending on this tiny target instead of the whole
+# parser keeps the writer's dep graph thin while making drift impossible.
+cc_library(
+    name = "prp_keywords",
+    include_prefix = "prpparse",
+    textual_hdrs = ["prp_keywords.def"],
+    visibility = ["//visibility:public"],
+)

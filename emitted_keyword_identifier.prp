@@ -1,0 +1,22 @@
+// REPRO: `lhd compile verilog --emit-dir pyrope:` emits a signal named `stage`
+// without backtick-escaping it, and `stage` is a Pyrope keyword (the `stage[N]`
+// pipelining modifier). The emitted file then fails lhd's own parser:
+//
+//   error[syntax]: expected an expression   (caret on the `=` of `stage[0] = a`)
+//
+// The parser is right -- it reads `stage[0] =` as a malformed `stage[N]`
+// declaration. The EMITTER is wrong: it escapes some reserved words (it emits
+// `in` correctly as `` `in` ``) but not this one.
+//
+// Renaming to `stages`, or backtick-escaping as `` `stage` ``, both compile --
+// so this is purely a missing escape in the emitter, not a language limitation.
+//
+// Found via bedrock's br_delay_valid, whose Verilog names its shift register
+// `stage`. 4 of 35 auto-seeded tests fail to re-parse for this reason, which in
+// turn fails ~100 sim_lhd_pyrope rows in this corpus.
+pub mod repro(a:u8) -> (o:u8@[0]) {
+  reg stage:[2]u8 = 0
+
+  stage[0] = a          // <-- "expected an expression"
+  o = stage[1]
+}

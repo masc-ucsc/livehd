@@ -1,12 +1,12 @@
-// Golden for the runtime array `concat` lane. Written from the rule, not from
-// the generated netlist: `concat` is MSB-first and an array lane expands in
-// entry order, so entry 0 of `stages` is the TOP byte of its window and the
-// scalar lane `inp` sits below all four.
+// Golden for the runtime array splice. Written from the rule, not from the
+// generated netlist: a packed tuple puts ENTRY 0 AT BIT 0, so entry 0 of
+// `stages` is the LOWEST byte of its window and the scalar entry `inp` sits
+// below all four.
 //
-// The Verilog spelling of that rule is the ordinary concatenation `{stages[0],
-// stages[1], stages[2], stages[3], inp}` -- which is the point: `concat(a, b)`
-// is Pyrope's `{a, b}`, and an array operand adds nothing but its own entry
-// order.
+// The Verilog spelling of that rule REVERSES the entry list, because Verilog
+// concatenation is MSB-first: `{stages[3], stages[2], stages[1], stages[0],
+// inp}`. That reversal is the whole reason `concat` was retired -- it read
+// like `{a, b}` and was the only bit spelling in Pyrope running high-to-low.
 //
 // `stages` is a plain unpacked reg array with no reset. Its Pyrope twin is
 // `reg stages:[4]u8:[ordering="old"]`: no initializer, so no reset hardware,
@@ -43,6 +43,6 @@ module \concat_array_lane.top (
   assign lanes[1] = p;
   assign lanes[2] = q;
 
-  assign regw  = {stages[0], stages[1], stages[2], stages[3], inp};
-  assign combw = {lanes[0], lanes[1], lanes[2]};
+  assign regw  = {stages[3], stages[2], stages[1], stages[0], inp};
+  assign combw = {lanes[2], lanes[1], lanes[0]};
 endmodule

@@ -6,30 +6,29 @@
 :set: compile.formal.mode=normal
 */
 
-// A positional ARRAY spliced as one `concat` lane, at RUNTIME.
+// A positional ARRAY spliced into a bit packing, at RUNTIME.
 //
-// THE RULE (docs/pyrope/10-internals.md, "Bit selection and concatenation"):
-// `concat` is MSB-first, and a tuple/array lane "expands to its fields in
-// declaration order (field 0 most significant)". An array is ordered by
-// construction -- its entries are numbered, not named -- so unlike a named
-// bundle (rejected, see ../errors/concat_named_bundle_lane.prp) it needs no
-// explicit per-field spelling: `concat(stages)` IS `concat(stages[0], …,
-// stages[3])`.
+// THE RULE (docs/pyrope/10-internals.md, "Bit selection and packing"):
+// `X#[..]` is the full bit vector of `X`, and a positional tuple/array packs
+// with ENTRY 0 AT BIT 0, each later entry stacked above it. An array is
+// ordered by construction -- its entries are numbered, not named -- so unlike
+// a multi-field named bundle (rejected, see ../errors/concat_named_bundle_lane.prp)
+// it needs no per-field spelling: `lanes#[..]` IS `(lanes[0], lanes[1], lanes[2])#[..]`.
 //
 // ../pyrope/concat_ordered_array_lane.prp already pins that rule for a
-// COMPTIME array, where upass.constprop folds the whole splice away. This
+// COMPTIME array, where upass.constprop folds the whole packing away. This
 // fixture is the RUNTIME twin, and it covers BOTH array storage classes,
 // which reach upass.tolg as two different things:
 //
-//   * `reg stages:[4]u8`  -- one Memory cell. The lane splices the cell's
+//   * `reg stages:[4]u8`  -- one Memory cell. The splice packs the cell's
 //     whole-array `read_all` bus.
 //   * `mut lanes:[3]u8`   -- an Array_scalar_view: a single packed comb bus.
 //
-// In BOTH the packed bus holds entry 0 in the LOW element window, so the
-// splice is a per-entry REVERSAL of that word, never a copy of it. That is
-// the part worth a golden: reading the array whole (`x = stages`) and
-// splicing it (`concat(stages)`) are opposite orders, and only one of them is
-// what `concat` means.
+// In BOTH the packed bus already holds entry 0 in the LOW element window, and
+// entry 0 is also the LOW end of the packed word, so the splice is a COPY of
+// that bus rather than a per-entry reversal of it. That is the part worth a
+// golden: reading the array whole (`x = lanes`) and packing it (`lanes#[..]`)
+// agree, which is exactly what changed when `concat` was retired.
 //
 // `ordering="old"` is required, not decoration: a whole-array read of a
 // memory that also carries a same-cycle collision matrix is refused by
@@ -37,21 +36,21 @@
 // also makes `stages[k] = stages[k-1]` an ordinary shift register -- every
 // read sees the committed contents -- which is what the golden spells.
 //
-// The array is left UNINITIALIZED so the design is the concat and nothing
+// The array is left UNINITIALIZED so the design is the packing and nothing
 // else: an initializer would add the reset-sweep FSM (a counter, a restore
 // write port) and the golden would have to model hardware this claim is not
 // about.
 //
 // Three statements of ONE layout, which must all agree:
-//   1. `concat(...)`               -- here;
-//   2. the hand-written Verilog    -- concat_array_lane.v (prp-equiv-*);
-//   3. the explicit per-range form -- written out twice: as the `assert`s
+//   1. `(inp, ...stages)#[..]`      -- here;
+//   2. the hand-written Verilog     -- concat_array_lane.v (prp-equiv-*);
+//   3. the explicit per-range form  -- written out twice: as the `assert`s
 //      below, so `pass.formal` has to discharge it inside this same file, and
 //      as concat_array_lane_1.prp (prp-lec-*), which spells the same ranges
 //      with a `for` loop over the entries.
 //
 // `rw`/`cw` exist only for those asserts; once proven they are dead and
-// swept, so the netlist that reaches the LEC is the pure concat one.
+// swept, so the netlist that reaches the LEC is the pure packing one.
 pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
   reg stages:[4]u8:[ordering="old"]
   stages[0] = inp
@@ -64,25 +63,25 @@ pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
   lanes[1] = p
   lanes[2] = q
 
-  // `stages` occupies bits [39..8] (entry 0 highest), `inp` the low 8 -- a
-  // mixed lane list, so the array splice has to interleave correctly with an
-  // ordinary scalar lane rather than only work on its own.
-  regw  = concat(stages, inp)
-  combw = concat(lanes)
+  // `inp` occupies bits [7..0] and `stages` the 32 above it (entry 0 lowest) --
+  // a mixed entry list, so the array splice has to interleave correctly with an
+  // ordinary scalar entry rather than only work on its own.
+  regw  = (inp, ...stages)#[..]
+  combw = lanes#[..]
 
   // The same layout written one range at a time. Every bit is driven exactly
-  // once and no `concat` appears, so this is an independent statement of where
+  // once and no packing appears, so this is an independent statement of where
   // each entry lands.
   mut rw:u40 = 0
-  rw#[32..=39] = stages[0]
-  rw#[24..=31] = stages[1]
-  rw#[16..=23] = stages[2]
-  rw#[8..=15]  = stages[3]
   rw#[0..=7]   = inp
+  rw#[8..=15]  = stages[0]
+  rw#[16..=23] = stages[1]
+  rw#[24..=31] = stages[2]
+  rw#[32..=39] = stages[3]
   mut cw:u24 = 0
-  cw#[16..=23] = lanes[0]
+  cw#[0..=7]   = lanes[0]
   cw#[8..=15]  = lanes[1]
-  cw#[0..=7]   = lanes[2]
-  assert(regw == rw, "reg-array lane: entry 0 is the most significant window")
-  assert(combw == cw, "comb-array lane: entry 0 is the most significant window")
+  cw#[16..=23] = lanes[2]
+  assert(regw == rw, "reg-array splice: entry 0 is the least significant window")
+  assert(combw == cw, "comb-array splice: entry 0 is the least significant window")
 }

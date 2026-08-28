@@ -13,5 +13,5 @@
 // rather than guessed.
 comb concat_untyped_lane(b:u8) -> (z:u11) {
   const u = 0ub101
-  z = concat(u, b)
+  z = (b, u)#[..]
 }

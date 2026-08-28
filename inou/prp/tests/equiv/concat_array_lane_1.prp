@@ -1,16 +1,16 @@
 /*
 :name: concat_array_lane_1
 */
-// The same design as concat_array_lane.prp with every `concat` replaced by the
+// The same design as concat_array_lane.prp with every packing replaced by the
 // explicit bit-assignment idiom, and the per-entry ranges COMPUTED by a `for`
 // loop rather than written out. No `concat` node is built here at all, so a
-// PROVEN result is an independent check of where `concat`'s array splice puts
-// each entry -- not two spellings that share the lowering being compared with
+// PROVEN result is an independent check of where a spliced array puts each
+// entry -- not two spellings that share the lowering being compared with
 // itself.
 //
-// Entry k of an N-entry array lane lands at bits [(N-1-k)*w .. (N-1-k)*w+w-1]
-// of that lane's window: entry 0 highest. The indices below say exactly that,
-// and the loop is comptime-unrolled, so this is N literal range writes.
+// Entry k of an N-entry array splice lands at bits [k*w .. k*w+w-1] of that
+// splice's window: entry 0 lowest. The indices below say exactly that, and the
+// loop is comptime-unrolled, so this is N literal range writes.
 pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
   reg stages:[4]u8:[ordering="old"]
   stages[0] = inp
@@ -24,15 +24,15 @@ pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
   lanes[2] = q
 
   mut rw:u40 = 0
-  rw#[0..=7] = inp          // the scalar lane, at the bottom
+  rw#[0..=7] = inp          // the scalar entry, at the bottom
   for i in 0..<4 {
-    rw#[(8 + (3 - i) * 8)..=(15 + (3 - i) * 8)] = stages[i]
+    rw#[(8 + i * 8)..=(15 + i * 8)] = stages[i]
   }
   regw = rw
 
   mut cw:u24 = 0
   for i in 0..<3 {
-    cw#[((2 - i) * 8)..=(7 + (2 - i) * 8)] = lanes[i]
+    cw#[(i * 8)..=(7 + i * 8)] = lanes[i]
   }
   combw = cw
 }
