@@ -19,7 +19,9 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1393,14 +1395,15 @@ bool try_packed_scalar_proven(const Query_result& ind, const Query_result& bmc, 
       || bmc.output_checks <= 0) {
     return false;
   }
-  out                       = ind;
-  out.verdict               = Verdict::Proven;
-  out.bounded               = false;
-  out.engine                = "ind+bmc-base";
+  out                           = ind;
+  out.verdict                   = Verdict::Proven;
+  out.bounded                   = false;
+  out.engine                    = "ind+bmc-base";
   out.packed_scalar_base_proven = true;
-  out.detail = "auto: PROVEN by packed/scalar relation (BMC from reset establishes the base; induction preserves the relation and "
-               "all outputs); "
-             + ind.detail + "; base: " + bmc.detail;
+  out.detail
+      = "auto: PROVEN by packed/scalar relation (BMC from reset establishes the base; induction preserves the relation and "
+        "all outputs); "
+        + ind.detail + "; base: " + bmc.detail;
   return true;
 }
 
@@ -2549,7 +2552,22 @@ inline void merge_top_in(Top_in& slot, int w, bool sgn) {
 struct Packed_scalar_bridge {
   std::string              wide_key;
   std::vector<std::string> bit_keys;  // LSB first
+  // pass.partition wraps mapped regions in synthetic `sub_<id>` instances.
+  // Once the LEC hierarchy driver inlines that one-sided wrapper, the prefix
+  // is representation-only and the embedded source register name is exact.
+  // Other suffix matches remain speculative and require a reachable base.
+  bool                     structural_partition = false;
 };
+
+bool is_synthetic_partition_prefix(std::string_view prefix) {
+  constexpr std::string_view marker = "sub_";
+  if (!prefix.starts_with(marker) || prefix.size() == marker.size()) {
+    return false;
+  }
+  return std::all_of(prefix.begin() + static_cast<std::ptrdiff_t>(marker.size()), prefix.end(), [](unsigned char c) {
+    return std::isdigit(c);
+  });
+}
 
 // Parse the stable loop-replica spelling produced by uPass, e.g.
 // `tree_valid__li64_valid_r`. The numeric occurrence is deliberately removed
@@ -2580,8 +2598,7 @@ bool split_loop_replica_key(std::string_view key, std::string& group, int& repli
 // one-bit implementation loop replicas. The spelling proposes a relation; it
 // does NOT justify it. The inductive step and reset-reachable BMC base are both
 // proved before the portfolio may turn it into a full equivalence result.
-std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side,
-                                                               const Io_name_map<int>& impl_side) {
+std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side, const Io_name_map<int>& impl_side) {
   std::map<std::string, std::map<int, std::string>> groups;
   for (const auto& [key, width] : impl_side) {
     if (width != 1 || ref_side.contains(key)) {
@@ -2599,7 +2616,7 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
     if (members.size() < 2) {
       continue;
     }
-    int expected = members.begin()->first;
+    int                      expected = members.begin()->first;
     std::vector<std::string> bits;
     for (const auto& [replica, key] : members) {
       if (replica != expected++) {
@@ -2626,7 +2643,96 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
     if (scalar_groups.size() != 1 || wit == wide_by_width.end() || wit->second.size() != 1) {
       continue;  // an arbitrary choice among same-shaped groups is not a correspondence
     }
-    out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front())});
+    out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front()), false});
+  }
+
+  // Standard-cell mapping uses `<source-register>_<bit>` rather than the
+  // loop-replica spelling above. The EXACT-base form (`data_0..data_N` against a
+  // ref `data`) is already related by the ordinary bit-blast bridge and is not
+  // re-proposed here, but a flattened implementation may retain a hierarchy
+  // prefix that the source front-end did not (`child_data_0` versus packed
+  // `data`). Admit that suffix relation only when it selects one complete,
+  // contiguous group of exactly N bits AND that group could serve no OTHER
+  // reference key. This remains an UNCERTAIN bridge: the caller requires both an
+  // inductive transition proof and a reset-reachable base proof before it can
+  // contribute to PROVEN.
+  std::map<std::string, std::map<int, std::string>> indexed;
+  for (const auto& [key, width] : impl_side) {
+    if (width != 1 || ref_side.contains(key)) {
+      continue;
+    }
+    const auto underscore = key.rfind('_');
+    if (underscore == std::string::npos || underscore + 1 == key.size()) {
+      continue;
+    }
+    int  index  = 0;
+    bool digits = true;
+    for (size_t i = underscore + 1; i < key.size(); ++i) {
+      // The bound also keeps a pathological all-digit tail from overflowing.
+      if (std::isdigit(static_cast<unsigned char>(key[i])) == 0 || index > 1000000) {
+        digits = false;
+        break;
+      }
+      index = index * 10 + (key[i] - '0');
+    }
+    if (digits) {
+      indexed[key.substr(0, underscore)].emplace(index, key);
+    }
+  }
+  // A wide key the loop-replica pass above already bridged is spoken for: a
+  // second relation would map the same reference bits onto two scalar groups.
+  std::set<std::string> bridged_wides;
+  for (const auto& b : out) {
+    bridged_wides.insert(b.wide_key);
+  }
+  // Walk the GROUPS and enumerate each base's own `_`-delimited suffixes (a
+  // handful per name) rather than testing every reference key against every
+  // group: the latter is quadratic in the state-key count and allocated a
+  // `"_" + wide` temporary per pair. BOTH directions must be unique -- a group
+  // that could serve two reference keys (`u_w_data_0..7` fits `data` and
+  // `w_data`), or a reference key with two candidate groups, is an arbitrary
+  // choice and not a correspondence. `std::map` keeps the emitted bridge order
+  // independent of hash iteration order.
+  std::map<std::string, std::vector<std::string>> wide_to_bases;  // ref wide -> candidate group bases
+  std::map<std::string, int>                      base_claims;    // group base -> ref wides it could serve
+  for (const auto& [base, members] : indexed) {
+    int  expected   = 0;
+    bool contiguous = true;
+    for (const auto& [index, key] : members) {
+      if (index != expected++) {
+        contiguous = false;
+        break;
+      }
+    }
+    if (!contiguous) {
+      continue;
+    }
+    const auto n = static_cast<int>(members.size());
+    if (n <= 1) {
+      continue;
+    }
+    for (size_t p = base.find('_'); p != std::string::npos; p = base.find('_', p + 1)) {
+      std::string wide = base.substr(p + 1);
+      auto        wit  = ref_side.find(wide);
+      if (wit == ref_side.end() || wit->second != n || impl_side.contains(wide) || bridged_wides.contains(wide)) {
+        continue;
+      }
+      ++base_claims[base];
+      wide_to_bases[wide].push_back(base);
+    }
+  }
+  for (const auto& [wide, bases] : wide_to_bases) {
+    if (bases.size() != 1 || base_claims.at(bases.front()) != 1) {
+      continue;  // ambiguous in one direction or the other
+    }
+    const auto&              base = bases.front();
+    std::vector<std::string> bits;
+    bits.reserve(indexed.at(base).size());
+    for (const auto& [index, key] : indexed.at(base)) {
+      bits.push_back(key);
+    }
+    const auto prefix = std::string_view(base).substr(0, base.size() - wide.size() - 1);
+    out.push_back(Packed_scalar_bridge{wide, std::move(bits), is_synthetic_partition_prefix(prefix)});
   }
   return out;
 }
@@ -2858,9 +2964,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     size_t p = spec + 2;
     while (p < entity.size()) {
-      const size_t end = entity.find('_', p);
-      const auto token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
-      bool       width = token == "bool";
+      const size_t end   = entity.find('_', p);
+      const auto   token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
+      bool         width = token == "bool";
       if (!width && token.size() >= 2 && (token[0] == 'u' || token[0] == 's')) {
         width = std::all_of(token.begin() + 1, token.end(), [](unsigned char c) { return std::isdigit(c); });
       }
@@ -4098,9 +4204,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // phase we instead start from a FRESH arbitrary equal state and let the
     // reset-hold prologue drive both designs into their reset state — so the
     // checked window genuinely exercises free-running behavior from reset.
-    Io_name_map<Val>                 ref_state, impl_state;
+    Io_name_map<Val>                  ref_state, impl_state;
     std::vector<Packed_scalar_bridge> bmc_packed_scalar;
-    absl::flat_hash_set<std::string> bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
+    absl::flat_hash_set<std::string>  bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
     {
       Io_name_map<int>  fw;
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
@@ -4208,6 +4314,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         bitblast.emplace(key, std::move(bits));
       }
+      // A mapped region's synthetic `sub_<partition-id>` boundary was already
+      // inlined by the hierarchy driver. Relate its per-bit cells immediately:
+      // unlike an arbitrary suffix guess, this prefix is generated by
+      // pass.partition and carries no hardware state or behavioral meaning.
+      for (const auto& bridge : bmc_packed_scalar) {
+        if (!bridge.structural_partition || bitblast.contains(bridge.wide_key)) {
+          continue;
+        }
+        for (const auto& bit : bridge.bit_keys) {
+          bitblast_bits.insert(bit);
+        }
+        bitblast.emplace(bridge.wide_key, bridge.bit_keys);
+      }
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
@@ -4219,9 +4338,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             if (q.is_invalid()) {
               continue;
             }
-            int  w   = gu::real_width(q);
-            bool rst = flop_initial(tm, node, w > 0 ? w : 1).has_value();
-            keys.insert(std::string(rst ? "[reset] " : "[UNRST] ") + eff(node.get_hier_name()) + "  <=  " + node.get_hier_name());
+            auto        init_d    = graph_util::get_driver_of_sink_name(node, "initial");
+            std::string init_text = init_d.is_invalid()                ? "absent"
+                                    : graph_util::is_const_pin(init_d) ? graph_util::hydrate_const(init_d).to_binary()
+                                                                       : "nonconst";
+            keys.insert(std::format("[{} init={}] {}  <=  {}",
+                                    Ntype::get_name(graph_util::type_op_of(node)),
+                                    init_text,
+                                    eff(node.get_hier_name()),
+                                    node.get_hier_name()));
           }
           for (const auto& k : keys) {
             std::fprintf(stderr, "[LEC_FLOP %s] %s\n", tag, k.c_str());
@@ -5077,15 +5202,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // unjustified shared-box assumption — only Unknown, with the sets surfaced.
     res.unmatched_ref.assign(bmc_unmatched_ref.begin(), bmc_unmatched_ref.end());
     res.unmatched_impl.assign(bmc_unmatched_impl.begin(), bmc_unmatched_impl.end());
-    const bool incomplete          = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
-    const bool dead_state_only     = internal_state_only(res.unmatched_ref, res.unmatched_impl);
-    const bool blocking_incomplete = incomplete && !dead_state_only;
-    auto prove_packed_scalar_base = [&]() {
+    const bool incomplete               = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+    const bool dead_state_only          = internal_state_only(res.unmatched_ref, res.unmatched_impl);
+    const bool blocking_incomplete      = incomplete && !dead_state_only;
+    auto       prove_packed_scalar_base = [&]() {
       if (bmc_packed_scalar.empty()) {
         return;
       }
       cvc5::Term relation_bad;
       for (const auto& bridge : bmc_packed_scalar) {
+        if (bridge.structural_partition) {
+          continue;
+        }
         auto wide = ref_state.find(bridge.wide_key);
         if (wide == ref_state.end() || wide->second.width != static_cast<int>(bridge.bit_keys.size())) {
           res.detail += "; packed/scalar base unavailable (wide state missing)";
@@ -5108,16 +5236,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {wide->second.term, packed});
         relation_bad    = relation_bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {relation_bad, diff});
       }
+      if (relation_bad.isNull()) {
+        return;  // every bridge was a structural (representation-only) one: nothing speculative to justify
+      }
       solver.push();
       solver.assertFormula(relation_bad);
       const auto br = solve_check();
       solver.pop();
       if (br.isUnsat()) {
-        res.packed_scalar_base_proven = true;
-        res.detail += "; packed/scalar relation reached from reset";
+        res.packed_scalar_base_proven  = true;
+        res.detail                    += "; packed/scalar relation reached from reset";
       } else {
         res.detail += br.isSat() ? "; packed/scalar relation not reached at the checked base"
-                                 : "; packed/scalar base check returned unknown";
+                                       : "; packed/scalar base check returned unknown";
       }
     };
     if (!res.unmatched_ref.empty()) {
@@ -5630,20 +5761,22 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;
     }
     for (size_t i = 0; i < bridge.bit_keys.size(); ++i) {
-      const auto b = static_cast<uint32_t>(i);
-      cvc5::Term t = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
+      const auto b               = static_cast<uint32_t>(i);
+      cvc5::Term t               = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
       shared[bridge.bit_keys[i]] = Val{t, 1, false};
     }
     ind_bitblast.emplace(bridge.wide_key, bridge.bit_keys);
-    ++ind_packed_scalar_applied;
+    if (!bridge.structural_partition) {
+      ++ind_packed_scalar_applied;
+    }
   }
   auto gate_packed_scalar_step = [&]() {
     if (res.verdict != Verdict::Proven || ind_packed_scalar_applied == 0) {
       return;
     }
-    res.verdict                     = Verdict::Unknown;
-    res.packed_scalar_step_proven   = true;
-    res.detail += "; packed/scalar transition relation is inductive; awaiting a reset-reachable base proof";
+    res.verdict                    = Verdict::Unknown;
+    res.packed_scalar_step_proven  = true;
+    res.detail                    += "; packed/scalar transition relation is inductive; awaiting a reset-reachable base proof";
   };
   // One shared current-state symbol per STATEFUL collapsed leaf (the box's state
   // cut), corresponding on both designs: the inductive miter assumes it equal and
@@ -6937,11 +7070,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (ref_grouped[r]) {
           continue;
         }
-        const auto& canonical = rrd[r];
+        const auto&         canonical = rrd[r];
         // ONE scan of `ird`: `crosses` (any same-address partner on the impl
         // side is what makes this group worth forming) and the mergeable
         // partners come from the same walk.
-        bool                crosses = false;
+        bool                crosses   = false;
         std::vector<size_t> cross;  // indices into `ird`
         for (size_t bi = 0; bi < ird.size(); ++bi) {
           const auto& b = ird[bi];
@@ -6968,11 +7101,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         for (size_t bi : cross) {
           const auto& b = ird[bi];
-          merge_cands.push_back({canonical.dout,
-                                 b.dout,
-                                 std::numeric_limits<size_t>::max(),
-                                 !(canonical.from_shared_cur && b.from_shared_cur),
-                                 key});
+          merge_cands.push_back(
+              {canonical.dout, b.dout, std::numeric_limits<size_t>::max(), !(canonical.from_shared_cur && b.from_shared_cur), key});
         }
       }
 

@@ -365,7 +365,7 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
 // key basis on the non-hier path, aligned with the hier driver's entity-canon
 // def keys so a design proven either way shares its pair hints.
 static std::string lec_entity_of(std::string_view n) {
-  auto d = n.rfind('.');
+  auto        d = n.rfind('.');
   std::string entity(d == std::string_view::npos ? n : n.substr(d + 1));
   const auto  spec = entity.find("__");
   if (spec == std::string::npos || spec == 0 || spec + 2 >= entity.size()) {
@@ -377,9 +377,9 @@ static std::string lec_entity_of(std::string_view n) {
   // primitive width; named/generic-value specializations remain distinct.
   size_t p = spec + 2;
   while (p < entity.size()) {
-    const size_t end = entity.find('_', p);
-    const auto token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
-    bool       width = token == "bool";
+    const size_t end   = entity.find('_', p);
+    const auto   token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
+    bool         width = token == "bool";
     if (!width && token.size() >= 2 && (token[0] == 'u' || token[0] == 's')) {
       width = std::all_of(token.begin() + 1, token.end(), [](unsigned char c) { return std::isdigit(c); });
     }
@@ -601,7 +601,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // keeps the full name (such defs simply stay flattened into their parents).
   // pass/lec's box-correspondence builder canonicalizes the same way, so the
   // entity keys pushed into o.collapse resolve on both sides.
-  auto entity_of = [](std::string_view n) -> std::string { return lec_entity_of(n); };
+  auto                                   entity_of = [](std::string_view n) -> std::string { return lec_entity_of(n); };
   // formal.lec.trust set: def keys ASSUMED equal without a proof. Matched by the
   // canonical (entity) key the DAG uses, or by either side's full spelling.
   const absl::flat_hash_set<std::string> trust_set(base.trust.begin(), base.trust.end());
@@ -1829,7 +1829,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         dst.emplace(pn, r);
       }
     }
-    auto            t0 = std::chrono::steady_clock::now();
+    auto              t0               = std::chrono::steady_clock::now();
     // A Liberty-model (`--lib`) comparison pits a gate-level netlist against
     // RTL. Under proven-child collapse the boxes are an abstraction the cone
     // pass refutes on cuts the flat miter proves (dino PipelinedDualIssueCPU:
@@ -1904,7 +1904,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     const long long cheap_ms               = o.timeout > 0 ? static_cast<long long>(o.timeout) * 100 : 1000;
     const bool      cheap_unknown          = r.elapsed_ms >= 0 && r.elapsed_ms < cheap_ms;
     const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
-                                             && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
+                                        && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
     //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one
     //        place a wrong PROVEN silently converts a DEFINITE counterexample into
     //        a run-level pass, so it gets the same flat confirmation (a) already
@@ -1945,12 +1945,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // query we are about to request.  Reuse it instead of spending the same
       // solver budget twice; deepen_if_bounded below is the additional check
       // that matters.
-      const bool already_flat = proven_absorbing && coll.empty();
-      auto       rf           = already_flat
-                                    ? r
-                                    : (order.size() == 1
-                                           ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
-                                           : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
+      const bool already_flat      = proven_absorbing && coll.empty();
+      auto       rf                = already_flat ? r
+                                                  : (order.size() == 1
+                                                         ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
+                                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
       // The collapsed run really ran cvc5, so its effort is part of what this def
       // cost: carry it into the survivor BEFORE the move discards `r` (formal.stats).
       // A BOUNDED flat pass ("no CEX up to bound k") cannot by itself overrule
@@ -1969,7 +1968,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // ordinary bounded-proof policy; an Unknown stays inconclusive, keeping
       // the collapsed witness (a hard fail under strict), and must NOT fall
       // through to the collapsed int-blast retry below.
-      auto deepen_if_bounded = [&](livehd::lec::Query_result& cand) -> bool {  // true = demoted to Unknown
+      auto       deepen_if_bounded = [&](livehd::lec::Query_result& cand) -> bool {  // true = demoted to Unknown
         if (!(cand.verdict == Verdict::Proven && cand.bounded)) {
           return false;
         }
@@ -1995,7 +1994,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                      flush);
         }
         auto rd      = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], odeep, sub_lib)
-                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], odeep, sub_lib);
+                                               : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], odeep, sub_lib);
         rd.cvc5     += cand.cvc5;
         rd.solve_ms += cand.solve_ms;  // the shallow flat leg really ran: the budget must see it
         if (rd.verdict == Verdict::Unknown) {
@@ -2003,7 +2002,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           cand.witness = r.witness;
           cand.detail  = std::format(
               "INCONCLUSIVE: flat confirmation only BOUNDED ({} step(s)) and the deepened run (bound {}) did not settle — "
-              "cannot overrule the collapsed-box REFUTE; {}",
+                     "cannot overrule the collapsed-box REFUTE; {}",
               cand.checked_steps,
               odeep.bound,
               rd.detail);
@@ -2016,7 +2015,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         rd.detail = std::format("deepened flat confirmation (bound {} = {} + flush {}); ", odeep.bound, odeep.bound - flush, flush)
                     + rd.detail;
-        cand      = std::move(rd);
+        cand = std::move(rd);
         return false;
       };
       if (refuted_under_collapse) {
@@ -2038,16 +2037,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (rf.verdict != Verdict::Unknown) {
           rf.detail = "flat-confirm after collapsed-box PROVEN absorbing a refutation" + std::string(rf.detail.empty() ? "" : "; ")
                       + rf.detail + (already_flat || r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
-          rf.elapsed_ms  = -1;
+          rf.elapsed_ms = -1;
           if (!already_flat) {
             rf.cvc5 += r.cvc5;
           }
-          r              = std::move(rf);
+          r = std::move(rf);
         } else {
           r.verdict = Verdict::Unknown;
           r.detail  = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
-                      + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                      + std::string(already_flat || r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+                     + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                     + std::string(already_flat || r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
           // When `rf` STARTED as a copy of `r` (already_flat), deepen_if_bounded
           // already folded r's own effort into it -- accumulating again would
           // double-charge the shared solver budget and starve the remaining defs.
@@ -2069,10 +2068,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // refuting, then a shallow 6-cycle flat retry that cannot reach the
         // divergence. Gated on a real child REFUTE: an ordinary Unknown -> flat
         // retry with nothing to absorb must not pay for a second solve.
-        r.verdict       = Verdict::Unknown;
-        r.detail        = "a bounded flat retry cannot clear a collapsed-box UNKNOWN while a child REFUTE stands"
-                          + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                          + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+        r.verdict = Verdict::Unknown;
+        r.detail  = "a bounded flat retry cannot clear a collapsed-box UNKNOWN while a child REFUTE stands"
+                   + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                   + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
         r.cvc5         += rf.cvc5;
         r.solve_ms     += rf.solve_ms;  // both flat legs really ran: the soft budget must see them
         // The progress record below carries the combined wall clock, exactly as
@@ -2632,9 +2631,9 @@ struct Lecfail_leaf {
 
 struct Lecfail_mod {
   std::string                                      name;
-  std::string                                      text;      // full module source
-  std::vector<std::pair<std::string, std::string>> inputs;    // {name, ":type" suffix or ""}
-  std::vector<std::pair<std::string, std::string>> outputs;   // {name, ":type@[..]" suffix or ""}
+  std::string                                      text;       // full module source
+  std::vector<std::pair<std::string, std::string>> inputs;     // {name, ":type" suffix or ""}
+  std::vector<std::pair<std::string, std::string>> outputs;    // {name, ":type@[..]" suffix or ""}
   std::vector<Lecfail_leaf>                        in_leaves;  // `inputs` flattened to scalars
 };
 
@@ -2703,7 +2702,7 @@ void lecfail_parse_io(std::string_view list, std::vector<std::pair<std::string, 
     if (b == std::string_view::npos) {
       return;
     }
-    item = item.substr(b, e - b + 1);
+    item         = item.substr(b, e - b + 1);
     // The name/type separator is the first ':' outside a quoted name AND outside
     // any nesting (a struct field's own ':' must not split the port).
     size_t colon = std::string_view::npos;
@@ -3431,7 +3430,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   std::vector<Wport>                            win;
   absl::flat_hash_map<std::string, std::string> flat_of;  // dotted -> wrapper port
   absl::flat_hash_set<std::string>              flat_used;
-  auto add_leaves = [&](const std::vector<Lecfail_leaf>& leaves) {
+  auto                                          add_leaves = [&](const std::vector<Lecfail_leaf>& leaves) {
     for (const auto& lf : leaves) {
       if (flat_of.contains(lf.dotted)) {
         continue;
@@ -3813,9 +3812,9 @@ static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
       .emit();
 }
 
-// The IMPL dropped part of the REF's hierarchy: inline, into each ref def the
-// impl still has, every instance whose def the impl library no longer holds,
-// so both sides own the same state.
+// One side dropped part of the other's hierarchy: inline, into each definition
+// the other side still has, every instance whose definition the other library
+// no longer holds, so both sides expose comparable machine state.
 //
 // Two producers do this to a netlist. `pass color flat` fuses the WHOLE
 // hierarchy into ONE abc region, so the impl is a single graph while the ref
@@ -3836,46 +3835,40 @@ static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
 // keep is left alone: that pair proves def by def, and flattening it would
 // throw away the decomposition that makes the proof tractable.
 //
-// Only for a mapped-netlist comparison (a `--lib` cell model library, and at
-// least one cell instance in the impl top): an ordinary design whose children
-// upass inlined is not this case. Returns how many instances were spliced.
-static size_t inline_ref_instances_absorbed_by_impl(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib,
-                                                    const std::vector<std::shared_ptr<hhds::Graph>>&    ref_graphs,
-                                                    const std::vector<std::shared_ptr<hhds::Graph>>&    impl_graphs,
-                                                    hhds::Graph* ref_g, hhds::Graph* impl_g) {
-  if (ref_g == nullptr || impl_g == nullptr || sub_lib.empty()) {
-    return 0;  // no `--lib`: this is not a mapped-netlist comparison
-  }
-  bool has_cell = false;
-  for (auto n : impl_g->body().nodes()) {
-    if (livehd::graph_util::type_op_of(n) == Ntype_op::Sub && sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
-      has_cell = true;
-      break;
-    }
-  }
-  if (!has_cell) {
+// This is deliberately source-format agnostic. It covers mapped netlists, but
+// also the ordinary Verilog-vs-Pyrope shape where one front-end retains helper
+// modules and the other has already flattened them. A hierarchy boundary is
+// not part of the equivalence contract and must never manufacture a REFUTED
+// verdict. `sub_lib` definitions are real mapped-cell vocabulary and are never
+// treated as absorbed design hierarchy. Returns how many instances were
+// spliced on `side`.
+static size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib,
+                                                       const std::vector<std::shared_ptr<hhds::Graph>>&    side_graphs,
+                                                       const std::vector<std::shared_ptr<hhds::Graph>>&    other_graphs,
+                                                       hhds::Graph*                                        side_g) {
+  if (side_g == nullptr) {
     return 0;
   }
-  // The defs the impl still has, by full name AND by entity tail (a netlist
-  // keeps `file.entity`; the tail covers a regenerated `plain.entity` side).
-  absl::flat_hash_set<std::string> impl_defs;
-  for (const auto& sp : impl_graphs) {
+  // The defs the other side still has, by full name AND by entity tail (a
+  // Pyrope graph keeps `file.entity`; the tail covers a flat Verilog side).
+  absl::flat_hash_set<std::string> other_defs;
+  for (const auto& sp : other_graphs) {
     if (sp) {
       const std::string full{sp->get_name()};
-      impl_defs.insert(full);
-      impl_defs.insert(lec_entity_of(full));
+      other_defs.insert(full);
+      other_defs.insert(lec_entity_of(full));
     }
   }
-  auto impl_has_def = [&](std::string_view def_name) {
+  auto other_has_def = [&](std::string_view def_name) {
     const std::string full{def_name};
-    return impl_defs.contains(full) || impl_defs.contains(lec_entity_of(full));
+    return other_defs.contains(full) || other_defs.contains(lec_entity_of(full));
   };
-  // Every ref def the impl still has gets the treatment, the top included: an
-  // absorbed def is inlined at ALL its sites, so a kept child may hold absorbed
-  // grandchildren too.
-  std::vector<hhds::Graph*> hosts{ref_g};
-  for (const auto& sp : ref_graphs) {
-    if (sp && sp.get() != ref_g && impl_has_def(sp->get_name()) && sub_lib.find(sp->get_gid()) == sub_lib.end()) {
+  // Every definition the other side still has gets the treatment, the top
+  // included: an absorbed def is inlined at ALL its sites, so a kept child may
+  // hold absorbed grandchildren too.
+  std::vector<hhds::Graph*> hosts{side_g};
+  for (const auto& sp : side_graphs) {
+    if (sp && sp.get() != side_g && other_has_def(sp->get_name()) && sub_lib.find(sp->get_gid()) == sub_lib.end()) {
       hosts.push_back(sp.get());
     }
   }
@@ -3890,8 +3883,28 @@ static size_t inline_ref_instances_absorbed_by_impl(const absl::flat_hash_map<hh
           continue;  // a Liberty cell is the impl's vocabulary, never an absorbed def
         }
         auto sio = n.get_subnode_io();
-        if (sio == nullptr || impl_has_def(sio->get_name())) {
-          continue;  // the impl kept this def: it pairs def by def
+        if (sio == nullptr || other_has_def(sio->get_name())) {
+          continue;  // the other side kept this def: it pairs def by def
+        }
+        // A genuine BLACKBOX -- an assertion/diagnostic marker instance, a
+        // memory macro, any def whose body this side does not hold either --
+        // has nothing to splice, and inline_sub_instance answers a bodyless or
+        // replicated Sub with a FATAL internal error that kills the whole run.
+        // This used to be unreachable because the caller only ran on a `--lib`
+        // mapped-netlist comparison; now that ANY design reaches here, leave
+        // such an instance a boundary (it is a boundary on both sides anyway).
+        auto def_g = n.get_subnode_graph();
+        if (n.is_loop_subnode() || !def_g) {
+          continue;
+        }
+        // An instantiated CLOCK GATE is not absorbed design hierarchy either: it
+        // is the one recognized clock operator, and materialize_clock_cells (run
+        // further down) is what turns it into the `Clock_cell` the encoder can
+        // model. Dissolving it here leaves a plain derived-clock cone, the
+        // encoder REFUSES the def, and a real difference downstream of the gate
+        // comes back UNKNOWN instead of REFUTED (clock_cell_test case 6b).
+        if (livehd::latch_contract::match_icg_def(def_g.get())) {
+          continue;
         }
         insts.push_back(n);
       }
@@ -4379,22 +4392,35 @@ void lec_command(Options& opts, Result& res) {
     // untouched by inlining the top alone and that def stays inconclusive.
     // A `--lib` model itself never instantiates one, so skip those (they are
     // shared with ref_defs — mutating one would be a cross-side edit).
-    if (auto nflat = inline_ref_instances_absorbed_by_impl(sub_lib, ref_var.graphs, impl_var.graphs, ref_g.get(), impl_g.get());
-        nflat > 0) {
-      std::print("lec: inlined {} ref instance(s) whose def the impl netlist absorbed\n", nflat);
-      // Those defs are inline now wherever the impl dropped them; a ref def the
-      // impl still has stays comparable def by def.
-      absl::flat_hash_set<std::string> keep;
-      for (const auto& sp : impl_var.graphs) {
-        if (sp) {
-          keep.insert(std::string{sp->get_name()});
-          keep.insert(lec_entity_of(sp->get_name()));
+    const auto ref_flat  = inline_instances_missing_from_other_side(sub_lib, ref_var.graphs, impl_var.graphs, ref_g.get());
+    const auto impl_flat = inline_instances_missing_from_other_side(sub_lib, impl_var.graphs, ref_var.graphs, impl_g.get());
+    if (ref_flat + impl_flat > 0) {
+      std::print("lec: inlined {} ref and {} impl instance(s) absent from the other hierarchy\n", ref_flat, impl_flat);
+      // Those definitions are inline now wherever the other side dropped them;
+      // definitions present on both sides stay comparable def by def. Do not
+      // leave an orphan definition in edge-normalization's scan: it is outside
+      // the actual post-flattening miter and could otherwise manufacture a
+      // clock/latch refusal of its own.
+      auto names_of = [](const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+        absl::flat_hash_set<std::string> names;
+        for (const auto& sp : graphs) {
+          if (sp) {
+            names.insert(std::string{sp->get_name()});
+            names.insert(lec_entity_of(sp->get_name()));
+          }
         }
-      }
-      std::erase_if(ref_defs, [&](hhds::Graph* d) {
-        return d != ref_g.get() && sub_lib.find(d->get_gid()) == sub_lib.end() && !keep.contains(std::string{d->get_name()})
-               && !keep.contains(lec_entity_of(d->get_name()));
-      });
+        return names;
+      };
+      const auto ref_names  = names_of(ref_var.graphs);
+      const auto impl_names = names_of(impl_var.graphs);
+      auto prune = [&](std::vector<hhds::Graph*>& defs, hhds::Graph* top, const absl::flat_hash_set<std::string>& other_names) {
+        std::erase_if(defs, [&](hhds::Graph* d) {
+          return d != top && sub_lib.find(d->get_gid()) == sub_lib.end() && !other_names.contains(std::string{d->get_name()})
+                 && !other_names.contains(lec_entity_of(d->get_name()));
+        });
+      };
+      prune(ref_defs, ref_g.get(), impl_names);
+      prune(impl_defs, impl_g.get(), ref_names);
     }
     if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
       for (auto* side : {ref_g.get(), impl_g.get()}) {
@@ -4877,7 +4903,7 @@ void lec_command(Options& opts, Result& res) {
             rf.witness = r.witness;
             rf.detail  = std::format(
                 "INCONCLUSIVE: flat confirmation only BOUNDED ({} step(s)) and the deepened run (bound {}) did not settle — "
-                "cannot overrule the collapsed-box REFUTE; {}",
+                 "cannot overrule the collapsed-box REFUTE; {}",
                 rf.checked_steps,
                 odeep.bound,
                 rd.detail);
@@ -4893,9 +4919,9 @@ void lec_command(Options& opts, Result& res) {
         }
         rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                     + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
-        rf.elapsed_ms   = -1;          // the progress record carries the combined wall-clock below
-        rf.cvc5        += r.cvc5;      // the collapsed run's cvc5 effort was still spent (formal.stats)
-        rf.solve_ms    += r.solve_ms;  // and so was its solve time
+        rf.elapsed_ms  = -1;          // the progress record carries the combined wall-clock below
+        rf.cvc5       += r.cvc5;      // the collapsed run's cvc5 effort was still spent (formal.stats)
+        rf.solve_ms   += r.solve_ms;  // and so was its solve time
         r              = std::move(rf);
       }
       // int_blast=auto second leg (same rule as the hierarchical driver): a

@@ -19,6 +19,7 @@
 #include <thread>
 
 #include "absl/strings/str_join.h"
+#include "cgen_verilog.hpp"
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
@@ -2729,20 +2730,65 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
 // cgen into the scratch workdir.
 std::string materialize_verilog(Options& opts, Result& res, const std::string& kind, const std::string& path,
                                 std::string_view side) {
+  // Concatenating with `ofs << ifs.rdbuf()` is wrong twice: inserting an EMPTY
+  // streambuf sets failbit and silently drops every later module written to the
+  // same stream, and a source without a trailing newline glues its `endmodule`
+  // onto the next `module`.  Read, then append with a guaranteed separator.
+  auto append_file = [](std::ofstream& ofs, const std::string& p) {
+    std::ifstream      ifs(p);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    const auto text = oss.str();
+    if (text.empty()) {
+      return;
+    }
+    ofs << text;
+    if (text.back() != '\n') {
+      ofs << '\n';
+    }
+  };
+
+  auto out = std::format("{}/check_{}.v", workdir(opts), side);
   if (kind == "verilog") {
     res.inputs.push_back(path);
     check_inputs_exist({path});
-    return path;
+    if (opts.libs.empty()) {
+      return path;
+    }
+    std::ofstream ofs(out);
+    append_file(ofs, path);
+  } else {
+    Eprp_var var;
+    load_side_graphs(opts, res, kind, path, side, var);  // lg/pyrope/ln -> graphs (throws if empty)
+    auto          scratch = std::format("{}/check_{}", workdir(opts), side);
+    auto          names   = cgen_into(opts, res, var, scratch);
+    std::ofstream ofs(out);
+    for (const auto& n : names) {
+      append_file(ofs, std::format("{}/{}.v", scratch, cgen_verilog_file_stem(n)));
+    }
   }
-  Eprp_var var;
-  load_side_graphs(opts, res, kind, path, side, var);  // lg/pyrope/ln -> graphs (throws if empty)
-  auto          scratch = std::format("{}/check_{}", workdir(opts), side);
-  auto          names   = cgen_into(opts, res, var, scratch);
-  auto          out     = std::format("{}/check_{}.v", workdir(opts), side);
-  std::ofstream ofs(out);
-  for (const auto& n : names) {
-    std::ifstream ifs(std::format("{}/{}.v", scratch, n));
-    ofs << ifs.rdbuf();
+
+  // The in-process solvers resolve mapped cells directly from --lib LGraphs.
+  // lgcheck consumes Verilog, so materialize those same model definitions into
+  // both sides.  Without this, every standard cell is an undefined module and
+  // the Yosys backend reports SETUP FAILED before it can compare behavior.
+  // (Both sides produce the SAME model text, so this repeats one load+cgen per
+  // run; caching it must NOT go through the reusable --workdir, where a stale
+  // file from an earlier run with a different --lib would silently win.)
+  for (size_t i = 0; i < opts.libs.size(); ++i) {
+    const auto& lp = opts.libs[i];
+    if (lp.kind != "lg") {
+      throw Lhd_error{"usage", std::format("lec --lib expects lg:DIR, got '{}:'", lp.kind), ""};
+    }
+    Eprp_var lib_var;
+    auto     lib_side = std::format("{}_lib{}", side, i);
+    load_side_graphs(opts, res, lp.kind, lp.path, lib_side, lib_var);
+    auto          scratch = std::format("{}/check_{}", workdir(opts), lib_side);
+    auto          names   = cgen_into(opts, res, lib_var, scratch);
+    std::ofstream ofs(out, std::ios::app);
+    for (const auto& n : names) {
+      append_file(ofs, std::format("{}/{}.v", scratch, cgen_verilog_file_stem(n)));
+    }
   }
   return out;
 }

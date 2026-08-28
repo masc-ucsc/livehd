@@ -19,6 +19,7 @@
 #include <sstream>
 
 #include "absl/container/flat_hash_set.h"
+#include "cgen_verilog.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
 #include "file_output.hpp"
@@ -1228,7 +1229,11 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
     first = false;
     ofs << "{\"name\":\"" << json_escape_min(u.name) << "\"";
     if (!ext.empty()) {
-      ofs << ",\"file\":\"" << json_escape_min(u.name) << ext << "\"";
+      // cgen collapses directory separators out of the FILE name (a
+      // path-qualified Pyrope import spells its graph `../lib/core.core`), so
+      // the manifest must name the file that actually landed on disk.
+      const std::string fname = kind == "verilog" ? cgen_verilog_file_stem(u.name) : u.name;
+      ofs << ",\"file\":\"" << json_escape_min(fname) << ext << "\"";
     }
     ofs << ",\"content_hash\":\"" << std::format("{:016x}", u.hash) << "\"";
     if (!u.unit_kind.empty()) {
@@ -1342,18 +1347,18 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
         continue;
       }
       Lnast_io_entry x;
-      x.name       = e["n"].GetString();
-      x.bits       = e.HasMember("b") ? e["b"].GetInt() : 0;
-      x.is_signed  = !e.HasMember("s") || e["s"].GetInt() != 0;
-      x.is_ref     = e.HasMember("r") && e["r"].GetInt() != 0;
-      x.is_varargs = e.HasMember("v") && e["v"].GetInt() != 0;
-      x.kind       = e.HasMember("k") ? static_cast<Io_kind>(e["k"].GetInt()) : Io_kind::none;
-      x.stages_min = e.HasMember("smin") ? e["smin"].GetInt() : 0;
-      x.stages_max = e.HasMember("smax") ? e["smax"].GetInt() : 0;
-      x.type_name  = e.HasMember("t") ? e["t"].GetString() : "";
-      x.has_range  = e.HasMember("hr") && e["hr"].GetInt() != 0;
-      x.range_min  = e.HasMember("rmin") ? e["rmin"].GetInt64() : 0;
-      x.range_max  = e.HasMember("rmax") ? e["rmax"].GetInt64() : 0;
+      x.name        = e["n"].GetString();
+      x.bits        = e.HasMember("b") ? e["b"].GetInt() : 0;
+      x.is_signed   = !e.HasMember("s") || e["s"].GetInt() != 0;
+      x.is_ref      = e.HasMember("r") && e["r"].GetInt() != 0;
+      x.is_varargs  = e.HasMember("v") && e["v"].GetInt() != 0;
+      x.kind        = e.HasMember("k") ? static_cast<Io_kind>(e["k"].GetInt()) : Io_kind::none;
+      x.stages_min  = e.HasMember("smin") ? e["smin"].GetInt() : 0;
+      x.stages_max  = e.HasMember("smax") ? e["smax"].GetInt() : 0;
+      x.type_name   = e.HasMember("t") ? e["t"].GetString() : "";
+      x.has_range   = e.HasMember("hr") && e["hr"].GetInt() != 0;
+      x.range_min   = e.HasMember("rmin") ? e["rmin"].GetInt64() : 0;
+      x.range_max   = e.HasMember("rmax") ? e["rmax"].GetInt64() : 0;
       x.has_default = e.HasMember("hd") && e["hd"].GetInt() != 0;
       x.array_size  = e.HasMember("as") ? e["as"].GetInt64() : 0;
       x.elem_bits   = e.HasMember("eb") ? e["eb"].GetInt() : 0;
@@ -1527,7 +1532,7 @@ std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, co
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
-    auto f = std::format("{}/{}.v", odir, n);
+    auto f = std::format("{}/{}.v", odir, cgen_verilog_file_stem(n));
     if (::access(f.c_str(), R_OK) != 0) {
       throw Lhd_error{"internal", std::format("inou.cgen.verilog did not produce {}", f), "check the step log in --workdir"};
     }
@@ -1553,7 +1558,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      std::ifstream      ifs(std::format("{}/{}.v", e.path, n));
+      std::ifstream      ifs(std::format("{}/{}.v", e.path, cgen_verilog_file_stem(n)));
       std::ostringstream oss;
       oss << ifs.rdbuf();
       manifest.emplace_back(n, hash_bytes(oss.str()));
@@ -1575,7 +1580,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
       throw Lhd_error{"config", std::format("could not write {}", e.path), ""};
     }
     for (const auto& n : names) {
-      std::ifstream ifs(std::format("{}/{}.v", scratch, n));
+      std::ifstream ifs(std::format("{}/{}.v", scratch, cgen_verilog_file_stem(n)));
       ofs << ifs.rdbuf();
     }
     res.outputs.push_back(e.path);

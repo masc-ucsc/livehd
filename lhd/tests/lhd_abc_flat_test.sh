@@ -96,17 +96,26 @@ run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$
 run compile lg:"$D2/net" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
 run compile lg:"$D2/re" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
 # `a`/`b` are the INSTANCE names (the LHS variable of each `holder(...)` call),
-# so the preserved hierarchical flop is `a.r` / `b.r` — one multi-bit reg each.
+# so the preserved hierarchical flop is `a.r` / `b.r`. These registers carry NO
+# `initial` value in the IR, so pass.abc maps them to per-bit DFF cells — the
+# name has to survive as `\a.r_<bit>` on the cell instances. (It must NOT be
+# asserted as one multi-bit native `reg \a.r`: that only happened because ABC
+# picked a concrete value for the DON'T-CARE latch init, and materializing that
+# optimization witness as a hardware power-on value is exactly what pass.abc now
+# refuses. What this fixture pins is the NAME correspondence the LEC's tier-1
+# state pairing needs — `canon_flop_name` folds the per-bit spelling — not which
+# of the two encodings ABC's internal choice happens to select.)
 for inst in a b; do
   grep -hqE "^reg \\[[0-9]+:0\\] \\\\${inst}\\.r " "$D2/netv/"*.v \
-    || fail "hierarchical flop name lost in the flat netlist (expected a multi-bit '${inst}.r' register): $(grep -hE '^reg ' "$D2/netv/"*.v | head -40)"
+    || grep -hqE "DFFx1 \\\\${inst}\\.r_[0-9]+ " "$D2/netv/"*.v \
+    || fail "hierarchical flop name lost in the flat netlist (expected '${inst}.r' as a multi-bit reg or per-bit DFF cells): $(grep -hE '^reg |DFFx1 ' "$D2/netv/"*.v | head -40)"
 done
 ! grep -hq "__rinit\|__r[0-9]" "$D2/netv/"*.v || fail "anonymous __rinit/__r flop leaked (original register names must survive)"
-! grep -hq "DFFx1 " "$D2/netv/"*.v || fail "an init-carrying register was mapped to a DFF cell (power-on init would be lost)"
+! grep -hqE "DFFx1 \\\\?g[0-9]+_" "$D2/netv/"*.v || fail "anonymous g<id>_<cell> flop leaked (original register names must survive)"
 cat "$D2/netv/"*.v "$D/modelsv/"*.v > "$D2/impl.v"
 cat "$D2/rev/"*.v > "$D2/ref.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
-echo "PASS: init-carrying registers keep their hierarchical names as native flops (LEC-proven)"
+echo "PASS: registers keep their hierarchical names through the flat tech-map (LEC-proven)"
 
 # A CONSTANT actual on a child's input port must survive the flatten.
 #

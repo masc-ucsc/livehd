@@ -4085,9 +4085,9 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   std::string filename;
   if (odir.empty()) {
-    filename = absl::StrCat(graph->get_name(), ".v");
+    filename = absl::StrCat(cgen_verilog_file_stem(graph->get_name()), ".v");
   } else {
-    filename = absl::StrCat(odir, "/", graph->get_name(), ".v");
+    filename = absl::StrCat(odir, "/", cgen_verilog_file_stem(graph->get_name()), ".v");
   }
 
   auto fout = std::make_shared<File_output>(filename);

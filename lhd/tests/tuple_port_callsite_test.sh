@@ -202,6 +202,41 @@ done >"$W/emitted_all.v"
   || fail "native slang reader rejects cgen's escaped dotted instance ports"
 echo "PASS: emitted hierarchy reads back through native slang"
 
+# A path-qualified import keeps its relative spelling in the internal graph
+# identity.  That identity is valid for module resolution, but its `../` must
+# never become part of cgen's output path: previously File_output tried to open
+# `<odir>/../lib/core.core.v`, failed, and the compile process segfaulted.
+mkdir -p "$W/relative/lib" "$W/relative/app"
+cat >"$W/relative/lib/core.prp" <<'EOF'
+pub comb core(a:u8) -> (y:u8) { y = a + 1 }
+EOF
+cat >"$W/relative/app/top.prp" <<'EOF'
+const core_t = import("../lib/core.core")
+pub comb relative_top(a:u8) -> (y:u8) {
+  const r = core_t(a=a)
+  y = r.y
+}
+EOF
+"$LHD" compile "$W/relative/app/top.prp" --top relative_top \
+  --emit-dir verilog:"$W/relative/out" --workdir "$W/relative/wdir" -q \
+  || fail "relative import escaped cgen's emit directory"
+test -r "$W/relative/out/.._lib_core.core.v" \
+  || fail "relative import did not receive its safe cgen basename: $(ls "$W/relative/out")"
+"$LHD" compile "$W/relative/app/top.prp" --top relative_top \
+  --emit verilog:"$W/relative/all.v" --workdir "$W/relative/wfile" -q \
+  || fail "relative import failed single-file Verilog concatenation"
+grep -q '^module core' "$W/relative/all.v" \
+  || fail "single-file cgen output omitted the relative-import module"
+grep -q '^module relative_top' "$W/relative/all.v" \
+  || fail "single-file cgen output omitted the relative-import top"
+"$LHD" lec --impl "$W/relative/app/top.prp" --ref "$W/relative/all.v" \
+  --top relative_top --set formal.solver=lgyosys \
+  --workdir "$W/relative/lec" --result-json "$W/relative/lec.json" -q \
+  || fail "lgyosys could not materialize the relative-import hierarchy"
+grep -q '"verdict":"proven"' "$W/relative/lec.json" \
+  || fail "relative-import hierarchy was not lgyosys-PROVEN: $(cat "$W/relative/lec.json")"
+echo "PASS: relative import graph identities receive safe cgen filenames"
+
 # A generated helper name derived from an escaped scalar must stay escaped as
 # well.  The wire split below mints `<net>__wtmp`; dropping the quotes from that
 # name turns its literal dot into a tuple_get and breaks LNAST-to-LGraph.

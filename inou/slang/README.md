@@ -53,7 +53,10 @@ Key invariants the lowering maintains:
 - registers are `declare(…,'reg')` hoisted to module start (an `output reg`'s
   q pin IS the output); non-`clk/clock` or negedge clocks ride per-reg
   `clock_pin`/`posclk` attrs; extracted async-reset rungs become
-  `initial`/`reset_pin`/`sync`/`negreset` attrs;
+  `initial`/`reset_pin`/`sync`/`negreset` attrs. A constant scalar declaration
+  initializer or simple `initial q = CONST` on a register without such a reset
+  becomes the implicit-module-reset value and emits `initial-without-reset`,
+  because formal equivalence can differ from reset-less hardware;
 - unpacked arrays lower to the `comp_type_array` declare + `store(mem,idx,v)`
   / `tuple_get(d,mem,idx)` memory vocabulary with `fwd=0` (Verilog
   nonblocking reads see old contents).

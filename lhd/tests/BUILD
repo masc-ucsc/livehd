@@ -1340,7 +1340,10 @@ sh_test(
     name = "lhd_abc_seq_test",
     size = "large",
     srcs = ["lhd_abc_seq_test.sh"],
-    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    data = _FLOW_DATA + [
+        "abc_resetless_sync.prp",
+        "//inou/prp:abc_tests",
+    ],
 )
 
 # Whole-design flatten: `pass.color flat` + pass.abc/pass.partition inline the

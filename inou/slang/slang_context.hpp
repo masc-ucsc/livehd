@@ -167,23 +167,23 @@ private:
   // that this reader does not model; without the diagnostic it lowered to a
   // stateless `mut`, i.e. the whole register vanished. Filled by
   // collect_blocking_ff_state, refused by lower_ff_process.
-  absl::flat_hash_set<const slang::ast::Symbol*> blocking_ff_state_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              blocking_ff_state_;
   // Stack of `broken` flag lnames, innermost unrolled loop last. A loop whose
   // body contains a `break` guards each iteration on its flag and the break
   // raises it. A loop that owns no flag pushes the EMPTY SENTINEL rather than
   // nothing: a `break` inside it must NOT reach into an outer loop's flag and
   // terminate the wrong loop, so the sentinel makes own_brk_flag() answer "no
   // flag of mine" and the break is refused instead.
-  std::vector<std::string>                       break_flags_;
+  std::vector<std::string>                                    break_flags_;
   // One entry per enclosing loop currently being lowered: true when that loop
   // became an LNAST `for` (rolled), false when it is being unrolled here. Only
   // the NEAREST enclosing loop matters — a `break` binds to it — so this must be
   // pushed by every loop lowering, not only the ones that own a break flag.
-  std::vector<bool>                              loop_rolled_;
+  std::vector<bool>                                           loop_rolled_;
   // The `broken` flag of the NEAREST enclosing loop, or nullptr when that loop
   // has none of its own (a rolled LNAST `for`, whose break is a marker uPass
   // lowers, or a while/repeat/foreach that pushed the sentinel).
-  [[nodiscard]] const std::string* own_brk_flag() const {
+  [[nodiscard]] const std::string*                            own_brk_flag() const {
     if (!loop_rolled_.empty() && loop_rolled_.back()) {
       return nullptr;  // rolled: func_break owns the semantics
     }
@@ -221,9 +221,9 @@ private:
   // merges, and it only covers aligned uniform granularity — so the second
   // site is diagnosed instead of quietly miscompiled.
   absl::flat_hash_map<const slang::ast::Symbol*, absl::flat_hash_set<std::string>> mem_rmw_leaf_written_;
-  absl::flat_hash_set<const slang::ast::Symbol*> declared_;             // declare stmt already emitted
-  std::string                                    genblk_prefix_;
-  bool                                           module_failed_ = false;
+  absl::flat_hash_set<const slang::ast::Symbol*>                                   declared_;  // declare stmt already emitted
+  std::string                                                                      genblk_prefix_;
+  bool                                                                             module_failed_ = false;
 
   // ── per-process state ──────────────────────────────────────────────────────
   enum class Proc_kind : uint8_t { none, comb, seq };
@@ -281,10 +281,10 @@ private:
   void        lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
   // Unknown-module definition names already diagnosed (one warning per name,
   // not per instance — XS-scale designs instantiate one SRAM macro x100s).
-  absl::flat_hash_set<std::string>               unknown_warned_;
+  absl::flat_hash_set<std::string> unknown_warned_;
   void lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
-  void                                           declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
-  void                                           declare_reg(const slang::ast::ValueSymbol& sym);
+  void declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
+  void declare_reg(const slang::ast::ValueSymbol& sym);
   absl::flat_hash_set<const slang::ast::Symbol*> reg_declared_;
 
   // Unpacked-array (memory) info per declared array symbol (2s-D).
@@ -345,9 +345,17 @@ private:
   // the reg array's declare initializer (scalar broadcast if uniform, else a
   // tuple literal), matching the hand-written `reg t:[N]T = (…)` goldens.
   absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, int64_t>> mem_init_vals_;
-  // Walk an `initial` block body collecting constant `mem[const] = const`
-  // element writes into mem_init_vals_.
-  void                                                                       collect_mem_inits(const slang::ast::Statement& stmt);
+  // Constant scalar register initializers, from either `logic q = CONST` or a
+  // simple `initial q = CONST`. A declaration carrying one causes tolg to use
+  // the module's implicit reset and this value instead of reset-less X state.
+  // Keep the applied/reset sets separate so the warning is emitted only after
+  // async-reset attributes have had a chance to override the initializer.
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>           reg_init_vals_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                        reg_init_applied_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                        reset_attr_syms_;
+  // Walk an `initial` block body collecting constant scalar-register writes
+  // into reg_init_vals_ and constant memory-element writes into mem_init_vals_.
+  void collect_initial_values(const slang::ast::Statement& stmt);
   // Emit the comp_type_array declare for an unpacked array (reg or mut).
   // Returns false (with a diagnostic) for shapes the reader cannot lower.
   bool declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg);

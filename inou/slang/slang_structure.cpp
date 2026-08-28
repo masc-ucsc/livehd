@@ -785,12 +785,12 @@ struct Seed_memo {
   // (`assign cw = ONE ? 8'hA5 : d;` used as an async-reset value). Attempt the
   // fold anyway, under a small per-fold budget so a big shared RUNTIME cone
   // still bails out quickly instead of being re-walked for every candidate.
-  int  spec_evals_left = 256;
+  int                                                 spec_evals_left = 256;
   // A refusal caused by the DEPTH cap is a property of the path, not of the
   // symbol, so it must not be memoized (the same guard graph/split_selfref
   // spells `cap_hit == cap_before`). A `visiting` cycle IS a property of the
   // symbol -- a net on a comb cycle depends on itself -- and stays memoized.
-  bool depth_capped     = false;
+  bool                                                depth_capped    = false;
 };
 
 bool seed_const_net(const slang::ast::ValueSymbol& sym, slang::ast::EvalContext& ctx,
@@ -1125,7 +1125,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
     }
     std::string name(ps.name);
     const bool  plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front()))
-                        && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
+                       && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
     if (!plain || used_names_.count(name) != 0u) {
       continue;  // colliding / exotic name — keep folding this param
     }
@@ -1513,6 +1513,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_packed_mem_regs   = std::move(packed_mem_regs_);
   auto saved_array_reset_lanes = std::move(array_reset_lanes_);
   auto saved_pending_resets    = std::move(pending_async_resets_);
+  auto saved_reg_init_vals     = std::move(reg_init_vals_);
+  auto saved_reg_init_applied  = std::move(reg_init_applied_);
+  auto saved_reset_attr_syms   = std::move(reset_attr_syms_);
 
   builder_ = Lnast_builder();
   sym_lname_.clear();
@@ -1544,6 +1547,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   packed_mem_regs_.clear();
   array_reset_lanes_.clear();
   pending_async_resets_.clear();
+  reg_init_vals_.clear();
+  reg_init_applied_.clear();
+  reset_attr_syms_.clear();
   local_cnt_ = 0;
 
   body_ = body;
@@ -1717,32 +1723,50 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       }
     }
   }
-  // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
-  // emit (declare_unpacked folds them into the reg array's initializer). Walk
-  // instantiated generate scopes too: cgen_memory_* guards its constant init
-  // loop with `generate if (INIT_EN)`.
-  std::function<void(const slang::ast::Scope&)> harvest_mem_inits = [&](const slang::ast::Scope& scope) {
+  // Harvest declaration initializers and `initial begin ... end` power-on
+  // contents before state declarations emit. A constant scalar initializer is
+  // attached to the reg declaration; tolg consequently gives that reg the
+  // module's implicit reset and uses the value instead of reset-less X state.
+  // Walk instantiated generate scopes too: cgen_memory_* guards its constant
+  // init loop with `generate if (INIT_EN)`.
+  std::function<void(const slang::ast::Scope&)> harvest_initial_values = [&](const slang::ast::Scope& scope) {
     for (const auto& member : scope.members()) {
       if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
         const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
         if (!gen.isUninstantiated) {
-          harvest_mem_inits(gen);
+          harvest_initial_values(gen);
         }
         continue;
       }
       if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
         for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-          harvest_mem_inits(*entry);
+          harvest_initial_values(*entry);
+        }
+        continue;
+      }
+      if (member.kind == slang::ast::SymbolKind::Variable) {
+        const auto& var  = member.as<slang::ast::VariableSymbol>();
+        const auto* init = var.getInitializer();
+        int64_t     n = 0, lo = 0;
+        int         w  = 0;
+        bool        sg = false;
+        if (init != nullptr && reg_syms_.contains(&var) && !latch_syms_.contains(&var)
+            && !var.getType().getCanonicalType().isUnpackedArray() && !is_packed_2d_array(var.getType(), n, w, sg, lo)) {
+          // `isInteger()` is also true for a 4-state pattern: `logic [7:0] q = 8'hxx`
+          // is "no specified power-on value", not a request for a reset to `?`.
+          if (auto cv = try_eval_const_net(*init); cv && cv->isInteger() && !cv->integer().hasUnknown()) {
+            reg_init_vals_[&var] = const_text(cv->integer());
+          }
         }
         continue;
       }
       if (member.kind == slang::ast::SymbolKind::ProceduralBlock
           && member.as<slang::ast::ProceduralBlockSymbol>().procedureKind == slang::ast::ProceduralBlockKind::Initial) {
-        collect_mem_inits(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
+        collect_initial_values(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
       }
     }
   };
-  harvest_mem_inits(*body);
+  harvest_initial_values(*body);
   // Classify array selectors before declarations. Packed 2-D register handling
   // below uses runtime indexing to choose a Memory. For unpacked arrays, state
   // always remains a Memory; selector constness only controls whether a plain
@@ -2110,6 +2134,19 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 
   lower_members(*body);
   finalize_pending_async_resets();
+  for (const auto* sym : emit_ordered(reg_init_applied_)) {
+    if (reset_attr_syms_.contains(sym)) {
+      continue;
+    }
+    emit_warning(
+        slang::SourceRange(sym->location, sym->location),
+        "initial-without-reset",
+        "time",
+        std::string("register '") + std::string(sym->name)
+            + "' has an initial value but no explicit register reset; inou.slang models it with the module's implicit reset",
+        "add an explicit reset if the initialized state must be portable; formal equivalence may otherwise differ from reset-less "
+        "hardware");
+  }
 
   bool ok = !module_failed_;
   if (ok) {
@@ -2157,6 +2194,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   packed_mem_regs_         = std::move(saved_packed_mem_regs);
   array_reset_lanes_       = std::move(saved_array_reset_lanes);
   pending_async_resets_    = std::move(saved_pending_resets);
+  reg_init_vals_           = std::move(saved_reg_init_vals);
+  reg_init_applied_        = std::move(saved_reg_init_applied);
+  reset_attr_syms_         = std::move(saved_reset_attr_syms);
 
   return ok;
 }
@@ -2165,20 +2205,20 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 // fwd=0 attr rides ahead of the declare: verilog nonblocking memory writes
 // never forward to same-cycle reads (Pyrope reg arrays default to
 // program-order forwarding).
-// Walk an `initial` block body, recording constant `mem[const] = const` element
-// writes (the standard memory power-on idiom) into mem_init_vals_. Direct
-// assignments and constant-bounded for loops are captured; anything else is
-// silently skipped (the block stays "ignored").
-void Slang_context::collect_mem_inits(const slang::ast::Statement& stmt) {
+// Walk an `initial` block body, recording constant scalar-register and
+// `mem[const]` assignments. Direct assignments and constant-bounded for loops
+// are captured; anything else is skipped and remains covered by the reader's
+// limited-initial-block warning.
+void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
   using slang::ast::ExpressionKind;
   using slang::ast::StatementKind;
   switch (stmt.kind) {
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        collect_mem_inits(*s);
+        collect_initial_values(*s);
       }
       return;
-    case StatementKind::Block              : collect_mem_inits(stmt.as<slang::ast::BlockStatement>().body); return;
+    case StatementKind::Block              : collect_initial_values(stmt.as<slang::ast::BlockStatement>().body); return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
       if (e.kind != ExpressionKind::Assignment) {
@@ -2186,6 +2226,21 @@ void Slang_context::collect_mem_inits(const slang::ast::Statement& stmt) {
       }
       const auto& as  = e.as<slang::ast::AssignmentExpression>();
       const auto& lhs = as.left();
+      if (lhs.kind == ExpressionKind::NamedValue) {
+        const auto* sym = &lhs.as<slang::ast::NamedValueExpression>().symbol;
+        int64_t     n = 0, lo = 0;
+        int         w  = 0;
+        bool        sg = false;
+        if (reg_syms_.contains(sym) && !latch_syms_.contains(sym) && !sym->getType().getCanonicalType().isUnpackedArray()
+            && !is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
+          // An x/z pattern is "no specified power-on value" (see the declaration
+          // harvest): do not turn `initial q = 'x` into a reset to `?`.
+          if (auto cv = try_eval_const_net(as.right()); cv && cv->isInteger() && !cv->integer().hasUnknown()) {
+            reg_init_vals_[sym] = const_text(cv->integer());
+          }
+        }
+        return;
+      }
       if (lhs.kind != ExpressionKind::ElementSelect) {
         return;
       }
@@ -2205,8 +2260,9 @@ void Slang_context::collect_mem_inits(const slang::ast::Statement& stmt) {
       if (!eval_ctx_) {
         return;
       }
-      const auto                                  saved_inits = mem_init_vals_;
-      const auto&                                 loop        = stmt.as<slang::ast::ForLoopStatement>();
+      const auto                                  saved_inits     = mem_init_vals_;
+      const auto                                  saved_reg_inits = reg_init_vals_;
+      const auto&                                 loop            = stmt.as<slang::ast::ForLoopStatement>();
       std::vector<const slang::ast::ValueSymbol*> locals;
       bool                                        valid = true;
       for (const auto* lv : loop.loopVars) {
@@ -2261,7 +2317,7 @@ void Slang_context::collect_mem_inits(const slang::ast::Statement& stmt) {
             break;
           }
         }
-        collect_mem_inits(loop.body);
+        collect_initial_values(loop.body);
         if (loop.stopExpr == nullptr && loop.steps.empty()) {
           valid = false;
           break;
@@ -2277,7 +2333,11 @@ void Slang_context::collect_mem_inits(const slang::ast::Statement& stmt) {
         eval_ctx_->deleteLocal(lv);
       }
       if (!valid) {
-        mem_init_vals_ = saved_inits;  // never retain a partial loop initialization
+        // Never retain a partial loop initialization -- for the SCALAR register
+        // values too, or an over-unroll_limit loop leaves a register holding the
+        // last walked iteration's value as its power-on/reset state.
+        mem_init_vals_ = saved_inits;
+        reg_init_vals_ = saved_reg_inits;
       }
       return;
     }
@@ -2729,20 +2789,27 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
     return;
   }
 
-  auto        ti   = tinfo(type);
+  auto        ti      = tinfo(type);
   // A partially-registered var declares its FLOP under the shadow name; the
   // symbol's own name is the combinational composite declared right after.
-  auto        name = reg_net_of(sym);
+  auto        name    = reg_net_of(sym);
   // A level-sensitive latch var lowers to Ntype_op::Latch (mode "latch"); it has
   // no clock/reset — its enable (transparency condition) and din are wired by
   // tolg's finalize_regs from the body's if-merge.
-  const char* mode = latch_syms_.contains(&sym) ? "latch" : "reg";
+  const char* mode    = latch_syms_.contains(&sym) ? "latch" : "reg";
+  std::string initial = "nil";
+  if (!latch_syms_.contains(&sym)) {
+    if (auto it = reg_init_vals_.find(&sym); it != reg_init_vals_.end()) {
+      initial = it->second;
+      reg_init_applied_.insert(&sym);
+    }
+  }
   set_pending_loc(sym.location);
   builder_.create_declare_stmts(name,
                                 mode,
                                 int_max_str(ti.bits, ti.is_signed),
                                 int_min_str(ti.bits, ti.is_signed),
-                                "nil");  // no reset by default; async patterns override via attrs
+                                initial);  // concrete init requests the implicit reset; async-reset attrs can override it
   if (partial_reg_shadow_.contains(&sym)) {
     // The composite every READ resolves to: the flop's q, then whatever the
     // continuous driver overwrites. Seeded HERE — declares are hoisted to
@@ -3383,8 +3450,8 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
   // in its lvalue mirror: the index net ends up with no reader at all.
   void note_path_selectors(const slang::ast::Expression& e) {
     switch (e.kind) {
-      case ExpressionKind::Conversion  : note_path_selectors(e.as<slang::ast::ConversionExpression>().operand()); return;
-      case ExpressionKind::MemberAccess: note_path_selectors(e.as<slang::ast::MemberAccessExpression>().value()); return;
+      case ExpressionKind::Conversion   : note_path_selectors(e.as<slang::ast::ConversionExpression>().operand()); return;
+      case ExpressionKind::MemberAccess : note_path_selectors(e.as<slang::ast::MemberAccessExpression>().value()); return;
       case ExpressionKind::ElementSelect: {
         const auto& es = e.as<slang::ast::ElementSelectExpression>();
         es.selector().visit(*this);
@@ -3637,11 +3704,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // Every set/vector default-constructs empty, so a construction site names only
   // `member` and `prefix` -- adding a field must not mean editing five brace
   // lists again (this struct grew one and all five had to change).
-  std::vector<Driver>                            drivers;
-  std::vector<size_t>                            unknown_idx;  // drivers[] entries that are blackbox instances
+  std::vector<Driver>                                 drivers;
+  std::vector<size_t>                                 unknown_idx;  // drivers[] entries that are blackbox instances
   // External nets driven by pure flop/latch state outputs; reads of them are
   // order-free (see collect_state_outputs) so pass 2 skips their back-edges.
-  absl::flat_hash_set<const slang::ast::Symbol*> seq_out_nets;
+  absl::flat_hash_set<const slang::ast::Symbol*>      seq_out_nets;
   // Ordinary (non-generated) partial continuous drivers that read sibling
   // slices of the same net. Their RHS must read the resolved wire while their
   // LHS writes the split accumulator; see emit_driver below.
@@ -3684,7 +3751,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
 
         case SymbolKind::Variable: {
           const auto& vs = member.as<slang::ast::VariableSymbol>();
-          if (vs.getInitializer() != nullptr) {
+          if (vs.getInitializer() != nullptr && !reg_init_vals_.contains(&vs)) {
             emit_warning(slang::SourceRange(vs.location, vs.location),
                          "var-init-ignored",
                          "unsupported",
@@ -4871,8 +4938,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         lower_continuous_assign(d.member->as<slang::ast::ContinuousAssignSymbol>(),
                                 resolved_cont_rhs ? &*resolved_cont_rhs : nullptr);
         break;
-      case SymbolKind::ProceduralBlock : lower_process(d.member->as<slang::ast::ProceduralBlockSymbol>()); break;
-      case SymbolKind::Instance        : lower_instance(d.member->as<slang::ast::InstanceSymbol>()); break;
+      case SymbolKind::ProceduralBlock: lower_process(d.member->as<slang::ast::ProceduralBlockSymbol>()); break;
+      case SymbolKind::Instance       : lower_instance(d.member->as<slang::ast::InstanceSymbol>()); break;
       case SymbolKind::UninstantiatedDef:
         lower_unknown_instance(d.member->as<slang::ast::UninstantiatedDefSymbol>(), d.bb_outs);
         break;
@@ -4990,11 +5057,14 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
 
   switch (pbs.procedureKind) {
     case ProceduralBlockKind::Initial:
-      // Synthesis ignores initial blocks (memory init is a 2s-D follow-up).
-      emit_warning(slang::SourceRange(pbs.location, pbs.location),
-                   "initial-ignored",
-                   "unsupported",
-                   "initial block is ignored (synthesis semantics)");
+      // Constant scalar-register and memory-element initialization was
+      // harvested before declarations. Other initial-block behavior remains
+      // outside this synthesis reader.
+      emit_warning(
+          slang::SourceRange(pbs.location, pbs.location),
+          "initial-ignored",
+          "unsupported",
+          "only supported constant register/memory initialization is preserved; other initial-block statements are ignored");
       return;
     case ProceduralBlockKind::Final     : return;
     case ProceduralBlockKind::AlwaysComb: lower_comb_process(pbs.getBody()); return;
@@ -5597,6 +5667,9 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
     targets.push_back({name, std::string(initial)});
   }
 
+  // Claimed only once the attrs really emit: an aggregate split that bailed out
+  // above emitted NO reset, so the reg must still report `initial-without-reset`.
+  reset_attr_syms_.insert(&sym);
   auto& ln        = *builder_.lnast;
   auto  emit_attr = [&](std::string_view target, std::string_view key, std::string_view val, bool val_is_ref) {
     auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
@@ -6101,12 +6174,12 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // latent naming collision became a hard REFUTED for every design with a
   // replicated sub-module, but only with `pass.abc.register=true` (bedrock's
   // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
-  auto qualify     = [&](const std::string& raw) {
+  auto qualify   = [&](const std::string& raw) {
     return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
-                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+                                    : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
   };
-  auto result    = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name))
-                                     : qualify(std::string(inst.name));
+  auto result
+      = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {
@@ -6311,12 +6384,12 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
   // latent naming collision became a hard REFUTED for every design with a
   // replicated sub-module, but only with `pass.abc.register=true` (bedrock's
   // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
-  auto qualify     = [&](const std::string& raw) {
+  auto qualify   = [&](const std::string& raw) {
     return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
-                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+                                    : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
   };
-  auto result    = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name))
-                                     : qualify(std::string(inst.name));
+  auto result
+      = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {

@@ -106,6 +106,29 @@ run_abc_lec hier_seq hier_seq.top true false
 has "$NETV" "DFFx1 " || fail "hier_seq register=true: flops were not mapped to DFF cells"
 echo "PASS: register=true maps flops to DFF cells across hierarchy (hier_seq)"
 
+# A synchronous reset lives in the D cone and does NOT specify power-on state.
+# ABC is free to choose zero for its internal don't-care latch init, but the
+# read-back must recover the source LGraph's absent init rather than turn that
+# optimization witness into a hardware guarantee.  The graph-native LEC checks
+# arbitrary equal startup state, which the Yosys backend intentionally ignores.
+RSD="$W/abc_resetless_sync"
+mkdir -p "$RSD"
+RSR="$RSD/r.json"
+rsrun() { "$LHD" "$@" -q --result-json "$RSR" || fail "$* -> $(cat "$RSR" 2>/dev/null)"; }
+rsrun compile lhd/tests/abc_resetless_sync.prp --top abc_resetless_sync --recipe O1 \
+  --emit-dir lg:"$RSD/lg" --workdir "$RSD/w1"
+rsrun pass color synth --top abc_resetless_sync lg:"$RSD/lg" --workdir "$RSD/w2"
+rsrun pass partition --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/re" --workdir "$RSD/w3"
+rsrun pass abc --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --set abc.library="$LIB" \
+  --workdir "$RSD/w4"
+rsrun pass liberty gensim "$LIB" --emit-dir lg:"$RSD/models" --workdir "$RSD/w5"
+rsrun lec --impl lg:"$RSD/net" --ref lg:"$RSD/re" --lib lg:"$RSD/models" --top abc_resetless_sync \
+  --set formal.solver=cvc5 --workdir "$RSD/wlec"
+rsrun compile lg:"$RSD/net" --top abc_resetless_sync --recipe O0 --emit-dir verilog:"$RSD/netv" --workdir "$RSD/w6"
+has "$RSD/netv" "DFFx1 " || fail "abc_resetless_sync: init-less flop was not mapped to DFF cells"
+! has "$RSD/netv" "posedge" || fail "abc_resetless_sync: fake ABC init kept the flop native"
+echo "PASS: ABC's internal don't-care init does not become a netlist power-on value"
+
 # register=false: flops kept native (`always @(posedge)`), never a DFF cell.
 run_abc_lec abc_seq abc_seq.abc_seq false false
 has "$NETV" "posedge" || fail "abc_seq register=false: no native flop survived (flops lost?)"

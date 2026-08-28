@@ -333,9 +333,9 @@ bool Mapper::start() {
   // dropped multi-output and sequential cells, and it is the surviving genlib
   // the mapper actually indexes.
   {
-    auto*       mio = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
-    const bool  no_buf = mio == nullptr || Mio_LibraryReadBuf(mio) == nullptr;
-    const bool  no_inv = mio == nullptr || Mio_LibraryReadInv(mio) == nullptr;
+    auto*      mio    = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
+    const bool no_buf = mio == nullptr || Mio_LibraryReadBuf(mio) == nullptr;
+    const bool no_inv = mio == nullptr || Mio_LibraryReadInv(mio) == nullptr;
     if (no_buf || no_inv) {
       const std::string_view what = (no_buf && no_inv) ? "buffer or inverter cell" : (no_buf ? "buffer cell" : "inverter cell");
       livehd::diag::err("pass.abc", "lib-no-buffer", "unsupported")
@@ -1012,7 +1012,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     const int bits  = gu::bits_of(node.create_driver_pin(0));
-    register_bits   += static_cast<uint64_t>(std::max(bits, 1));
+    register_bits  += static_cast<uint64_t>(std::max(bits, 1));
   }
   if (opts_.map_register && opts_.register_max_bits != 0 && register_bits > opts_.register_max_bits) {
     opts_.map_register = false;
@@ -1594,6 +1594,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     hhds::Pin_class         q_pin;
     hhds::Pin_class         din_drv, en_drv, rst_drv, rval_drv, clk_drv;
     bool                    neg_reset = false;
+    // The `initial` (power-on / reset) value, SNAPSHOT at crossing time. The
+    // read-back below runs after map_region has rewritten the region, so the
+    // source const node behind `rval_drv` may already be gone -- re-reading the
+    // pin there silently answers "no init" and refines an init-carrying flop
+    // into a plain DFF cell (measured: abc_flat_names lost `a.r`/`b.r`).
+    bool                    has_init  = false;
+    Dlop                    init_val;
     std::vector<Abc_Obj_t*> bi;  // per-bit latch BI (data-in terminal)
   };
   // Region-input driver -> port name. Used twice: to reconnect a flop
@@ -1716,9 +1723,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); !nr.is_invalid() && gu::is_const_pin(nr)) {
         f.neg_reset = gu::hydrate_const(nr).bit_test(0);
       }
-      bool  has_rval = !f.rval_drv.is_invalid() && gu::is_const_pin(f.rval_drv);
-      auto  rval     = has_rval ? gu::hydrate_const(f.rval_drv) : Dlop{};
-      auto& slots    = bitnet[f.q_pin];
+      bool has_rval = !f.rval_drv.is_invalid() && gu::is_const_pin(f.rval_drv);
+      auto rval     = has_rval ? gu::hydrate_const(f.rval_drv) : Dlop{};
+      f.has_init    = has_rval;
+      f.init_val    = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
+      auto& slots   = bitnet[f.q_pin];
       for (int b = 0; b < f.bits; ++b) {
         auto* bo    = Abc_NtkCreateBo(manNtk);
         auto* latch = Abc_NtkCreateLatch(manNtk);
@@ -3756,10 +3765,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       total_bits += f.bits;
     }
     std::vector<const Seq_flop*> latch_owner;
+    std::vector<int>             latch_owner_bit;
     if (m == total_bits) {
       for (const auto& f : flops) {
         for (int b = 0; b < f.bits; ++b) {
           latch_owner.push_back(&f);
+          latch_owner_bit.push_back(b);
         }
       }
     }
@@ -3773,6 +3784,29 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // can map to a cell. Only a resetless init must keep its native flop.
     auto owner_has_reset = [&](int k) -> bool {
       return k < static_cast<int>(latch_owner.size()) ? !latch_owner[k]->rst_drv.is_invalid() : !flops.front().rst_drv.is_invalid();
+    };
+    // ABC is allowed to pick a concrete value for a don't-care latch init while
+    // optimizing. That choice is an internal optimization witness, NOT a new
+    // hardware power-on guarantee: materializing it on read-back refines an
+    // init-less source flop to zero and makes post-synthesis formal comparison
+    // spuriously fail. Whenever the latch count is preserved, recover init from
+    // the SNAPSHOT taken at crossing time (Seq_flop::has_init -- the source pin
+    // is no longer resolvable here) instead of asking the optimized ABC latch.
+    // Only the retime-reshaped fallback lacks a source-bit correspondence and
+    // therefore has to use ABC's transformed init.
+    auto source_init_bit = [&](int k) -> std::optional<bool> {
+      if (k < static_cast<int>(latch_owner.size())) {
+        const auto* f = latch_owner[k];
+        if (!f->has_init) {
+          return std::nullopt;
+        }
+        return f->init_val.bit_test(latch_owner_bit[k]);
+      }
+      int v = Abc_LatchInit(lat[k]);  // 1=zero, 2=one, else dc/none
+      if (v == 1 || v == 2) {
+        return v == 2;
+      }
+      return std::nullopt;
     };
 
     // Original-name reconstruction: with the latch count preserved, latches
@@ -3837,16 +3871,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (!clk.is_invalid()) {
         clk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
       }
-      // power-on / reset init from the (possibly retimed) latch init values.
-      // Build the value MSB->LSB as a binary string so widths past 64 bits stay
-      // exact (an int64 accumulator would overflow / be UB).
+      // Power-on / reset init from the source bits when correspondence
+      // survives, otherwise from the possibly-retimed latch init values. Build
+      // MSB->LSB so widths past 64 bits stay exact.
       bool        any_init = false;
       std::string init_bits(k, '0');  // index 0 = MSB (bit k-1)
       for (int b = 0; b < k; ++b) {
-        int v = Abc_LatchInit(lat[idx[b]]);  // 1=zero, 2=one, else dc/none
-        if (v == 1 || v == 2) {
+        if (auto v = source_init_bit(idx[b]); v.has_value()) {
           any_init = true;
-          if (v == 2) {
+          if (*v) {
             init_bits[k - 1 - b] = '1';
           }
         }
@@ -3885,10 +3918,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto io           = liberty::create_dff_io(*outlib_, *dff_);
       // resetless power-on init: such a bit must keep a native flop so the
       // value survives
-      auto needs_native = [&](int k) -> bool {
-        int v = Abc_LatchInit(lat[k]);
-        return (v == 1 || v == 2) && !owner_has_reset(k);
-      };
+      auto needs_native = [&](int k) -> bool { return source_init_bit(k).has_value() && !owner_has_reset(k); };
       // `owner` names the SOURCE register bit this latch came from (empty when
       // the latch count was reshaped and no correspondence survives). A mapped
       // DFF cell otherwise lands as `g<abcId>_<cell>`, which drops the register

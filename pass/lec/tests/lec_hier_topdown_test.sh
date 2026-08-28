@@ -345,6 +345,90 @@ if [ "$fail" -eq 0 ]; then
   else echo "ok: a sequential Sub feedback boundary is exposed by one private contextual inline"; fi
 fi
 
+# ---------------------------------------------------------------------------
+# 10. Hierarchy is representation, not specification. One side may retain a
+#     stateful helper while the other front-end has already flattened it into
+#     the top. Inline the one-sided helper before building the shared-def DAG,
+#     then let ordinary state pairing relate the exposed machine flops.
+# ---------------------------------------------------------------------------
+cat > "$W/asym_ref.v" <<'EOF'
+module asym_leaf(input clock, input reset, input d, output q);
+  reg state;
+  always @(posedge clock) begin
+    if (reset) state <= 1'b0;
+    else state <= d;
+  end
+  assign q = state;
+endmodule
+module asym_top(input clock, input reset, input d, output q);
+  asym_leaf u_leaf(.clock(clock), .reset(reset), .d(d), .q(q));
+endmodule
+EOF
+cat > "$W/asym_impl.v" <<'EOF'
+module asym_top(input clock, input reset, input d, output q);
+  reg state;
+  always @(posedge clock) begin
+    if (reset) state <= 1'b0;
+    else state <= d;
+  end
+  assign q = state;
+endmodule
+EOF
+OUT=$("$LHD" lec --ref "$W/asym_ref.v" --impl "$W/asym_impl.v" --top asym_top \
+      --set formal.lec.semdiff=none --set formal.simfail=false \
+      --workdir "$W/wd_asym_hierarchy" 2>&1); RC=$?
+if [ "$RC" -ne 0 ]; then
+  echo "FAIL: case 10 a one-sided hierarchy changed the equivalence verdict (rc=$RC)"
+  echo "$OUT" | grep -E "lec: inlined|lec\[hier\]"; fail=1
+elif ! echo "$OUT" | grep -q "inlined 1 ref and 0 impl instance(s) absent from the other hierarchy"; then
+  echo "FAIL: case 10 proved without exposing the one-sided helper's machine state"; fail=1
+elif ! echo "$OUT" | grep -q "tier-2 state pairing: 1 uncertain pair(s) injected"; then
+  echo "FAIL: case 10 flattened the helper but did not pair its state flop"; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
+  echo "FAIL: case 10 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
+else echo "ok: asymmetric hierarchy is flattened to paired machine state and proves"; fi
+
+# ---------------------------------------------------------------------------
+# 11. pass.partition's mapped-region wrappers are named `sub_<id>`. Inlining
+#     that synthetic hierarchy must expose its scalar DFFs as the bits of the
+#     source packed register; no reset edge is available to establish a merely
+#     speculative suffix relation.
+# ---------------------------------------------------------------------------
+cat > "$W/partition_ref.v" <<'EOF'
+module partition_top(input clock, input d, output [1:0] q);
+  reg [1:0] state;
+  always @(posedge clock) state <= {state[0], d};
+  assign q = state;
+endmodule
+EOF
+cat > "$W/partition_impl.v" <<'EOF'
+module partition_top__c1(input clock, input d, output [1:0] q);
+  reg state_0;
+  reg state_1;
+  always @(posedge clock) begin
+    state_0 <= d;
+    state_1 <= state_0;
+  end
+  assign q = {state_1, state_0};
+endmodule
+module partition_top(input clock, input d, output [1:0] q);
+  partition_top__c1 sub_16(.clock(clock), .d(d), .q(q));
+endmodule
+EOF
+OUT=$("$LHD" lec --ref "$W/partition_ref.v" --impl "$W/partition_impl.v" --top partition_top \
+      --set formal.lec.semdiff=none --set formal.simfail=false \
+      --workdir "$W/wd_partition_hierarchy" 2>&1); RC=$?
+if [ "$RC" -ne 0 ]; then
+  echo "FAIL: case 11 a synthetic partition wrapper blocked packed/scalar state correspondence (rc=$RC)"
+  echo "$OUT" | grep -E "lec: inlined|lec\[hier\]"; fail=1
+elif ! echo "$OUT" | grep -q "inlined 0 ref and 1 impl instance(s) absent from the other hierarchy"; then
+  echo "FAIL: case 11 did not inline the one-sided mapped partition"; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
+  # rc=0 also covers UNKNOWN, and the whole point of the `sub_<id>` bridge is
+  # that it turns this shape into a PROOF -- assert it rather than the exit code.
+  echo "FAIL: case 11 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
+else echo "ok: synthetic partition hierarchy collapses to packed/scalar machine state and proves"; fi
+
 if [ "$fail" -ne 0 ]; then echo "lec_hier_topdown_test: FAILED"; exit 1; fi
 echo "PASS: lec_hier_topdown_test"
 exit 0

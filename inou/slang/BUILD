@@ -205,6 +205,20 @@ sh_test(
     ],
 )
 
+# A scalar register with a Verilog declaration / initial-block value but no
+# explicit reset is modeled as reset-bearing state using that value. This is a
+# deliberate two-state synthesis choice and carries a warning because source
+# LEC can distinguish it from truly reset-less hardware.
+sh_test(
+    name = "slang_scalar_initial_no_reset",
+    size = "large",
+    srcs = ["tests/scalar_initial_no_reset_test.sh"],
+    data = [
+        "tests/sv/scalar_initial_no_reset.v",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "slang_packed_vector_port_sroa",
     size = "large",

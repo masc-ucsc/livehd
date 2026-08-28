@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -13,6 +14,26 @@
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
 #include "hhds/sourcemap_emit.hpp"
+
+// A graph name is normally `file.entity`, but a path-qualified Pyrope import
+// can make it `../dir/file.entity`.  Graph IDENTITY retains that full spelling
+// (the emitted Verilog module name comes from flat_module_name, which already
+// reduces it); only the filesystem basename must collapse directory separators
+// so cgen cannot escape (or fail to create) its declared output directory.
+// This is public because the lhd emit driver must use the exact same mapping
+// when checking, listing and concatenating cgen output.
+//
+// NOTE: the mapping is not injective -- `a/b.c` and `a_b.c` share a file name.
+// Two co-emitted graphs spelled that way silently overwrite each other.
+inline std::string cgen_verilog_file_stem(std::string_view name) {
+  std::string stem(name);
+  for (char& c : stem) {
+    if (c == '/' || c == '\\') {
+      c = '_';
+    }
+  }
+  return stem;
+}
 
 class Cgen_verilog {
 private:
