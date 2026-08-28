@@ -229,7 +229,7 @@ private def mixTermAlts : List SAlt :=
                 (pair_ (fst_ (R "o2")) (C "appendL" [R "q", snd_ (R "o2")])))
               -- ask the driver for a specialized copy and call it
               (.letN "req" (mkReq (R "f") (C "splitStatics" [R "ps", R "rs"])) <|
-               pair_ (rCode (eCall (C "indexOfReqL" [R "reqs", R "req", K 0])
+               pair_ (rCode (eCall (C "indexOfReqL" [R "reqs", R "req"])
                                    (C "splitDyns" [R "ps", R "rs"])))
                      (C "appendL" [R "q", cons_ (R "req") nil_])))
 
@@ -441,10 +441,19 @@ def mixS : SProgram where
 
   -- ## the memo table
 
-  , { name := "indexOfReqL", params := ["reqs", "r", "i"]
+  -- NO ACCUMULATOR.  The natural `indexOfReq reqs r i` carries a counter that
+  -- increments in a loop whose termination test (`isNil reqs`) is dynamic.  The
+  -- counter is static, so specializing it generates one residual function for
+  -- i = 0, 1, 2, … without bound, and the second projection simply never
+  -- finishes.  A static parameter that grows in a dynamically-terminated loop
+  -- is the classic non-termination of offline partial evaluation; the usual fix
+  -- is to generalize the parameter to dynamic, and the better fix here is to
+  -- not have it, computing the index on the way back out instead.
+  , { name := "indexOfReqL", params := ["reqs", "r"]
     , body := .ite (isNil_ (R "reqs")) (K (-1))
-        (.ite (P2 .eqV (hd_ (R "reqs")) (R "r")) (R "i")
-              (C "indexOfReqL" [tl_ (R "reqs"), R "r", add_ (R "i") (K 1)])) }
+        (.ite (P2 .eqV (hd_ (R "reqs")) (R "r")) (K 0)
+          (.letN "k" (C "indexOfReqL" [tl_ (R "reqs"), R "r"]) <|
+           .ite (P2 .ltI (R "k") (K 0)) (K (-1)) (add_ (R "k") (K 1)))) }
 
   , { name := "memberReqL", params := ["reqs", "r"]
     , body := .ite (isNil_ (R "reqs")) (bool false)
@@ -617,7 +626,7 @@ def mixS : SProgram where
         .letN "reqs" (C "closeL"
             [R "A", C "groupByFun" [R "A", cons_ (R "req0") nil_, K 0]]) <|
         eProgram (C "genAll" [R "A", R "reqs", K 0])
-                 (C "indexOfReqL" [R "reqs", R "req0", K 0]) }
+                 (C "indexOfReqL" [R "reqs", R "req0"]) }
   ]
 
 /-! ## Resolution -/
