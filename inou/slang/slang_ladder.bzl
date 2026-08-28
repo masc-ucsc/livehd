@@ -13,7 +13,12 @@ SLANG_LADDER = {
     "add2": "lec",
     "aldff": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "arith": "lec",
-    "arraycells": "error",  # instance arrays / paramod shapes not lowered yet
+    # PROMOTED: `aoi12 p [31:0] (a, b, c, y)` — slang expands an arrayed
+    # instantiation into one nameless element per index inside an InstanceArray
+    # scope, each with its own already-sliced (or broadcast) port connections,
+    # so collect() walks into that scope and every element lowers as an
+    # ordinary instance.
+    "arraycells": "lec",
     "assigns": "lec",
     "async_localdecl": "lec",  # async-reset always_ff w/ a block-local temp before the if/else
     "common_sub": "lec",
@@ -52,7 +57,9 @@ SLANG_LADDER = {
     "flop": "lec",
     "gates": "lec",
     "graphtest": "lec",
-    "grid_hier_test": "error",  # instance arrays / paramod shapes not lowered yet
+    # PROMOTED with arraycells: a 33-wide instance array whose 1-bit port
+    # connections are all BROADCAST (`lg[32:0](.x(testi[5]), .y(testo[0]))`).
+    "grid_hier_test": "lec",
     "hierarchy": "lec",
     "inc_after_nb": "lec",  # x++ is blocking even after a nonblocking <= in the same process
     "issue_047": "lec",  # narrow signed port range: signed[1:0] is {-2..1}, signed[0:0] is {-1,0}
@@ -97,7 +104,15 @@ SLANG_LADDER = {
     "nocheck_gcd_large": "error",  # duplicate definition; slang rejects per 1800
     "nocheck_join_fadd": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "nocheck_slang_foreach": "verilog",  # foreach lowers to an async-read memory; memory LEC inconclusive
+    # A constant-bound `for` inside a `function automatic` called from a
+    # continuous assign / net initializer: those never enter lower_process, so
+    # the unroll budget armed only there was still 0 and the first tick failed.
+    "nocheck_slang_func_loop": "lec",
     "nocheck_slang_loops": "lec",
+    # A var whose bits are split between a continuous `assign` and an edge
+    # process (`assign stages[0] = in;` + `always_ff stages[i] <= stages[i-1]`).
+    # Lowering it as one register silently registered the continuous bits.
+    "nocheck_slang_partial_reg": "lec",
     "not_vslogicnot": "lec",
     "null_port": "lec",
     "offset": "lec",

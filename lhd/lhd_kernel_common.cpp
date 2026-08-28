@@ -2,11 +2,14 @@
 // Common kernel plumbing: diagnostics, pass execution, typed I/O, and emits.
 
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -461,30 +464,172 @@ void setup_diag(const Options& opts, std::string_view step) {
   sink.set_step(step);
 }
 
+// ── Crash reporting ───────────────────────────────────────────────────────────
+//
+// ABC, yosys and the solvers do not null-check their allocations, so a bad
+// library or an oversized design can take the process down with SIGSEGV. Nothing
+// unwinds: no diagnostic, no result envelope, no exit-code class. Worse, the
+// installed handler (iassert's) renders its backtrace only under glibc -- on
+// macOS it prints NOTHING and exits 1, so a crashed `lhd synth` looked exactly
+// like a run that quietly produced no output.
+//
+// Say which step died and where its log is. A signal handler may only touch
+// async-signal-safe machinery, so the strings live in fixed buffers filled ahead
+// of time by run_step and are pushed out with write(2) -- no allocation, no
+// std::format, no locking. The exit status stays EXIT_FAILURE, matching what the
+// handler this replaces produced.
+namespace {
+
+constexpr size_t kCrashCtxMax = 1024;
+
+char crash_step_[kCrashCtxMax] = {0};
+char crash_log_[kCrashCtxMax]  = {0};
+
+void copy_crash_ctx(char (&dst)[kCrashCtxMax], std::string_view src) {
+  const size_t n = std::min(src.size(), kCrashCtxMax - 1);
+  std::memcpy(dst, src.data(), n);
+  dst[n] = '\0';
+}
+
+void crash_write(const char* s) {
+  if (s == nullptr || *s == '\0') {
+    return;
+  }
+  const size_t n = std::strlen(s);
+  ssize_t      w = ::write(STDERR_FILENO, s, n);
+  (void)w;  // a failed report cannot itself be reported
+}
+
+// C language linkage (what sigaction wants) with internal linkage (the symbol is
+// this file's business).
+extern "C" {
+static void crash_handler(int /*sig*/) {
+  crash_write("lhd: FATAL signal SIGSEGV -- this is a livehd bug, not a bad input\n");
+  if (crash_step_[0] != '\0') {
+    crash_write("lhd: crashed while running ");
+    crash_write(crash_step_);
+    crash_write("\n");
+  }
+  if (crash_log_[0] != '\0') {
+    crash_write("lhd: that step's output up to the crash is in ");
+    crash_write(crash_log_);
+    crash_write("\n");
+  } else {
+    crash_write("lhd: re-run with --workdir DIR to keep the per-pass logs\n");
+  }
+  ::_exit(EXIT_FAILURE);
+}
+}  // extern "C"
+
+// A failing step's own output -- ABC's `Error:` lines, yosys's log, a solver's
+// trace -- is captured to its per-step log, and the CLI error is the only place
+// a user looks. Point the error at that log so the reason is one `cat` away.
+//
+// Only when the log actually has content (most steps write nothing, and naming
+// an empty file is worse than saying nothing), and only when the user named a
+// --workdir: without one the workdir is an unpredictable mkdtemp scratch, and
+// its path must not leak into `error.hint`, which is part of the result envelope
+// (the kernel's determinism invariant is over output bytes). Name the flag that
+// would have kept the log instead.
+void point_error_at_step_log(Lhd_error& e, const Options& opts, const std::string& log) {
+  std::error_code ec;
+  const auto      sz = fs::file_size(log, ec);
+  if (ec || sz == 0) {
+    return;
+  }
+  const std::string where
+      = opts.workdir_scratch
+            ? std::string{"re-run with --workdir DIR to keep the per-pass logs; this step's own output explains the failure"}
+            : std::format("this step's own output is in {}", log);
+  if (e.hint.empty()) {
+    e.hint = where;
+  } else {
+    e.hint += " (";
+    e.hint += where;
+    e.hint += ')';
+  }
+}
+
+// The exception a step threw, as the kernel's error type. Mirrors what main()
+// does for an escaping exception, hoisted here so the step's log can be named
+// in the hint while we still know which step it was.
+Lhd_error step_failure(const std::exception_ptr& ep, std::string_view method) {
+  try {
+    std::rethrow_exception(ep);
+  } catch (const Lhd_error& e) {
+    return e;
+  } catch (const std::exception& e) {
+    // A diag `.fatal()` throws AFTER emitting: classify_engine_failure recovers
+    // that record's own message and hint, which beats the exception text.
+    return classify_engine_failure(e.what());
+  } catch (...) {
+    return Lhd_error{"internal", std::format("{} aborted with an unknown exception", method), ""};
+  }
+}
+
+}  // namespace
+
 // Run one registered EPRP method synchronously, stdout captured to a log.
 void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict& labels, Options& opts, Result& res) {
   // One perfetto slice per pipeline step (`--define profiling=1` builds; a
   // plain build compiles this away), so the trace timeline reads as the recipe.
   TRACE_EVENT("pass", perfetto::DynamicString{std::string(method)});
-  auto log = next_log_path(opts, method);
+  auto               log = next_log_path(opts, method);
+  std::exception_ptr failure;
+  // Named BEFORE the step runs: if it dies on a signal there is no later
+  // opportunity, and the log is where its own output already is.
+  set_crash_context(method, opts.workdir_scratch ? std::string_view{} : std::string_view{log});
   {
     // The phase time is the pass body alone, under the BARE method name (the
     // recipe line below adds the label decorations; "phases" stays keyable).
     Phase_timer   phase(res, method);
     Stdout_to_log redirect(log);
-    Pass::eprp.run_method_now(method, var, labels);
+    // Caught, not left to unwind: everything below (mirroring the log, naming
+    // it in the hint) has to happen with fd 1 already restored, and the
+    // redirect only lifts when this scope ends.
+    try {
+      Pass::eprp.run_method_now(method, var, labels);
+    } catch (...) {
+      failure = std::current_exception();
+    }
+  }
+  if (opts.verbose) {
+    mirror_log_to_stderr(log);  // a failing step's log is the one most worth mirroring
+  }
+  if (failure) {
+    auto e = step_failure(failure, method);
+    point_error_at_step_log(e, opts, log);
+    throw e;
   }
   res.recipe_steps.emplace_back(step_desc(method, labels));
-  if (opts.verbose) {
-    mirror_log_to_stderr(log);
-  }
   // Halting errors abort the pipeline here; deferred errors (e.g. a refuted
   // formal property) are recorded and fail the build at the end, but let the
   // remaining passes / emits run so the design still compiles with its failing
   // check kept as a runtime check.
   if (livehd::diag::sink().has_halting_errors()) {
-    throw classify_engine_failure(std::format("{} reported errors", method));
+    auto e = classify_engine_failure(std::format("{} reported errors", method));
+    point_error_at_step_log(e, opts, log);
+    throw e;
   }
+  set_crash_context({}, {});
+}
+
+void set_crash_context(std::string_view step, std::string_view log) {
+  copy_crash_ctx(crash_step_, step);
+  copy_crash_ctx(crash_log_, log);
+}
+
+void install_crash_reporter() {
+#if !defined(__GLIBC__)
+  // glibc keeps iassert's handler: it renders a demangled backtrace there, which
+  // is strictly more than this reports. Everywhere else that handler is silent,
+  // and this is the only thing that names the failure.
+  struct sigaction sa{};
+  sa.sa_handler = crash_handler;
+  sa.sa_flags   = SA_RESTART;
+  sigemptyset(&sa.sa_mask);
+  (void)::sigaction(SIGSEGV, &sa, nullptr);
+#endif
 }
 
 // The --set/--config pass-name vocabulary -> the EPRP method that consumes

@@ -38,6 +38,10 @@ struct Trace_guard {
 
 int main(int argc, char** argv) {
   I_setup();
+  // AFTER I_setup: on platforms where iassert's SIGSEGV handler renders nothing
+  // this takes the signal over and reports which pass died and where its log is
+  // (a crash in ABC/yosys/a solver otherwise exits 1 with no output at all).
+  lhd::install_crash_reporter();
 
   // Hard memory backstop (see pass/cost/host_mem.hpp). Armed FIRST, before any
   // large allocation, so a runaway pass (a whole-design ABC/LEC run that would
@@ -78,33 +82,14 @@ int main(int argc, char** argv) {
     return res.exit_code;
   }
 
-  // `lhd pyrope <lsp|fmt>` — the Pyrope developer tools. `pyrope lsp` is the
-  // Pyrope LSP server (JSON-RPC owns stdio, so run_stdio() reassigns fd 1
-  // internally and drives the front-end passes directly); `pyrope fmt` is the
-  // prpfmt source formatter. Both run before the pass/inou engine is
-  // initialized and write no result envelope (fmt's output is the formatted
-  // source on stdout / the rewritten files).
-  if (opts.command == "pyrope") {
-    return livehd::pyrope::run(opts);
-  }
-
-  if (lhd::is_meta_command(opts)) {
-    return lhd::run_meta_command(opts);
-  }
-
-  res.command = opts.command;
-  if (!opts.language.empty()) {
-    res.command += ' ';
-    res.command += opts.language;
-  }
-
   // Configure the diagnostics sink from `opts` ONCE, here, before anything can
   // fail. Several failures are raised BEFORE any per-step setup_diag runs
-  // (--emit/--dump validation, an unknown `--set`, `lhd sim --list-tests`), and
-  // an unconfigured sink falls back to its env default: it would ignore
-  // --quiet and write its records to a stray ./diag.jsonl in the user's cwd
-  // while the declared `--emit diagnostics:` file stays empty. The per-step
-  // setup_diag calls inside the kernel re-apply these same three settings.
+  // (--emit/--dump validation, an unknown `--set`, `lhd sim --list-tests`, and
+  // every `lhd pyrope fmt` failure below), and an unconfigured sink falls back
+  // to its env default: it would ignore --quiet and write its records to a
+  // stray ./diag.jsonl in the user's cwd while the declared
+  // `--emit diagnostics:` file stays empty. The per-step setup_diag calls
+  // inside the kernel re-apply these same three settings.
   {
     auto&            sink = livehd::diag::sink();
     std::string_view diag_path{"off"};
@@ -117,6 +102,28 @@ int main(int argc, char** argv) {
     sink.set_human_stderr(!opts.quiet);
     sink.set_stderr_jsonl(opts.diag_fmt == lhd::Diag_fmt::jsonl);
     sink.set_jsonl_path(diag_path);
+  }
+
+  // `lhd pyrope <lsp|fmt>` — the Pyrope developer tools. `pyrope lsp` is the
+  // Pyrope LSP server (JSON-RPC owns stdio, so run_stdio() reassigns fd 1
+  // internally and drives the front-end passes directly); `pyrope fmt` is the
+  // prpfmt source formatter. Both run before the pass/inou engine is
+  // initialized and write no result envelope (fmt's output is the formatted
+  // source on stdout / the rewritten files) -- but their failures still go
+  // through the sink configured above, so --diag-fmt / -q / --emit diagnostics:
+  // work there too.
+  if (opts.command == "pyrope") {
+    return livehd::pyrope::run(opts);
+  }
+
+  if (lhd::is_meta_command(opts)) {
+    return lhd::run_meta_command(opts);
+  }
+
+  res.command = opts.command;
+  if (!opts.language.empty()) {
+    res.command += ' ';
+    res.command += opts.language;
   }
 
   try {

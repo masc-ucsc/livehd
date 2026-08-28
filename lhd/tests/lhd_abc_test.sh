@@ -96,7 +96,7 @@ echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative contr
 # GENLIB derived from the Liberty's 2-D NLDM tables. Without that conversion,
 # `&nf -D 1000` constrains logic depth and the reported delay stays a small
 # integer. The timed run also exercises the SCL sizing tail with two NAND drive
-# strengths; ABC must be able to find every cell that upsize/dnsize introduces.
+# strengths; ABC must be able to find every cell that dnsize considers.
 T="$W/timing"
 mkdir -p "$T"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/unit" --set abc.library="$TIMING_LIB" \

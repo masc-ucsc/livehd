@@ -191,7 +191,13 @@ File_output::~File_output() {
 
   void* base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
   if (base == MAP_FAILED) {
-    std::println("mmap errno:{} for filename{}\n", strerror_threadsafe(errno), filename);
+    // Report before aborting: the sink flushes each record, so the reason
+    // survives the SIGABRT below and reaches an `--emit diagnostics:` consumer.
+    // A bare stdout line would only land in the per-step log, where a run that
+    // died on a signal gives nobody a pointer to look.
+    livehd::diag::err("io", "mmap-failed", "io")
+        .msg("could not map '{}' for writing: {}", filename, strerror_threadsafe(errno))
+        .emit();
     I(false);
   }
 

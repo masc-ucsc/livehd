@@ -2007,6 +2007,30 @@ void uPass_runner::stamp_loop_inst_suffix(std::string_view callee) {
 
 // ── Pass dispatch ─────────────────────────────────────────────────────────────
 
+namespace {
+
+// A pass that threw is REPORTED, not printed. stderr is not a channel the CLI
+// reads: it honours neither -q nor --diag-fmt json, never reaches an
+// `--emit diagnostics:` consumer, and never enters the result envelope -- so a
+// pass whose exception the dispatcher swallows used to leave the run reporting
+// success with the reason on a scrolled-past line.
+//
+// A throw out of `diag::…​.fatal()` has ALREADY reported: Sink::fatal emits the
+// record and then throws a runtime_error carrying that same message. Match on
+// it so the specific diagnostic stands alone instead of being restated (and
+// double-counted) as a generic one.
+void report_pass_exception(std::string_view where, const std::runtime_error& ex) {
+  const std::string_view what{ex.what()};
+  for (const auto& r : livehd::diag::sink().records()) {
+    if (r.severity == livehd::diag::Severity::error && r.message == what) {
+      return;
+    }
+  }
+  livehd::diag::err("pass.upass", "pass-exception", "internal").msg("{}: {}", where, what).emit();
+}
+
+}  // namespace
+
 void uPass_runner::dispatch_to_passes(Pass_method fn) {
   for (auto& entry : upasses) {
     // Snapshot the read cursor before dispatch. If the pass throws (e.g.
@@ -2019,7 +2043,7 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
       try {
         (entry.pass.get()->*fn)();
       } catch (const std::runtime_error& ex) {
-        std::print(stderr, "uPass [{}] error: {}\n", entry.name, ex.what());
+        report_pass_exception(entry.name, ex);
       }
       entry.stat_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
       ++entry.stat_calls;
@@ -2029,7 +2053,7 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
     try {
       (entry.pass.get()->*fn)();
     } catch (const std::runtime_error& ex) {
-      std::print(stderr, "uPass [{}] error: {}\n", entry.name, ex.what());
+      report_pass_exception(entry.name, ex);
     }
     lm->restore_cursor(saved);
   }
@@ -2185,7 +2209,7 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
         any_drop = true;
       }
     } catch (const std::runtime_error& e) {
-      std::print(stderr, "upass pass error: {}\n", e.what());
+      report_pass_exception(entry.name, e);
       lm->restore_cursor(here);
     }
     I(lm->get_current_nid() == here.current, "push handler left the LNAST cursor unbalanced");
@@ -9258,7 +9282,9 @@ void uPass_runner::unroll_while() {
 
 void uPass_runner::run() {
   if (configuration_error) {
-    std::print("uPass - invalid configuration: {}\n", configuration_error_msg);
+    livehd::diag::err("pass.upass", "bad-configuration", "io")
+        .msg("uPass invalid configuration: {}", configuration_error_msg)
+        .emit();
     return;
   }
 

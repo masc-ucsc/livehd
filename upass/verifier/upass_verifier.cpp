@@ -3,6 +3,7 @@
 #include "upass_verifier.hpp"
 
 #include <charconv>
+#include <format>
 #include <print>
 #include <string>
 #include <string_view>
@@ -401,31 +402,40 @@ void uPass_verifier::finalize_aggregate() {
              aggregate_unknown_count,
              aggregate_cputs_count);
 
-  bool mismatch = false;
+  // Build the mismatch report as ONE string and hand it to upass::error, which
+  // is the diagnostics-sink path: the CLI renders it per --diag-fmt and lifts it
+  // into the result envelope. A loose stderr print of the same numbers obeys
+  // neither -q nor --diag-fmt json and never reaches an `--emit diagnostics:`
+  // consumer, so the reader is told the tally mismatched but not by how much.
+  std::string detail;
+  const auto  add_detail = [&detail](std::string_view d) {
+    if (!detail.empty()) {
+      detail += "; ";
+    }
+    detail += d;
+  };
   if (aggregate_expected_pass >= 0 && static_cast<int>(aggregate_pass_count) != aggregate_expected_pass) {
-    std::print(stderr,
-               "uPass - verifier expected verifier_pass:{} but saw pass:{}\n",
-               aggregate_expected_pass,
-               aggregate_pass_count);
-    mismatch = true;
+    add_detail(std::format("expected verifier_pass:{} but saw pass:{}", aggregate_expected_pass, aggregate_pass_count));
   }
   // When verifier_fail is set, treat it as the allowed count: mismatch is
   // an error. When unset, any fail is unexpected — match expected_fail==0
   // as the default so a naked run still catches false casserts.
   const int fail_allowed = aggregate_expected_fail >= 0 ? aggregate_expected_fail : 0;
   if (static_cast<int>(aggregate_fail_count) != fail_allowed) {
-    std::print(stderr, "uPass - verifier expected verifier_fail:{} but saw fail:{}\n", fail_allowed, aggregate_fail_count);
-    mismatch = true;
+    add_detail(std::format("expected verifier_fail:{} but saw fail:{}", fail_allowed, aggregate_fail_count));
   }
 
-  if (mismatch) {
+  if (!detail.empty()) {
     if (!aggregate_unknown_operands.empty()) {
-      std::print(stderr, "uPass - verifier unresolved cassert operand(s):");
+      std::string ops;
       for (const auto& s : aggregate_unknown_operands) {
-        std::print(stderr, " {}", s);
+        if (!ops.empty()) {
+          ops += ' ';
+        }
+        ops += s;
       }
-      std::print(stderr, "\n");
+      add_detail(std::format("unresolved cassert operand(s): {}", ops));
     }
-    upass::error("verifier cassert count mismatch\n");
+    upass::error("verifier cassert count mismatch ({})", detail);
   }
 }

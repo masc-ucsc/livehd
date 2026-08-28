@@ -61,10 +61,18 @@ std::vector<std::string> parse_order_csv(std::string_view txt_view) {
   return out;
 }
 
-[[noreturn]] void fail_upass_runtime(std::string_view msg) {
-  std::print("ERROR: {}\n", msg);
-  throw std::runtime_error(std::string(msg));
+// Abort pass.upass with a REPORTED reason. The diagnostics sink is the only
+// channel the CLI reads (it renders pretty or JSON per --diag-fmt, and
+// classify_engine_failure lifts the record into the result envelope); a bare
+// stdout print lands in the per-step log the kernel captures fd 1 into, where
+// the user never sees it.
+[[noreturn]] void fail_upass_runtime(std::string_view code, std::string_view category, std::string_view msg) {
+  livehd::diag::err("pass.upass", code, category).msg("{}", msg).fatal();
 }
+
+// Abort after the specific diagnostics have ALREADY been emitted: a summary
+// record here would double the error count and bury the per-item ones.
+[[noreturn]] void abort_upass_runtime(std::string_view msg) { throw std::runtime_error(std::string(msg)); }
 
 // uPass_constprop consults this registry only while pass.upass is running.
 // Keeping owning Lnast pointers in its static map until process teardown both
@@ -406,7 +414,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   }
 
   if (upass_order.empty()) {
-    fail_upass_runtime("pass.upass has all the passed disabled??");
+    fail_upass_runtime("no-pass-enabled", "io", "pass.upass has every sub-pass disabled: nothing left to run");
   }
 }
 
@@ -658,7 +666,9 @@ void Pass_upass::work(Eprp_var& var) {
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(function_registry);  // 1i: comb bodies to inline from (shared, built once)
     if (runner.has_configuration_error()) {
-      fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
+      fail_upass_runtime("bad-configuration",
+                         "io",
+                         std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
     runner.run();
 
@@ -795,7 +805,7 @@ void Pass_upass::work(Eprp_var& var) {
                                      .message  = std::format("unit `{}`: unresolved import \"{}\"", p.unit, p.text),
                                      .hint     = std::format("searched inputs: {}", searched.empty() ? "(none)" : searched)});
       }
-      fail_upass_runtime(std::format("{} unresolved import(s)", seen.size()));
+      abort_upass_runtime(std::format("{} unresolved import(s)", seen.size()));
     }
   }
 

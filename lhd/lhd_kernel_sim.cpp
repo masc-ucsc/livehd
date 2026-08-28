@@ -2807,6 +2807,7 @@ void lec_lgyosys(Options& opts, Result& res) {
         res.recipe_steps.emplace_back("pass.lec solver:lgyosys (byte-identical materialization)");
         const std::string name = !opts.impl_top.empty() ? opts.impl_top : opts.impl_path;
         std::print("lec: '{}' PROVEN equivalent (solver=lgyosys; byte-identical materialization)\n", name);
+        res.lec = {.present = true, .verdict = "proven", .solver = "lgyosys", .bounded = false, .bound = 0};
         return;
       }
     }
@@ -2901,6 +2902,10 @@ void lec_lgyosys(Options& opts, Result& res) {
   // refutation: it carries no equivalence evidence in either direction.
   if (code == 2) {
     std::print("lec: '{}' INCONCLUSIVE (solver=lgyosys; could not prove, no counterexample)\n", name);
+    // Exit 0 -- an inconclusive comparison must not fail a pair -- so the
+    // envelope's verdict is the ONLY thing that tells a machine consumer this
+    // was not a proof.
+    res.lec = {.present = true, .verdict = "unknown", .solver = "lgyosys", .bounded = false, .bound = 0};
     return;
   }
   if (code != 0 && code != 1) {
@@ -2908,6 +2913,7 @@ void lec_lgyosys(Options& opts, Result& res) {
     throw Lhd_error{"dependency", std::format("lgyosys could not compare the designs (exit {})", code), std::format("see {}", log)};
   }
   std::print("lec: '{}' {} (solver=lgyosys)\n", name, code == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
+  res.lec = {.present = true, .verdict = code == 0 ? "proven" : "refuted", .solver = "lgyosys", .bounded = false, .bound = 0};
   if (code == 1) {
     throw Lhd_error{"equiv_fail",
                     std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path),

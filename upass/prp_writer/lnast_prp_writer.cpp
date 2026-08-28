@@ -5303,6 +5303,17 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
           write_idx_[nm].push_back(my_index);  // pushed in increasing index order
           write_idx_id_[name_id].push_back(my_index);
         }
+      } else if (t == Lnast_ntype::Lnast_ntype_func_call && pos == 1 && nm == lnast->get_name(lnast->get_child(nid))) {
+        // The CALLEE of `inst = Mod(...)` where the RTL named the instance
+        // after its own module -- `br_flow_checks_valid_data_impl
+        // br_flow_checks_valid_data_impl (...)`, which is legal SystemVerilog
+        // and bedrock-rtl's habit for its assertion sinks. That ref is a MODULE
+        // reference, not a read of the call's own result; counting it made a
+        // zero-output sink instance look like something consumed its result,
+        // and write_func_call then refused to emit the whole module
+        // ("result 'X' of zero-output module 'X' is read"). Only the
+        // self-named case is skipped, so a genuine higher-order call through a
+        // lambda-valued variable still counts its read.
       } else {
         fi.use_count++;
         fi.use_index = my_index;

@@ -285,10 +285,32 @@ struct Result {
     double   lookup_ms{0.0};
   } sta_incr;
 
-  // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph
-  // restore/store). Not serialized; the public machine contract is the stats
-  // object above. A graph inventory independently records this closure key, so
-  // a compile that fails after updating the parse cache cannot authorize a
+  // `lhd lec`'s VERDICT, as a machine-readable value.
+  //
+  // The envelope's `status` is the process outcome, not the proof: an
+  // INCONCLUSIVE lgyosys run and a real proof BOTH exit 0 with
+  // `"status":"pass"` (by design -- an inconclusive comparison must not fail a
+  // pair), so a consumer that reads only `status` records a non-proof AS a
+  // proof. That is the exact conflation lec's verdict discipline exists to
+  // prevent, and a tracker aggregating it silently promotes an unverified
+  // design into a headline comparison (lhdtrack flows/lib/lec.py). Emitted for
+  // every solver, alongside the human verdict line.
+  //
+  //   proven    equivalent (inductively, or exhaustively to `bound` cycles
+  //             when `bounded` -- both are real answers, see PASS(n))
+  //   refuted   a counterexample exists
+  //   unknown   the solver gave up / timed out / could not decide
+  struct Lec_verdict {
+    bool        present{false};
+    std::string verdict;         // proven | refuted | unknown
+    std::string solver;          // cvc5 | bitwuzla | lgyosys | …
+    bool        bounded{false};  // proven only to `bound` cycles from reset
+    int64_t     bound{0};        // the depth `bounded` refers to
+  } lec;
+
+  // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)
+  // to Tier B (final LGraph restore/store). Not serialized; the public machine contract is the stats object above. A graph
+  // inventory independently records this closure key, so a compile that fails after updating the parse cache cannot authorize a
   // stale pre-failure graph generation on the next run.
   std::string                                      compile_cache_scope;
   std::string                                      compile_cache_context;
@@ -538,6 +560,14 @@ Lhd_error classify_engine_failure(std::string_view fallback_msg);
 // Initialize the pass/inou registry: every static Pass_plugin plus
 // setup_inou_yosys() (no REPL-style Top/Meta command surface).
 void init_engine();
+
+// Name the crash. A pass that dies on SIGSEGV (ABC and the solvers do not
+// null-check their allocations) unwinds nothing, so no diagnostic, no result
+// envelope and no exit-code class ever reach the user -- and off glibc the
+// installed handler prints not even a backtrace, leaving a bare exit 1 with no
+// output at all. install_crash_reporter() reports which step died and where its
+// log is, from data run_step parks in fixed buffers for the handler to read.
+void install_crash_reporter();
 
 // Deterministic content-hash run_id over (tool version + command + resolved
 // config + input bytes). A lec --impl/--ref side of kind lg: hashes only its

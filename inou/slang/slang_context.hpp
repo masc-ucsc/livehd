@@ -146,6 +146,22 @@ private:
   // read mh_wb_req before the child instances wrote it — LEC-refuted).
   absl::flat_hash_set<const slang::ast::Symbol*>              wire_split_flat_;
   absl::flat_hash_set<const slang::ast::Symbol*> latch_syms_;  // level-sensitive latch state vars (subset of reg_syms_)
+  // PARTIALLY-REGISTERED vars: some bits driven by a continuous `assign`, the
+  // rest nonblocking-written by an edge process. IEEE 1800 allows that (the two
+  // drivers must not overlap, which slang enforces), and it is how bedrock's
+  // br_delay and cvfpu's pipelines spell a delay line whose stage 0 IS the
+  // input: `assign stages[0] = in;` + `always_ff stages[i] <= stages[i-1];`.
+  //
+  // Such a var is TWO nets sharing a name, and lowering it as one register
+  // silently registers the continuous bits -- one extra cycle of delay on
+  // every one of them, and the whole array reading 0 out of reset instead of
+  // the live input (br_delay's `out_stages`, LEC-REFUTED). So it is split:
+  //   <name>       a COMBINATIONAL composite -- what every READ resolves to,
+  //                seeded from the flop's q and overwritten by the continuous
+  //                driver;
+  //   <name>___q   the actual flop -- what an EDGE-PROCESS WRITE targets.
+  // Maps the symbol to the flop's net name; empty for everything else.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> partial_reg_shadow_;
   // Vars BLOCKING-written by an edge process and READ OUTSIDE it. Such a var is
   // persistent flop state (`always @(posedge p) ms = ms + 1;` + `assign o = ms`)
   // that this reader does not model; without the diagnostic it lowered to a
@@ -831,6 +847,15 @@ private:
 
   // ── naming + reads ─────────────────────────────────────────────────────────
   std::string        lname_of(const slang::ast::Symbol& sym);
+  // The net that HOLDS `sym`'s flop state: `lname_of` unless the symbol is a
+  // partially-registered split, where the symbol's own name is the
+  // combinational composite and the flop lives on the shadow. Declares and
+  // every reg attribute (clock_pin / reset_pin / initial / …) name this.
+  std::string        reg_net_of(const slang::ast::Symbol& sym);
+  // The net a WRITE to `sym` targets: the shadow flop for a split symbol
+  // written from an EDGE process, the symbol's own net everywhere else (a
+  // continuous assign and a comb process both drive the composite).
+  std::string        write_target_of(const slang::ast::Symbol& sym);
   // One raw SV identifier -> the LNAST ref spelling: whitespace folded away and
   // the result backtick-quoted when it is not a plain identifier. NO uniquing —
   // for a name that is already unique in its own namespace (an INSTANCE name,

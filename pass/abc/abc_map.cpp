@@ -57,7 +57,7 @@ extern "C" {
 #include "base/cmd/cmd.h"
 #include "aig/hop/hop.h"
 #include "map/mio/mio.h"
-#include "map/scl/sclLib.h"  // SC_Lib: the parsed NLDM (the `buffer`/`upsize` + QoR timing gate)
+#include "map/scl/sclLib.h"  // SC_Lib: the parsed NLDM (`buffer`/`dnsize` + QoR timing)
 #include "map/scl/sclSize.h"  // SC_Man: physical NLDM QoR after sizing
 #include "misc/extra/extra.h"
 }
@@ -79,10 +79,14 @@ namespace {
 // Liberty's characterized load -- dino had 283 nets over 32 sinks and a mapped
 // net with 384 -- and `pass.opentimer` then EXTRAPOLATES off the end of the NLDM
 // table (an `a21oi_1` came out at 3090 ns against a ~0.05 ns intrinsic delay).
-// `buffer -N` caps mapped fanout exactly, and `upsize`/`dnsize` re-size around
-// the inserted buffers. Together with the flow above: dino STA 51.1 -> 35.0 ns
-// (-32%) for +2.8% area. These are SCL commands: they need a MAPPED network, so
-// they must follow `&put`, and they need `pLibScl`, which `read_lib -s` loads.
+// `buffer -N` caps mapped fanout exactly, and `dnsize` area-recovers around the
+// inserted buffers. `map_region` runs `upsize; dnsize` afterwards ONLY when
+// this result still misses `{D}`: upsize optimizes for the fastest achievable
+// delay rather than the requested budget. On the 16x32 Bedrock one-hot mux,
+// running it despite meeting 100 ps changed 30.79 um^2 at 52.22 ps into 45.72
+// um^2 at 46.47 ps -- a 48% area increase. These are SCL commands: they need a
+// MAPPED network, so they must follow `&put`, and they need `pLibScl`, which
+// `read_lib -s` loads.
 //
 // It cannot fix everything: a net driven by a NATIVE (unblasted) node -- a wide
 // SRA, packed wiring, a region boundary -- never reaches ABC, so its fanout
@@ -92,7 +96,7 @@ constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; s
 // Appended to a BUILT-IN flow when max_fanout != 0. Not part of the constants
 // above so that max_fanout=0 yields a clean unbuffered string rather than a
 // stripped one; a custom flow places `{F}` (the bare number) itself.
-constexpr std::string_view kBufferTail = "; buffer -N {F}; upsize; dnsize";
+constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize";
 
 // Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow; the
 // latches only carry the registers across ABC so it can optimize the logic
@@ -200,7 +204,7 @@ std::string flag_subst(std::string f, std::string_view tok, char flag, const std
 // inverter timing surface instead.
 //
 // This is the ONE library-capability predicate for every SCL command the pass
-// drives (the `buffer`/`upsize`/`dnsize` tail and the `stime`-shaped QoR
+// drives (the `buffer`/`dnsize` tail and the `stime`-shaped QoR
 // timer). It is deliberately STRICTER than ABC's own `Abc_SclHasDelayInfo`,
 // which is satisfied by a scalar-only arc: the SCL timer walks 2-D surfaces,
 // so a scalar Liberty that happens to declare `lu_table_template` must NOT be
@@ -313,6 +317,37 @@ bool Mapper::start() {
   }
   lib_loaded_ = true;
 
+  // ABC's structural mappers (`&nf`, `map`, `sfm`, ...) build their cell table
+  // with Mio_CollectRootsNew*, which REQUIRES a buffer and an inverter gate.
+  // `read_lib` only WARNS when the genlib reader cannot find them ("genlib
+  // library reader cannot detect the buffer gate") and still returns 0, so the
+  // load looks successful; the failure surfaces much later, inside the mapping
+  // flow, as ABC printing `Error: Cannot find buffer gate in the library.` and
+  // returning a NULL cell table that the very next mapper walk dereferences.
+  // That lands as a bare SIGSEGV inside ABC -- and iassert's handler prints no
+  // backtrace off glibc -- so the run ended with exit 1, an empty netlist
+  // directory, and the reason visible only to whoever thought to `cat` the pass
+  // log. Refuse here instead, naming the gates the library is missing.
+  //
+  // Checked on the GENLIB, not on the Liberty text: `read_lib -s` has already
+  // dropped multi-output and sequential cells, and it is the surviving genlib
+  // the mapper actually indexes.
+  {
+    auto*       mio = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
+    const bool  no_buf = mio == nullptr || Mio_LibraryReadBuf(mio) == nullptr;
+    const bool  no_inv = mio == nullptr || Mio_LibraryReadInv(mio) == nullptr;
+    if (no_buf || no_inv) {
+      const std::string_view what = (no_buf && no_inv) ? "buffer or inverter cell" : (no_buf ? "buffer cell" : "inverter cell");
+      livehd::diag::err("pass.abc", "lib-no-buffer", "unsupported")
+          .msg("Liberty library '{}' has no {}: ABC cannot technology-map against it", startup_opts_.library, what)
+          .hint(
+              "pass a Liberty that contains both a buffer and an inverter; a vendor library split across views (ASAP7 keeps "
+              "them in its *_INVBUF_* view and its flops in *_SEQ_*) has to be merged into the single file synth.liberty takes")
+          .fatal();
+      return false;
+    }
+  }
+
   if (nldm_requested()) {
     auto* scl = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
     if (lib_has_nldm_timing(scl)) {
@@ -320,9 +355,8 @@ bool Mapper::start() {
       // (every pin 1.00), so every mapped delay is logic depth. Reinstall the
       // GENLIB from the parsed NLDM at ABC's conventional gain=100 operating
       // point; slew=0 asks ABC to choose a representative slew from the
-      // library. Keep every drive strength (fUseAll) so the SCL upsize/dnsize
-      // tail can find every cell it introduces. A representative-only GENLIB
-      // makes dnsize abort after upsize selects a non-representative ASAP7 cell.
+      // library. Keep every drive strength (fUseAll) so the SCL dnsize tail can
+      // consider every legal drive strength while recovering area.
       const void* before_mio = Abc_FrameReadLibGen();
       Abc_SclInstallGenlib(scl, 0.0f, 100.0f, 1, 0);
       Mio_LibraryTransferCellIds();
@@ -494,10 +528,12 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
   return m;
 }
 
-void Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
-  auto apply = [&](const Region_opts& ro, std::string_view src) {
+bool Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
+  bool flow_overridden = false;
+  auto apply           = [&](const Region_opts& ro, std::string_view src) {
     if (ro.flow.has_value()) {
-      opts_.flow = *ro.flow;
+      opts_.flow      = *ro.flow;
+      flow_overridden = !ro.flow->empty();
     }
     if (ro.delay.has_value()) {
       opts_.delay = *ro.delay;
@@ -540,6 +576,7 @@ void Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
   if (auto it = region_opts_cli_.find(rb.color); it != region_opts_cli_.end()) {
     apply(it->second, "--set region_opts");
   }
+  return flow_overridden;
 }
 
 namespace {
@@ -975,7 +1012,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     const int bits  = gu::bits_of(node.create_driver_pin(0));
-    register_bits  += static_cast<uint64_t>(std::max(bits, 1));
+    register_bits   += static_cast<uint64_t>(std::max(bits, 1));
   }
   if (opts_.map_register && opts_.register_max_bits != 0 && register_bits > opts_.register_max_bits) {
     opts_.map_register = false;
@@ -989,6 +1026,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // a user naming one specific region always has the final say. `input_ge` is
   // invariant source-logic cost, unlike mapped gates, so cache recipes and
   // threshold decisions remain stable when the mapping flow changes.
+  bool tool_owned_flow = opts_.flow.empty();
   if (opts_.small_ge != 0 && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
     // resolve_flow, not the raw string: the size TIERS are tool-chosen defaults
     // like kCombFlow, so max_fanout's buffering tail applies to them too. Only
@@ -1011,7 +1049,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
     }
   }
-  apply_region_overrides(rb);
+  if (apply_region_overrides(rb)) {
+    tool_owned_flow = false;
+  }
   if (opts_.verbose) {
     uint64_t input_bits  = 0;
     uint64_t output_bits = 0;
@@ -3071,7 +3111,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // while retaining the parsed Liberty library and command aliases.
   Abc_FrameReplaceCurrentNetwork(frame, pLogic);
   auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
-  // The `{F}` tail is SCL: `buffer`/`upsize`/`dnsize` TIME the mapped network,
+  // The `{F}` tail is SCL: `buffer`/`dnsize` TIME the mapped network,
   // walking the per-pin NLDM tables of `pAbc->pLibScl`. A Liberty with no
   // `lu_table_template` builds none -- ABC says exactly that ("Templates are not
   // defined.") and then read_lib still returns 0, so `start()` above saw a
@@ -3105,7 +3145,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         // fallback above uses).
         std::print(
             "[pass.abc] max_fanout={}: '{}' has no 2-D slew/load NLDM timing tables, so ABC cannot size "
-            "cells -- skipping `buffer -N`/`upsize`/`dnsize`; mapped fanout is NOT capped\n",
+            "cells -- skipping `buffer -N`/`dnsize`; mapped fanout is NOT capped\n",
             opts_.max_fanout,
             startup_opts_.library);
       }
@@ -3114,6 +3154,40 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
+  }
+
+  // A delay is a budget, not an instruction to minimize delay at any cost.
+  // ABC's `upsize` ignores &nf's -D target and always chases the fastest cell
+  // assignment; the following `dnsize` then preserves that newly tightened
+  // delay instead of recovering toward the requested budget. Time the built-in
+  // flow first and invoke the speed-grade sweep only for a real miss. Custom
+  // flows remain fully caller-owned.
+  if (tool_owned_flow && nldm_genlib_loaded_ && !opts_.delay.empty()) {
+    char*       end    = nullptr;
+    const float target = std::strtof(opts_.delay.c_str(), &end);
+    if (end != opts_.delay.c_str() && *end == '\0' && target > 0.0f) {
+      auto* mapped = Abc_FrameReadNtk(frame);
+      if (mapped != nullptr && Abc_NtkIsMappedLogic(mapped)) {
+        auto* timing_ntk = mapped->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(mapped) : mapped;
+        if (Abc_SclCheckNtk(timing_ntk, 0)) {
+          auto*      timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_ntk, 0, 1, 0.0f, 0);
+          const bool missed = timing->MaxDelay0 > target;
+          Abc_SclManFree(timing);
+          if (missed && Cmd_CommandExecute(frame, "upsize; dnsize") != 0) {
+            livehd::diag::err("pass.abc", "abc-flow", "internal")
+                .msg("ABC conditional sizing failed for region '{}' after missing delay target {}", rb.module_name, opts_.delay)
+                .fatal();
+            if (timing_ntk != mapped) {
+              Abc_NtkDelete(timing_ntk);
+            }
+            return;
+          }
+        }
+        if (timing_ntk != mapped) {
+          Abc_NtkDelete(timing_ntk);
+        }
+      }
+    }
   }
   trace_stage("flow-complete");
 
@@ -3723,11 +3797,32 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     // Nothing enforces wire-name uniqueness across a region's registers; two
     // same-named rebuilt flops would cgen as two `reg` declarations of one name.
+    //
+    // BUT THE SUFFIX IS A LAST RESORT, NOT A FIX. It renames the IMPL side only,
+    // so a duplicate that the reference still spells one way becomes an
+    // asymmetric pair: the post-synthesis LEC corresponds state BY NAME, and
+    // every name-keyed map between here and cgen has to pick one of the two.
+    // Measured (2026-08-28, bedrock br_fifo_shared_*): a genvar-loop
+    // instantiation whose instances shared a name flattened to two registers
+    // under one name, and the mapped netlist then computed
+    // `{credit_initial[5:3], credit_initial[5:3]}` where the RTL gives
+    // `credit_initial` — 56 of 64 values wrong, confirmed by an independent
+    // iverilog simulation against the PDK's own cell models. So say it out loud
+    // rather than quietly renaming: a collision here means something upstream
+    // minted two distinct registers under one hierarchical name.
     absl::flat_hash_map<std::string, int> name_used;
+    int                                   dup_names = 0;
+    std::string                           dup_first;
     auto                                  unique_flop_name = [&](const std::string& base) {
       int& n = name_used[base];
       ++n;
-      return n == 1 ? base : std::format("{}__dup{}", base, n - 1);
+      if (n > 1) {
+        if (dup_names++ == 0) {
+          dup_first = base;
+        }
+        return std::format("{}__dup{}", base, n - 1);
+      }
+      return base;
     };
     // Rebuild one native flop covering the latches `idx` (bit 0 first): Q bits
     // feed the mapped logic via net2drv, din is Set_mask-reassembled in pass
@@ -3888,6 +3983,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
       }
     }  // else (native-flop read-back)
+    if (dup_names != 0) {
+      livehd::diag::warn("pass.abc", "duplicate-register-name", "internal")
+          .msg(
+              "pass.abc region '{}': {} register(s) share a name with another register in the same region (first: '{}'); "
+              "the read-back had to suffix them '__dup<N>' on the IMPLEMENTATION side only. Two distinct registers under "
+              "one hierarchical name is an upstream naming defect: it breaks the post-synthesis LEC's name-based state "
+              "correspondence and can alias the registers outright",
+              rb.module_name,
+              dup_names,
+              dup_first)
+          .emit();
+    }
   }
   if (init_dropped) {
     livehd::diag::warn("pass.abc", "dff-init-kept-native", "unsupported")

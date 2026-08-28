@@ -46,7 +46,8 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
                                      .pass     = "cli",
                                      .message  = std::format("path `{}` is not accessible and could not be created", path),
                                      .hint     = "check the `path:`/`src_path:` argument and permissions"});
-        std::print("ERROR: path {} is not accessible (skipping)\n", path);
+        // The diagnostic above IS the report. A second copy on stdout would only
+        // land in the step log (the kernel captures fd 1 per pass), unseen.
         throw std::runtime_error("not valid file");
       }
     }

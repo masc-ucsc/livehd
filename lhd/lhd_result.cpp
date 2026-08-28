@@ -790,6 +790,27 @@ void write_result(const Options& opts, const Result& res) {
     w.EndObject();
   }
 
+  if (res.lec.present) {
+    // The PROOF, separate from the process `status`: an inconclusive comparison
+    // exits 0 too, so a consumer that reads only `status` would record it as a
+    // proof (see Result::Lec_verdict).
+    w.Key("lec");
+    w.StartObject();
+    w.Key("verdict");
+    w.String(res.lec.verdict.c_str());
+    if (!res.lec.solver.empty()) {
+      w.Key("solver");
+      w.String(res.lec.solver.c_str());
+    }
+    w.Key("bounded");
+    w.Bool(res.lec.bounded);
+    if (res.lec.bounded) {
+      w.Key("bound");
+      w.Int64(res.lec.bound);
+    }
+    w.EndObject();
+  }
+
   w.Key("inputs");
   w.StartArray();
   for (const auto& s : res.inputs) {

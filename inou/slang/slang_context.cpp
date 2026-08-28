@@ -362,6 +362,23 @@ std::string Slang_context::lname_of(const slang::ast::Symbol& sym) {
   return name;
 }
 
+std::string Slang_context::reg_net_of(const slang::ast::Symbol& sym) {
+  if (auto it = partial_reg_shadow_.find(&sym); it != partial_reg_shadow_.end()) {
+    return it->second;
+  }
+  return lname_of(sym);
+}
+
+std::string Slang_context::write_target_of(const slang::ast::Symbol& sym) {
+  // Only an EDGE process writes the flop. A continuous assign (and a comb
+  // process, which cannot legally share bits with the flop anyway) drives the
+  // composite the reads resolve to.
+  if (proc_kind_ == Proc_kind::seq) {
+    return reg_net_of(sym);
+  }
+  return lname_of(sym);
+}
+
 std::string Slang_context::fresh_local(std::string_view stem) {
   std::string name = absl::StrCat("_", stem, "_", ++local_cnt_);
   while (used_names_.contains(name)) {

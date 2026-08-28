@@ -23,7 +23,7 @@ struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
   // Cap on the fanout of any net ABC MAPS, enforced by appending
-  // `buffer -N <n>; upsize; dnsize` to a built-in flow. 0 disables the tail.
+  // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.
   // Nets driven by native (unblasted) nodes are outside ABC and keep their
   // fanout regardless. Default 16.
   uint32_t          max_fanout = 16;
@@ -272,7 +272,7 @@ private:
 
   // Overlay any per-region overrides for rb.color onto opts_ (caller saves and
   // restores opts_ around the region).
-  void apply_region_overrides(const livehd::partition::Region_body& rb);
+  [[nodiscard]] bool apply_region_overrides(const livehd::partition::Region_body& rb);
 
   // One compact, flushed record after each color has completely finished.
   // Kept separate from verbose stage tracing so long-running synthesis always

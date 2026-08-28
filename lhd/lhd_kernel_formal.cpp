@@ -4837,6 +4837,13 @@ void lec_command(Options& opts, Result& res) {
                                           : std::string{"PROVEN equivalent"};
   const char*       verdict   = lec_known ? (lec_equiv ? pass_word.c_str() : "REFUTED (not equivalent)") : "UNKNOWN";
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);
+  // The same three states, machine-readable: `status`/exit code alone cannot
+  // tell a proof from a solver give-up (see Result::Lec_verdict).
+  res.lec = {.present = true,
+             .verdict = lec_known ? (lec_equiv ? "proven" : "refuted") : "unknown",
+             .solver  = o.solver,
+             .bounded = lec_equiv && r.bounded,
+             .bound   = lec_equiv && r.bounded ? static_cast<int64_t>(o.bound) : int64_t{0}};
   // The witness names the diverging COMMON outputs; print it on Refuted AND on the
   // Unknown-because-incomplete-correspondence case (where a matched-portion diff is
   // still the actionable iteration signal), not only on a clean Refuted.

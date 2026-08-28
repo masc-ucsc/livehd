@@ -136,11 +136,15 @@ through `--set`) and the Liberty contains 2-D NLDM slew/load tables, `pass.abc`
 replaces `read_lib -s`'s default **unit-delay** GENLIB (every pin 1.00, so every
 mapped delay is logic depth) with one derived from the parsed NLDM at ABC's
 conventional gain-100 operating point. All drive strengths remain available so
-the built-in `upsize`/`dnsize` tail can optimize the mapped cells using their
-NLDM surfaces, and the reported regional delay/area are recomputed with the same
-physical SCL timer ABC's `stime` uses. Libraries containing only scalar delays
-retain unit-delay mapping and produce a note, as does a library whose derived
-GENLIB fails to build or has no buffer cell (ABC's SCL timer requires one).
+the built-in `dnsize` tail can area-recover the mapped cells using their NLDM
+surfaces after fanout buffering, and the reported regional delay/area are
+recomputed with the same physical SCL timer ABC's `stime` uses. The default runs
+`upsize; dnsize` only when the buffered/down-sized result still misses the
+requested delay: `upsize` chases the fastest achievable delay and can inflate an
+already timing-clean cone when invoked unconditionally. Libraries containing
+only scalar delays retain unit-delay mapping and produce a note, as does a
+library whose derived GENLIB fails to build or has no buffer cell (ABC's SCL
+timer requires one).
 
 Two caveats, both about `{D}` itself:
 

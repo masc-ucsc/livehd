@@ -201,6 +201,9 @@ void              mirror_log_to_stderr(const std::string& log_path);
 std::string       map_diag_category(std::string_view category);
 void              setup_diag(const Options& opts, std::string_view step);
 void              run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict& labels, Options& opts, Result& res);
+// Park "which step, which log" where the SIGSEGV handler can read it without
+// allocating (see install_crash_reporter). Empty strings clear the slot.
+void              set_crash_context(std::string_view step, std::string_view log);
 std::string_view  set_pass_method(std::string_view set_name);
 bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);

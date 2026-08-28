@@ -61,11 +61,11 @@ void Pass_abc::setup() {
   // Fanout cap for anything ABC MAPS. Without it ABC leaves nets far past the
   // Liberty's characterized load and pass.opentimer extrapolates off the end of
   // the NLDM table -- an `a21oi_1` measured 3090 ns against a ~0.05 ns intrinsic
-  // delay. 16 measured best on dino: mapped fanout capped exactly at 16,
-  // whole-design STA 51.1 -> 35.0 ns, +2.8% area, ~2x ABC time. Nets driven by
-  // NATIVE (unblasted) nodes never reach ABC and keep their fanout regardless.
+  // delay. A cap of 16 bounds the mapped dino fanouts that originally exposed
+  // the extrapolation. Nets driven by NATIVE (unblasted) nodes never reach ABC
+  // and keep their fanout regardless.
   m.add_label_optional("max_fanout",
-                       "cap the fanout of every net ABC maps, by appending `buffer -N <n>; upsize; dnsize` to the "
+                       "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize` to the "
                        "built-in flow (0 disables it). A custom `flow` places `{F}` -- the bare number -- itself",
                        "16");
   m.add_label_optional("small_flow",

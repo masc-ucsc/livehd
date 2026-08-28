@@ -443,8 +443,12 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
         declare_value_symbol(sym, /*force_reg=*/false);
       }
-      auto name = lname_of(sym);
-      if (rhs == name) {
+      auto name  = lname_of(sym);
+      // A partially-registered var writes its FLOP from an edge process while
+      // reads (including `rhs`) resolve to the combinational composite, so the
+      // two names differ and the hold shortcut below must not fire on them.
+      auto wname = write_target_of(sym);
+      if (rhs == name && wname == name) {
         return;  // full-width self-assign (`q <= q;` hold idiom): an unwritten reg already holds
       }
       // A bundle-declared struct var has NO flat net — every read resolves
@@ -461,7 +465,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
       note_write(sym, current_assign_nonblocking_, lhs.sourceRange.start());
-      builder_.create_assign_stmts(name, to_int_value(rhs));
+      builder_.create_assign_stmts(wname, to_int_value(rhs));
       return;
     }
 
@@ -1948,7 +1952,15 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   // integers are otherwise unbounded, so an arithmetic RHS can reach the
   // bitwidth verifier one carry bit wider than the destination slice.
   auto val       = fit_wrap(rhs, static_cast<int>(lv.width), lv.is_signed);
-  auto base_name = lname_of(*lv.base);
+  // The net this RMW modifies. For a partially-registered var an edge-process
+  // write lands on the FLOP, not on the combinational composite the symbol's
+  // own name now denotes -- and it must also READ the flop here, because the
+  // unmasked bits are the ones being HELD and because sibling generate-block
+  // drivers chain their disjoint slices through this same name (reading the
+  // composite instead made every driver seed from the same value, so the last
+  // one to emit silently discarded the others). Value reads inside `rhs` went
+  // through lname_of and already see the composite, which is the whole point.
+  auto base_name = write_target_of(*lv.base);
 
   if (lv.dyn_off.empty()) {
     int64_t lo_bit = lv.const_off;

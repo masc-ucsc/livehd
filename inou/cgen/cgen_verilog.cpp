@@ -1280,11 +1280,18 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       const bool collides = (!mem_fwd_dpin.is_invalid() && !hydrate_const(mem_fwd_dpin).is_known_zero())
                             || (!mem_undef_dpin.is_invalid() && !hydrate_const(mem_undef_dpin).is_known_zero());
       if (collides) {
+        // Name the two matrices: "non-zero" alone does not say WHICH ordering
+        // the graph is asking for, and the two demand different fixes.
+        const auto mat_txt = [&](const hhds::Pin_class& p) -> std::string {
+          return p.is_invalid() ? std::string("-") : std::string(hydrate_const(p).to_pyrope());
+        };
         livehd::diag::err("inou.cgen", "mem-readall-collision", "unsupported")
             .msg(
-                "memory {} is read WHOLE (read_all) and also carries a non-zero same-cycle collision matrix; the inline "
-                "reg-array emission the whole read forces has no forwarding model",
-                debug_name(node))
+                "memory {} is read WHOLE (read_all) and also carries a non-zero same-cycle collision matrix "
+                "(fwd={}, undef={}); the inline reg-array emission the whole read forces has no forwarding model",
+                debug_name(node),
+                mat_txt(mem_fwd_dpin),
+                mat_txt(mem_undef_dpin))
             .hint(
                 "spell `ordering=\"old\"` on the array, or drop the whole-array read so the cgen_memory_* wrapper (which "
                 "carries FWD/UNDEF) is used")

@@ -228,6 +228,41 @@ sh_test(
     ],
 )
 
+# An instance inside a generate block must carry the generate prefix in its name
+# exactly as a net inside one does. Two genvar-loop instances of the same module
+# otherwise share a name, and after flattening so do their registers — which
+# pass/abc's register read-back then disambiguates on the IMPL side only,
+# refuting the post-synthesis LEC.
+sh_test(
+    name = "slang_genblk_instance_name",
+    size = "large",
+    srcs = ["tests/genblk_instance_name_test.sh"],
+    data = [
+        "tests/sv/genblk_instance_name.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",  # lgcheck + yosys2 for the LEC leg
+    ],
+)
+
+# An instance named after its own module, of a module with NO OUTPUTS
+# (bedrock-rtl's spelling for every assertion-only observer). Both refs of the
+# emitted `fcall` carry the same name, which made prp_writer read the CALLEE
+# reference as a read of the call's own result and refuse the whole module.
+sh_test(
+    name = "slang_self_named_sink_inst",
+    size = "large",
+    srcs = ["tests/self_named_sink_inst_test.sh"],
+    data = [
+        "tests/sv/self_named_sink_inst.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",  # lgcheck + yosys2 for the LEC leg
+    ],
+)
+
 # A plain packed local whose first lowered write sits inside a comptime-decided
 # `if` arm used to lose its declaration entirely (the arm, and the declare with
 # it, is dead-code-eliminated), so the emitted Pyrope did not recompile. Round

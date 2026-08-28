@@ -34,6 +34,7 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -201,7 +202,10 @@ void synth_command(Options& opts, Result& res) {
                     "the design compiled to no LGraphs -- nothing to synthesize",
                     "a type/constant-only unit has no module"};
   }
-  if (user_workdir) {
+  if (user_workdir && std::find(res.outputs.begin(), res.outputs.end(), lg_dir) == res.outputs.end()) {
+    // compile_command already declared it (the flow hands it `--emit-dir
+    // lg:<root>/lg`), so an unconditional push listed the same directory twice
+    // in the report and in the envelope's `outputs`.
     res.outputs.push_back(lg_dir);
   }
 

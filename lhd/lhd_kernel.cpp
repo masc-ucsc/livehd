@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <vector>
 
 #include "diag.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -205,6 +206,45 @@ std::vector<Set_option> list_set_options() {
   return out;
 }
 
+namespace {
+
+// A run that names nowhere to keep its result is legitimate -- a syntax check, a
+// `--stats` report -- but it is far more often a mistake, and the symptom (the
+// command "did nothing") looks identical either way. Say it ONCE, up front,
+// rather than after a long synthesis: the scratch workdir the kernel mints is
+// never named, so nothing the run builds is reachable afterwards.
+//
+// `compile` and `synth` only: they exist to BUILD something. Every other
+// command's output is its report (lec's verdict, sim's test results, tool's
+// stdout, a pass's --stats), which a run with no workdir still delivers in
+// full. `diagnostics:`/`results:` describe the run, not the design, so they do
+// not count as somewhere to keep it.
+void warn_no_artifacts(const Options& opts) {
+  if (opts.command != "compile" && opts.command != "synth") {
+    return;
+  }
+  // `workdir_scratch` because workdir() MUTATES opts.workdir: by the time this
+  // runs, a workdir-less command has already been handed an unnamed mkdtemp
+  // path, so a plain `workdir.empty()` test would never fire.
+  if ((!opts.workdir.empty() && !opts.workdir_scratch) || !opts.dumps.empty()) {
+    return;
+  }
+  const auto keeps_design = [](const std::vector<Typed_path>& v) {
+    return std::any_of(v.begin(), v.end(), [](const Typed_path& t) { return t.kind != "diagnostics" && t.kind != "results"; });
+  };
+  if (keeps_design(opts.emits) || keeps_design(opts.emit_dirs)) {
+    return;
+  }
+  livehd::diag::warn("lhd", "no-artifacts", "io")
+      .msg("`lhd {}` was given neither --workdir nor an --emit/--emit-dir output: it runs, but nothing it builds is kept",
+           opts.command)
+      .hint("--emit-dir lg:DIR (or verilog:DIR) keeps the result; --workdir DIR additionally keeps the intermediates and the "
+            "per-pass logs")
+      .emit();
+}
+
+}  // namespace
+
 void run_engine_command(Options& opts, Result& res) {
   validate_emits(opts);
   validate_dumps(opts);
@@ -236,6 +276,10 @@ void run_engine_command(Options& opts, Result& res) {
   } else {
     throw Lhd_error{"usage", std::format("unknown command '{}'", opts.command), ""};
   }
+  // AFTER the dispatch: each command opens with its own setup_diag, which
+  // clears the sink -- a record emitted before that would print but never be
+  // counted (the envelope would say "0 warnings" under its own warning line).
+  warn_no_artifacts(opts);
 }
 
 }  // namespace lhd

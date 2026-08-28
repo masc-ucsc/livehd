@@ -1211,6 +1211,19 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# A Bedrock-style 5x34 one-hot mux under the hermetic NLDM Liberty. The default
+# fanout treatment must not invoke an unconstrained speed-grade upsize after the
+# requested delay is already met.
+sh_test(
+    name = "lhd_abc_onehot_qor_smoke",
+    size = "large",
+    srcs = ["lhd_abc_onehot_qor_smoke.sh"],
+    data = _FLOW_DATA + [
+        "br_mux_onehot.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2opt-incr A+C: incremental pass.abc. A persistent region cache keyed by a
 # canonical digest: a NoChange run is all hits and zero ABC; editing one module
 # re-synthesizes only the regions it touched; every assembled netlist is

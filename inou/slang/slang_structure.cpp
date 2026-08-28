@@ -1484,9 +1484,11 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_wire_split        = std::move(wire_split_tmp_);
   auto saved_wire_flat         = std::move(wire_split_flat_);
   auto saved_latches           = std::move(latch_syms_);
+  auto saved_partial_reg       = std::move(partial_reg_shadow_);
   auto saved_mems              = std::move(mem_syms_);
   auto saved_declared          = std::move(declared_);
   auto saved_prefix            = std::move(genblk_prefix_);
+  auto saved_unroll_budget     = unroll_budget_;
   auto saved_failed            = module_failed_;
   auto saved_proc_kind         = proc_kind_;
   auto saved_style             = std::move(proc_assign_style_);
@@ -1526,6 +1528,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   wire_split_tmp_.clear();
   wire_split_flat_.clear();
   latch_syms_.clear();
+  partial_reg_shadow_.clear();
   mem_syms_.clear();
   declared_.clear();
   genblk_prefix_.clear();
@@ -1973,6 +1976,42 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       }
     }
   }
+  // PARTIALLY-REGISTERED vars (see partial_reg_shadow_): a var whose bits are
+  // split between a continuous `assign` and an edge process's `<=` is TWO nets
+  // sharing a name. Decide that here, BEFORE the declares run, because it
+  // renames the flop and takes the symbol off the memory path.
+  for (const auto* sym : emit_ordered(reg_syms_)) {
+    if (!cont_assign_syms_.contains(sym)) {
+      continue;
+    }
+    const auto& vs = sym->as<slang::ast::ValueSymbol>();
+    // Scope: FLAT integral state only. A struct var, a bundle port, an
+    // unpacked array and a latch each carry their own leaf/shadow lowering
+    // whose interaction with a second driver is a separate question. A plain
+    // packed OUTPUT PORT is in scope (`output logic [31:0] q;` + `assign
+    // q[7:0] = d;` + an always_ff over the rest is the same shape, and just as
+    // wrong when it is one register) — the port itself becomes the composite,
+    // so it needs no `mut` declare, only the seed. The two output shapes that
+    // mint a `<port>_q` shadow of their OWN are excluded above and below.
+    const auto& ty = vs.getType();
+    if (!ty.isIntegral() || latch_syms_.contains(sym) || bundle_port_info_.contains(sym) || struct_var_info_.contains(sym)
+        || is_scalar_struct_var(vs)) {
+      continue;
+    }
+    if (output_syms_.contains(sym) && !options_.struct_port_bundles && struct_port_bundle_ok(ty)) {
+      continue;  // the flat struct-output bridge in declare_reg already owns this symbol
+    }
+    std::string base   = lname_of(vs);
+    std::string shadow = absl::StrCat(base, "___q");
+    for (int n = 0; used_names_.contains(shadow); ++n) {
+      shadow = absl::StrCat(base, "___q", n);
+    }
+    used_names_.insert(shadow);
+    partial_reg_shadow_.emplace(sym, shadow);
+    // A memory has one write port per element store and no combinational
+    // element at all, so the split's composite has nowhere to live there.
+    packed_mem_regs_.erase(sym);
+  }
   // Hoist every state reg's declare to module start: drivers emit in
   // dataflow order, so a comb reader sorted before the owning edge process
   // must already see the declare (reg q-reads are order-free only once
@@ -2095,9 +2134,11 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   wire_split_tmp_          = std::move(saved_wire_split);
   wire_split_flat_         = std::move(saved_wire_flat);
   latch_syms_              = std::move(saved_latches);
+  partial_reg_shadow_      = std::move(saved_partial_reg);
   mem_syms_                = std::move(saved_mems);
   declared_                = std::move(saved_declared);
   genblk_prefix_           = std::move(saved_prefix);
+  unroll_budget_           = saved_unroll_budget;
   module_failed_           = saved_failed;
   proc_kind_               = saved_proc_kind;
   proc_assign_style_       = std::move(saved_style);
@@ -2689,7 +2730,9 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   }
 
   auto        ti   = tinfo(type);
-  auto        name = lname_of(sym);
+  // A partially-registered var declares its FLOP under the shadow name; the
+  // symbol's own name is the combinational composite declared right after.
+  auto        name = reg_net_of(sym);
   // A level-sensitive latch var lowers to Ntype_op::Latch (mode "latch"); it has
   // no clock/reset — its enable (transparency condition) and din are wired by
   // tolg's finalize_regs from the body's if-merge.
@@ -2700,6 +2743,19 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
                                 int_max_str(ti.bits, ti.is_signed),
                                 int_min_str(ti.bits, ti.is_signed),
                                 "nil");  // no reset by default; async patterns override via attrs
+  if (partial_reg_shadow_.contains(&sym)) {
+    // The composite every READ resolves to: the flop's q, then whatever the
+    // continuous driver overwrites. Seeded HERE — declares are hoisted to
+    // module start, so the seed lands ahead of every driver, and the
+    // continuous assign's own set_mask lands on top of it in driver order.
+    // An OUTPUT PORT is already the interface's own net: it takes the seed but
+    // never a second declare.
+    auto composite = lname_of(sym);
+    if (!output_syms_.contains(&sym)) {
+      builder_.create_declare_stmts(composite, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+    }
+    builder_.create_assign_stmts(composite, name);
+  }
   // M7 bridge: tuple output leaves driven combinationally from the shadow
   // reg's q (order-free — a reg read by name is its committed value).
   if (bridge_si) {
@@ -3714,6 +3770,21 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           break;
         }
 
+        case SymbolKind::InstanceArray: {
+          // An ARRAYED instantiation (`foo u_leaf[3:0](.a(x), …)`, which is
+          // also what `br_misc_unused #(…) br_misc_unused_``name`` (…)` becomes
+          // when bedrock's `BR_UNUSED(sig[hi:0])` macro pastes a part-select
+          // into the instance NAME). slang has already expanded it into one
+          // nameless InstanceSymbol per element inside this array scope, each
+          // carrying its OWN port connections with the per-element slicing
+          // (or the whole-signal broadcast) already resolved -- so every
+          // element lowers exactly like a standalone instance and the only
+          // thing left to do is walk into the scope. Nested arrays
+          // (`u[1:0][3:0]`) nest InstanceArray scopes and recurse here again.
+          collect(member.as<slang::ast::InstanceArraySymbol>());
+          break;
+        }
+
         case SymbolKind::UninstantiatedDef: {
           // Unknown-module instance. Under a USER --ignore-unknown-modules it
           // is kept as an opaque blackbox sub-instance (slang has no port
@@ -4697,6 +4768,14 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     const auto& d            = drivers[i];
     auto        saved_prefix = genblk_prefix_;
     genblk_prefix_           = d.prefix;
+    // Re-arm the unroll budget per DRIVER, not per process. A `for` loop can
+    // also reach the lowerer from a continuous assign or a net initializer —
+    // through an inlined `function automatic` body, which is how bedrock's
+    // br_lfsr spells its state advance — and those never enter lower_process,
+    // so a budget armed only there is still 0 and `unroll_tick` fails the very
+    // first iteration ("loop unroll limit of 4000 exhausted" on `for (int i =
+    // 0; i < 1; i++)`).
+    unroll_budget_           = options_.unroll_limit;
     // A split continuous equation reads the RESOLVED wire, not the accumulator
     // that receives its own partial store. Lower its RHS before redirecting the
     // written symbol to `__wtmp`; this makes sibling slice drivers concurrent
@@ -5495,7 +5574,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
 void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
                                          bool edge_pos) {
   declare_reg(sym);  // ensure declared (hoisting normally did)
-  auto name = lname_of(sym);
+  auto name = reg_net_of(sym);
   struct Reset_target {
     std::string name;
     std::string initial;
@@ -5664,7 +5743,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
       if (!reg_syms_.contains(sym)) {
         continue;
       }
-      auto                     name = lname_of(*sym);
+      auto                     name = reg_net_of(*sym);
       // A TUPLE memory is split by upass.detuple into per-field memories
       // (`mem.field:[N]`), and detuple does not split attr_set — an attr on
       // the BASE name is silently dropped, leaving the per-field memories on
@@ -5714,6 +5793,43 @@ Slang_context::Tinfo Slang_context::flat_or_tinfo(const slang::ast::Type& t) {
     }
   }
   return tinfo(t);
+}
+
+// The source spelling of ONE element of an arrayed instantiation.
+//
+// slang expands `foo u[3:0](...)` into four NAMELESS InstanceSymbols inside an
+// InstanceArray scope, so without this every element would fall back to an
+// anonymous LNAST temp and the Sub would lose the name the RTL gave it (four
+// instances that all report the same empty hierarchy component). Rebuilds
+// `u_3`, `u_2`, `u_1`, `u_0` -- the declared index, not slang's zero-based
+// element position, which is what every other tool prints -- and nests
+// outermost dimension first for `u[1:0][3:0]`. Returns "" when the symbol is
+// not an array element at all.
+static std::string slang_array_element_name(const slang::ast::Symbol& sym) {
+  std::vector<std::string>  idx;
+  const slang::ast::Symbol* cur   = &sym;
+  const slang::ast::Scope*  scope = cur->getParentScope();
+  while (scope != nullptr && scope->asSymbol().kind == slang::ast::SymbolKind::InstanceArray) {
+    const auto& arr = scope->asSymbol().as<slang::ast::InstanceArraySymbol>();
+    size_t      pos = 0;
+    while (pos < arr.elements.size() && arr.elements[pos] != cur) {
+      ++pos;
+    }
+    if (pos == arr.elements.size()) {
+      return {};  // not actually one of this array's elements — leave it unnamed
+    }
+    idx.emplace_back(std::to_string(static_cast<int32_t>(pos) + arr.range.lower()));
+    cur   = &scope->asSymbol();
+    scope = cur->getParentScope();
+  }
+  if (idx.empty()) {
+    return {};
+  }
+  std::string name(cur->name);  // the OUTERMOST array carries the declared name
+  for (auto it = idx.rbegin(); it != idx.rend(); ++it) {
+    absl::StrAppend(&name, "_", *it);
+  }
+  return name;
 }
 
 void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
@@ -5973,7 +6089,24 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // unquoted LNAST ref reads as a bundle FIELD PATH; the symbol table asserts on
   // a dotted var long before tolg gets to name the Sub. Ordinary names are
   // returned unchanged.
-  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : Slang_context::ref_name_of_raw(inst.name);
+  auto arr_name  = inst.name.empty() ? slang_array_element_name(inst) : std::string{};
+  // The generate-block prefix belongs to an INSTANCE name exactly as it belongs
+  // to a net's (`lname_of`). Two instances of the same module in one genvar loop
+  // carry the SAME `inst.name` -- SystemVerilog tells them apart only by the
+  // generate index (`gen_lp[0].u_dl` vs `gen_lp[1].u_dl`) -- so dropping the
+  // prefix minted two Subs, and after flatten two REGISTERS, under one
+  // hierarchical name. Everything downstream that keys on a name then has to
+  // invent a tiebreak, and pass/abc's register read-back invents it on the IMPL
+  // SIDE ONLY (`<name>__dup1`): the post-synthesis LEC pairs state BY NAME, so a
+  // latent naming collision became a hard REFUTED for every design with a
+  // replicated sub-module, but only with `pass.abc.register=true` (bedrock's
+  // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
+  auto qualify     = [&](const std::string& raw) {
+    return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
+                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+  };
+  auto result    = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name))
+                                     : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {
@@ -6166,7 +6299,24 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
   // unquoted LNAST ref reads as a bundle FIELD PATH; the symbol table asserts on
   // a dotted var long before tolg gets to name the Sub. Ordinary names are
   // returned unchanged.
-  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : Slang_context::ref_name_of_raw(inst.name);
+  auto arr_name  = inst.name.empty() ? slang_array_element_name(inst) : std::string{};
+  // The generate-block prefix belongs to an INSTANCE name exactly as it belongs
+  // to a net's (`lname_of`). Two instances of the same module in one genvar loop
+  // carry the SAME `inst.name` -- SystemVerilog tells them apart only by the
+  // generate index (`gen_lp[0].u_dl` vs `gen_lp[1].u_dl`) -- so dropping the
+  // prefix minted two Subs, and after flatten two REGISTERS, under one
+  // hierarchical name. Everything downstream that keys on a name then has to
+  // invent a tiebreak, and pass/abc's register read-back invents it on the IMPL
+  // SIDE ONLY (`<name>__dup1`): the post-synthesis LEC pairs state BY NAME, so a
+  // latent naming collision became a hard REFUTED for every design with a
+  // replicated sub-module, but only with `pass.abc.register=true` (bedrock's
+  // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
+  auto qualify     = [&](const std::string& raw) {
+    return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
+                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+  };
+  auto result    = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name))
+                                     : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {

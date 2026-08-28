@@ -3,13 +3,14 @@
 #include "lhd_pyrope.hpp"
 
 #include <cstdlib>  // std::free
+#include <format>
 #include <fstream>
-#include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "diag.hpp"
 #include "lhd.hpp"
 #include "livehd_lsp.hpp"
 #include "prpfmt_api.h"
@@ -47,17 +48,23 @@ bool write_file(const std::string& path, std::string_view bytes) {
 int run_fmt(const lhd::Options& opts) {
   std::vector<std::string> inputs(opts.files.begin() + 1, opts.files.end());
   if (inputs.empty()) {
-    std::print(stderr,
-               "lhd pyrope fmt: no input files\n"
-               "usage: lhd pyrope fmt FILE… [-i] [-o OUT] [--indent N] [--width N] [--verify]\n");
+    livehd::diag::err("lhd.pyrope.fmt", "no-input", "io")
+        .msg("no input files")
+        .hint("usage: lhd pyrope fmt FILE… [-i] [-o OUT] [--indent N] [--width N] [--verify]")
+        .emit();
     return 1;
   }
   if (opts.fmt_inplace && !opts.fmt_output.empty()) {
-    std::print(stderr, "lhd pyrope fmt: -i/--inplace and -o/--output are mutually exclusive\n");
+    livehd::diag::err("lhd.pyrope.fmt", "conflicting-options", "io")
+        .msg("-i/--inplace and -o/--output are mutually exclusive")
+        .emit();
     return 1;
   }
   if (!opts.fmt_output.empty() && inputs.size() > 1) {
-    std::print(stderr, "lhd pyrope fmt: -o/--output takes a single input file (got {})\n", inputs.size());
+    livehd::diag::err("lhd.pyrope.fmt", "too-many-inputs", "io")
+        .msg("-o/--output takes a single input file (got {})", inputs.size())
+        .hint("use -i/--inplace to rewrite several files")
+        .emit();
     return 1;
   }
 
@@ -65,7 +72,7 @@ int run_fmt(const lhd::Options& opts) {
   for (const auto& path : inputs) {
     std::string src;
     if (!read_file(path, src)) {
-      std::print(stderr, "lhd pyrope fmt: cannot open '{}'\n", path);
+      livehd::diag::err("lhd.pyrope.fmt", "missing-file", "io").msg("cannot open '{}'", path).emit();
       exit_code = 1;
       continue;
     }
@@ -75,19 +82,23 @@ int run_fmt(const lhd::Options& opts) {
     int    rc = prpfmt_format_string(src.data(), src.size(), opts.fmt_indent, opts.fmt_width,
                                      opts.fmt_verify ? 1 : 0, &out, &out_len);
     if (rc == 2) {
-      std::print(stderr, "lhd pyrope fmt: '{}' did not parse — run `lhd compile {}` to locate the error\n", path, path);
+      livehd::diag::err("lhd.pyrope.fmt", "parse-failed", "syntax")
+          .msg("'{}' did not parse", path)
+          .hint(std::format("run `lhd compile {}` to locate the error", path))
+          .emit();
       exit_code = 1;
       continue;
     }
     if (rc == 1 || out == nullptr) {
-      std::print(stderr, "lhd pyrope fmt: '{}' could not be formatted (internal error)\n", path);
+      livehd::diag::err("lhd.pyrope.fmt", "format-failed", "internal").msg("'{}' could not be formatted", path).emit();
       exit_code = 1;
       std::free(out);
       continue;
     }
     if (rc == 3) {
-      std::print(stderr, "lhd pyrope fmt: WARNING '{}' formatted output failed to re-parse (--verify); emitting anyway\n",
-                 path);
+      livehd::diag::warn("lhd.pyrope.fmt", "verify-failed", "syntax")
+          .msg("'{}' formatted output failed to re-parse (--verify); emitting anyway", path)
+          .emit();
       exit_code = 1;
     }
 
@@ -95,13 +106,13 @@ int run_fmt(const lhd::Options& opts) {
     if (opts.fmt_inplace) {
       if (formatted != src) {  // skip rewriting an already-formatted file (preserve mtime)
         if (!write_file(path, formatted)) {
-          std::print(stderr, "lhd pyrope fmt: cannot write '{}'\n", path);
+          livehd::diag::err("lhd.pyrope.fmt", "write-failed", "io").msg("cannot write '{}'", path).emit();
           exit_code = 1;
         }
       }
     } else if (!opts.fmt_output.empty()) {
       if (!write_file(opts.fmt_output, formatted)) {
-        std::print(stderr, "lhd pyrope fmt: cannot write '{}'\n", opts.fmt_output);
+        livehd::diag::err("lhd.pyrope.fmt", "write-failed", "io").msg("cannot write '{}'", opts.fmt_output).emit();
         exit_code = 1;
       }
     } else {
@@ -124,9 +135,12 @@ int run(const lhd::Options& opts) {
     return run_fmt(opts);
   }
   if (sub.empty()) {
-    std::print(stderr, "lhd pyrope: a sub-command is required (lsp | fmt)\n");
+    livehd::diag::err("lhd.pyrope", "missing-subcommand", "io").msg("a sub-command is required").hint("lsp | fmt").emit();
   } else {
-    std::print(stderr, "lhd pyrope: unknown sub-command '{}' (lsp | fmt)\n", sub);
+    livehd::diag::err("lhd.pyrope", "unknown-subcommand", "io")
+        .msg("unknown sub-command '{}'", sub)
+        .hint("lsp | fmt")
+        .emit();
   }
   return 1;
 }

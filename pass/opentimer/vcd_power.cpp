@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/strings/str_cat.h"
+#include "diag.hpp"
 
 Vcd_power::Vcd_power(size_t n_buckets) : Vcd_reader(n_buckets), power_total_(0.0), power_samples_(0) {}
 
@@ -62,7 +63,13 @@ void Vcd_power::compute(const std::string& out_dir) {
     auto  fname = absl::StrCat(out_dir, "/", filename_, "_", name, ".power.trace");
     FILE* f     = std::fopen(fname.c_str(), "w");
     if (!f) {
-      std::cerr << std::format("ERROR: cannot open {}\n", fname);
+      // Through the sink, not std::cerr: the CLI renders it per --diag-fmt and
+      // counts it, so a power trace the user asked for and did not get fails
+      // the run instead of scrolling past. The remaining channels still write.
+      livehd::diag::err("pass.opentimer", "power-trace-write", "io")
+          .msg("cannot open power trace '{}' for writing", fname)
+          .hint("check that the --emit-dir/odir directory exists and is writable")
+          .emit();
       continue;
     }
 
