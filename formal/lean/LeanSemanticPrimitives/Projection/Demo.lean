@@ -192,7 +192,6 @@ def residual2P : Program := match residual2 with | .ok p => p | .error _ => ⟨[
 #guard evalFuel 200 residual2P [] (.call 0 [.lit sampleEnv]) == .value (.int 56)
 #guard ((residual2P.funs.map (fun fd => countCaseT fd.body)).foldl (· + ·) 0) == 0
 
-#eval residual2P
 
 end Demo
 end Projection
