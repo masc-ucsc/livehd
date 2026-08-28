@@ -66,6 +66,42 @@ Output: `PROVEN equivalent`, `REFUTED (not equivalent)` + a counterexample, or
 
 Example: `lhd lec --impl lg:a --ref lg:b --top foo --set lec.engine=bmc --set lec.bound=32`
 
+### The counterexample testbench (`formal.simfail`)
+
+A REFUTED verdict with `--workdir` leaves three artifacts beside each other:
+`simfail_<top>.prp` (a runnable Pyrope test driving BOTH designs with the
+failing input sequence), `simfail_<top>.json` (the same trace, machine
+readable), and `simfail_<top>.vcd` (the waveform, unless
+`formal.simfail_run=false`). Two shapes matter when reading one:
+
+- **Import vs inline.** When both sides are `.prp` files with DISTINCT stems and
+  a `pub` top, the test `import`s the ORIGINALS, so fixing the bug and re-running
+  the SAME test picks the fix up — re-run it with both sources passed
+  positionally (the header line spells the command out). Nothing is re-emitted in
+  that case, so a construct `pass.prp_writer` cannot yet write (`popcount`, …)
+  does not cost you the testbench. Otherwise (an `lg:`/Verilog side, a non-`pub`
+  top, colliding stems) each side is re-emitted as Pyrope and inlined, with
+  ref-side name clashes renamed to `lecref_*`; that form is self-contained but
+  cannot follow an edit to the original.
+- **Struct ports are driven per leaf.** A test can only poke a named top-level
+  port, so `io:(valid:u1, bits:(x:u4))` becomes the flat wrapper ports
+  `io__valid` / `io__bits__x`, rebuilt into the struct at each call site
+  (`io.bits.x = io__bits__x`). A leaf only one side declares appears on the
+  wrapper and is bound only on that side.
+
+`lhd formal verify` writes the same artifacts for a refuted obligation, wrapping
+a struct-ported DUT the same way and re-checking the violated statement in the
+test body so the replay FAILS on it.
+
+To read the replayed VALUES back without opening a waveform, re-run the test
+under [`lhd sim --query`](https://masc-ucsc.github.io/docs/pyrope/09b-simquery/) — the wrapper exposes the
+two sides as `_lec_dut.impl_<out>` / `_lec_dut.ref_<out>`, so
+`{"op":"changes","signal":"_lec_dut.impl_o", …}` gives the transitions and
+`{"op":"values","kind":"flop","at":{"cycle":N}}` gives the state cut. Mind the
+sampling rule: a flop reports its SETTLED end-of-period value while an output
+reports what it drove DURING the period, so the state a cycle-N output inherits
+is the flop read at cycle N-1.
+
 ### The two engines
 
 - **`ind` (default).** Cuts every flop: its Q is a current-state symbol shared

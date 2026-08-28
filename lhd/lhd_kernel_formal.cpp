@@ -2620,11 +2620,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 // One re-emitted Pyrope module: name + parsed header IO + full source text (the
 // emitted `::[lg="..", hdl]` attribute is kept verbatim; a fresh sim compile
 // ignores the stale `lg=` reference — validated).
+// One SCALAR input the wrapper has to drive. A STRUCT port (`io:(a:u1, b:(c:u2))`)
+// is ONE `inputs` entry but SEVERAL leaves, and an instantiation binds such a port
+// per LEAF (`io.b.c = expr` — the spelling pass.prp_writer itself emits, see any
+// xiangshan sub-module call), never as one aggregate. So the wrapper declares a
+// flat scalar per leaf and rebuilds the struct at each call site.
+struct Lecfail_leaf {
+  std::string dotted;  // `io.b.c` — the actual's name at a call site
+  std::string type;    // declared ":u2" suffix, or "" when untyped
+};
+
 struct Lecfail_mod {
   std::string                                      name;
-  std::string                                      text;     // full module source
-  std::vector<std::pair<std::string, std::string>> inputs;   // {name, ":type" suffix or ""}
-  std::vector<std::pair<std::string, std::string>> outputs;  // {name, ":type@[..]" suffix or ""}
+  std::string                                      text;      // full module source
+  std::vector<std::pair<std::string, std::string>> inputs;    // {name, ":type" suffix or ""}
+  std::vector<std::pair<std::string, std::string>> outputs;   // {name, ":type@[..]" suffix or ""}
+  std::vector<Lecfail_leaf>                        in_leaves;  // `inputs` flattened to scalars
 };
 
 // Simple (unqualified) module name: the tail after the last '.' (a graph named
@@ -2648,27 +2659,126 @@ std::string simfail_filename(std::string_view subject) {
   return "simfail_" + safe + ".prp";
 }
 
+// Index of the bracket matching the `(`/`[` at `open`, or npos. A backtick-quoted
+// identifier is stepped over so a bracket inside one never counts.
+size_t lecfail_match_bracket(std::string_view text, size_t open) {
+  if (open >= text.size()) {
+    return std::string_view::npos;
+  }
+  const char oc = text[open];
+  const char cc = oc == '(' ? ')' : (oc == '[' ? ']' : '\0');
+  if (cc == '\0') {
+    return std::string_view::npos;
+  }
+  int depth = 0;
+  for (size_t i = open; i < text.size(); ++i) {
+    const char c = text[i];
+    if (c == '`') {
+      const size_t q = text.find('`', i + 1);
+      if (q == std::string_view::npos) {
+        break;
+      }
+      i = q;
+      continue;
+    }
+    if (c == oc) {
+      ++depth;
+    } else if (c == cc && --depth == 0) {
+      return i;
+    }
+  }
+  return std::string_view::npos;
+}
+
 // Split a comma-separated IO list ("en, din:u8") into {name, ":type" suffix}.
+// The split is DEPTH-AWARE: a STRUCT port's type carries commas of its own
+// (`io:(valid:u1, bits:(x:u4))`), and so does a cycle/attribute bracket
+// (`o:u8@[0, 1]`) — only a comma at nesting depth 0 separates two ports. The
+// flat split this replaces turned every struct port into syntactic garbage
+// (`bits:(ftqIdx:(flag:u1`), so a struct-ported design never got a testbench.
 void lecfail_parse_io(std::string_view list, std::vector<std::pair<std::string, std::string>>& out) {
-  size_t i = 0;
-  while (i <= list.size()) {
-    size_t           c    = list.find(',', i);
-    std::string_view item = list.substr(i, (c == std::string_view::npos ? list.size() : c) - i);
-    size_t           b    = item.find_first_not_of(" \t\r\n");
-    size_t           e    = item.find_last_not_of(" \t\r\n");
-    if (b != std::string_view::npos) {
-      item         = item.substr(b, e - b + 1);
-      size_t colon = item.find(':');
-      if (colon == std::string_view::npos) {
-        out.emplace_back(std::string(item), std::string{});
-      } else {
-        out.emplace_back(std::string(item.substr(0, colon)), std::string(item.substr(colon)));
+  auto emit = [&out](std::string_view item) {
+    size_t b = item.find_first_not_of(" \t\r\n");
+    size_t e = item.find_last_not_of(" \t\r\n");
+    if (b == std::string_view::npos) {
+      return;
+    }
+    item = item.substr(b, e - b + 1);
+    // The name/type separator is the first ':' outside a quoted name AND outside
+    // any nesting (a struct field's own ':' must not split the port).
+    size_t colon = std::string_view::npos;
+    int    depth = 0;
+    for (size_t i = 0; i < item.size(); ++i) {
+      const char c = item[i];
+      if (c == '`') {
+        const size_t q = item.find('`', i + 1);
+        if (q == std::string_view::npos) {
+          break;
+        }
+        i = q;
+      } else if (c == '(' || c == '[') {
+        ++depth;
+      } else if (c == ')' || c == ']') {
+        --depth;
+      } else if (c == ':' && depth == 0) {
+        colon = i;
+        break;
       }
     }
-    if (c == std::string_view::npos) {
+    if (colon == std::string_view::npos) {
+      out.emplace_back(std::string(item), std::string{});
+    } else {
+      out.emplace_back(std::string(item.substr(0, colon)), std::string(item.substr(colon)));
+    }
+  };
+  int    depth = 0;
+  size_t start = 0;
+  for (size_t i = 0; i <= list.size(); ++i) {
+    if (i == list.size()) {
+      emit(list.substr(start));
       break;
     }
-    i = c + 1;
+    const char c = list[i];
+    if (c == '`') {
+      const size_t q = list.find('`', i + 1);
+      if (q == std::string_view::npos) {
+        emit(list.substr(start));
+        break;
+      }
+      i = q;
+    } else if (c == '(' || c == '[') {
+      ++depth;
+    } else if (c == ')' || c == ']') {
+      --depth;
+    } else if (c == ',' && depth == 0) {
+      emit(list.substr(start, i - start));
+      start = i + 1;
+    }
+  }
+}
+
+// Flatten one declared port into the SCALAR leaves an instantiation binds:
+// `io:(valid:u1, bits:(x:u4))` -> {`io.valid`:u1, `io.bits.x`:u4}; a scalar port
+// is its own single leaf. The recursion is driven by the TYPE, so a
+// backtick-quoted name that merely CONTAINS a dot (`` `io.a` ``, a flat port
+// prp_writer emits for a severed struct net) correctly stays one leaf.
+void lecfail_expand_leaves(const std::string& name, const std::string& suffix, std::vector<Lecfail_leaf>& out) {
+  std::string_view s(suffix);
+  size_t           p = (!s.empty() && s[0] == ':') ? 1 : 0;
+  while (p < s.size() && (s[p] == ' ' || s[p] == '\t')) {
+    ++p;
+  }
+  const size_t close = (p < s.size() && s[p] == '(') ? lecfail_match_bracket(s, p) : std::string_view::npos;
+  std::vector<std::pair<std::string, std::string>> fields;
+  if (close != std::string_view::npos) {
+    lecfail_parse_io(s.substr(p + 1, close - p - 1), fields);
+  }
+  if (fields.empty()) {
+    out.push_back({name, suffix});
+    return;
+  }
+  for (const auto& [fn, ft] : fields) {
+    lecfail_expand_leaves(name + "." + fn, ft, out);
   }
 }
 
@@ -2736,9 +2846,10 @@ size_t lecfail_header_name_pos(std::string_view text) {
 }
 
 // Parse `... mod NAME[::[..]](in..) -> (out..) {` (or `comb`/`pipe`/`fluid`)
-// from a module's source. The attribute block and types carry no parens, so the
-// first '(' after the name is the input list. Returns false if no lambda header
-// is present (e.g. an empty file-level unit).
+// from a module's source. Both lists end at the MATCHING bracket, not the first
+// one: a struct port nests (`io:(valid:u1, bits:(x:u4))`) and an attribute block
+// can hold a paren of its own (`::[name=a(b)]`). Returns false if no lambda
+// header is present (e.g. an empty file-level unit).
 bool lecfail_parse_header(std::string_view text, Lecfail_mod& m) {
   size_t ns = lecfail_header_name_pos(text);
   if (ns == std::string_view::npos) {
@@ -2752,11 +2863,18 @@ bool lecfail_parse_header(std::string_view text, Lecfail_mod& m) {
   if (m.name.empty()) {
     return false;
   }
+  if (text.compare(p, 3, "::[") == 0) {  // step over the `::[..]` attribute block
+    const size_t rb = lecfail_match_bracket(text, p + 2);
+    if (rb == std::string_view::npos) {
+      return false;
+    }
+    p = rb + 1;
+  }
   size_t io = text.find('(', p);
   if (io == std::string_view::npos) {
     return false;
   }
-  size_t ic = text.find(')', io);
+  size_t ic = lecfail_match_bracket(text, io);
   if (ic == std::string_view::npos) {
     return false;
   }
@@ -2764,34 +2882,28 @@ bool lecfail_parse_header(std::string_view text, Lecfail_mod& m) {
   size_t arrow = text.find("->", ic);
   if (arrow != std::string_view::npos && (body == std::string_view::npos || arrow < body)) {
     size_t oo = text.find('(', arrow);
-    size_t oc = oo == std::string_view::npos ? std::string_view::npos : text.find(')', oo);
+    size_t oc = oo == std::string_view::npos ? std::string_view::npos : lecfail_match_bracket(text, oo);
     if (oo != std::string_view::npos && oc != std::string_view::npos && (body == std::string_view::npos || oc < body)) {
       lecfail_parse_io(text.substr(oo + 1, oc - oo - 1), m.outputs);
     }
   }
   lecfail_parse_io(text.substr(io + 1, ic - io - 1), m.inputs);
+  for (const auto& [n, t] : m.inputs) {
+    lecfail_expand_leaves(n, t, m.in_leaves);
+  }
   return true;
 }
 
-// Read every *.prp in `dir` and parse each lambda header. pass.prp_writer emits
+// Parse every lambda header in one .prp's text. pass.prp_writer emits
 // one file per SOURCE FILE, so a file can hold SEVERAL lambdas (`<file>.prp`
 // carries the file scope plus every `pub mod` lifted out of it) — parse them
 // all, or a top that is not the file's first lambda goes missing and the
 // simfail testbench is silently skipped. Each module's `text` is its own slice
 // plus the file prologue (the imports it may need).
-std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
-  std::vector<Lecfail_mod> mods;
-  std::error_code          ec;
-  for (auto& de : fs::directory_iterator(dir, ec)) {
-    if (!de.is_regular_file() || de.path().extension() != ".prp") {
-      continue;
-    }
-    std::ifstream     ifs(de.path());
-    std::stringstream ss;
-    ss << ifs.rdbuf();
-    const std::string text = ss.str();
-
-    // Start of every lambda header LINE, in order.
+void lecfail_parse_text(const std::string& text, std::vector<Lecfail_mod>& mods) {
+  {
+    // Start of every lambda header LINE, in order. (kept in a block so the
+    // per-file locals below stay scoped exactly as when this was inlined)
     std::vector<size_t> starts;
     for (size_t at = 0; at < text.size();) {
       const size_t np = lecfail_header_name_pos(std::string_view(text).substr(at));
@@ -2809,7 +2921,7 @@ std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
       at = nl + 1;
     }
     if (starts.empty()) {
-      continue;  // a file-level unit with no lambda (e.g. a package)
+      return;  // a file-level unit with no lambda (e.g. a package)
     }
     // The file prologue (its `const X = import(…)` header) belongs to the FILE,
     // not to each lambda: attaching it to every slice duplicates those bindings
@@ -2830,6 +2942,36 @@ std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
       mods.push_back(std::move(m));
     }
   }
+}
+
+std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
+  std::vector<Lecfail_mod> mods;
+  std::error_code          ec;
+  for (auto& de : fs::directory_iterator(dir, ec)) {
+    if (!de.is_regular_file() || de.path().extension() != ".prp") {
+      continue;
+    }
+    std::ifstream     ifs(de.path());
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    lecfail_parse_text(ss.str(), mods);
+  }
+  std::sort(mods.begin(), mods.end(), [](const Lecfail_mod& a, const Lecfail_mod& b) { return a.name < b.name; });
+  return mods;
+}
+
+// The same parse over ONE .prp, used for the import form: the testbench then
+// references the original source verbatim, so its HEADERS are all that is
+// needed and there is nothing to re-emit.
+std::vector<Lecfail_mod> lecfail_parse_file(const std::string& path) {
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) {
+    return {};
+  }
+  std::stringstream ss;
+  ss << ifs.rdbuf();
+  std::vector<Lecfail_mod> mods;
+  lecfail_parse_text(ss.str(), mods);
   std::sort(mods.begin(), mods.end(), [](const Lecfail_mod& a, const Lecfail_mod& b) { return a.name < b.name; });
   return mods;
 }
@@ -2943,34 +3085,38 @@ std::string lecfail_type_params(const std::string& text, const absl::flat_hash_m
   if (mp == std::string::npos) {
     return text;
   }
-  size_t io = text.find('(', mp);
-  size_t ic = io == std::string::npos ? std::string::npos : text.find(')', io);
+  // Step over a `::[..]` attribute block, which can hold a '(' of its own.
+  size_t after = text.find_first_of("(: \t\n", mp);
+  if (after == std::string::npos) {
+    return text;
+  }
+  if (text.compare(after, 3, "::[") == 0) {
+    const size_t rb = lecfail_match_bracket(text, after + 2);
+    if (rb == std::string::npos) {
+      return text;
+    }
+    after = rb + 1;
+  }
+  size_t io = text.find('(', after);
+  size_t ic = io == std::string::npos ? std::string::npos : lecfail_match_bracket(text, io);
   if (io == std::string::npos || ic == std::string::npos || ic <= io + 1) {
     return text;  // no header params
   }
-  const std::string params = text.substr(io + 1, ic - io - 1);
-  std::string       rebuilt;
-  bool              changed = false;
-  size_t            i       = 0;
-  while (i <= params.size()) {
-    size_t      c   = params.find(',', i);
-    std::string raw = params.substr(i, (c == std::string::npos ? params.size() : c) - i);
-    size_t      b   = raw.find_first_not_of(" \t");
-    size_t      e   = raw.find_last_not_of(" \t");
-    if (b != std::string::npos) {
-      std::string name = raw.substr(b, e - b + 1);
-      if (name.find(':') == std::string::npos) {  // untyped
-        if (auto it = width_of.find(name); it != width_of.end()) {
-          raw     = name + std::format(":u{}", it->second);
-          changed = true;
-        }
+  // The same depth-aware split the header parser uses: a struct param carries
+  // commas and colons of its own, and both would corrupt a flat rebuild.
+  std::vector<std::pair<std::string, std::string>> decls;
+  lecfail_parse_io(std::string_view(text).substr(io + 1, ic - io - 1), decls);
+  std::string rebuilt;
+  bool        changed = false;
+  for (const auto& [name, suffix] : decls) {
+    std::string raw = name + suffix;
+    if (suffix.empty()) {  // untyped
+      if (auto it = width_of.find(name); it != width_of.end()) {
+        raw     = name + std::format(":u{}", it->second);
+        changed = true;
       }
     }
     rebuilt += (rebuilt.empty() ? "" : ", ") + raw;
-    if (c == std::string::npos) {
-      break;
-    }
-    i = c + 1;
   }
   if (!changed) {
     return text;
@@ -3127,22 +3273,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       .msg("lec: creating counterexample simulation test {}", simfail_path)
       .emit();
 
-  const std::string lhd_bin  = file_utils::get_exe_path() + "/lhd";
-  const std::string impl_dir = opts.workdir + "/lecfail_impl_prp";
-  const std::string ref_dir  = opts.workdir + "/lecfail_ref_prp";
-  const std::string log      = next_log_path(opts, "formal.simfail");
-  if (!lecfail_emit_side(lhd_bin, opts, opts.impl_kind, opts.impl_path, impl_dir, opts.workdir + "/lecfail_impl_w", log)
-      || !lecfail_emit_side(lhd_bin, opts, opts.ref_kind, opts.ref_path, ref_dir, opts.workdir + "/lecfail_ref_w", log)) {
-    skip(std::format("a side could not be re-emitted as Pyrope (lg:/yosys-verilog sides have no LNAST); see {}", log));
-    return;
-  }
-
-  std::vector<Lecfail_mod> impl_mods = lecfail_parse_dir(impl_dir);
-  std::vector<Lecfail_mod> ref_mods  = lecfail_parse_dir(ref_dir);
-  if (impl_mods.empty() || ref_mods.empty()) {
-    skip("no Pyrope modules were re-emitted for a side");
-    return;
-  }
+  const std::string lhd_bin = file_utils::get_exe_path() + "/lhd";
 
   std::string       impl_top = lecfail_simple_name(impl_top_full);
   std::string       ref_top  = lecfail_simple_name(ref_top_full);
@@ -3165,7 +3296,9 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
 
   // A Pyrope pair that qualifies EXCEPT for a non-`pub` top gets the inline copy
   // (which cannot iterate on the original). Nudge the user to opt into the import
-  // form — `import("<file>.<top>")` needs the top to be `pub`.
+  // form — `import("<file>.<top>")` needs the top to be `pub`. Emitted BEFORE the
+  // re-emit below, because that re-emit is the step marking the top `pub` avoids,
+  // and it is also the step most likely to fail.
   if (prp_pair && !can_import) {
     std::string which;
     if (!impl_pub) {
@@ -3181,6 +3314,40 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
             which)
         .hint(std::format("e.g. `pub mod {}(...)` / `pub comb {}(...)`", impl_top, ref_top))
         .emit();
+  }
+
+  // Where the two hierarchies come from. The IMPORT form references the original
+  // .prp verbatim, so only the two HEADERS are needed and the sources are parsed
+  // straight from disk. Round-tripping a Pyrope side back out through
+  // pass.prp_writer would be pure cost there — and it is the one step that can
+  // fail for a reason the LEC verdict does not care about (a construct the WRITER
+  // cannot emit, e.g. `popcount`), which used to cost the user the whole
+  // counterexample testbench on a refutation that was otherwise fully reproduced.
+  // Only the INLINE form, which needs each side's module TEXT, re-emits.
+  std::vector<Lecfail_mod> impl_mods;
+  std::vector<Lecfail_mod> ref_mods;
+  if (can_import) {
+    impl_mods = lecfail_parse_file(opts.impl_path);
+    ref_mods  = lecfail_parse_file(opts.ref_path);
+    if (impl_mods.empty() || ref_mods.empty()) {
+      skip("no lambda header could be parsed from a side's .prp");
+      return;
+    }
+  } else {
+    const std::string impl_dir = opts.workdir + "/lecfail_impl_prp";
+    const std::string ref_dir  = opts.workdir + "/lecfail_ref_prp";
+    const std::string log      = next_log_path(opts, "formal.simfail");
+    if (!lecfail_emit_side(lhd_bin, opts, opts.impl_kind, opts.impl_path, impl_dir, opts.workdir + "/lecfail_impl_w", log)
+        || !lecfail_emit_side(lhd_bin, opts, opts.ref_kind, opts.ref_path, ref_dir, opts.workdir + "/lecfail_ref_w", log)) {
+      skip(std::format("a side could not be re-emitted as Pyrope (lg:/yosys-verilog sides have no LNAST); see {}", log));
+      return;
+    }
+    impl_mods = lecfail_parse_dir(impl_dir);
+    ref_mods  = lecfail_parse_dir(ref_dir);
+    if (impl_mods.empty() || ref_mods.empty()) {
+      skip("no Pyrope modules were re-emitted for a side");
+      return;
+    }
   }
 
   // Rename any ref-side module whose name clashes with an impl-side module (or
@@ -3236,29 +3403,64 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       width_of[in.name] = in.width < 1 ? 1 : in.width;
     }
   }
-  auto wtype = [&](const std::string& n) {
-    auto it = width_of.find(n);
-    return std::format(":u{}", it == width_of.end() ? 1 : it->second);
+  // One wrapper port. A STRUCT input is declared here as one flat scalar per
+  // LEAF (`io.bits.x` -> `io__bits__x`), because a `test` block pokes a named
+  // top-level port; the struct is rebuilt at the two call sites, where the
+  // per-leaf actual (`io.bits.x = io__bits__x`) is the spelling prp_writer
+  // itself emits. A scalar port keeps its own name, so the flat case is byte
+  // identical to what this generated before leaves existed.
+  struct Wport {
+    std::string dotted;  // trace / call-site name
+    std::string flat;    // wrapper port + `_drv_` array name
+    std::string decl;    // declared ":u4" suffix, "" when untyped
+  };
+  auto wtype = [&](const Wport& w) {
+    if (auto it = width_of.find(w.dotted); it != width_of.end()) {
+      return std::format(":u{}", it->second);
+    }
+    // Not in the trace (the solver never constrained it): keep the DECLARED
+    // type rather than defaulting to :u1, which would silently truncate.
+    if (!w.decl.empty()) {
+      const size_t at = w.decl.find("@[");
+      return at == std::string::npos ? w.decl : w.decl.substr(0, at);
+    }
+    return std::string{":u1"};
   };
 
-  // Union of the two tops' declared inputs (order: impl first, then ref extras).
-  std::vector<std::string>         win;
-  absl::flat_hash_set<std::string> seen;
-  for (const auto& [n, t] : impl_m->inputs) {
-    if (seen.insert(n).second) {
-      win.push_back(n);
+  // Union of the two tops' input LEAVES (order: impl first, then ref extras).
+  std::vector<Wport>                            win;
+  absl::flat_hash_map<std::string, std::string> flat_of;  // dotted -> wrapper port
+  absl::flat_hash_set<std::string>              flat_used;
+  auto add_leaves = [&](const std::vector<Lecfail_leaf>& leaves) {
+    for (const auto& lf : leaves) {
+      if (flat_of.contains(lf.dotted)) {
+        continue;
+      }
+      std::string flat;
+      for (char c : lf.dotted) {
+        if (c == '.') {
+          flat += "__";
+        } else if ((std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_') {
+          flat += c;
+        }  // a backtick or other punctuation in a quoted name is dropped
+      }
+      if (flat.empty() || (std::isdigit(static_cast<unsigned char>(flat[0])) != 0)) {
+        flat = "p_" + flat;
+      }
+      while (!flat_used.insert(flat).second) {  // a real port could already spell it
+        flat += "_";
+      }
+      flat_of[lf.dotted] = flat;
+      win.push_back({lf.dotted, flat, lf.type});
     }
-  }
-  for (const auto& [n, t] : ref_m->inputs) {
-    if (seen.insert(n).second) {
-      win.push_back(n);
-    }
-  }
+  };
+  add_leaves(impl_m->in_leaves);
+  add_leaves(ref_m->in_leaves);
 
   // ---- build the wrapper module -------------------------------------------
   std::string sig_in;
-  for (const auto& n : win) {
-    sig_in += (sig_in.empty() ? "" : ", ") + n + wtype(n);
+  for (const auto& w : win) {
+    sig_in += (sig_in.empty() ? "" : ", ") + w.flat + wtype(w);
   }
   // Every `mod` output MUST declare a landing cycle, and a re-emitted `comb`
   // side carries only a type (`:u64`) — so a wrapper over a combinational DUT
@@ -3272,10 +3474,16 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   for (const auto& [n, suf] : ref_m->outputs) {
     sig_out += (sig_out.empty() ? "" : ", ") + std::format("ref_{}{}", n, ocycle(suf));
   }
-  auto call_args = [](const Lecfail_mod* m) {
+  // Per-LEAF actuals: a struct port is bound field by field, and a leaf the
+  // wrapper does not carry (a field only the OTHER side declares) is skipped.
+  auto call_args = [&](const Lecfail_mod* m) {
     std::string a;
-    for (const auto& [n, t] : m->inputs) {
-      a += (a.empty() ? "" : ", ") + std::format("{} = {}", n, n);
+    for (const auto& lf : m->in_leaves) {
+      auto it = flat_of.find(lf.dotted);
+      if (it == flat_of.end()) {
+        continue;
+      }
+      a += (a.empty() ? "" : ", ") + std::format("{} = {}", lf.dotted, it->second);
     }
     return a;
   };
@@ -3315,16 +3523,16 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // The implicit reset: a trace input named `reset` that is NOT a declared port
   // (Pyrope-origin designs drive their registers off it). An explicit reset PORT
   // is instead driven by name like any other input.
-  const bool reset_is_port  = std::find(win.begin(), win.end(), "reset") != win.end();
+  const bool reset_is_port  = std::any_of(win.begin(), win.end(), [](const Wport& w) { return w.dotted == "reset"; });
   const bool implicit_reset = width_of.count("reset") != 0 && !reset_is_port;
 
   std::string test_text = std::format("test {} {{\n  mut _lec_dut = {}\n", test_name, wrapper);
-  for (const auto& n : win) {
+  for (const auto& w : win) {
     std::string arr;
     for (int c = 0; c < ncyc; ++c) {
-      arr += (arr.empty() ? "" : ", ") + val_at(n, c);
+      arr += (arr.empty() ? "" : ", ") + val_at(w.dotted, c);
     }
-    test_text += std::format("  const _drv_{} = [{}]\n", n, arr);
+    test_text += std::format("  const _drv_{} = [{}]\n", w.flat, arr);
   }
   if (implicit_reset) {
     std::string arr;
@@ -3342,8 +3550,8 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   if (implicit_reset) {
     test_text += "    _lec_dut.reset = _drv_reset[clock]\n";
   }
-  for (const auto& n : win) {
-    test_text += std::format("    _lec_dut.{} = _drv_{}[clock]\n", n, n);
+  for (const auto& w : win) {
+    test_text += std::format("    _lec_dut.{} = _drv_{}[clock]\n", w.flat, w.flat);
   }
   test_text += "    step\n  }\n}\n";
 
@@ -5034,20 +5242,41 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       .msg("formal verify: creating counterexample simulation test {}", simfail_path)
       .emit();
 
-  const std::string lhd_bin    = file_utils::get_exe_path() + "/lhd";
-  const std::string design_dir = opts.workdir + "/formalfail_prp";
-  const std::string log        = next_log_path(opts, "formal.simfail");
-  if (!lecfail_emit_side(lhd_bin, opts, design_kind, design_path, design_dir, opts.workdir + "/formalfail_w", log)) {
-    skip(std::format("the design could not be re-emitted as Pyrope (lg:/yosys-verilog has no LNAST); see {}", log));
-    return;
+  const std::string lhd_bin = file_utils::get_exe_path() + "/lhd";
+  std::string       top     = lecfail_simple_name(top_full);
+
+  // Import the ORIGINAL source when it is a Pyrope file with a `pub` top (a fix
+  // to the .prp then flows into a re-run of the SAME simfail test); else
+  // inline the re-emitted copy (self-contained).
+  const std::string design_stem = fs::path(design_path).stem().string();
+  const bool        can_import  = design_kind == "pyrope" && !design_stem.empty() && lecfail_prp_top_is_pub(design_path, top);
+
+  // Same rule as the lec generator: the import form references the original .prp
+  // verbatim, so it needs the design's HEADER and nothing else — round-tripping a
+  // Pyrope design back out through pass.prp_writer is pure cost, and it is the one
+  // step that can fail over a construct the WRITER cannot emit, taking the whole
+  // replay with it.
+  std::vector<Lecfail_mod> mods;
+  if (can_import) {
+    mods = lecfail_parse_file(design_path);
+    if (mods.empty()) {
+      skip("no lambda header could be parsed from the design's .prp");
+      return;
+    }
+  } else {
+    const std::string design_dir = opts.workdir + "/formalfail_prp";
+    const std::string log        = next_log_path(opts, "formal.simfail");
+    if (!lecfail_emit_side(lhd_bin, opts, design_kind, design_path, design_dir, opts.workdir + "/formalfail_w", log)) {
+      skip(std::format("the design could not be re-emitted as Pyrope (lg:/yosys-verilog has no LNAST); see {}", log));
+      return;
+    }
+    mods = lecfail_parse_dir(design_dir);
+    if (mods.empty()) {
+      skip("no Pyrope modules were re-emitted for the design");
+      return;
+    }
   }
-  std::vector<Lecfail_mod> mods = lecfail_parse_dir(design_dir);
-  if (mods.empty()) {
-    skip("no Pyrope modules were re-emitted for the design");
-    return;
-  }
-  std::string        top = lecfail_simple_name(top_full);
-  const Lecfail_mod* m   = nullptr;
+  const Lecfail_mod* m = nullptr;
   for (const auto& mm : mods) {
     if (mm.name == top) {
       m = &mm;
@@ -5058,21 +5287,46 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     return;
   }
 
-  // Import the ORIGINAL source when it is a Pyrope file with a `pub` top (a fix
-  // to the .prp then flows into a re-run of the SAME simfail test); else
-  // inline the re-emitted copy (self-contained).
-  const std::string design_stem = fs::path(design_path).stem().string();
-  const bool        can_import  = design_kind == "pyrope" && !design_stem.empty() && lecfail_prp_top_is_pub(design_path, top);
-
   absl::flat_hash_map<std::string, int> width_of;
   for (const auto& cyc : tr.cycles) {
     for (const auto& in : cyc.inputs) {
       width_of[in.name] = in.width < 1 ? 1 : in.width;
     }
   }
-  std::vector<std::string> win;  // the DESIGN's declared inputs, decl order
-  for (const auto& [n, t] : m->inputs) {
-    win.push_back(n);
+  // The design's inputs as SCALAR leaves. A struct port is not writable from a
+  // test — `_dut.io.bits.x = v` is rejected read-only and `_dut.io = <tuple>` is
+  // not a supported test expression — so a struct-ported design gets a thin
+  // wrapper whose ports are the flattened leaves, exactly as the lec generator
+  // builds. Without it the drive came out as `_dut.io = 0`: a scalar into a
+  // struct port, which fails the replay compile and silently produced no VCD.
+  std::vector<Lecfail_leaf> leaves = m->in_leaves;
+  bool                      wrap   = false;
+  for (const auto& lf : leaves) {
+    wrap = wrap || lf.dotted.find('.') != std::string::npos;
+  }
+  struct Fport {
+    std::string dotted;
+    std::string flat;
+    std::string decl;
+  };
+  std::vector<Fport>               win;
+  absl::flat_hash_set<std::string> flat_used;
+  for (const auto& lf : leaves) {
+    std::string flat;
+    for (char c : lf.dotted) {
+      if (c == '.') {
+        flat += "__";
+      } else if ((std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_') {
+        flat += c;
+      }
+    }
+    if (flat.empty() || (std::isdigit(static_cast<unsigned char>(flat[0])) != 0)) {
+      flat = "p_" + flat;
+    }
+    while (!flat_used.insert(flat).second) {
+      flat += "_";
+    }
+    win.push_back({lf.dotted, flat, lf.type});
   }
   const int ncyc   = static_cast<int>(tr.cycles.size());
   auto      val_at = [&](const std::string& name, int c) -> std::string {
@@ -5083,17 +5337,58 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     }
     return "0";
   };
-  const bool reset_is_port  = std::find(win.begin(), win.end(), "reset") != win.end();
+  const bool reset_is_port  = std::any_of(win.begin(), win.end(), [](const Fport& w) { return w.dotted == "reset"; });
   const bool implicit_reset = width_of.count("reset") != 0 && !reset_is_port;
+  if (wrap && implicit_reset) {
+    // `_dut.reset` would land on the WRAPPER's implicit reset, never reaching
+    // the design's. Rather than emit a testbench that drives the wrong flop,
+    // say why nothing was written.
+    skip("the design has struct port(s) AND an implicit reset — the flattening wrapper cannot thread the reset");
+    return;
+  }
 
-  const std::string callee    = can_import ? std::string{"dutmod"} : top;
+  const std::string dut_mod = can_import ? std::string{"dutmod"} : top;
+  const std::string wrapper = "__simfail_dut_wrap";
+  const std::string inst    = "_simfail_dut";  // named so the embedded check can read into it
+  auto              wtype   = [&](const Fport& w) {
+    if (auto it = width_of.find(w.dotted); it != width_of.end()) {
+      return std::format(":u{}", it->second);
+    }
+    if (!w.decl.empty()) {
+      const size_t at = w.decl.find("@[");
+      return at == std::string::npos ? w.decl : w.decl.substr(0, at);
+    }
+    return std::string{":u1"};
+  };
+  std::string wrap_text;
+  if (wrap) {
+    std::string sig_in;
+    for (const auto& w : win) {
+      sig_in += (sig_in.empty() ? "" : ", ") + w.flat + wtype(w);
+    }
+    std::string sig_out;
+    std::string args;
+    for (const auto& [n, suf] : m->outputs) {
+      sig_out += (sig_out.empty() ? "" : ", ") + n + (suf.find("@[") == std::string::npos ? suf + "@[]" : suf);
+    }
+    for (const auto& w : win) {
+      args += (args.empty() ? "" : ", ") + std::format("{} = {}", w.dotted, w.flat);
+    }
+    wrap_text = std::format("mod {}({}) -> ({}) {{\n  const {} = {}({})\n", wrapper, sig_in, sig_out, inst, dut_mod, args);
+    for (const auto& [n, suf] : m->outputs) {
+      wrap_text += std::format("  {} = {}.{}\n", n, inst, n);
+    }
+    wrap_text += "}\n\n";
+  }
+
+  const std::string callee    = wrap ? wrapper : dut_mod;
   std::string       test_text = std::format("test {} {{\n  mut _dut = {}\n", test_name, callee);
-  for (const auto& n : win) {
+  for (const auto& w : win) {
     std::string arr;
     for (int c = 0; c < ncyc; ++c) {
-      arr += (arr.empty() ? "" : ", ") + val_at(n, c);
+      arr += (arr.empty() ? "" : ", ") + val_at(w.dotted, c);
     }
-    test_text += std::format("  const _drv_{} = [{}]\n", n, arr);
+    test_text += std::format("  const _drv_{} = [{}]\n", w.flat, arr);
   }
   if (implicit_reset) {
     std::string arr;
@@ -5109,15 +5404,63 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   if (implicit_reset) {
     test_text += "    _dut.reset = _drv_reset[clock]\n";
   }
-  for (const auto& n : win) {
-    test_text += std::format("    _dut.{} = _drv_{}[clock]\n", n, n);
+  for (const auto& w : win) {
+    test_text += std::format("    _dut.{} = _drv_{}[clock]\n", w.flat, w.flat);
   }
   if (!embed_assert.empty()) {
     // The violated formal-block assertion, re-targeted at the instance
     // (`__p_*` idents -> `_dut.<path>` reads): the replay TRIGGERS it through
     // the test-assert machinery at exactly the violating cycle, so the run
-    // fails with a located `assert fail: clock=N` line plus the VCD.
-    test_text += std::format("    if clock == {} {{\n      {}\n    }}\n", tr.diverge_cycle, embed_assert);
+    // fails with a located `assert fail: clock=N` line plus the VCD. Behind the
+    // flattening wrapper the design sits one level down, so every `_dut.` read
+    // has to grow that level.
+    std::string chk = embed_assert;
+    if (wrap) {
+      // Three cases for the path after `_dut.`, and only the last one grows a
+      // level: an INPUT leaf becomes the wrapper's flat port (`io.bits.x` ->
+      // `io__bits__x`); an OUTPUT is already re-exposed at the wrapper, and
+      // reading it through the instance fails ("unknown state 'o'"); anything
+      // else is design-internal state, which lives one level down.
+      absl::flat_hash_set<std::string> outs;
+      for (const auto& [n, suf] : m->outputs) {
+        outs.insert(n);
+      }
+      std::string       rebuilt;
+      const std::string from = "_dut.";
+      size_t            i    = 0;
+      while (i < chk.size()) {
+        if (chk.compare(i, from.size(), from) != 0) {
+          rebuilt += chk[i++];
+          continue;
+        }
+        size_t e = i + from.size();  // the dotted path that follows
+        while (e < chk.size() && ((std::isalnum(static_cast<unsigned char>(chk[e])) != 0) || chk[e] == '_' || chk[e] == '.')) {
+          ++e;
+        }
+        const std::string path = chk.substr(i + from.size(), e - i - from.size());
+        std::string       flat;
+        for (const auto& w : win) {  // LONGEST input leaf first (`io` vs `io.bits`)
+          if ((path == w.dotted || path.starts_with(w.dotted + ".")) && w.dotted.size() > flat.size()) {
+            flat = w.dotted;
+          }
+        }
+        if (!flat.empty()) {
+          for (const auto& w : win) {
+            if (w.dotted == flat) {
+              rebuilt += from + w.flat + path.substr(flat.size());
+              break;
+            }
+          }
+        } else if (outs.contains(path.substr(0, path.find('.')))) {
+          rebuilt += from + path;
+        } else {
+          rebuilt += from + inst + "." + path;
+        }
+        i = e;
+      }
+      chk = rebuilt;
+    }
+    test_text += std::format("    if clock == {} {{\n      {}\n    }}\n", tr.diverge_cycle, chk);
   }
   test_text += "    step\n  }\n}\n";
 
@@ -5161,7 +5504,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       out += '\n';
     }
   }
-  out += test_text;
+  out += wrap_text + test_text;
 
   std::ofstream ofs(simfail_path);
   if (!ofs.is_open()) {

@@ -1135,4 +1135,49 @@ grep -q "block 'blk.bad'" "$OUT" \
 grep -q "contradictory assume set in the design" "$OUT" \
   && fail "the fork path blamed the DESIGN for a BLOCK's contradictory assumes: $(cat "$OUT")"
 
+# ---------------------------------------------------------------------------
+# 15. STRUCT-ported design: the simfail replay must still drive it and reach the
+#     violation. A struct port is not writable from a test (`_dut.io.bits.x = v`
+#     is read-only and `_dut.io = <tuple>` is not a test expression), so the
+#     generator wraps the DUT in a flat-leaf `__simfail_dut_wrap`. It used to
+#     emit `_dut.io = _drv_io[clock]` — a scalar into a struct port — which
+#     failed the replay compile and silently produced NO VCD while the verify
+#     verdict still read REFUTED. The embedded check has to follow the design
+#     one level down, EXCEPT for a port the wrapper re-exposes.
+#     The design also uses `#+[..]` (popcount), which pass.prp_writer cannot
+#     emit: an importable design must not be round-tripped through the writer,
+#     or a construct the WRITER lacks costs the whole reproduction.
+cat >"$W/stp.prp" <<'EOF'
+pub mod stp(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  const pc:u4 = io.bits.x#+[..]
+  if io.valid { cnt = (cnt + pc + io.bits.y)#[0..=7] }
+}
+
+const stpm = import("stp.stp")
+
+formal stp.bound {
+  mut acc = stpm
+  assert(acc.o != 3, "o hit 3")
+}
+EOF
+"$LHD" compile "$W/stp.prp" --emit-dir "pyrope:$W/stp_out" --workdir "$W/stp_w" >/dev/null 2>&1   && fail "the popcount premise is stale: pass.prp_writer now emits this design, so the round-trip leg is untested"
+WD3="$W/wd_struct"
+OUT="$W/struct.out"
+"$LHD" formal verify "$W/stp.prp" --top stp --set formal.bound=6 --workdir "$WD3" >"$OUT" 2>&1
+[ -s "$WD3/simfail_stp_bound.prp" ] || fail "a struct-ported design must still get a testbench: $(cat "$OUT")"
+[ ! -d "$WD3/formalfail_prp" ] || fail "an importable design must not be round-tripped through pass.prp_writer"
+grep -q 'mod __simfail_dut_wrap(' "$WD3/simfail_stp_bound.prp" \
+  || fail "a struct port needs the flattening wrapper: $(cat "$WD3/simfail_stp_bound.prp")"
+grep -q 'io.bits.x = io__bits__x' "$WD3/simfail_stp_bound.prp" \
+  || fail "the wrapper must bind the struct port per LEAF: $(cat "$WD3/simfail_stp_bound.prp")"
+grep -q '_dut.io__bits__x = _drv_io__bits__x\[clock\]' "$WD3/simfail_stp_bound.prp" \
+  || fail "the test must poke the flat leaf ports: $(cat "$WD3/simfail_stp_bound.prp")"
+grep -q 'assert(_dut.o != 3' "$WD3/simfail_stp_bound.prp" \
+  || fail "the embedded check must read the output the WRAPPER re-exposes, not through the instance: $(cat "$WD3/simfail_stp_bound.prp")"
+[ -s "$WD3/simfail_stp_bound.vcd" ] || fail "the replay must dump a VCD: $(cat "$OUT")"
+grep -q 'the replay reproduced the violation' "$OUT" \
+  || fail "the replay must re-fire the embedded check: $(cat "$OUT")"
+
 echo "PASS: 2f-verify V1-V3 + assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; every assume checked-as-assert with the assume_nocheck escape; formal blocks + filter; timeout isolation; inconclusive/vacuous FAIL by default with the formal.strict=false opt-out; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"

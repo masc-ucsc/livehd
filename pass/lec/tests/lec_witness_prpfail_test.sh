@@ -211,6 +211,58 @@ SQ="$WORK/sq"
 $LHD sim "$WORK/qimpl.prp" "$WORK/qref.prp" "$WQ/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SQ" >/dev/null 2>&1
 ck "comb: testbench sim-valid"  '[ -f "$SQ/sim/drv.cpp" ]'
 
+# ---- STRUCT ports. A nested port (`io:(valid:u1, bits:(x:u4))`) is ONE decl but
+# several scalar leaves, and an instantiation binds it per LEAF (`io.bits.x = e`),
+# never as an aggregate. So the wrapper declares one flat scalar per leaf and the
+# test pokes those. The impl here also carries a field the ref does NOT
+# (`only_impl`), which must appear on the wrapper (impl needs it) and be absent
+# from the ref call. Before leaves existed the header split on every comma, so a
+# struct port shredded into garbage and no testbench came out at all. ----
+cat > "$WORK/simpl.prp" <<'EOF'
+pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3, only_impl:u2))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  if io.valid { cnt = (cnt + io.bits.x + io.bits.y + io.bits.only_impl)#[0..=7] }
+}
+EOF
+cat > "$WORK/sref.prp" <<'EOF'
+pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  if io.valid { cnt = (cnt + io.bits.x + io.bits.y + 1)#[0..=7] }
+}
+EOF
+WS="$WORK/ws"
+$LHD lec --impl "$WORK/simpl.prp" --ref "$WORK/sref.prp" --workdir "$WS" --set formal.simfail_run=false >/dev/null 2>&1
+ck "struct: prp generated"        '[ -f "$WS/simfail_dut.prp" ]'
+ck "struct: leaves are flat ports" 'grep -q "io__bits__x:u4" "$WS/simfail_dut.prp"'
+ck "struct: actuals are per-leaf"  'grep -q "io.bits.x = io__bits__x" "$WS/simfail_dut.prp"'
+ck "struct: impl-only leaf on impl" 'grep -q "implmod(.*io.bits.only_impl = io__bits__only_impl" "$WS/simfail_dut.prp"'
+ck "struct: impl-only leaf NOT on ref" '! grep -q "refmod(.*only_impl" "$WS/simfail_dut.prp"'
+ck "struct: drives each leaf"      'grep -q "_lec_dut.io__bits__y = _drv_io__bits__y\[clock\]" "$WS/simfail_dut.prp"'
+SS="$WORK/ss"
+$LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WS/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SS" >/dev/null 2>&1
+ck "struct: testbench sim-valid"   '[ -f "$SS/sim/drv.cpp" ]'
+
+# ---- a construct pass.prp_writer cannot EMIT must not cost the testbench. The
+# import form references the original .prp verbatim, so it needs the two HEADERS
+# and nothing else; re-emitting a Pyrope side through the writer was pure cost
+# that could fail for a reason the LEC verdict does not care about (here
+# `popcount`, `#+[..]`), and took the whole counterexample down with it. ----
+sed 's|if io.valid {|const pc:u4 = io.bits.x#+[..]\n  if io.valid {|; s|cnt + io.bits.x|cnt + pc|' \
+    "$WORK/simpl.prp" > "$WORK/pcimpl.prp"
+sed 's|if io.valid {|const pc:u4 = io.bits.x#+[..]\n  if io.valid {|; s|cnt + io.bits.x|cnt + pc|' \
+    "$WORK/sref.prp"  > "$WORK/pcref.prp"
+ck "popcount: writer really refuses it" \
+   '! $LHD compile "$WORK/pcimpl.prp" --emit-dir "pyrope:$WORK/pcw_out" --workdir "$WORK/pcw" >/dev/null 2>&1'
+WC="$WORK/wc"
+$LHD lec --impl "$WORK/pcimpl.prp" --ref "$WORK/pcref.prp" --workdir "$WC" --set formal.simfail_run=false >/dev/null 2>&1
+ck "popcount: prp still generated" '[ -f "$WC/simfail_dut.prp" ]'
+ck "popcount: no writer round trip" '[ ! -d "$WC/lecfail_impl_prp" ] && [ ! -d "$WC/lecfail_ref_prp" ]'
+SC="$WORK/sc"
+$LHD sim "$WORK/pcimpl.prp" "$WORK/pcref.prp" "$WC/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SC" >/dev/null 2>&1
+ck "popcount: testbench sim-valid" '[ -f "$SC/sim/drv.cpp" ]'
+
 if [ $fail -ne 0 ]; then echo "lec_witness_prpfail_test: FAILED"; exit 1; fi
 echo "lec_witness_prpfail_test: PASSED"
 exit 0

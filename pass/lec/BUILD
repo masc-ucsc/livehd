@@ -265,6 +265,18 @@ sh_test(
     tags = ["no-sandbox"],  # in-process cvc5 BMC + shells `lhd compile` / `lhd sim --setup-only`
 )
 
+# The same flow taken all the way to the REPLAY: the generated testbench is re-run
+# standalone and its values are read back with `lhd sim --query`, so the trace is
+# asserted structurally instead of by diffing a waveform. The .prp generation above
+# stops at `--setup-only`, so the sim leg had no guard at all — it can go quiet
+# while `lhd lec` still exits REFUTED with the right verdict.
+sh_test(
+    name = "lec_witness_replay_test",
+    srcs = ["tests/lec_witness_replay_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # in-process cvc5 BMC + shells `lhd compile` / `lhd sim` (host-compiles the driver)
+)
+
 # Agentic per-block progress: every resolved block emits one machine-parseable
 # `info`-severity diagnostic (lec-block-proven / -refuted / -inconclusive) with a
 # verdict, the winning engine, and duration_ms, without touching the exit code.
