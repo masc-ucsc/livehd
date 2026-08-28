@@ -57,3 +57,6 @@ difftest_*/
 # construction. Regenerate with `bazel run //bench:ledger -- render`.
 #current_opt_loop_incr.html
 #current_opt_loop_synth.html
+
+# plain-lean dev build output for LeanSemanticPrimitives/Projection
+formal/lean/.olean-dev/
