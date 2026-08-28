@@ -72,7 +72,7 @@ bazel_dep(name = "flex", version = "2.6.4.bcr.5")
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 bazel_dep(name = "mimalloc", version = "2.2.4.bcr.2")
 
-bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
+bazel_dep(name = "libffi", version = "3.4.7.bcr.5")
 
 # GMP -- cvc5's bignum backend. cvc5's non-GPL prebuilt static libs leave the
 # GMP symbols undefined (they are not bundled, to avoid the LGPL libgmp.a); they
