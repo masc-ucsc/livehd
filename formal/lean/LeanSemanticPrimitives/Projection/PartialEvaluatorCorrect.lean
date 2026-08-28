@@ -277,4 +277,109 @@ def SpecOK (A : AProgram) (Pr : Program) (reqs : List SpecRequest) (m : Nat) : P
         evalFuel m (eraseProgram A) ρs (erase afd.body) = .value v →
         Eval Pr ds fd.body v
 
+/-! ## Partial results
+
+`PResOK Pr ρr r v` -- `mix` produced `r` where the source produces `v`, and `r`
+is an honest account of that: a static result IS the value, and residual code
+EVALUATES to it. -/
+
+def PResOK (Pr : Program) (ρr : Env) (r : PRes) (v : Val) : Prop :=
+  (∀ w, r = .stat w → w = v) ∧ (∀ c, r = .code c → Eval Pr ρr c v)
+
+/-- Pointwise `PResOK` over an argument list.  Written out rather than using
+`List.Forall₂`, which is not in core. -/
+inductive PResAll (Pr : Program) (ρr : Env) : List PRes → List Val → Prop where
+  | nil  : PResAll Pr ρr [] []
+  | cons : PResOK Pr ρr r v → PResAll Pr ρr rs vs → PResAll Pr ρr (r :: rs) (v :: vs)
+
+theorem PResOK_toCode {Pr ρr r v} (h : PResOK Pr ρr r v) : Eval Pr ρr r.toCode v := by
+  cases r with
+  | stat w => have : w = v := h.1 w rfl
+              subst this
+              exact .lit
+  | code c => exact h.2 c rfl
+
+theorem allStatic_forall₂ : ∀ (Pr : Program) (ρr : Env) (rs : List PRes)
+    (vs ws : List Val), PResAll Pr ρr rs vs → allStatic rs = .ok ws → ws = vs
+  | _,  _,  [],            [],      ws, _, hw => by simp [allStatic] at hw; simp [hw]
+  | Pr, ρr, .stat w :: rs, v :: vs, ws, h, hw => by
+      cases h with
+      | cons hr ht =>
+        simp only [allStatic] at hw
+        split at hw <;> try contradiction
+        rename_i us hus
+        cases hw
+        rw [allStatic_forall₂ Pr ρr rs vs us ht hus, hr.1 w rfl]
+  | _,  _,  .code _ :: _,  _,       _,  _, hw => by simp [allStatic] at hw
+  | _,  _,  _ :: _,        [],      _,  h, _  => by cases h
+  | _,  _,  [],            _ :: _,  _,  h, _  => by cases h
+
+theorem toCode_forall₂ : ∀ (Pr : Program) (ρr : Env) (rs : List PRes) (vs : List Val),
+    PResAll Pr ρr rs vs → EvalList Pr ρr (rs.map PRes.toCode) vs
+  | _,  _,  [],      [],      _ => .nil
+  | Pr, ρr, r :: rs, v :: vs, h => by
+      cases h with
+      | cons hr ht => exact .cons (PResOK_toCode hr) (toCode_forall₂ Pr ρr rs vs ht)
+  | _,  _,  _ :: _,  [],      h => by cases h
+  | _,  _,  [],      _ :: _,  h => by cases h
+
+/-! ## The memo table names a real request -/
+
+theorem indexOfReqFrom_spec : ∀ (rs : List SpecRequest) (r : SpecRequest) (i k : Nat),
+    indexOfReqFrom r i rs = some k → i ≤ k ∧ rs[k - i]? = some r
+  | [],      _, _, _, h => by simp [indexOfReqFrom] at h
+  | q :: rs, r, i, k, h => by
+      simp only [indexOfReqFrom] at h
+      split at h
+      · rename_i heq
+        cases h
+        refine ⟨Nat.le_refl _, ?_⟩
+        simp only [Nat.sub_self, List.getElem?_cons_zero, Option.some.injEq]
+        -- `beq` on requests is equality: the index really names THIS request
+        simp only [BEq.beq, SpecRequest.beq, Bool.and_eq_true] at heq
+        have h1 : r.funIdx = q.funIdx := by simpa using heq.1
+        have h2 : r.staticArgs = q.staticArgs := Val.eqList_of_beqList _ _ heq.2
+        cases q; cases r; simp_all
+      · obtain ⟨hle, hget⟩ := indexOfReqFrom_spec rs r (i + 1) k h
+        refine ⟨by omega, ?_⟩
+        have : k - i = (k - (i + 1)) + 1 := by omega
+        rw [this]
+        simpa using hget
+
+theorem indexOfReq_spec {rs : List SpecRequest} {r : SpecRequest} {k : Nat}
+    (h : indexOfReq rs r = some k) : rs[k]? = some r := by
+  have := indexOfReqFrom_spec rs r 0 k h
+  simpa using this.2
+
+/-! ## The `let`s an unfold wraps
+
+`EvalLets` is what `wrapLets` means: the bound terms are evaluated one after
+another, each in the environment the previous ones have already extended.  That
+staircase is exactly why `mixUArgs` has to thread the residual scope. -/
+
+inductive EvalLets (P : Program) : Env → List Term → Env → Prop where
+  | nil  : EvalLets P ρ [] ρ
+  | cons : Eval P ρ e d → EvalLets P (d :: ρ) es ρ' → EvalLets P ρ (e :: es) ρ'
+
+theorem wrapLets_eval {P : Program} : ∀ (es : List Term) (ρ ρ' : Env) (body : Term) (v : Val),
+    EvalLets P ρ es ρ' → Eval P ρ' body v → Eval P ρ (wrapLets es body) v
+  | [],      _, _, _,    _, hl, hb => by cases hl; exact hb
+  | e :: es, ρ, ρ', body, v, hl, hb => by
+      cases hl with
+      | cons he ht => exact .letIn he (wrapLets_eval es _ ρ' body v ht hb)
+
+/-! ## A fully static call's environment -/
+
+theorem Compat_allStat : ∀ (ρr : Env) (ps : Div) (ws : List Val),
+    allStatDiv ps = true → ps.length = ws.length →
+    Compat ρr ps (ws.map PVal.stat) ws
+  | _,  [],          [],      _, _  => .nil
+  | ρr, .stat :: ps, w :: ws, h, hl => by
+      simp only [allStatDiv] at h
+      simp only [List.length_cons, Nat.add_right_cancel_iff] at hl
+      exact (Compat_allStat ρr ps ws h hl).stat
+  | _,  .dyn :: _,   _,       h, _  => by simp [allStatDiv] at h
+  | _,  [],          _ :: _,  _, hl => by simp at hl
+  | _,  .stat :: _,  [],      _, hl => by simp at hl
+
 end Projection

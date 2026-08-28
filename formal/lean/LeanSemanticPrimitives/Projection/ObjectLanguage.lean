@@ -71,6 +71,73 @@ end
 
 instance : BEq Val := ⟨Val.beq⟩
 
+/-! `Val.beq` decides equality, both ways.
+
+`mix`'s memo table is keyed on static values, so "the table already has this
+request" has to mean the requests are EQUAL, not merely `beq`.  Without this the
+residual call index a specializer emits would be justified by nothing. -/
+
+mutual
+
+theorem Val.eq_of_beq : ∀ (a b : Val), Val.beq a b = true → a = b
+  | .int a,     .int b,     h => by simp [Val.beq] at h; simp [h]
+  | .bool a,    .bool b,    h => by simp [Val.beq] at h; simp [h]
+  | .nil,       .nil,       _ => rfl
+  | .cons a b,  .cons c d,  h => by
+      simp only [Val.beq, Bool.and_eq_true] at h
+      rw [Val.eq_of_beq a c h.1, Val.eq_of_beq b d h.2]
+  | .ctor t as, .ctor u bs, h => by
+      simp only [Val.beq, Bool.and_eq_true, beq_iff_eq] at h
+      rw [h.1, Val.eqList_of_beqList as bs h.2]
+  | .int _,  .bool _,   h => by simp [Val.beq] at h
+  | .int _,  .nil,      h => by simp [Val.beq] at h
+  | .int _,  .cons _ _, h => by simp [Val.beq] at h
+  | .int _,  .ctor _ _, h => by simp [Val.beq] at h
+  | .bool _, .int _,    h => by simp [Val.beq] at h
+  | .bool _, .nil,      h => by simp [Val.beq] at h
+  | .bool _, .cons _ _, h => by simp [Val.beq] at h
+  | .bool _, .ctor _ _, h => by simp [Val.beq] at h
+  | .nil,    .int _,    h => by simp [Val.beq] at h
+  | .nil,    .bool _,   h => by simp [Val.beq] at h
+  | .nil,    .cons _ _, h => by simp [Val.beq] at h
+  | .nil,    .ctor _ _, h => by simp [Val.beq] at h
+  | .cons _ _, .int _,    h => by simp [Val.beq] at h
+  | .cons _ _, .bool _,   h => by simp [Val.beq] at h
+  | .cons _ _, .nil,      h => by simp [Val.beq] at h
+  | .cons _ _, .ctor _ _, h => by simp [Val.beq] at h
+  | .ctor _ _, .int _,    h => by simp [Val.beq] at h
+  | .ctor _ _, .bool _,   h => by simp [Val.beq] at h
+  | .ctor _ _, .nil,      h => by simp [Val.beq] at h
+  | .ctor _ _, .cons _ _, h => by simp [Val.beq] at h
+
+theorem Val.eqList_of_beqList : ∀ (as bs : List Val), Val.beqList as bs = true → as = bs
+  | [],      [],      _ => rfl
+  | a :: as, b :: bs, h => by
+      simp only [Val.beqList, Bool.and_eq_true] at h
+      rw [Val.eq_of_beq a b h.1, Val.eqList_of_beqList as bs h.2]
+  | [],      _ :: _,  h => by simp [Val.beqList] at h
+  | _ :: _,  [],      h => by simp [Val.beqList] at h
+
+end
+
+mutual
+
+theorem Val.beq_refl : ∀ a : Val, Val.beq a a = true
+  | .int _     => by simp [Val.beq]
+  | .bool _    => by simp [Val.beq]
+  | .nil       => rfl
+  | .cons a b  => by simp [Val.beq, Val.beq_refl a, Val.beq_refl b]
+  | .ctor _ as => by simp [Val.beq, Val.beqList_refl as]
+
+theorem Val.beqList_refl : ∀ as : List Val, Val.beqList as as = true
+  | []      => rfl
+  | a :: as => by simp [Val.beqList, Val.beq_refl a, Val.beqList_refl as]
+
+end
+
+theorem Val.beq_iff {a b : Val} : Val.beq a b = true ↔ a = b :=
+  ⟨Val.eq_of_beq a b, fun h => h ▸ Val.beq_refl a⟩
+
 /-! ## Primitives
 
 Closed and first-order.  Every primitive costs an `evalPrim` case and a semantic

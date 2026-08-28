@@ -39,5 +39,12 @@ namespace Projection
 #print axioms Compat_stat_lookup
 #print axioms Compat_dyn_lookup
 #print axioms buildEnv_Compat
+#print axioms generateFrom_spec
+#print axioms Val.eq_of_beq
+#print axioms indexOfReq_spec
+#print axioms wrapLets_eval
+#print axioms allStatic_forall₂
+#print axioms toCode_forall₂
+#print axioms Compat_allStat
 
 end Projection
