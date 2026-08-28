@@ -521,3 +521,80 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 )
+
+# Sub-word writes into a MULTI-DIMENSIONAL unpacked array — the bedrock-rtl
+# `br_ram_flops` tiling idiom `tile_wr_data[r][c][wport] = …`, which used to die
+# on "nested non-variable assignment targets are not supported yet" because both
+# memory-element write paths hard-coded a SINGLE selector. The combinational
+# fixture also pins the packed-bus poison seed a linearized comb array needs
+# before its first element store, and the memory fixture pins that same-cycle
+# disjoint chunk writes still take the write-enable model (a read-modify-write
+# would clobber one of them).
+sh_test(
+    name = "slang_array2d_partial_write",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/array2d_partial_write.v)",
+    ],
+    data = [
+        "tests/sv/array2d_partial_write.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_array2d_mem_partial_write",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/array2d_mem_partial_write.v)",
+    ],
+    data = [
+        "tests/sv/array2d_mem_partial_write.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# A slice write into one entry of a STRUCT-ELEMENT (tuple) memory: decomposed
+# across the per-field memories detuple splits out, instead of a store on the
+# aggregate name that no longer exists (a silently DROPPED write). Emission
+# check, not LEC — see the header of the test script for why a LEC verdict says
+# nothing about a split tuple memory.
+sh_test(
+    name = "slang_mem_struct_slice_write",
+    size = "large",
+    srcs = ["tests/mem_struct_slice_write_test.sh"],
+    data = [
+        "tests/sv/mem_struct_slice_write.v",
+        "//lhd",
+    ],
+)
+
+# Two same-cycle sub-word writes to ONE clocked-memory word at a granularity the
+# chunk-enable model cannot express: they cannot be merged (both read-modify-write
+# the committed word), so the reader must DIAGNOSE the second site rather than
+# emit hardware that silently loses a write. Pinned at the `error` tier — a
+# promotion here means the merge became expressible and this ladder entry should
+# move with it.
+sh_test(
+    name = "slang_mem_double_partial_write",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "error",
+        "$(location tests/sv/mem_double_partial_write.v)",
+    ],
+    data = [
+        "tests/sv/mem_double_partial_write.v",
+        "//lhd",
+    ],
+)

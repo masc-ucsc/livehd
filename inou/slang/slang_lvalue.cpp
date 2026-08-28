@@ -531,10 +531,11 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
 
-      // `mem[addr][dyn-bit/slice] <= data` with a NON-constant in-word position
-      // (e.g. `useful[i][decrBit] <= 0`): no constant chunk to enable, so
-      // read-modify-write the addressed word.
-      if (lower_mem_element_dynamic_write(lhs, rhs)) {
+      // Every other sub-word element write: a combinational array (`tile_wr_data
+      // [r][c][port] = …`), a struct-element memory, or a NON-constant in-word
+      // position (`useful[i][decrBit] <= 0`) with no constant chunk to enable.
+      // Read-modify-write the addressed element.
+      if (lower_mem_element_splice_write(lhs, rhs)) {
         return;
       }
 
@@ -1291,6 +1292,38 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
   builder_.add_value_child_pub(st, val);
 }
 
+// The BASE of a sub-word element write (`mem[addr]`, `mem[r][c]`, …) resolved to
+// its memory. Uses the same peel_unpacked_chain walk as the read side, so a
+// MULTI-dimensional array is handled exactly like a one-dimensional one: the
+// linearizing index math lives in build_unpacked_index and is emitted by the
+// caller (this function is on paths that still return false, so it must not
+// emit LNAST).
+const slang::ast::ValueSymbol* Slang_context::resolve_mem_element_base(const slang::ast::Expression&               base,
+                                                                       std::vector<const slang::ast::Expression*>& sels,
+                                                                       Mem_info&                                   mi_out) {
+  if (base.kind != ExpressionKind::ElementSelect) {
+    return nullptr;
+  }
+  const auto& root    = *peel_unpacked_chain(base, sels);
+  const auto* mem_sym = resolve_base_symbol(root);
+  if (mem_sym == nullptr || flat_port_syms_.contains(mem_sym)) {
+    return nullptr;  // flat-port arrays are bit-slices of a packed bus, not memories
+  }
+  // The chain must index a single memory element: an UNPACKED-array memory, OR a
+  // memory-ized packed 2-D reg (register file, `logic [N:0][W:0][..]`). Both
+  // store one word per index; the caller's write targets a sub-chunk of that
+  // word. The read path (lower_rvalue) already routes packed_mem_regs_ here.
+  if (!root.type->getCanonicalType().isUnpackedArray() && !packed_mem_regs_.contains(mem_sym)) {
+    return nullptr;
+  }
+  auto mit = mem_info_.find(mem_sym);
+  if (mit == mem_info_.end() || sels.size() != mit->second.rank()) {
+    return nullptr;  // a partial selector chain does not name one element
+  }
+  mi_out = mit->second;  // COPY: the callers lower selector expressions, which can rehash mem_info_
+  return mem_sym;
+}
+
 // `mem[addr][const-chunk] <= data` — a chunked masked memory write (the XS SRAM
 // byte/chunk write-enable idiom). A naive read-modify-write would be wrong here
 // (a synchronous read gives last cycle's word, and multiple disjoint partial
@@ -1303,30 +1336,28 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
 bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expression& lhs, const std::string& rhs) {
   using slang::ast::RangeSelectionKind;
 
-  // The slice base must be a single memory-element select: mem[addr].
+  // The slice base must select one memory element: `mem[addr]`, or a full
+  // selector chain of a multi-dimensional array (`mem[r][c]`).
   const auto& base = lhs.kind == ExpressionKind::ElementSelect ? lhs.as<slang::ast::ElementSelectExpression>().value()
                                                                : lhs.as<slang::ast::RangeSelectExpression>().value();
-  if (base.kind != ExpressionKind::ElementSelect) {
+  std::vector<const slang::ast::Expression*> sels;
+  Mem_info                                   mi;
+  const auto*                                mem_sym = resolve_mem_element_base(base, sels, mi);
+  if (mem_sym == nullptr) {
     return false;
   }
-  const auto& base_es = base.as<slang::ast::ElementSelectExpression>();
-  const auto* mem_sym = resolve_base_symbol(base_es.value());
-  if (mem_sym == nullptr || flat_port_syms_.contains(mem_sym)) {
-    return false;  // flat-port arrays use the bit-slice path elsewhere
-  }
-  // The base must index a single memory element: an UNPACKED-array memory, OR a
-  // memory-ized packed 2-D reg (register file, `logic [N:0][W:0][..]`). Both
-  // store one word per index; this write targets a constant sub-chunk of that
-  // word.  The read path (lower_rvalue) already routes packed_mem_regs_ here.
-  if (!base_es.value().type->getCanonicalType().isUnpackedArray() && !packed_mem_regs_.contains(mem_sym)) {
+  // The chunk model is a MEMORY's per-chunk write ENABLE. Two shapes cannot
+  // carry it, and both take the read-modify-write splice instead:
+  //  * an array tolg represents as a packed BUS rather than a memory (see
+  //    lowers_as_memory) — its store takes exactly (index, value), so the chunk
+  //    child is a hard error there;
+  //  * a struct-element (TUPLE) memory — its storage is the per-field arrays
+  //    detuple splits out, so a store on the aggregate name writes a net that
+  //    does not exist (it was silently dropped before this guard).
+  if (!lowers_as_memory(*mem_sym) || mi.is_tuple) {
     return false;
   }
-  auto mit = mem_info_.find(mem_sym);
-  if (mit == mem_info_.end()) {
-    return false;
-  }
-  const auto& mi        = mit->second;
-  const int   word_bits = mi.elem_bits;
+  const int word_bits = mi.elem_bits;
 
   // The element word's type (e.g. `reg [3:0]`) gives the in-word bit indexing.
   const auto& elem_ty = base.type->getCanonicalType();
@@ -1359,10 +1390,15 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
         lo_bit = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
       }
     } else if (auto b = try_eval_int(rs.left())) {
+      // `*b` is an ELEMENT index of the packed word, so the far-end bias is the
+      // selected ELEMENT count, not the selection's bit width. They differ
+      // exactly when the element word is a packed ARRAY (`[3:0][1:0]`), and
+      // getting it wrong silently writes a different chunk.
+      const int64_t w = width / stride;
       if (kind == RangeSelectionKind::IndexedUp) {
-        lo_bit = range.isDescending() ? (*b - range.lower()) : (range.upper() - *b - (width - 1));
+        lo_bit = range.isDescending() ? (*b - range.lower()) : (range.upper() - *b - (w - 1));
       } else {  // IndexedDown
-        lo_bit = range.isDescending() ? (*b - range.lower() - (width - 1)) : (range.upper() - *b);
+        lo_bit = range.isDescending() ? (*b - range.lower() - (w - 1)) : (range.upper() - *b);
       }
     }
   }
@@ -1398,10 +1434,7 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
 
   // Memory write port: store(mem, addr, din, chunk). The extra chunk child
   // (D+2 store children) marks a chunked write to tolg.
-  auto idx = to_int_value(lower_rvalue(base_es.selector()));
-  if (mi.lower != 0) {
-    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
-  }
+  auto idx = build_unpacked_index(mi, sels);
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
   auto& ln = *builder_.lnast;
   auto  st = builder_.add_child(Lnast_ntype::create_store());
@@ -1412,27 +1445,44 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   return true;
 }
 
-bool Slang_context::lower_mem_element_dynamic_write(const slang::ast::Expression& lhs, const std::string& rhs) {
+// `mem[addr][bit/slice] = data` for every sub-word element write the chunked
+// wensize model above cannot express. Read the addressed element, splice the new
+// bits in, write the whole element back — the SEQUENCE of plain statements a
+// constant-indexed unrolled loop means, which is sound precisely because the
+// element being written is the only thing read back.
+//
+// Three callers land here, and the read they issue means different things:
+//  * a COMBINATIONAL array. tolg keeps it as one packed bus, so the read sees
+//    the in-flight value and successive partial writes ACCUMULATE in program
+//    order — exactly Verilog net semantics. This is the only shape a chunk-
+//    tagged store cannot take at all (tolg's scalar-view store is (index,
+//    value) only), so const and dynamic in-word positions both come here.
+//  * a struct-element (TUPLE) memory. Its storage is the per-field arrays
+//    detuple splits out, so the write is decomposed per OVERLAPPED field: a
+//    fully covered field is a plain field store, a partially covered one a
+//    field-local splice. Only the partial cover reads back, so writes that land
+//    on DIFFERENT fields of one entry in the same cycle all survive; two
+//    same-cycle PARTIAL writes to one field would not (before this
+//    decomposition existed, the whole write was dropped instead).
+//  * a CLOCKED scalar memory whose position the wensize path above could not
+//    take: a DYNAMIC one (`useful[i][decrBit] <= 0` — no constant chunk to
+//    enable) or a constant slice whose width does not divide the element word
+//    evenly, or is not chunk-aligned. Its read returns last cycle's COMMITTED
+//    word, which is exactly what a nonblocking partial write must preserve for
+//    the untouched bits — correct for one write per word per cycle. Two
+//    same-cycle partial writes to one word need the chunk-enable model, and
+//    that model is what the aligned uniform-granularity case above uses.
+bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression& lhs, const std::string& rhs) {
   using slang::ast::RangeSelectionKind;
 
   const auto& base = lhs.kind == ExpressionKind::ElementSelect ? lhs.as<slang::ast::ElementSelectExpression>().value()
                                                                : lhs.as<slang::ast::RangeSelectExpression>().value();
-  if (base.kind != ExpressionKind::ElementSelect) {
-    return false;  // only `mem[addr][...]`
-  }
-  const auto& base_es = base.as<slang::ast::ElementSelectExpression>();
-  if (!base_es.value().type->getCanonicalType().isUnpackedArray()) {
+  std::vector<const slang::ast::Expression*> sels;
+  Mem_info                                   mi;
+  const auto*                                mem_sym = resolve_mem_element_base(base, sels, mi);
+  if (mem_sym == nullptr) {
     return false;
   }
-  const auto* mem_sym = resolve_base_symbol(base_es.value());
-  if (mem_sym == nullptr || flat_port_syms_.contains(mem_sym)) {
-    return false;  // flat-port arrays use the packed bit-slice path
-  }
-  auto mit = mem_info_.find(mem_sym);
-  if (mit == mem_info_.end() || mit->second.is_tuple) {
-    return false;  // struct (tuple) element field/bit writes handled elsewhere
-  }
-  const auto& mi      = mit->second;
   const auto& elem_ty = base.type->getCanonicalType();  // the element word type
   if (!elem_ty.isIntegral() || !elem_ty.hasFixedRange()) {
     return false;
@@ -1440,12 +1490,59 @@ bool Slang_context::lower_mem_element_dynamic_write(const slang::ast::Expression
   auto      range = elem_ty.getFixedRange();
   auto      ti    = tinfo(*lhs.type);
   const int width = ti.bits;
-  if (width <= 0) {
+  if (width <= 0 || width > mi.elem_bits) {
+    return false;
+  }
+  // A packed element word (`[3:0][1:0]`) indexes ELEMENTS spanning `stride`
+  // bits; a flat word (`[31:0]`) has stride 1. Same scaling as the chunked path.
+  const int stride = elem_ty.isPackedArray() ? static_cast<int>(elem_ty.getArrayElementType()->getBitWidth()) : 1;
+
+  // Constant in-word low bit, when the position folds.
+  std::optional<int64_t> lo_bit;
+  if (lhs.kind == ExpressionKind::ElementSelect) {
+    if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
+      lo_bit = range.isDescending() ? (*ci - range.lower()) : (range.upper() - *ci);
+    }
+  } else {
+    const auto&   rs   = lhs.as<slang::ast::RangeSelectExpression>();
+    auto          kind = rs.getSelectionKind();
+    const int64_t w    = width / stride;  // selected ELEMENTS of the packed word
+    if (kind == RangeSelectionKind::Simple) {
+      auto l = try_eval_int(rs.left());
+      auto r = try_eval_int(rs.right());
+      if (l && r) {
+        lo_bit = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
+      }
+    } else if (auto b = try_eval_int(rs.left())) {
+      if (kind == RangeSelectionKind::IndexedUp) {
+        lo_bit = range.isDescending() ? (*b - range.lower()) : (range.upper() - *b - (w - 1));
+      } else {
+        lo_bit = range.isDescending() ? (*b - range.lower() - (w - 1)) : (range.upper() - *b);
+      }
+    }
+  }
+  if (lo_bit) {
+    *lo_bit *= stride;  // element index -> bit offset within the word
+    if (*lo_bit < 0 || *lo_bit + width > mi.elem_bits) {
+      return false;
+    }
+  }
+
+  // A tuple memory needs a constant position: a runtime in-word offset would
+  // have to splice across an unknown field boundary.
+  //
+  // A COMBINATIONAL array that tolg still keeps as a Memory (it carries `initial`
+  // power-on contents, so it is not the packed-bus scalar view) cannot take the
+  // read-back at all — tolg rejects a read after a write on a mut memory. Leave
+  // its constant positions to the chunk path above and, when that declines the
+  // granularity, to the reader's own diagnostic, which names the real cause.
+  const bool comb_memory = !reg_syms_.contains(mem_sym) && lowers_as_memory(*mem_sym);
+  if (mi.is_tuple ? !lo_bit : (comb_memory && lo_bit.has_value())) {
     return false;
   }
 
-  // Dynamic in-word low-bit offset of the slice. Mirrors resolve_packed_lvalue's
-  // normalize, but a memory-element base makes the packed path return false.
+  // Dynamic in-word low-bit offset. Mirrors resolve_packed_lvalue's normalize,
+  // which a memory-element base makes unreachable on the packed path.
   auto offset_of = [&](const slang::ast::Expression& sel, int64_t wdown, int64_t wup) -> std::string {
     auto v = to_int_value(lower_rvalue(sel));
     if (range.isDescending()) {
@@ -1456,46 +1553,125 @@ bool Slang_context::lower_mem_element_dynamic_write(const slang::ast::Expression
     return builder_.create_minus_stmts(std::to_string(bias), v);
   };
   std::string dyn_lo;
-  if (lhs.kind == ExpressionKind::ElementSelect) {
-    dyn_lo = offset_of(lhs.as<slang::ast::ElementSelectExpression>().selector(), 1, 1);
-  } else {
-    const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
-    auto        kind = rs.getSelectionKind();
-    if (kind == RangeSelectionKind::IndexedUp) {
-      dyn_lo = offset_of(rs.left(), 1, width);
-    } else if (kind == RangeSelectionKind::IndexedDown) {
-      dyn_lo = offset_of(rs.left(), width, 1);
+  if (!lo_bit) {
+    if (lhs.kind == ExpressionKind::ElementSelect) {
+      dyn_lo = offset_of(lhs.as<slang::ast::ElementSelectExpression>().selector(), 1, 1);
     } else {
-      return false;  // a Simple range with non-constant bounds: unsupported here
+      const auto&   rs   = lhs.as<slang::ast::RangeSelectExpression>();
+      auto          kind = rs.getSelectionKind();
+      const int64_t w    = width / stride;  // ELEMENTS, like the constant branch above
+      if (kind == RangeSelectionKind::IndexedUp) {
+        dyn_lo = offset_of(rs.left(), 1, w);
+      } else if (kind == RangeSelectionKind::IndexedDown) {
+        dyn_lo = offset_of(rs.left(), w, 1);
+      } else {
+        return false;  // a Simple range with non-constant bounds: unsupported here
+      }
+    }
+    if (stride != 1) {
+      dyn_lo = builder_.create_mult_stmts(dyn_lo, std::to_string(stride));
     }
   }
 
-  // Memory index (biased), computed once for the read and the store.
-  auto idx = to_int_value(lower_rvalue(base_es.selector()));
-  if (mi.lower != 0) {
-    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
-  }
+  // Linear element index, computed once for the read(s) and the store(s). Every
+  // early return is behind us, so emitting LNAST is safe from here on.
+  auto  idx      = build_unpacked_index(mi, sels);
+  auto  val      = to_pattern(rhs, width, ti.is_signed);
+  auto& ln       = *builder_.lnast;
+  auto  mem_name = lname_of(*mem_sym);
 
-  // Read the addressed word (old contents, fwd=0), splice the new bits in at the
-  // dynamic offset, write the whole word back.
-  auto& ln  = *builder_.lnast;
-  auto  tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
-  auto  cur = builder_.create_lnast_tmp();
-  ln.add_child(tg, Lnast_node::create_ref(cur));
-  ln.add_child(tg, Lnast_node::create_ref(lname_of(*mem_sym)));
-  builder_.add_value_child_pub(tg, idx);
+  // set_mask(%new, src, mask, value) — the copy-temp shape (dst != src) tolg
+  // lowers without rebinding `src`, which here is a read temp, not a variable.
+  auto splice_const = [&](const std::string& src, int64_t lo, int bits, const std::string& piece) {
+    auto dst = builder_.create_lnast_tmp();
+    auto sm  = builder_.add_child(Lnast_ntype::create_set_mask());
+    ln.add_child(sm, Lnast_node::create_ref(dst));
+    builder_.add_value_child_pub(sm, src);
+    builder_.add_value_child_pub(sm, lo == 0 ? mask_text(bits) : std::string(Dlop::get_mask_value(lo + bits - 1, lo)->to_pyrope()));
+    builder_.add_value_child_pub(sm, piece);
+    return dst;
+  };
 
-  auto cur_p    = to_pattern(cur, mi.elem_bits, false);
-  auto val      = to_pattern(rhs, width, ti.is_signed);
-  auto sel_mask = builder_.create_shl_stmts(mask_text(width), dyn_lo);
-  auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-  auto ins      = builder_.create_shl_stmts(val, dyn_lo);
-  auto next     = builder_.create_bit_or_stmts({keep, ins});
-  next          = trunc_to(next, mi.elem_bits);
+  // A read-back on a CLOCKED memory reads the COMMITTED word, so two such
+  // partial stores into the same leaf cannot be merged — whichever write port
+  // wins the same-cycle collision discards the other's bits. Diagnose the
+  // second site rather than emit hardware that loses a write. A combinational
+  // array is exempt: tolg keeps it as a packed bus, so successive splices
+  // chain in program order.
+  const bool clocked   = reg_syms_.contains(mem_sym);
+  auto       claim_rmw = [&](std::string_view leaf) {
+    if (!clocked || mem_rmw_leaf_written_[mem_sym].insert(std::string(leaf)).second) {
+      return true;
+    }
+    emit_unsupported(lhs.sourceRange,
+                     "unsupported-mem-partial-write",
+                     absl::StrCat("a second read-modify-write partial store to memory '",
+                                  mem_sym->name,
+                                  leaf.empty() ? "" : absl::StrCat(".", leaf),
+                                  "' cannot be merged with the first"),
+                     "make every partial write of this memory a chunk-aligned slice of one uniform width, so they "
+                     "lower to per-chunk write enables instead");
+    return false;
+  };
 
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+
+  // Struct-element memory: split the constant slice across every OVERLAPPED
+  // field leaf (a slice may cross field boundaries), the same decomposition the
+  // packed-struct VARIABLE path uses.
+  if (mi.is_tuple) {
+    const int64_t hi = *lo_bit + width - 1;
+    for (const auto& f : mi.fields) {
+      const int64_t ov_lo = std::max<int64_t>(*lo_bit, f.off);
+      const int64_t ov_hi = std::min<int64_t>(hi, f.off + f.bits - 1);
+      if (ov_lo > ov_hi) {
+        continue;  // field outside the written slice
+      }
+      const int     ov_bits = static_cast<int>(ov_hi - ov_lo + 1);
+      const int64_t rel     = ov_lo - f.off;  // LSB position within the field leaf
+      auto          piece   = extract_field(val, ov_lo - *lo_bit, ov_bits);
+      if (ov_bits == f.bits) {
+        emit_field_store(mem_name, idx, f.name, piece);  // full cover: no read-back
+        continue;
+      }
+      if (!claim_rmw(f.name)) {
+        return true;  // diagnosed
+      }
+      auto cur = emit_field_read_chain(mem_name, idx, f.name);
+      emit_field_store(mem_name, idx, f.name, splice_const(cur, rel, ov_bits, piece));
+    }
+    return true;
+  }
+
+  // A constant slice covering the whole element word is a plain element store —
+  // no read-back, which is what a single-write-port `arr[r][c][0]` unrolls to.
+  std::string next;
+  if (lo_bit && width == mi.elem_bits) {
+    next = val;
+  } else {
+    if (!claim_rmw("")) {
+      return true;  // diagnosed
+    }
+    auto tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
+    auto cur = builder_.create_lnast_tmp();
+    ln.add_child(tg, Lnast_node::create_ref(cur));
+    ln.add_child(tg, Lnast_node::create_ref(mem_name));
+    builder_.add_value_child_pub(tg, idx);
+    builder_.note_unsigned_bits(cur, mi.elem_bits);
+    auto cur_p = to_pattern(cur, mi.elem_bits, false);
+    if (lo_bit) {
+      next = splice_const(cur_p, *lo_bit, width, val);
+    } else {
+      auto sel_mask = builder_.create_shl_stmts(mask_text(width), dyn_lo);
+      auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
+      auto ins      = builder_.create_shl_stmts(val, dyn_lo);
+      next          = builder_.create_bit_or_stmts({keep, ins});
+    }
+    next = trunc_to(next, mi.elem_bits);
+  }
+
   auto st = builder_.add_child(Lnast_ntype::create_store());
-  ln.add_child(st, Lnast_node::create_ref(lname_of(*mem_sym)));
+  ln.add_child(st, Lnast_node::create_ref(mem_name));
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, next);
   return true;

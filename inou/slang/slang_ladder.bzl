@@ -68,7 +68,12 @@ SLANG_LADDER = {
     "long_nocheck_iwls_square": "verilog",  # compiles; LEC gap tracked
     "long_regfile1r1w": "lec",  # `output reg` port: procedural <= is a legal NBA-to-variable
     "long_regfile2r1w": "lec",  # ports are `output reg` (variables), so the procedural <= is a legal NBA-to-variable (unlike long_regfile1r1w's net `output`)
-    "long_shared_ports": "error",  # nested dynamic lvalue (mem element part-select)
+    # PROMOTED (was "error", "nested dynamic lvalue (mem element part-select)"):
+    # a constant `mem[addr][hi:lo] <= …` the chunk model cannot express is now a
+    # read-modify-write of the addressed word, and a whole-word write port on a
+    # wensize>1 memory replicates its enable across every chunk instead of
+    # writing only chunk 0.
+    "long_shared_ports": "lec",
     "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
     "mem_reset": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)

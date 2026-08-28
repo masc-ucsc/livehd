@@ -1995,40 +1995,74 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // packed AGGREGATE (struct/union — its `.field` writes need composition) or a
   // plain-vector array that is never runtime-indexed (its bit-slice writes need
   // composition too, and constant offsets make flattening exact).
-  for (const auto& member : body->members()) {
-    if (member.kind != slang::ast::SymbolKind::Variable) {
-      continue;
+  // A MULTI-dimensional array is also pre-declared from INSIDE a generate block
+  // (`top` false below), because its seed has to dominate every element store
+  // wherever the array lives; the flatten-branch rules stay module-scope only,
+  // where they were tuned.
+  std::function<void(const slang::ast::Scope&, bool)> predeclare_arrays = [&](const slang::ast::Scope& scope, bool top) {
+    for (const auto& member : scope.members()) {
+      if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
+        const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+        if (!gen.isUninstantiated) {
+          predeclare_arrays(gen, /*top=*/false);
+        }
+        continue;
+      }
+      if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
+        for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+          predeclare_arrays(*entry, /*top=*/false);
+        }
+        continue;
+      }
+      if (member.kind != slang::ast::SymbolKind::Variable) {
+        continue;
+      }
+      const auto& vsym = member.as<slang::ast::VariableSymbol>();
+      if (reg_syms_.contains(&vsym) || declared_.contains(&vsym)) {
+        continue;
+      }
+      const auto& ct = vsym.getType().getCanonicalType();
+      // A module-scope STRUCT variable is pre-declared too — but INSIDE
+      // lower_members, right after the wire classification (see the
+      // "struct pre-declare" block there). Pre-declaring it here locked every
+      // struct net into `mut`, because declare_struct_leaves consults
+      // `wire_syms_`, which lower_members only fills later: a reader sorted
+      // ahead of its writer then resolved to nil and the connection was SEVERED
+      // (minion's id_vpu_core_ctrl, f8_trans_rom_response). It still lands at
+      // module top, so the reason this pre-declare exists at all — a lazy
+      // declare would emit the leaf declares INSIDE the first use's if/uif arm,
+      // and a dotted poison store in a unique_if arm survives the branch merge
+      // in a field-store form tolg cannot lower (trans_top's f5_rom_response_l)
+      // — is unchanged.
+      if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+        continue;
+      }
+      // Walk the whole unpacked dim chain: a MULTI-dimensional array's element
+      // type is another unpacked array, and stopping at the first level skipped
+      // every 2-D array here.
+      const slang::ast::Type* leaf     = &ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType();
+      bool                    multidim = false;
+      while (leaf->kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+        multidim = true;
+        leaf     = &leaf->as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType();
+      }
+      const auto& elem = *leaf;
+      if (!elem.isIntegral()) {
+        continue;
+      }
+      const bool aggregate     = elem.isStruct() || elem.isPackedUnion();
+      const bool const_indexed = !runtime_indexed_arrays_.contains(&vsym);
+      // A MULTI-dimensional array is pre-declared whatever its selectors are: it
+      // never takes the flatten branch, so declare_unpacked gives it a linearized
+      // array plus the whole-array poison seed its first element store splices
+      // onto — and a LAZY declare would drop that seed inside the first use's
+      // if/case arm, leaving the array unseeded on every other path.
+      if (multidim || (top && (aggregate || const_indexed))) {
+        declare_value_symbol(vsym, /*force_reg=*/false);
+      }
     }
-    const auto& vsym = member.as<slang::ast::VariableSymbol>();
-    if (reg_syms_.contains(&vsym) || declared_.contains(&vsym)) {
-      continue;
-    }
-    const auto& ct = vsym.getType().getCanonicalType();
-    // A module-scope STRUCT variable is pre-declared too — but INSIDE
-    // lower_members, right after the wire classification (see the
-    // "struct pre-declare" block there). Pre-declaring it here locked every
-    // struct net into `mut`, because declare_struct_leaves consults
-    // `wire_syms_`, which lower_members only fills later: a reader sorted
-    // ahead of its writer then resolved to nil and the connection was SEVERED
-    // (minion's id_vpu_core_ctrl, f8_trans_rom_response). It still lands at
-    // module top, so the reason this pre-declare exists at all — a lazy
-    // declare would emit the leaf declares INSIDE the first use's if/uif arm,
-    // and a dotted poison store in a unique_if arm survives the branch merge
-    // in a field-store form tolg cannot lower (trans_top's f5_rom_response_l)
-    // — is unchanged.
-    if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-      continue;
-    }
-    const auto& elem = ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType();
-    if (!elem.isIntegral()) {
-      continue;
-    }
-    const bool aggregate     = elem.isStruct() || elem.isPackedUnion();
-    const bool const_indexed = !runtime_indexed_arrays_.contains(&vsym);
-    if (aggregate || const_indexed) {
-      declare_value_symbol(vsym, /*force_reg=*/false);
-    }
-  }
+  };
+  predeclare_arrays(*body, /*top=*/true);
 
   // The X-default poison-init for combinational outputs is emitted inside
   // lower_members (after wire classification: a wire-classified output must
@@ -2408,6 +2442,26 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     }
   } else if (is_reg) {
     ln.add_child(didx, Lnast_node::create_const("nil"));  // no power-on contents
+  } else {
+    // A COMBINATIONAL linearized array (a multi-dimensional one; the flat branch
+    // above took every 1-D case) is aggregate storage with no power-on value, so
+    // its declare carries no initializer -- and tolg then scalar-replaces it into
+    // a packed bus whose FIRST element store has no base to set_mask onto ("array
+    // '…' is written before it has an initializer"). Seed it exactly the way the
+    // Pyrope frontend does, with a separate whole-array store. The store must NOT
+    // become a declare child -- that flips tolg to the Memory representation,
+    // which a partial element write cannot use.
+    //
+    // The seed value is written `0sb?`, but it lands as a ZERO: tolg's
+    // whole-array store maps `nil`/`0sb?` to integer 0 and broadcasts it
+    // (upass_tolg.cpp, the array_scalar_views_ branch). So an element nobody
+    // drives reads 0 here, where the 1-D flat branch above -- which puts the
+    // poison on the DECLARE, a shape the packed-bus store has no equivalent of
+    // -- keeps it X. That is an X-fidelity gap, not a wrong value: it can only
+    // make the emitted design MORE defined than the Verilog source.
+    auto sidx = builder_.add_child(Lnast_ntype::create_store());
+    ln.add_child(sidx, Lnast_node::create_ref(name));
+    ln.add_child(sidx, Lnast_node::create_const("0sb?"));
   }
   clear_pending_loc();
   return true;

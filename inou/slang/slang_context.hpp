@@ -197,6 +197,14 @@ private:
   };
   absl::flat_hash_set<const slang::ast::Symbol*> mem_syms_;             // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*> mem_wensize_emitted_;  // memories whose wensize attr was emitted
+  // CLOCKED memories that already took a read-modify-write partial store, per
+  // written leaf ("" for a scalar memory's word, the field name for a tuple
+  // memory). A second one on the same leaf cannot be merged: both write ports
+  // splice into the COMMITTED word, so if they fire in the same cycle one of
+  // them is silently lost. The chunk-enable model is the only shape that
+  // merges, and it only covers aligned uniform granularity — so the second
+  // site is diagnosed instead of quietly miscompiled.
+  absl::flat_hash_map<const slang::ast::Symbol*, absl::flat_hash_set<std::string>> mem_rmw_leaf_written_;
   absl::flat_hash_set<const slang::ast::Symbol*> declared_;             // declare stmt already emitted
   std::string                                    genblk_prefix_;
   bool                                           module_failed_ = false;
@@ -719,20 +727,50 @@ private:
   // port, splices at the runtime position, and writes every field back.
   void emit_bundle_port_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
 
+  // Resolve the BASE of a sub-word unpacked-array lvalue (`mem[i]`, and — for a
+  // multi-dimensional array — `mem[i][j]…`) to the memory symbol it selects one
+  // element of. `sels` receives the FULL outermost-first selector chain so the
+  // caller can call build_unpacked_index() once it has committed to lowering
+  // (that call emits LNAST, so it must not run on a path that still returns
+  // false). Returns nullptr unless the chain selects exactly one element of a
+  // memory-represented (NOT flat-port) unpacked array or of a memory-ized
+  // packed 2-D reg. `mi_out` gets a COPY of the descriptor, not a reference into
+  // mem_info_: lowering a runtime selector can declare another array and rehash
+  // that flat_hash_map, dangling any reference held across the call.
+  const slang::ast::ValueSymbol* resolve_mem_element_base(const slang::ast::Expression&               base,
+                                                          std::vector<const slang::ast::Expression*>& sels, Mem_info& mi_out);
+
+  // True when tolg keeps this linearized array as a MEMORY cell rather than
+  // scalar-replacing it into a packed bus: a clocked array, or a combinational
+  // one carrying `initial` power-on contents (declare_unpacked emits those as
+  // the declare's initializer, which is what routes tolg to lower_mem_declare).
+  // Only a memory can carry a per-chunk write enable; only a packed bus composes
+  // a read-modify-write in program order.
+  bool lowers_as_memory(const slang::ast::ValueSymbol& sym) const {
+    if (reg_syms_.contains(&sym)) {
+      return true;
+    }
+    auto it = mem_init_vals_.find(&sym);
+    return it != mem_init_vals_.end() && !it->second.empty();
+  }
+
   // `mem[addr][const-chunk] <= data`: a chunked masked memory write (the XS SRAM
   // models' byte/chunk write-enable idiom). Lowers to a memory write port whose
   // store carries the chunk index, so tolg sets the memory's `wensize` and a
   // per-chunk write-enable (LEC-matching the yosys-slang $memwr WR_EN model).
-  // Returns false when lhs is not a constant-aligned bit-slice of a memory
-  // element (the caller then falls through to the existing diagnostic).
+  // Returns false when lhs is not a constant-aligned bit-slice of a
+  // memory-represented scalar-element array (the caller then falls through to
+  // the read-modify-write splice below).
   bool lower_mem_element_bitslice_write(const slang::ast::Expression& lhs, const std::string& rhs);
 
-  // `mem[addr][dyn-bit/slice] <= data` where the in-word position is NOT
-  // constant (so the const-chunk wensize path does not apply): read-modify-write
-  // the addressed memory word (read old contents, splice the new bits in at the
-  // dynamic offset, write the whole word back). Returns false when lhs is not a
-  // bit/slice select of a (non-tuple) memory element.
-  bool lower_mem_element_dynamic_write(const slang::ast::Expression& lhs, const std::string& rhs);
+  // `mem[addr][bit/slice] <= data` for every sub-word element write the chunked
+  // wensize model above cannot express: a COMBINATIONAL array (tolg keeps one
+  // as a packed bus, so a chunk-tagged store has no meaning there), a dynamic
+  // in-word position, and a struct-element (tuple) memory. Read the addressed
+  // element, splice the new bits in, write the whole element back — per FIELD
+  // for a tuple memory. Returns false when lhs is not a bit/slice select of a
+  // memory element it can lower.
+  bool lower_mem_element_splice_write(const slang::ast::Expression& lhs, const std::string& rhs);
 
   // ── types + conversions (slang_types.cpp) ─────────────────────────────────
   struct Tinfo {

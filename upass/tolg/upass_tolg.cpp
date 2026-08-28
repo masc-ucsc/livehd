@@ -2386,6 +2386,12 @@ private:
     int                  n_user_wr   = 0;  // pre-scanned program write sites
     int                  wr_next     = 0;
     int                  rd_next     = 0;
+    // Write-port ordinals whose store carried NO chunk index. Their enable is
+    // one bit, which a wensize > 1 memory reads as "chunk 0 only" — so on a
+    // memory that ALSO takes chunked writes, finalize_mems has to replicate
+    // that bit across every chunk or the write silently loses all but its
+    // bottom chunk.
+    std::vector<int>     plain_wr_ports;
     // Same-cycle ordering (Pyrope `ordering` attr): "program" (default) needs
     // each read port's POSITION in program order, so record `wr_next` as each
     // read port is minted — the number of program writes that textually
@@ -3805,6 +3811,9 @@ private:
       return;
     }
     const auto base = mi.wr_next * kMemPortStride;
+    if (chunk < 0) {
+      mi.plain_wr_ports.emplace_back(mi.wr_next);
+    }
     ++mi.wr_next;
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);           // addr
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
@@ -4345,13 +4354,40 @@ private:
       if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
         if (auto wit = pit->second.find("wensize"); wit != pit->second.end()) {
           if (auto wv = Dlop::from_pyrope(wit->second); wv && wv->is_just_i64() && wv->to_just_i64() > 1) {
+            const int64_t wensize = wv->to_just_i64();
             for (const auto& e : mi.node.inp_edges()) {
               if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 8) {
                 e.del_edge();
                 break;
               }
             }
-            setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wv->to_just_i64())));
+            setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wensize)));
+            // Every WHOLE-word write port on this memory (`mem[i] <= v`, or a
+            // reader read-modify-write for a slice the chunk model could not
+            // express) still drives a ONE-BIT enable, and the wensize wrapper
+            // reads bit k as "write chunk k" — so chunks 1..wensize-1 of that
+            // write were dropped. Replicate the bit across every chunk: a 0/1
+            // path condition times the all-ones mask is all-ones or zero.
+            for (const int port : mi.plain_wr_ports) {
+              const auto pid = static_cast<hhds::Port_id>(port * kMemPortStride + 4);
+              Pin        cur;
+              for (const auto& e : mi.node.inp_edges()) {
+                if (!e.sink.is_invalid() && e.sink.get_port_id() == pid) {
+                  cur = e.driver;
+                  e.del_edge();
+                  break;
+                }
+              }
+              if (cur.is_invalid()) {
+                continue;
+              }
+              auto rep = make_node(Ntype_op::Mult);
+              setup_sink_by_name(rep, "as").connect_driver(cur);
+              setup_sink_by_name(rep, "as").connect_driver(create_const(*g_, *Dlop::get_mask_value(static_cast<int>(wensize))));
+              auto out = rep.create_driver_pin(0);
+              set_ubits(out, static_cast<int32_t>(wensize));
+              mi.node.create_sink_pin(pid).connect_driver(out);
+            }
           }
         }
         // Re-drive the forwarding mask (fwd, port 5).  lower_mem_declare reads
