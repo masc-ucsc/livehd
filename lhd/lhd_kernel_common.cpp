@@ -491,6 +491,7 @@ void copy_crash_ctx(char (&dst)[kCrashCtxMax], std::string_view src) {
   dst[n] = '\0';
 }
 
+#if !defined(__GLIBC__)
 void crash_write(const char* s) {
   if (s == nullptr || *s == '\0') {
     return;
@@ -520,6 +521,7 @@ static void crash_handler(int /*sig*/) {
   ::_exit(EXIT_FAILURE);
 }
 }  // extern "C"
+#endif
 
 // A failing step's own output -- ABC's `Error:` lines, yosys's log, a solver's
 // trace -- is captured to its per-step log, and the CLI error is the only place
