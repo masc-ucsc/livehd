@@ -120,7 +120,7 @@ inductive EvalResult where
   | value     : Val → EvalResult
   | outOfFuel : EvalResult
   | typeError : String → EvalResult
-  deriving Inhabited, Repr
+  deriving Inhabited, Repr, BEq
 
 mutual
 
