@@ -12,6 +12,7 @@
 
 import LeanSemanticPrimitives.Projection.Encoding
 import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics
+import LeanSemanticPrimitives.Projection.BTA
 
 namespace Projection
 
@@ -26,5 +27,8 @@ namespace Projection
 #print axioms encEnv_decEnv
 #print axioms encTerm_inj
 #print axioms encProgram_inj
+#print axioms bta_sound
+#print axioms bta_erases
+#print axioms erase_annT
 
 end Projection

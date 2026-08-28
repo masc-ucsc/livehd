@@ -19,6 +19,8 @@
 -/
 
 import LeanSemanticPrimitives.Projection.PartialEvaluator
+import LeanSemanticPrimitives.Projection.BTA
+import LeanSemanticPrimitives.Projection.Surface
 
 namespace Projection
 namespace Demo
@@ -124,7 +126,73 @@ def sourceCaseTs   : Nat := (interpP.funs.map   (fun fd => countCaseT fd.body)).
 -- And the recursive `nth` walk is unrolled: `nth` needed no residual function.
 #guard residualP.funs.length == 1
 
-#eval residualP
+/-! ## The same thing again, through the real pipeline
+
+Above, the annotation was written by hand.  Here the interpreter is written in
+the surface syntax with names, resolved to de Bruijn, and annotated by BTA --
+which is how every program from here on will be produced.  If the two paths
+disagree, one of them is wrong.
+-/
+
+open Surface in
+/-- `interp` and `nth` in named form.  `nth` is marked `inline` so its static
+walk down a dynamic list unrolls; `interp`'s recursion on subexpressions is
+inlined too, since the expression tree is static and finite. -/
+def interpS : SProgram where
+  entry := "interp"
+  funs :=
+    [ { name := "interp", params := ["e", "env"], inline := true
+      , body :=
+          .switch (.ref "e")
+            [ (0, ["n"],       .ref "n")
+            , (1, ["i"],       .call "nth" [.ref "i", .ref "env"])
+            , (2, ["l", "r"],  .prim .addI [ .call "interp" [.ref "l", .ref "env"]
+                                           , .call "interp" [.ref "r", .ref "env"] ])
+            , (3, ["l", "r"],  .prim .mulI [ .call "interp" [.ref "l", .ref "env"]
+                                           , .call "interp" [.ref "r", .ref "env"] ]) ] }
+    , { name := "nth", params := ["i", "env"], inline := true
+      , body :=
+          .ite (.prim .eqI [.ref "i", int 0])
+            (.prim .hd [.ref "env"])
+            (.call "nth" [.prim .subI [.ref "i", int 1], .prim .tl [.ref "env"]]) } ]
+
+def interpResolved : Except String (Program × List Bool) := Surface.resolveProgram interpS
+
+#guard interpResolved.toOption.isSome
+
+def interpP2  : Program    := match interpResolved with | .ok (p, _) => p | .error _ => ⟨[], 0⟩
+def interpInl : List Bool  := match interpResolved with | .ok (_, i) => i | .error _ => []
+
+-- name resolution must reproduce the hand-written de Bruijn program exactly
+#guard interpP2.funs.length == 2
+
+-- BTA: the entry takes a static expression and a dynamic environment
+def interpA2 : Except BTAError AProgram := bta interpP2 interpInl [.stat, .dyn] 50
+
+#guard interpA2.toOption.isSome
+
+def interpA2P : AProgram := match interpA2 with | .ok a => a | .error _ => ⟨[], 0⟩
+
+-- bta_sound and bta_erases, as executable checks on this instance
+#guard wfAProgram interpA2P
+#guard eraseProgram interpA2P == interpP2
+
+-- BTA must infer exactly the division that was written by hand
+#guard (interpA2P.funs.map AFunDef.params) == [[.stat, .dyn], [.stat, .dyn]]
+#guard (interpA2P.funs.map AFunDef.ret)    == [.dyn, .dyn]
+
+def residual2 : Except MixError Program := mixDriver 200 50 interpA2P [sample]
+
+#guard residual2.toOption.isSome
+
+def residual2P : Program := match residual2 with | .ok p => p | .error _ => ⟨[], 0⟩
+
+-- and the pipeline-produced residual computes the same thing, with the
+-- dispatch equally gone
+#guard evalFuel 200 residual2P [] (.call 0 [.lit sampleEnv]) == .value (.int 56)
+#guard ((residual2P.funs.map (fun fd => countCaseT fd.body)).foldl (· + ·) 0) == 0
+
+#eval residual2P
 
 end Demo
 end Projection

@@ -138,7 +138,7 @@ inductive Term where
   | ctorT : Nat → List Term → Term
   | caseT : Term → List (Nat × Nat × Term) → Term
   | call  : Nat → List Term → Term
-  deriving Inhabited, Repr
+  deriving Inhabited, Repr, BEq
 
 /-- One branch of a `caseT`: `(tag, arity, body)`.
 
@@ -157,7 +157,7 @@ abbrev Alt := Nat × Nat × Term
 structure FunDef where
   arity : Nat
   body  : Term
-  deriving Inhabited, Repr
+  deriving Inhabited, Repr, BEq
 
 /-- A program: a function table plus an entry index.
 
@@ -167,7 +167,7 @@ speed matters it is a host-side concern, not a semantic one. -/
 structure Program where
   funs  : List FunDef
   entry : Nat
-  deriving Inhabited, Repr
+  deriving Inhabited, Repr, BEq
 
 /-- Environments are finite lists, innermost binding first (de Bruijn order).
 
