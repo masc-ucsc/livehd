@@ -10,7 +10,7 @@ export LEAN_NUM_THREADS=4
 mkdir -p "$OUT/LeanSemanticPrimitives/Projection"
 # Default: the whole Projection library, in dependency order.
 MODULES=(ObjectLanguage ObjectLanguageSemantics Encoding BindingTime
-         PartialEvaluator Surface BTA MixProgram Demo
+         PartialEvaluator Surface BTA MixProgram Demo Gate0
          PartialEvaluatorCorrect Audit)
 if [ $# -gt 0 ]; then MODULES=("$@"); fi
 

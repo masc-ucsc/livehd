@@ -59,6 +59,19 @@ The ONLY place a primitive is interpreted.  Adding a primitive touches this
 function and its correctness lemma -- never the specializer, whose `prim` rule is
 generic over `p` (see `PartialEvaluator.lean`). -/
 
+/-- A cons chain as a list, and back.  `mkCtorP`/`ctorFieldsP` move between the
+two representations of "several values": `ctor`'s field list, which is a Lean
+`List` inside the value, and a cons chain, which is what a program in `L` can
+actually walk. -/
+def valList : Val → Option (List Val)
+  | .nil      => some []
+  | .cons a b => (valList b).map (a :: ·)
+  | _         => none
+
+def listVal : List Val → Val
+  | []      => .nil
+  | v :: vs => .cons v (listVal vs)
+
 def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
   match p, vs with
   | .addI, [.int a, .int b] => .ok (.int (a + b))
@@ -77,6 +90,14 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
   | .tl, [.cons _ d] => .ok d
   | .consP, [a, d]   => .ok (.cons a d)
   | .eqV, [a, b]     => .ok (.bool (Val.beq a b))
+  | .mkCtorP, [.int k, l] =>
+      if 0 ≤ k then
+        match valList l with
+        | some fs => .ok (.ctor k.toNat fs)
+        | none    => .error "mkCtor: fields are not a list"
+      else .error "mkCtor: negative tag"
+  | .ctorTagP,    [.ctor t _]  => .ok (.int (Int.ofNat t))
+  | .ctorFieldsP, [.ctor _ fs] => .ok (listVal fs)
   | .bvMk,    [.int w, .int v] => .ok (bvNorm w v)
   | .bvWidth, [v] => match asBV v with | some (w, _) => .ok (.int w) | none => .error "bvWidth: not a BV"
   | .bvUint,  [v] => match asBV v with

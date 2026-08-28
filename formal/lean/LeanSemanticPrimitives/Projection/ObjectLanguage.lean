@@ -94,6 +94,12 @@ inductive Prim where
   -- structural equality on values, which `mix`'s memo table is keyed on and
   -- which `eqI` (integers only) cannot provide
   | eqV
+  -- generic reflection on `ctor`.  `ctorT` builds a constructor with a STATIC
+  -- tag and field count, which is right for a program written by hand -- but
+  -- `mix` takes apart and rebuilds constructor values belonging to the program
+  -- it is specializing, whose tags it cannot know.  Without these a specializer
+  -- cannot be written in its own object language.
+  | mkCtorP | ctorTagP | ctorFieldsP
   -- bit vectors, as LGraphModel's BV = ⟨width, value⟩
   | bvMk | bvWidth | bvUint | bvBit
   | bvAnd | bvOr | bvXor | bvNot
@@ -109,6 +115,8 @@ def Prim.arity : Prim → Nat
   | .notB                                 => 1
   | .isNil | .hd | .tl                    => 1
   | .consP | .eqV                         => 2
+  | .mkCtorP                              => 2
+  | .ctorTagP | .ctorFieldsP              => 1
   | .bvMk                                 => 2
   | .bvWidth | .bvUint                    => 1
   | .bvBit                                => 2

@@ -25,7 +25,7 @@
   literal pattern would be a second copy of the table and could drift from it.
 -/
 
-import LeanSemanticPrimitives.Projection.ObjectLanguage
+import LeanSemanticPrimitives.Projection.BindingTime
 
 namespace Projection
 
@@ -76,6 +76,7 @@ def primCode : Prim → Nat
   | .bvAnd => 18 | .bvOr => 19 | .bvXor => 20 | .bvNot => 21
   | .bvResize => 22
   | .consP => 23 | .eqV => 24
+  | .mkCtorP => 25 | .ctorTagP => 26 | .ctorFieldsP => 27
 
 def primOfCode : Nat → Option Prim
   | 0 => some .addI  | 1 => some .subI  | 2 => some .mulI
@@ -87,6 +88,7 @@ def primOfCode : Nat → Option Prim
   | 18 => some .bvAnd | 19 => some .bvOr | 20 => some .bvXor | 21 => some .bvNot
   | 22 => some .bvResize
   | 23 => some .consP | 24 => some .eqV
+  | 25 => some .mkCtorP | 26 => some .ctorTagP | 27 => some .ctorFieldsP
   | _ => none
 
 @[simp] theorem primOfCode_primCode (p : Prim) : primOfCode (primCode p) = some p := by
@@ -524,5 +526,95 @@ theorem encProgram_inj {P Q : Program} (h : encProgram P = encProgram Q) : P = Q
   have := decProgram_encProgram P
   rw [h, decProgram_encProgram Q] at this
   exact (Option.some.inj this).symm
+
+/-! ## Annotated programs
+
+The object-level specializer consumes ANNOTATED programs, so `ATerm` needs an
+encoding too.  Only encoders: nothing ever decodes an `ATerm`, because `mix`
+produces a `Program`, not an `AProgram` -- the annotated form only ever travels
+INTO the object level.  If that changes the decoders are mechanical, and the
+retraction proof above is the template.
+
+Binding times encode as `int 0` / `int 1` rather than as nullary constructors.
+The object specializer tests them constantly, and `eqI` on an integer is one
+primitive where a `caseT` on a constructor is a branch -- and every one of those
+tests is on static data, so making them cheap makes the generated compiler
+smaller. -/
+
+def tagALit     : Nat := 30
+def tagAVar     : Nat := 31
+def tagALetIn   : Nat := 32
+def tagAIte     : Nat := 33
+def tagAPrim    : Nat := 34
+def tagACtorT   : Nat := 35
+def tagACaseT   : Nat := 36
+def tagACall    : Nat := 37
+def tagAUcall   : Nat := 38
+def tagALift    : Nat := 39
+def tagAAlt     : Nat := 40
+def tagAFunDef  : Nat := 41
+def tagAProgram : Nat := 42
+
+@[inline] def encBT : BT → Val
+  | .stat => .int 0
+  | .dyn  => .int 1
+
+def encDiv : Div → Val
+  | []      => .nil
+  | b :: bs => .cons (encBT b) (encDiv bs)
+
+mutual
+
+def encATerm : ATerm → Val
+  | .lit v        => .ctor tagALit   [v]                       -- payload RAW
+  | .var i        => .ctor tagAVar   [encNat i]
+  | .letIn b e bd => .ctor tagALetIn [encBT b, encATerm e, encATerm bd]
+  | .ite b c a e  => .ctor tagAIte   [encBT b, encATerm c, encATerm a, encATerm e]
+  | .prim b p ts  => .ctor tagAPrim  [encBT b, encPrim p, encATerms ts]
+  | .ctorT b k ts => .ctor tagACtorT [encBT b, encNat k, encATerms ts]
+  | .caseT b s as => .ctor tagACaseT [encBT b, encATerm s, encAAlts as]
+  | .call b f ts  => .ctor tagACall  [encBT b, encNat f, encATerms ts]
+  | .ucall b f ts => .ctor tagAUcall [encBT b, encNat f, encATerms ts]
+  | .lift t       => .ctor tagALift  [encATerm t]
+
+def encATerms : List ATerm → Val
+  | []      => .nil
+  | t :: ts => .cons (encATerm t) (encATerms ts)
+
+def encAAlts : List AAlt → Val
+  | []      => .nil
+  | a :: as => .cons (.ctor tagAAlt [encNat a.tag, encNat a.arity, encATerm a.body])
+                     (encAAlts as)
+
+end
+
+@[inline] def encAFunDef (fd : AFunDef) : Val :=
+  .ctor tagAFunDef [encDiv fd.params, encBT fd.ret, encATerm fd.body]
+
+def encAFunDefs : List AFunDef → Val
+  | []        => .nil
+  | fd :: fds => .cons (encAFunDef fd) (encAFunDefs fds)
+
+def encAProgram (A : AProgram) : Val :=
+  .ctor tagAProgram [encAFunDefs A.funs, encNat A.entry]
+
+/-! ## Values in, values out
+
+`encVals` packages a list of `Val`s -- the static arguments handed to the
+specializer, and the argument lists it passes around internally.  As with
+literals this is packaging only, not quotation: the elements are already data. -/
+
+def encVals : List Val → Val
+  | []      => .nil
+  | v :: vs => .cons v (encVals vs)
+
+def decVals : Val → Option (List Val)
+  | .nil      => some []
+  | .cons a b => (decVals b).map (a :: ·)
+  | _         => none
+
+@[simp] theorem decVals_encVals : ∀ vs : List Val, decVals (encVals vs) = some vs
+  | []      => by simp [encVals, decVals]
+  | v :: vs => by simp [encVals, decVals, decVals_encVals vs]
 
 end Projection
