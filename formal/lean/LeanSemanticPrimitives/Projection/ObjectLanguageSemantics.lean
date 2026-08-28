@@ -138,8 +138,9 @@ specializer and an evaluator can silently disagree:
   `arity` -- a `typeError`.
 -/
 
-def findAlt (alts : List Alt) (tag : Nat) : Option Alt :=
-  alts.find? (fun a => a.tag = tag)
+def findAlt : List Alt → Nat → Option Alt
+  | [],      _   => none
+  | a :: as, tag => if a.tag = tag then some a else findAlt as tag
 
 /-! ## The fuelled evaluator -/
 

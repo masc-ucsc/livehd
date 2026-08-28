@@ -128,12 +128,14 @@ annotation error, not a recoverable case. -/
 
 def splitArgs : Div → List PRes → Except MixError (List Val × List Term)
   | [], [] => .ok ([], [])
-  | .stat :: bs, .stat v :: rs => do
-      let (vs, ts) ← splitArgs bs rs
-      .ok (v :: vs, ts)
-  | .dyn :: bs, r :: rs => do
-      let (vs, ts) ← splitArgs bs rs
-      .ok (vs, r.toCode :: ts)
+  | .stat :: bs, .stat v :: rs =>
+      match splitArgs bs rs with
+      | .ok (vs, ts) => .ok (v :: vs, ts)
+      | .error e     => .error e
+  | .dyn :: bs, r :: rs =>
+      match splitArgs bs rs with
+      | .ok (vs, ts) => .ok (vs, r.toCode :: ts)
+      | .error e     => .error e
   | .stat :: _, .code _ :: _ => .error (.notStatic "call: static parameter got residual code")
   | _, _ => .error (.badArity "call: argument count does not match the division")
 
@@ -142,12 +144,14 @@ parameters hold their values, and the `j`-th dynamic parameter becomes residual
 index `j`. -/
 def buildEnv : Div → List Val → Nat → Except MixError PEnv
   | [], [], _ => .ok []
-  | .stat :: bs, v :: vs, j => do
-      let rest ← buildEnv bs vs j
-      .ok (.stat v :: rest)
-  | .dyn :: bs, vs, j => do
-      let rest ← buildEnv bs vs (j + 1)
-      .ok (.dyn j :: rest)
+  | .stat :: bs, v :: vs, j =>
+      match buildEnv bs vs j with
+      | .ok rest => .ok (.stat v :: rest)
+      | .error e => .error e
+  | .dyn :: bs, vs, j =>
+      match buildEnv bs vs (j + 1) with
+      | .ok rest => .ok (.dyn j :: rest)
+      | .error e => .error e
   | _, _, _ => .error (.badArity "specialize: static argument count does not match the division")
 
 /-- How many parameters survive into the residual function. -/
@@ -160,7 +164,10 @@ def dynCount : Div → Nat
 congruence rule guarantees it and a violation is an annotation error. -/
 def allStatic : List PRes → Except MixError (List Val)
   | []            => .ok []
-  | .stat v :: rs => do let vs ← allStatic rs; .ok (v :: vs)
+  | .stat v :: rs =>
+      match allStatic rs with
+      | .ok vs   => .ok (v :: vs)
+      | .error e => .error e
   | .code _ :: _  => .error (.notStatic "static node has a residual operand")
 
 /-- The residual code of each DYNAMIC argument, in source order.  These become
@@ -168,9 +175,10 @@ the `let`s an unfold wraps around the inlined body. -/
 def dynArgCodes : Div → List PRes → Except MixError (List Term)
   | [], [] => .ok []
   | .stat :: bs, _ :: rs => dynArgCodes bs rs
-  | .dyn :: bs, r :: rs => do
-      let ts ← dynArgCodes bs rs
-      .ok (r.toCode :: ts)
+  | .dyn :: bs, r :: rs =>
+      match dynArgCodes bs rs with
+      | .ok ts   => .ok (r.toCode :: ts)
+      | .error e => .error e
   | _, _ => .error (.badArity "unfold: argument count does not match the division")
 
 /-- The environment the inlined body is specialized under.
@@ -180,14 +188,16 @@ in … let e_{k-1} in ·` puts `e_{k-1}` at residual index 0, so the `j`-th dyna
 argument lands at index `k-1-j`. -/
 def inlineEnv : Div → List PRes → Nat → Nat → Except MixError PEnv
   | [], [], _, _ => .ok []
-  | .stat :: bs, .stat v :: rs, k, j => do
-      let rest ← inlineEnv bs rs k j
-      .ok (.stat v :: rest)
+  | .stat :: bs, .stat v :: rs, k, j =>
+      match inlineEnv bs rs k j with
+      | .ok rest => .ok (.stat v :: rest)
+      | .error e => .error e
   | .stat :: _, .code _ :: _, _, _ =>
       .error (.notStatic "unfold: static parameter got residual code")
-  | .dyn :: bs, _ :: rs, k, j => do
-      let rest ← inlineEnv bs rs k (j + 1)
-      .ok (.dyn (k - 1 - j) :: rest)
+  | .dyn :: bs, _ :: rs, k, j =>
+      match inlineEnv bs rs k (j + 1) with
+      | .ok rest => .ok (.dyn (k - 1 - j) :: rest)
+      | .error e => .error e
   | _, _, _, _ => .error (.badArity "unfold: argument count does not match the division")
 
 /-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
@@ -372,10 +382,13 @@ def mixFun (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat)
     (req : SpecRequest) : Except MixError (FunDef × List SpecRequest) :=
   match A.fn req.funIdx with
   | none    => .error (.unknownFun req.funIdx)
-  | some fd => do
-      let env ← buildEnv fd.params req.staticArgs 0
-      let (r, rq) ← mixTerm stepFuel A idx fd.params env fd.body
-      .ok (⟨dynCount fd.params, r.toCode⟩, rq)
+  | some fd =>
+    match buildEnv fd.params req.staticArgs 0 with
+    | .error e => .error e
+    | .ok env =>
+      match mixTerm stepFuel A idx fd.params env fd.body with
+      | .error e     => .error e
+      | .ok (r, rq)  => .ok (⟨dynCount fd.params, r.toCode⟩, rq)
 
 /-! ## The driver
 
@@ -420,9 +433,21 @@ def discover (stepFuel : Nat) : Nat → AProgram → List SpecRequest → List S
       let fresh := addNew seen rq
       discover stepFuel k A (work ++ fresh) (seen ++ fresh)
 
-def generate (stepFuel : Nat) (A : AProgram) (reqs : List SpecRequest) :
+/-- Explicit recursion rather than `mapM`: `generate_spec` has to say that
+residual function `i` is the specialization of request `i`, and `List.mapM` over
+`Except` does not expose a structure to induct on. -/
+def generateFrom (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat) :
+    List SpecRequest → Except MixError (List FunDef)
+  | []      => .ok []
+  | r :: rs =>
+    match mixFun stepFuel A idx r, generateFrom stepFuel A idx rs with
+    | .ok (fd, _), .ok fds  => .ok (fd :: fds)
+    | .error e,    _        => .error e
+    | _,           .error e => .error e
+
+@[inline] def generate (stepFuel : Nat) (A : AProgram) (reqs : List SpecRequest) :
     Except MixError (List FunDef) :=
-  reqs.mapM fun r => (mixFun stepFuel A (indexOfReq reqs) r).map Prod.fst
+  generateFrom stepFuel A (indexOfReq reqs) reqs
 
 /-- `mix`.  The entry request is discovered first, so it is residual function 0. -/
 def mixDriver (stepFuel wlFuel : Nat) (A : AProgram) (statics : List Val) :

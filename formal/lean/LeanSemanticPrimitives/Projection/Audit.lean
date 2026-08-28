@@ -13,6 +13,7 @@
 import LeanSemanticPrimitives.Projection.Encoding
 import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics
 import LeanSemanticPrimitives.Projection.BTA
+import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
 
 namespace Projection
 
@@ -30,5 +31,13 @@ namespace Projection
 #print axioms bta_sound
 #print axioms bta_erases
 #print axioms erase_annT
+#print axioms eraseProgram_fn
+#print axioms findAlt_eraseAlts
+#print axioms Compat_shift
+#print axioms Compat_fields_dyn
+#print axioms Compat_fields_stat
+#print axioms Compat_stat_lookup
+#print axioms Compat_dyn_lookup
+#print axioms buildEnv_Compat
 
 end Projection
