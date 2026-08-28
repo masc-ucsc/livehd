@@ -121,7 +121,11 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
   | .bvResize, [.int w, a] => match asBV a with
                               | some (aw, x) => .ok (bvNorm w (if aw ≤ 0 then 0 else x % (2 ^ aw.toNat)))
                               | none => .error "bvResize: not a BV"
-  | p, vs => .error s!"primitive arity/type error: expected {p.arity} operands, got {vs.length}"
+  | p, vs =>
+      if vs.length = p.arity then
+        .error s!"primitive {repr p}: operand types do not match"
+      else
+        .error s!"primitive {repr p}: expected {p.arity} operands, got {vs.length}"
 
 /-! ## `caseT` alternative selection
 

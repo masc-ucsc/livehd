@@ -26,7 +26,7 @@ open MixProg
 /-! ## (a) `mixProgram` against the Lean specializer -/
 
 #guard mixResolved.toOption.isSome
-#guard mixProgram.funs.length == 39
+#guard mixProgram.funs.length == 52
 
 /-- Run the object-level specializer on the toy interpreter and the sample
 expression -- the same inputs `Demo.residual2` gave the Lean specializer. -/

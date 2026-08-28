@@ -134,9 +134,13 @@ private def mixTermAlts : List SAlt :=
   [ (tagALit, ["v"], pair_ (rStat (R "v")) nil_)
 
         , (tagAVar, ["i"],
-            .switch (C "nthL" [R "i", R "env"])
-              [ (tagPStat, ["v"], pair_ (rStat (R "v")) nil_)
-              , (tagPDyn,  ["k"], pair_ (rCode (eVar (R "k"))) nil_) ])
+            -- the DIVISION decides which kind of entry this is, and the
+            -- division is static; switching on the entry itself would put a tag
+            -- test in the generated compiler for every variable reference
+            .letN "e" (C "nthE" [R "i", R "env"]) <|
+            .ite (eq_ (C "nthS" [R "i", R "D"]) (K 0))
+              (pair_ (rStat (C "pvVal" [R "e"])) nil_)
+              (pair_ (rCode (eVar (C "pvIdx" [R "e"]))) nil_))
 
         , (tagALift, ["e"],
             .letN "o" (C "mixTerm" [R "A", R "reqs", R "D", R "env", R "e"])
@@ -204,16 +208,8 @@ private def mixTermAlts : List SAlt :=
             .ite (eq_ (R "bs") (K 0))
               -- static scrutinee: pick the alternative now and bind its fields as
               -- values.  No residual `caseT` survives.
-              (.letN "sv" (C "presVal" [R "r1"]) <|
-               .letN "tg" (P1 .ctorTagP (R "sv")) <|
-               .letN "fs" (P1 .ctorFieldsP (R "sv")) <|
-               .letN "al" (C "findAAltL" [R "as", R "tg"]) <|
-               .letN "ar" (C "altArity" [R "al"]) <|
-               .letN "o2" (C "mixTerm"
-                   [R "A", R "reqs",
-                    C "appendL" [C "replicateL" [R "ar", K 0], R "D"],
-                    C "appendL" [C "mapPStat" [R "fs"], R "env"],
-                    C "altBody" [R "al"]])
+              (.letN "o2" (C "mixCaseSel"
+                   [R "A", R "reqs", R "D", R "env", R "as", C "presVal" [R "r1"]])
                  (pair_ (fst_ (R "o2")) (C "appendL" [R "q1", snd_ (R "o2")])))
               (.letN "o2" (C "mixAlts" [R "A", R "reqs", R "D", R "env", R "as"])
                  (pair_ (rCode (eCaseT (C "toCode" [R "r1"]) (fst_ (R "o2"))))
@@ -266,15 +262,46 @@ def mixS : SProgram where
 
   -- ## generic list helpers
 
-  -- `nth i l`.  Recursion is on `i`, which is static wherever this is used, so
-  -- specializing it unrolls to exactly `i` steps.
-  { name := "nthL", params := ["i", "l"]
+  -- `nth`, TWICE.  Recursion is on `i`, which is static everywhere, so both
+  -- copies unroll -- but the LIST differs: `nthS` indexes the function table and
+  -- the division, which are static, while `nthE` indexes the partial
+  -- environment, whose contents are not.  One shared copy is forced dynamic by
+  -- the environment use, and then `fnOf` returns a dynamic function definition,
+  -- `funBody` a dynamic term, and `mixTerm`'s term parameter goes dynamic --
+  -- at which point the specializer specializes nothing.  Same reason as
+  -- `appendD`, and the same general fix (polyvariant BTA) would remove it.
+  { name := "nthS", params := ["i", "l"]
   , body := .ite (eq_ (R "i") (K 0)) (hd_ (R "l"))
-                 (C "nthL" [sub_ (R "i") (K 1), tl_ (R "l")]) }
+                 (C "nthS" [sub_ (R "i") (K 1), tl_ (R "l")]) }
+
+  , { name := "nthE", params := ["i", "l"]
+    , body := .ite (eq_ (R "i") (K 0)) (hd_ (R "l"))
+                   (C "nthE" [sub_ (R "i") (K 1), tl_ (R "l")]) }
 
   , { name := "appendL", params := ["a", "b"]
     , body := .ite (isNil_ (R "a")) (R "b")
                    (cons_ (hd_ (R "a")) (C "appendL" [tl_ (R "a"), R "b"])) }
+
+  -- A SECOND COPY OF `append`, for divisions only.  Binding-time analysis here
+  -- is monovariant -- one division per function -- and `appendL` is applied
+  -- both to request lists (dynamic) and to divisions (static), so a single copy
+  -- is forced dynamic and drags every division it builds down with it.
+  -- Duplicating the helper is the standard remedy; making BTA polyvariant would
+  -- fix this class of loss in general.
+  , { name := "appendD", params := ["a", "b"]
+    , body := .ite (isNil_ (R "a")) (R "b")
+                   (cons_ (hd_ (R "a")) (C "appendD" [tl_ (R "a"), R "b"])) }
+
+  -- `length`, twice, for the same reason: `numFuns` measures the static function
+  -- table and is a loop bound that has to stay static, while `closeL` measures
+  -- the request list.
+  , { name := "lenS", params := ["l"]
+    , body := .ite (isNil_ (R "l")) (K 0) (add_ (K 1) (C "lenS" [tl_ (R "l")])) }
+
+  , { name := "lenL", params := ["l"]
+    , body := .ite (isNil_ (R "l")) (K 0) (add_ (K 1) (C "lenL" [tl_ (R "l")])) }
+
+  , { name := "numFuns", params := ["A"], body := C "lenS" [C "progFuns" [R "A"]] }
 
   -- ## annotated-program accessors
 
@@ -283,7 +310,7 @@ def mixS : SProgram where
   , { name := "progEntry", params := ["A"]
     , body := .switch (R "A") [(tagAProgram, ["fs", "e"], R "e")] }
   , { name := "fnOf", params := ["A", "f"]
-    , body := C "nthL" [R "f", C "progFuns" [R "A"]] }
+    , body := C "nthS" [R "f", C "progFuns" [R "A"]] }
   , { name := "funParams", params := ["fd"]
     , body := .switch (R "fd") [(tagAFunDef, ["p", "r", "b"], R "p")] }
   , { name := "funRet", params := ["fd"]
@@ -299,7 +326,7 @@ def mixS : SProgram where
   , { name := "btOfD", params := ["D", "t"]
     , body := .switch (R "t")
         [ (tagALit,   ["v"],            K 0)
-        , (tagAVar,   ["i"],            C "nthL" [R "i", R "D"])
+        , (tagAVar,   ["i"],            C "nthS" [R "i", R "D"])
         , (tagALetIn, ["b", "e", "bd"], R "b")
         , (tagAIte,   ["b", "c", "a", "e"], R "b")
         , (tagAPrim,  ["b", "p", "ts"], R "b")
@@ -329,6 +356,14 @@ def mixS : SProgram where
 
   -- ## partial results
 
+  -- The PEnv entry's SHAPE is fixed by the division, so which of these applies
+  -- is a static question even though the payload is not.  Reading the payload
+  -- with a one-alternative `switch` keeps that question out of `mixTerm`.
+  , { name := "pvVal", params := ["e"]
+    , body := .switch (R "e") [(tagPStat, ["v"], R "v")] }
+  , { name := "pvIdx", params := ["e"]
+    , body := .switch (R "e") [(tagPDyn, ["k"], R "k")] }
+
   , { name := "presVal", params := ["r"]
     , body := .switch (R "r") [(tagRStat, ["v"], R "v")] }
 
@@ -349,12 +384,8 @@ def mixS : SProgram where
 
   -- ## alternative selection
 
-  , { name := "findAAltL", params := ["alts", "tag"]
-    , body := .switch (hd_ (R "alts"))
-        [ (tagAAlt, ["t", "a", "b"],
-            .ite (eq_ (R "t") (R "tag")) (hd_ (R "alts"))
-                 (C "findAAltL" [tl_ (R "alts"), R "tag"])) ] }
-
+  , { name := "altTag", params := ["a"]
+    , body := .switch (R "a") [(tagAAlt, ["t", "n", "b"], R "t")] }
   , { name := "altArity", params := ["a"]
     , body := .switch (R "a") [(tagAAlt, ["t", "n", "b"], R "n")] }
   , { name := "altBody", params := ["a"]
@@ -439,6 +470,37 @@ def mixS : SProgram where
     , body := .ite (isNil_ (R "vs")) nil_
                    (cons_ (pStat (hd_ (R "vs"))) (C "mapPStat" [tl_ (R "vs")])) }
 
+  -- "The trick": select the alternative by walking the STATIC alternative list
+  -- and testing tags dynamically, rather than looking the alternative up and
+  -- then processing whatever came back.
+  --
+  -- The two are equivalent when `mix` runs.  They are not equivalent when `mix`
+  -- is SPECIALIZED: the scrutinee's tag is a static value of the program being
+  -- specialized, which is dynamic one level out, so a lookup returns a dynamic
+  -- alternative and `mixTerm` inherits a dynamic term -- at which point nothing
+  -- specializes at all.  Walking the list statically keeps `altBody a` static
+  -- in each branch; the dynamic tag test is simply residualized, which is
+  -- exactly the dispatch a real compiler performs on the source program.
+  , { name := "mixCaseSel", params := ["A", "reqs", "D", "env", "as", "sv"]
+    -- The exhausted case must EMIT a failing term, not evaluate one.  `mix`
+    -- unrolls this walk over the static alternative list and therefore reaches
+    -- the end of it at specialization time, even though at run time exactly one
+    -- alternative matches -- so a static `hd nil` here fails while specializing
+    -- a perfectly good program.  Emitting residual `hd nil` instead reproduces
+    -- what the source does when no alternative matches (a `typeError`), in the
+    -- one execution that actually gets there.
+    , body := .ite (isNil_ (R "as"))
+        (pair_ (rCode (ePrim (K 12) (cons_ (eLit nil_) nil_))) nil_)
+        (.letN "a"  (hd_ (R "as")) <|
+         .letN "ar" (C "altArity" [R "a"]) <|
+         .ite (eq_ (C "altTag" [R "a"]) (P1 .ctorTagP (R "sv")))
+           (C "mixTerm"
+             [R "A", R "reqs",
+              C "appendD" [C "replicateL" [R "ar", K 0], R "D"],
+              C "appendL" [C "mapPStat" [P1 .ctorFieldsP (R "sv")], R "env"],
+              C "altBody" [R "a"]])
+           (C "mixCaseSel" [R "A", R "reqs", R "D", R "env", tl_ (R "as"), R "sv"])) }
+
   , { name := "mixTerms", params := ["A", "reqs", "D", "env", "ts"]
     , body := .ite (isNil_ (R "ts")) (pair_ nil_ nil_)
         (.letN "o1" (C "mixTerm"  [R "A", R "reqs", R "D", R "env", hd_ (R "ts")]) <|
@@ -452,7 +514,7 @@ def mixS : SProgram where
          .letN "ar" (C "altArity" [R "a"]) <|
          .letN "o1" (C "mixTerm"
              [R "A", R "reqs",
-              C "appendL" [C "replicateL" [R "ar", K 1], R "D"],
+              C "appendD" [C "replicateL" [R "ar", K 1], R "D"],
               C "appendL" [C "freshFrom" [K 0, R "ar"], C "shiftEnv" [R "ar", R "env"]],
               C "altBody" [R "a"]]) <|
          .letN "o2" (C "mixAlts" [R "A", R "reqs", R "D", R "env", tl_ (R "as")]) <|
@@ -468,41 +530,94 @@ def mixS : SProgram where
   , { name := "reqArgs", params := ["r"]
     , body := .switch (R "r") [(tagReq, ["f", "vs"], R "vs")] }
 
-  , { name := "mixFun", params := ["A", "reqs", "req"]
+  -- `f` IS A SEPARATE, STATIC PARAMETER -- not read out of the request.
+  --
+  -- This is the change that decides whether the second projection works at all.
+  -- Taking `f` from the request makes it dynamic one level out, so `fnOf A f`,
+  -- `funParams`, and `funBody` all go dynamic, and `mixTerm` receives a dynamic
+  -- term: its `switch` on the term is then residualized and NOTHING
+  -- specializes.  Passing `f` alongside keeps the whole chain static, and
+  -- `mixTerm` ends up memoized on `(A, Δ, t)` -- one residual function per
+  -- interpreter subterm, which is a compiler.
+  , { name := "mixFun", params := ["A", "reqs", "f", "args"]
     , body :=
-        .letN "fd" (C "fnOf" [R "A", C "reqFun" [R "req"]]) <|
+        .letN "fd" (C "fnOf" [R "A", R "f"]) <|
         .letN "ps" (C "funParams" [R "fd"]) <|
         .letN "o"  (C "mixTerm"
             [R "A", R "reqs", R "ps",
-             C "buildEnvL" [R "ps", C "reqArgs" [R "req"], K 0],
+             C "buildEnvL" [R "ps", R "args", K 0],
              C "funBody" [R "fd"]]) <|
         pair_ (eFunDef (C "dynCountL" [R "ps"]) (C "toCode" [fst_ (R "o")]))
               (snd_ (R "o")) }
 
   -- ## the driver
   --
-  -- Discovery passes `seen` as the memo table, so a request it has not reached
-  -- yet resolves to index -1.  That code is thrown away; only generation, which
-  -- runs against the complete list, is kept.
+  -- Requests are kept in FUNCTION-MAJOR order, and every pass over them is an
+  -- outer loop on the function index (static, so it unrolls) around an inner
+  -- loop on the requests (dynamic, so it survives).  That is what lets `f` be
+  -- static at the point `mixFun` is called.
+  --
+  -- The cost is that discovery is a chaotic iteration rather than a worklist:
+  -- each round re-specializes every request seen so far.  Rounds are bounded by
+  -- the depth of the call graph, and the alternative -- popping from a dynamic
+  -- worklist -- is exactly what makes `f` dynamic.
 
-  , { name := "discoverL", params := ["A", "work", "seen"]
-    , body := .ite (isNil_ (R "work")) (R "seen")
-        (.letN "o" (C "mixFun" [R "A", R "seen", hd_ (R "work")]) <|
-         .letN "fresh" (C "addNewL" [R "seen", snd_ (R "o")]) <|
-         C "discoverL" [R "A", C "appendL" [tl_ (R "work"), R "fresh"],
-                        C "appendL" [R "seen", R "fresh"]]) }
+  , { name := "filterFun", params := ["reqs", "f"]
+    , body := .ite (isNil_ (R "reqs")) nil_
+        (.ite (eq_ (C "reqFun" [hd_ (R "reqs")]) (R "f"))
+           (cons_ (hd_ (R "reqs")) (C "filterFun" [tl_ (R "reqs"), R "f"]))
+           (C "filterFun" [tl_ (R "reqs"), R "f"])) }
 
-  , { name := "generateL", params := ["A", "reqs", "todo"]
+  , { name := "groupByFun", params := ["A", "reqs", "f"]
+    , body := .ite (eq_ (R "f") (C "numFuns" [R "A"])) nil_
+        (C "appendL" [C "filterFun" [R "reqs", R "f"],
+                      C "groupByFun" [R "A", R "reqs", add_ (R "f") (K 1)]]) }
+
+  , { name := "collectFor", params := ["A", "reqs", "f", "todo"]
     , body := .ite (isNil_ (R "todo")) nil_
-        (cons_ (fst_ (C "mixFun" [R "A", R "reqs", hd_ (R "todo")]))
-               (C "generateL" [R "A", R "reqs", tl_ (R "todo")])) }
+        (.ite (eq_ (C "reqFun" [hd_ (R "todo")]) (R "f"))
+           (C "appendL"
+             [snd_ (C "mixFun" [R "A", R "reqs", R "f", C "reqArgs" [hd_ (R "todo")]]),
+              C "collectFor" [R "A", R "reqs", R "f", tl_ (R "todo")]])
+           (C "collectFor" [R "A", R "reqs", R "f", tl_ (R "todo")])) }
 
+  , { name := "collectAll", params := ["A", "reqs", "f"]
+    , body := .ite (eq_ (R "f") (C "numFuns" [R "A"])) nil_
+        (C "appendL" [C "collectFor" [R "A", R "reqs", R "f", R "reqs"],
+                      C "collectAll" [R "A", R "reqs", add_ (R "f") (K 1)]]) }
+
+  , { name := "closeL", params := ["A", "seen"]
+    , body :=
+        .letN "s2" (C "groupByFun"
+            [R "A",
+             C "appendL" [R "seen",
+               C "addNewL" [R "seen", C "collectAll" [R "A", R "seen", K 0]]],
+             K 0]) <|
+        .ite (eq_ (C "lenL" [R "seen"]) (C "lenL" [R "s2"])) (R "seen")
+             (C "closeL" [R "A", R "s2"]) }
+
+  , { name := "genFor", params := ["A", "reqs", "f", "todo"]
+    , body := .ite (isNil_ (R "todo")) nil_
+        (.ite (eq_ (C "reqFun" [hd_ (R "todo")]) (R "f"))
+           (cons_ (fst_ (C "mixFun" [R "A", R "reqs", R "f", C "reqArgs" [hd_ (R "todo")]]))
+                  (C "genFor" [R "A", R "reqs", R "f", tl_ (R "todo")]))
+           (C "genFor" [R "A", R "reqs", R "f", tl_ (R "todo")])) }
+
+  , { name := "genAll", params := ["A", "reqs", "f"]
+    , body := .ite (eq_ (R "f") (C "numFuns" [R "A"])) nil_
+        (C "appendL" [C "genFor" [R "A", R "reqs", R "f", R "reqs"],
+                      C "genAll" [R "A", R "reqs", add_ (R "f") (K 1)]]) }
+
+  -- The entry is no longer residual function 0: function-major order puts
+  -- requests for lower-numbered source functions first, so the entry's index
+  -- has to be looked up.
   , { name := "mixDriver", params := ["A", "statics"]
     , body :=
         .letN "req0" (mkReq (C "progEntry" [R "A"]) (R "statics")) <|
-        .letN "reqs" (C "discoverL" [R "A", cons_ (R "req0") nil_,
-                                     cons_ (R "req0") nil_]) <|
-        eProgram (C "generateL" [R "A", R "reqs", R "reqs"]) (K 0) }
+        .letN "reqs" (C "closeL"
+            [R "A", C "groupByFun" [R "A", cons_ (R "req0") nil_, K 0]]) <|
+        eProgram (C "genAll" [R "A", R "reqs", K 0])
+                 (C "indexOfReqL" [R "reqs", R "req0", K 0]) }
   ]
 
 /-! ## Resolution -/
