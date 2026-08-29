@@ -4026,6 +4026,66 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         continue;
       }
       const bool i_writes_r = drivers[i].writes.contains(r);
+
+      // A generated packed-array pipeline is commonly written as one partial
+      // continuous assignment per stage:
+      //
+      //   assign stages[0]       = in;
+      //   for (genvar s = 0; ...)
+      //     assign stages[s + 1] = f(stages[s]);
+      //   assign out             = stages[LAST];
+      //
+      // Symbol-only dependencies make every generated RHS helper depend on
+      // EVERY `stages` writer while its stage writer depends on that helper.
+      // That false SCC emits in source order, placing `out` before the loop and
+      // binding it to the first SSA version. Keep the accumulator chain ordered
+      // by source: a generated co-writer depends on the preceding writer, and
+      // helper equations in the SAME generate instance observe that preceding
+      // version. An external reader (such as `out`) still depends on all
+      // writers and therefore sees the completed array.
+      bool generated_co_writer = false;
+      if (it->second.size() > 1) {
+        for (size_t w : it->second) {
+          if (!drivers[w].in_generate_loop || drivers[w].member == nullptr
+              || drivers[w].member->kind != SymbolKind::ContinuousAssign || !drivers[w].writes.contains(r)) {
+            continue;
+          }
+          generated_co_writer = true;
+          break;
+        }
+      }
+      if (generated_co_writer) {
+        size_t prior_writer = SIZE_MAX;
+        for (size_t w : it->second) {
+          if (w < i && (prior_writer == SIZE_MAX || w > prior_writer)) {
+            prior_writer = w;
+          }
+        }
+        if (i_writes_r && drivers[i].in_generate_loop) {
+          if (prior_writer != SIZE_MAX) {
+            deps[i].insert(prior_writer);
+          }
+          continue;
+        }
+        // Net initializers inside a generate loop are separate Net drivers;
+        // slang does not mark those as `in_generate_loop`, but their collected
+        // prefix is the same as the stage's generated continuous writer.
+        if (!i_writes_r && !drivers[i].prefix.empty()) {
+          bool same_generate_writer = false;
+          for (size_t w : it->second) {
+            if (w != i && drivers[w].prefix == drivers[i].prefix) {
+              same_generate_writer = true;
+              break;
+            }
+          }
+          if (same_generate_writer) {
+            if (prior_writer != SIZE_MAX) {
+              deps[i].insert(prior_writer);
+            }
+            continue;
+          }
+        }
+      }
       for (size_t w : it->second) {
         if (w == i || i_writes_r) {
           continue;

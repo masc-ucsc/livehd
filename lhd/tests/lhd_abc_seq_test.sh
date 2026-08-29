@@ -11,10 +11,11 @@
 #   pass.abc.memory=true     memory bit-blasted into a DFF array + mux gates
 #   pass.abc.memory=false    memory kept as a native boundary instance
 #
-# Registers cross into ABC as 1-bit latches (so ABC can optimize the surrounding
-# logic); on read-back register=true maps each latch to a plain DFF cell (a bit
-# carrying a power-on init stays native so the value survives), register=false
-# rebuilds a native flop. Sub instances are blackbox boundaries; a memory is
+# Resetless registers cross into ABC as 1-bit latches (so ABC can optimize the
+# surrounding logic); on read-back register=true maps each latch to a plain DFF
+# cell (a reset-bearing register or resetless power-on init stays native so its
+# contract survives), while register=false rebuilds a native flop. Sub instances
+# are blackbox boundaries; a memory is
 # either a boundary (memory=false) or lowered to flops+mux gates (memory=true).
 # Each mode's mapped netlist must be sequentially LEC-equivalent (yosys miter +
 # BMC/induction, via `lhd lec --set formal.solver=lgyosys`) to its `partition` twin.
@@ -95,18 +96,20 @@ run_abc_lec() {
 
 has() { grep -hq "$2" "$1/"*.v; }
 
-# register=true: flops map to library DFF cells (abc_seq/hier_seq are init-less,
-# so every flop becomes a DFFx1 cell -- no behavioral `always @(posedge)` left).
+# abc_seq/hier_seq declare concrete initial values, which request Pyrope's
+# implicit reset. The test Liberty has no reset-capable DFF, so register=true
+# must keep those flops native while mapping their surrounding logic.
 run_abc_lec abc_seq abc_seq.abc_seq true false
-has "$NETV" "DFFx1 " || fail "abc_seq register=true: flops were not mapped to DFF cells"
-! has "$NETV" "posedge" || fail "abc_seq register=true: a behavioral flop survived (expected all DFF cells)"
-echo "PASS: register=true maps flops to DFF cells (abc_seq)"
+has "$NETV" "posedge" || fail "abc_seq register=true: reset-bearing native flops were lost"
+! has "$NETV" "DFFx1 " || fail "abc_seq register=true: reset-bearing flops became plain DFF cells"
+echo "PASS: register=true keeps reset-bearing flops native (abc_seq)"
 
 run_abc_lec hier_seq hier_seq.top true false
-has "$NETV" "DFFx1 " || fail "hier_seq register=true: flops were not mapped to DFF cells"
-echo "PASS: register=true maps flops to DFF cells across hierarchy (hier_seq)"
+has "$NETV" "posedge" || fail "hier_seq register=true: reset-bearing native flops were lost"
+! has "$NETV" "DFFx1 " || fail "hier_seq register=true: reset-bearing flops became plain DFF cells"
+echo "PASS: register=true keeps reset-bearing flops native across hierarchy (hier_seq)"
 
-# A synchronous reset lives in the D cone and does NOT specify power-on state.
+# A synchronous reset expressed in the D cone does NOT specify power-on state.
 # ABC is free to choose zero for its internal don't-care latch init, but the
 # read-back must recover the source LGraph's absent init rather than turn that
 # optimization witness into a hardware guarantee.  The graph-native LEC checks
@@ -128,6 +131,37 @@ rsrun compile lg:"$RSD/net" --top abc_resetless_sync --recipe O0 --emit-dir veri
 has "$RSD/netv" "DFFx1 " || fail "abc_resetless_sync: init-less flop was not mapped to DFF cells"
 ! has "$RSD/netv" "posedge" || fail "abc_resetless_sync: fake ABC init kept the flop native"
 echo "PASS: ABC's internal don't-care init does not become a netlist power-on value"
+
+# The test Liberty's plain DFFx1 cannot implement either reset-bearing register:
+# asynchronous reset is an event, while synchronous reset also carries a source
+# reset/initial contract before the first edge. Keep both native while still
+# mapping their XOR data cones. lgcheck toggles reset independently of clk, so
+# this catches the old reset-folded-into-D/plain-DFF miscompile directly.
+ARD="$W/abc_async_reset"
+mkdir -p "$ARD"
+ARR="$ARD/r.json"
+arrun() { "$LHD" "$@" -q --result-json "$ARR" || fail "$* -> $(cat "$ARR" 2>/dev/null)"; }
+arrun compile lhd/tests/abc_async_reset.prp --top abc_async_reset --recipe O1 \
+  --emit-dir lg:"$ARD/lg" --workdir "$ARD/w1"
+arrun pass color synth --top abc_async_reset lg:"$ARD/lg" --workdir "$ARD/w2"
+arrun pass partition --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/re" --workdir "$ARD/w3"
+arrun pass abc --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/net" --set abc.library="$LIB" \
+  --workdir "$ARD/w4"
+arrun pass liberty gensim "$LIB" --emit-dir lg:"$ARD/models" --workdir "$ARD/w5"
+arrun compile lg:"$ARD/net" --top abc_async_reset --recipe O0 --emit-dir verilog:"$ARD/netv" --workdir "$ARD/w6"
+arrun compile lg:"$ARD/models" --recipe O0 --emit-dir verilog:"$ARD/modelsv" --workdir "$ARD/w7"
+arrun compile lg:"$ARD/re" --top abc_async_reset --recipe O0 --emit-dir verilog:"$ARD/rev" --workdir "$ARD/w8"
+cat "$ARD/netv/"*.v "$ARD/modelsv/"*.v > "$ARD/impl.v"
+cat "$ARD/rev/"*.v > "$ARD/ref.v"
+arrun lec --set formal.solver=lgyosys --impl verilog:"$ARD/impl.v" --ref verilog:"$ARD/ref.v" \
+  --top abc_async_reset --workdir "$ARD/wc"
+has "$ARD/netv" "or posedge rst" || fail "abc_async_reset: asynchronous reset edge did not survive mapping"
+grep -h "always @" "$ARD/netv/"*.v | grep -qv "or posedge rst" \
+  || fail "abc_async_reset: synchronous reset register did not survive mapping"
+has "$ARD/netv" "XOR2x1\|NAND2x1\|NOR2x1\|INVx1\|BUFx1" \
+  || fail "abc_async_reset: surrounding data cone was not mapped"
+! has "$ARD/netv" "DFFx1 " || fail "abc_async_reset: reset-bearing register incorrectly mapped to plain DFFx1"
+echo "PASS: synchronous/asynchronous reset registers stay native and LEC-equivalent"
 
 # register=false: flops kept native (`always @(posedge)`), never a DFF cell.
 run_abc_lec abc_seq abc_seq.abc_seq false false

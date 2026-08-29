@@ -1666,7 +1666,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
 
   std::vector<Seq_flop>                 flops;
-  absl::flat_hash_set<hhds::Node_class> clk_demoted;  // registers demoted to boundary: clock from region-internal logic
+  // Registers that cannot be represented by the selected plain Liberty DFF
+  // stay native boundaries. A derived clock has no native source after latch
+  // read-back. A reset has no corresponding pin on that DFF: folding it into D
+  // loses an asynchronous reset edge, and also discards the source register's
+  // reset/initial contract before the first clock edge.
+  absl::flat_hash_set<hhds::Node_class> clk_demoted;
+  absl::flat_hash_set<hhds::Node_class> reset_demoted;
   if (opts_.map_register) {
     for (const auto& n : rb.nodes) {
       if (!gu::is_type_flop(n)) {
@@ -1688,6 +1694,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
       f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
       f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
+      // ABC latches and the selected plain Liberty DFF have no reset pin. Keep
+      // every reset-bearing flop native so cgen retains the exact synchronous
+      // or asynchronous reset behavior and its initial/reset value. The data
+      // cone still crosses the boundary and is technology-mapped.
+      if (!f.rst_drv.is_invalid()) {
+        reset_demoted.insert(n);
+        continue;
+      }
       // tolg may wrap a call-site clock in 1-bit Get_mask coercions (`x:u1`
       // casts survive cprop when the source is signed). On a 1-bit operand they are wire
       // identities regardless of the declared output width — trace to the root
@@ -1748,20 +1762,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       flops.push_back(std::move(f));
     }
-    if (!clk_demoted.empty()) {
-      // Name the registers, not just their count: "3 register(s)" in a 12k-node
-      // region is unactionable. First few by identity + declaration site; the
-      // set is unordered, so sort by nid to keep the report reproducible.
-      std::vector<hhds::Node_class> demoted(clk_demoted.begin(), clk_demoted.end());
+    // Name the registers, not just their count: "3 register(s)" in a 12k-node
+    // region is unactionable. First few by identity + declaration site; the set
+    // is unordered, so sort by nid to keep the report reproducible.
+    auto report_demoted = [&](const absl::flat_hash_set<hhds::Node_class>& set, std::string_view diag_id, const std::string& why) {
+      if (set.empty()) {
+        return;
+      }
+      std::vector<hhds::Node_class> demoted(set.begin(), set.end());
       std::sort(demoted.begin(), demoted.end(), [](const auto& a, const auto& b) { return a.get_debug_nid() < b.get_debug_nid(); });
-      auto w = livehd::diag::warn("pass.abc", "derived-clock-native", "unsupported");
-      w.at(node_span(rb, demoted.front()))
-          .msg(
-              "pass.abc region '{}': {} register(s) clocked by region-internal logic (a gated/derived clock) kept as "
-              "native flops — a DFF cell cannot take its clock from mapped logic; the clock cone is still mapped and "
-              "reconnected",
-              rb.module_name,
-              clk_demoted.size());
+      auto w = livehd::diag::warn("pass.abc", diag_id, "unsupported");
+      w.at(node_span(rb, demoted.front())).msg("pass.abc region '{}': {} {}", rb.module_name, demoted.size(), why);
       constexpr size_t kMaxNamed = 5;
       for (size_t k = 0; k < std::min(kMaxNamed, demoted.size()); ++k) {
         w.note(std::format("kept native: {}", node_identity(demoted[k])), node_span(rb, demoted[k]));
@@ -1770,7 +1781,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         w.note(std::format("... and {} more register(s)", demoted.size() - kMaxNamed));
       }
       w.emit();
-    }
+    };
+    report_demoted(clk_demoted,
+                   "derived-clock-native",
+                   "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — a DFF "
+                   "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected");
+    report_demoted(reset_demoted,
+                   "reset-native",
+                   "reset-bearing register(s) kept as native flops — the selected plain DFF cell has no reset pin; "
+                   "their surrounding data cones are still mapped");
   }
 
   // A very wide OR of non-overlapping, constant-position shifts is a packed-bus
@@ -1779,6 +1798,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // Keep the SHLs and their OR as native zero-delay wiring, just like
   // Get_mask/Set_mask at the mapper boundary. pass.opentimer's pin tracker
   // understands both operations, so timing identity is preserved bit-for-bit.
+  // Width at or above which a pure-wiring cell (Concat / constant-control
+  // slice, pack, shift, sext) is kept as a NATIVE boundary instead of being
+  // bit-blasted. Below it the bit-level cone is both cheaper and better
+  // (constant lanes reach ABC, and a one-bit boundary net does not acquire
+  // hundreds of dead mapped-cell loads); above it, materializing one ABC
+  // PI/PO per bit is pathological (Backend carries megabit-scale slice/pack
+  // colors). Native reconstruction is the scalability escape hatch for
+  // genuinely wide buses, not the default representation for ordinary structs.
+  constexpr int kNativeWiringBits = 4096;
+
   // Native boundary nodes. Most are zero-delay packed wiring discovered below;
   // a structurally cyclic combinational remainder is added after the wiring
   // scan because ABC itself only accepts acyclic Boolean networks.
@@ -1803,9 +1832,19 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     const auto d = gu::get_driver_of_sink_name(n, sink);
     return !d.is_invalid() && gu::is_const_pin(d);
   };
+  // A Concat lane whose driver is WIDER than its declared window is a width
+  // boundary only the native reconstruction path can spell (see fit_native_ins,
+  // which recreates the missing low-bit cast). Bit-blasting such a cell instead
+  // trips abc_bit's lane-table invariant, so keep it native regardless of width.
+  const auto concat_has_overwide_lane = [](const hhds::Node_class& n) {
+    const auto lanes = gu::concat_lanes(n);
+    return !lanes.empty() && !gu::concat_lane_violation(lanes).empty();
+  };
   for (const auto& n : rb.nodes) {
     const auto op     = gu::type_op_of(n);
-    bool       wiring = op == Ntype_op::Concat;
+    const int  width  = node_output_width(n);
+    // Below kNativeWiringBits a wiring cell stays inside the bit-level cone.
+    bool       wiring = op == Ntype_op::Concat && (width >= kNativeWiringBits || concat_has_overwide_lane(n));
     // The control operand must be CONSTANT for the cell to be a bit rename.
     // A non-constant mask/position is real logic -- and, crucially, one the
     // bit-blast loop below REFUSES with a precise per-node diagnostic. Marking
@@ -1813,16 +1852,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // node its pin tracker also cannot model, turning a clean ABC refusal into a
     // fatal in a later pass.
     if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
-      wiring = const_operand(n, "mask");
+      wiring = width >= kNativeWiringBits && const_operand(n, "mask");
     } else if (op == Ntype_op::Sext || op == Ntype_op::SRA || op == Ntype_op::SHL) {
-      wiring = const_operand(n, "b");
+      wiring = width >= kNativeWiringBits && const_operand(n, "b");
     }
     if (wiring) {
       native_wiring.insert(n);
     }
   }
   for (const auto& n : rb.nodes) {
-    if (gu::type_op_of(n) != Ntype_op::Or || node_output_width(n) < 4096) {
+    if (gu::type_op_of(n) != Ntype_op::Or || node_output_width(n) < kNativeWiringBits) {
       continue;
     }
     struct Span {
@@ -1932,7 +1971,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     const auto n            = port.src_driver.get_master_node();
     const auto op           = gu::type_op_of(n);
     const bool constant_shl = op == Ntype_op::SHL && gu::is_const_pin(gu::get_driver_of_sink_name(n, "b"));
-    const bool wide_pack    = node_output_width(n) >= 4096 && (op == Ntype_op::Concat || op == Ntype_op::Set_mask);
+    const bool wide_pack    = node_output_width(n) >= kNativeWiringBits && (op == Ntype_op::Concat || op == Ntype_op::Set_mask);
     if (!region.contains(n) || (!constant_shl && !wide_pack)) {
       continue;
     }
@@ -1947,7 +1986,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       const auto parent = e.driver.get_master_node();
       const auto op     = gu::type_op_of(parent);
-      if (!region.contains(parent) || node_output_width(parent) < 4096 || (op != Ntype_op::Concat && op != Ntype_op::Set_mask)) {
+      if (!region.contains(parent) || node_output_width(parent) < kNativeWiringBits
+          || (op != Ntype_op::Concat && op != Ntype_op::Set_mask)) {
         continue;
       }
       if (native_wiring.insert(parent).second) {
@@ -2074,6 +2114,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::vector<Bbox_in>                         ins;
     std::vector<std::pair<int, hhds::Pin_class>> const_ins;   // (port_id, const driver)
     std::vector<std::pair<int, hhds::Pin_class>> native_ins;  // flop boundary: (port_id, region-input driver) reconnected directly
+    std::vector<std::tuple<int, hhds::Pin_class, int, bool>> fit_native_ins;  // direct driver, truncated to a Concat lane
   };
   // region_in_name (built above the register scan) reconnects a flop
   // boundary's control pins (clock/reset/enable that come straight from a
@@ -2081,8 +2122,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // combinational AIG would map it to a logic buffer and make the rebuilt flop
   // clock on `posedge <data-wire>` -- logically correct but unusable as a real
   // netlist (breaks clock-tree synthesis and timing). Only the flop's din cone
-  // (genuine comb logic) crosses into ABC. A clk_demoted register's GATED
-  // clock cone, by contrast, IS genuine logic and does cross as a PO.
+  // (genuine comb logic) crosses into ABC. A demoted register's derived-clock
+  // or reset data cone, by contrast, IS genuine logic and crosses as a PO.
   // Convert the trivially-mappable remainders BEFORE the boundary scan, so the
   // refusal below only fires for a shape that genuinely has no gate translation.
   if (rems_rewritten_graphs_.insert(rb.src).second) {
@@ -2092,15 +2133,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   std::vector<Bbox>                      bboxes;
   std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
   for (const auto& n : rb.nodes) {
-    auto       op             = gu::type_op_of(n);
+    auto       op            = gu::type_op_of(n);
     // A flop in a !seq (combinational-only) map is kept as a native boundary,
     // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
     // din/enable/clock/reset are cut as POs (or recreated when const), and the
     // Flop node is rebuilt unchanged on read-back (never bit-blasted). In seq
     // mode flops instead cross into ABC as 1-bit latches (handled above), so they
     // are excluded from the boundary set there — EXCEPT registers demoted for a
-    // region-internal (gated/derived) clock, which take this boundary path.
-    bool       flop_boundary  = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n));
+    // region-internal clock or reset, which take this boundary path.
+    bool       flop_boundary = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n) || reset_demoted.contains(n));
     // A LATCH is a boundary in BOTH modes, unconditionally (2f-latch M2).
     // TERMINOLOGY TRAP: an ABC/AIGER "latch" is an edge-triggered unit-delay
     // register on an implicit global clock, NOT a level-sensitive latch — and
@@ -2149,9 +2190,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           .emit();
     }
     Bbox bb;
-    bb.node                                      = n;
-    bb.op                                        = op;
-    int                                   bb_idx = static_cast<int>(bboxes.size());
+    bb.node                              = n;
+    bb.op                                = op;
+    int                           bb_idx = static_cast<int>(bboxes.size());
+    absl::flat_hash_map<int, int> concat_lane_width;
+    if (op == Ntype_op::Concat) {
+      const auto lanes = gu::concat_lanes(n);
+      for (size_t lane = 0; lane < lanes.size(); ++lane) {
+        concat_lane_width.emplace(static_cast<int>(2 * lane), lanes[lane].width);
+      }
+    }
     // outputs: distinct driver pins that feed region logic -> fresh PI sources.
     // btree_map (ascending port_id) so the fresh-PI creation order — hence ABC
     // ObjId assignment and the read-back `g<id>_<cell>` gate names — is
@@ -2205,12 +2253,29 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       int pid = static_cast<int>(e.sink.get_port_id());
       if (gu::is_const_pin(e.driver)) {
         bb.const_ins.emplace_back(pid, e.driver);
-      } else if (region_in_name.contains(e.driver) || native_wiring.contains(e.driver.get_master_node())) {
-        bb.native_ins.emplace_back(pid, e.driver);
       } else {
+        const auto lane_fit      = concat_lane_width.find(pid);
+        const bool needs_fit     = lane_fit != concat_lane_width.end() && gu::bits_of(e.driver) > lane_fit->second;
+        const bool native_driver = region_in_name.contains(e.driver) || native_wiring.contains(e.driver.get_master_node());
+        if (native_driver) {
+          if (needs_fit) {
+            // A Concat lane is an explicit width boundary. The source normally
+            // has a Get_mask in front of an over-wide packed-array carrier, but
+            // that zero-delay wrapper can disappear while native boundaries
+            // are cut and reconstructed. Recreate it natively below rather
+            // than mapping W identity buffers through ABC.
+            bb.fit_native_ins.emplace_back(pid, e.driver, lane_fit->second, !gu::is_unsign(e.driver));
+          } else {
+            bb.native_ins.emplace_back(pid, e.driver);
+          }
+          continue;
+        }
         int w = gu::bits_of(e.driver);
         if (w == 0) {
           w = 1;
+        }
+        if (lane_fit != concat_lane_width.end()) {
+          w = std::min(w, lane_fit->second);
         }
         bb.ins.push_back({pid, e.driver, w, !gu::is_unsign(e.driver)});
       }
@@ -2402,12 +2467,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         ins.push_back(e.driver);
       }
       for (int b = 0; b < out_bits; ++b) {
-        Abc_Obj_t* acc = nullptr;
+        std::vector<Abc_Obj_t*> level;
+        level.reserve(ins.size());
         for (const auto& d : ins) {
-          auto* bit = abc_bit(d, b);
-          acc       = acc == nullptr ? bit : abc_bin(acc, bit, kind);
+          level.push_back(abc_bit(d, b));
         }
-        slots[b] = acc == nullptr ? abc_const_bit(false) : acc;
+        // Preserve the associativity already expressed by the n-ary LGraph
+        // cell. A left fold turns N parallel arbiter predicates into an
+        // artificial N-deep critical path before ABC sees the network; a
+        // pairwise reduction exposes the intended logarithmic structure.
+        while (level.size() > 1) {
+          std::vector<Abc_Obj_t*> next;
+          next.reserve((level.size() + 1) / 2);
+          for (size_t i = 0; i < level.size(); i += 2) {
+            next.push_back(i + 1 < level.size() ? abc_bin(level[i], level[i + 1], kind) : level[i]);
+          }
+          level = std::move(next);
+        }
+        slots[b] = level.empty() ? abc_const_bit(false) : level.front();
       }
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       hhds::Pin_class                       sel;
@@ -2427,20 +2504,29 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         sel_bits = 1;
       }
       for (int b = 0; b < out_bits; ++b) {
-        Abc_Obj_t* acc = nullptr;
+        std::vector<Abc_Obj_t*> products;
+        products.reserve(data.size());
         for (const auto& [v, drv] : data) {
           Abc_Obj_t* hit = nullptr;  // selector matches value v
           if (op == Ntype_op::Hotmux) {
             hit = abc_bit(sel, v);  // one-hot: bit v of selector
           } else {
+            std::vector<Abc_Obj_t*> literals;
+            literals.reserve(sel_bits);
             for (int sb = 0; sb < sel_bits; ++sb) {
               auto* sbit = abc_bit(sel, sb);
               auto* lit  = ((v >> sb) & 1) ? sbit : abc_not(sbit);
-              hit        = hit == nullptr ? lit : abc_bin(hit, lit, '&');
+              literals.push_back(lit);
             }
-            if (hit == nullptr) {
-              hit = abc_const_bit(true);
+            while (literals.size() > 1) {
+              std::vector<Abc_Obj_t*> next;
+              next.reserve((literals.size() + 1) / 2);
+              for (size_t i = 0; i < literals.size(); i += 2) {
+                next.push_back(i + 1 < literals.size() ? abc_bin(literals[i], literals[i + 1], '&') : literals[i]);
+              }
+              literals = std::move(next);
             }
+            hit = literals.empty() ? abc_const_bit(true) : literals.front();
           }
           // A constant-only selector can guard a syntactic self-reference
           // (generated RTL uses this for an invalid/X arm).  Form the guard
@@ -2450,9 +2536,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           }
           Abc_Obj_t* term = abc_bit(drv, b);  // data_v[b]
           auto*      prod = abc_bin(term, hit, '&');
-          acc             = acc == nullptr ? prod : abc_bin(acc, prod, '|');
+          products.push_back(prod);
         }
-        slots[b] = acc == nullptr ? abc_const_bit(false) : acc;
+        // Like n-ary logic above, keep the mux cover logarithmic. A serial
+        // product-term OR chain made selection logic scale linearly with the
+        // number of arms before ABC could optimize it.
+        while (products.size() > 1) {
+          std::vector<Abc_Obj_t*> next;
+          next.reserve((products.size() + 1) / 2);
+          for (size_t i = 0; i < products.size(); i += 2) {
+            next.push_back(i + 1 < products.size() ? abc_bin(products[i], products[i + 1], '|') : products[i]);
+          }
+          products = std::move(next);
+        }
+        slots[b] = products.empty() ? abc_const_bit(false) : products.front();
       }
     } else if (op == Ntype_op::Get_mask) {
       // out[j] = a[positions[j]] where positions = mask-selected source bits.
@@ -2513,7 +2610,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                "mask driven here");
       }
     } else if (op == Ntype_op::Sext) {
-      // out[i] = a[min(i, from_bit)] (sign bit at from_bit replicated above).
+      // The Sext cell's `b` is the KEPT BIT COUNT, so the sign bit sits at
+      // `keep-1` -- the same convention inou/cgen emits (`$signed(a[keep-1:0])`)
+      // and pass/lec/encode proves against. out[i] = a[min(i, keep-1)].
       auto a_drv = gu::get_driver_of_sink_name(n, "a");
       auto b_drv = gu::get_driver_of_sink_name(n, "b");
       if (!gu::is_const_pin(b_drv)) {
@@ -2524,10 +2623,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                {},
                b_drv,
                "bit position driven here");
+      } else if (int keep = static_cast<int>(gu::hydrate_const(b_drv).to_just_i64()); keep < 1) {
+        refuse(n,
+               "unsupported-cell",
+               "unsupported",
+               "sext keeps a non-positive number of bits, which has no gate-level meaning",
+               {},
+               b_drv,
+               "kept bit count driven here");
       } else {
-        int from_bit = static_cast<int>(gu::hydrate_const(b_drv).to_just_i64());
+        const int sign_bit = keep - 1;
         for (int b = 0; b < out_bits; ++b) {
-          slots[b] = abc_bit(a_drv, std::min(b, from_bit));
+          slots[b] = abc_bit(a_drv, std::min(b, sign_bit));
         }
       }
     } else if (op == Ntype_op::Sum) {
@@ -2552,20 +2659,47 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
         return v;
       };
-      std::vector<Abc_Obj_t*> acc;
-      size_t                  ai = 0;
-      if (a_drv.empty()) {
-        acc.assign(out_bits, abc_const_bit(false));
-      } else {
-        acc = extend(a_drv[0]);
-        ai  = 1;
+      std::vector<std::vector<Abc_Obj_t*>> level;
+      level.reserve(std::max(a_drv.size(), b_drv.size()));
+      // Fold each subtract operand into an ADD operand's adder (a + ~b + 1)
+      // rather than negating it on its own. A standalone `0 + ~b + 1` costs a
+      // whole extra adder, which would double the plain `a - b` cell -- by far
+      // the most common Sum shape -- for no depth benefit.
+      size_t bi = 0;
+      for (const auto& ad : a_drv) {
+        if (bi < b_drv.size()) {
+          level.push_back(
+              arith::build_add(opts_.adder, bs, ops, extend(ad), arith::bv_invert(ops, extend(b_drv[bi++])), abc_const_bit(true))
+                  .sum);
+        } else {
+          level.push_back(extend(ad));
+        }
       }
-      for (; ai < a_drv.size(); ++ai) {
-        acc = arith::build_add(opts_.adder, bs, ops, acc, extend(a_drv[ai]), abc_const_bit(false)).sum;
+      for (; bi < b_drv.size(); ++bi) {
+        std::vector<Abc_Obj_t*> zero(out_bits, abc_const_bit(false));
+        level.push_back(
+            arith::build_add(opts_.adder, bs, ops, zero, arith::bv_invert(ops, extend(b_drv[bi])), abc_const_bit(true)).sum);
       }
-      for (const auto& bd : b_drv) {
-        acc = arith::build_add(opts_.adder, bs, ops, acc, arith::bv_invert(ops, extend(bd)), abc_const_bit(true)).sum;
+      if (level.empty()) {
+        level.emplace_back(out_bits, abc_const_bit(false));
       }
+      // A Sum cell is associative at its declared output width. Preserve that
+      // n-ary structure as a balanced tree; a source-order left fold makes a
+      // popcount or wide reduction N adders deep before ABC gets a chance to
+      // optimize it.
+      while (level.size() > 1) {
+        std::vector<std::vector<Abc_Obj_t*>> next;
+        next.reserve((level.size() + 1) / 2);
+        for (size_t i = 0; i < level.size(); i += 2) {
+          if (i + 1 == level.size()) {
+            next.push_back(std::move(level[i]));
+          } else {
+            next.push_back(arith::build_add(opts_.adder, bs, ops, level[i], level[i + 1], abc_const_bit(false)).sum);
+          }
+        }
+        level = std::move(next);
+      }
+      const auto& acc = level.front();
       for (int b = 0; b < out_bits; ++b) {
         slots[b] = acc[b];
       }
@@ -2968,8 +3102,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   trace_stage("blast-complete");
 
   // --- sequential: wire each latch's data-in (D) to the folded next-state ---
-  // The native LGraph flop's next state is  reset? rval : (enable? din : Q).
-  // Folding enable+reset into the AIG means the reconstructed flop is a plain
+  // Reset-bearing flops were kept as native boundaries above because the
+  // selected plain DFF cannot represent their reset/initial contract. Thus the
+  // remaining native LGraph flop's next state is enable? din : Q. Folding
+  // enable into the AIG means the reconstructed flop is a plain
   // D-flop (only clock + power-on init reattached), and ABC sees the true
   // next-state function so retiming/sweeping stays sound.
   // enable/reset are single control signals: an N-bit pin asserts on (pin != 0),
@@ -3547,6 +3683,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (auto nm = gu::node_name_of(bb.node); !nm.empty()) {
       nn.attr(hhds::attrs::name).set(std::string{nm});
     }
+    if (auto sid = bb.node.attr(hhds::attrs::srcid); sid.has() && sid.get() != 0) {
+      nn.attr(hhds::attrs::srcid).set(out_srcmap.import_from(rb.src->source_locator(), sid.get()));
+    }
     if (native_comb_logic.contains(bb.node)) {
       nn.attr(livehd::attrs::native_comb_boundary).set({});
     }
@@ -3641,6 +3780,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (auto it = native_boundary_driver.find(src_drv); it != native_boundary_driver.end()) {
         it->second.connect_sink(bbox_recon[bi].node.create_sink_pin(pid));
       }
+    }
+    for (const auto& [pid, src_drv, bits, sign] : bboxes[bi].fit_native_ins) {
+      hhds::Pin_class source;
+      if (auto nit = region_in_name.find(src_drv); nit != region_in_name.end()) {
+        source = body->get_input_pin(nit->second);
+      } else if (auto bit = native_boundary_driver.find(src_drv); bit != native_boundary_driver.end()) {
+        source = bit->second;
+      }
+      if (source.is_invalid()) {
+        continue;
+      }
+      auto fit = gu::create_typed_node(*body, Ntype_op::Get_mask);
+      source.connect_sink(gu::setup_sink_by_name(fit, "a"));
+      gu::create_const(*body, *Dlop::get_mask_value(bits)).connect_sink(gu::setup_sink_by_name(fit, "mask"));
+      auto fitted = fit.create_driver_pin(0);
+      gu::set_bits(fitted, bits);
+      sign ? gu::set_sign(fitted) : gu::set_unsign(fitted);
+      fitted.connect_sink(bbox_recon[bi].node.create_sink_pin(pid));
     }
   }
   for (size_t po = 0; po < rb.outputs.size(); ++po) {

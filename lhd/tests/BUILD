@@ -1341,6 +1341,7 @@ sh_test(
     size = "large",
     srcs = ["lhd_abc_seq_test.sh"],
     data = _FLOW_DATA + [
+        "abc_async_reset.prp",
         "abc_resetless_sync.prp",
         "//inou/prp:abc_tests",
     ],

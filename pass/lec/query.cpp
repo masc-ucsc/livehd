@@ -275,6 +275,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   // flops; hierarchy matters here purely for collision detection.
   struct Vflop {
     int         count    = 0;
+    int         width    = 0;
     bool        has_init = false;
     std::string init;  // serialized reset/init const ("" when none)
   };
@@ -293,6 +294,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
       }
       auto& f = m[canon_flop_name(node.get_hier_name())];
       ++f.count;
+      f.width = graph_util::bits_of(node.get_driver_pin(0));
       if (auto d = graph_util::get_driver_of_sink_name(node, "initial"); !d.is_invalid() && graph_util::is_const_pin(d)) {
         f.has_init = true;
         f.init     = graph_util::hydrate_const(d).serialize();
@@ -313,6 +315,36 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
       reasons->push_back(rn + "<->" + in + ": " + std::string(why));
     }
   };
+  // An exact same-base packed/scalar split is stronger evidence than semdiff's
+  // speculative one-to-one signature match.  In particular, a mapped N-bit
+  // register named `state` becomes `state_0 .. state_(N-1)`.  Pairing just one
+  // of those scalar cells (often `state_1`) to the packed `state` aliases a
+  // 1-bit term onto an N-bit cut and also hides that member from the exact
+  // packed-to-bits bridge used by both proof engines.  Reject only the complete,
+  // lossless shape here; unrelated width-changing tier-2 pairs remain legal and
+  // retain their ordinary self-certifying/reset-backed discipline.
+  auto exact_packed_scalar_member = [&](const std::string& rc, const std::string& ic) {
+    auto ri = rmap.find(rc);
+    auto ii = imap.find(ic);
+    if (ri == rmap.end() || ii == imap.end() || ri->second.width <= 1 || ii->second.width != 1 || imap.contains(rc)) {
+      return false;
+    }
+    const std::string prefix = rc + "_";
+    if (!ic.starts_with(prefix) || ic.size() == prefix.size()
+        || !std::all_of(ic.begin() + static_cast<std::ptrdiff_t>(prefix.size()), ic.end(), [](unsigned char ch) {
+             return std::isdigit(ch);
+           })) {
+      return false;
+    }
+    for (int bit = 0; bit < ri->second.width; ++bit) {
+      auto bi = imap.find(prefix + std::to_string(bit));
+      if (bi == imap.end() || bi->second.count != 1 || bi->second.width != 1) {
+        return false;
+      }
+    }
+    // Exact means exactly N cells, not merely an N-bit prefix of a larger bank.
+    return !imap.contains(prefix + std::to_string(ri->second.width));
+  };
   for (const auto& [rn, in] : pairs) {
     std::string rc = canon_flop_name(rn);
     std::string ic = canon_flop_name(in);
@@ -327,6 +359,10 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
     }
     if (ri->second.count != 1 || ii->second.count != 1) {
       drop(rn, in, "canonical name is ambiguous on its side");
+      continue;
+    }
+    if (exact_packed_scalar_member(rc, ic)) {
+      drop(rn, in, "member of exact packed/scalar state split");
       continue;
     }
     // The alias (canon(impl) -> canon(ref)) is applied to BOTH designs' walks:
@@ -4469,11 +4505,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           // A bit-blasted register's cuts look exactly like a bank (`<reg>_0..`,
           // no constant init once abc folds the reset into D) but they are NOT
-          // one: the pairing above has bound them to slices of the ref's ONE
-          // parent cut, and that parent is not a bank key. Holding only the impl
-          // side through the reset prologue would make two states that are now
-          // the SAME diverge on the first cycle — a spurious REFUTED.
-          if (n > 1 && bitblast_bits.count(key) == 0) {
+          // one. The ordinary bitblast bridge excludes same-base splits above.
+          // A differently named split (e.g. Pyrope `stage0` against mapped
+          // Verilog `stages___q_8..15`) cannot be recognized from the suffix
+          // alone. Never apply the bank approximation to a ONE-SIDED key: that
+          // holds only one implementation through the reset prologue, defeats
+          // its real reset-data cone, and manufactures a reachable CEX. A true
+          // same-named bank is present on both sides and starts from the shared
+          // symbol, so holding it remains symmetric and sound.
+          const bool on_both_sides = fw_side[0].contains(key) && fw_side[1].contains(key);
+          if (n > 1 && bitblast_bits.count(key) == 0 && on_both_sides) {
             bank_hold_keys.insert(key);
           }
         }

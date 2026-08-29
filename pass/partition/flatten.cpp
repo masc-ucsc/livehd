@@ -19,6 +19,11 @@ namespace gu = livehd::graph_util;
 
 namespace {
 
+struct Port_shape {
+  uint32_t bits   = 0;
+  bool     unsign = false;
+};
+
 // One inlined instance of a def: the top graph is the root context (no parent);
 // every design Sub gets its own context, so two instances of the same def are
 // cloned independently (their node/pin maps must not alias — hhds Node/Pin
@@ -48,8 +53,10 @@ struct Ictx {
 
   // Child-decl port-id <-> name maps (lazy, per context; needed to hop a module
   // boundary: a Sub sink/driver port id pairs with the child GraphIO decl).
-  absl::flat_hash_map<std::string, uint32_t> in_name2pid;   // this def's INPUT decls
-  absl::flat_hash_map<uint32_t, std::string> out_pid2name;  // this def's OUTPUT decls
+  absl::flat_hash_map<std::string, uint32_t>   in_name2pid;   // this def's INPUT decls
+  absl::flat_hash_map<uint32_t, std::string>   out_pid2name;  // this def's OUTPUT decls
+  absl::flat_hash_map<std::string, Port_shape> in_name2shape;
+  absl::flat_hash_map<std::string, Port_shape> out_name2shape;
 };
 
 class Flattener {
@@ -77,6 +84,7 @@ private:
 
   [[nodiscard]] hhds::Pin_class resolve_driver(Ictx* ctx, const hhds::Pin_class& d);
   [[nodiscard]] hhds::Pin_class resolve_output_of(Ictx* cctx, std::string_view oname);
+  [[nodiscard]] hhds::Pin_class apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape);
 
   void carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo);
   void carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo);
@@ -94,13 +102,57 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
   }
   if (auto gio = src->get_io()) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      c.in_name2pid[d.name] = static_cast<uint32_t>(d.port_id);
+      c.in_name2pid[d.name]   = static_cast<uint32_t>(d.port_id);
+      c.in_name2shape[d.name] = Port_shape{.bits = d.bits, .unsign = d.unsign};
     }
     for (const auto& d : gio->get_output_pin_decls()) {
       c.out_pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
+      c.out_name2shape[d.name]                         = Port_shape{.bits = d.bits, .unsign = d.unsign};
     }
   }
   return &c;
+}
+
+// Flattening dissolves the Sub/GraphIO pair that used to implement a module
+// port cast. Preserve that cast explicitly whenever the producer's structural
+// width or sign differs from the declaration. Never re-stamp `source` itself:
+// one producer can feed both a narrow port and an unrelated wide consumer.
+//
+// The adapter must match the port's DECLARED signedness, because an LGraph
+// value is an unlimited-precision signed integer and the `signed` attr is only
+// a realization hint -- it does not reinterpret the value:
+//   * UNSIGNED port: a constant Get_mask selects the low `bits` bits (reading
+//     the source's conceptual sign/zero extension above a narrow source), and
+//     the result is a non-negative `bits`-wide pattern.
+//   * SIGNED port: Sext is the sign-aware adapter (its `b` is the KEPT BIT
+//     COUNT, see inou/cgen and pass/lec/encode). Get_mask would instead turn a
+//     -1 into 2^bits-1, so a signed narrowing/widening cast through it changes
+//     the value every arithmetic consumer then reads.
+hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape) {
+  if (source.is_invalid() || shape.bits == 0) {
+    return source;
+  }
+  if (gu::bits_of(source) == static_cast<int32_t>(shape.bits) && gu::is_unsign(source) == shape.unsign) {
+    return source;
+  }
+
+  if (!shape.unsign) {
+    auto adapter = gu::create_typed_node(*flat_, Ntype_op::Sext);
+    source.connect_sink(gu::setup_sink_by_name(adapter, "a"));
+    gu::create_const(*flat_, *Dlop::create_integer(static_cast<int64_t>(shape.bits)))
+        .connect_sink(gu::setup_sink_by_name(adapter, "b"));
+    auto result = adapter.create_driver_pin(0);
+    gu::set_sbits(result, static_cast<int32_t>(shape.bits));
+    return result;
+  }
+
+  auto adapter = gu::create_typed_node(*flat_, Ntype_op::Get_mask);
+  source.connect_sink(gu::setup_sink_by_name(adapter, "a"));
+  gu::create_const(*flat_, *Dlop::get_mask_value(static_cast<int>(shape.bits)))
+      .connect_sink(gu::setup_sink_by_name(adapter, "mask"));
+  auto result = adapter.create_driver_pin(0);
+  gu::set_ubits(result, static_cast<int32_t>(shape.bits));
+  return result;
 }
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
@@ -302,6 +354,9 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
           } else {
             res = resolve_driver(ctx->parent, eit->second);
           }
+          if (auto sit = ctx->in_name2shape.find(std::string{gu::pin_name_of(d)}); sit != ctx->in_name2shape.end()) {
+            res = apply_port_shape(res, sit->second);
+          }
         }
       }
       // No edge: the parent left the port unconnected — stay invalid.
@@ -337,10 +392,16 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
     return {};
   }
   for (const auto& e : opin.inp_edges()) {
+    hhds::Pin_class source;
     if (gu::is_const_pin(e.driver)) {
-      return gu::create_const(*flat_, gu::hydrate_const(e.driver));
+      source = gu::create_const(*flat_, gu::hydrate_const(e.driver));
+    } else {
+      source = resolve_driver(cctx, e.driver);
     }
-    return resolve_driver(cctx, e.driver);
+    if (auto sit = cctx->out_name2shape.find(std::string{oname}); sit != cctx->out_name2shape.end()) {
+      source = apply_port_shape(source, sit->second);
+    }
+    return source;
   }
   return {};  // declared but undriven
 }

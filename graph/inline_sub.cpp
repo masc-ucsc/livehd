@@ -20,8 +20,13 @@ namespace {
 class Sub_inliner {
 public:
   Sub_inliner(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def = nullptr,
-              bool name_state = false)
-      : parent_(parent), inst_(inst), from_pass_(from_pass), def_(def), name_state_(name_state) {}
+              bool name_state = false, bool prefix_instance = true)
+      : parent_(parent)
+      , inst_(inst)
+      , from_pass_(from_pass)
+      , def_(def)
+      , name_state_(name_state)
+      , prefix_instance_(prefix_instance) {}
 
   bool run();
 
@@ -32,12 +37,15 @@ private:
   // Explicit body, for an instance whose def is NOT in the parent's own graph
   // library (a `lec --lib` cell model lives in a side library, so
   // get_subnode_graph() is null for it). nullptr = resolve the ordinary way.
-  hhds::Graph*     def_        = nullptr;
+  hhds::Graph*     def_             = nullptr;
   // Name an UNNAMED spliced state node after the instance (see the header): a
   // cell model's internal flop carries no name attr, so the cut would otherwise
   // be keyed on a synthesized net name that corresponds to nothing.
-  bool             name_state_ = false;
-  hhds::Graph*     child_      = nullptr;
+  bool             name_state_      = false;
+  // False only for an unnamed compiler-generated wrapper whose default
+  // `sub_<nid>` name is not part of the source hierarchy.
+  bool             prefix_instance_ = true;
+  hhds::Graph*     child_           = nullptr;
   std::string      prefix_;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map_;   // child node -> parent clone
@@ -65,7 +73,7 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     // the first \x1f -- an assume would re-emit as an assert). The payload is
     // parsed, never used as an identifier: copy it verbatim.
     neo.attr(hhds::attrs::name).set(nm.find('\x1f') == std::string::npos ? prefix_ + nm : nm);
-  } else if (name_state_ && is_type_flop(neo)) {
+  } else if (name_state_ && is_type_flop(neo) && !prefix_.empty()) {
     // Unnamed spliced STATE: take the instance's own name (prefix_ minus its
     // trailing '.'). Done here, once per spliced node, instead of re-walking the
     // parent body after every inline.
@@ -297,7 +305,7 @@ bool Sub_inliner::run() {
     return false;
   }
   child_  = cg.get();
-  prefix_ = default_instance_name(inst_) + ".";
+  prefix_ = prefix_instance_ ? default_instance_name(inst_) + "." : std::string{};
 
   auto gio = child_->get_io();
   if (!gio) {
@@ -330,8 +338,8 @@ bool Sub_inliner::run() {
 }  // namespace
 
 bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def,
-                         bool name_state) {
-  Sub_inliner s(parent, inst, from_pass, def, name_state);
+                         bool name_state, bool prefix_instance) {
+  Sub_inliner s(parent, inst, from_pass, def, name_state, prefix_instance);
   return s.run();
 }
 

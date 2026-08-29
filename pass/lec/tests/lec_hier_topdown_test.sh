@@ -423,6 +423,9 @@ if [ "$RC" -ne 0 ]; then
   echo "$OUT" | grep -E "lec: inlined|lec\[hier\]"; fail=1
 elif ! echo "$OUT" | grep -q "inlined 0 ref and 1 impl instance(s) absent from the other hierarchy"; then
   echo "FAIL: case 11 did not inline the one-sided mapped partition"; fail=1
+elif echo "$OUT" | grep -q "tier-2 state pairing:"; then
+  echo "FAIL: case 11 speculatively paired one scalar bit to the packed register instead of using the exact bit split"
+  echo "$OUT" | grep -E "tier-2 state pairing|tier-2 unpaired state"; fail=1
 elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
   # rc=0 also covers UNKNOWN, and the whole point of the `sub_<id>` bridge is
   # that it turns this shape into a PROOF -- assert it rather than the exit code.

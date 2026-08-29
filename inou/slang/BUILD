@@ -205,6 +205,43 @@ sh_test(
     ],
 )
 
+# Generated partial writes to consecutive packed-array elements form an RMW
+# chain. The final output must observe the last generated stage, even when its
+# source-level assignment appears before the generate loop.
+sh_test(
+    name = "slang_generated_packed_stage_chain",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/generated_packed_stage_chain.v)",
+    ],
+    data = [
+        "tests/sv/generated_packed_stage_chain.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# A nested reset/enable write to one packed bit must not make ABC select the
+# entire carrier once per condition. cprop factors the Mux through Set_mask so
+# only the one-bit lane is Boolean logic; lgyosys independently checks the
+# emitted result against the source.
+sh_test(
+    name = "slang_conditional_packed_lane_update",
+    size = "large",
+    srcs = ["tests/conditional_packed_lane_update_smoke.sh"],
+    data = [
+        "tests/sv/conditional_packed_lane_update.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
 # A scalar register with a Verilog declaration / initial-block value but no
 # explicit reset is modeled as reset-bearing state using that value. This is a
 # deliberate two-state synthesis choice and carries a warning because source

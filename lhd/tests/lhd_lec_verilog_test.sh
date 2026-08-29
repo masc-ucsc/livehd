@@ -358,6 +358,24 @@ grep -q 'REFUTED' "$W/r2_setup_fail.json" \
   && fail "lgyosys setup failure was mislabeled REFUTED: $(cat "$W/r2_setup_fail.json")"
 echo "PASS: lgyosys setup failures stay distinct from refutations"
 
+# A bounded lgcheck witness is an encoder result, not permission to overrule a
+# proof from the native LGraph checker.  Inject exit 1 at the backend seam for
+# an identical raw-Verilog pair: cvc5 must confirm the original obligation,
+# reject the synthetic witness, and publish UNKNOWN rather than REFUTED.
+cat >"$W/lgcheck_fake_refute.sh" <<'SH'
+#!/bin/sh
+exit 1
+SH
+chmod +x "$W/lgcheck_fake_refute.sh"
+out=$(LHD_LGCHECK="$W/lgcheck_fake_refute.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+  --set formal.solver=lgyosys --workdir "$W/c2_refute_confirm" --result-json "$W/r2_refute_confirm.json" 2>&1) \
+  || fail "a cvc5-disproved lgcheck witness must not fail the pair: $out"
+echo "$out" | grep -q 'bounded counterexample rejected because cvc5 proved' \
+  || fail "lgyosys did not disclose the rejected witness: $out"
+grep -q '"verdict":"unknown"' "$W/r2_refute_confirm.json" \
+  || fail "rejected lgyosys witness was not classified unknown: $(cat "$W/r2_refute_confirm.json")"
+echo "PASS: lgyosys refutes require independent cvc5 confirmation"
+
 # A bounded BMC window is a counterexample search, not an equivalence proof.
 # This pair first diverges after more than five clocks: the short window must be
 # INCONCLUSIVE (never PROVEN), while a deeper window must find the real CEX.

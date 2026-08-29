@@ -173,6 +173,27 @@ run synth "$DPRP" --top ot_div_boundary --workdir "$W/dw" --emit-dir lg:"$W/dnet
 grep -q '"div_blackbox":1' "$W/r.json" || fail "divider fixture was not reported as one ABC blackbox"
 grep -q '"kind":"sta"' "$W/dw/synth/timing.json" || fail "divider-boundary timing.json missing STA report"
 
+# 4ac. A packed-array assignment around a sliced memory read creates a 64-bit
+# Concat lane over an internal 65-bit Set_mask carrier. The source Get_mask is
+# the lane-width boundary; ABC's native-boundary readback must preserve that
+# low-64-bit cast instead of reconnecting the raw carrier and handing
+# OpenTimer a malformed over-wide lane.
+CPRP="$W/concat_lane_fit.prp"
+cat >"$CPRP" <<'EOF'
+pub mod ot_concat_lane(clk:u1, addr:u1, a:u64) -> (y:u64@[0]) {
+  reg mem:[2]u64:[clock_pin=ref clk]
+  mem[addr] = a
+  mut read:u64 = 0sb?
+  read#[0..=63] = mem[addr]#[0..=63]
+  mut lane:[1]u64 = 0
+  lane[0] = read
+  y = lane[0]
+}
+EOF
+run synth "$CPRP" --top ot_concat_lane --workdir "$W/cfw" --emit-dir lg:"$W/cfnet" \
+    --set synth.liberty="$LIB" --set lhd.incremental=false
+grep -q '"kind":"sta"' "$W/cfw/synth/timing.json" || fail "Concat-lane width-boundary timing.json missing STA report"
+
 # 4b. negative control: with explicit hier=false a WRAPPER top -- one that only
 #     instantiates region modules, which are not Liberty cells -- must fail
 #     (never silent garbage). A single-region def is emitted directly with no

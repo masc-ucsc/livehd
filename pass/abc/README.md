@@ -70,14 +70,16 @@ Per region (`Region_body` from the partition seam):
 
 ### Sequential (`seq=true`)
 
-Registers cross into ABC as 1-bit **latches** (`Abc_NtkCreateLatch` + `Bi`/`Bo`)
-so ABC can optimize the logic between them, but stay **native `Flop`s** on read-back
-(never mapped to library DFFs — the Liberty stays purely combinational). Each
-flop's Q-net seeds `bitnet` as a source; its latch D is wired (after the comb
-loop) to the folded next-state `reset? rval : (enable? din : Q)`, so the
-reconstructed flop is a plain D-flop with only the region clock + power-on
-`initial` reattached, and ABC sees the true register function. Latch init comes
-from the reset/initial constant. On read-back, latches rebuild into native flops:
+Registers with no reset cross into ABC as 1-bit **latches**
+(`Abc_NtkCreateLatch` + `Bi`/`Bo`) so ABC can optimize the logic between them.
+Each flop's Q-net seeds `bitnet` as a source; its latch D is wired (after the comb
+loop) to the folded next-state `enable? din : Q`. A **reset-bearing** register
+stays a native boundary because the selected plain Liberty DFF has no reset pin:
+folding reset into D loses asynchronous assertion and the source reset/initial
+contract before the first clock edge. Its surrounding data logic is still
+mapped. Latch init comes from a resetless power-on constant. On read-back,
+latches rebuild into native flops or plain Liberty DFF cells according to the
+`register` option:
 a single-root region (one register name) collapses to one named flop, a 1:1
 multi-register region rebuilds one flop per register, and a retiming-reshaped
 region falls back to `<region>__r<n>` 1-bit flops (all LEC-correct).

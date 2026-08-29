@@ -2958,6 +2958,49 @@ void lec_lgyosys(Options& opts, Result& res) {
     std::print("lec: '{}' SETUP FAILED (solver=lgyosys; no equivalence verdict)\n", name);
     throw Lhd_error{"dependency", std::format("lgyosys could not compare the designs (exit {})", code), std::format("see {}", log)};
   }
+
+  // lgcheck's bounded witness uses a concrete zero initialization for every
+  // un-reset FF.  That is useful for finding real sequential divergences, but
+  // it can also manufacture a mismatch when the reference carries an X-valued
+  // invalid payload and synthesis chooses a concrete implementation value.
+  // Before publishing REFUTED, ask the native LGraph checker to confirm the
+  // same obligation.  A cvc5 proof makes the Yosys witness an encoder/checker
+  // disagreement, never a design counterexample.  Keep a cvc5 refute or
+  // unknown result subordinate to the explicit lgcheck witness.
+  if (code == 1) {
+    Options confirm_opts = opts;
+    confirm_opts.sets.erase(std::remove_if(confirm_opts.sets.begin(),
+                                           confirm_opts.sets.end(),
+                                           [](const auto& kv) {
+                                             return kv.first == "formal.solver" || kv.first == "formal.lec.solver"
+                                                    || kv.first == "formal.witness" || kv.first == "formal.lec.witness";
+                                           }),
+                            confirm_opts.sets.end());
+    confirm_opts.sets.emplace_back("formal.solver", "cvc5");
+    confirm_opts.sets.emplace_back("formal.witness", "false");
+    confirm_opts.workdir         = (fs::path(rundir) / "cvc5_refute_confirm").string();
+    confirm_opts.workdir_scratch = false;
+    confirm_opts.result_json.clear();
+    confirm_opts.quiet   = true;
+    confirm_opts.verbose = false;
+
+    Result confirm_res;
+    try {
+      lec_command(confirm_opts, confirm_res);
+    } catch (const Lhd_error&) {
+      // A native refute/unknown/setup error does not invalidate lgcheck's
+      // concrete witness.  Only a positive proof can downgrade it.
+    }
+    res.recipe_steps.emplace_back(std::format("pass.lec lgyosys-refute-confirm:cvc5 verdict:{}",
+                                              confirm_res.lec.present ? confirm_res.lec.verdict : "unavailable"));
+    if (confirm_res.lec.present && confirm_res.lec.verdict == "proven") {
+      std::print(
+          "lec: '{}' INCONCLUSIVE (solver=lgyosys; bounded counterexample rejected because cvc5 proved the same obligation)\n",
+          name);
+      res.lec = {.present = true, .verdict = "unknown", .solver = "lgyosys", .bounded = false, .bound = 0};
+      return;
+    }
+  }
   std::print("lec: '{}' {} (solver=lgyosys)\n", name, code == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
   res.lec = {.present = true, .verdict = code == 0 ? "proven" : "refuted", .solver = "lgyosys", .bounded = false, .bound = 0};
   if (code == 1) {

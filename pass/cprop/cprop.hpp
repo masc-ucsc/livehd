@@ -71,5 +71,8 @@ protected:
 public:
   Cprop() = default;
 
-  void do_trans(const std::shared_ptr<hhds::Graph>& g);
+  // `check_input_sized=false` is reserved for a graph produced by a later
+  // structural transform (for example LEC hierarchy collapse), not a raw
+  // front-end output. Normal compile callers keep the default invariant.
+  void do_trans(const std::shared_ptr<hhds::Graph>& g, bool check_input_sized = true);
 };

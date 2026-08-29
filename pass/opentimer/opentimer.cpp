@@ -1299,7 +1299,14 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
-            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal").msg("{}", lane_bad).fatal();
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("{} on concat '{}' ({}) in module '{}'{}",
+                     lane_bad,
+                     debug_name(node),
+                     occurrence_name(node),
+                     node.get_graph() != nullptr ? node.get_graph()->get_name() : std::string_view{"?"},
+                     src_of_node(g, node).empty() ? std::string{} : std::format(" at {}", src_of_node(g, node)))
+                .fatal();
             return;
           }
           absl::flat_hash_map<hhds::Port_id, hhds::Occurrence_pin> lane_by_pid;

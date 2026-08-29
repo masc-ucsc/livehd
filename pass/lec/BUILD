@@ -297,6 +297,16 @@ sh_test(
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver as race workers
 )
 
+# A mapped vector can become differently named one-bit flops. The BMC reset
+# prologue must run their real reset-data cones rather than misclassify and hold
+# the one-sided numeric suffix group as a reset-less register-file bank.
+sh_test(
+    name = "lec_reset_bank_split_test",
+    srcs = ["tests/lec_reset_bank_split_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
+)
+
 # Proven-module black-box collapse (lhd lec --collapse <def>): force a same-library
 # submodule to the sound UF black-box (hide its internals) while still refuting on
 # diverging leaf inputs or out-of-leaf logic. Exercises the hhds forward_hier +

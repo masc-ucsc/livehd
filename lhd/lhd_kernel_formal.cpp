@@ -3913,7 +3913,27 @@ static size_t inline_instances_missing_from_other_side(const absl::flat_hash_map
       }
       size_t spliced = 0;
       for (const auto& inst : insts) {
-        spliced += livehd::graph_util::inline_sub_instance(host, inst, "pass.lec") ? 1 : 0;
+        // pass.color names an absorbed region `<host>__c<N>` and inserts an
+        // UNNAMED Sub at the host boundary.  Its fallback instance name
+        // (`sub_<nid>`) is not source hierarchy and is unstable across the two
+        // graphs; retaining it turns every otherwise preserved register name
+        // into `sub_20.foo` and defeats flop correspondence after collapse.
+        // Drop the prefix only for that reserved generated shape.  A real
+        // named instance, and any ordinary helper definition, keeps its full
+        // hierarchy so distinct occurrences cannot alias.
+        bool synthetic_partition = false;
+        if (livehd::graph_util::node_name_of(inst).empty()) {
+          auto        sio      = inst.get_subnode_io();
+          std::string host_ent = lec_entity_of(host->get_name());
+          std::string def_ent  = sio == nullptr ? std::string{} : lec_entity_of(sio->get_name());
+          std::string marker   = host_ent + "__c";
+          if (def_ent.starts_with(marker) && def_ent.size() > marker.size()) {
+            synthetic_partition = std::all_of(def_ent.begin() + static_cast<std::ptrdiff_t>(marker.size()),
+                                              def_ent.end(),
+                                              [](unsigned char c) { return std::isdigit(c); });
+          }
+        }
+        spliced += livehd::graph_util::inline_sub_instance(host, inst, "pass.lec", nullptr, false, !synthetic_partition) ? 1 : 0;
       }
       if (spliced == 0) {
         break;  // nothing inlinable left (a real blackbox): stop rather than spin
@@ -4421,6 +4441,42 @@ void lec_command(Options& opts, Result& res) {
       };
       prune(ref_defs, ref_g.get(), impl_names);
       prune(impl_defs, impl_g.get(), ref_names);
+
+      // Inlining a definition is not only a hierarchy change: it connects the
+      // caller's packing/unpacking cells directly to the callee's body.  A
+      // constant slice which used to stop at a Sub boundary can now see the
+      // Concat/Set_mask lane that really drives it.  Run the ordinary,
+      // value-preserving scalar folds again so those newly visible lane reads
+      // are rebased before the word-level encoder schedules the cone.
+      //
+      // This is load-bearing for ready/valid networks such as
+      // br_amba_axi_demux.  Each valid[i] excludes ready[i], hence the circuit
+      // is a DAG per bit, but after asymmetric hierarchy collapse an unsimplified
+      // packed ready -> packed valid -> ready[i] ring looks cyclic per WORD and
+      // cvc5 refuses without ever solving.  Cprop's Get_mask(Concat(...)) and
+      // Set_mask slice rules delete exactly those false cross-lane edges.  Run
+      // it on every design graph because an absorbed grandchild may have been
+      // spliced into a retained common definition, not only into the top.
+      // Never touch --lib models: they are shared vocabulary, and mutating one
+      // side's cell definition would mutate the other side too.
+      absl::flat_hash_set<hhds::Graph*> simplified;
+      auto                              simplify_after_inline = [&](const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+        for (const auto& sp : graphs) {
+          auto* g = sp.get();
+          if (g == nullptr || sub_lib.find(g->get_gid()) != sub_lib.end() || !simplified.insert(g).second) {
+            continue;
+          }
+          Cprop cprop;
+          // This is not a raw front-end graph: the hierarchy transform above
+          // may expose an intentionally truncated Concat lane whose internal
+          // carrier has no standalone width stamp.  The normal cprop entry
+          // assertion is specifically a tolg/upass contract, so skip that
+          // assertion here while retaining every value-preserving fold.
+          cprop.do_trans(sp, /*check_input_sized=*/false);
+        }
+      };
+      simplify_after_inline(ref_var.graphs);
+      simplify_after_inline(impl_var.graphs);
     }
     if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
       for (auto* side : {ref_g.get(), impl_g.get()}) {
