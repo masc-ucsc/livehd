@@ -358,23 +358,27 @@ grep -q 'REFUTED' "$W/r2_setup_fail.json" \
   && fail "lgyosys setup failure was mislabeled REFUTED: $(cat "$W/r2_setup_fail.json")"
 echo "PASS: lgyosys setup failures stay distinct from refutations"
 
-# A bounded lgcheck witness is an encoder result, not permission to overrule a
-# proof from the native LGraph checker.  Inject exit 1 at the backend seam for
-# an identical raw-Verilog pair: cvc5 must confirm the original obligation,
-# reject the synthetic witness, and publish UNKNOWN rather than REFUTED.
+# Two engines disagreeing means one of them is WRONG, and the safe reading of
+# "an engine holds a concrete counterexample" is never "the designs match".
+# Inject exit 1 at the backend seam for an identical raw-Verilog pair: cvc5
+# proves the same obligation, so lhd must announce the ENGINE DISAGREEMENT and
+# still publish REFUTED with a non-zero exit -- never downgrade it to a pass.
 cat >"$W/lgcheck_fake_refute.sh" <<'SH'
 #!/bin/sh
 exit 1
 SH
 chmod +x "$W/lgcheck_fake_refute.sh"
-out=$(LHD_LGCHECK="$W/lgcheck_fake_refute.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
-  --set formal.solver=lgyosys --workdir "$W/c2_refute_confirm" --result-json "$W/r2_refute_confirm.json" 2>&1) \
-  || fail "a cvc5-disproved lgcheck witness must not fail the pair: $out"
-echo "$out" | grep -q 'bounded counterexample rejected because cvc5 proved' \
-  || fail "lgyosys did not disclose the rejected witness: $out"
-grep -q '"verdict":"unknown"' "$W/r2_refute_confirm.json" \
-  || fail "rejected lgyosys witness was not classified unknown: $(cat "$W/r2_refute_confirm.json")"
-echo "PASS: lgyosys refutes require independent cvc5 confirmation"
+if out=$(LHD_LGCHECK="$W/lgcheck_fake_refute.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+  --set formal.solver=lgyosys --workdir "$W/c2_refute_confirm" --result-json "$W/r2_refute_confirm.json" 2>&1); then
+  fail "an lgcheck witness was swallowed into a passing verdict: $out"
+fi
+echo "$out" | grep -q 'ENGINE DISAGREEMENT' \
+  || fail "lgyosys did not disclose the cvc5 disagreement: $out"
+grep -q '"verdict":"refuted"' "$W/r2_refute_confirm.json" \
+  || fail "a disputed lgyosys witness must stay refuted: $(cat "$W/r2_refute_confirm.json")"
+grep -q '"status":"pass"' "$W/r2_refute_confirm.json" \
+  && fail "a disputed lgyosys witness was reported as a pass: $(cat "$W/r2_refute_confirm.json")"
+echo "PASS: an lgyosys/cvc5 disagreement stays REFUTED instead of becoming a pass"
 
 # A bounded BMC window is a counterexample search, not an equivalence proof.
 # This pair first diverges after more than five clocks: the short window must be

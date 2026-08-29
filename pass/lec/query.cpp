@@ -1147,6 +1147,47 @@ void write_all(int fd, const char* p, size_t n) {
   }
 }
 
+// Length-framing for a worker's serialized result.
+//
+// Both result codecs below are deliberately TAIL-TOLERANT: a short blob stops
+// the parse and returns success, so trailing fields keep their defaults.  That
+// is the right rule for a field this build simply never wrote -- but it is the
+// WRONG rule for a blob the pipe truncated, because the trailing fields are
+// exactly the soundness qualifiers (`bounded`, `unsupported`,
+// `nothing_compared`), and their defaults all read as "nothing to worry about".
+// A child SIGKILLed by the wall backstop or the RLIMIT_AS share, or a
+// `write_all` that gave up on a short write, could therefore hand the parent an
+// UNBOUNDED Proven for a bounded claim.
+//
+// Frame the payload with its byte length so truncation is a parse FAILURE, which
+// every caller already routes to "worker produced no result" -> Unknown.
+}  // namespace
+
+std::string frame_blob(std::string_view payload) {
+  const uint64_t n = payload.size();
+  std::string    b(reinterpret_cast<const char*>(&n), sizeof n);
+  b.append(payload);
+  return b;
+}
+
+// Returns false for a short header, a short payload, or trailing garbage -- any
+// frame that is not byte-exact is no result at all.
+bool unframe_blob(std::string_view b, std::string_view& payload) {
+  uint64_t n = 0;
+  if (b.size() < sizeof n) {
+    return false;
+  }
+  std::memcpy(&n, b.data(), sizeof n);
+  b.remove_prefix(sizeof n);
+  if (b.size() != n) {
+    return false;
+  }
+  payload = b;
+  return true;
+}
+
+namespace {
+
 long long now_ms(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 }
@@ -1235,7 +1276,7 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
                      static_cast<unsigned long long>(share >> 20));
       }
       R           r    = run_method(i);
-      std::string blob = ser(r);
+      std::string blob = frame_blob(ser(r));
       write_all(wfd[i], blob.data(), blob.size());
       ::close(wfd[i]);
       ::_exit(0);
@@ -1298,8 +1339,9 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
       }
       out.done[i] = true;
       --remaining;
-      if (!deser(bufs[i], out.results[i])) {
-        out.results[i] = R{};
+      std::string_view payload;
+      if (!unframe_blob(bufs[i], payload) || !deser(payload, out.results[i])) {
+        out.results[i] = R{};  // truncated/absent frame: no result, never a partial verdict
       }
       if (trust(i, out.results[i])) {
         out.winner = i;
@@ -1786,7 +1828,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
       o._split_name     = pick.name;
       o._split_values   = slices[i];
       Query_result r    = safe_prove_equal(ref, impl, o, sub_lib);
-      std::string  blob = serialize_result(r);
+      std::string  blob = frame_blob(serialize_result(r));
       write_all(wfd[i], blob.data(), blob.size());
       ::close(wfd[i]);
       ::_exit(0);
@@ -1852,7 +1894,8 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
       }
       done[i] = true;
       --remaining;
-      if (!deserialize_result(buf[i], got[i])) {
+      std::string_view payload;
+      if (!unframe_blob(buf[i], payload) || !deserialize_result(payload, got[i])) {
         got[i]         = Query_result{};
         got[i].verdict = Verdict::Unknown;
       }
@@ -8421,7 +8464,7 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     worker._isolated_worker = true;
     worker.partitions       = 1;
     Query_result r          = safe_prove_equal(ref, impl, worker, sub_lib);
-    std::string  blob       = serialize_result(r);
+    std::string  blob       = frame_blob(serialize_result(r));
     write_all(p[1], blob.data(), blob.size());
     ::close(p[1]);
     ::_exit(0);
@@ -8477,8 +8520,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   ::close(p[0]);
   int status = 0;
   ::waitpid(c, &status, 0);
-  Query_result out;
-  if (!deserialize_result(blob, out)) {
+  Query_result     out;
+  std::string_view payload;
+  if (!unframe_blob(blob, payload) || !deserialize_result(payload, out)) {
     died = true;
     if (WIFSIGNALED(status)) {
       const int sig = WTERMSIG(status);

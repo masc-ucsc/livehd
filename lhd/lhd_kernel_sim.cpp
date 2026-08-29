@@ -2960,13 +2960,16 @@ void lec_lgyosys(Options& opts, Result& res) {
   }
 
   // lgcheck's bounded witness uses a concrete zero initialization for every
-  // un-reset FF.  That is useful for finding real sequential divergences, but
-  // it can also manufacture a mismatch when the reference carries an X-valued
-  // invalid payload and synthesis chooses a concrete implementation value.
-  // Before publishing REFUTED, ask the native LGraph checker to confirm the
-  // same obligation.  A cvc5 proof makes the Yosys witness an encoder/checker
-  // disagreement, never a design counterexample.  Keep a cvc5 refute or
-  // unknown result subordinate to the explicit lgcheck witness.
+  // un-reset FF.  That can manufacture a mismatch when the reference carries an
+  // X-valued invalid payload and synthesis picks a concrete implementation
+  // value, so a witness is worth cross-checking against the native LGraph
+  // checker.  The cross-check is a DIAGNOSTIC ONLY: two independent engines
+  // disagreeing means one of them is wrong, and the safe reading of "an engine
+  // holds a concrete counterexample" is never "the designs are equivalent".
+  // The verdict below stays REFUTED either way -- a false alarm is recoverable,
+  // a silently swallowed refutation is not.
+  std::string cross_verdict;
+  auto        cross_dir = (fs::path(rundir) / "cvc5_refute_crosscheck").string();
   if (code == 1) {
     Options confirm_opts = opts;
     confirm_opts.sets.erase(std::remove_if(confirm_opts.sets.begin(),
@@ -2978,7 +2981,7 @@ void lec_lgyosys(Options& opts, Result& res) {
                             confirm_opts.sets.end());
     confirm_opts.sets.emplace_back("formal.solver", "cvc5");
     confirm_opts.sets.emplace_back("formal.witness", "false");
-    confirm_opts.workdir         = (fs::path(rundir) / "cvc5_refute_confirm").string();
+    confirm_opts.workdir         = cross_dir;
     confirm_opts.workdir_scratch = false;
     confirm_opts.result_json.clear();
     confirm_opts.quiet   = true;
@@ -2988,25 +2991,29 @@ void lec_lgyosys(Options& opts, Result& res) {
     try {
       lec_command(confirm_opts, confirm_res);
     } catch (const Lhd_error&) {
-      // A native refute/unknown/setup error does not invalidate lgcheck's
-      // concrete witness.  Only a positive proof can downgrade it.
+      // A native refute/unknown/setup error adds nothing to the witness lgcheck
+      // already produced.  Only the "proven" case below is worth reporting.
     }
-    res.recipe_steps.emplace_back(std::format("pass.lec lgyosys-refute-confirm:cvc5 verdict:{}",
-                                              confirm_res.lec.present ? confirm_res.lec.verdict : "unavailable"));
-    if (confirm_res.lec.present && confirm_res.lec.verdict == "proven") {
+    cross_verdict = confirm_res.lec.present ? confirm_res.lec.verdict : "unavailable";
+    res.recipe_steps.emplace_back(std::format("pass.lec lgyosys-refute-crosscheck:cvc5 verdict:{}", cross_verdict));
+    if (cross_verdict == "proven") {
       std::print(
-          "lec: '{}' INCONCLUSIVE (solver=lgyosys; bounded counterexample rejected because cvc5 proved the same obligation)\n",
+          "lec: '{}' ENGINE DISAGREEMENT (lgyosys holds a bounded counterexample, cvc5 proved the same obligation) -- "
+          "one of the two encoders is wrong; reporting REFUTED, do NOT read this as equivalence\n",
           name);
-      res.lec = {.present = true, .verdict = "unknown", .solver = "lgyosys", .bounded = false, .bound = 0};
-      return;
     }
   }
   std::print("lec: '{}' {} (solver=lgyosys)\n", name, code == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
   res.lec = {.present = true, .verdict = code == 0 ? "proven" : "refuted", .solver = "lgyosys", .bounded = false, .bound = 0};
   if (code == 1) {
-    throw Lhd_error{"equiv_fail",
-                    std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path),
-                    std::format("see {}", log)};
+    auto hint = std::format("see {}", log);
+    if (cross_verdict == "proven") {
+      hint += std::format(
+          "; cvc5 disagreed (it proved the same obligation) -- suspect an encoder/X-semantics bug in one"
+          " of the two engines, cross-check workdir {}",
+          cross_dir);
+    }
+    throw Lhd_error{"equiv_fail", std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path), hint};
   }
 }
 

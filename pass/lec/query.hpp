@@ -723,6 +723,25 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 // collapse set so it is descended (flattened into the parent) instead.
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl);
 
+// Worker-pipe framing for a forked solver's serialized result.
+//
+// The result codecs are deliberately TAIL-TOLERANT (a short blob stops the
+// parse and keeps the trailing fields at their defaults) so a build can add a
+// field without breaking an older reader. That rule is wrong for a blob the
+// pipe TRUNCATED, because the trailing fields are the soundness qualifiers
+// (`bounded`, `unsupported`, `nothing_compared`) and every default reads as
+// "nothing to worry about" -- a child SIGKILLed by the wall backstop or its
+// RLIMIT_AS share, mid-write, would otherwise hand the parent an UNBOUNDED
+// Proven for a bounded claim. Framing makes truncation a parse failure, which
+// every caller already routes to "worker produced no result" -> Unknown.
+//
+// Exposed (rather than file-local) so the seam has a direct regression test.
+std::string frame_blob(std::string_view payload);
+
+// False for a short header, a short payload, or trailing garbage: any frame
+// that is not byte-exact is no result at all.
+bool unframe_blob(std::string_view b, std::string_view& payload);
+
 // Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
 // one task owns one child process, so the solver-process count is bounded by
 // formal.jobs and cvc5 instances never execute concurrently in threads.

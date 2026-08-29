@@ -10,6 +10,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "cell.hpp"
 #include "encode.hpp"
@@ -397,4 +398,37 @@ TEST(CombEquiv, IndexedCarryDescriptorMismatchFallsBackAndRefutes) {
 TEST(CombEquiv, ZeroCountObservedPlainOutputIsRejectedBeforeCertification) {
   hhds::GraphLibrary lib;
   EXPECT_THROW((void)build_indexed_carry_loop(lib, 0, 0, true), std::logic_error);
+}
+
+// --- worker-pipe framing -----------------------------------------------------
+//
+// The soundness contract of frame_blob/unframe_blob: a blob the pipe truncated
+// must FAIL to unframe, so the parent tags the worker "no result" (Unknown)
+// instead of reading a half-parsed Query_result whose trailing soundness
+// qualifiers (bounded / unsupported / nothing_compared) silently default to
+// "nothing to worry about". Before framing, a child SIGKILLed mid-write handed
+// the parent an UNBOUNDED Proven for a bounded claim.
+TEST(WorkerFrame, RoundTripsAnyPayload) {
+  for (const auto& payload : std::vector<std::string>{{}, {"x"}, std::string(9000, '\x01')}) {
+    const std::string framed = livehd::lec::frame_blob(payload);
+    EXPECT_EQ(framed.size(), payload.size() + sizeof(uint64_t));
+    std::string_view got;
+    ASSERT_TRUE(livehd::lec::unframe_blob(framed, got));
+    EXPECT_EQ(std::string(got), payload);
+  }
+}
+
+TEST(WorkerFrame, TruncationIsNotAResult) {
+  const std::string payload(4096, '\x7f');  // > PIPE_BUF: a real short-write shape
+  const std::string framed = livehd::lec::frame_blob(payload);
+  std::string_view  got;
+  // Every proper prefix must be rejected: a header cut mid-length, a header with
+  // no payload, and a payload cut at any point (including one byte short).
+  for (size_t n = 0; n < framed.size(); ++n) {
+    EXPECT_FALSE(livehd::lec::unframe_blob(std::string_view{framed}.substr(0, n), got))
+        << "a " << n << "-byte prefix of a " << framed.size() << "-byte frame was accepted";
+  }
+  // Trailing garbage (two children's writes interleaved) is not a result either.
+  EXPECT_FALSE(livehd::lec::unframe_blob(framed + "junk", got));
+  EXPECT_TRUE(livehd::lec::unframe_blob(framed, got));
 }
