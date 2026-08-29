@@ -70,7 +70,11 @@ run compile lg:"$D/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$D/rev" --wo
 NV=$(ls "$D/netv/"*.v | wc -l | tr -d ' ')
 [ "$NV" = "1" ] || fail "expected exactly one netlist .v, got $NV"
 grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$D/netv/"*.v || fail "no standard cells in the flat netlist"
-grep -hq "DFFx1 " "$D/netv/"*.v || fail "flops were not mapped to DFF cells in the flat netlist"
+# hier_seq's `reg r:u8 = 0` requests Pyrope's implicit reset, and the test
+# Liberty has no reset-capable DFF, so pass.abc keeps those registers NATIVE
+# while still mapping their data cones (same contract lhd_abc_seq_test pins).
+grep -hq "posedge" "$D/netv/"*.v || fail "reset-bearing native flops were lost in the flat netlist"
+! grep -hq "DFFx1 " "$D/netv/"*.v || fail "a reset-bearing flop became a plain DFFx1 in the flat netlist"
 ! grep -hq "__c[0-9]" "$D/netv/"*.v || fail "a __c<color> region module leaked into the flat netlist"
 ! grep -hq "stage_unit\b" "$D/netv/"*.v || fail "a child module instance survived the flatten"
 

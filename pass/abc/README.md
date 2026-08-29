@@ -128,6 +128,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
 | `delay` / `load` | `{D}` / `{L}` substitution: expands to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC | empty |
+| `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` always maps for minimum delay — see below | `200` |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
 | `flatten` | whole-design flatten: `auto`/`true`/`false` — see below | `auto` |
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
@@ -154,10 +155,40 @@ Two caveats, both about `{D}` itself:
   normalizes every SCL library to ps/ff on read (`Abc_SclLibNormalize`), so a
   `time_unit : "1ns"` Liberty still reports and consumes ps here.
 - The pinned ABC revision's `&nf` **parses `-D` but never reads it**
-  (`giaNf.c` only consults `MapDelayTarget`, which `-D` does not set), so today
-  `delay` selects the delay *model* and the QoR units — it is not yet a binding
-  constraint on the mapper. A per-output required time would have to come from
-  ABC's `read_constr`/`Scl_Con` channel.
+  (`giaNf.c` only consults `MapDelayTarget`, which `-D` does not set), so `{D}`
+  alone selects the delay *model* and the QoR units, not a mapper constraint.
+  The only relaxation knob `&nf` honours is `-R <pct>`, a percentage of the
+  mapper's OWN achieved delay — which is what `area_relax` drives (below). A
+  per-output required time would still have to come from ABC's
+  `read_constr`/`Scl_Con` channel.
+
+### A budget is a budget in BOTH directions (`area_relax`)
+
+Because `&nf -D` is inert, the built-in flow used to map every region for
+**minimum delay** and then keep it, no matter how much timing slack the target
+left. That is invisible under a tight ASAP7 constraint and enormous under a
+relaxed sky130 one, where a mapped region beats its clock by 6–380× and pays
+area for speed nothing asked for.
+
+So after the flow, `pass.abc` times the mapped network with the SCL timer and:
+
+- **over budget** → `upsize; dnsize`, the speed-grade sweep (unchanged);
+- **under budget** → hand the measured slack back as `&nf -R <pct>`, capped by
+  `area_relax` and by the slack itself, and re-map. Only the mapper is repeated:
+  `&undo` restores the GIA `&nf` consumed, so `&fraig`/`dc2`/`&dch` — the
+  expensive part — run once, and the whole recovery costs a few percent of ABC
+  time. The re-map's `dnsize` gets `-D <target>` so it can down-size toward the
+  budget instead of preserving the delay it happened to land on. `&undo` reverses
+  exactly ONE step, so there is no second undo back to the minimum-delay netlist;
+  the relaxation never exceeds the slack that was actually measured, and if the
+  gain model and the SCL timer still disagree the result is repaired with
+  `upsize -D; dnsize -D`.
+
+Measured over 15 ../lhdtrack designs (geomean, `area_relax=0` vs the `200`
+default): **sky130 −13.6% area** with every design still inside its 20 ns budget,
+**ASAP7 −7.0% area** with the set of designs that miss their 100 ps budget
+unchanged — the tight ones have no slack, so they are never relaxed. ABC time
+moves 1.03×/1.00×. A custom `flow` is untouched by either path.
 
 A delay target that arrives ONLY through the graph-embedded `coloring_info`
 `region_opts` channel does not switch the GENLIB: it is parsed per region, while

@@ -242,3 +242,37 @@ TEST(AbcIncr, ReuseIneligibleMiss) {
   Incr_cache c2("lgdb_p2d_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R").hit) << "reuse-ineligible region must not reuse";
 }
+
+// --- the delay budget's OTHER half (area recovery) --------------------------
+//
+// `pass.abc` re-maps a region with `&nf -R <pct>` when the first mapping BEAT
+// its delay target, because ABC's `&nf -D` is silently ignored by the mapper
+// (giaNf.c reads `MapDelayTarget`, which `-D` never writes) and the flow would
+// otherwise always chase minimum delay and pay area for it. The QoR that buys
+// depends on the cell library; the DECISION does not, so it is pinned here.
+TEST(AbcAreaRelax, MissedBudgetNeverRelaxes) {
+  // At or over the target there is no slack to trade -- that is the `upsize`
+  // path's job, and relaxing there would give away timing the design needs.
+  EXPECT_EQ(livehd::abc::area_relax_percent(100.0f, 140.0f, 200), 0);
+  EXPECT_EQ(livehd::abc::area_relax_percent(100.0f, 100.0f, 200), 0);
+}
+
+TEST(AbcAreaRelax, SmallSlackIsNotWorthASecondMapping) {
+  EXPECT_EQ(livehd::abc::area_relax_percent(110.0f, 100.0f, 200), 0);   // 10%
+  EXPECT_EQ(livehd::abc::area_relax_percent(124.0f, 100.0f, 200), 0);   // just under the floor
+  EXPECT_EQ(livehd::abc::area_relax_percent(125.0f, 100.0f, 200), 25);  // at it
+}
+
+TEST(AbcAreaRelax, RelaxIsBoundedByBothSlackAndCap) {
+  // A relaxed sky130 target (20 ns against ~1.2 ns mapped) has far more slack
+  // than ABC will trade, so the cap decides; a tighter one is slack-bound.
+  EXPECT_EQ(livehd::abc::area_relax_percent(20000.0f, 1200.0f, 200), 200);
+  EXPECT_EQ(livehd::abc::area_relax_percent(200.0f, 100.0f, 200), 100);
+  EXPECT_EQ(livehd::abc::area_relax_percent(200.0f, 100.0f, 50), 50);
+}
+
+TEST(AbcAreaRelax, DisabledAndDegenerateInputs) {
+  EXPECT_EQ(livehd::abc::area_relax_percent(20000.0f, 1200.0f, 0), 0);  // area_relax=0
+  EXPECT_EQ(livehd::abc::area_relax_percent(0.0f, 1200.0f, 200), 0);    // no target
+  EXPECT_EQ(livehd::abc::area_relax_percent(20000.0f, 0.0f, 200), 0);   // untimed network
+}

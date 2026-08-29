@@ -1615,6 +1615,26 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
 
+    // A materialized property marker (`fproperty` / `lgassert`) is not hardware:
+    // it drives nothing and has no Liberty cell, so there is no arc to time.
+    // pass.abc drops these before the netlist, but a design timed straight from
+    // its source graph (`lhd pass opentimer` on a pre-ABC library) still carries
+    // them, and refusing one would report a black box for an assertion.
+    if (livehd::graph_util::is_property_marker(node)) {
+      continue;
+    }
+    // A Sub that DRIVES NOTHING is on no timing path, whatever it is: with no
+    // output pin there is no arc to annotate and no arrival to propagate. That
+    // is exactly the shape of a property marker whose module declaration went
+    // missing (pass.partition rebuilds the instance but does not clone the
+    // `lgassert`/`fproperty` decl, so the Sub arrives here unbound and its type
+    // name reads empty) -- and refusing the WHOLE design over an assertion is
+    // the wrong answer either way. A genuine black box that matters for timing
+    // has outputs and still reaches the refusal below.
+    if (node.out_edges().empty()) {
+      continue;
+    }
+
     // A Sub that is not a Liberty cell. In whole-design mode a design module is
     // descended into by the hier walk (never yielded here); reaching this with
     // a body means a black-box the flatten cannot enter — skip it defensively

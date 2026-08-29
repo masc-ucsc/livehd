@@ -54,6 +54,19 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/tight" \
   --workdir "$W/tight_work"
 cp "$W/result.json" "$W/tight.json"
 
+# The budget's OTHER half. `&nf -D` is silently ignored by ABC's mapper, so
+# without an explicit relaxation the flow always chases MINIMUM delay and spends
+# area no constraint asked for. `abc.area_relax=0` restores exactly that old
+# behaviour, so the default must never come out LARGER than it -- and must still
+# be inside the budget. (How much smaller depends on the cell library: this
+# hermetic Liberty has six cells and one alternative drive strength, so it has
+# almost no area/delay curve to trade along. The measured effect is in
+# //pass/abc:abc_incr_test's policy tests and the ../lhdtrack sweep.)
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/norelax" \
+  --set abc.library="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set abc.area_relax=0 --workdir "$W/norelax_work"
+cp "$W/result.json" "$W/norelax.json"
+
 default_area=$(metric area "$W/default.json")
 default_delay=$(metric max_delay "$W/default.json")
 base_area=$(metric area "$W/no_fanout.json")
@@ -69,5 +82,14 @@ awk -v delay="$default_delay" 'BEGIN { exit !(delay > 0 && delay <= 1000) }' \
 awk -v tight="$tight_delay" -v relaxed="$default_delay" \
   'BEGIN { exit !(tight < relaxed * 0.9) }' \
   || fail "a missed target did not trigger timing recovery (tight=$tight_delay, relaxed=$default_delay)"
+
+norelax_area=$(metric area "$W/norelax.json")
+norelax_delay=$(metric max_delay "$W/norelax.json")
+[ -n "$norelax_area" ] && [ -n "$norelax_delay" ] \
+  || fail "missing QoR metric for area_relax=0 (area=$norelax_area delay=$norelax_delay)"
+awk -v area="$default_area" -v base="$norelax_area" 'BEGIN { exit !(area <= base) }' \
+  || fail "budget-aware area recovery INFLATED the netlist (area_relax=200 -> $default_area, =0 -> $norelax_area)"
+awk -v delay="$norelax_delay" 'BEGIN { exit !(delay > 0 && delay <= 1000) }' \
+  || fail "area_relax=0 one-hot mux missed its 1000 ps budget (delay=$norelax_delay)"
 
 echo "PASS: one-hot mux avoids unconditional area inflation and still sizes a real miss (area=$default_area, no-fanout=$base_area, relaxed=$default_delay ps, tight=$tight_delay ps)"

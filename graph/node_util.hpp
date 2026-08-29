@@ -282,6 +282,30 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 
 [[nodiscard]] inline bool has_name(const hhds::Node_class& node) { return node.attr(hhds::attrs::name).has(); }
 
+// True for a materialized property MARKER instance: the `fproperty` Sub a user
+// `assert`/`assume` becomes, or the `lgassert` Sub a runtime `a#[lo..=hi]` guard
+// emits. Both are recognized PRIMITIVES -- no sub-graph body, no Liberty cell --
+// so every pass that walks real HARDWARE has to know they are neither. Templated
+// over the node kind because the hierarchical walks (pass.opentimer) see
+// occurrences while the flat ones see base nodes.
+template <typename Node_like>
+[[nodiscard]] inline bool is_property_marker(const Node_like& n) {
+  if (const auto sio = n.get_subnode_io(); sio) {
+    const auto nm = sio->get_name();
+    return nm == fproperty_module_name || nm == lgassert_module_name;
+  }
+  // No subnode binding left -- and then it is not even an `Ntype_op::Sub` any
+  // more, since type_op_of derives that from the subnode gid. A marker still
+  // identifies itself by the payload it
+  // packs into its NAME attr -- "<kind>\x1f<loc>\x1f<msg>" for fproperty,
+  // "<loc>\x1f<node>" for lgassert -- which is the same signature
+  // Sub_inliner/Flattener use to know they must not prefix that name. \x1f is
+  // not a legal identifier character, so a genuine body-less black box (external
+  // IP, a Liberty cell) can never collide with it, and such a box must keep
+  // reaching whatever refusal its consumer has.
+  return node_name_of(n).find('\x1f') != std::string_view::npos;
+}
+
 // Serialized const value (for Ntype_op::Nconst nodes). Empty if absent.
 [[nodiscard]] inline std::string_view const_value_of(const hhds::Node_class& node) {
   auto a = node.attr(livehd::attrs::const_value);

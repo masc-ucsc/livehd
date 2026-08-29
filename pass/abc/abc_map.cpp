@@ -98,6 +98,15 @@ constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; s
 // stripped one; a custom flow places `{F}` (the bare number) itself.
 constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize";
 
+// The MAPPER step of both built-in flows, spelled once so map_region's
+// area-recovery pass can replay exactly it -- and nothing else -- after `&undo`.
+constexpr std::string_view kMapCmd = "&nf {D}";
+
+// The buffering tail with the delay BUDGET handed to `dnsize`. A bare `dnsize`
+// preserves whatever delay the mapper landed on; `-D` lets it downsize toward
+// the requested target instead, which is the point of the area-recovery pass.
+constexpr std::string_view kBufferTailBudget = "; buffer -N {F}; dnsize {D}";
+
 // Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow; the
 // latches only carry the registers across ABC so it can optimize the logic
 // BETWEEN them. Retiming (`dretime`) is deliberately NOT in the default
@@ -111,6 +120,12 @@ constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize";
 // `--set pass.abc.flow="strash; &get -n; &dc4; dretime; &dch -f; &nf {D};
 // &put"` (the read-back stays robust to reshaped latches).
 constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put";
+
+// The remap in map_region assumes both built-in flows END with the mapper step
+// followed by `&put`, because `&undo` reverses exactly one GIA transformation.
+static_assert(kCombFlow.ends_with("; &nf {D}; &put"));
+static_assert(kSeqFlow.ends_with("; &nf {D}; &put"));
+static_assert(kCombFlow.find(kMapCmd) != std::string_view::npos);
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -188,6 +203,21 @@ struct Abc_bit_ops {
 };
 
 }  // namespace
+
+// The slack floor. Below it a remap cannot buy back anything ABC would not
+// already have taken, and it would still cost a second mapping pass.
+static constexpr double kMinRelaxPct = 25.0;
+
+int area_relax_percent(float target, float achieved, uint32_t cap) {
+  if (cap == 0 || target <= 0.0f || achieved <= 0.0f || achieved > target) {
+    return 0;
+  }
+  const double slack_pct = (static_cast<double>(target) / achieved - 1.0) * 100.0;
+  if (slack_pct < kMinRelaxPct) {
+    return 0;
+  }
+  return static_cast<int>(std::min(slack_pct, static_cast<double>(cap)));
+}
 
 // {D}/{L} expand to the full FLAG (`-D <val>` / `-L <val>`) when the option is
 // set and to nothing otherwise — `&nf {D}` needs `&nf -D 4`, and a bare value
@@ -279,13 +309,19 @@ std::string Mapper::resolve_recipe() const {
   // to a later run that never installed the physical GENLIB. The Liberty
   // content is already in Incr_cache::make_salt, so the request is the only
   // missing half of the decision.
-  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}",
+  //
+  // `arelax` joins them for the same reason `nldm` did: the area-recovery remap
+  // re-maps a region that beat its budget, so two runs that spell an identical
+  // flow still produce different netlists (and different QoR rows) when the cap
+  // differs.
+  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}",
                      comb_flow(),
                      seq_flow(),
                      static_cast<int>(opts_.adder),
                      opts_.block_size,
                      static_cast<int>(opts_.multiplier),
-                     nldm_requested() ? 1 : 0);
+                     nldm_requested() ? 1 : 0,
+                     opts_.area_relax_pct);
 }
 
 bool Mapper::start() {
@@ -854,7 +890,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-                     "(was {} MiB, color added {} MiB){}, {}{}",
+      "(was {} MiB, color added {} MiB){}, {}{}",
       region,
       blasted,
       total,
@@ -1267,12 +1303,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   constexpr size_t kMaxRefusals = 10;
   size_t           refusals     = 0;
   const auto       refuse       = [&](const hhds::Node_class& bad,
-                          std::string_view        code,
-                          std::string_view        category,
-                          std::string_view        what,
-                          std::string_view        hint     = {},
-                          const hhds::Pin_class&  note_pin = {},
-                          std::string_view        note_msg = {}) {
+                                      std::string_view        code,
+                                      std::string_view        category,
+                                      std::string_view        what,
+                                      std::string_view        hint     = {},
+                                      const hhds::Pin_class&  note_pin = {},
+                                      std::string_view        note_msg = {}) {
     unsupported = true;
     if (refusals++ >= kMaxRefusals) {
       return;  // counted; the post-loop summary reports the total
@@ -2133,7 +2169,22 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   std::vector<Bbox>                      bboxes;
   std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
   for (const auto& n : rb.nodes) {
-    auto       op            = gu::type_op_of(n);
+    auto op = gu::type_op_of(n);
+    // A materialized PROPERTY marker (`fproperty` from a user assert/assume,
+    // `lgassert` from a runtime `a#[lo..=hi]` guard) is not hardware: it has no
+    // Liberty cell and no body, and the mapped netlist is a synthesis artifact
+    // that cannot represent it. Dropping it here is what makes the netlist
+    // WELL-FORMED. Carrying it as a blackbox boundary instead left a Sub whose
+    // module was never declared in the output library, so `get_subnode_io()`
+    // came back null downstream: cgen silently emitted nothing for it (the
+    // runtime check was already lost), and `pass.opentimer` refused the WHOLE
+    // design over a black box with an empty type name -- which is what took out
+    // every cva6 synthesis run, and any design containing one runtime bit-range
+    // select. The check lives on in the pre-ABC design, which is what pass.formal
+    // and the source-level flows read.
+    if (gu::is_property_marker(n)) {
+      continue;
+    }
     // A flop in a !seq (combinational-only) map is kept as a native boundary,
     // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
     // din/enable/clock/reset are cut as POs (or recreated when const), and the
@@ -3296,40 +3347,98 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
   }
+  // Can the area-recovery pass below replay JUST the mapper? `&undo` reverses one
+  // GIA transformation, so the flow has to END with the built-in mapper step plus
+  // `&put` and (when it is on) the buffering tail -- anything after that would
+  // survive the undo and be applied twice. Derive it from the RESOLVED string
+  // rather than from `tool_owned_flow`: that flag is computed before the
+  // size-tier `small_flow`/`large_flow` substitution, so a tier flow is still
+  // "tool owned" while being an arbitrary command list.
+  const std::string map_step   = subst_flow(std::string{kMapCmd});
+  const std::string flow_tail  = subst_flow(std::string{kBufferTail});
+  const bool        tail_on    = !flow_tail.empty() && flow.ends_with(flow_tail);
+  const std::string remap_post = std::string{"; &put"} + (tail_on ? subst_flow(std::string{kBufferTailBudget}) : "");
+  const bool        remappable = tool_owned_flow && flow.ends_with(map_step + "; &put" + (tail_on ? flow_tail : ""));
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
   }
 
-  // A delay is a budget, not an instruction to minimize delay at any cost.
-  // ABC's `upsize` ignores &nf's -D target and always chases the fastest cell
-  // assignment; the following `dnsize` then preserves that newly tightened
+  // A delay is a BUDGET, in both directions.
+  //
+  // MISS: ABC's `upsize` ignores &nf's -D target and always chases the fastest
+  // cell assignment; the following `dnsize` then preserves that newly tightened
   // delay instead of recovering toward the requested budget. Time the built-in
-  // flow first and invoke the speed-grade sweep only for a real miss. Custom
-  // flows remain fully caller-owned.
+  // flow first and invoke the speed-grade sweep only for a real miss.
+  //
+  // SLACK: `&nf -D` is silently IGNORED by ABC's mapper -- giaNf.c consults only
+  // `Jf_Par_t::MapDelayTarget`, which the `-D` switch never writes (it sets the
+  // unread `DelayTarget`), so the sole knob that relaxes required times is `-R`,
+  // a PERCENTAGE of the mapper's own achieved delay. The built-in flow therefore
+  // always mapped for minimum delay and paid area for timing nothing asked for.
+  // That is invisible under a tight ASAP7 target and enormous under a relaxed
+  // sky130 one, where a region beats its clock by 6-380x. Re-map with the
+  // measured slack handed back as `-R`, bounded by `area_relax`.
+  //
+  // Only `&nf` is repeated, not the whole flow: `&undo` restores the GIA the
+  // mapper consumed (ABC keeps exactly one, in `pGia2`), so `&fraig`/`dc2`/`&dch`
+  // -- the expensive part -- run once. It restores only ONE step, which is why
+  // there is no second undo back to the minimum-delay netlist; the relaxation is
+  // capped by the slack that was actually measured, and a miss is repaired with
+  // the same budget-directed sizing the MISS path uses.
+  //
+  // Custom flows remain fully caller-owned: neither path touches them.
+  const auto scl_qor = [&]() -> std::optional<std::pair<float, double>> {
+    auto* mapped = Abc_FrameReadNtk(frame);
+    if (mapped == nullptr || !Abc_NtkIsMappedLogic(mapped)) {
+      return std::nullopt;
+    }
+    auto*                                   timing_ntk = mapped->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(mapped) : mapped;
+    std::optional<std::pair<float, double>> out;
+    if (Abc_SclCheckNtk(timing_ntk, 0)) {
+      auto* timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_ntk, 0, 1, 0.0f, 0);
+      out          = std::pair{timing->MaxDelay0, static_cast<double>(timing->SumArea0)};
+      Abc_SclManFree(timing);
+    }
+    if (timing_ntk != mapped) {
+      Abc_NtkDelete(timing_ntk);
+    }
+    return out;
+  };
   if (tool_owned_flow && nldm_genlib_loaded_ && !opts_.delay.empty()) {
     char*       end    = nullptr;
     const float target = std::strtof(opts_.delay.c_str(), &end);
     if (end != opts_.delay.c_str() && *end == '\0' && target > 0.0f) {
-      auto* mapped = Abc_FrameReadNtk(frame);
-      if (mapped != nullptr && Abc_NtkIsMappedLogic(mapped)) {
-        auto* timing_ntk = mapped->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(mapped) : mapped;
-        if (Abc_SclCheckNtk(timing_ntk, 0)) {
-          auto*      timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_ntk, 0, 1, 0.0f, 0);
-          const bool missed = timing->MaxDelay0 > target;
-          Abc_SclManFree(timing);
-          if (missed && Cmd_CommandExecute(frame, "upsize; dnsize") != 0) {
+      const auto first = scl_qor();
+      if (first && first->first > target) {
+        if (Cmd_CommandExecute(frame, "upsize; dnsize") != 0) {
+          livehd::diag::err("pass.abc", "abc-flow", "internal")
+              .msg("ABC conditional sizing failed for region '{}' after missing delay target {}", rb.module_name, opts_.delay)
+              .fatal();
+          return;
+        }
+      } else if (first && remappable) {
+        const int relax = area_relax_percent(target, first->first, opts_.area_relax_pct);
+        if (relax > 0) {
+          const std::string remap = std::format("&undo; {} -R {}{}", map_step, relax, remap_post);
+          if (Cmd_CommandExecute(frame, remap.c_str()) != 0) {
             livehd::diag::err("pass.abc", "abc-flow", "internal")
-                .msg("ABC conditional sizing failed for region '{}' after missing delay target {}", rb.module_name, opts_.delay)
+                .msg("ABC area-recovery remap failed for region '{}': {}", rb.module_name, remap)
                 .fatal();
-            if (timing_ntk != mapped) {
-              Abc_NtkDelete(timing_ntk);
-            }
             return;
           }
-        }
-        if (timing_ntk != mapped) {
-          Abc_NtkDelete(timing_ntk);
+          // The relaxation was derived from the SCL timer while `-R` relaxes the
+          // mapper's own gain model, so the two can disagree. Repair with the
+          // same budget-directed sizing the MISS path uses rather than trusting
+          // the request.
+          const auto second = scl_qor();
+          if (second && second->first > target
+              && Cmd_CommandExecute(frame, std::format("upsize -D {0}; dnsize -D {0}", opts_.delay).c_str()) != 0) {
+            livehd::diag::err("pass.abc", "abc-flow", "internal")
+                .msg("ABC sizing repair failed for region '{}' after area recovery", rb.module_name)
+                .fatal();
+            return;
+          }
         }
       }
     }

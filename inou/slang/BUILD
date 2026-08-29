@@ -242,6 +242,24 @@ sh_test(
     ],
 )
 
+# Two DISJOINT sub-word writes of DIFFERENT widths into one word of a packed 2-D
+# reg (minion's `ex_reg_data`). A memory carries one `wensize`, so it can hold
+# neither a mixed-width per-chunk enable nor two read-modify-write splices into a
+# clocked word -- the reader keeps such an array a flat flop bus instead, and
+# lgyosys checks the result against the source.
+sh_test(
+    name = "slang_packed2d_mixed_partial_write",
+    size = "large",
+    srcs = ["tests/packed2d_mixed_partial_write_smoke.sh"],
+    data = [
+        "tests/sv/packed2d_mixed_partial_write.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
 # A scalar register with a Verilog declaration / initial-block value but no
 # explicit reset is modeled as reset-bearing state using that value. This is a
 # deliberate two-state synthesis choice and carries a warning because source

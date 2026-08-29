@@ -68,6 +68,17 @@ void Pass_abc::setup() {
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize` to the "
                        "built-in flow (0 disables it). A custom `flow` places `{F}` -- the bare number -- itself",
                        "16");
+  // A delay target is a BUDGET. ABC's own `&nf -D` is a no-op for the mapper
+  // (giaNf.c reads MapDelayTarget, which `-D` never writes), so without this the
+  // built-in flow always maps for MINIMUM delay -- which is right for a tight
+  // ASAP7 target and pure waste under a relaxed sky130 one, where the mapped
+  // region beats its clock by an order of magnitude and pays area for it.
+  m.add_label_optional("area_relax",
+                       "max percent of measured timing SLACK to trade back for area: when the mapped region beats the "
+                       "`delay` budget, pass.abc re-maps with ABC's `&nf -R <pct>` relaxation, bounded by both this cap "
+                       "and the real slack. 0 disables it (always map for minimum delay). Requires `delay` and an NLDM "
+                       "Liberty",
+                       "200");
   m.add_label_optional("small_flow",
                        "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
                        "[small_min_ge, small_ge]; "
@@ -617,6 +628,20 @@ void Pass_abc::work(Eprp_var& var) {
       return;
     }
   }
+  uint64_t area_relax_pct = 200;
+  {
+    const auto s_ar = std::string{var.get("area_relax", "200")};
+    auto*      b    = s_ar.data();
+    auto*      e    = s_ar.data() + s_ar.size();
+    auto [p, ec]    = std::from_chars(b, e, area_relax_pct);
+    if (ec != std::errc{} || p != e || area_relax_pct > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-area-relax", "io")
+          .msg("pass.abc: area_relax must be an integer in [0, {}], got '{}'", std::numeric_limits<uint32_t>::max(), s_ar)
+          .hint("0 always maps for minimum delay; 200 lets ABC give back up to 3x the mapped delay when the budget allows")
+          .fatal();
+      return;
+    }
+  }
   uint64_t register_max_bits = 4096;
   {
     auto* b      = register_max_bits_s.data();
@@ -645,6 +670,7 @@ void Pass_abc::work(Eprp_var& var) {
   livehd::abc::Map_options opts;
   opts.flow              = flow;
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
+  opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
   opts.small_flow        = small_flow;
   opts.small_min_ge      = small_min_ge;
   opts.small_ge          = small_ge;

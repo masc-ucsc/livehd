@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -18,6 +19,17 @@
 namespace livehd::abc {
 
 class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
+
+// How much of a met delay budget to hand back to ABC's mapper as area, in
+// percent, for `&nf -R`. `achieved` and `target` are in the same (Liberty) unit;
+// `cap` is Map_options::area_relax_pct. Returns 0 when there is nothing to trade
+// -- the budget was missed, the slack is too small to pay for a second mapping
+// pass, or recovery is switched off -- which is exactly the "leave the
+// minimum-delay mapping alone" answer.
+//
+// Free and pure so the policy is testable without a Liberty: the QoR it produces
+// depends on the cell library, but the DECISION does not.
+int area_relax_percent(float target, float achieved, uint32_t cap);
 
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
@@ -57,6 +69,16 @@ struct Map_options {
   std::string       dff_cell;
   std::string       delay;  // {D} substitution
   std::string       load;   // {L} substitution
+  // A delay target is a BUDGET, not "go as fast as you can". ABC's `&nf -D` is
+  // silently IGNORED by the mapper (giaNf reads only `MapDelayTarget`, which
+  // `-D` never sets), so a built-in flow always mapped for MINIMUM delay and
+  // spent area no timing constraint asked for. When the mapped region beats its
+  // budget, pass.abc re-runs the mapper with `&nf -R <pct>` -- ABC's own delay
+  // RELAXATION ratio -- to convert the measured slack into area. This caps that
+  // percentage; 0 disables the recovery entirely and restores minimum-delay
+  // mapping. Needs a physical (NLDM) Liberty and a `delay` target: with neither
+  // there is no budget to be inside of.
+  uint32_t          area_relax_pct   = 200;
   bool              verbose          = false;
   // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
   // CSKA/CLA block width (0 => auto from the operating width).

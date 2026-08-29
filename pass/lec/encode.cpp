@@ -440,6 +440,89 @@ Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width) {
   return tm.mkTerm(op, {v.x_mask});
 }
 
+namespace {
+
+// Exact X plane for a constant-mask Get_mask (bit EXTRACT), or a null Term when
+// the shape is anything else (caller then falls back to the conservative
+// whole-value smear).
+//
+// Unknowns are POSITIONAL, so the plane must be sliced exactly the way the value
+// is: the window's own bits, extended above `a`'s stored width the way `fit`
+// extends the value. Smearing instead marks every extracted bit unknown, which
+// makes an output assembled out of such slices compare NOTHING -- a vacuous
+// PROVEN. This is `//pass/lec:lec_combarray_test`'s corrupted chunk: the golden's
+// `'0` fill leaves the packed bus partially X, so slicing it used to hand the
+// miter a fully don't-care 128-bit `dout` even though the differing bits are in
+// a fully known window.
+Term exact_get_mask_x_plane(cvc5::TermManager& tm, const hhds::Occurrence_node& node, Ntype_op op, const std::vector<Val>& a_in,
+                            int width) {
+  if (op != Ntype_op::Get_mask || a_in.empty()) {
+    return Term();
+  }
+  const Val& a = a_in.front();
+  if (a.x_mask.isNull()) {
+    return Term();  // `a` is fully known; the plane can only come from the mask pin
+  }
+  auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
+  if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
+    return Term();
+  }
+  Dlop mask = gu::hydrate_const(mask_pin);
+  if (mask.has_unknowns()) {
+    return Term();  // an unknown mask selects unknown POSITIONS: smear
+  }
+  if (mask.is_just_i64() && mask.to_just_i64() == -1) {
+    // Unsigned cast: the value is re-read as unsigned, so the plane extends with
+    // known-zero bits exactly like the value extends with zeros.
+    return fit_x_mask_to(tm, Val{a.term, a.width, /*is_signed=*/false, a.x_mask}, width);
+  }
+  auto      range = mask.get_mask_range();  // [begin, end)
+  const int rb = range.first, re = range.second;
+  if (rb < 0 || re <= rb) {
+    return Term();  // non-contiguous: the value path refuses too
+  }
+  Term axw = re > a.width ? fit_x_mask_to(tm, a, re) : a.x_mask;
+  if (axw.isNull()) {
+    return Term();
+  }
+  Term slice = bv_extract(tm, axw, re - 1, rb);
+  return fit_x_mask_to(tm, Val{slice, re - rb, /*is_signed=*/false, slice}, width);
+}
+
+// Exact X plane for a constant-position Sext. The kept window carries `a`'s own
+// plane; the replicated copies above it are unknown exactly when the kept sign
+// bit is, which is what fit_x_mask_to's signed branch already computes.
+Term exact_sext_x_plane(cvc5::TermManager& tm, const hhds::Occurrence_node& node, Ntype_op op, const std::vector<Val>& a_in,
+                        int width) {
+  if (op != Ntype_op::Sext || a_in.empty()) {
+    return Term();
+  }
+  const Val& a = a_in.front();
+  if (a.x_mask.isNull()) {
+    return Term();
+  }
+  auto pos_pin = gu::get_driver_of_sink_name(node, "b");
+  if (pos_pin.is_invalid() || !gu::is_const_pin(pos_pin)) {
+    return Term();
+  }
+  Dlop posc = gu::hydrate_const(pos_pin);
+  if (posc.has_unknowns() || !posc.is_just_i64()) {
+    return Term();
+  }
+  const int pos = static_cast<int>(posc.to_just_i64());
+  if (pos < 1) {
+    return Term();
+  }
+  Term axw = (pos > a.width) ? fit_x_mask_to(tm, a, pos) : a.x_mask;
+  if (axw.isNull()) {
+    return Term();
+  }
+  Term low = (pos == a.width) ? axw : bv_extract(tm, axw, pos - 1, 0);
+  return fit_x_mask_to(tm, Val{low, pos, /*is_signed=*/true, low}, width);
+}
+
+}  // namespace
+
 std::string Encoder::frame_tag(std::string_view prefix) {
   // "r3_" / "i3_" -> "3_" (same frame, opposite sides); "" -> "" (inductive).
   if (!prefix.empty() && (prefix.front() == 'r' || prefix.front() == 'i')) {
@@ -2823,6 +2906,23 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             Term ax        = fit_x_mask_to(tm_, pid(0)[0], W);
             Term keep      = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(pid(Ntype::get_sink_pid(op, "mask"))[0], W)});
             out_val.x_mask = ax.isNull() ? zero_w : tm_.mkTerm(Kind::BITVECTOR_AND, {ax, keep});
+          } else if (Term gx = exact_get_mask_x_plane(tm_, node, op, pid(0), W); !gx.isNull()) {
+            // A bit-EXTRACT is exact on the X plane for exactly the reason the
+            // Concat arm below is: unknowns are POSITIONAL, so a slice keeps the
+            // plane of the bits it actually reads and nothing else. The
+            // conservative smear marked the WHOLE slice unknown, so reading any
+            // window of a bus that carries an unknown ANYWHERE made every
+            // extracted bit X -- and an output assembled from such slices then
+            // compares NOTHING, i.e. a false PROVEN. That is `lec_combarray`'s
+            // corrupted chunk: `mem[b][63:32] = din[b][31:0]` differs from the
+            // golden in bits the unknown fill never reaches, yet the whole
+            // 128-bit `dout` came back don't-care and the miter was vacuous.
+            out_val.x_mask = gx;
+          } else if (Term sx = exact_sext_x_plane(tm_, node, op, pid(0), W); !sx.isNull()) {
+            // Sign extension is positional too: the replicated copies are unknown
+            // exactly when the kept sign bit is (that is what fit_x_mask_to's
+            // signed branch already does for a plain width fit).
+            out_val.x_mask = sx;
           } else if (op == Ntype_op::Concat && !concat_tbl.empty()) {
             // A Concat is EXACT on the X plane, and it has to be: unknowns here are
             // POSITIONAL, so a lane's unknown bits belong in that lane's window and
@@ -2894,8 +2994,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (dbg_nodes.count(nid)) {
             out.outputs[std::string("\x03"
                                     "dbg:")
-                        + std::string(prefix) + std::to_string(nid)]
-                = Val{result, W, out_signed};
+                        + std::string(prefix) + std::to_string(nid)] = Val{result, W, out_signed};
           }
         }
       }
@@ -2970,18 +3069,18 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           bool drv_ok = true;
           (void)driver_val(drv, drv_ok);
           if (!drv_ok) {
-            diag = "data input of '" + gu::debug_name(cur) + "' is driven by timing-only or unencoded pin '" + gu::debug_name(mn)
-                   + "' (op " + std::string(Ntype::get_name(gu::type_op_of(mn))) + ", key " + missing_driver_key + ")";
-            diag       += "; consumer inputs{";
-            bool first  = true;
+            diag  = "data input of '" + gu::debug_name(cur) + "' is driven by timing-only or unencoded pin '" + gu::debug_name(mn)
+                    + "' (op " + std::string(Ntype::get_name(gu::type_op_of(mn))) + ", key " + missing_driver_key + ")";
+            diag += "; consumer inputs{";
+            bool first = true;
             for (const auto& ie : cur.inp_edges()) {
               if (!first) {
                 diag += ", ";
               }
               first  = false;
               diag  += "p" + std::to_string(static_cast<int>(ie.sink.get_port_id())) + "="
-                      + gu::debug_name(ie.driver.get_master_node()) + ":"
-                      + std::string(Ntype::get_name(gu::type_op_of(ie.driver.get_master_node())));
+                       + gu::debug_name(ie.driver.get_master_node()) + ":"
+                       + std::string(Ntype::get_name(gu::type_op_of(ie.driver.get_master_node())));
             }
             diag  += "}; consumer outputs{";
             first  = true;
@@ -2991,8 +3090,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               }
               first  = false;
               diag  += gu::debug_name(oe.sink.get_master_node()) + ":"
-                      + std::string(Ntype::get_name(gu::type_op_of(oe.sink.get_master_node()))) + ".p"
-                      + std::to_string(static_cast<int>(oe.sink.get_port_id()));
+                       + std::string(Ntype::get_name(gu::type_op_of(oe.sink.get_master_node()))) + ".p"
+                       + std::to_string(static_cast<int>(oe.sink.get_port_id()));
             }
             diag      += "}";
             diagnosed  = true;

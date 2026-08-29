@@ -233,6 +233,30 @@ if "$LHD" pass opentimer --set pass.opentimer.hier=false --top "$TOP" lg:"$W/net
   fail "opentimer hier=false on a wrapper (non-Liberty region Subs) passed; expected failure"
 fi
 
+# 4c. A design carrying a PROPERTY MARKER must still time. A runtime bit-range
+# select (`a#[lo..=hi]`) materializes an `lgassert` Sub, and a user assert an
+# `fproperty` one; both are recognized primitives, not hardware. pass.partition
+# rebuilds the instance without cloning the marker's module declaration, so it
+# reaches OpenTimer unbound -- an empty type name and no body -- and the pass
+# used to refuse the WHOLE design over it ("whole-design timing hit black-box
+# ''"). That took out every cva6 synthesis run and any design with one runtime
+# bit-range select. A Sub that drives NOTHING is on no timing path.
+MARK="$W/marker.prp"
+cat > "$MARK" <<'EOF'
+mod marker_sta(a:u8, b:u8, sel:u3) -> (o:u8@[1]) {
+  reg r:u8 = 0
+  r = (a & b) ^ (a#[0..=sel] + 1)
+  o = r
+}
+EOF
+MTOP=marker_sta.marker_sta
+run compile "$MARK" --top marker_sta --recipe O1 --emit-dir lg:"$W/mlg" --workdir "$W/mw1"
+run pass color synth --top "$MTOP" lg:"$W/mlg" --workdir "$W/mw2"
+run pass abc --top "$MTOP" lg:"$W/mlg" --emit-dir lg:"$W/mnet" --set abc.library="$LIB" --workdir "$W/mw3"
+run pass opentimer --top "$MTOP" lg:"$W/mnet" "$LIB" --workdir "$W/mw4"
+grep -q '"kind":"sta"' "$W/mw4/timing.json" \
+  || fail "a design with a runtime bit-range select produced no STA report: $(cat "$W/mw4/timing.json" 2>/dev/null)"
+
 # 5. negative control: a nonexistent --top must fail
 if "$LHD" pass opentimer --top "no.such_module" lg:"$W/net" "$LIB" --workdir "$W/wn2" -q --result-json "$W/rn2.json" 2>/dev/null; then
   fail "opentimer with a bogus --top passed; expected failure"

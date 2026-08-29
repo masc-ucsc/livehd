@@ -649,6 +649,85 @@ struct Array_range_write_collector : public slang::ast::ASTVisitor<Array_range_w
   }
 };
 
+// Sub-word (`arr[i][hi:lo] <= v`) writes to a packed 2-D reg, keyed by symbol.
+//
+// WHY THE MEMORY REPRESENTATION CARES. A memory-ized packed 2-D reg lowers a
+// sub-word write one of two ways: a per-chunk write ENABLE (uniform,
+// chunk-aligned slices — the SRAM byte-enable idiom), or a read-modify-write
+// splice that writes the whole word back. Two RMW splices to one CLOCKED memory
+// cannot both stand: each reads the COMMITTED word, so whichever write port wins
+// a same-cycle collision discards the other's bits, and `lower_mem_element_*`
+// refuses the second one outright. A flat flop bus has no such problem — the
+// splices are Set_masks that compose — so an array carrying that shape must
+// simply not become a memory.
+//
+// Per symbol: how many sub-word writes CANNOT be a per-chunk enable (dynamic
+// in-word position, or a width that does not divide and align the word), plus
+// the set of widths of the ones that can. Two non-chunk writes are two RMW
+// splices into one word -- the refused shape. Two chunk writes of DIFFERENT
+// widths are equally unrepresentable: a memory carries ONE `wensize`.
+struct Sub_word_write_collector : public slang::ast::ASTVisitor<Sub_word_write_collector, slang::ast::VisitFlags::AllGood> {
+  struct Shape {
+    int                          non_chunk = 0;
+    absl::flat_hash_set<int64_t> chunk_widths;
+    bool                         unrepresentable_as_memory() const { return non_chunk > 1 || chunk_widths.size() > 1; }
+  };
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Shape>*          widths = nullptr;
+  // The caller's constant folder (Slang_context::try_eval_int): the collector
+  // runs during the structural scan and has no eval context of its own.
+  std::function<std::optional<int64_t>(const slang::ast::Expression&)> eval;
+
+  void handle(const slang::ast::AssignmentExpression& a) {
+    const slang::ast::Expression* l = &a.left();
+    while (l->kind == slang::ast::ExpressionKind::Conversion) {
+      l = &l->as<slang::ast::ConversionExpression>().operand();
+    }
+    // `arr[elem][slice]` / `arr[elem][bit]`: a select whose BASE is itself an
+    // element select of a packed 2-D array. `arr[elem]` alone is a whole-word
+    // write and never takes the splice path.
+    const slang::ast::Expression* base = nullptr;
+    int64_t                       lo   = -1;
+    const int64_t                 wid  = l->type == nullptr ? -1 : static_cast<int64_t>(l->type->getBitWidth());
+    if (l->kind == slang::ast::ExpressionKind::ElementSelect) {
+      const auto& es = l->as<slang::ast::ElementSelectExpression>();
+      base           = &es.value();
+      if (auto ci = eval(es.selector())) {
+        lo = *ci;
+      }
+    } else if (l->kind == slang::ast::ExpressionKind::RangeSelect) {
+      const auto& rs = l->as<slang::ast::RangeSelectExpression>();
+      base           = &rs.value();
+      if (rs.getSelectionKind() == slang::ast::RangeSelectionKind::Simple) {
+        auto lft = eval(rs.left());
+        auto rgt = eval(rs.right());
+        if (lft && rgt) {
+          lo = std::min(*lft, *rgt);
+        }
+      } else if (auto b = eval(rs.left()); b && wid > 0) {
+        lo = rs.getSelectionKind() == slang::ast::RangeSelectionKind::IndexedUp ? *b : *b - (wid - 1);
+      }
+    }
+    if (base != nullptr && base->kind == slang::ast::ExpressionKind::ElementSelect) {
+      const auto& elem = base->as<slang::ast::ElementSelectExpression>();
+      const auto& bct  = elem.value().type->getCanonicalType();
+      if (bct.isPackedArray() && bct.getArrayElementType() != nullptr && bct.getArrayElementType()->getBitWidth() > 1) {
+        if (const auto* sym = lhs_base_symbol(elem.value()); sym != nullptr) {
+          const auto&   elem_ty = *bct.getArrayElementType();
+          const int64_t word    = static_cast<int64_t>(elem_ty.getBitWidth());
+          const int64_t base_lo = elem_ty.hasFixedRange() ? static_cast<int64_t>(elem_ty.getFixedRange().lower()) : 0;
+          auto&         shape   = (*widths)[sym];
+          if (wid > 0 && lo >= base_lo && word % wid == 0 && (lo - base_lo) % wid == 0) {
+            shape.chunk_widths.insert(wid);
+          } else {
+            ++shape.non_chunk;
+          }
+        }
+      }
+    }
+    visitDefault(a);
+  }
+};
+
 // Select packed-vector ports whose body repeatedly addresses constant bits.
 // These are profitable leaf ports (the compressor-array xN_i[i] shape), unlike
 // a vector used only as a whole value. Dynamic selects stay packed: expanding
@@ -1125,7 +1204,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
     }
     std::string name(ps.name);
     const bool  plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front()))
-                       && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
+                        && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
     if (!plain || used_names_.count(name) != 0u) {
       continue;  // colliding / exotic name — keep folding this param
     }
@@ -1975,6 +2054,22 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         array_reset_lanes_[sym] = std::move(lanes);
       }
     }
+    // An array whose sub-word writes cannot ALL be per-chunk write enables would
+    // need two read-modify-write splices into one clocked memory word, which
+    // `lower_mem_element_splice_write` refuses (the second port's bits are lost
+    // to the first on a same-cycle collision). Keep it a flat flop bus, where
+    // the same two writes are ordinary composing Set_masks. Minion's
+    // `logic [1:0][XregSize-1:0] ex_reg_data` is the shape: one always_ff writes
+    // `[0][XregSize-1:CoreGsc32IdxVSize]` and another `[0][CoreGsc32IdxVSize-1:0]`,
+    // two different widths under two different enables.
+    absl::flat_hash_map<const slang::ast::ValueSymbol*, Sub_word_write_collector::Shape> sub_word_widths;
+    {
+      Sub_word_write_collector swc;
+      swc.widths = &sub_word_widths;
+      swc.eval   = [this](const slang::ast::Expression& e) { return try_eval_int(e); };
+      body->visit(swc);
+    }
+
     // One decision per SYMBOL: the selector no longer participates (a constant
     // and a runtime index spell the same LGraph memory), so a 16-entry bank
     // must not re-run the whole gate once per element access.
@@ -1994,6 +2089,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // write port per element store and no place to put `arr[2:1] <= v`, so
       // the write is silently dropped (the memory instantiates with
       // `wr_enable_0(1'b0)`).
+      if (auto it = sub_word_widths.find(sym); it != sub_word_widths.end() && it->second.unrepresentable_as_memory()) {
+        continue;  // mixed sub-word write shapes: see Sub_word_write_collector
+      }
       if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && !array_range_written.contains(sym)
           && !array_pattern_loaded.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
         packed_mem_regs_.insert(sym);
@@ -6236,7 +6334,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
   auto qualify   = [&](const std::string& raw) {
     return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
-                                    : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
   };
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
@@ -6446,7 +6544,7 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
   // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
   auto qualify   = [&](const std::string& raw) {
     return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
-                                    : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
   };
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
