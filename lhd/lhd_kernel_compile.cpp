@@ -13,10 +13,12 @@
 #include <sstream>
 #include <thread>
 
+#include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/tree_edit_distance.hpp"
 #include "latch_contract.hpp"
+#include "legalize.hpp"
 #include "lhd_compile_cache.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lhd_prp_import.hpp"
@@ -1298,18 +1300,18 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
             }
             list += '"' + t + '"';
           }
-          livehd::diag::sink().emit(
-              livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                       .code     = "import-no-progress",
-                                       .category = "name",
-                                       .pass     = "lhd.elaborate",
-                                       .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
-                                       .hint = std::format("an import cycle or a missing unit; {} unit{} available (use --diag-fmt "
-                                                           "json for the full list)",
-                                                           available_count,
-                                                           available_count == 1 ? " is" : "s are"),
-                                       .attrs = {{"available_unit_count", std::to_string(available_count)},
-                                                 {"available_units", units_avail}}});
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "import-no-progress",
+              .category = "name",
+              .pass     = "lhd.elaborate",
+              .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
+              .hint     = std::format("an import cycle or a missing unit; {} unit{} available (use --diag-fmt "
+                                      "json for the full list)",
+                                  available_count,
+                                  available_count == 1 ? " is" : "s are"),
+              .attrs    = {{"available_unit_count", std::to_string(available_count)}, {"available_units", units_avail}}
+          });
         }
         throw classify_engine_failure("import resolution made no progress");
       }
@@ -1460,6 +1462,44 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         run_step("pass.formal", *active, labels, opts, res);
       }
     }
+
+    // pass.legalize -- the one sanctioned structural transform between the
+    // optimization passes and every consumer, and the point the design is
+    // FROZEN. NOT a recipe step on purpose: `recipe:O0` has no steps, so a
+    // recipe-gated legalize would skip exactly the level that needs it most.
+    //
+    // It runs LAST, after pass.formal, so that every pass that may still
+    // reshape the graph has run before the structure is recorded; formal itself
+    // only annotates (`proven` / `runtime_check`). Everything downstream of
+    // here -- cgen, the emits, and the LEC / synthesis / simulation consumers
+    // -- reads a graph nobody may reshape.
+    //
+    // The split may create defs (loop halves) and delete defs (orphaned loop
+    // bodies, stale halves); both var.graphs and the active subset are updated
+    // so the emits, the cache and the freeze check see the design as it is.
+    if (!active->graphs.empty()) {
+      Phase_timer                               phase(res, "pass.legalize");
+      std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
+      const auto                                legalized = livehd::legalize::legalize_design(design, verify_frozen_enabled(opts));
+      if (!legalized.removed.empty() || !legalized.added.empty()) {
+        absl::flat_hash_set<const hhds::Graph*> gone;
+        for (const auto& g : legalized.removed) {
+          gone.insert(g.get());
+        }
+        for (auto* v : {&var, active}) {
+          std::erase_if(v->graphs, [&](const std::shared_ptr<hhds::Graph>& g) { return gone.contains(g.get()); });
+          if (v == active && active == &var) {
+            break;
+          }
+        }
+        for (const auto& g : legalized.added) {
+          var.add(g);
+          if (active != &var) {
+            active->add(g);
+          }
+        }
+      }
+    }
   }
 
   if (res.compile_cache.enabled && !active->graphs.empty()) {
@@ -1538,6 +1578,16 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
   emit_pyrope_outputs(opts, res, var);             // --emit-dir pyrope:DIR/ (one .prp per unit)
   emit_pyrope_single_file(opts, res, var);         // --emit foo.prp (single-unit design)
   emit_lnast_dump_outputs(var.lnasts, opts, res);  // post-upass textual dump (debug/test observable)
+
+  // Did anything reshape the design after pass.legalize froze it? Emits are
+  // supposed to READ the graph; a structural change here means a consumer is
+  // still rewriting the artifact that LEC, synthesis and simulation all share.
+  // A graph legalize did not freeze in THIS run (a cache overlay swapped the
+  // object, a restored body) is not claimed. Gated like the freeze itself.
+  if (verify_frozen_enabled(opts)) {
+    std::vector<std::shared_ptr<hhds::Graph>> design(var.graphs.begin(), var.graphs.end());
+    (void)livehd::legalize::verify_design_frozen(design, "compile emits");
+  }
 }
 
 // First-elaboration `ln:` publish from pyrope sources: the source-derived
@@ -1682,14 +1732,14 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     res.compile_cache.present = user_workdir;
     res.compile_cache.enabled = user_workdir && compile_cache_enabled(opts);
     setup_diag(opts, "compile.pyrope");
-    const auto* lg_out               = find_slot(opts.emit_dirs, "lg");
-    const auto* ln_out               = find_slot(opts.emit_dirs, "ln");
-    std::string lib_path             = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-    const bool  need_graphs          = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
-    const bool  defer_cache_lnasts   = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                       && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
-    auto        n_imports            = pyrope_parse(opts, res, var, ir.ln_dirs, defer_cache_lnasts);
-    auto        materialize_deferred = [&] {
+    const auto* lg_out             = find_slot(opts.emit_dirs, "lg");
+    const auto* ln_out             = find_slot(opts.emit_dirs, "ln");
+    std::string lib_path           = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+    const bool  need_graphs        = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
+    const bool  defer_cache_lnasts = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
+                                    && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
+    auto n_imports            = pyrope_parse(opts, res, var, ir.ln_dirs, defer_cache_lnasts);
+    auto materialize_deferred = [&] {
       if (!defer_cache_lnasts) {
         return;
       }
@@ -1732,7 +1782,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // window is closed by graph_pipeline_and_emits, before the emits.
     res.compile_cache_diag_mark = livehd::diag::sink().records().size();
     const bool graph_cache_hit  = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                  && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
+                                 && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
     if (!graph_cache_hit) {

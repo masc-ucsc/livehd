@@ -414,6 +414,10 @@ struct Sim_set_option {
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
+    {           "compile_only",
+     "false",      Sim_set_option::Kind::boolean,
+     "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "
+     "builds an existing <workdir>/sim incrementally without regenerating its sources"                         },
     {                "backend",
      "slop",      Sim_set_option::Kind::backend,
      "slop|llvm — simulator color-kernel backend. llvm is experimental and emits native object files directly; "

@@ -209,6 +209,10 @@ bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
 bool              lnastfmt_enabled(const Options& opts);
+// `compile.verify_frozen`: freeze every legalized def and re-check it after the
+// emits (pass/legalize). A full structural digest per graph twice, so on by
+// default only in debug builds (same policy as lnast_fmt).
+bool              verify_frozen_enabled(const Options& opts);
 bool              compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
 bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);

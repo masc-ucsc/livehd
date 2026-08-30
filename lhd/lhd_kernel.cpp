@@ -189,6 +189,16 @@ std::vector<Set_option> list_set_options() {
       "false",
 #endif
       "run the pass.lnastfmt compiler self-check after parsing; defaults on in debug builds and off in optimized builds"});
+  out.push_back(
+      Set_option{"compile.verify_frozen",
+                 "compile",
+#ifndef NDEBUG
+                 "true",
+#else
+                 "false",
+#endif
+                 "freeze every legalized graph's structure and re-check it after the emits (pass.legalize); a full digest per "
+                 "graph, twice, so it defaults on in debug builds and off in optimized builds"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =
   // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.

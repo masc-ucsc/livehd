@@ -10,18 +10,19 @@
 #      importer that still owes the proof. Compiling a submodule on its own must
 #      not fail on it (its inputs are constrained by a parent that is not present).
 #   2. parent binds a=3        -> now PROVABLE, so the obligation is DISCHARGED:
-#      the emitted lgraph carries one property fewer than case 1.
+#      the fproperty node stays (marked `proven`) and its runtime check is gone
+#      from the emitted netlist.
 #   3. parent binds a=4        -> VIOLATED, and the build must FAIL.
 #
 # Case 3 is the point of the test: without it, an implementation that simply
 # never checks anything would satisfy cases 1 and 2 and look correct.
 #
-# The COUNT of obligations left in the emitted lgraph is the evidence: tolg
-# materializes each assert/assume as an fproperty Sub node, and an obligation
-# that is gone is one that was proven. Only the ones still owed remain — so no
-# separate "proven" marker is needed, and an importer re-proving what is present
-# is re-proving exactly the outstanding set. Case 0 below checks that removal on
-# its own, with no hierarchy involved.
+# tolg materializes each assert/assume as an fproperty Sub node, and pass.formal
+# never deletes one: a discharged obligation is MARKED `proven` (the channel
+# cgen elides the runtime check off, and verify/LEC re-adjudicate off), so the
+# evidence is two-fold -- the node count in the emitted lgraph (still present)
+# and the runtime-check count in the emitted Verilog (gone). Case 0 below
+# checks that marking on its own, with no hierarchy involved.
 #
 # The top-rooted contract walk implements this without a second modular verify
 # driver: selected-top IO assumptions remain active/unchecked, while a parent
@@ -71,14 +72,42 @@ props() {
   $LHD tool cat "lg:$1" --workdir "$1.catwd" 2>/dev/null | grep -c '"kind":"sub","name":"ass'
 }
 
+# Runtime checks left in an emitted Verilog directory. cgen spells an assert
+# obligation `assert (` and an assume obligation `assume (` (both inside
+# `synthesis translate_off`), so BOTH must be counted or a surviving assume is
+# invisible to the test. The `lgassert` range-select guard is emitted for a
+# bit-range select regardless of any property, so it is deliberately NOT
+# matched. An empty directory (no .v emitted) is a failure of the compile, not
+# a clean netlist: report -1 so the caller cannot mistake it for "elided".
+runtime_checks() {
+  local n=0 f found=0
+  for f in "$1"/*.v; do
+    [ -e "$f" ] || continue
+    found=1
+    n=$((n + $(grep -cE '^\s*(assert|assume) \(' "$f")))
+  done
+  [ "$found" -eq 1 ] && echo "$n" || echo -1
+}
+
 # --- 0. a provable assert is discharged, with no hierarchy involved ----------
-if $LHD compile "$W/taut.prp" --top taut --emit-dir "lg:$W/TAUT" \
+# DISCHARGED means MARKED, not deleted. pass.formal records the result on the
+# node as `proven`; it does not edit the graph. That attribute is the channel
+# consumers read — cgen elides the runtime check off it, and `lhd formal
+# verify` / `lhd lec` re-adjudicate off it — so deleting the node would throw
+# away the very marker the proof produced.
+#
+# The observable contract is therefore: the node SURVIVES, and its runtime check
+# is GONE from the emitted netlist.
+if $LHD compile "$W/taut.prp" --top taut --emit-dir "lg:$W/TAUT" --emit-dir "verilog:$W/TAUTV" \
      --workdir "$W/w0" -q >"$W/l0.log" 2>&1; then
   n=$(props "$W/TAUT")
-  if [ "$n" -eq 0 ]; then
-    echo "ok: a proven assert was removed from the lgraph"
+  a=$(runtime_checks "$W/TAUTV")
+  if [ "$n" -ge 1 ] && [ "$a" -eq 0 ]; then
+    echo "ok: a proven assert is marked (node kept) and its runtime check elided"
+  elif [ "$n" -lt 1 ]; then
+    fail "the fproperty node was removed; a discharged obligation must be MARKED proven, not deleted"
   else
-    fail "assert(a<=255) on a u8 is a tautology, but $n obligation(s) remain — a proven obligation must be removed"
+    fail "assert(a<=255) on a u8 is a tautology, but its runtime check survived into the netlist ($a)"
   fi
 else
   fail "the tautology assert should compile cleanly"
@@ -99,13 +128,18 @@ else
 fi
 
 # --- 2. a parent that satisfies the assume discharges it ---------------------
-if $LHD compile "$W/use_ok.prp" --top use_ok --emit-dir "lg:$W/OK" \
+if $LHD compile "$W/use_ok.prp" --top use_ok --emit-dir "lg:$W/OK" --emit-dir "verilog:$W/OKV" \
      --workdir "$W/w2" -q >"$W/l2.log" 2>&1; then
   n=$(props "$W/OK")
-  if [ "$n" -eq 0 ]; then
-    echo "ok: parent binding a=3 discharged the assume (0 fproperty left)"
+  a=$(runtime_checks "$W/OKV")
+  # Same rule as case 0: discharged == marked proven, so the node stays and only
+  # the runtime obligation disappears.
+  if [ "$n" -ge 1 ] && [ "$a" -eq 0 ]; then
+    echo "ok: parent binding a=3 discharged the assume (marked proven, no runtime check)"
+  elif [ "$n" -lt 1 ]; then
+    fail "the discharged assume was deleted; it must be marked proven and kept"
   else
-    fail "parent binds a=3 (assume provable) but $n obligation(s) remain — not discharged"
+    fail "parent binds a=3 (assume provable) but a runtime check survived ($a)"
   fi
 else
   fail "parent binding a=3 should compile cleanly"

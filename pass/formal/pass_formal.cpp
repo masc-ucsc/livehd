@@ -301,13 +301,20 @@ void Pass_formal::work(Eprp_var& var) {
   // occurrence-aware result is nevertheless the same representation that the
   // future verify scheduler can consume.
   //
-  // A property lives once in its definition but can occur many times. Delete
-  // the definition-level fproperty only when EVERY reached occurrence is
-  // proven unbounded. An unchecked occurrence stays in the graph as a live
-  // constraint; one refuted/unknown checked assumption is a build error.
+  // A property lives once in its definition but can occur many times. Mark
+  // the definition-level fproperty `proven` only when EVERY reached occurrence
+  // is proven unbounded. An unchecked occurrence stays a live constraint; one
+  // refuted/unknown checked assumption is a build error.
+  //
+  // Definition-level assumes the preflight discharged. The flat pass below
+  // leaves them alone (see the MARK note): they are proven for the design, and
+  // module-alone re-proof cannot see the binding that proved them.
+  using Prop_key = std::pair<hhds::Gid, hhds::Nid>;
+  auto prop_key  = [](const hhds::Node_class& n) { return Prop_key{n.get_graph()->get_gid(), n.get_debug_nid()}; };
+  absl::flat_hash_set<Prop_key> hier_discharged;
   if (truthy(var.get("hier_preflight", "true"))) {
     struct Hier_prop_state {
-      hhds::Node_class node;       // the definition-level fproperty to discharge
+      hhds::Node_class node;  // the definition-level fproperty to discharge
       int              total     = 0;
       int              proven    = 0;
       bool             unchecked = false;
@@ -318,9 +325,6 @@ void Pass_formal::work(Eprp_var& var) {
     // keys within one graph; this is the one map filled from a CROSS-GRAPH
     // occurrence walk, so key on (gid, nid) or unrelated properties alias into a
     // single entry and only one of them is ever discharged.
-    using Prop_key  = std::pair<hhds::Gid, hhds::Nid>;
-    auto  prop_key  = [](const hhds::Node_class& n) { return Prop_key{n.get_graph()->get_gid(), n.get_debug_nid()}; };
-
     absl::flat_hash_map<Prop_key, Hier_prop_state> hier_props;
     absl::flat_hash_map<hhds::Gid, hhds::Graph*>   sub_lib;
     for (auto& gp2 : var.graphs) {
@@ -417,10 +421,10 @@ void Pass_formal::work(Eprp_var& var) {
       // the state free from cycle 0 and refutes true constraints (e.g. `cnt < 8`
       // on a reset-to-zero counter) at an unreachable initial state — exactly
       // what the `reset` knob exists to prevent.
-      ho.reset_cycles = 1;
-      ho.phase        = "after_reset";
-      ho.reset        = std::string{var.get("reset", "")};
-      auto hr         = livehd::lec::prove_properties(root, ho, &sub_lib);
+      ho.reset_cycles   = 1;
+      ho.phase          = "after_reset";
+      ho.reset          = std::string{var.get("reset", "")};
+      auto hr           = livehd::lec::prove_properties(root, ho, &sub_lib);
 
       if (occurrences.size() != hr.props.size()) {
         // The encoder refused (oversize design, unorderable cone) or returned a
@@ -478,14 +482,27 @@ void Pass_formal::work(Eprp_var& var) {
       const int  design_total = (it == design_occ.end()) ? st.total : it->second;
       // st.total == design_total: every occurrence the design has was reached and
       // proven here. Fewer means some parent outside the preflight roots still
-      // binds this contract, and deleting the definition would drop a live
-      // constraint from that parent (and from the module's own flat pass).
+      // binds this contract, so the obligation is NOT discharged for the design.
       if (st.total > 0 && st.proven == st.total && st.total == design_total && !st.unchecked && !st.failed) {
         discharged.push_back(st.node);
       }
     }
+    // MARK, do not delete. The discharged contract is recorded on the node as
+    // `proven`, which is the channel consumers already read: cgen elides the
+    // runtime check off it (inou/cgen/cgen_verilog.cpp) and verify/LEC
+    // re-adjudicate off it. Deleting the node destroyed that -- an attribute a
+    // downstream consumer wants, thrown away to save a handful of nodes -- and
+    // made a read-only pass a structural one.
+    //
+    // The kind is kFormalAssumeHier, not kFormalAssume: the proof holds under
+    // the parents' bindings in THIS design, so LEC of the child on its own must
+    // not turn it into a hypothesis (pass/lec/encode.cpp). And the flat pass
+    // below must skip these nodes: proving them again in module isolation --
+    // where the parent's binding is absent -- would stamp a runtime_check on
+    // top of the proof and un-elide the check it just discharged.
     for (auto& node : discharged) {
-      node.del_node();
+      gu::set_proven(node, gu::kFormalAssumeHier);
+      hier_discharged.insert(prop_key(node));
     }
   }
 
@@ -568,13 +585,13 @@ void Pass_formal::work(Eprp_var& var) {
     // Pass 1: prove each assume INDEPENDENTLY (no hypotheses, so no circular
     // self-proof). Only PROVEN assumes become hypotheses for the asserts below
     // (sound: proven facts) and are exposed to pass.abc as don't-cares.
-    std::vector<hhds::Pin_class> proven_assumes;
+    std::vector<hhds::Pin_class>  proven_assumes;
     // Set when a hypothesis was ACCEPTED WITHOUT PROOF (assume_nocheck, an
     // unreachable top IO assume, or formal.assume_check=false). Such a hypothesis
     // can be false — or jointly contradictory — so the elisions it enables are
     // conditional and the obligations must stay in the persisted graph for
     // `lhd formal verify` / `lhd lec` to re-adjudicate.
-    bool unchecked_hypotheses = false;
+    bool                          unchecked_hypotheses = false;
     // The assume NODES stamped proven WITHOUT proof: assume_nocheck /
     // assume_check=false, plus the selected-top IO assume (that one also carries a
     // runtime_check, so only its `proven` stamp is a retraction concern).
@@ -589,6 +606,14 @@ void Pass_formal::work(Eprp_var& var) {
       }
       auto cond = gu::get_driver_of_sink_name(node, "cond");
       if (cond.is_invalid()) {
+        continue;
+      }
+      if (hier_discharged.contains(prop_key(node))) {
+        // Discharged top-rooted, at every occurrence, by the preflight above.
+        // Neither re-proved here (the binding that proved it is in the parent,
+        // not in this module) nor used as a hypothesis for this module's own
+        // asserts: the old code deleted the node before this loop ever saw it,
+        // and that is the behavior to preserve.
         continue;
       }
       const bool explicit_nocheck = parts.kind == "assume_nocheck";
@@ -933,31 +958,14 @@ void Pass_formal::work(Eprp_var& var) {
       }
     }
 
-    // A proved assert has no remaining obligation and cgen already elides it
-    // via the proven attribute. Remove that inert fproperty from the persisted
-    // graph too. Do this only for asserts: a proved checked assume is removed by
-    // the occurrence-aware hierarchy preflight above, while an unchecked/top IO
-    // assume is marked proven solely to make it an active hypothesis and must
-    // remain in the design for verify and LEC (the top IO one additionally keeps
-    // its runtime check, so its netlist obligation survives too).
+    // A proved assert has no remaining obligation, and the `proven` attribute is
+    // how that is recorded: cgen elides the runtime check off it, and verify/LEC
+    // re-adjudicate it against their own assumptions. That attribute is stamped
+    // where the proof happens; nothing is removed from the graph here.
     //
-    // ...and only when NO unchecked hypothesis was in play: under an unproven
-    // assume the proof is conditional, so deleting the node would leave the
-    // emitted lg library with zero obligations (`lhd formal verify lg:X` green
-    // while proving nothing) and no runtime check either. There the `proven`
-    // attribute alone is the right outcome: cgen still elides, verify/LEC can
-    // still re-adjudicate against their own assumptions.
-    if (truthy(var.get("hier_preflight", "true")) && !unchecked_hypotheses) {
-      std::vector<hhds::Node_class> proved_asserts;
-      for (auto& node : props) {
-        auto parts = fprop_parts(node);
-        if (!livehd::lec::is_assume_kind(parts.kind) && gu::has_proven(node)) {
-          proved_asserts.push_back(node);
-        }
-      }
-      for (auto& node : proved_asserts) {
-        node.del_node();
-      }
-    }
+    // This used to delete the inert fproperty node as well. It was the one place
+    // pass.formal edited the design rather than annotating it, and it threw away
+    // a marker downstream passes consume -- the reason the `proven` channel
+    // exists in the first place.
   }
 }

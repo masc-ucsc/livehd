@@ -1,0 +1,68 @@
+/*
+:name: loop_carry_kinds_sim
+:type: simulation
+*/
+// Runtime twin of `inou/prp/tests/equiv/loop_carry_kinds.prp`: the three carry
+// shapes `graph/loop_split.hpp` classifies, checked against hand-computed values
+// so a backend that starts treating them differently (mapping the parallel part
+// once, unrolling only the recurrence, fusing loop nests in sim) has to keep
+// producing the same numbers.
+//
+//   any   IDEMPOTENT reduction: `or` over the bits of x -- true iff x != 0
+//   sum   ASSOCIATIVE, NOT idempotent: 4*x
+//   lane  DISJOINT-SLICE write: rebuilds x bit by bit, so lane == x
+//
+// `lane` is the interesting one: it is structurally a carry (each step reads and
+// rewrites `l`), but every step writes a bit no other step touches, which is why
+// it classifies as parallel rather than as a recurrence.
+mod loop_carry_kinds_sim(x:u4) -> (any:bool@[0], sum:u16@[0], lane:u4@[0]) {
+  mut a:bool = false
+  for i in 0..<4 {
+    a = a or boolean(x#[i])
+  }
+  any = a
+
+  mut s:u16 = 0
+  for i in 0..<4 {
+    s = s + x
+  }
+  sum = s
+
+  mut l:u4 = 0
+  for i in 0..<4 {
+    l#[i] = x#[i]
+  }
+  lane = l
+}
+
+test loop_carry_kinds_sim.three_carry_shapes {
+  mut dut = loop_carry_kinds_sim
+
+  tick 3 {
+    if clock == 0 {
+      dut.x = 0
+    } elif clock == 1 {
+      dut.x = 5
+    } else {
+      dut.x = 15
+    }
+
+    step
+
+    if clock == 0 {
+      // x == 0: nothing sets a bit, so the idempotent reduction stays false and
+      // the disjoint-slice rebuild is zero.
+      assert(dut.any == false, "or over the bits of 0")
+      assert(dut.sum == 0, "4*0")
+      assert(dut.lane == 0, "bitwise rebuild of 0")
+    } elif clock == 1 {
+      assert(dut.any == true, "x=5 has bits set")
+      assert(dut.sum == 20, "4*5")
+      assert(dut.lane == 5, "the per-lane writes rebuild x exactly")
+    } else {
+      assert(dut.any == true, "x=15 has bits set")
+      assert(dut.sum == 60, "4*15")
+      assert(dut.lane == 15, "every bit written by its own iteration")
+    }
+  }
+}

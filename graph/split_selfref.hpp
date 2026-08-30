@@ -19,19 +19,6 @@ namespace livehd::graph_util {
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
                               const std::vector<hhds::Node_class>& early_readers);
 
-// RETIRED 2026-08-20 -- DO NOT CALL. Every call site was removed and the
-// definition now trips a fatal diagnostic on entry; the body survives only for
-// a short soak period before it is deleted outright.
-//
-// It used to repair a packed self-reference exposed by dissolving a pure-comb
-// `Sub`, by re-deriving the word-level cycle set over the WHOLE graph. That is
-// the wrong shape: a graph leaving lnast.tolg cannot carry such a cycle (the
-// per-wire splitter above resolves each `wire` over its own buffer/driver cone
-// and tolg raises `combinational loop through wire` on a residual), so the only
-// producer was a mutation -- and a mutator already knows the region it changed.
-// A whole-design Kahn peel, up to 16 rounds, to rediscover that is pure waste.
-int split_packed_selfref_cycles(hhds::Graph* g);
-
 // Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State and
 // memories are scheduling boundaries. A `Sub` is NOT: a pure-comb call is seen
 // THROUGH, per OUTPUT CONE -- the walk follows only the instance inputs that
@@ -54,12 +41,12 @@ int split_packed_selfref_cycles(hhds::Graph* g);
 // Flop/Latch/Memory would change state identity. A no-op unless a stateless
 // Sub's output actually feeds back into one of its own inputs.
 //
-// This separate legacy hierarchy repair is still writer-owned. cgen_verilog
-// emits one always_comb of ordered BLOCKING assignments, so a residual cycle
-// makes it emit a read before the line that assigns it -- Verilog that is not
-// combinational at all (measured on tests/equiv/sim_sub_nested_comb_feedback:
-// 299/300 vectors wrong at O0, 0/300 at O1, from the SAME source).
-// Returns the number of instances inlined.
+// Callers: pass.legalize (every compile, before the freeze) and the LEC prep
+// path for inputs that bypass the compile pipeline. cgen_verilog no longer
+// needs it -- it schedules across a Sub boundary read-only (comb_emit_order,
+// closing the always_comb at each cut instance); the older "299/300 vectors
+// wrong at O0" measurement on tests/equiv/sim_sub_nested_comb_feedback predates
+// that scheduler. Returns the number of instances inlined.
 int flatten_false_loop_subs(hhds::Graph* g);
 
 // The comb nodes of `g` that sit on a WORD-LEVEL cycle, non-mutating.
@@ -95,7 +82,6 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
 // a writer must still emit them: omitting a statement is worse than emitting it
 // out of order. A caller that wants to refuse instead inspects `residual`.
 void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order,
-                     absl::flat_hash_set<hhds::Node_class>* cut_subs = nullptr,
-                     std::vector<hhds::Node_class>*         residual = nullptr);
+                     absl::flat_hash_set<hhds::Node_class>* cut_subs = nullptr, std::vector<hhds::Node_class>* residual = nullptr);
 
 }  // namespace livehd::graph_util

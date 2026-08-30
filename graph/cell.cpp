@@ -7,7 +7,12 @@
 #include "iassert.hpp"
 
 namespace {
-// Pre-register every LiveHD attribute tag at static-init. The HHDS
+// Pre-register every LiveHD attribute tag at static-init.
+//
+// The tag list is LIVEHD_FOR_EACH_ATTR_TAG (graph/attrs.hpp): this block and
+// graph/attr_carry.hpp both expand it, so a tag added there is registered here
+// AND carried by every graph->graph rebuild (legalize, flatten, inline_sub,
+// occurrence materialize) with nothing to keep in step by hand. The HHDS
 // attribute registry is not thread-safe on first-touch (two threads
 // racing to register the same tag both find the registry empty and try
 // to insert). Pre-registering before main() keeps the lazy attr() path
@@ -15,35 +20,10 @@ namespace {
 struct Livehd_attr_init {
   Livehd_attr_init() {
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
-    hhds::register_attr_tag<livehd::attrs::bits_t>("livehd::attrs::bits");
-    hhds::register_attr_tag<livehd::attrs::pin_offset_t>("livehd::attrs::pin_offset");
-    hhds::register_attr_tag<livehd::attrs::pin_name_t>("livehd::attrs::pin_name");
-    hhds::register_attr_tag<livehd::attrs::pin_delay_t>("livehd::attrs::pin_delay");
-    hhds::register_attr_tag<livehd::attrs::pin_signed_t>("livehd::attrs::pin_signed");
-    hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
-    hhds::register_attr_tag<livehd::attrs::synth_region_t>("livehd::attrs::synth_region");
-    hhds::register_attr_tag<livehd::attrs::synth_region_id_t>("livehd::attrs::synth_region_id");
-    hhds::register_attr_tag<livehd::attrs::resynth_t>("livehd::attrs::resynth");
-    hhds::register_attr_tag<livehd::attrs::native_comb_boundary_t>("livehd::attrs::native_comb_boundary");
-    hhds::register_attr_tag<livehd::attrs::hier_color_t>("livehd::attrs::hier_color");
-    hhds::register_attr_tag<livehd::attrs::coloring_info_t>("livehd::attrs::coloring_info");
-    hhds::register_attr_tag<livehd::attrs::match_t>("livehd::attrs::match");
-    hhds::register_attr_tag<livehd::attrs::proven_t>("livehd::attrs::proven");
-    hhds::register_attr_tag<livehd::attrs::runtime_check_t>("livehd::attrs::runtime_check");
-    hhds::register_attr_tag<livehd::attrs::memory_async_reset_t>("livehd::attrs::memory_async_reset");
-    hhds::register_attr_tag<livehd::attrs::aggregate_origin_t>("livehd::attrs::aggregate_origin");
-    hhds::register_attr_tag<livehd::attrs::aggregate_source_index_t>("livehd::attrs::aggregate_source_index");
-    hhds::register_attr_tag<livehd::attrs::aggregate_lane_ordinal_t>("livehd::attrs::aggregate_lane_ordinal");
-    hhds::register_attr_tag<livehd::attrs::aggregate_bit_offset_t>("livehd::attrs::aggregate_bit_offset");
-    hhds::register_attr_tag<livehd::attrs::aggregate_bit_width_t>("livehd::attrs::aggregate_bit_width");
-    hhds::register_attr_tag<livehd::attrs::aggregate_extent_t>("livehd::attrs::aggregate_extent");
-    hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     // source provenance rides hhds::attrs::srcid (self-registering)
-    hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
-    hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
-    hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
-    hhds::register_attr_tag<livehd::attrs::time_range_t>("livehd::attrs::time_range");
-    hhds::register_attr_tag<livehd::attrs::pending_time_t>("livehd::attrs::pending_time");
+#define LIVEHD_REGISTER_ATTR_TAG(tag) hhds::register_attr_tag<livehd::attrs::tag##_t>("livehd::attrs::" #tag);
+    LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_REGISTER_ATTR_TAG)
+#undef LIVEHD_REGISTER_ATTR_TAG
   }
 };
 [[maybe_unused]] const Livehd_attr_init livehd_attr_init_{};

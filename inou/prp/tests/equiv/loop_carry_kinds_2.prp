@@ -1,0 +1,29 @@
+/*
+:name: loop_carry_kinds_2
+:lec_expect: refuted
+*/
+// The NON-idempotent reduction is count-sensitive: one extra `s = s + x` step
+// makes this 5*x instead of 4*x. Same edit shape as _1 (widen a trip count by
+// leaving the body alone), opposite verdict -- which is exactly the distinction
+// `graph/loop_split.hpp` draws between an idempotent and a merely associative
+// reduction, and the reason "different counts => must differ" is NOT a sound
+// rule on its own.
+pub mod top(x:u4) -> (any:bool@[0], sum:u16@[0], lane:u4@[0]) {
+  mut a:bool = false
+  for i in 0..<4 {
+    a = a or boolean(x#[i])
+  }
+  any = a
+
+  mut s:u16 = 0
+  for i in 0..<5 {
+    s = s + x
+  }
+  sum = s
+
+  mut l:u4 = 0
+  for i in 0..<4 {
+    l#[i] = x#[i]
+  }
+  lane = l
+}

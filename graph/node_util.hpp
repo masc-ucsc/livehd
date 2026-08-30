@@ -75,6 +75,12 @@ inline constexpr uint32_t kFormalOnehot       = 1;
 inline constexpr uint32_t kFormalAssert       = 2;
 inline constexpr uint32_t kFormalAssume       = 3;
 inline constexpr uint32_t kFormalAssertAlways = 4;
+// An input assume discharged by the HIERARCHY: proven at every occurrence this
+// design has, under the parents' actual bindings. That is a proof about the
+// design, not about the child def alone, so cgen elides the runtime check but
+// pass/lec must NOT seed a hypothesis from it when the child is compared on its
+// own (see pass/lec/encode.cpp).
+inline constexpr uint32_t kFormalAssumeHier   = 5;
 
 // ---------------------------------------------------------------------------
 // Constant pins (HHDS Graph::CONST_NODE singleton, scheme-A encoded).

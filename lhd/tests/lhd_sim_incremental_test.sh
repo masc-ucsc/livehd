@@ -186,18 +186,20 @@ setup
 [ -f "$W/wd/sim/$victim" ] \
   || fail "deleting the recorded artifact '$victim' did not force a re-emission — an incomplete tree reads as a hit"
 
-# ---- 6. end-to-end: a second build compiles nothing (needs ninja + a cxx) -----
+# ---- 6. compile-only stops at drv.bin; a second build compiles nothing -------
 if ! command -v ninja >/dev/null 2>&1; then
   echo "PASS (steps 1-5; no ninja on PATH, skipped the end-to-end build check)"
   exit 0
 fi
-if ! "$LHD" sim "$W/tb.prp" --run-only --diag-fmt pretty --workdir "$W/wd" >"$W/run1.log" 2>&1; then
+if ! "$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
+  --diag-fmt pretty --workdir "$W/wd" >"$W/build1.log" 2>&1; then
   # No host compiler / no sim runtime headers in this environment: the
   # incremental properties above are still proven, so do not fail on it.
-  echo "PASS (steps 1-5; the host build did not run here: $(tail -1 "$W/run1.log"))"
+  echo "PASS (steps 1-5; the host build did not run here: $(tail -1 "$W/build1.log"))"
   exit 0
 fi
-grep -qa "hello world" "$W/run1.log" || fail "the built sim printed no hello world"
+[ -x "$W/wd/sim/drv.bin" ] || fail "compile-only did not produce drv.bin"
+grep -qa "hello world" "$W/build1.log" && fail "compile-only executed the testbench"
 [ -f "$W/wd/sim/build.ninja" ] || fail "no build.ninja was written next to the generated sources"
 
 # Nothing changed since that build, so ninja must have no work left.

@@ -3176,7 +3176,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // come back): lec must still assert the pair, see the UNSAT hypothesis set
       // and report CONTRADICTORY rather than hand out an ordinary verdict.
       const std::string_view raw_kind{std::string_view{raw}.substr(0, raw.find('\x1f'))};
-      if (is_assume_kind(raw_kind) && (raw_kind == "assume_nocheck" || gu::has_proven(node.base_node()))) {
+      // A `proven` stamped by the hierarchy preflight (kFormalAssumeHier) holds
+      // only under the parents' bindings in the design that stamped it; it does
+      // not license restricting the compared space of this def on its own.
+      const bool proven_here = gu::has_proven(node.base_node()) && gu::proven_of(node.base_node()) != gu::kFormalAssumeHier;
+      if (is_assume_kind(raw_kind) && (raw_kind == "assume_nocheck" || proven_here)) {
         out.prop_active_assume.insert(occ);
       }
       // A Sub occurrence's path includes the site itself.  Consequently a

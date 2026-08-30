@@ -1571,11 +1571,14 @@ void sim_command(Options& opts, Result& res) {
   // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
   // path is absolute (the driver binary is run from the caller's cwd), and when
   // on, the fast build also links hlop's VCD writer (vcd_writer.cpp).
+  bool compile_only      = false;
   bool vcd_on            = false;
   bool vcd_fakedelay     = true;  // sim.vcdfakedelay: X + settle delay after each edge (default); false = edge-aligned
   bool vcd_fakedelay_set = false;
   for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.vcd") {
+    if (k == "sim.compile_only") {
+      compile_only = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.vcd") {
       // bool-or-FILE: any non-false value turns tracing on (an explicit FILE
       // only matters for compiled/baked binaries; `lhd sim` derives per-test paths)
       vcd_on = !(v == "false" || v == "0" || v == "off" || v.empty());
@@ -2393,6 +2396,14 @@ void sim_command(Options& opts, Result& res) {
     }
   }
   build_phase.stop();
+
+  // The incremental build benchmark wants the real generated host-build path
+  // (including Ninja's depfile-based reuse) but deliberately no simulation.
+  // Returning here leaves drv.bin as the successful endpoint and guarantees
+  // that no testbench side effects or design-dependent cycle time enter it.
+  if (compile_only) {
+    return;
+  }
 
   // Run the one binary. A test selector (`lhd sim foo.prp my.test`) becomes
   // `--test`; an explicit `--seed` and every `lhd sim --arg key=value` are

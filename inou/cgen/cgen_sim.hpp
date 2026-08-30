@@ -173,7 +173,7 @@ private:
 
   // Per-graph liveness (backward reach from IO/state/Sub/Memory sinks): only
   // live comb nodes emit — dead trees stranded by graph passes (e.g.
-  // split_packed_selfref_wire / split_packed_selfref_cycles) produce no code.
+  // split_packed_selfref_wire) produce no code.
   absl::flat_hash_set<hhds::Class_index> live_;
 
   // Resolve a driver pin to a Slop<target_bits> C++ EXPRESSION: a constant ->
@@ -215,7 +215,7 @@ private:
   bool        runtime_support_on;  // checkpoint/probe/query state-walk methods; false for lean performance builds
   // Node count of a def's body. Memoized: the same def is reached once per
   // instantiation site and counting walks the whole graph.
-  int graph_node_count(hhds::Graph* g);
+  int         graph_node_count(hhds::Graph* g);
 
   absl::flat_hash_map<hhds::Graph*, int> node_count_memo_;
 

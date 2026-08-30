@@ -353,6 +353,42 @@ template <>
 inline constexpr Attr_kind attr_kind<const_value_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
+
+// EVERY LiveHD attribute tag, in one list. graph/cell.cpp pre-registers from it
+// and graph/attr_carry.hpp carries from it (role from `attr_kind`), so a tag
+// that is registered is carried and a tag that is carried is registered -- the
+// two cannot drift, and a new tag is one row here. `hhds::attrs::name` and
+// `hhds::attrs::srcid` are hhds-owned and handled by those two files directly.
+#define LIVEHD_FOR_EACH_ATTR_TAG(X) \
+  X(bits)                           \
+  X(pin_offset)                     \
+  X(pin_name)                       \
+  X(pin_delay)                      \
+  X(pin_signed)                     \
+  X(color)                          \
+  X(synth_region)                   \
+  X(synth_region_id)                \
+  X(resynth)                        \
+  X(native_comb_boundary)           \
+  X(hier_color)                     \
+  X(coloring_info)                  \
+  X(match)                          \
+  X(proven)                         \
+  X(runtime_check)                  \
+  X(memory_async_reset)             \
+  X(aggregate_origin)               \
+  X(aggregate_source_index)         \
+  X(aggregate_lane_ordinal)         \
+  X(aggregate_bit_offset)           \
+  X(aggregate_bit_width)            \
+  X(aggregate_extent)               \
+  X(place)                          \
+  X(const_value)                    \
+  X(pin_const_value)                \
+  X(lut)                            \
+  X(time_range)                     \
+  X(pending_time)
+
 }  // namespace livehd::attrs
 
 namespace hhds {}  // namespace hhds

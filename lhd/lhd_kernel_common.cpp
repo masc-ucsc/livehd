@@ -795,10 +795,11 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
-    if (pass == "compile" && flag == "lnast_fmt") {
-      // Kernel gate (not a pass option): whether the pass.lnastfmt LNAST
-      // self-check runs. Folded into a kernel decision; merge_sets never copies
-      // it into a pass (its `pass` matches none).
+    if (pass == "compile" && (flag == "lnast_fmt" || flag == "verify_frozen")) {
+      // Kernel gates (not pass options): whether the pass.lnastfmt LNAST
+      // self-check runs / whether pass.legalize freezes and re-checks the graphs.
+      // Folded into a kernel decision; merge_sets never copies them into a pass
+      // (their `pass` matches none).
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
       }
@@ -997,6 +998,30 @@ bool compile_unroll_requested(const Options& opts) {
   }
   return unroll;
 }
+
+namespace {
+// A `compile.<flag>` boolean gate that defaults ON in debug builds and OFF in
+// release; `--set compile.<flag>=...` (or the bare `<flag>`) overrides either.
+bool debug_default_gate(const Options& opts, std::string_view wanted) {
+#ifdef NDEBUG
+  bool enabled = false;
+#else
+  bool enabled = true;
+#endif
+  for (const auto& [key, value] : opts.sets) {
+    std::string_view k{key};
+    auto             pos  = k.rfind('.');
+    auto             flag = pos == std::string_view::npos ? k : k.substr(pos + 1);
+    auto             pass = pos == std::string_view::npos ? std::string_view{} : k.substr(0, pos);
+    if (flag == wanted && (pass.empty() || pass == "compile")) {
+      enabled = (value == "true" || value == "1" || value == "on");
+    }
+  }
+  return enabled;
+}
+}  // namespace
+
+bool verify_frozen_enabled(const Options& opts) { return debug_default_gate(opts, "verify_frozen"); }
 
 bool lnastfmt_enabled(const Options& opts) {
 #ifdef NDEBUG

@@ -540,7 +540,14 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
     //     `lhd lec`, or a side built at O0 where pass.formal does not run —
     //     carries no attribute, is not a hypothesis, and must not be disclosed
     //     as one either.
-    if (!nocheck_by_name && !livehd::graph_util::has_proven(node.base_node())) {
+    //   * a `proven` of kind kFormalAssumeHier was discharged by the HIERARCHY
+    //     (proven at every occurrence under the parents' bindings). The encoder
+    //     does not turn that into a hypothesis for the def on its own, so it is
+    //     neither active nor an unchecked promotion here.
+    const auto base        = node.base_node();
+    const bool proven_hier = livehd::graph_util::has_proven(base)
+                             && livehd::graph_util::proven_of(base) == livehd::graph_util::kFormalAssumeHier;
+    if (!nocheck_by_name && (!livehd::graph_util::has_proven(base) || proven_hier)) {
       continue;
     }
     ++census.active;
