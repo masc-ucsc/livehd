@@ -1,4 +1,4 @@
-<title>Incremental rebuild speedup — full vs no-change and one-file edit</title>
+<title>LiveHD incremental optimization loop</title>
 <style>
 body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:2rem;max-width:82rem}
 table{border-collapse:collapse;margin:1rem 0;width:100%}
@@ -19,48 +19,25 @@ h4{margin:1.2rem 0 0}
 code{background:#f4f4f4;padding:0 .2rem}
 dt{font-weight:bold;margin-top:.4rem}
 </style>
-<h1>Incremental rebuild speedup — full vs no-change and one-file edit</h1>
-<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-29 17:29. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out docs/current_opt_loop_incr.html --current incremental-opt-20260829 --host mada4</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
-<p>Synthesis resource policy: one shared color sizing for every design; ABC uses soft per-color guards of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is the maximum conservative per-color RSS growth before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic and is <b>not</b> a benchmark rejection threshold. Whole-process RSS may exceed 16 GiB during STA; only an actual tool failure marks the run failed. Incremental simulation runs a uniform <b>100-cycle correctness check</b> after each build, so its wall clock measures setup/codegen and host compilation instead of each core's normal simulation workload.</p>
+<h1>LiveHD incremental optimization loop</h1>
+<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-29 18:59. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current incremental-compile-only-xs-opt-20260829</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>2 host section(s) — never compare a number across them</b> (I11).</p>
+<p>Synthesis resource policy: one shared color sizing for every design; ABC uses soft per-color guards of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is the maximum conservative per-color RSS growth before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic and is <b>not</b> a benchmark rejection threshold. Whole-process RSS may exceed 16 GiB during STA; only an actual tool failure marks the run failed. Incremental simulation stops after compiling and linking <code>drv.bin</code>; it does not run the testbench. Its wall clock is setup/codegen plus the generated host build.</p>
 <h2>At a glance</h2>
-<h3>configuration: <code>incremental-opt-20260829</code></h3>
+<h3>configuration: <code>incremental-compile-only-xs-opt-20260829</code></h3>
 <h3>host: mada4</h3>
-<h2>Simulation</h2>
+<h2>Simulation compile</h2>
 <table class="sortable-table"><thead><tr><th>design</th><th>backend</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
-<tr><td>cva6</td><td>SLOP</td><td class="" data-sort="8942">8,942.0</td><td class="" data-sort="6824">6,824.0</td><td class="" data-sort="109">109.0</td><td class="better" data-sort="82.0366972477">82.04&times;</td><td class="" data-sort="5206">5,206.0</td><td class="better" data-sort="1.71763349981">1.72&times;</td></tr>
-<tr><td>dino</td><td>SLOP</td><td class="" data-sort="10119">10,119.0</td><td class="" data-sort="8811">8,811.0</td><td class="" data-sort="129">129.0</td><td class="better" data-sort="78.4418604651">78.44&times;</td><td class="" data-sort="8938">8,938.0</td><td class="better" data-sort="1.13213246811">1.13&times;</td></tr>
-<tr><td>matched_filter</td><td>SLOP</td><td class="" data-sort="10536">10,536.0</td><td class="" data-sort="10176">10,176.0</td><td class="" data-sort="107">107.0</td><td class="better" data-sort="98.4672897196">98.47&times;</td><td class="" data-sort="10589">10,589.0</td><td class="noise" data-sort="0.994994805931">0.99&times;</td></tr>
-<tr><td>minion</td><td>SLOP</td><td class="" data-sort="96922">96,922.0</td><td class="" data-sort="104751">104,751.0</td><td class="" data-sort="1424">1,424.0</td><td class="better" data-sort="68.0632022472">68.06&times;</td><td class="" data-sort="74742">74,742.0</td><td class="better" data-sort="1.29675416767">1.30&times;</td></tr>
+<tr><td>xs_alu</td><td>SLOP</td><td class="" data-sort="10759">10,759.0</td><td class="" data-sort="10761">10,761.0</td><td class="" data-sort="139">139.0</td><td class="better" data-sort="77.4028776978">77.40&times;</td><td class="" data-sort="10741">10,741.0</td><td class="noise" data-sort="1.00167582162">1.00&times;</td></tr>
 </tbody><tfoot><tr class="geomean"><td colspan="2">geomean</td>
 <td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="81.0382593089">81.04&times; <small>(n=4)</small></td>
+<td class="better" data-sort="77.4028776978">77.40&times; <small>(n=1)</small></td>
 <td class="miss">-</td>
-<td class="better" data-sort="1.25856761765">1.26&times; <small>(n=4)</small></td>
+<td class="noise" data-sort="1.00167582162">1.00&times; <small>(n=1)</small></td>
 </tr></tfoot></table>
 <h2>Synthesis</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
-<tr><td>cva6</td><td class="" data-sort="1131">1,131.0</td><td class="" data-sort="1243">1,243.0</td><td class="" data-sort="147">147.0</td><td class="better" data-sort="7.69387755102">7.69&times;</td><td class="" data-sort="1259">1,259.0</td><td class="worse" data-sort="0.898332009531">0.90&times;</td></tr>
-<tr><td>dino</td><td class="" data-sort="9092">9,092.0</td><td class="" data-sort="9490">9,490.0</td><td class="" data-sort="6479">6,479.0</td><td class="better" data-sort="1.40330297885">1.40&times;</td><td class="" data-sort="6864">6,864.0</td><td class="better" data-sort="1.32459207459">1.32&times;</td></tr>
-<tr><td>matched_filter</td><td class="" data-sort="1891">1,891.0</td><td class="" data-sort="2040">2,040.0</td><td class="" data-sort="208">208.0</td><td class="better" data-sort="9.09134615385">9.09&times;</td><td class="" data-sort="1374">1,374.0</td><td class="better" data-sort="1.37627365357">1.38&times;</td></tr>
-<tr><td>minion</td><td class="" data-sort="215032">215,032.0</td><td class="" data-sort="220201">220,201.0</td><td class="" data-sort="21070">21,070.0</td><td class="better" data-sort="10.2056003797">10.21&times;</td><td class="" data-sort="141908">141,908.0</td><td class="better" data-sort="1.51529159737">1.52&times;</td></tr>
-</tbody><tfoot><tr class="geomean"><td>geomean</td>
-<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="5.62588522091">5.63&times; <small>(n=4)</small></td>
-<td class="miss">-</td>
-<td class="better" data-sort="1.25510485504">1.26&times; <small>(n=4)</small></td>
-</tr></tfoot></table>
+<p class="warn">No synthesis incremental measurements in this configuration.</p>
 <h2>LEC</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
-<tr><td>cva6</td><td class="" data-sort="82">82.0</td><td class="" data-sort="82">82.0</td><td class="" data-sort="43">43.0</td><td class="better" data-sort="1.90697674419">1.91&times;</td><td class="" data-sort="42">42.0</td><td class="better" data-sort="1.95238095238">1.95&times;</td></tr>
-<tr><td>dino</td><td class="" data-sort="261">261.0</td><td class="" data-sort="279">279.0</td><td class="" data-sort="64">64.0</td><td class="better" data-sort="4.078125">4.08&times;</td><td class="" data-sort="118">118.0</td><td class="better" data-sort="2.21186440678">2.21&times;</td></tr>
-<tr><td>matched_filter</td><td class="" data-sort="8187">8,187.0</td><td class="" data-sort="8265">8,265.0</td><td class="" data-sort="47">47.0</td><td class="better" data-sort="174.191489362">174.19&times;</td><td class="" data-sort="52">52.0</td><td class="better" data-sort="157.442307692">157.44&times;</td></tr>
-<tr><td>minion</td><td class="worse">1,040,713.0 FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
-</tbody><tfoot><tr class="geomean"><td>geomean</td>
-<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="11.0648183241">11.06&times; <small>(n=3)</small></td>
-<td class="miss">-</td>
-<td class="better" data-sort="8.79322466825">8.79&times; <small>(n=3)</small></td>
-</tr></tfoot></table>
+<p class="warn">No lec incremental measurements in this configuration.</p>
 <details><summary><b>How to read this page</b> — full, cold, no-change, edit, and the speedup denominator</summary>
 
 <h2>What the four timing columns mean</h2>
