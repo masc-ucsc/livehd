@@ -20,7 +20,7 @@ code{background:#f4f4f4;padding:0 .2rem}
 dt{font-weight:bold;margin-top:.4rem}
 </style>
 <h1>LiveHD incremental optimization loop</h1>
-<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-29 20:02. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current incremental-opt-20260829 --also-current incremental-compile-only-xs-opt-20260829</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>2 host section(s) — never compare a number across them</b> (I11).</p>
+<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-29 20:15. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current incremental-opt-20260829 --also-current incremental-compile-only-xs-opt-20260829</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>2 host section(s) — never compare a number across them</b> (I11).</p>
 <p>Synthesis resource policy: one shared color sizing for every design; ABC uses soft per-color guards of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is the maximum conservative per-color RSS growth before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic and is <b>not</b> a benchmark rejection threshold. Whole-process RSS may exceed 16 GiB during STA; only an actual tool failure marks the run failed. Incremental simulation stops after compiling and linking <code>drv.bin</code>; it does not run the testbench. Its wall clock is setup/codegen plus the generated host build.</p>
 <h2>At a glance</h2>
 <h3>configuration: <code>incremental-opt-20260829</code></h3>
@@ -84,11 +84,12 @@ dt{font-weight:bold;margin-top:.4rem}
 <tr><td>matched_filter</td><td class="" data-sort="1959">1,959.0</td><td class="" data-sort="2067">2,067.0</td><td class="" data-sort="206">206.0</td><td class="better" data-sort="9.50970873786">9.51&times;</td><td class="" data-sort="1433">1,433.0</td><td class="better" data-sort="1.36706210747">1.37&times;</td></tr>
 <tr><td>minion</td><td class="" data-sort="217436">217,436.0</td><td class="" data-sort="218416">218,416.0</td><td class="" data-sort="20521">20,521.0</td><td class="better" data-sort="10.5957799328">10.60&times;</td><td class="" data-sort="141681">141,681.0</td><td class="better" data-sort="1.53468707872">1.53&times;</td></tr>
 <tr><td>xs_alu</td><td class="" data-sort="3811">3,811.0</td><td class="" data-sort="3973">3,973.0</td><td class="" data-sort="253">253.0</td><td class="better" data-sort="15.0632411067">15.06&times;</td><td class="" data-sort="1748">1,748.0</td><td class="better" data-sort="2.18020594966">2.18&times;</td></tr>
+<tr><td>xs_renametable</td><td class="" data-sort="237897">237,897.0</td><td class="" data-sort="269657">269,657.0</td><td class="" data-sort="32405">32,405.0</td><td class="better" data-sort="7.34136707298">7.34&times;</td><td class="" data-sort="206275">206,275.0</td><td class="better" data-sort="1.15330020604">1.15&times;</td></tr>
 </tbody><tfoot><tr class="geomean"><td>geomean</td>
 <td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="6.9284735747">6.93&times; <small>(n=5)</small></td>
+<td class="better" data-sort="6.9956401348">7.00&times; <small>(n=6)</small></td>
 <td class="miss">-</td>
-<td class="better" data-sort="1.42116864192">1.42&times; <small>(n=5)</small></td>
+<td class="better" data-sort="1.37255074056">1.37&times; <small>(n=6)</small></td>
 </tr></tfoot></table>
 <h2>LEC</h2>
 <table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
