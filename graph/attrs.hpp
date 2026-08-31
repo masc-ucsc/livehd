@@ -168,6 +168,18 @@ struct coloring_info_t {
 };
 inline constexpr coloring_info_t coloring_info{};
 
+// Newline-separated, sorted names of callee definitions whose bodies
+// pass.legalize dissolved into this graph while repairing a false hierarchy
+// loop.  The compile cache reads the attribute back from the serialized graph
+// instead of trusting its JSON inventory: a body-only edit to one of these
+// callees must invalidate the caller even though the callee's GraphIO did not
+// change.
+struct legalize_inlined_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr legalize_inlined_t legalize_inlined{};
+
 // Per-node / per-pin structural-correspondence id (pass/semdiff, task
 // 2f-semdiff). Two corresponding nodes across a ref/impl pair share one id; a
 // node with no counterpart gets 0. Stamped on the node AND its driver pin(s)
@@ -332,6 +344,8 @@ inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
@@ -372,6 +386,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(native_comb_boundary)           \
   X(hier_color)                     \
   X(coloring_info)                  \
+  X(legalize_inlined)               \
   X(match)                          \
   X(proven)                         \
   X(runtime_check)                  \

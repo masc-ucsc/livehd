@@ -7,7 +7,7 @@
 //   upass.tolg: wire 'io.a' is never driven — a `wire` must have exactly one driver
 // The same store to a SCALAR wire (`wire x:u8; x = 3`) compiles clean.
 //
-// Root cause: uPass_detuple splits `wire io:(…)` into per-field dotted
+// Root cause: the runner detupler splits `wire io:(…)` into per-field dotted
 // declares (`declare(io.a,…,wire)`) and deletes the root declare; the runner's
 // declare bake then DROPS the dotted facts because the root binding does not
 // exist (upass_runner.cpp bake_decl_pre_step, dotted branch, root==null early

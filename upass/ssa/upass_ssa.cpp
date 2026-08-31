@@ -5,10 +5,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdlib>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <optional>
+#include <print>
 #include <string>
 #include <vector>
 
@@ -78,12 +81,12 @@ std::optional<std::pair<size_t, size_t>> stale_ssa_suffix(std::string_view name)
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
-  int32_t bits      = 0;
-  bool    is_signed = true;
-  Io_kind kind      = Io_kind::none;
-  bool    has_range = false;  // explicit `int(min,max)` bounds (both known, fit i64)
-  int64_t range_min = 0;
-  int64_t range_max = 0;
+  int32_t bits        = 0;
+  bool    is_signed   = true;
+  Io_kind kind        = Io_kind::none;
+  bool    has_range   = false;  // explicit `int(min,max)` bounds (both known, fit i64)
+  int64_t range_min   = 0;
+  int64_t range_max   = 0;
   // `[N]T` port: packed bus of N lanes (see Lnast_io_entry).
   int64_t array_size  = 0;
   int32_t elem_bits   = 0;
@@ -127,9 +130,9 @@ Type_info type_info_from(const std::shared_ptr<Lnast> &lnast, Lnast_nid type_nid
                                    .category = "bitwidth",
                                    .pass     = "upass.ssa",
                                    .message  = std::format("array port packed width {} x {} bits is out of range (1..{})",
-                                                           n,
-                                                           et.bits,
-                                                           std::numeric_limits<int32_t>::max()),
+                                                          n,
+                                                          et.bits,
+                                                          std::numeric_limits<int32_t>::max()),
                                    .span     = lnast->span_of(len_nid)});
       return Type_info{};
     }
@@ -277,7 +280,10 @@ void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast> &src, const Lnast_
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
-void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::shared_ptr<Lnast>> *all_units_) {
+void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::shared_ptr<Lnast>> *all_units_,
+                    bool allow_stream_ssa) {
+  lnast->set_stream_ssa(false);
+  lnast->set_stream_ssa_names({});
   auto root = lnast->get_root();
 
   // ── Demote stale SSA versions from a prior run ──────────────────────────
@@ -401,6 +407,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   using Flat_field = Lnast_io_entry;
   std::vector<Flat_field> flat_inputs;
   std::vector<Flat_field> flat_outputs;
+  bool                    saw_composite_port = false;
 
   // An `a:[N]T` port's array view, as it stood BEFORE this rebuild. uPass_ssa's
   // own staging io re-emits every leaf as a flat prim_type_int (the packed
@@ -419,15 +426,15 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   // are replaced wholesale a few lines below, and a pointer that is merely
   // still-valid-today is a trap for the next edit that moves the restore call.
   absl::flat_hash_map<std::string, Array_view> prior_array_view;
-  for (const auto* v : {&meta.inputs, &meta.outputs}) {
-    for (const auto& e : *v) {
+  for (const auto *v : {&meta.inputs, &meta.outputs}) {
+    for (const auto &e : *v) {
       if (e.array_size > 0 && e.elem_bits > 0) {
         prior_array_view.insert_or_assign(e.name, Array_view{e.array_size, e.elem_bits, e.elem_signed});
       }
     }
   }
-  auto restore_array_view = [&](std::vector<Flat_field>& fields) {
-    for (auto& f : fields) {
+  auto restore_array_view = [&](std::vector<Flat_field> &fields) {
+    for (auto &f : fields) {
       if (f.array_size > 0) {
         continue;
       }
@@ -514,6 +521,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
 
     // Composite tuple type → recurse on each inner assign with a dotted prefix.
     if (!type_nid.is_invalid() && Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
+      saw_composite_port = true;
       // An INLINE tuple type on `self` would flatten it into dotted
       // leaves (`self.a`, `self.b`) and break the inliner's `has_self`
       // detection (io.inputs[0].name == "self"). Only named self types are
@@ -948,7 +956,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   // leaf names so a `comb/pipe/mod f(ar:(x,y)) -> (p:(q,r))` lowers EXACTLY
   // like its hand-flattened `f(ar.x, ar.y) -> (p.q, p.r)` twin — leaving no
   // `tuple_*` node that references a tuple port for tolg. Mirrors detuple's
-  // struct reg/mem leaf rewrite (upass_detuple.cpp), but keyed on the io leaf
+  // struct reg/mem leaf rewrite (the runner's streaming detupler), but keyed on the io leaf
   // set.
   absl::flat_hash_set<std::string> port_in_leaf;   // full input leaf names ("ar.x")
   absl::flat_hash_set<std::string> port_out_leaf;  // full output leaf names ("p.q")
@@ -968,7 +976,268 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   for (const auto &f : flat_outputs) {
     register_port_leaf(f.name, /*is_in=*/false);
   }
-  const bool has_tuple_ports = !port_prefix.empty();
+  // A dot in a port name is not, by itself, evidence of a tuple. Verilog-
+  // origin units use already-flat scalar names such as `io_redirect.valid`;
+  // only recursion through an actual tuple type requires body field rewrites.
+  const bool has_tuple_ports = saw_composite_port;
+
+  // The shared runner consumes STATIC field reads/writes against flattened
+  // tuple-port leaves while it streams the body. Keep SSA's established whole-
+  // tree rewrite only for uses that are not streamable yet: a whole-tuple
+  // value, a dynamic field/index, or a write that does not resolve to an output
+  // leaf. This is deliberately a conservative syntax check; a false negative
+  // costs one legacy rebuild but cannot change semantics.
+  bool        needs_tuple_port_rewrite = false;
+  std::string tuple_rewrite_reason;
+  if (has_tuple_ports) {
+    absl::flat_hash_map<std::string, std::string> stream_alias_path;
+    for (const auto &nid : lnast->depth_preorder(stmts_nid)) {
+      if (nid.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(nid))) {
+        continue;
+      }
+      std::optional<std::string> base_path;
+      if (port_prefix.contains(lnast->get_name(nid))) {
+        base_path = std::string(lnast->get_name(nid));
+      } else if (const auto it = stream_alias_path.find(lnast->get_name(nid)); it != stream_alias_path.end()) {
+        base_path = it->second;
+      } else {
+        continue;
+      }
+      const auto parent = nid.parent();
+      if (parent.is_invalid()) {
+        needs_tuple_port_rewrite = true;
+        tuple_rewrite_reason     = std::format("{} has no parent", lnast->get_name(nid));
+        break;
+      }
+      std::vector<Lnast_nid> kids;
+      for (const auto &kid : lnast->children(parent)) {
+        kids.push_back(kid);
+      }
+      auto       same_nid    = [](const Lnast_nid &a, const Lnast_nid &b) { return a.get_class_index() == b.get_class_index(); };
+      bool       streamable  = false;
+      const auto grandparent = parent.parent();
+      if (Lnast_ntype::is_store(lnast->get_type(parent)) && !kids.empty() && same_nid(nid, kids[0]) && grandparent.is_valid()
+          && (Lnast_ntype::is_func_call(lnast->get_type(grandparent)) || Lnast_ntype::is_tuple_add(lnast->get_type(grandparent)))) {
+        // Named call-argument / tuple-literal FIELD LABEL. A formal or field
+        // can legitimately have the same spelling as a tuple port (`io_redirect`);
+        // it is syntax, not a read or write of that port.
+        streamable = true;
+      } else if (Lnast_ntype::is_tuple_get(lnast->get_type(parent)) && kids.size() >= 3 && same_nid(nid, kids[1])) {
+        std::string path(*base_path);
+        bool        static_path = true;
+        for (size_t i = 2; i < kids.size(); ++i) {
+          if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
+            static_path = false;
+            break;
+          }
+          path.push_back('.');
+          path.append(lnast->get_name(kids[i]));
+        }
+        streamable = static_path && (port_prefix.contains(path) || port_in_leaf.contains(path) || port_out_leaf.contains(path));
+        if (streamable && port_prefix.contains(path) && Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
+          stream_alias_path.insert_or_assign(std::string(lnast->get_name(kids[0])), std::move(path));
+        }
+      } else if (Lnast_ntype::is_store(lnast->get_type(parent)) && kids.size() == 2 && same_nid(nid, kids[1])
+                 && Lnast_ntype::is_ref(lnast->get_type(kids[0])) && Lnast::is_tmp(lnast->get_name(kids[0]))) {
+        // Parser carrier for a dotted access chain: tmp = whole-port. The
+        // runner records the alias without emitting a tuple-valued store.
+        stream_alias_path.insert_or_assign(std::string(lnast->get_name(kids[0])), *base_path);
+        streamable = true;
+      } else if (Lnast_ntype::is_store(lnast->get_type(parent)) && kids.size() >= 3 && same_nid(nid, kids[0])) {
+        std::string path(*base_path);
+        bool        static_path = true;
+        for (size_t i = 1; i + 1 < kids.size(); ++i) {
+          if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
+            static_path = false;
+            break;
+          }
+          path.push_back('.');
+          path.append(lnast->get_name(kids[i]));
+        }
+        streamable = static_path && port_out_leaf.contains(path);
+      }
+      if (!streamable) {
+        needs_tuple_port_rewrite = true;
+        size_t ref_pos           = 0;
+        while (ref_pos < kids.size() && !same_nid(nid, kids[ref_pos])) {
+          ++ref_pos;
+        }
+        tuple_rewrite_reason = std::format("{} child {}/{} under {}",
+                                           lnast->get_name(nid),
+                                           ref_pos,
+                                           kids.size(),
+                                           Lnast_ntype::debug_name(lnast->get_type(parent)));
+        for (const auto &kid : kids) {
+          std::format_to(std::back_inserter(tuple_rewrite_reason),
+                         " {}:{}",
+                         Lnast_ntype::debug_name(lnast->get_type(kid)),
+                         lnast->get_name(kid));
+        }
+        break;
+      }
+    }
+  }
+
+  // ── Already-canonical fast path ──────────────────────────────────────────
+  //
+  // A large generated unit (Slang/v2prp is the important case) commonly
+  // arrives with one definition per scalar name, scalar ports, and no stale
+  // private SSA suffixes.  The old implementation still rebuilt every node
+  // into a second HHDS tree merely to reproduce the same body.  pass.upass then
+  // immediately walked that copy and built the real output tree, so this was a
+  // pure O(nodes) allocation/copy pass and briefly kept an extra full body
+  // alive.
+  //
+  // Keep the parser/extractor tree as the read-only source in that case.  All
+  // work that does not require a replacement has already happened above:
+  // io_meta harvest, case-collision diagnostics, and reg partial-write
+  // threading.  The runner understands the original io node (and canonicalizes
+  // imported scalar type slots while emitting), while tolg takes the flattened
+  // ABI from io_meta.  A replacement remains mandatory when:
+  //   * a stale SSA name must be re-minted,
+  //   * tuple ports need structural field rewrites, or
+  //   * a non-state scalar has more than one definition and therefore needs
+  //     versioning/read remapping.
+  //
+  // Count only destination-bearing scalar statements, mirroring process_child
+  // below.  Declarations are not value definitions; tuple-set stores mutate a
+  // bundle; reg/wire names deliberately retain one stable identity; compiler
+  // temporaries are already unique.  The scan is conservative across control
+  // scopes: a false positive only selects the established rebuilding path.
+  bool                             requires_ssa_rebuild = has_stale_ssa || needs_tuple_port_rewrite;
+  bool                             use_stream_ssa       = false;
+  absl::flat_hash_set<std::string> stream_ssa_names;
+  absl::flat_hash_set<std::string> output_names;
+  for (const auto &output : flat_outputs) {
+    output_names.emplace(output.name);
+  }
+  std::string repeated_definition;
+  if (!requires_ssa_rebuild) {
+    absl::flat_hash_map<std::string, bool> defined;  // name -> every def so far is a plain 2-child store
+    // Match process_child's straight-line domain: recurse through bare
+    // unconditional stmts blocks, but do not count writes inside if/loop/tick
+    // scopes. Those subtrees are copied branch-aware yet deliberately not
+    // versioned by the established transformer. Counting them globally made a
+    // generated SSA-shaped module look multiply defined solely because the
+    // same destination appeared in mutually exclusive arms.
+    std::function<void(const Lnast_nid &)> scan_straight_line = [&](const Lnast_nid &block) {
+      for (const auto &nid : lnast->children(block)) {
+        if (requires_ssa_rebuild) {
+          return;
+        }
+        const auto t = lnast->get_type(nid);
+        if (Lnast_ntype::is_stmts(t)) {
+          scan_straight_line(nid);
+          continue;
+        }
+        if (!stmt_has_dest(t) || Lnast_ntype::is_declare(t)) {
+          continue;
+        }
+        if (Lnast_ntype::is_store(t)) {
+          std::size_t nchild = 0;
+          for (const auto &unused : lnast->children(nid)) {
+            (void)unused;
+            if (++nchild > 2) {
+              break;
+            }
+          }
+          if (nchild > 2) {
+            continue;  // tuple/array field mutation, not a scalar definition
+          }
+        }
+        const auto lhs = lnast->get_first_child(nid);
+        if (lhs.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(lhs))) {
+          continue;
+        }
+        const std::string_view name = lnast->get_name(lhs);
+        if (!is_user_var(name) || reg_names.contains(name)) {
+          continue;
+        }
+        const bool plain_store       = Lnast_ntype::is_store(t);
+        const auto [def_it, first_d] = defined.try_emplace(std::string(name), plain_store);
+        if (!first_d) {
+          if (repeated_definition.empty()) {
+            repeated_definition.assign(name);
+          }
+          // Slang/v2prp output is already scalar and uses globally unique
+          // control-flow temporaries. Its rare repeated user name is a
+          // straight-line declaration/poison overwrite, which the shared
+          // runner can version while streaming. Keep hand-written Pyrope on
+          // the established transformer until branch phi insertion migrates.
+          // A repeated output needs a final-version commit back to the stable
+          // port name. The current linear streaming path would otherwise keep
+          // the poison first definition as the DCE root and discard the real
+          // `o___ssa_1` definition.
+          if (output_names.contains(std::string(name))) {
+            requires_ssa_rebuild = true;
+            return;
+          }
+          // The runner registers stream-SSA versions only at STORE dispatch
+          // (note_stream_ssa_definition). A repeated destination reached
+          // through any other dest-bearing node would keep both drivers on
+          // the raw name — force the branch-aware rebuild for those.
+          if (allow_stream_ssa && lnast->is_verilog_origin() && plain_store && def_it->second) {
+            use_stream_ssa = true;
+            stream_ssa_names.emplace(name);
+          } else {
+            requires_ssa_rebuild = true;
+            return;
+          }
+        }
+      }
+    };
+    scan_straight_line(stmts_nid);
+
+    // The fused runner carries one linear version map. A selected name that
+    // is also assigned below runtime control needs path-local versions and a
+    // join phi/mux; advancing the linear map while visiting one arm makes a
+    // later arm's uses dangle. Keep those units on the established
+    // branch-aware transformer until phi insertion moves into the runner.
+    if (!requires_ssa_rebuild && !stream_ssa_names.empty()) {
+      std::function<void(const Lnast_nid &, bool)> find_controlled_selected_write;
+      find_controlled_selected_write = [&](const Lnast_nid &parent, bool under_control) {
+        for (const auto &nid : lnast->children(parent)) {
+          if (requires_ssa_rebuild) {
+            return;
+          }
+          const auto t = lnast->get_type(nid);
+          if (under_control && stmt_has_dest(t) && !Lnast_ntype::is_declare(t)) {
+            const auto lhs = lnast->get_first_child(nid);
+            if (!lhs.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(lhs))
+                && stream_ssa_names.contains(std::string(lnast->get_name(lhs)))) {
+              requires_ssa_rebuild = true;
+              return;
+            }
+          }
+          const bool child_control = under_control || Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t)
+                                     || Lnast_ntype::is_while(t) || Lnast_ntype::is_tick(t);
+          find_controlled_selected_write(nid, child_control);
+        }
+      };
+      find_controlled_selected_write(stmts_nid, false);
+    }
+  }
+  if (!requires_ssa_rebuild && use_stream_ssa) {
+    lnast->set_stream_ssa(true);
+    lnast->set_stream_ssa_names(std::move(stream_ssa_names));
+  }
+  if (std::getenv("LIVEHD_UPASS_STATS") != nullptr) {
+    std::print(stderr,
+               "uPass stats [ssa]: unit={} rebuild={} stream={} origin={} stale={} composite_ports={} tuple_port_rewrite={} "
+               "tuple_reason={} repeated={}\n",
+               lnast->get_top_module_name(),
+               requires_ssa_rebuild,
+               lnast->needs_stream_ssa(),
+               lnast->is_verilog_origin(),
+               has_stale_ssa,
+               has_tuple_ports,
+               needs_tuple_port_rewrite,
+               tuple_rewrite_reason.empty() ? "-" : tuple_rewrite_reason,
+               repeated_definition.empty() ? "-" : repeated_definition);
+  }
+  if (!requires_ssa_rebuild) {
+    return;
+  }
 
   // A temp that aliases a (possibly interior) tuple-port path. A nested read
   // `ar.x.a` lowers to a chain `t1 = ar['x']` (interior) ; `t2 = t1['a']`

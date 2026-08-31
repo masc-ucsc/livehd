@@ -143,6 +143,7 @@ void warn_deferred(bool enabled, std::string_view code, std::string_view subject
             "kept as a runtime check",
             subject,
             m)
+        .attr("graph", m)
         .emit();
   } else if (out.verdict == formal::Verdict::Refuted && !is_top) {
     livehd::diag::warn("pass.formal", code, "comptime")
@@ -151,6 +152,7 @@ void warn_deferred(bool enabled, std::string_view code, std::string_view subject
             "instantiation (not enough top); kept as a runtime check",
             subject,
             m)
+        .attr("graph", m)
         .emit();
   } else if (out.verdict == formal::Verdict::Refuted) {
     livehd::diag::warn("pass.formal", code, "comptime")
@@ -159,10 +161,12 @@ void warn_deferred(bool enabled, std::string_view code, std::string_view subject
             "(use --set compile.formal.mode=normal for a BMC check)",
             subject,
             m)
+        .attr("graph", m)
         .emit();
   } else {
     livehd::diag::warn("pass.formal", code, "comptime")
         .msg("DEFERRED: {} in '{}' could not be proven — kept as a runtime check", subject, m)
+        .attr("graph", m)
         .emit();
   }
 }
@@ -211,6 +215,10 @@ void Pass_formal::setup() {
                        "internal load gate: top-rooted child-assumption discharge (formal verify disables it because "
                        "its deeper property engine is authoritative)",
                        "true");
+  m.add_label_optional("active",
+                       "internal compile-cache filter: comma-separated graph names to check while the complete design remains "
+                       "visible for hierarchy/root classification",
+                       "");
   register_pass(m);
 }
 
@@ -250,11 +258,26 @@ void Pass_formal::work(Eprp_var& var) {
         .emit();
     return;
   }
-  const bool             downgrade_refute = (on_refute == "warn");
+  const bool                       downgrade_refute = (on_refute == "warn");
+  absl::flat_hash_set<std::string> active_graphs;
+  {
+    std::string_view text = var.get("active", "");
+    while (!text.empty()) {
+      const auto comma = text.find(',');
+      auto       name  = text.substr(0, comma);
+      if (!name.empty()) {
+        active_graphs.emplace(name);
+      }
+      if (comma == std::string_view::npos) {
+        break;
+      }
+      text.remove_prefix(comma + 1);
+    }
+  }
   // An explicit --top names the committed design boundary, so that graph is always
   // treated as a root for the FAIL decision (even if a parent that happens to be
   // in the same compilation instantiates it).
-  const std::string_view designated_top   = var.get("top", "");
+  const std::string_view designated_top = var.get("top", "");
 
   formal::Prove_options opts;
   const int             budget_k = to_int(var.get("budget_k", "0"), 0);
@@ -509,6 +532,9 @@ void Pass_formal::work(Eprp_var& var) {
   for (auto& gp : var.graphs) {
     auto* g = gp.get();
     if (g == nullptr) {
+      continue;
+    }
+    if (!active_graphs.empty() && !active_graphs.contains(std::string(g->get_name()))) {
       continue;
     }
     // is_top: the graph is the design boundary — the explicit --top (by module

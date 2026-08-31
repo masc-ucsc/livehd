@@ -1,4 +1,4 @@
-<title>LiveHD incremental optimization loop</title>
+<title>Incremental rebuild speedup — full vs no-change and one-file edit</title>
 <style>
 body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:2rem;max-width:82rem}
 table{border-collapse:collapse;margin:1rem 0;width:100%}
@@ -19,58 +19,59 @@ h4{margin:1.2rem 0 0}
 code{background:#f4f4f4;padding:0 .2rem}
 dt{font-weight:bold;margin-top:.4rem}
 </style>
-<h1>LiveHD incremental optimization loop</h1>
-<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-30 06:23. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current incremental-compile-only-xs-opt-20260829</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
+<h1>Incremental rebuild speedup — full vs no-change and one-file edit</h1>
+<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-31 00:51. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current incremental-streaming-upass-opt-20260830 --previous incremental-compile-only-xs-opt-20260829</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
 <p>Synthesis resource policy: one shared color sizing for every design; ABC uses soft per-color guards of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is the maximum conservative per-color RSS growth before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic and is <b>not</b> a benchmark rejection threshold. Whole-process RSS may exceed 16 GiB during STA; only an actual tool failure marks the run failed. Incremental simulation stops after compiling and linking <code>drv.bin</code>; it does not run the testbench. Its wall clock is setup/codegen plus the generated host build.</p>
 <h2>At a glance</h2>
-<h3>configuration: <code>incremental-compile-only-xs-opt-20260829</code></h3>
+<h3>configuration: <code>incremental-streaming-upass-opt-20260830</code></h3>
+<p>Fresh measurements come from <code>incremental-streaming-upass-opt-20260830</code>. Unrerun synth, lec tables retain <code>incremental-compile-only-xs-opt-20260829</code>; every speedup remains within one configuration row.</p>
 <h3>host: mada4</h3>
 <h2>Simulation compile — SLOP</h2>
 <table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
-<tr><td>cva6</td><td class="" data-sort="6833">6,833.0</td><td class="" data-sort="6830">6,830.0</td><td class="" data-sort="105">105.0</td><td class="better" data-sort="65.0761904762">65.08&times;</td><td class="" data-sort="5218">5,218.0</td><td class="better" data-sort="1.30950555768">1.31&times;</td><td class="" data-sort="1">1</td></tr>
-<tr><td>dino</td><td class="" data-sort="11089">11,089.0</td><td class="" data-sort="9006">9,006.0</td><td class="" data-sort="125">125.0</td><td class="better" data-sort="88.712">88.71&times;</td><td class="" data-sort="9124">9,124.0</td><td class="better" data-sort="1.21536606751">1.22&times;</td><td class="" data-sort="2">2</td></tr>
-<tr><td>matched_filter</td><td class="" data-sort="10629">10,629.0</td><td class="" data-sort="10306">10,306.0</td><td class="" data-sort="102">102.0</td><td class="better" data-sort="104.205882353">104.21&times;</td><td class="" data-sort="10772">10,772.0</td><td class="noise" data-sort="0.986724842183">0.99&times;</td><td class="" data-sort="2">2</td></tr>
-<tr><td>minion</td><td class="" data-sort="96199">96,199.0</td><td class="" data-sort="98497">98,497.0</td><td class="" data-sort="1424">1,424.0</td><td class="better" data-sort="67.5554775281">67.56&times;</td><td class="" data-sort="80027">80,027.0</td><td class="better" data-sort="1.20208179739">1.20&times;</td><td class="" data-sort="119">119</td></tr>
-<tr><td>xs_alu</td><td class="" data-sort="10759">10,759.0</td><td class="" data-sort="10761">10,761.0</td><td class="" data-sort="139">139.0</td><td class="better" data-sort="77.4028776978">77.40&times;</td><td class="" data-sort="10741">10,741.0</td><td class="noise" data-sort="1.00167582162">1.00&times;</td><td class="" data-sort="2">2</td></tr>
-<tr><td>xs_renametable</td><td class="" data-sort="246886">246,886.0</td><td class="" data-sort="264086">264,086.0</td><td class="" data-sort="9443">9,443.0</td><td class="better" data-sort="26.1448692153">26.14&times;</td><td class="" data-sort="138460">138,460.0</td><td class="better" data-sort="1.78308536762">1.78&times;</td><td class="" data-sort="28">28</td></tr>
-<tr><td>xs_rob</td><td class="" data-sort="602178">602,178.0</td><td class="" data-sort="648790">648,790.0</td><td class="" data-sort="69359">69,359.0</td><td class="better" data-sort="8.68204558889">8.68&times;</td><td class="" data-sort="695464">695,464.0</td><td class="worse" data-sort="0.865865091507">0.87&times;</td><td class="" data-sort="89">89</td></tr>
+<tr><td>cva6</td><td class="" data-sort="7767">7,767.0</td><td class="" data-sort="6985">6,985.0</td><td class="" data-sort="100">100.0</td><td class="better" data-sort="77.67">77.67&times;</td><td class="" data-sort="5181">5,181.0</td><td class="better" data-sort="1.49913144181">1.50&times;</td><td class="" data-sort="1">1</td></tr>
+<tr><td>dino</td><td class="" data-sort="9545">9,545.0</td><td class="" data-sort="8721">8,721.0</td><td class="" data-sort="126">126.0</td><td class="better" data-sort="75.753968254">75.75&times;</td><td class="" data-sort="8755">8,755.0</td><td class="noise" data-sort="1.09023415191">1.09&times;</td><td class="" data-sort="2">2</td></tr>
+<tr><td>matched_filter</td><td class="" data-sort="10410">10,410.0</td><td class="" data-sort="10411">10,411.0</td><td class="" data-sort="101">101.0</td><td class="better" data-sort="103.069306931">103.07&times;</td><td class="" data-sort="10708">10,708.0</td><td class="noise" data-sort="0.972170339933">0.97&times;</td><td class="" data-sort="2">2</td></tr>
+<tr><td>minion</td><td class="" data-sort="110291">110,291.0</td><td class="" data-sort="100218">100,218.0</td><td class="" data-sort="1491">1,491.0</td><td class="better" data-sort="73.9711602951">73.97&times;</td><td class="" data-sort="70132">70,132.0</td><td class="better" data-sort="1.5726202019">1.57&times;</td><td class="" data-sort="119">119</td></tr>
+<tr><td>xs_alu</td><td class="" data-sort="11118">11,118.0</td><td class="" data-sort="10677">10,677.0</td><td class="" data-sort="117">117.0</td><td class="better" data-sort="95.0256410256">95.03&times;</td><td class="" data-sort="10622">10,622.0</td><td class="noise" data-sort="1.04669553756">1.05&times;</td><td class="" data-sort="2">2</td></tr>
+<tr><td>xs_renametable</td><td class="" data-sort="243256">243,256.0</td><td class="" data-sort="254009">254,009.0</td><td class="" data-sort="7853">7,853.0</td><td class="better" data-sort="30.9761874443">30.98&times;</td><td class="" data-sort="110366">110,366.0</td><td class="better" data-sort="2.20408459127">2.20&times;</td><td class="" data-sort="28">28</td></tr>
+<tr><td>xs_rob</td><td class="" data-sort="592031">592,031.0</td><td class="" data-sort="617066">617,066.0</td><td class="" data-sort="59560">59,560.0</td><td class="better" data-sort="9.94007723304">9.94&times;</td><td class="" data-sort="633486">633,486.0</td><td class="worse" data-sort="0.934560511203">0.93&times;</td><td class="" data-sort="89">89</td></tr>
 </tbody><tfoot><tr class="geomean"><td>geomean</td>
 <td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="49.3615730408">49.36&times; <small>(n=7)</small></td>
+<td class="better" data-sort="53.8466178363">53.85&times; <small>(n=7)</small></td>
 <td class="miss">-</td>
-<td class="better" data-sort="1.16538811537">1.17&times; <small>(n=7)</small></td>
+<td class="better" data-sort="1.27198828065">1.27&times; <small>(n=7)</small></td>
 <td class="miss">-</td>
 </tr></tfoot></table>
 <h2>Simulation compile — LLVM</h2>
 <table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
-<tr><td>cva6</td><td class="" data-sort="6914">6,914.0</td><td class="" data-sort="6877">6,877.0</td><td class="" data-sort="150">150.0</td><td class="better" data-sort="46.0933333333">46.09&times;</td><td class="" data-sort="5406">5,406.0</td><td class="better" data-sort="1.27894931558">1.28&times;</td><td class="" data-sort="4">4</td></tr>
-<tr><td>dino</td><td class="" data-sort="8775">8,775.0</td><td class="" data-sort="8957">8,957.0</td><td class="" data-sort="127">127.0</td><td class="better" data-sort="69.094488189">69.09&times;</td><td class="" data-sort="9090">9,090.0</td><td class="noise" data-sort="0.965346534653">0.97&times;</td><td class="" data-sort="2">2</td></tr>
-<tr><td>matched_filter</td><td class="" data-sort="11388">11,388.0</td><td class="" data-sort="10891">10,891.0</td><td class="" data-sort="170">170.0</td><td class="better" data-sort="66.9882352941">66.99&times;</td><td class="" data-sort="11429">11,429.0</td><td class="noise" data-sort="0.996412634526">1.00&times;</td><td class="" data-sort="236">236</td></tr>
-<tr><td>minion</td><td class="" data-sort="93369">93,369.0</td><td class="" data-sort="94758">94,758.0</td><td class="" data-sort="1564">1,564.0</td><td class="better" data-sort="59.6988491049">59.70&times;</td><td class="" data-sort="73563">73,563.0</td><td class="better" data-sort="1.2692386118">1.27&times;</td><td class="" data-sort="228">228</td></tr>
-<tr><td>xs_alu</td><td class="" data-sort="10506">10,506.0</td><td class="" data-sort="27206">27,206.0</td><td class="" data-sort="191">191.0</td><td class="better" data-sort="55.0052356021">55.01&times;</td><td class="" data-sort="8581">8,581.0</td><td class="better" data-sort="1.22433282834">1.22&times;</td><td class="" data-sort="5">5</td></tr>
-<tr><td>xs_renametable</td><td class="" data-sort="257037">257,037.0</td><td class="" data-sort="287168">287,168.0</td><td class="" data-sort="9640">9,640.0</td><td class="better" data-sort="26.6635892116">26.66&times;</td><td class="" data-sort="142394">142,394.0</td><td class="better" data-sort="1.80511117041">1.81&times;</td><td class="" data-sort="28">28</td></tr>
-<tr><td>xs_rob</td><td class="" data-sort="797277">797,277.0</td><td class="" data-sort="826206">826,206.0</td><td class="" data-sort="69912">69,912.0</td><td class="better" data-sort="11.4040078956">11.40&times;</td><td class="" data-sort="846591">846,591.0</td><td class="worse" data-sort="0.941749912295">0.94&times;</td><td class="" data-sort="4947">4947</td></tr>
+<tr><td>cva6</td><td class="" data-sort="7608">7,608.0</td><td class="" data-sort="7135">7,135.0</td><td class="" data-sort="148">148.0</td><td class="better" data-sort="51.4054054054">51.41&times;</td><td class="" data-sort="5432">5,432.0</td><td class="better" data-sort="1.40058910162">1.40&times;</td><td class="" data-sort="4">4</td></tr>
+<tr><td>dino</td><td class="" data-sort="9738">9,738.0</td><td class="" data-sort="8714">8,714.0</td><td class="" data-sort="120">120.0</td><td class="better" data-sort="81.15">81.15&times;</td><td class="" data-sort="9398">9,398.0</td><td class="noise" data-sort="1.03617791019">1.04&times;</td><td class="" data-sort="2">2</td></tr>
+<tr><td>matched_filter</td><td class="" data-sort="11377">11,377.0</td><td class="" data-sort="11491">11,491.0</td><td class="" data-sort="166">166.0</td><td class="better" data-sort="68.5361445783">68.54&times;</td><td class="" data-sort="11654">11,654.0</td><td class="noise" data-sort="0.97623133688">0.98&times;</td><td class="" data-sort="236">236</td></tr>
+<tr><td>minion</td><td class="" data-sort="86158">86,158.0</td><td class="" data-sort="90960">90,960.0</td><td class="" data-sort="1461">1,461.0</td><td class="better" data-sort="58.9719370294">58.97&times;</td><td class="" data-sort="68737">68,737.0</td><td class="better" data-sort="1.25344428765">1.25&times;</td><td class="" data-sort="228">228</td></tr>
+<tr><td>xs_alu</td><td class="" data-sort="9341">9,341.0</td><td class="" data-sort="8538">8,538.0</td><td class="" data-sort="176">176.0</td><td class="better" data-sort="53.0738636364">53.07&times;</td><td class="" data-sort="8392">8,392.0</td><td class="better" data-sort="1.11308388942">1.11&times;</td><td class="" data-sort="5">5</td></tr>
+<tr><td>xs_renametable</td><td class="" data-sort="252189">252,189.0</td><td class="" data-sort="261162">261,162.0</td><td class="" data-sort="8326">8,326.0</td><td class="better" data-sort="30.2893346145">30.29&times;</td><td class="" data-sort="115110">115,110.0</td><td class="better" data-sort="2.1908522283">2.19&times;</td><td class="" data-sort="28">28</td></tr>
+<tr><td>xs_rob</td><td class="" data-sort="764347">764,347.0</td><td class="" data-sort="791944">791,944.0</td><td class="" data-sort="59160">59,160.0</td><td class="better" data-sort="12.9199966193">12.92&times;</td><td class="" data-sort="799593">799,593.0</td><td class="noise" data-sort="0.955920074338">0.96&times;</td><td class="" data-sort="4947">4947</td></tr>
 </tbody><tfoot><tr class="geomean"><td>geomean</td>
 <td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="41.528533483">41.53&times; <small>(n=7)</small></td>
+<td class="better" data-sort="44.5846159964">44.58&times; <small>(n=7)</small></td>
 <td class="miss">-</td>
-<td class="better" data-sort="1.18337553823">1.18&times; <small>(n=7)</small></td>
+<td class="better" data-sort="1.22500515599">1.23&times; <small>(n=7)</small></td>
 <td class="miss">-</td>
 </tr></tfoot></table>
 <h2>Compile only</h2>
 <table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
-<tr><td>cva6</td><td class="" data-sort="22">22.0</td><td class="" data-sort="27">27.0</td><td class="" data-sort="12">12.0</td><td class="better" data-sort="1.83333333333">1.83&times;</td><td class="" data-sort="54">54.0</td><td class="worse" data-sort="0.407407407407">0.41&times;</td></tr>
-<tr><td>dino</td><td class="" data-sort="114">114.0</td><td class="" data-sort="139">139.0</td><td class="" data-sort="252">252.0</td><td class="worse" data-sort="0.452380952381">0.45&times;</td><td class="" data-sort="208">208.0</td><td class="worse" data-sort="0.548076923077">0.55&times;</td></tr>
-<tr><td>matched_filter</td><td class="" data-sort="75">75.0</td><td class="" data-sort="80">80.0</td><td class="" data-sort="5">5.0</td><td class="better" data-sort="15">15.00&times;</td><td class="" data-sort="93">93.0</td><td class="worse" data-sort="0.806451612903">0.81&times;</td></tr>
-<tr><td>minion</td><td class="" data-sort="12493">12,493.0</td><td class="" data-sort="13679">13,679.0</td><td class="" data-sort="13755">13,755.0</td><td class="worse" data-sort="0.908251544893">0.91&times;</td><td class="" data-sort="14861">14,861.0</td><td class="worse" data-sort="0.840656752574">0.84&times;</td></tr>
-<tr><td>xs_alu</td><td class="" data-sort="94">94.0</td><td class="" data-sort="102">102.0</td><td class="" data-sort="24">24.0</td><td class="better" data-sort="3.91666666667">3.92&times;</td><td class="" data-sort="141">141.0</td><td class="worse" data-sort="0.666666666667">0.67&times;</td></tr>
-<tr><td>xs_renametable</td><td class="" data-sort="45275">45,275.0</td><td class="" data-sort="57843">57,843.0</td><td class="" data-sort="1425">1,425.0</td><td class="better" data-sort="31.7719298246">31.77&times;</td><td class="" data-sort="46700">46,700.0</td><td class="noise" data-sort="0.96948608137">0.97&times;</td></tr>
-<tr><td>xs_rob</td><td class="worse">FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
+<tr><td>cva6</td><td class="" data-sort="60">60.0</td><td class="" data-sort="67">67.0</td><td class="" data-sort="42">42.0</td><td class="better" data-sort="1.42857142857">1.43&times;</td><td class="" data-sort="70">70.0</td><td class="worse" data-sort="0.857142857143">0.86&times;</td></tr>
+<tr><td>dino</td><td class="" data-sort="134">134.0</td><td class="" data-sort="170">170.0</td><td class="" data-sort="70">70.0</td><td class="better" data-sort="1.91428571429">1.91&times;</td><td class="" data-sort="353">353.0</td><td class="worse" data-sort="0.379603399433">0.38&times;</td></tr>
+<tr><td>matched_filter</td><td class="" data-sort="132">132.0</td><td class="" data-sort="119">119.0</td><td class="" data-sort="43">43.0</td><td class="better" data-sort="3.06976744186">3.07&times;</td><td class="" data-sort="144">144.0</td><td class="worse" data-sort="0.916666666667">0.92&times;</td></tr>
+<tr><td>minion</td><td class="" data-sort="11442">11,442.0</td><td class="" data-sort="12560">12,560.0</td><td class="" data-sort="91">91.0</td><td class="better" data-sort="125.736263736">125.74&times;</td><td class="" data-sort="3192">3,192.0</td><td class="better" data-sort="3.58458646617">3.58&times;</td></tr>
+<tr><td>xs_alu</td><td class="" data-sort="117">117.0</td><td class="" data-sort="138">138.0</td><td class="" data-sort="51">51.0</td><td class="better" data-sort="2.29411764706">2.29&times;</td><td class="" data-sort="119">119.0</td><td class="noise" data-sort="0.983193277311">0.98&times;</td></tr>
+<tr><td>xs_renametable</td><td class="" data-sort="39076">39,076.0</td><td class="" data-sort="54180">54,180.0</td><td class="" data-sort="964">964.0</td><td class="better" data-sort="40.5352697095">40.54&times;</td><td class="" data-sort="27347">27,347.0</td><td class="better" data-sort="1.42889530844">1.43&times;</td></tr>
+<tr><td>xs_rob</td><td class="" data-sort="161190">161,190.0</td><td class="" data-sort="189927">189,927.0</td><td class="" data-sort="42801">42,801.0</td><td class="better" data-sort="3.76603350389">3.77&times;</td><td class="" data-sort="188838">188,838.0</td><td class="worse" data-sort="0.853588790392">0.85&times;</td></tr>
 </tbody><tfoot><tr class="geomean"><td>geomean</td>
 <td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
-<td class="better" data-sort="3.34708873418">3.35&times; <small>(n=6)</small></td>
+<td class="better" data-sort="6.24311157708">6.24&times; <small>(n=7)</small></td>
 <td class="miss">-</td>
-<td class="worse" data-sort="0.678817395181">0.68&times; <small>(n=6)</small></td>
+<td class="noise" data-sort="1.03613752484">1.04&times; <small>(n=7)</small></td>
 </tr></tfoot></table>
 <h2>Synthesis − STA</h2>
 <table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit ABC misses</small></th></tr></thead><tbody>
@@ -142,8 +143,8 @@ warm workdir. Only work affected by that file should be redone.</dd>
 <code>full / no-change</code> and <code>full / edit</code>. The cold incremental
 sample is shown to expose cache-population cost, but it is never the denominator
 of a displayed speedup.</p>
-<p>The <b>Compile only</b> table is the compile portion reported by
-<code>lhd synth</code>. <b>Synthesis &minus; STA</b> is compile + color + ABC and
+<p>The <b>Compile only</b> table is the dedicated <code>lhd compile</code>
+incremental benchmark. <b>Synthesis &minus; STA</b> is compile + color + ABC and
 excludes OpenTimer. In the edit-only <b>colors changed</b> column, simulation
 uses the number of rewritten simulator units and synthesis uses ABC cache
 misses (the colors resynthesized).</p>

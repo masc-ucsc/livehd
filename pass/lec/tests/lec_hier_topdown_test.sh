@@ -228,7 +228,11 @@ done
 if [ "$fail" -eq 0 ]; then
   OUT=$("$LHD" lec --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top empty_parent \
         --workdir "$W/wd_empty_parent" 2>&1); RC=$?
-  if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q "'sink' PROVEN (no observable output ports)"; then
+  # The compile pipeline may already erase a pure outputless instance. In that
+  # case the hierarchy contains only the parent; otherwise LEC discharges the
+  # retained child explicitly. Both are the same unobservable-hardware result.
+  if [ "$RC" -ne 0 ] || { ! echo "$OUT" | grep -q "'sink' PROVEN (no observable output ports)" \
+                          && ! echo "$OUT" | grep -q "1/1 def(s) proven"; }; then
     echo "FAIL: case 7 an outputless child did not discharge the parent (rc=$RC)"; fail=1
   else echo "ok: an outputless DPI-style child is structurally unobservable to its parent"; fi
 

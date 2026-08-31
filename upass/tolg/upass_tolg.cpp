@@ -130,10 +130,14 @@ struct Val {
 }
 
 // Resolve a func_call callee name against the lnast registry the
-// same way the runner's lookup_callee does: exact top-module-name match, else
-// a UNIQUE "<module>.<name>" suffix match.
-[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
-                                                          const std::vector<std::shared_ptr<Lnast>>& registry) {
+// same way the runner's lookup_callee does: exact top-module-name match, then
+// a lexical match on the CALLER's own unit-name prefix chain (streamed nested
+// helpers register as "<file>.<outer>.<name>", and two same-named helpers in
+// sibling scopes otherwise make the suffix scan ambiguous), else a UNIQUE
+// "<module>.<name>" suffix match.
+[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view name,
+                                                          const std::vector<std::shared_ptr<Lnast>>& registry,
+                                                          std::string_view caller_unit = {}) {
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
   int                    suffix_matches = 0;
@@ -152,6 +156,24 @@ struct Val {
   }
   if (exact) {
     return exact;
+  }
+  if (!caller_unit.empty()) {
+    std::string scoped;
+    for (std::string_view unit = caller_unit;;) {
+      scoped.assign(unit);
+      scoped.push_back('.');
+      scoped.append(name);
+      for (const auto& ln : registry) {
+        if (ln && ln->get_top_module_name() == scoped) {
+          return ln;
+        }
+      }
+      const auto dot = unit.rfind('.');
+      if (dot == std::string_view::npos) {
+        break;
+      }
+      unit = unit.substr(0, dot);
+    }
   }
   if (suffix_matches == 1) {
     return suffix_hit;
@@ -5049,7 +5071,7 @@ private:
       callee_name = lg_name;  // Sub instance name + diagnostics
     } else {
       if (registry_ != nullptr) {
-        callee = resolve_callee_lnast(callee_name, *registry_);
+        callee = resolve_callee_lnast(callee_name, *registry_, lnast_->get_top_module_name());
       }
       kind = callee ? callee->get_lambda_kind() : std::string_view{};
       // A `comb` callee normally inlines in the runner, but with
@@ -9016,7 +9038,7 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
   bool needs = declares(lnast);
   if (!needs) {
     for (const auto& cn : collect_callee_names(lnast)) {
-      auto callee = resolve_callee_lnast(cn, registry);
+      auto callee = resolve_callee_lnast(cn, registry, lnast->get_top_module_name());
       if (!callee) {
         continue;
       }
@@ -9215,11 +9237,11 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
     by_exact_name[std::string(ln->get_top_module_name())] = idx;
   }
 
-  auto resolve_index = [&](std::string_view name) -> std::optional<size_t> {
+  auto resolve_index = [&](std::string_view name, std::string_view caller_unit) -> std::optional<size_t> {
     if (const auto it = by_exact_name.find(name); it != by_exact_name.end()) {
       return it->second;
     }
-    auto ln = resolve_callee_lnast(name, registry);
+    auto ln = resolve_callee_lnast(name, registry, caller_unit);
     if (!ln) {
       return std::nullopt;
     }
@@ -9236,9 +9258,9 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
 
   std::vector<uint8_t> control_root(units.size(), 0);
   for (size_t i = 0; i < units.size(); ++i) {
-    clock[i]        = tree_declares_reg(units[i]);
-    reset[i]        = tree_declares_reset_reg(units[i]);
-    control_root[i] = std::any_of(units[i]->io_meta().outputs.begin(), units[i]->io_meta().outputs.end(), [](const auto& e) {
+    clock[i]         = units[i]->tolg_needs_clock().value_or(tree_declares_reg(units[i]));
+    reset[i]         = units[i]->tolg_needs_reset().value_or(tree_declares_reset_reg(units[i]));
+    control_root[i]  = std::any_of(units[i]->io_meta().outputs.begin(), units[i]->io_meta().outputs.end(), [](const auto& e) {
       return e.name == "__next_active";
     });
     // Only a NON-template unit is a caller the activation flood may start
@@ -9249,12 +9271,13 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
     // have marked this one, and overwriting that mark loses the whole reason it
     // is activation capable (the caller precedes the callee in registry order
     // whenever the callee is imported, which is the common case).
+    activation[i]   |= units[i]->tolg_activation_capable().value_or(false);
     if (!units[i]->is_template()) {
       activation[i] |= control_root[i];
     }
 
     for (const auto& name : collect_callee_names(units[i])) {
-      const auto child = resolve_index(name);
+      const auto child = resolve_index(name, units[i]->get_top_module_name());
       if (!child.has_value()) {
         continue;
       }
@@ -9279,7 +9302,7 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
       continue;
     }
     for (const auto& name : collect_guarded_callee_names(units[i])) {
-      if (const auto child = resolve_index(name); child.has_value()) {
+      if (const auto child = resolve_index(name, units[i]->get_top_module_name()); child.has_value()) {
         activation[*child] = 1;
       }
     }
@@ -9318,6 +9341,9 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
     cache.needs_clock.emplace(units[i].get(), clock[i] != 0);
     cache.needs_reset.emplace(units[i].get(), reset[i] != 0);
     cache.activation_capable.emplace(units[i].get(), activation[i] != 0);
+    units[i]->set_tolg_needs_clock(clock[i] != 0);
+    units[i]->set_tolg_needs_reset(reset[i] != 0);
+    units[i]->set_tolg_activation_capable(activation[i] != 0);
   }
   cache.registry = &registry;
 }
@@ -9341,7 +9367,7 @@ void reset_registry_abi(const uPass_tolg::Registry& registry) {
     return false;
   }
   for (const auto& name : collect_callee_names(from)) {
-    auto child = resolve_callee_lnast(name, registry);
+    auto child = resolve_callee_lnast(name, registry, from->get_top_module_name());
     if (child && activation_reaches(child, target, registry, visiting)) {
       visiting.erase(key);
       return true;
@@ -9378,7 +9404,7 @@ void reset_registry_abi(const uPass_tolg::Registry& registry) {
       }
     }
     for (const auto& name : collect_guarded_callee_names(caller)) {
-      auto root = resolve_callee_lnast(name, registry);
+      auto root = resolve_callee_lnast(name, registry, caller->get_top_module_name());
       if (!root) {
         continue;
       }

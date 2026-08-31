@@ -163,10 +163,10 @@ TEST(LnastPrpWriter, VerificationKindRoundTrips) {
     const char* expect;
   };
   const Case cases[] = {
-      {nullptr, "assert(cond)"},
-      {"__fkind__assume", "assume(cond)"},
+      {                 nullptr,        "assert(cond)"},
+      {       "__fkind__assume",        "assume(cond)"},
       {"__fkind__assert_always", "assert_always(cond)"},
-      {"__fkind__cassert", "cassert(cond)"},
+      {      "__fkind__cassert",       "cassert(cond)"},
   };
   for (const auto& c : cases) {
     auto ln = std::make_shared<Lnast>("kind_test");
@@ -397,11 +397,20 @@ static std::string write_prp(std::string_view name, std::string_view src) {
 }
 
 // Parse a .prp file → run uPass → emit Pyrope 3.0 text.
-static std::string round_trip(std::string_view name, std::string_view src,
-                              const std::vector<std::string>& passes = {"noop"}) {
+static std::string round_trip(std::string_view name, std::string_view src, const std::vector<std::string>& passes = {"noop"}) {
   auto      path = write_prp(name, src);
   Prp2lnast converter(path, std::string(name));
   auto      ln = converter.get_lnast();
+
+  // Prp2lnast streams each named lambda directly into its final per-function
+  // LNAST. Production publishes these siblings before pass.upass; mirror that
+  // handoff here instead of running the writer on the intentionally empty file
+  // wrapper. The round-trip cases below contain at most one named lambda.
+  auto streamed = ln->take_streamed_lambdas();
+  if (!streamed.empty()) {
+    EXPECT_EQ(streamed.size(), 1u);
+    ln = std::move(streamed.front());
+  }
 
   auto         lm = std::make_shared<upass::Lnast_manager>(ln);
   uPass_runner runner(lm, passes);

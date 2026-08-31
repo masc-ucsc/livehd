@@ -14,6 +14,7 @@ protected:
   bool                     inherit_labels{true};
   bool                     verifier_include_funcs{false};
   bool                     run_ssa{false};
+  bool                     stream_ssa{true};
   bool                     run_tolg{false};
   bool                     run_toln{true};
   std::string              reset_style{"sync"};  // sync|async implicit-reset wiring (tolg)

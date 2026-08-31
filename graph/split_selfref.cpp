@@ -1482,7 +1482,7 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
   }
 }
 
-int flatten_false_loop_subs(hhds::Graph* g) {
+int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees) {
   // A replicated Sub is never a false-loop target: dissolving one keeps a
   // single body copy and drops count-1 replicas (see graph/replica_desc.hpp).
   // Physical backends materialize it only in their private output state.
@@ -1580,6 +1580,9 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       auto sio = sub.get_subnode_io();
       if (!cg || !sio) {
         continue;
+      }
+      if (inlined_callees != nullptr) {
+        inlined_callees->emplace_back(sio->get_name());
       }
       // The Sub's driver for each input port (by port id) -- feeds a callee input.
       absl::flat_hash_map<uint32_t, hhds::Pin_class> sub_in_drv;

@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
@@ -47,7 +48,7 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
 // closing the always_comb at each cut instance); the older "299/300 vectors
 // wrong at O0" measurement on tests/equiv/sim_sub_nested_comb_feedback predates
 // that scheduler. Returns the number of instances inlined.
-int flatten_false_loop_subs(hhds::Graph* g);
+int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees = nullptr);
 
 // The comb nodes of `g` that sit on a WORD-LEVEL cycle, non-mutating.
 //

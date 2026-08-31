@@ -303,7 +303,7 @@ protected:
   void check_field_store_kind(std::string_view field_key, const Dlop& value);
 
   // Dotted `wire` field declares seen this file walk (`declare(io.a,…,wire)`,
-  // the uPass_detuple split of `wire io:(a:…, o:…)`). The runner's declare
+  // the runner detupler's split of `wire io:(a:…, o:…)`). The runner's declare
   // bake DROPS their facts when the root was never declared (detuple removed
   // it), and constprop never binds their runtime stores — so these fields have
   // no bundle entry to inspect at the file-scope pop. This set is the

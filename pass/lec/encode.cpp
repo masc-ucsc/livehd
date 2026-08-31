@@ -4319,7 +4319,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // array term => provably equal values. A forwarding / combinational read
       // sources this design's OWN a_next, so nothing can be assumed about it.
       const bool shared_cur = !mc.is_comb && !mc.is_rom && rd_src == mc.a_cur;
-      out.mem_rd[mc.key].push_back(Encoded::Mem_rd_port{mc.rd_fresh[k], addr, shared_cur});
+      out.mem_rd[mc.key].push_back(
+          Encoded::Mem_rd_port{mc.rd_fresh[k], addr, mc.mtype == 1 ? Term{} : real, shared_cur});
       if (mc.mtype == 1 && shared_reads != nullptr) {
         // Sync read (latency-1): rd_fresh is the CURRENT registered dout (seeded
         // from shared_reads in phase 1); THIS cycle's read is its NEXT state,

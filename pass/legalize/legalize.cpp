@@ -2,6 +2,7 @@
 
 #include "legalize.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -634,7 +635,20 @@ Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>&
   //    any split, so a half is copied from a repaired body.
   for (const auto& g : graphs) {
     if (is_live(g.get())) {
-      (void)gu::flatten_false_loop_subs(g.get());
+      std::vector<std::string> inlined;
+      (void)gu::flatten_false_loop_subs(g.get(), &inlined);
+      auto attr = g->get_input_node().attr(livehd::attrs::legalize_inlined);
+      attr.del();
+      if (!inlined.empty()) {
+        std::sort(inlined.begin(), inlined.end());
+        inlined.erase(std::unique(inlined.begin(), inlined.end()), inlined.end());
+        std::string encoded;
+        for (const auto& name : inlined) {
+          encoded += name;
+          encoded.push_back('\n');
+        }
+        attr.set(std::move(encoded));
+      }
     }
   }
 

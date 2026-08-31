@@ -968,7 +968,7 @@ void uPass_constprop::process_declare() {
   note_var_span(current_text());  // the declared var, at its declaration line
   // The runner's declare bake already wrote mode/type_name/decl
   // ranges onto the binding (declare_bare created it) — EXCEPT for a dotted
-  // wire leaf (`declare(io.a,…,wire)`, the uPass_detuple split of a bundle
+  // wire leaf (`declare(io.a,…,wire)`, the runner detupler's split of a bundle
   // wire): its root was never declared, so the bake drops the facts and no
   // binding ever answers for the field. Record those here — they are the
   // declared-field enumeration for the unset-unused-field warning (a leaf

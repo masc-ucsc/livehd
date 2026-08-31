@@ -261,6 +261,37 @@ grep -q 'input.*clock' "$W/v/"*.v || fail "restored stateful child lost the pare
 [ "$("$LHD" tool diff "lg:$W/stateful_parent_edit_cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
   || fail "restored stateful child with dirty parent differs from cold"
 
+# A metadata-only restored child must also retain TRANSITIVE ABI facts. The
+# wrapper has no register of its own; only its restored grandchild needs the
+# compiler-minted clock/reset. Editing the parent must not turn that transitive
+# fact into a false direct-declaration scan over the wrapper's empty stub.
+cat > "$W/src/deep.prp" <<'EOF'
+pub mod hold(a:u8) -> (r:u9@[1]) {
+  reg q:u9 = 0
+  q = a + 3
+  r = q
+}
+EOF
+cat > "$W/src/leaf.prp" <<'EOF'
+const deep = import("deep")
+pub mod add1(a:u8) -> (r:u9@[1]) { r = deep.hold(a=a) }
+EOF
+compile "$W/transitive_seed.json"
+python3 - "$W/src/top.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("const changed = x ^ 1", "const changed = x ^ 2"))
+PY
+compile "$W/transitive_parent_edit.json"
+[ "$(field "$W/transitive_parent_edit.json" incremental.compile.misses)" = 1 ] \
+  || fail "transitive-clock parent edit did not miss exactly the parent"
+grep -q 'input.*clock' "$W/v/"*.v || fail "restored transitive state lost the parent clock ABI"
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/transitive_parent_edit_cold_lg" \
+  --workdir "$W/transitive_parent_edit_cold_w" --set lhd.incremental=false -q \
+  --result-json "$W/transitive_parent_edit_cold.json" || fail "transitive parent-edit cold reference failed"
+[ "$("$LHD" tool diff "lg:$W/transitive_parent_edit_cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
+  || fail "restored transitive state with dirty parent differs from cold"
+
 # Tier-A damage is also a refused cold miss. Remove the exact source snapshot
 # for one unchanged unit; the compile must reparse and republish it cleanly.
 SNAPSHOT=$(python3 - "$SCOPE/inventory.json" <<'PY'
@@ -366,6 +397,61 @@ compile "$W/post_shared.json"
 [ -d "$W/w/sim" ] || fail "shared-workdir sim tenant missing"
 
 # ---------------------------------------------------------------------------
+# A body-only change normally stops at its source unit, except where legalize
+# dissolved that callee into a caller to repair a false hierarchy loop. The
+# stored caller carries the exact inlined callee name; editing the callee must
+# therefore retrigger both graph bodies, while an unrelated unit still hits.
+IW="$W/inlined"
+mkdir -p "$IW/src"
+cat > "$IW/src/callee.prp" <<'EOF'
+pub comb split::[timecheck=false](a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
+  o1 = a + b
+  o2 = c * d
+}
+EOF
+cat > "$IW/src/side.prp" <<'EOF'
+pub comb side(a:u8) -> (r:u8) { r = a ^ 1 }
+EOF
+cat > "$IW/src/top.prp" <<'EOF'
+const split = import("callee.split")
+const side = import("side.side")
+pub mod top::[timecheck=false](a:u8, b:u8, d:u8, bump:u8) -> (sum:u16@[], prod:u16@[]) {
+  wire back:u8 = nil
+  mut (o1, o2) = split(a=a, b=b, c=back, d=d)
+  back = (o1 + bump) & 0xFF
+  sum = o1 + side(a=a)
+  prod = o2
+}
+EOF
+icom() {  # RESULT OUTPUT WORKDIR [extra]
+  local result=$1 out=$2 work=$3
+  shift 3
+  "$LHD" compile "$IW/src/top.prp" --top top --emit-dir "lg:$out" --workdir "$work" \
+    -q --result-json "$result" "$@" || fail "inlined-dependency compile failed: $(cat "$result" 2>/dev/null)"
+}
+icom "$IW/cold.json" "$IW/lg" "$IW/w"
+ISCOPE="$IW/w/incr/scopes/compile/top"
+python3 - "$ISCOPE/lg/graph_inventory.json" <<'PY' || fail "legalize did not persist the inlined-callee record"
+import json, sys
+rows = json.load(open(sys.argv[1]))["graphs"]
+top = next((row for row in rows if row["name"] == "top.top"), None)
+if top is None or "callee.split" not in top.get("inlined", []):
+    raise SystemExit(f"FAIL: legalize did not persist top.top -> callee.split: {top}")
+PY
+python3 - "$IW/src/callee.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + b", "a + b + 1"))
+PY
+icom "$IW/edit.json" "$IW/lg" "$IW/w"
+[ "$(field "$IW/edit.json" incremental.compile.misses)" = 1 ] \
+  || fail "inlined callee edit did not reparse exactly one source unit"
+has_phase "$IW/edit.json" pass.upass || fail "inlined callee edit restored a stale caller"
+icom "$IW/edit_cold.json" "$IW/edit_cold_lg" "$IW/edit_cold_w" --set lhd.incremental=false
+[ "$("$LHD" tool diff "lg:$IW/edit_cold_lg" "lg:$IW/lg" --structural -q)" = identical ] \
+  || fail "inlined callee edit retained the caller's stale dissolved body"
+
+# ---------------------------------------------------------------------------
 # A `pass.formal` WARNING travels WITH the generation instead of poisoning it.
 # A DEFERRED warning used to make compile_cache_store_graphs return before it
 # ever wrote graph_inventory.json, so a design with one unprovable obligation
@@ -373,7 +459,7 @@ compile "$W/post_shared.json"
 # pass.formal for the whole design (measured on minion: five `onehot-deferred`
 # warnings, warm 4.5 s against cold 5.0 s). The generation now carries the
 # warnings; a TOTAL restore replays them verbatim, and a partial restore -- which
-# has no per-graph attribution to split live from stored -- is a counted refusal.
+# replays only the clean owners' records while the dirty graph emits its own.
 FW="$W/fw"
 mkdir -p "$FW/src"
 cat > "$FW/src/fleaf.prp" <<'EOF'
@@ -467,7 +553,7 @@ has_phase "$FW/comment.json" pass.upass && fail "comment-only edit reran upass"
   || fail "comment-only restore changed the diagnostic stream"
 # The generation itself must carry every graph-pipeline record, spans included:
 # a store-side drop would only surface on some LATER restore.
-python3 - "$FSCOPE/lg/graph_inventory.json" "$COLD_WARNS" <<'PY'
+python3 - "$FSCOPE/lg/graph_inventory.json" "$COLD_WARNS" <<'PY' || fail "stored pipeline_diags failed validation"
 import json, sys
 inv = json.load(open(sys.argv[1]))
 stored = inv.get("pipeline_diags")
@@ -477,7 +563,10 @@ if len(stored) < int(sys.argv[2]):
     raise SystemExit(f"FAIL: generation stored {len(stored)} records, cold emitted {sys.argv[2]}")
 # The whole Diagnostic rides, not a hand-picked subset: a field dropped here is
 # a field a warm restore silently loses.
-for row in stored:
+for stored_row in stored:
+    if "owner" not in stored_row or "diagnostic" not in stored_row:
+        raise SystemExit(f"FAIL: stored record has no owner/diagnostic envelope: {stored_row}")
+    row = stored_row["diagnostic"]
     for key in ("severity", "pass", "code", "category", "message", "hint", "span", "see", "notes",
                 "deferred", "verdict", "engine", "duration_ms", "attrs"):
         if key not in row:
@@ -486,9 +575,9 @@ for row in stored:
         raise SystemExit(f"FAIL: an error-severity record was cached: {row}")
 PY
 
-# Semantic edit: the dirty cone re-runs pass.formal and emits its own warnings,
-# so the stored set must NOT be replayed on top. That is a principled refusal
-# (I5) and it is counted, not hidden.
+# Semantic edit: only the leaf is dirty. The restored root remains visible to
+# pass.formal for root/submodule classification, but only the leaf is checked;
+# its live warning replaces the stored leaf warning without blocking reuse.
 python3 - "$FW/src/fleaf.prp" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
@@ -496,8 +585,10 @@ p.write_text(p.read_text().replace("a + 1", "a + 3"))
 PY
 fcompile "$FW/edit.json" "$FW/edit.jsonl"
 has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the dirty cone"
-[ "$(field "$FW/edit.json" incremental.compile.refused)" -ge 1 ] \
-  || fail "a partial restore of a warning-carrying generation was not counted as refused"
+[ "$(field "$FW/edit.json" incremental.compile.refused)" = 0 ] \
+  || fail "a warning-bearing partial restore was unnecessarily refused"
+[ "$(field "$FW/edit.json" incremental.compile.hits)" -ge 3 ] \
+  || fail "a warning-bearing partial restore did not retain the clean graphs"
 [ "$(fwarns "$FW/edit.jsonl")" = "$COLD_WARNS" ] \
   || fail "semantic edit did not reproduce the pass.formal warnings live"
 "$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/edit_cold_lg" \
@@ -506,12 +597,10 @@ has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the
 [ "$("$LHD" tool diff "lg:$FW/edit_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
   || fail "refused partial restore diverged from cold"
 
-# A damaged cache scope may not turn a COMPLETE live compile into a config
-# error. Overlaying validated clean bodies is EXACTNESS only (H5-exact
-# presentation of unchanged graphs); the live pipeline has already produced a
-# checked result for every graph. So an unreadable cached body is a WARNING plus
-# a cold-equal result -- only a HALF-FINISHED transplant (bodies deleted from
-# the destination, merge then failed) may fail the build.
+# A damaged graph generation is a counted refusal followed by a complete live
+# rebuild. Validation happens before any cached body is merged, so corruption
+# cannot leave a half-finished transplant or turn the successful cold fallback
+# into a config error.
 python3 - "$FW/src/fleaf.prp" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
@@ -521,23 +610,17 @@ FBODY=$(find "$FSCOPE/lg" -name 'body.bin' -print 2>/dev/null | head -1)
 [ -n "$FBODY" ] || fail "no cached graph body to damage"
 printf 'damaged' > "$FBODY"
 fcompile "$FW/ovdmg.json" "$FW/ovdmg.jsonl"
-grep -q '"code":"cache-overlay-declined"' "$FW/ovdmg.jsonl" \
-  || fail "a declined clean-body overlay was not reported: $(cat "$FW/ovdmg.jsonl")"
-if grep '"code":"cache-overlay-declined"' "$FW/ovdmg.jsonl" | grep -q '"severity":"error"'; then
-  fail "a cosmetic overlay refusal was reported at error severity"
-fi
+[ "$(field "$FW/ovdmg.json" incremental.compile.refused)" -ge 1 ] \
+  || fail "damaged warning-bearing graph generation was not refused"
+has_phase "$FW/ovdmg.json" pass.upass || fail "damaged graph generation did not rebuild live"
 "$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/ovdmg_cold_lg" \
   --workdir "$FW/ovdmg_cold_w" --set lhd.incremental=false -q --result-json "$FW/ovdmg_cold.json" \
   || fail "overlay-declined cold reference failed"
 [ "$("$LHD" tool diff "lg:$FW/ovdmg_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
   || fail "a declined overlay changed the compile result"
-# This run republishes a healthy generation, so the NEXT compile is warm again
-# and must NOT replay the overlay warning: it describes a SCOPE, not the design,
-# so it has to sit OUTSIDE the stored [diag_mark, diag_end) window.
+# This run republishes a healthy generation, so the NEXT compile is warm again.
 fcompile "$FW/ovheal.json" "$FW/ovheal.jsonl"
-if grep -q '"code":"cache-overlay-declined"' "$FW/ovheal.jsonl"; then
-  fail "the declined-overlay warning was cached into the generation and replayed"
-fi
+has_phase "$FW/ovheal.json" pass.upass && fail "healthy generation did not restore after damage recovery"
 
 # A clean generic `mod` is NOT an ordinary restored Sub body. A dirty caller
 # needs the template statements to materialize its concrete specialization.

@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "upass_runner.hpp"
+
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -8,7 +11,6 @@
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "upass_core.hpp"
-#include "upass_runner.hpp"
 
 namespace {
 
@@ -237,4 +239,106 @@ TEST(UpassRunnerIfPrune, RefCondResolvedByConstpropPrunesIfNode) {
   ASSERT_NE(staging, nullptr);
   // ___cond was folded to true by constprop → runner must prune the if node.
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
+}
+
+TEST(UpassRunnerTuplePortStream, StaticReadBecomesDottedScalarBinding) {
+  auto ln    = std::make_shared<Lnast>("tuple_port_read");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  ln->io_meta().inputs.push_back(Lnast_io_entry{.name = "ar.x", .bits = 8});
+  ln->io_meta().outputs.push_back(Lnast_io_entry{.name = "z", .bits = 8});
+
+  auto alias = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(alias, Lnast_node::create_ref("%port"));
+  ln->add_child(alias, Lnast_node::create_ref("ar"));
+  auto get = ln->add_child(stmts, Lnast_ntype::create_tuple_get());
+  ln->add_child(get, Lnast_node::create_ref("%field"));
+  ln->add_child(get, Lnast_node::create_ref("%port"));
+  ln->add_child(get, Lnast_node::create_const("x"));
+  auto out = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(out, Lnast_node::create_ref("z"));
+  ln->add_child(out, Lnast_node::create_ref("%field"));
+
+  auto         lm = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_tuple_get), 0U);
+  EXPECT_TRUE(has_ref_tok(*staging, "ar.x"));
+}
+
+TEST(UpassRunnerTuplePortStream, StaticOutputFieldWriteBecomesDottedScalarStore) {
+  auto ln    = std::make_shared<Lnast>("tuple_port_write");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  ln->io_meta().inputs.push_back(Lnast_io_entry{.name = "a", .bits = 8});
+  ln->io_meta().outputs.push_back(Lnast_io_entry{.name = "p.x", .bits = 8});
+
+  auto out = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(out, Lnast_node::create_ref("p"));
+  ln->add_child(out, Lnast_node::create_const("x"));
+  ln->add_child(out, Lnast_node::create_ref("a"));
+
+  auto         lm = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  EXPECT_TRUE(has_ref_tok(*staging, "p.x"));
+  EXPECT_FALSE(has_ref_tok(*staging, "p"));
+}
+
+TEST(UpassRunnerSsaStream, RepeatedScalarDefinitionIsVersionedInOutput) {
+  auto ln    = std::make_shared<Lnast>("stream_ssa");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  ln->io_meta().inputs.push_back(Lnast_io_entry{.name = "a", .bits = 8});
+  ln->io_meta().inputs.push_back(Lnast_io_entry{.name = "b", .bits = 8});
+  ln->io_meta().outputs.push_back(Lnast_io_entry{.name = "z", .bits = 8});
+  ln->set_stream_ssa(true);
+  ln->set_stream_ssa_names({"x"});
+
+  auto first = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(first, Lnast_node::create_ref("x"));
+  ln->add_child(first, Lnast_node::create_ref("a"));
+  auto second = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(second, Lnast_node::create_ref("x"));
+  ln->add_child(second, Lnast_node::create_ref("b"));
+  auto out = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(out, Lnast_node::create_ref("z"));
+  ln->add_child(out, Lnast_node::create_ref("x"));
+
+  auto         lm = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  EXPECT_TRUE(has_ref_tok(*staging, "x___ssa_1"));
+}
+
+TEST(UpassRunnerDce, ManySiblingSubtreesRemainDumpableAfterPrune) {
+  auto ln    = std::make_shared<Lnast>("dce_many_siblings");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  ln->io_meta().inputs.push_back(Lnast_io_entry{.name = "a", .bits = 8});
+  ln->io_meta().outputs.push_back(Lnast_io_entry{.name = "z", .bits = 8});
+  for (int i = 0; i < 10000; ++i) {
+    auto dead = ln->add_child(stmts, Lnast_ntype::create_store());
+    ln->add_child(dead, Lnast_node::create_ref(std::format("%dead{}", i)));
+    ln->add_child(dead, Lnast_node::create_ref("a"));
+  }
+  auto out = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(out, Lnast_node::create_ref("z"));
+  ln->add_child(out, Lnast_node::create_ref("a"));
+
+  auto         lm = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  std::ostringstream dump;
+  staging->dump(dump);
+  EXPECT_FALSE(dump.str().empty());
+  EXPECT_TRUE(has_ref_tok(*staging, "z"));
 }

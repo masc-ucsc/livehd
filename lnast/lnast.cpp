@@ -255,6 +255,14 @@ void Lnast::set_name_id(const Lnast_nid& nid, int32_t id) {
 
 void Lnast::rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool) {
   I(pool, "rehome_name_pool: null target pool");
+  // Parser-streamed lambda siblings are built on the same worker thread and
+  // therefore share this wrapper's old pool. Rehome the whole transient unit
+  // family before publishing it to the single-threaded compile closure.
+  for (auto& child : streamed_lambda_lnasts_) {
+    if (child) {
+      child->rehome_name_pool(pool);
+    }
+  }
   if (pool == name_pool_) {
     return;
   }

@@ -280,6 +280,9 @@ private:
   struct Tolg_scan_cache {
     std::optional<bool>                     declares_reg;
     std::optional<bool>                     declares_reset_reg;
+    std::optional<bool>                     needs_clock;
+    std::optional<bool>                     needs_reset;
+    std::optional<bool>                     activation_capable;
     std::optional<std::vector<std::string>> callee_names;
   };
   mutable Tolg_scan_cache tolg_scan_cache_;
@@ -299,6 +302,15 @@ private:
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                                      lambda_kind_;
   bool                                             verilog_origin_ = false;  // set by the native slang reader
+  // Transient handoff from uPass_ssa to the shared runner. The source body is
+  // structurally reusable, but it contains straight-line scalar redefinitions
+  // whose output names must be versioned while streaming. This is deliberately
+  // not serialized: restored compile-cache LNASTs are already post-upass.
+  bool                                             stream_ssa_     = false;
+  // Names selected by uPass_ssa's conservative straight-line scan. This is
+  // transient runner state (like stream_ssa_): serialized LNASTs already
+  // contain the emitted SSA names and must not stream-version again.
+  absl::flat_hash_set<std::string>                 stream_ssa_names_;
   // Explicit lgraph/module name (`pub comb f::[lg="name"]`). Empty ⇒ the
   // artifact keeps the mangled `<file>.<entity>` (top_module_name). Stamped by
   // func_extract from the file-level pub entry's `lg`. tolg uses this as the
@@ -376,6 +388,13 @@ private:
   // exported definitions. In-memory only (like lambda_kind_): the durable
   // forms are the `<unit>.__pub` wrapper tree and the manifest pub index.
   std::vector<Lnast_pub_entry>                     pub_list_;
+  // Pyrope's parser emits named comb/pipe/mod bodies directly as sibling
+  // `top -> [io, stmts]` trees. They travel with their source-unit wrapper
+  // until pass.upass takes ownership. The raw compile cache serializes this
+  // sidecar forest recursively because a mixed restored+fresh rebuild still
+  // needs every clean function body; post-upass artifacts remain ordinary
+  // independent units.
+  std::vector<std::shared_ptr<Lnast>>              streamed_lambda_lnasts_;
   // Folded comptime leaves of the pub VALUE exports, stamped by
   // uPass_constprop when the file-scope walk completes: (flat dotted path,
   // pyrope const text) pairs — a scalar contributes ("name", "12"), a bundle
@@ -576,8 +595,12 @@ public:
   // would falsely flag a concat/OR of a registered field with a comb field as
   // "mixes values at different cycles"). In-memory only (sibling to
   // lambda_kind_); propagated on clone.
-  bool is_verilog_origin() const noexcept { return verilog_origin_; }
-  void set_verilog_origin(bool v) { verilog_origin_ = v; }
+  bool                                    is_verilog_origin() const noexcept { return verilog_origin_; }
+  void                                    set_verilog_origin(bool v) { verilog_origin_ = v; }
+  bool                                    needs_stream_ssa() const noexcept { return stream_ssa_; }
+  void                                    set_stream_ssa(bool v) noexcept { stream_ssa_ = v; }
+  const absl::flat_hash_set<std::string>& stream_ssa_names() const noexcept { return stream_ssa_names_; }
+  void set_stream_ssa_names(absl::flat_hash_set<std::string> names) { stream_ssa_names_ = std::move(names); }
 
   // ── explicit lgraph/module name override (`::[lg="name"]`; see 2f-lg) ──────
   std::string_view get_lg_name() const noexcept { return lg_name_; }
@@ -600,15 +623,21 @@ public:
   // the analyses are otherwise re-walked once per phase (register_io + run) and
   // once per ancestor that reaches this module as a clock/reset callee. The
   // cache collapses all of that to a single walk. Fresh clones re-derive the
-  // facts lazily. The compact compile cache preserves the two declaration
-  // facts because a graph-restored mod/pipe intentionally has a metadata-only
-  // body; re-scanning that stub would otherwise lose its hidden clock/reset
-  // ABI when a dirty parent is lowered beside it.
+  // facts lazily. The compact compile cache preserves both the direct
+  // declaration facts and the registry-derived transitive ABI facts because a
+  // graph-restored mod/pipe intentionally has a metadata-only body. Re-scanning
+  // that stub cannot rediscover state/activation in its restored descendants.
   Tolg_scan_cache&    tolg_scan_cache() const noexcept { return tolg_scan_cache_; }
   std::optional<bool> tolg_declares_reg() const noexcept { return tolg_scan_cache_.declares_reg; }
   std::optional<bool> tolg_declares_reset_reg() const noexcept { return tolg_scan_cache_.declares_reset_reg; }
   void                set_tolg_declares_reg(bool value) const noexcept { tolg_scan_cache_.declares_reg = value; }
   void                set_tolg_declares_reset_reg(bool value) const noexcept { tolg_scan_cache_.declares_reset_reg = value; }
+  std::optional<bool> tolg_needs_clock() const noexcept { return tolg_scan_cache_.needs_clock; }
+  std::optional<bool> tolg_needs_reset() const noexcept { return tolg_scan_cache_.needs_reset; }
+  std::optional<bool> tolg_activation_capable() const noexcept { return tolg_scan_cache_.activation_capable; }
+  void                set_tolg_needs_clock(bool value) const noexcept { tolg_scan_cache_.needs_clock = value; }
+  void                set_tolg_needs_reset(bool value) const noexcept { tolg_scan_cache_.needs_reset = value; }
+  void                set_tolg_activation_capable(bool value) const noexcept { tolg_scan_cache_.activation_capable = value; }
 
   // ── deferred template (stamped by func_extract; cleared on a
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
@@ -756,6 +785,9 @@ public:
   void add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0, std::string_view lg = {}) {
     pub_list_.push_back({std::string(name), std::string(kind), srcid, std::string(lg)});
   }
+  void add_streamed_lambda(std::shared_ptr<Lnast> ln) { streamed_lambda_lnasts_.emplace_back(std::move(ln)); }
+  const std::vector<std::shared_ptr<Lnast>>&              streamed_lambdas() const noexcept { return streamed_lambda_lnasts_; }
+  std::vector<std::shared_ptr<Lnast>>                     take_streamed_lambdas() { return std::move(streamed_lambda_lnasts_); }
   // Folded pub-value leaves (set by uPass_constprop at file-walk completion).
   const std::vector<std::pair<std::string, std::string>>& get_pub_values() const noexcept { return pub_values_; }
   void set_pub_values(std::vector<std::pair<std::string, std::string>> v) { pub_values_ = std::move(v); }

@@ -7016,9 +7016,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return false;
       }
       const std::string tag = key + ":wr" + std::to_string(k);
-      subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}), tag + ".addr"});
-      subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.wmask, b.wmask}), tag + ".wmask"});
-      subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.din, b.din}), tag + ".din"});
+      // Hash-consed identical terms are already a proof.  Do not send thousands
+      // of trivially-false port miters through ABC: a flattened whole-array
+      // assignment can expose one constant-address write per element (352 in
+      // XiangShan RenameBuffer), and those no-op obligations can consume the
+      // complete cone deadline before the differing data cones are attempted.
+      if (a.addr != b.addr) {
+        subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}), tag + ".addr"});
+      }
+      if (a.wmask != b.wmask) {
+        subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.wmask, b.wmask}), tag + ".wmask"});
+      }
+      // Data under a disabled mask bit is a don't-care: STORE keeps the old
+      // array bit there. Front ends routinely produce different disabled data
+      // cones (one preserves the source expression, another fills/extends it),
+      // so comparing raw din makes an equivalent memory look different and
+      // sends the whole ARRAY equality to cvc5. Together with the separately
+      // proven wmask equality, equality of the masked data is exactly the
+      // condition needed for both STORE updates to match.
+      const auto a_data = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {a.wmask, a.din});
+      const auto b_data = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {b.wmask, b.din});
+      if (a_data != b_data) {
+        subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a_data, b_data}), tag + ".din"});
+      }
     }
     if (permuted) {
       // Reordering write ports only preserves the chain when no two enabled
@@ -7045,6 +7065,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                           false});
         }
       }
+    }
+    if (pre.empty() && subs.empty()) {
+      // Keep the parent in `subs_of`: an empty obligation set means the port
+      // chains are identical, but omitting the parent would send its ARRAY cut
+      // down the unsupported direct-cone path instead of discharging it.
+      subs.push_back({parent, tm.mkFalse(), key + ":identical"});
     }
     out.insert(out.end(), pre.begin(), pre.end());  // the bulk-update base, when this is a whole-array
     out.insert(out.end(), subs.begin(), subs.end());
@@ -7140,8 +7166,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (it == ie.mem_rd.end()) {
         continue;
       }
-      const auto& ird = it->second;
-
+      const auto&       ird = it->second;
       // Front ends need not materialize the same NUMBER of async read ports.
       // Re-reading generated Pyrope commonly duplicates a constant-index read
       // that the direct Verilog path shared (TraceBuffer: 59 vs 62). All reads
@@ -7190,6 +7215,72 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
 
+      // A duplicate inserted on one side shifts the remaining read ports, so
+      // the positional route below cannot be used when the counts differ. For
+      // modest sets, try the complete cross-product. This handles equivalent
+      // address arithmetic normalized into different shapes. Every candidate
+      // remains guarded by its own ABC proof; the bound prevents a large
+      // multi-read memory from turning this into quadratic work.
+      constexpr size_t kMaxCrossAddressProofs = 4096;
+      if (rrd.size() != ird.size() && rrd.size() * ird.size() <= kMaxCrossAddressProofs) {
+        for (const auto& a : rrd) {
+          for (const auto& b : ird) {
+            if (a.addr == b.addr || a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()
+                || a.from_shared_cur != b.from_shared_cur) {
+              continue;
+            }
+            merge_cands.push_back({a.dout, b.dout, merge_obl.size(), !(a.from_shared_cur && b.from_shared_cur), key});
+            merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+          }
+        }
+      } else if (rrd.size() != ird.size()) {
+        // Large unequal sets use structural address digests to keep candidate
+        // generation linear. The digest is only an index, never a premise: a
+        // collision creates an address obligation that simply will not prove.
+        struct Digest_group {
+          std::vector<size_t> ref;
+          std::vector<size_t> impl;
+        };
+        absl::flat_hash_map<std::string, Digest_group> by_addr_digest;
+        auto add_digest_port = [&](const Encoded::Mem_rd_port& p, size_t ix, bool is_ref) {
+          const std::string digest = cone_digest(p.addr);
+          if (digest.empty()) {
+            return;
+          }
+          const std::string group_key = digest + (p.from_shared_cur ? ":shared" : ":forwarded");
+          auto&             group     = by_addr_digest[group_key];
+          (is_ref ? group.ref : group.impl).push_back(ix);
+        };
+        for (size_t k = 0; k < rrd.size(); ++k) {
+          add_digest_port(rrd[k], k, true);
+        }
+        for (size_t k = 0; k < ird.size(); ++k) {
+          add_digest_port(ird[k], k, false);
+        }
+        for (const auto& item : by_addr_digest) {
+          const auto& group = item.second;
+          if (group.ref.empty() || group.impl.empty()) {
+            continue;
+          }
+          const auto& canonical             = rrd[group.ref.front()];
+          auto        add_proven_addr_merge = [&](const Encoded::Mem_rd_port& p) {
+            if (canonical.dout == p.dout || canonical.addr == p.addr || canonical.addr.getSort() != p.addr.getSort()
+                || canonical.dout.getSort() != p.dout.getSort() || canonical.from_shared_cur != p.from_shared_cur) {
+              return;
+            }
+            merge_cands.push_back(
+                {canonical.dout, p.dout, merge_obl.size(), !(canonical.from_shared_cur && p.from_shared_cur), key});
+            merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {canonical.addr, p.addr}));
+          };
+          for (size_t k = 1; k < group.ref.size(); ++k) {
+            add_proven_addr_merge(rrd[group.ref[k]]);
+          }
+          for (size_t k : group.impl) {
+            add_proven_addr_merge(ird[k]);
+          }
+        }
+      }
+
       // When counts agree, retain the positional proof route for equivalent
       // but non-identical address cones. Exact groups above already cover the
       // common case and are deliberately allowed when counts differ.
@@ -7212,30 +7303,474 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
 
-    // ---- round 1: no merge, so every proof here is cacheable ----------------
-    std::vector<size_t>     try_ix;  // indices into ind_diffs
-    std::vector<cvc5::Term> terms;
+    // Address equalities are prerequisites for memory-data induction, so prove
+    // them before either memory or ordinary output cones.  They are small and
+    // independent; a hard output must not starve them.
+    std::vector<Cone_stats>   addr_stats;
+    std::vector<Cone_verdict> addr_v = abc_prove_unsat_batch(merge_obl, opts.conelimit, cone_budget_left(), &addr_stats);
+
+    // Exact-address reads of the shared current array need no proof premise:
+    // both encoders read the same matched-state symbol with the same address
+    // term.  Make those correspondences available to the FIRST memory-port
+    // solve.  Large whole-array updates (RenameBuffer has 352 writes) otherwise
+    // spend the entire cone budget proving write data while treating thousands
+    // of already-corresponding douts as unrelated inputs, and the useful retry
+    // never gets a turn.  Forwarding reads and non-identical addresses remain
+    // excluded until their array/address obligations discharge below.
+    Cone_merge_map initial_shared_merge;
+    for (const auto& c : merge_cands) {
+      const bool addr_ok = c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven;
+      if (addr_ok && !c.needs_array) {
+        initial_shared_merge.emplace(c.from_dout, c.to_dout);
+      }
+    }
+
+    // Rebuild a term DAG after replacing discharged read symbols with their
+    // representatives.  cvc5 hash-conses the rebuilt terms, so equality after
+    // this rewrite is an exact structural proof (unlike a digest comparison).
+    // Keep one memo across every port: the 352 RenameBuffer data slices share a
+    // very large producer DAG, and walking that DAG once is the entire win.
+    std::unordered_map<cvc5::Term, cvc5::Term> exact_rewrite_memo;
+    size_t                                     exact_slice_rewrites = 0;
+    auto                                       bitvector_constant   = [](cvc5::Term t) -> std::optional<uint64_t> {
+      while (t.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND && t.getNumChildren() == 1) {
+        t = t[0];
+      }
+      if (t.getKind() != cvc5::Kind::CONST_BITVECTOR) {
+        return std::nullopt;
+      }
+      const std::string bits  = t.getBitVectorValue(2);
+      uint64_t          value = 0;
+      for (const char bit : bits) {
+        if (bit != '0' && bit != '1') {
+          return std::nullopt;
+        }
+        if (value > (std::numeric_limits<uint64_t>::max() >> 1U)) {
+          return std::nullopt;
+        }
+        value = (value << 1U) | static_cast<uint64_t>(bit - '0');
+      }
+      return value;
+    };
+    struct Slice_key {
+      cvc5::Term term;
+      uint32_t   hi;
+      uint32_t   lo;
+      bool       operator==(const Slice_key&) const = default;
+    };
+    struct Slice_hash {
+      size_t operator()(const Slice_key& key) const {
+        size_t h  = std::hash<cvc5::Term>{}(key.term);
+        h        ^= static_cast<size_t>(key.hi) + 0x9e3779b9U + (h << 6U) + (h >> 2U);
+        h        ^= static_cast<size_t>(key.lo) + 0x85ebca6bU + (h << 6U) + (h >> 2U);
+        return h;
+      }
+    };
+    std::unordered_map<Slice_key, cvc5::Term, Slice_hash>     slice_memo;
+    std::function<cvc5::Term(cvc5::Term, uint32_t, uint32_t)> slice_term;
+    slice_term = [&](cvc5::Term base, uint32_t hi, uint32_t lo) -> cvc5::Term {
+      const Slice_key key{base, hi, lo};
+      if (auto it = slice_memo.find(key); it != slice_memo.end()) {
+        return it->second;
+      }
+      const uint32_t width = base.getSort().getBitVectorSize();
+      if (lo > hi || hi >= width) {
+        return {};
+      }
+      auto remember = [&](cvc5::Term value) {
+        slice_memo.emplace(key, value);
+        return value;
+      };
+      if (lo == 0 && hi + 1 == width) {
+        return remember(base);
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_CONCAT) {
+        uint32_t lsb = 0;
+        for (size_t n = base.getNumChildren(); n-- > 0;) {
+          const uint32_t child_width = base[n].getSort().getBitVectorSize();
+          if (lo >= lsb && hi < lsb + child_width) {
+            return remember(slice_term(base[n], hi - lsb, lo - lsb));
+          }
+          lsb += child_width;
+        }
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND && base.getNumChildren() == 1) {
+        const uint32_t child_width = base[0].getSort().getBitVectorSize();
+        if (hi < child_width) {
+          return remember(slice_term(base[0], hi, lo));
+        }
+        if (lo >= child_width) {
+          return remember(tm.mkBitVector(hi - lo + 1, 0));
+        }
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_LSHR && base.getNumChildren() == 2) {
+        if (const auto shift = bitvector_constant(base[1])) {
+          if (*shift < width && hi < width - *shift) {
+            return remember(slice_term(base[0], hi + static_cast<uint32_t>(*shift), lo + static_cast<uint32_t>(*shift)));
+          }
+          if (*shift >= width || lo >= width - *shift) {
+            return remember(tm.mkBitVector(hi - lo + 1, 0));
+          }
+        }
+      }
+      if ((base.getKind() == cvc5::Kind::BITVECTOR_AND || base.getKind() == cvc5::Kind::BITVECTOR_OR
+           || base.getKind() == cvc5::Kind::BITVECTOR_XOR)
+          && base.getNumChildren() >= 2) {
+        std::vector<cvc5::Term> sliced;
+        sliced.reserve(base.getNumChildren());
+        for (size_t i = 0; i < base.getNumChildren(); ++i) {
+          sliced.push_back(slice_term(base[i], hi, lo));
+        }
+        return remember(tm.mkTerm(base.getKind(), sliced));
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_NOT && base.getNumChildren() == 1) {
+        return remember(tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {slice_term(base[0], hi, lo)}));
+      }
+      if (base.getKind() == cvc5::Kind::ITE && base.getNumChildren() == 3 && base[1].getSort().isBitVector()) {
+        return remember(tm.mkTerm(cvc5::Kind::ITE, {base[0], slice_term(base[1], hi, lo), slice_term(base[2], hi, lo)}));
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_EXTRACT && base.getNumChildren() == 1) {
+        const auto op = base.getOp();
+        if (op.getNumIndices() == 2) {
+          const uint32_t inner_lo = static_cast<uint32_t>(std::stoul(cvc5::Op(op)[1].toString()));
+          return remember(slice_term(base[0], inner_lo + hi, inner_lo + lo));
+        }
+      }
+      return remember(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo}), {base}));
+    };
+    auto rewrite_exact_reads = [&](const cvc5::Term& root) {
+      std::vector<std::pair<cvc5::Term, bool>> work;
+      work.emplace_back(root, false);
+      while (!work.empty()) {
+        const cvc5::Term t = work.back().first;
+        if (exact_rewrite_memo.contains(t)) {
+          work.pop_back();
+          continue;
+        }
+        if (auto it = initial_shared_merge.find(t); it != initial_shared_merge.end()) {
+          exact_rewrite_memo.emplace(t, it->second);
+          work.pop_back();
+          continue;
+        }
+        if (!work.back().second) {
+          work.back().second = true;
+          for (size_t i = 0; i < t.getNumChildren(); ++i) {
+            if (!exact_rewrite_memo.contains(t[i])) {
+              work.emplace_back(t[i], false);
+            }
+          }
+          continue;
+        }
+        work.pop_back();
+        if (t.getNumChildren() == 0) {
+          exact_rewrite_memo.emplace(t, t);
+          continue;
+        }
+        std::vector<cvc5::Term> children;
+        children.reserve(t.getNumChildren());
+        bool changed = false;
+        for (size_t i = 0; i < t.getNumChildren(); ++i) {
+          const auto& child = exact_rewrite_memo.at(t[i]);
+          children.push_back(child);
+          changed = changed || child != t[i];
+        }
+        cvc5::Term rebuilt;
+        if (!changed) {
+          rebuilt = t;
+        } else if (t.hasOp()) {
+          rebuilt = tm.mkTerm(t.getOp(), children);
+        } else {
+          rebuilt = tm.mkTerm(t.getKind(), children);
+        }
+
+        // Generated Pyrope reconstructs a packed input and then accesses a
+        // field as EXTRACT(LSHR(CONCAT(all ports), constant)).  Select the one
+        // contributing CONCAT child here; otherwise a one-bit field forces ABC
+        // to materialize the entire top-level input bundle.  Only wholly
+        // contained constant slices are rewritten.
+        if (rebuilt.getKind() == cvc5::Kind::BITVECTOR_EXTRACT && rebuilt.getNumChildren() == 1) {
+          const auto op = rebuilt.getOp();
+          if (op.getNumIndices() == 2) {
+            const uint64_t hi = std::stoull(cvc5::Op(op)[0].toString());
+            const uint64_t lo = std::stoull(cvc5::Op(op)[1].toString());
+            if (auto sliced = slice_term(rebuilt[0], static_cast<uint32_t>(hi), static_cast<uint32_t>(lo)); !sliced.isNull()) {
+              exact_slice_rewrites += sliced != rebuilt ? 1 : 0;
+              rebuilt               = sliced;
+            }
+          }
+        }
+        exact_rewrite_memo.emplace(t, rebuilt);
+      }
+      return exact_rewrite_memo.at(root);
+    };
+
+    // Prepare the direct cuts/address equalities, but run the memory induction
+    // first below.  A single hard output cone can consume the whole deadline;
+    // prioritizing it would leave no time to prove the array correspondence
+    // that unlocks thousands of read merges for those same outputs.
+    const size_t n_sub = subs.size();
+
+    // ---- round 1a: memory ports, with unconditional exact-read merges --------
+    std::vector<Cone_verdict> sub_v(n_sub, Cone_verdict::Unknown);
+    if (n_sub > 0) {
+      std::vector<cvc5::Term> sub_terms;
+      std::vector<size_t>     sub_pending;
+      sub_terms.reserve(n_sub);
+      sub_pending.reserve(n_sub);
+      size_t exact_term_proven = 0;
+      size_t simplify_proven   = 0;
+      for (size_t k = 0; k < n_sub; ++k) {
+        const auto& term = subs[k].term;
+        // Port obligations are normally DISTINCT(lhs,rhs).  If the two sides
+        // become the same hash-consed term after applying unconditional exact
+        // read merges, no AIG or SAT call is needed.
+        if (!initial_shared_merge.empty() && term.getKind() == cvc5::Kind::DISTINCT && term.getNumChildren() == 2
+            && rewrite_exact_reads(term[0]) == rewrite_exact_reads(term[1])) {
+          sub_v[k] = Cone_verdict::Proven;
+          ++exact_term_proven;
+          continue;
+        }
+        // cvc5's rewriter is particularly valuable for generated Pyrope port
+        // accesses: a field may arrive as EXTRACT(LSHR(CONCAT(all inputs), C)),
+        // whereas the direct Verilog side has the field symbol itself.  Sending
+        // the unreduced CONCAT to ABC makes a 20-bit write cone materialize the
+        // entire multi-kilobit top input bundle.  `simplify` is a semantics-
+        // preserving term rewrite (it does not use asserted assumptions here).
+        const cvc5::Term merged_term = initial_shared_merge.empty() ? term : rewrite_exact_reads(term);
+        const cvc5::Term simplified  = solver.simplify(merged_term);
+        if (simplified == tm.mkFalse()) {
+          sub_v[k] = Cone_verdict::Proven;
+          ++simplify_proven;
+          continue;
+        }
+        sub_pending.push_back(k);
+        sub_terms.push_back(simplified);
+      }
+      if (std::getenv("LEC_CONE_LOG") != nullptr && !initial_shared_merge.empty()) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] -- exact-read rewrite: %zu packed slice(s), %zu structural + %zu simplified port proof(s), "
+                     "%zu pending\n",
+                     exact_slice_rewrites,
+                     exact_term_proven,
+                     simplify_proven,
+                     sub_pending.size());
+      }
+      std::vector<Cone_stats> sub_stats;
+      const Cone_merge_map*   initial_merge = initial_shared_merge.empty() ? nullptr : &initial_shared_merge;
+      const auto pending_v = abc_prove_unsat_batch(sub_terms, opts.conelimit, cone_budget_left(), &sub_stats, initial_merge);
+      for (size_t k = 0; k < sub_pending.size(); ++k) {
+        sub_v[sub_pending[k]] = pending_v[k];
+      }
+    }
+
+    // ---- round 1b: direct cuts with discharged shared-current reads ----------
+    // Address and memory-port obligations already ran first.  Make every read
+    // correspondence unlocked by those memory proofs available to the FIRST
+    // direct-output solve.  Trying a multi-kilobit output with forwarding douts
+    // still independent can consume the entire deadline before the historical
+    // merge-assisted retry gets a turn (RenameBuffer's 10,400-bit commit bus is
+    // the canonical example).
+    absl::flat_hash_set<std::string> direct_mem_proven = mem_equal_terms;
+    for (const auto& [parent, ix] : subs_of) {
+      bool all = true;
+      for (const size_t k : ix) {
+        all = all && sub_v[k] == Cone_verdict::Proven;
+      }
+      if (all) {
+        direct_mem_proven.insert(mem_key_of[parent]);
+      }
+    }
+    Cone_merge_map first_direct_merge;
+    for (const auto& c : merge_cands) {
+      const bool addr_ok  = c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven;
+      const bool array_ok = !c.needs_array || direct_mem_proven.contains(c.mem_key);
+      if (addr_ok && array_ok) {
+        first_direct_merge.emplace(c.from_dout, c.to_dout);
+      }
+    }
+
+    // All entries in first_direct_merge are now discharged premises.  Apply
+    // them as exact DAG substitutions as well as supplying them to ABC.  The
+    // latter alone still makes ABC materialize both large producer cones before
+    // recognizing their leaves as the same inputs; direct substitution lets
+    // hash-consing and cvc5's rewriter erase equal packed-output fields first.
+    for (const auto& [from, to] : first_direct_merge) {
+      initial_shared_merge.emplace(from, to);
+    }
+    // The memo caches rewrites AGAINST THE ROUND-1a MERGE MAP; the map just
+    // grew (first_direct_merge) and grows further inside install below, so a
+    // stale memo would return round-1a results and silently skip the new
+    // substitutions — with WHICH ones skipped depending on what round 1a
+    // happened to walk. Reset it here (sound either way, but deterministic).
+    exact_rewrite_memo.clear();
+    size_t exact_read_values   = 0;
+    auto   install_exact_reads = [&](const Encoded& side) {
+      // side.mem_rd is an absl hash map: iterate its keys SORTED so the
+      // install order (each insert_or_assign feeds later rewrites) — and
+      // therefore the exact terms handed to cvc5/ABC — is process-stable.
+      std::vector<std::string_view> keys;
+      keys.reserve(side.mem_rd.size());
+      for (const auto& [key, ports] : side.mem_rd) {
+        (void)ports;
+        keys.emplace_back(key);
+      }
+      std::sort(keys.begin(), keys.end());
+      for (const auto& key : keys) {
+        for (const auto& port : side.mem_rd.at(std::string(key))) {
+          if (port.from_shared_cur && !port.value.isNull()) {
+            // NOTE: entries installed here are invisible to sub-DAGs the memo
+            // already walked this loop (per-insert invalidation would re-walk
+            // the shared producer DAG per port — the memo's whole win). That
+            // bounded staleness is sound and, with the sorted order above,
+            // now deterministic.
+            initial_shared_merge.insert_or_assign(port.dout, solver.simplify(rewrite_exact_reads(port.value)));
+            ++exact_read_values;
+          }
+        }
+      }
+    };
+    install_exact_reads(re);
+    install_exact_reads(ie);
+    exact_rewrite_memo.clear();
+
+    // Preserve the part of array semantics that an ABC cone otherwise loses:
+    // two reads of the same (or already-proven-equal next) array return equal
+    // data whenever their addresses are equal.  Globally equal addresses were
+    // substituted above.  Keep the remaining relation conditional, as
+    //   (addr_a != addr_b) || (dout_a == dout_b).
+    // These are sound premises, not guessed correspondences.  A candidate is
+    // admitted only after its backing arrays are known equal; an incomplete
+    // candidate set can only miss a proof, never create a false one.
+    std::vector<cvc5::Term> direct_coherence;
+    for (const auto& c : merge_cands) {
+      if (c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven) {
+        continue;
+      }
+      const bool array_ok = !c.needs_array || direct_mem_proven.contains(c.mem_key);
+      if (!array_ok) {
+        continue;
+      }
+      const cvc5::Term dout_equal
+          = tm.mkTerm(cvc5::Kind::EQUAL, {rewrite_exact_reads(c.from_dout), rewrite_exact_reads(c.to_dout)});
+      const cvc5::Term coherence
+          = solver.simplify(tm.mkTerm(cvc5::Kind::OR, {rewrite_exact_reads(merge_obl[c.obligation]), dout_equal}));
+      if (coherence != tm.mkTrue()) {
+        direct_coherence.push_back(coherence);
+      }
+    }
+    cvc5::Term coherence_all;
+    for (const auto& c : direct_coherence) {
+      coherence_all = coherence_all.isNull() ? c : tm.mkTerm(cvc5::Kind::AND, {coherence_all, c});
+    }
+
+    // Merge-assisted direct proofs are deliberately kept out of the persistent
+    // standalone-cone cache: their digest does not include the address/array
+    // obligations which justify the read substitution.
+    std::vector<size_t>                              try_ix;  // unique parent indices into ind_diffs
+    std::vector<cvc5::Term>                          terms;
+    absl::flat_hash_map<size_t, std::vector<size_t>> direct_jobs_of;  // parent -> indices into terms
+    std::vector<bool>                                direct_merge_touched(ind_diffs.size(), false);
     for (size_t i = 0; i < ind_diffs.size(); ++i) {
       if (!cached[i] && subs_of.find(i) == subs_of.end()) {
         try_ix.push_back(i);
-        terms.push_back(ind_diffs[i].second);
+        cvc5::Term direct = ind_diffs[i].second;
+        if (!initial_shared_merge.empty()) {
+          const auto rewritten    = rewrite_exact_reads(direct);
+          direct_merge_touched[i] = rewritten != direct;
+          direct                  = rewritten;
+        }
+        const bool wide_external = !ind_diffs[i].first.starts_with("nxt:") && direct.getKind() == cvc5::Kind::DISTINCT
+                                   && direct.getNumChildren() == 2 && direct[0].getSort().isBitVector()
+                                   && direct[0].getSort() == direct[1].getSort() && direct[0].getSort().getBitVectorSize() >= 16;
+        if (wide_external) {
+          const uint32_t width = direct[0].getSort().getBitVectorSize();
+          for (uint32_t lo = 0; lo < width; lo += 8) {
+            const uint32_t hi  = std::min<uint32_t>(width - 1, lo + 7);
+            const auto     op  = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo});
+            const auto     lhs = solver.simplify(rewrite_exact_reads(tm.mkTerm(op, {direct[0]})));
+            const auto     rhs = solver.simplify(rewrite_exact_reads(tm.mkTerm(op, {direct[1]})));
+            direct_jobs_of[i].push_back(terms.size());
+            cvc5::Term job = tm.mkTerm(cvc5::Kind::DISTINCT, {lhs, rhs});
+            if (!coherence_all.isNull()) {
+              job                     = tm.mkTerm(cvc5::Kind::AND, {job, coherence_all});
+              direct_merge_touched[i] = true;
+            }
+            terms.push_back(job);
+          }
+        } else {
+          direct_jobs_of[i].push_back(terms.size());
+          cvc5::Term job = solver.simplify(direct);
+          if (!coherence_all.isNull()) {
+            job                     = tm.mkTerm(cvc5::Kind::AND, {job, coherence_all});
+            direct_merge_touched[i] = true;
+          }
+          terms.push_back(job);
+        }
       }
     }
-    const size_t n_direct = terms.size();
-    for (const auto& s : subs) {
-      terms.push_back(s.term);
+    const size_t            n_direct = try_ix.size();
+    std::vector<Cone_stats> stats;
+    const Cone_merge_map*   direct_merge        = first_direct_merge.empty() ? nullptr : &first_direct_merge;
+    size_t                  fresh_slice_proven  = 0;
+    size_t                  fresh_slice_sat     = 0;
+    size_t                  fresh_slice_unknown = 0;
+    {
+      bool fresh_budget_spent = false;
+      for (const size_t parent : try_ix) {
+        if (direct_jobs_of.at(parent).size() <= 1 || fresh_budget_spent) {
+          continue;
+        }
+        const auto&                            jobs             = direct_jobs_of.at(parent);
+        constexpr size_t                       fresh_group_size = 32;
+        std::vector<std::pair<size_t, size_t>> ranges;
+        for (size_t first = 0; first < jobs.size(); first += fresh_group_size) {
+          ranges.emplace_back(first, std::min(jobs.size(), first + fresh_group_size));
+        }
+        while (!ranges.empty() && !fresh_budget_spent) {
+          const auto [first, last] = ranges.back();
+          ranges.pop_back();
+          cvc5::Term group;
+          for (size_t k = first; k < last; ++k) {
+            group = group.isNull() ? terms[jobs[k]] : tm.mkTerm(cvc5::Kind::OR, {group, terms[jobs[k]]});
+          }
+          cvc5::Solver slice_solver(tm);
+          slice_solver.setLogic("QF_AUFBV");
+          slice_solver.setOption("tlimit-per", "500");
+          slice_solver.assertFormula(group);
+          if (acc != nullptr) {
+            ++acc->checks;
+          }
+          const auto check_t0  = std::chrono::steady_clock::now();
+          const auto sr        = slice_solver.checkSat();
+          solve_spent         += std::chrono::steady_clock::now() - check_t0;
+          res.solve_ms         = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+          if (sr.isUnsat()) {
+            // Keep the existing result/stats plumbing: ABC receives a literal
+            // false for an already-discharged job and returns Proven instantly.
+            for (size_t k = first; k < last; ++k) {
+              terms[jobs[k]] = tm.mkFalse();
+            }
+            fresh_slice_proven += last - first;
+          } else if (last - first > 1) {
+            const size_t middle = first + (last - first) / 2;
+            ranges.emplace_back(middle, last);
+            ranges.emplace_back(first, middle);
+          } else if (sr.isSat()) {
+            ++fresh_slice_sat;
+          } else {
+            ++fresh_slice_unknown;
+          }
+          if (budget_on && budget_left_ms() <= budget_floor_ms) {
+            fresh_budget_spent = true;
+          }
+        }
+      }
     }
-    const size_t n_sub = subs.size();
-    for (const auto& m : merge_obl) {
-      terms.push_back(m);
-    }
-
-    std::vector<Cone_stats>         stats;
-    const std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats);
+    std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats, direct_merge);
     if (std::getenv("LEC_CONE_LOG") != nullptr) {
       int addr_ok = 0;
       for (size_t k = 0; k < merge_obl.size(); ++k) {
-        addr_ok += r1[n_direct + n_sub + k] == Cone_verdict::Proven ? 1 : 0;
+        addr_ok += addr_v[k] == Cone_verdict::Proven ? 1 : 0;
       }
       // Most merges are now EXACT-address groups that need no solver premise,
       // so `merge_obl` is no longer the merge population: reporting `addr_ok /
@@ -7246,18 +7781,59 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         exact += c.obligation == std::numeric_limits<size_t>::max() ? 1 : 0;
       }
       std::fprintf(stderr,
-                   "[LEC_CONE] -- %zu direct cut(s), %zu memory port obligation(s), %zu read-port merge(s) "
+                   "[LEC_CONE] -- %zu direct cut(s)/%zu ABC job(s), %zu memory port obligation(s), %zu read-port merge(s) "
                    "(%zu exact-address, %d/%zu address-proved)\n",
                    n_direct,
+                   terms.size(),
                    subs.size(),
                    merge_cands.size(),
                    exact,
                    addr_ok,
                    merge_obl.size());
+      if (!direct_coherence.empty()) {
+        std::fprintf(stderr, "[LEC_CONE] -- %zu conditional read-coherence premise(s)\n", direct_coherence.size());
+      }
+      if (exact_read_values > 0) {
+        std::fprintf(stderr, "[LEC_CONE] -- substituted %zu exact latency-0 read value(s)\n", exact_read_values);
+      }
+      if (fresh_slice_proven > 0 || fresh_slice_sat > 0 || fresh_slice_unknown > 0) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] -- fresh slice solver: %zu proven, %zu sat, %zu unknown\n",
+                     fresh_slice_proven,
+                     fresh_slice_sat,
+                     fresh_slice_unknown);
+      }
     }
-    for (size_t k = 0; k < n_direct; ++k) {
-      verdicts[try_ix[k]] = r1[k];
-      per_cut[try_ix[k]]  = stats[k];
+    for (const size_t parent : try_ix) {
+      bool   all_proven      = true;
+      bool   any_refuted     = false;
+      bool   any_unsupported = false;
+      size_t proven_jobs     = 0;
+      size_t unknown_jobs    = 0;
+      for (const size_t job : direct_jobs_of.at(parent)) {
+        all_proven            = all_proven && r1[job] == Cone_verdict::Proven;
+        any_refuted           = any_refuted || r1[job] == Cone_verdict::Refuted;
+        any_unsupported       = any_unsupported || r1[job] == Cone_verdict::Unsupported;
+        proven_jobs          += r1[job] == Cone_verdict::Proven ? 1 : 0;
+        unknown_jobs         += r1[job] == Cone_verdict::Unknown ? 1 : 0;
+        per_cut[parent].pis   = std::max(per_cut[parent].pis, stats[job].pis);
+        per_cut[parent].ands += stats[job].ands;
+        if (per_cut[parent].why.empty() && !stats[job].why.empty()) {
+          per_cut[parent].why = stats[job].why;
+        }
+      }
+      verdicts[parent] = all_proven        ? Cone_verdict::Proven
+                         : any_refuted     ? Cone_verdict::Refuted
+                         : any_unsupported ? Cone_verdict::Unsupported
+                                           : Cone_verdict::Unknown;
+      if (std::getenv("LEC_CONE_LOG") != nullptr && direct_jobs_of.at(parent).size() > 1) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] -- split %-40s %zu/%zu proven, %zu unknown\n",
+                     ind_diffs[parent].first.c_str(),
+                     proven_jobs,
+                     direct_jobs_of.at(parent).size(),
+                     unknown_jobs);
+      }
     }
     // A memory cut is discharged exactly when EVERY one of its port obligations
     // is. A port obligation that is definitively SAT means the write logic really
@@ -7266,11 +7842,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // equality may do that (`can_refute`): a bulk-update obligation is merely
     // sufficient, so a SAT one leaves the parent Unknown for cvc5 to settle.
     absl::flat_hash_set<std::string> mem_proven;  // mem keys whose next-state arrays are proven equal
-    std::vector<Cone_verdict>        sub_v(n_sub, Cone_verdict::Unknown);
-    for (size_t k = 0; k < n_sub; ++k) {
-      sub_v[k] = r1[n_direct + k];
-    }
-    auto aggregate_mem = [&]() {
+    auto                             aggregate_mem = [&]() {
       mem_proven = mem_equal_terms;  // no cut was built for these: equal by construction
       for (const auto& [parent, ix] : subs_of) {
         bool all = true, any_sat = false;
@@ -7286,7 +7858,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     };
     aggregate_mem();
 
-    // ---- round 2: retry the residue with the DISCHARGED dout merges ---------
+    // A memory proof made under exact dout correspondence is sound, but its
+    // standalone cone digest does not include the surrounding address/read-port
+    // relation.  Keep it out of the persistent cone cache, just like the later
+    // merge-assisted retries.
+    std::vector<bool> merge_assisted(ind_diffs.size(), false);
+    int               merged_proven = 0;
+    if (!initial_shared_merge.empty()) {
+      for (const auto& [parent, ix] : subs_of) {
+        if (verdicts[parent] == Cone_verdict::Proven) {
+          merge_assisted[parent] = true;
+        }
+      }
+    }
+    if (!first_direct_merge.empty() || !direct_coherence.empty()) {
+      for (size_t k = 0; k < n_direct; ++k) {
+        if (verdicts[try_ix[k]] == Cone_verdict::Proven && direct_merge_touched[try_ix[k]]) {
+          merge_assisted[try_ix[k]] = true;
+          ++merged_proven;
+        }
+      }
+    }
+
+    // ---- round 2: retry the residue with all DISCHARGED dout merges ----------
     // NOT cacheable: a merge-assisted proof is a weaker claim than the cone's
     // digest stands for (it assumes the two douts equal), and the digest does not
     // cover the address cones that justify it — a later run with the same cone but
@@ -7294,8 +7888,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto build_merge = [&]() {
       Cone_merge_map m;
       for (const auto& c : merge_cands) {
-        const bool addr_ok
-            = c.obligation == std::numeric_limits<size_t>::max() || r1[n_direct + n_sub + c.obligation] == Cone_verdict::Proven;
+        const bool addr_ok  = c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven;
         const bool array_ok = !c.needs_array || mem_proven.contains(c.mem_key);
         if (addr_ok && array_ok) {
           m.emplace(c.from_dout, c.to_dout);
@@ -7303,10 +7896,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       return m;
     };
-    Cone_merge_map    merge         = build_merge();
-    int               merged_proven = 0;
-    std::vector<bool> merge_assisted(ind_diffs.size(), false);
-    // ---- round 1b: the memory sub-obligations get the merges too -------------
+    Cone_merge_map merge = build_merge();
+    if (std::getenv("LEC_CONE_LOG") != nullptr && !merge_cands.empty()) {
+      std::fprintf(stderr, "[LEC_CONE] -- enabled %zu/%zu discharged read-port merge(s)\n", merge.size(), merge_cands.size());
+    }
+    // ---- round 2a: unresolved memory obligations get the wider merge set ------
     // A whole-array register file is routinely written from a function of
     // ITSELF (`ex_mask_rf_q <= f8_mask_rf_wdata_d`, which starts life as a copy
     // of `ex_mask_rf_q`), so its bulk-update bus reads the array's own douts.

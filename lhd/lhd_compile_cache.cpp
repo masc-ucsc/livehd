@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "attrs.hpp"
 #include "compile_salt.hpp"
 #include "diag.hpp"
 #include "eprp.hpp"
@@ -63,15 +64,18 @@ struct Source_unit {
   std::string              bytes;     // the hermetic per-run snapshot
   std::vector<std::string> imports;
   uint64_t                 semantic_hash{0};
+  uint64_t                 interface_hash{0};
   bool                     exact_snapshot_match{false};
   bool                     snapshot_unavailable{false};
   bool                     exact_prior_match{false};
+  bool                     exact_interface_match{false};
   std::string              snapshot_file;
   std::shared_ptr<Lnast>   lnast;
 };
 
 struct Prior_unit {
   uint64_t                 semantic_hash{0};
+  uint64_t                 interface_hash{0};
   std::string              snapshot_file;
   std::string              path;
   std::vector<std::string> imports;
@@ -85,13 +89,14 @@ struct Prior_cache {
 };
 
 struct Graph_row {
-  std::string name;
-  std::string owner;
-  std::string unit_key;
-  uint64_t    interface_hash{0};
-  bool        has_body{false};
-  uint64_t    h0{0};
-  uint64_t    h1{0};
+  std::string              name;
+  std::string              owner;
+  std::string              unit_key;
+  uint64_t                 interface_hash{0};
+  bool                     has_body{false};
+  uint64_t                 h0{0};
+  uint64_t                 h1{0};
+  std::vector<std::string> inlined;
 };
 
 struct Artifact_file {
@@ -316,20 +321,28 @@ std::optional<livehd::diag::Diagnostic> read_diag(const rapidjson::Value& v) {
   return d;
 }
 
+struct Stored_diag {
+  std::string              owner;
+  livehd::diag::Diagnostic diagnostic;
+};
+
 struct Graph_inventory {
-  std::string                           closure_key;
-  std::vector<std::string>              lnast_order;
-  std::vector<Graph_row>                rows;
-  std::vector<Artifact_file>            artifact_files;
-  std::vector<livehd::diag::Diagnostic> pipeline_diags;
+  std::string                closure_key;
+  std::vector<std::string>   lnast_order;
+  std::vector<Graph_row>     rows;
+  std::vector<Artifact_file> artifact_files;
+  std::vector<Stored_diag>   pipeline_diags;
 };
 
 // Re-emit a generation's stored pipeline records. Only legal when the restore
 // is TOTAL: the pipeline then ran over no graph in this process, so the
 // replayed set is exactly what a cold run would have printed.
-void replay_pipeline_diags(const Graph_inventory& inventory) {
-  for (const auto& d : inventory.pipeline_diags) {
-    livehd::diag::sink().emit(d);
+void replay_pipeline_diags(const Graph_inventory& inventory, const std::set<std::string>* clean = nullptr) {
+  for (const auto& stored : inventory.pipeline_diags) {
+    if (clean != nullptr && (stored.owner.empty() || !clean->contains(stored.owner))) {
+      continue;
+    }
+    livehd::diag::sink().emit(stored.diagnostic);
   }
 }
 
@@ -634,6 +647,24 @@ bool semantic_identical_node(const Lnast& a, const Lnast_nid& an, const Lnast& b
 
 bool semantic_identical(const Lnast& a, const Lnast& b) { return semantic_identical_node(a, a.get_root(), b, b.get_root()); }
 
+// The interface digest is currently the FULL semantic digest, func_def bodies
+// included. An earlier draft masked func_def stmts as "<body>" so a body-only
+// edit would not count as an interface change — but a func_def body kept in a
+// source wrapper (a hoisted tuple method, or any non-streamed lambda) IS
+// observable across the module boundary: the shared runner registry UFCS-
+// inlines and comptime-folds it into importers' graphs, and nothing records
+// that dependency (attrs::legalize_inlined only covers legalize's false-loop
+// dissolution). Masking those bodies let an importer's stale cached graph
+// restore after a body-only edit of the exporter (reproduced: an imported
+// `pub const Obj = (…, comb bump(self,…))` UFCS-called from another unit kept
+// the old body on a warm compile — a silent miscompile). Until LNAST-level
+// body consumption is tracked per caller, the interface digest must stay
+// body-sensitive; streamed lambdas already are through their marker
+// fingerprint.
+uint64_t source_interface_hash(const Lnast& ln) { return semantic_hash(ln); }
+
+bool interface_identical(const Lnast& a, const Lnast& b) { return semantic_identical(a, b); }
+
 std::string closure_key(const std::vector<Source_unit>& units) {
   std::string bytes;
   for (const auto& unit : units) {
@@ -650,54 +681,30 @@ std::string closure_key(const std::vector<Source_unit>& units) {
   return std::format("{:016x}", hash_bytes(bytes));
 }
 
-std::map<std::string, std::string> unit_merkle_keys(const std::vector<Source_unit>& units) {
-  std::map<std::string, const Source_unit*> by_name;
-  std::map<std::string, std::string>        keys;
+std::map<std::string, std::string> unit_body_keys(const std::vector<Source_unit>& units) {
+  std::map<std::string, std::string> keys;
   for (const auto& unit : units) {
-    by_name.emplace(unit.name, &unit);
     keys.emplace(unit.name, std::format("{:016x}", unit.semantic_hash));
-  }
-  // Acyclic imports settle in at most N rounds. Cycles never reach lowering
-  // successfully; their unstable keys merely prevent reuse on the failing run.
-  for (size_t round = 0; round < units.size(); ++round) {
-    auto next = keys;
-    for (const auto& unit : units) {
-      std::vector<std::string> deps;
-      for (const auto& raw : unit.imports) {
-        for (const auto& candidate : import_detail::candidates(raw)) {
-          if (by_name.contains(candidate)) {
-            deps.push_back(keys.at(candidate));
-            break;
-          }
-        }
-      }
-      std::sort(deps.begin(), deps.end());
-      std::string text = std::format("{:016x}", unit.semantic_hash);
-      for (const auto& dep : deps) {
-        text += '|';
-        text += dep;
-      }
-      next[unit.name] = std::format("{:016x}", hash_bytes(text));
-    }
-    if (next == keys) {
-      break;
-    }
-    keys = std::move(next);
   }
   return keys;
 }
 
-std::vector<std::string> clean_units(const std::vector<Source_unit>& units, const Prior_cache& prior) {
+std::vector<std::string> clean_units(const std::vector<Source_unit>& units, const Prior_cache& prior,
+                                     const std::map<std::string, std::set<std::string>>& inlined_dependents) {
   if (!prior.compatible) {
     return {};
   }
   std::map<std::string, const Source_unit*> by_name;
   std::set<std::string>                     dirty;
+  std::set<std::string>                     interface_changed;
   for (const auto& unit : units) {
     by_name.emplace(unit.name, &unit);
     const auto old = prior.units.find(unit.name);
     if (old == prior.units.end() || !unit.exact_prior_match) {
       dirty.emplace(unit.name);
+    }
+    if (old == prior.units.end() || !unit.exact_interface_match) {
+      interface_changed.emplace(unit.name);
     }
   }
   if (prior.units.size() != units.size()) {
@@ -706,24 +713,36 @@ std::vector<std::string> clean_units(const std::vector<Source_unit>& units, cons
     // rebuild the current closure; ghost pruning still removes the vanished def.
     return {};
   }
+  // Body dirtiness is local. It crosses a boundary only when legalize recorded
+  // that the caller contains an inlined copy of the callee, or when the
+  // callee's source interface changed. Interface dirtiness remains transitive:
+  // an implicit clock/reset ABI can change an importer's own GraphIO.
   bool changed = true;
   while (changed) {
     changed = false;
-    for (const auto& unit : units) {
-      if (dirty.contains(unit.name)) {
+    for (const auto& [callee, callers] : inlined_dependents) {
+      if (!dirty.contains(callee)) {
         continue;
       }
+      for (const auto& caller : callers) {
+        if (by_name.contains(caller) && dirty.emplace(caller).second) {
+          changed = true;
+        }
+      }
+    }
+    for (const auto& unit : units) {
       for (const auto& raw : unit.imports) {
-        bool dep_dirty = false;
+        bool dep_interface_changed = false;
         for (const auto& candidate : import_detail::candidates(raw)) {
           if (by_name.contains(candidate)) {
-            dep_dirty = dirty.contains(candidate);
+            dep_interface_changed = interface_changed.contains(candidate);
             break;
           }
         }
-        if (dep_dirty) {
-          dirty.emplace(unit.name);
-          changed = true;
+        if (dep_interface_changed) {
+          const bool new_dirty      = dirty.emplace(unit.name).second;
+          const bool new_interface  = interface_changed.emplace(unit.name).second;
+          changed                  |= new_dirty || new_interface;
           break;
         }
       }
@@ -757,6 +776,51 @@ std::string key_of(std::string_view owner, const Result& res) {
   for (const auto& [unit, key] : res.compile_cache_unit_keys) {
     if (unit == owner) {
       return key;
+    }
+  }
+  return {};
+}
+
+std::string diagnostic_owner(const livehd::diag::Diagnostic& diagnostic, const Prior_cache& current, const Result& res) {
+  const auto owner_from_file = [&](std::string_view raw) {
+    if (raw.empty()) {
+      return std::string{};
+    }
+    const auto  file = fs::path(raw).lexically_normal();
+    std::string exact;
+    std::string basename;
+    bool        basename_ambiguous = false;
+    for (const auto& [name, unit] : current.units) {
+      const auto candidate = fs::path(unit.path).lexically_normal();
+      if (candidate == file) {
+        exact = name;
+        break;
+      }
+      if (candidate.filename() == file.filename()) {
+        if (!basename.empty() && basename != name) {
+          basename_ambiguous = true;
+        }
+        basename = name;
+      }
+    }
+    return !exact.empty() ? exact : (!basename_ambiguous ? basename : std::string{});
+  };
+  if (auto owner = owner_from_file(diagnostic.span.file); !owner.empty()) {
+    return owner;
+  }
+  for (const auto& note : diagnostic.notes) {
+    if (auto owner = owner_from_file(note.span.file); !owner.empty()) {
+      return owner;
+    }
+  }
+  // A graph-oriented diagnostic may have no source span but carry its def in a
+  // structured attribute. Only accept an exact graph-name ownership match;
+  // free-form messages are never parsed into cache authority.
+  for (const auto& [key, value] : diagnostic.attrs) {
+    if (key == "graph" || key == "module" || key == "def" || key == "top") {
+      if (auto owner = owner_of(value, res); !owner.empty()) {
+        return owner;
+      }
     }
   }
   return {};
@@ -809,21 +873,23 @@ Prior_cache load_prior(const std::string& scope, const std::string& context, boo
   rapidjson::Document doc;
   doc.Parse(text->data(), text->size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema_version") || !doc["schema_version"].IsInt()
-      || doc["schema_version"].GetInt() != 3 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
+      || doc["schema_version"].GetInt() != 4 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
       || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt || !doc.HasMember("context") || !doc["context"].IsString()
       || context != doc["context"].GetString() || !doc.HasMember("units") || !doc["units"].IsArray()) {
     return prior;
   }
   for (const auto& u : doc["units"].GetArray()) {
     if (!u.IsObject() || !u.HasMember("name") || !u["name"].IsString() || !u.HasMember("semantic_hash")
-        || !u["semantic_hash"].IsUint64() || !u.HasMember("snapshot") || !u["snapshot"].IsString() || !u.HasMember("path")
-        || !u["path"].IsString() || !u.HasMember("imports") || !u["imports"].IsArray()) {
+        || !u["semantic_hash"].IsUint64() || !u.HasMember("interface_hash") || !u["interface_hash"].IsUint64()
+        || !u.HasMember("snapshot") || !u["snapshot"].IsString() || !u.HasMember("path") || !u["path"].IsString()
+        || !u.HasMember("imports") || !u["imports"].IsArray()) {
       return {};
     }
     Prior_unit unit;
-    unit.semantic_hash = u["semantic_hash"].GetUint64();
-    unit.snapshot_file = u["snapshot"].GetString();
-    unit.path          = u["path"].GetString();
+    unit.semantic_hash  = u["semantic_hash"].GetUint64();
+    unit.interface_hash = u["interface_hash"].GetUint64();
+    unit.snapshot_file  = u["snapshot"].GetString();
+    unit.path           = u["path"].GetString();
     for (const auto& import : u["imports"].GetArray()) {
       if (!import.IsString()) {
         return {};
@@ -859,7 +925,7 @@ void write_inventory(const std::string& path, const std::string& context, const 
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("schema_version");
-  w.Int(3);
+  w.Int(4);
   w.Key("code_salt");
   w.Uint64(livehd::kCompileSrcSalt);
   w.Key("context");
@@ -874,6 +940,8 @@ void write_inventory(const std::string& path, const std::string& context, const 
     w.String(unit.path.c_str());
     w.Key("semantic_hash");
     w.Uint64(unit.semantic_hash);
+    w.Key("interface_hash");
+    w.Uint64(unit.interface_hash);
     w.Key("snapshot");
     w.String(unit.snapshot_file.c_str());
     w.Key("imports");
@@ -967,6 +1035,29 @@ uint64_t graph_interface_hash(const hhds::GraphIO& io) {
   return hash_bytes(bytes);
 }
 
+std::vector<std::string> graph_inlined_callees(const hhds::Graph& graph) {
+  std::vector<std::string> out;
+  auto                     attr = graph.get_input_node().attr(livehd::attrs::legalize_inlined);
+  if (!attr.has()) {
+    return out;
+  }
+  std::string_view encoded = attr.get();
+  while (!encoded.empty()) {
+    const auto end  = encoded.find('\n');
+    auto       name = encoded.substr(0, end);
+    if (!name.empty()) {
+      out.emplace_back(name);
+    }
+    if (end == std::string_view::npos) {
+      break;
+    }
+    encoded.remove_prefix(end + 1);
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
 std::vector<Graph_row> graph_rows(hhds::GraphLibrary& lib, const Result& res, bool& digestable) {
   std::vector<Graph_row>                                            rows;
   absl::flat_hash_map<hhds::Gid, livehd::semdiff::Canonical_digest> digest_memo;
@@ -999,8 +1090,9 @@ std::vector<Graph_row> graph_rows(hhds::GraphLibrary& lib, const Result& res, bo
         digestable = false;
         return {};
       }
-      row.h0 = digest.h0;
-      row.h1 = digest.h1;
+      row.h0      = digest.h0;
+      row.h1      = digest.h1;
+      row.inlined = graph_inlined_callees(*graph);
     }
     rows.push_back(std::move(row));
   }
@@ -1072,12 +1164,12 @@ bool artifact_matches(const fs::path& root, const std::vector<Artifact_file>& ex
 
 void write_graph_inventory(const std::string& path, const Result& res, const std::vector<Graph_row>& rows,
                            const std::vector<std::shared_ptr<Lnast>>& lnasts, const std::vector<Artifact_file>& files,
-                           const std::vector<livehd::diag::Diagnostic>& pipeline_diags) {
+                           const std::vector<Stored_diag>& pipeline_diags) {
   rapidjson::StringBuffer                    sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("schema_version");
-  w.Int(3);
+  w.Int(4);
   w.Key("code_salt");
   w.Uint64(livehd::kCompileSrcSalt);
   w.Key("context");
@@ -1112,13 +1204,24 @@ void write_graph_inventory(const std::string& path, const Result& res, const std
       w.Key("h1");
       w.Uint64(row.h1);
     }
+    w.Key("inlined");
+    w.StartArray();
+    for (const auto& callee : row.inlined) {
+      w.String(callee.c_str());
+    }
+    w.EndArray();
     w.EndObject();
   }
   w.EndArray();
   w.Key("pipeline_diags");
   w.StartArray();
-  for (const auto& d : pipeline_diags) {
-    write_diag(w, d);
+  for (const auto& stored : pipeline_diags) {
+    w.StartObject();
+    w.Key("owner");
+    w.String(stored.owner.c_str());
+    w.Key("diagnostic");
+    write_diag(w, stored.diagnostic);
+    w.EndObject();
   }
   w.EndArray();
   w.Key("artifact_files");
@@ -1154,7 +1257,7 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
   rapidjson::Document doc;
   doc.Parse(text->data(), text->size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema_version") || !doc["schema_version"].IsInt()
-      || doc["schema_version"].GetInt() != 3 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
+      || doc["schema_version"].GetInt() != 4 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
       || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt || !doc.HasMember("context") || !doc["context"].IsString()
       || res.compile_cache_context != doc["context"].GetString() || !doc.HasMember("closure_key") || !doc["closure_key"].IsString()
       || !doc.HasMember("lnast_order") || !doc["lnast_order"].IsArray() || !doc.HasMember("graphs") || !doc["graphs"].IsArray()
@@ -1172,7 +1275,8 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
   }
   for (const auto& g : doc["graphs"].GetArray()) {
     if (!g.IsObject() || !g.HasMember("name") || !g["name"].IsString() || !g.HasMember("interface_hash")
-        || !g["interface_hash"].IsUint64() || !g.HasMember("has_body") || !g["has_body"].IsBool()) {
+        || !g["interface_hash"].IsUint64() || !g.HasMember("has_body") || !g["has_body"].IsBool() || !g.HasMember("inlined")
+        || !g["inlined"].IsArray()) {
       return std::nullopt;
     }
     Graph_row row;
@@ -1188,14 +1292,27 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
       row.h0 = g["h0"].GetUint64();
       row.h1 = g["h1"].GetUint64();
     }
+    for (const auto& callee : g["inlined"].GetArray()) {
+      if (!callee.IsString()) {
+        return std::nullopt;
+      }
+      row.inlined.emplace_back(callee.GetString());
+    }
+    if (!std::is_sorted(row.inlined.begin(), row.inlined.end())
+        || std::adjacent_find(row.inlined.begin(), row.inlined.end()) != row.inlined.end()) {
+      return std::nullopt;
+    }
     inventory.rows.push_back(std::move(row));
   }
   for (const auto& d : doc["pipeline_diags"].GetArray()) {
-    auto stored = read_diag(d);
-    if (!stored) {
+    if (!d.IsObject() || !d.HasMember("owner") || !d["owner"].IsString() || !d.HasMember("diagnostic")) {
       return std::nullopt;
     }
-    inventory.pipeline_diags.push_back(std::move(*stored));
+    auto diagnostic = read_diag(d["diagnostic"]);
+    if (!diagnostic) {
+      return std::nullopt;
+    }
+    inventory.pipeline_diags.push_back(Stored_diag{d["owner"].GetString(), std::move(*diagnostic)});
   }
   for (const auto& f : doc["artifact_files"].GetArray()) {
     if (!f.IsObject() || !f.HasMember("path") || !f["path"].IsString() || !safe_artifact_path(f["path"].GetString())
@@ -1345,7 +1462,7 @@ std::string lnast_unit_dir(std::string_view snapshot_file) {
 
 std::string lowered_lnast_dir(size_t index) { return std::format("unit_{:08}", index); }
 
-constexpr std::string_view kCompactLnastMagic{"lhd.cln6"};
+constexpr std::string_view kCompactLnastMagic{"lhd.cln7"};
 
 // The header pairs the magic with the stored body's semantic hash. The defer
 // hit path compares it against the inventory row, so a snapshot that was
@@ -1417,6 +1534,20 @@ void save_compact_lnast(const std::shared_ptr<Lnast>& ln, const fs::path& dir, b
     tolg_flags |= *declares_reset_reg ? 8 : 0;
   }
   write_pod<uint8_t>(os, tolg_flags);
+  uint8_t tolg_abi_flags = 0;
+  if (const auto needs_clock = ln->tolg_needs_clock(); needs_clock.has_value()) {
+    tolg_abi_flags |= 1;
+    tolg_abi_flags |= *needs_clock ? 2 : 0;
+  }
+  if (const auto needs_reset = ln->tolg_needs_reset(); needs_reset.has_value()) {
+    tolg_abi_flags |= 4;
+    tolg_abi_flags |= *needs_reset ? 8 : 0;
+  }
+  if (const auto activation = ln->tolg_activation_capable(); activation.has_value()) {
+    tolg_abi_flags |= 16;
+    tolg_abi_flags |= *activation ? 32 : 0;
+  }
+  write_pod<uint8_t>(os, tolg_abi_flags);
   auto write_strings = [&](const std::vector<std::string>& strings) {
     write_pod<uint32_t>(os, static_cast<uint32_t>(strings.size()));
     for (const auto& text : strings) {
@@ -1518,6 +1649,22 @@ void save_compact_lnast(const std::shared_ptr<Lnast>& ln, const fs::path& dir, b
   }
   if (!metadata_only) {
     ln->source_locator().save(dir.string());
+    const auto& streamed = ln->streamed_lambdas();
+    if (!streamed.empty()) {
+      std::ofstream siblings(dir / "streamed.bin", std::ios::binary | std::ios::trunc);
+      if (!siblings.is_open()) {
+        throw Lhd_error{"config", std::format("could not store streamed lambda index for {}", ln->get_top_module_name()), ""};
+      }
+      write_pod<uint32_t>(siblings, static_cast<uint32_t>(streamed.size()));
+      for (std::size_t i = 0; i < streamed.size(); ++i) {
+        write_string(siblings, streamed[i]->get_top_module_name());
+        save_compact_lnast(streamed[i], dir / std::format("streamed_{:08}", i));
+      }
+      siblings.close();
+      if (!siblings) {
+        throw Lhd_error{"config", std::format("failed closing streamed lambda index for {}", ln->get_top_module_name()), ""};
+      }
+    }
   }
 }
 
@@ -1560,6 +1707,20 @@ std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_vi
   }
   if ((tolg_flags & 4) != 0) {
     ln->set_tolg_declares_reset_reg((tolg_flags & 8) != 0);
+  }
+  const auto tolg_abi_flags = read_pod<uint8_t>(is);
+  if ((tolg_abi_flags & ~uint8_t{63}) != 0 || ((tolg_abi_flags & 2) != 0 && (tolg_abi_flags & 1) == 0)
+      || ((tolg_abi_flags & 8) != 0 && (tolg_abi_flags & 4) == 0) || ((tolg_abi_flags & 32) != 0 && (tolg_abi_flags & 16) == 0)) {
+    throw Lhd_error{"config", "compact compile-cache LNAST has invalid transitive tolg flags", "the unit will be rebuilt cold"};
+  }
+  if ((tolg_abi_flags & 1) != 0) {
+    ln->set_tolg_needs_clock((tolg_abi_flags & 2) != 0);
+  }
+  if ((tolg_abi_flags & 4) != 0) {
+    ln->set_tolg_needs_reset((tolg_abi_flags & 8) != 0);
+  }
+  if ((tolg_abi_flags & 16) != 0) {
+    ln->set_tolg_activation_capable((tolg_abi_flags & 32) != 0);
   }
   auto read_strings = [&]() {
     const auto count = read_pod<uint32_t>(is);
@@ -1699,6 +1860,19 @@ std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_vi
   (void)ln->source_locator().load_lazy(dir);
   for (auto& pub : pubs) {
     ln->add_pub(pub.name, pub.kind, pub.srcid, pub.lg);
+  }
+  if (std::ifstream siblings(fs::path(dir) / "streamed.bin", std::ios::binary); siblings.is_open()) {
+    const auto count = read_pod<uint32_t>(siblings);
+    if (count > (1U << 20)) {
+      throw Lhd_error{"config", "invalid streamed lambda count", "the unit will be rebuilt cold"};
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+      const auto sibling_name = read_string(siblings);
+      ln->add_streamed_lambda(load_compact_lnast((fs::path(dir) / std::format("streamed_{:08}", i)).string(), sibling_name));
+    }
+    if (siblings.peek() != std::char_traits<char>::eof()) {
+      throw Lhd_error{"config", "trailing data in streamed lambda index", "the unit will be rebuilt cold"};
+    }
   }
   return ln;
 }
@@ -2028,9 +2202,11 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
           if (compact_lnast_header_valid(fs::path(scope) / "ln" / lnast_unit_dir(row->second.snapshot_file),
                                          row->second.semantic_hash)
               && (defer_clean_lnasts || (unit.lnast = load_prior_unit(unit.name, row->second)))) {
-            unit.semantic_hash     = row->second.semantic_hash;
-            unit.exact_prior_match = true;
-            hit                    = true;
+            unit.semantic_hash         = row->second.semantic_hash;
+            unit.interface_hash        = row->second.interface_hash;
+            unit.exact_prior_match     = true;
+            unit.exact_interface_match = true;
+            hit                        = true;
           } else {
             // The user's bytes match the preserved snapshot, so a missing or
             // mismatched cached forest is cache damage, not a source edit.
@@ -2045,18 +2221,25 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
       }
       const auto t0 = std::chrono::steady_clock::now();
       Prp2lnast  converter(unit.path, unit.name, unit.bytes);
-      unit.lnast         = converter.get_lnast();
-      unit.semantic_hash = semantic_hash(*unit.lnast);
+      unit.lnast          = converter.get_lnast();
+      unit.semantic_hash  = semantic_hash(*unit.lnast);
+      unit.interface_hash = source_interface_hash(*unit.lnast);
       if (prior.compatible) {
-        const auto row         = prior.units.find(unit.name);
-        auto       ln          = row != prior.units.end() && row->second.semantic_hash == unit.semantic_hash
-                                     ? load_prior_unit(unit.name, row->second)
-                                     : std::shared_ptr<Lnast>{};
+        const auto row = prior.units.find(unit.name);
+        // Decode the prior tree only when a digest proposes a hit: both
+        // consumers below require their hash to match first, so a real edit
+        // (both hashes differ — the common case) never pays the full decode.
+        const bool digest_hit
+            = row != prior.units.end()
+              && (row->second.semantic_hash == unit.semantic_hash || row->second.interface_hash == unit.interface_hash);
+        auto ln                = digest_hit ? load_prior_unit(unit.name, row->second) : std::shared_ptr<Lnast>{};
         // The digest only proposes a comment-only semantic hit. The exact,
         // ordered type/name traversal decides, so a digest collision can only
         // cause this comparison -- never stale graph restoration.
         unit.exact_prior_match = row != prior.units.end() && ln && row->second.semantic_hash == unit.semantic_hash
                                  && semantic_identical(*unit.lnast, *ln);
+        unit.exact_interface_match = row != prior.units.end() && ln && row->second.interface_hash == unit.interface_hash
+                                     && interface_identical(*unit.lnast, *ln);
       }
       const std::chrono::duration<double, std::milli> dt  = std::chrono::steady_clock::now() - t0;
       res.compile_cache.redone_ms                        += dt.count();
@@ -2065,9 +2248,23 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
   }
 
   res.compile_cache_closure_key = closure_key(units);
-  const auto unit_keys          = unit_merkle_keys(units);
+  const auto unit_keys          = unit_body_keys(units);
   res.compile_cache_unit_keys.assign(unit_keys.begin(), unit_keys.end());
-  res.compile_cache_clean_units = clean_units(units, prior);
+  std::map<std::string, std::set<std::string>> inlined_dependents;
+  if (auto inventory = read_graph_inventory(res)) {
+    for (const auto& row : inventory->rows) {
+      const auto caller = owner_of(row.name, res);
+      if (caller.empty()) {
+        continue;
+      }
+      for (const auto& callee_name : row.inlined) {
+        if (const auto callee = owner_of(callee_name, res); !callee.empty()) {
+          inlined_dependents[callee].insert(caller);
+        }
+      }
+    }
+  }
+  res.compile_cache_clean_units = clean_units(units, prior, inlined_dependents);
 
   if (!defer_clean_lnasts) {
     for (auto& unit : units) {
@@ -2100,8 +2297,9 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
           ++res.compile_cache.misses;
         }
         Prp2lnast converter(unit.path, unit.name, unit.bytes);
-        unit.lnast         = converter.get_lnast();
-        unit.semantic_hash = semantic_hash(*unit.lnast);
+        unit.lnast          = converter.get_lnast();
+        unit.semantic_hash  = semantic_hash(*unit.lnast);
+        unit.interface_hash = source_interface_hash(*unit.lnast);
       }
       var.add(unit.lnast);
     }
@@ -2152,8 +2350,24 @@ void compile_cache_materialize_sources(Result& res, Eprp_var& var) {
   // parse (XS ExeUnitImp split shared Get_mask nodes), so a full fallback was
   // semantically equal but not H5-identical. Rebuild the forest in the exact
   // captured order.
+  // Dirty source units are already present in `var` as the freshly parsed
+  // objects. Keep those exact objects: besides avoiding a pointless decode,
+  // prp2lnast may attach transient directly-streamed lambda siblings that are
+  // deliberately not part of the compact source-wrapper serialization. Clean
+  // units still come from the just-published hermetic generation below.
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> fresh;
+  for (auto& ln : var.lnasts) {
+    if (ln) {
+      fresh[std::string(ln->get_top_module_name())] = std::move(ln);
+    }
+  }
   var.lnasts.clear();
   for (const auto& name : current.order) {
+    if (auto fit = fresh.find(name); fit != fresh.end()) {
+      var.add(std::move(fit->second));
+      fresh.erase(fit);
+      continue;
+    }
     auto it = current.lnasts.find(name);
     if (it == current.lnasts.end()) {
       ++res.compile_cache.refused;
@@ -2243,28 +2457,6 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
   const bool                  full_clean
       = expected->closure_key == res.compile_cache_closure_key && clean.size() == res.compile_cache_unit_keys.size();
   res.compile_cache_overlay_graphs.clear();
-  // A PARTIAL restore re-runs the pipeline over the dirty cone only, so its live
-  // records and the stored ones would overlap on an unknown boundary: the stored
-  // records carry no per-graph attribution, so there is no sound way to replay
-  // just the restored half — and a generation stored from a partial run would
-  // itself hold an incomplete set. Refuse (I5: a principled refusal is COUNTED,
-  // not hidden) and let the full rebuild reproduce every record. Per-graph
-  // attribution is what would lift this.
-  //
-  // Decided BEFORE the cache library is opened: the verdict depends only on
-  // full_clean and the carried records, so digesting every cached graph first
-  // (graph_rows) just to refuse was pure waste on every incremental compile of
-  // a design that warns.
-  if (!full_clean && !expected->pipeline_diags.empty()) {
-    for (const auto& row : expected->rows) {
-      if (row.has_body && !row.owner.empty() && clean.contains(row.owner) && !row.unit_key.empty()
-          && row.unit_key == key_of(row.owner, res)) {
-        res.compile_cache_overlay_graphs.push_back(row.name);
-      }
-    }
-    ++res.compile_cache.refused;
-    return false;
-  }
   try {
     check_ir_body_magic(res.compile_cache_scope + "/lg", "graph_", kHhdsGraphBodyMagic, "compile cache lg:");
     auto& cache      = livehd::Hhds_graph_library::instance(res.compile_cache_scope + "/lg");
@@ -2277,7 +2469,8 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
     for (size_t i = 0; i < actual.size(); ++i) {
       const auto& a = actual[i];
       const auto& e = expected->rows[i];
-      if (a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body || a.h0 != e.h0 || a.h1 != e.h1) {
+      if (a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body || a.h0 != e.h0 || a.h1 != e.h1
+          || a.inlined != e.inlined) {
         ++res.compile_cache.refused;
         return false;
       }
@@ -2291,6 +2484,31 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
 
     if (!full_clean && clean.empty()) {
       return false;  // nothing restorable — leave the destination library untouched
+    }
+    if (!full_clean) {
+      // A stored record with no derivable owner cannot be split between the
+      // replayed (clean) half and the live (dirty) half of a partial restore:
+      // skipping it silently LOSES the warning (the clean unit's pipeline does
+      // not re-run), and the regeneration stored after this run would drop it
+      // from every later TOTAL restore too. Keep the counted refusal for that
+      // case only; fully attributed generations still take the partial path.
+      bool unattributed = false;
+      for (const auto& stored : expected->pipeline_diags) {
+        if (stored.owner.empty()) {
+          unattributed = true;
+          break;
+        }
+      }
+      if (unattributed) {
+        for (const auto& row : expected->rows) {
+          if (row.has_body && !row.owner.empty() && clean.contains(row.owner) && !row.unit_key.empty()
+              && row.unit_key == key_of(row.owner, res)) {
+            res.compile_cache_overlay_graphs.push_back(row.name);
+          }
+        }
+        ++res.compile_cache.refused;
+        return false;
+      }
     }
     auto eligible = [&](const Graph_row& row) {
       return full_clean
@@ -2442,6 +2660,12 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       // set reproduces the cold diagnostics exactly. A partial restore was
       // already refused above when the generation carries any.
       replay_pipeline_diags(*expected);
+    } else if (restored_bodies != 0) {
+      // A warning is not a reuse barrier. The stored owner is derived from its
+      // source span (or an exact structured graph attribute), so replay only
+      // records belonging to restored units; the live dirty pipeline emits the
+      // other half. Unattributed records deliberately stay live-only.
+      replay_pipeline_diags(*expected, &clean);
     }
     return total;
   } catch (...) {
@@ -2484,7 +2708,7 @@ Overlay_status compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, co
       const auto& a = actual[i];
       const auto& e = expected->rows[i];
       if (a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body || a.h0 != e.h0 || a.h1 != e.h1
-          || a.owner != e.owner) {
+          || a.inlined != e.inlined || a.owner != e.owner) {
         return decline();
       }
     }
@@ -2621,15 +2845,21 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
   // record from a pipeline pass (pass.bitfuzz) is skipped by a warm restore in
   // exactly the same way. Errors cannot reach here (has_errors() bailed above);
   // the guard keeps it that way if that ever changes.
-  std::vector<livehd::diag::Diagnostic> pipeline_diags;
+  std::vector<Stored_diag> pipeline_diags;
   {
-    const auto&  records = livehd::diag::sink().records();
-    const size_t begin   = std::min(res.compile_cache_diag_mark, records.size());
-    const size_t end     = std::min(res.compile_cache_diag_end, records.size());
+    // The prior inventory is needed only to attribute stored records; loading
+    // and re-parsing it on the (common) diagnostic-free store is pure waste.
+    std::optional<Prior_cache> current;
+    const auto&                records = livehd::diag::sink().records();
+    const size_t               begin   = std::min(res.compile_cache_diag_mark, records.size());
+    const size_t               end     = std::min(res.compile_cache_diag_end, records.size());
     for (size_t i = begin; i < end; ++i) {
       const auto& record = records[i];
       if (record.severity != livehd::diag::Severity::error) {
-        pipeline_diags.push_back(record);
+        if (!current) {
+          current = load_prior(res.compile_cache_scope, res.compile_cache_context);
+        }
+        pipeline_diags.push_back(Stored_diag{diagnostic_owner(record, *current, res), record});
       }
     }
   }

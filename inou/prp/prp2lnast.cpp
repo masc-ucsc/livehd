@@ -148,7 +148,8 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
   // One slice per parsed file (profiling builds) — parse cost is per-file, so
   // this is the "which file is slow" view of the trace.
   TRACE_EVENT("pyrope", "prp2lnast", "file", std::string(filename));
-  lnast = std::make_shared<Lnast>(module_name);
+  lnast       = std::make_shared<Lnast>(module_name);
+  root_lnast_ = lnast;
 
   lnast->set_root(Lnast_ntype::create_top());
 
@@ -220,12 +221,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
     // parse() builders. check_parse_errors() is moot: prpparse fails fast (no
     // MISSING/ERROR nodes), so a returning parse is well-formed.
 
-    process_description();  // runs the scope checks internally, before rewrite_decls_to_declare
-
-    // Replace the remaining global-counter `___N` tmps (mint sites with no
-    // destination to scope on: if/while conditions, for-range temps, fcall
-    // statements, …) with edit-stable `___<site-hash>_<n>` ids (2p).
-    builder.stabilize_fallback_tmps();
+    process_description();
   } catch (const prpparse::Parse_error& pe) {
     report_prpparse_error(pe.diag);  // stages the diag + throws Eprp::parser_error
   } catch (...) {
@@ -563,7 +559,7 @@ void Prp2lnast::check_undeclared_writes() const {
   std::vector<absl::flat_hash_set<std::string>> scope_stack;
   for (auto c = lnast->get_first_child(lnast->get_root()); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     if (Lnast_ntype::is_stmts(lnast->get_type(c))) {
-      check_writes_in_scope(c, scope_stack, /*barrier=*/0);
+      check_writes_in_scope(c, scope_stack, /*barrier=*/0, streamed_scope_names_);
     }
   }
 }
@@ -864,6 +860,9 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
       p     = lnast->get_parent(p);
     }
     if (p.is_invalid() || lnast->is_root(p)) {
+      if (streamed_scope_names_.contains(rs.name)) {
+        return true;
+      }
       break;  // ran out of enclosing frames
     }
     frame    = p;
@@ -918,7 +917,7 @@ void Prp2lnast::check_undefined_reads() const {
 
   for (const auto& rs : read_sites_) {
     if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name) || prp_name_is_placeholder_arg(rs.name)
-        || hoisted.contains(rs.name)) {
+        || hoisted.contains(rs.name) || streamed_function_names_.contains(rs.name)) {
       continue;
     }
     if (read_is_visible(rs)) {
@@ -1362,8 +1361,7 @@ void Prp2lnast::check_wire_drivers() const {
             }
           };
 
-    std::function<std::optional<std::pair<Lnast_nid, std::string>>(const Lnast_nid&, bool,
-                                                                  const absl::flat_hash_set<std::string>&)>
+    std::function<std::optional<std::pair<Lnast_nid, std::string>>(const Lnast_nid&, bool, const absl::flat_hash_set<std::string>&)>
         find_use;
     find_use = [&](const Lnast_nid&                        nid,
                    bool                                    structural_key,
@@ -1667,6 +1665,13 @@ void Prp2lnast::process_description() {
   while (const prpparse::Ast* c_ast = prp_parser->parse_next()) {
     lower_streamed_top_level(TSNode{c_ast, prp_buf.get()}, pending_overflow, prev_end);
   }
+  finalize_current_lnast();
+}
+
+void Prp2lnast::finalize_current_lnast() {
+  // Each destination owns its own builder/counter, so close and stabilize it
+  // as soon as its lambda ends instead of waiting for the source file.
+  builder.stabilize_fallback_tmps();
   // Run the scope checks on the PRE-rewrite tree: declarations are still in
   // their `attr_set(t,"type",K)` form here, with their source spans intact and
   // each scope's declarations un-merged. rewrite_decls_to_declare folds
@@ -1683,10 +1688,57 @@ void Prp2lnast::process_description() {
   check_wire_drivers();
 }
 
+void Prp2lnast::push_streamed_destination(std::string_view name, std::string_view kind, bool verilog_origin,
+                                          std::string_view lg_name) {
+  destination_stack_.push_back(Destination_state{.lnast                  = std::move(lnast),
+                                                 .builder                = std::move(builder),
+                                                 .read_sites             = std::move(read_sites_),
+                                                 .read_scope_decls       = std::move(read_scope_decls_),
+                                                 .read_child_index       = std::move(read_child_index_),
+                                                 .tick_loop_var_decls    = std::move(tick_loop_var_decls_),
+                                                 .streamed_scope_names   = std::move(streamed_scope_names_),
+                                                 .streamed_lexical_names = std::move(streamed_lexical_names_)});
+  lnast = std::make_shared<Lnast>(name);
+  lnast->set_root(Lnast_ntype::create_top());
+  lnast->set_lambda_kind(kind);
+  lnast->set_verilog_origin(verilog_origin);
+  if (!lg_name.empty()) {
+    lnast->set_lg_name(lg_name);
+  }
+  if (!src_relpath.empty()) {
+    lnast->source_locator().set_file_content(src_relpath, std::string(prp_file));
+  }
+  builder       = Lnast_builder{};
+  builder.lnast = lnast;
+  read_sites_.clear();
+  read_scope_decls_.clear();
+  read_child_index_.clear();
+  tick_loop_var_decls_.clear();
+  streamed_scope_names_.clear();
+  streamed_lexical_names_.clear();
+}
+
+std::shared_ptr<Lnast> Prp2lnast::pop_streamed_destination() {
+  I(!destination_stack_.empty());
+  finalize_current_lnast();
+  auto completed = std::move(lnast);
+  auto state     = std::move(destination_stack_.back());
+  destination_stack_.pop_back();
+  lnast                   = std::move(state.lnast);
+  builder                 = std::move(state.builder);
+  read_sites_             = std::move(state.read_sites);
+  read_scope_decls_       = std::move(state.read_scope_decls);
+  read_child_index_       = std::move(state.read_child_index);
+  tick_loop_var_decls_    = std::move(state.tick_loop_var_decls);
+  streamed_scope_names_   = std::move(state.streamed_scope_names);
+  streamed_lexical_names_ = std::move(state.streamed_lexical_names);
+  return completed;
+}
+
 namespace {
 // Copy one LNAST node (preserving ref/const text) under dst_parent.
 Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& dst, const Lnast_nid& dst_parent) {
-  const auto t = src.get_type(src_nid);
+  const auto t  = src.get_type(src_nid);
   Lnast_nid  nn = dst.add_child(dst_parent, t);
   if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
     dst.set_name_id(nn, src.get_name_id(src_nid));
@@ -1699,6 +1751,73 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
     dst.set_srcid(nn, src.get_srcid(src_nid));
   }
   return nn;
+}
+
+// Comment/whitespace-insensitive fingerprint of a source span. The streamed
+// lambda marker rides this in the wrapper tree, where it participates in the
+// compile cache's semantic hash: hashing the RAW bytes made a comment (or
+// reindent) INSIDE a lambda body defeat the comment-only warm hit that
+// semantic_identical provides everywhere else. Comments are stripped and
+// whitespace runs collapse to one byte, both suspended inside string literals;
+// every real token byte (including the hidden `wrap`/`sat` prefixes, which are
+// plain text here) still contributes.
+uint64_t stable_source_fingerprint(std::string_view txt) {
+  std::string norm;
+  norm.reserve(txt.size());
+  bool pending_ws = false;
+  for (size_t i = 0; i < txt.size();) {
+    const char c = txt[i];
+    if (c == '"' || c == '\'') {
+      if (pending_ws) {
+        norm.push_back(' ');
+        pending_ws = false;
+      }
+      const char quote = c;
+      norm.push_back(txt[i++]);
+      while (i < txt.size()) {
+        norm.push_back(txt[i]);
+        if (txt[i] == '\\' && i + 1 < txt.size()) {
+          norm.push_back(txt[i + 1]);
+          i += 2;
+          continue;
+        }
+        if (txt[i] == quote) {
+          ++i;
+          break;
+        }
+        ++i;
+      }
+      continue;
+    }
+    if (c == '/' && i + 1 < txt.size() && txt[i + 1] == '/') {
+      while (i < txt.size() && txt[i] != '\n') {
+        ++i;
+      }
+      pending_ws = true;
+      continue;
+    }
+    if (c == '/' && i + 1 < txt.size() && txt[i + 1] == '*') {
+      i += 2;
+      while (i + 1 < txt.size() && !(txt[i] == '*' && txt[i + 1] == '/')) {
+        ++i;
+      }
+      i = std::min(txt.size(), i + 2);
+      pending_ws = true;
+      continue;
+    }
+    if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+      pending_ws = true;
+      ++i;
+      continue;
+    }
+    if (pending_ws) {
+      norm.push_back(' ');
+      pending_ws = false;
+    }
+    norm.push_back(c);
+    ++i;
+  }
+  return std::hash<std::string>{}(norm);
 }
 
 // Deep-copy a prpparse CST subtree into `dst` (2f-stream). The streaming parser
@@ -1868,6 +1987,10 @@ void Prp2lnast::rewrite_decls_to_declare() {
 
   auto src_root = lnast->get_root();
   auto dst_root = staging->set_root(lnast->get_type(src_root));
+  // The streamed lambda root is its module-level source-map anchor.  The
+  // declaration rewrite replaces the whole body, so carry that anchor just
+  // as we carry the child statement ids below.
+  staging->set_srcid(dst_root, lnast->get_srcid(src_root));
   for (auto c : lnast->children(src_root)) {
     copy_merge(c, dst_root);
   }
@@ -2980,6 +3103,42 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       }
     }
 
+    // General declaration-point closure values (integer timing constants use
+    // the specialized map above). Writes inside a lambda/conditional do not
+    // mutate the enclosing capture environment.
+    if (conditional_depth_ == 0) {
+      const std::string nm(trim(get_text(id)));
+      auto              clear_capture = [&]() {
+        capture_const_bindings_.erase(nm);
+        capture_import_bindings_.erase(nm);
+      };
+      if (resolved_rvalue_int) {
+        clear_capture();
+        capture_const_bindings_[nm] = std::to_string(*resolved_rvalue_int);
+      } else if (rvalue.is_const()) {
+        clear_capture();
+        capture_const_bindings_[nm] = std::string(rvalue.get_name());
+      } else if (rvalue.is_ref()) {
+        const std::string rhs(rvalue.get_name());
+        if (auto it = capture_const_bindings_.find(rhs); it != capture_const_bindings_.end()) {
+          auto value = it->second;
+          clear_capture();
+          capture_const_bindings_[nm] = std::move(value);
+        } else if (auto import_it = capture_import_bindings_.find(rhs); import_it != capture_import_bindings_.end()) {
+          auto value = import_it->second;
+          clear_capture();
+          capture_import_bindings_[nm] = std::move(value);
+        } else {
+          clear_capture();
+        }
+      } else {
+        clear_capture();
+      }
+    }
+    if (!destination_stack_.empty() && has_decl && kind_sv != "const") {
+      streamed_lexical_names_.insert(std::string(canonical_escaped_ident(trim(get_text(id)))));
+    }
+
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
     Lnast_nid  reg_decl_head{};  // set for `reg` decls; the init value rides this cluster head
     if (has_decl) {
@@ -3485,7 +3644,13 @@ void Prp2lnast::process_assignment(TSNode n) {
       // can be a LATER top-level statement, after this construct's arena is reset.
       prpparse::Ast* kept = clone_prp_subtree(retained_arena_, rv.a);
       prpparse::link_parents(kept);
-      const_rvalue_nodes_[std::string(trim(get_text(lv)))] = TSNode{kept, prp_buf.get()};
+      const std::string const_name(trim(get_text(lv)));
+      if (const_rvalue_nodes_.insert_or_assign(const_name, TSNode{kept, prp_buf.get()}).second) {
+        // Source declaration order — the streamed-lambda capture prologue
+        // replays consts and enums in this order so a const tuple that reads
+        // an earlier const/enum sees its producer already emitted.
+        capture_stmt_order_.push_back(Capture_stmt{.is_enum = false, .name = const_name, .node = {}});
+      }
     }
   }
 
@@ -4351,6 +4516,77 @@ void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::ve
   }
 }
 
+std::string Prp2lnast::streamed_actuals_key(std::string_view scope_unit, std::string_view callee) {
+  std::string key(scope_unit);
+  key.push_back('\n');  // cannot appear in a unit or entity name
+  key.append(callee);
+  return key;
+}
+
+void Prp2lnast::append_streamed_capture_actuals(const Lnast_nid& fcall, std::string_view callee) {
+  // Actuals are registered under the DEFINING scope's unit name (see
+  // streamed_actuals_key): a bare-name lookup let scope A's capture list ride
+  // calls to a DIFFERENT same-named helper in scope B, where those names do
+  // not exist. Resolve lexically: walk the current destination's unit-name
+  // prefix chain innermost-first.
+  auto resolve = [&]() {
+    auto it = streamed_capture_actuals_.end();
+    for (std::string_view unit = lnast->get_top_module_name();;) {
+      it = streamed_capture_actuals_.find(streamed_actuals_key(unit, callee));
+      if (it != streamed_capture_actuals_.end()) {
+        return it;
+      }
+      const auto dot = unit.rfind('.');
+      if (dot == std::string_view::npos) {
+        return streamed_capture_actuals_.end();
+      }
+      unit = unit.substr(0, dot);
+    }
+  };
+  auto it = resolve();
+  if (it == streamed_capture_actuals_.end()) {
+    return;
+  }
+  absl::flat_hash_set<std::string> present;
+  for (auto c = lnast->get_first_child(fcall); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (!Lnast_ntype::is_store(lnast->get_type(c))) {
+      continue;
+    }
+    auto key = lnast->get_first_child(c);
+    if (!key.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(key))) {
+      present.insert(std::string(lnast->get_name(key)));
+    }
+  }
+  for (const auto& name : it->second) {
+    if (!present.insert(name).second) {
+      continue;
+    }
+    auto arg = lnast->add_child(fcall, Lnast_ntype::create_store());
+    lnast->add_child(arg, Lnast_node::create_ref(name));
+    lnast->add_child(arg, Lnast_node::create_ref(name));
+  }
+}
+
+void Prp2lnast::patch_streamed_capture_calls(const std::shared_ptr<Lnast>& target, std::string_view callee,
+                                             const std::vector<std::string>& captures) {
+  if (!target || captures.empty()) {
+    return;
+  }
+  auto saved = lnast;
+  lnast      = target;
+  for (auto n : target->depth_preorder(target->get_root())) {
+    if (n.is_invalid() || !Lnast_ntype::is_func_call(target->get_type(n))) {
+      continue;
+    }
+    auto dst = target->get_first_child(n);
+    auto fn  = dst.is_invalid() ? dst : target->get_sibling_next(dst);
+    if (!fn.is_invalid() && target->get_name(fn) == callee) {
+      append_streamed_capture_actuals(n, callee);
+    }
+  }
+  lnast = std::move(saved);
+}
+
 void Prp2lnast::process_lambda_statement(TSNode n) { process_lambda_statement_named(n, {}); }
 
 void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_name) {
@@ -4631,16 +4867,78 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                           : ts_node_is_null(name_node) ? builder.mint_tmp_ref()
                                                        : Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(name_node))));
 
-  auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
-  lnast->add_child(fd_idx, lambda_ref);
-  lnast->add_child(fd_idx, Lnast_node::create_const(kind));
+  // Named hardware lambdas stream directly into their final sibling tree.
+  // Leave only a compact declaration marker in the enclosing destination: it
+  // preserves hoisting and source-unit semantic hashing, while pass.upass drops
+  // it without materializing/copying the body. Anonymous/fluid/test lambdas
+  // keep the legacy func_def representation.
+  // A tuple method is lowered while tuple_to_node is still collecting the
+  // enclosing literal.  Keep that hoisted method as an ordinary func_def in
+  // the current destination: switching destinations here would make the
+  // method body re-enter tuple lowering before the enclosing tuple has been
+  // completed.  File/nested source definitions (which have no synthetic
+  // hoist_name) can stream directly into their final sibling tree.
+  const bool stream_lambda = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
+                             && (kind == "comb" || kind == "pipe" || kind == "mod");
+  const auto                       outer_runtime_names = streamed_lexical_names_;
+  absl::flat_hash_set<std::string> outer_hoisted_names;
+  if (stream_lambda) {
+    // Types, enums, and sibling function names are file/function-scope
+    // comptime declarations.  The streamed child no longer has an ancestor
+    // func_def node through which read_is_visible can discover them, so carry
+    // the compact name set across the destination switch.  Their definitions
+    // remain in the enclosing source-unit tree and are consumed through the
+    // shared runner registries; no declaration subtree is copied.
+    collect_hoisted_names(lnast->get_root(), outer_hoisted_names);
+  }
+  std::string streamed_entity;
+  Lnast_nid   fd_idx;
+  Lnast_nid   signature_parent;
+  if (stream_lambda) {
+    const std::string entity(lambda_ref.get_name());
+    streamed_entity = entity;
+    streamed_function_names_.insert(entity);
+    if (destination_stack_.empty()) {
+      auto marker = builder.add_child(Lnast_ntype::create_func_def());
+      lnast->add_child(marker, lambda_ref);
+      lnast->add_child(marker, Lnast_node::create_const(std::format("__streamed_{}", kind)));
+      // The source-unit wrapper needs a compact body fingerprint for semantic
+      // cache equality.  A nested definition needs no second marker: its own
+      // streamed sidecar is attached to this same source unit, and the outer
+      // wrapper's fingerprint already covers the complete nested source text.
+      // Comment/whitespace-insensitive on purpose: a comment edit inside a
+      // body must stay a comment-only warm hit (see stable_source_fingerprint).
+      lnast->add_child(marker, Lnast_node::create_const(std::to_string(stable_source_fingerprint(get_text(n)))));
+      attach_loc(marker, n);
+    }
+
+    const std::string streamed_name = std::format("{}.{}", lnast->get_top_module_name(), entity);
+    push_streamed_destination(streamed_name, kind, has_hdl || lnast->is_verilog_origin(), is_pub ? lg_value : std::string_view{});
+    // The streamed destination has no enclosing func_def node from which the
+    // source mapper can inherit the declaration span.  Seed its root so that
+    // synthesized io/declaration nodes still map back to this function.
+    attach_loc(lnast->get_root(), n);
+    streamed_scope_names_.insert(outer_hoisted_names.begin(), outer_hoisted_names.end());
+    streamed_scope_names_.insert(streamed_function_names_.begin(), streamed_function_names_.end());
+    signature_parent = lnast->add_child(lnast->get_root(), Lnast_ntype::create_io());
+  } else {
+    fd_idx = builder.add_child(Lnast_ntype::create_func_def());
+    lnast->add_child(fd_idx, lambda_ref);
+    lnast->add_child(fd_idx, Lnast_node::create_const(kind));
+    signature_parent = fd_idx;
+  }
   // generics tuple: each `<T, U>` name becomes a `ref` child of
   // this tuple_add. Empty when absent. func_extract copies these onto the
   // extracted Lnast (Lnast::generics_) so a generic signature is detected as a
   // template; the per-`T` body substitution is a deferred follow-up goal.
   // grammar.js: `function_definition_decl` carries the names under the
   // `generic` field as a `typed_identifier_list` between `<` and `>`.
-  auto gen_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  Lnast_nid                gen_idx;
+  std::vector<std::string> streamed_generics;
+  std::vector<std::string> streamed_generic_defaults;
+  if (!stream_lambda) {
+    gen_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  }
   if (!ts_node_is_null(fdef)) {
     uint32_t fcount = child_count(fdef);
     for (uint32_t i = 0; i < fcount; i++) {
@@ -4653,13 +4951,21 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       auto             add_one = [&](TSNode ti) {
         TSNode id = child_by_field(ti, "identifier");
         if (!ts_node_is_null(id)) {
-          auto   gref = lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+          Lnast_nid gref;
+          if (stream_lambda) {
+            streamed_generics.emplace_back(get_text(id));
+            streamed_scope_names_.insert(std::string(get_text(id)));
+          } else {
+            gref = lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+          }
           // A DECLARATION default (`<T, N=1>`, todo 3g B) rides as the default's
           // source text in a `const` child of the generic ref: func_extract
           // lifts it into Lnast::generic_defaults_, and the runner re-classifies
           // it (type / constant / lambda) exactly like an explicit `<…>` arg.
-          TSNode def  = child_by_field(ti, "definition");
-          if (!ts_node_is_null(def)) {
+          TSNode def = child_by_field(ti, "definition");
+          if (stream_lambda) {
+            streamed_generic_defaults.emplace_back(ts_node_is_null(def) ? std::string{} : std::string(trim(get_text(def))));
+          } else if (!ts_node_is_null(def)) {
             lnast->add_child(gref, Lnast_node::create_const(std::string(trim(get_text(def)))));
           }
         }
@@ -4673,9 +4979,19 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       } else if (ct == "typed_identifier") {
         add_one(ci);
       } else if (ct == "identifier") {
-        lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(ci)));
+        if (stream_lambda) {
+          streamed_generics.emplace_back(get_text(ci));
+          streamed_generic_defaults.emplace_back();
+          streamed_scope_names_.insert(std::string(get_text(ci)));
+        } else {
+          lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(ci)));
+        }
       }
     }
+  }
+  if (stream_lambda) {
+    lnast->set_generics(std::move(streamed_generics));
+    lnast->set_generic_defaults(std::move(streamed_generic_defaults));
   }
 
   // Emit input args. The grammar tags `ref`/`reg`/`...` prefixes on each arg
@@ -4684,7 +5000,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // they bracket. The `ref` mod is encoded as the assign's RHS const text
   // ("ref") when no explicit default is present; downstream passes
   // (func_extract, constprop) detect it without inventing a new ntype.
-  auto                                        in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  auto                                        in_idx = lnast->add_child(signature_parent, Lnast_ntype::create_tuple_add());
   std::vector<Param_attr>                     input_attrs;
   // `-> (reg q:T[@N] [= init])` output registers: the q pin IS the
   // output (the counter idiom). Collected here; a matching `reg` declare is
@@ -4696,10 +5012,10 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // param-tuple scope — an EARLIER param is readable — and is self-contained).
   std::vector<std::pair<std::string, TSNode>> input_defaults;
   auto                                        collect_args = [&](TSNode                    container,
-                                                                 const Lnast_nid&          parent_tup,
-                                                                 std::vector<std::string>* names_out,
-                                                                 std::vector<Param_attr>*  attrs_out,
-                                                                 bool                      is_io_output) {
+                          const Lnast_nid&          parent_tup,
+                          std::vector<std::string>* names_out,
+                          std::vector<Param_attr>*  attrs_out,
+                          bool                      is_io_output) {
     TSNode pending_typed{};
     TSNode pending_def{};
     bool   pending_is_ref    = false;
@@ -4717,6 +5033,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // (`comb f(a, b = a+5)` — 04-variables.md "Tuple scope" default
           // example): expose through the in-flight signature frame.
           inflight_name_scopes_.back().emplace_back(get_text(id));
+          if (stream_lambda) {
+            const std::string pname(canonical_escaped_ident(get_text(id)));
+            streamed_scope_names_.insert(pname);
+            streamed_lexical_names_.insert(pname);
+          }
           if (names_out) {
             names_out->emplace_back(get_text(id));
           }
@@ -4745,7 +5066,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         // is a compile error. (`ref self` methods expand locally via UFCS and
         // never expose the receiver as a port.) (2f-ref_wrap_sat B.)
         if (pending_is_ref && !is_io_output && kind != "comb") {
-          TSNode           rid   = child_by_field(pending_typed, "identifier");
+          TSNode           rid = child_by_field(pending_typed, "identifier");
           std::string_view rname = ts_node_is_null(rid) ? std::string_view{} : get_text(rid);
           if (rname != "self") {
             report_error(pending_typed,
@@ -4809,9 +5130,12 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       collect_args(inp, in_idx, nullptr, &input_attrs, /*is_io_output=*/false);
     }
   }
+  if (stream_lambda && lnast->get_first_child(in_idx).is_invalid()) {
+    lnast->add_child(in_idx, Lnast_node::create_ref("__empty_tuple"));
+  }
 
   // Output args
-  auto                     out_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  auto                     out_idx = lnast->add_child(signature_parent, Lnast_ntype::create_tuple_add());
   std::vector<std::string> output_refs;  // for placeholder-lambda implicit assign
   if (!ts_node_is_null(fdef)) {
     // Collect ALL output field occurrences (there may be multiple due to "->" anchor + arg_list form)
@@ -4832,6 +5156,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         }
       }
     }
+  }
+  if (stream_lambda && lnast->get_first_child(out_idx).is_invalid()) {
+    lnast->add_child(out_idx, Lnast_node::create_ref("__empty_tuple"));
   }
 
   inflight_name_scopes_.pop_back();  // signature frame ends here
@@ -4856,8 +5183,78 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // args; 04-variables.md "Lambda scope"). Suspend the stack; params resolve
   // via the func_def signature in read_is_visible.
   auto saved_inflight_scopes = std::exchange(inflight_name_scopes_, {});
-  auto body_idx              = lnast->add_child(fd_idx, Lnast_ntype::create_stmts());
+  auto body_idx              = lnast->add_child(stream_lambda ? lnast->get_root() : fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
+  if (stream_lambda) {
+    // Declaration-point captures are emitted before the first user statement.
+    // They are compact scalar/import/bundle reconstructions, never copies of
+    // the enclosing function tree.
+    //
+    // The scalar/import maps are absl hash maps: iterate them SORTED so the
+    // emitted prologue (and every hash/tmp-id derived from it downstream —
+    // the compile cache's semantic hash above all) is process-independent.
+    // Their values are pre-resolved literals / unit strings, so order among
+    // them carries no dependency.
+    std::vector<std::pair<std::string_view, std::string_view>> sorted_bindings;
+    sorted_bindings.reserve(capture_const_bindings_.size());
+    for (const auto& [name, value] : capture_const_bindings_) {
+      sorted_bindings.emplace_back(name, value);
+    }
+    std::sort(sorted_bindings.begin(), sorted_bindings.end());
+    for (const auto& [name, value] : sorted_bindings) {
+      if (streamed_scope_names_.contains(name)) {
+        continue;
+      }
+      auto st = lnast->add_child(body_idx, Lnast_ntype::create_store());
+      lnast->add_child(st, Lnast_node::create_ref(name));
+      lnast->add_child(st, Lnast_node::create_const(value));
+      streamed_scope_names_.insert(std::string(name));
+    }
+    sorted_bindings.clear();
+    for (const auto& [name, unit] : capture_import_bindings_) {
+      sorted_bindings.emplace_back(name, unit);
+    }
+    std::sort(sorted_bindings.begin(), sorted_bindings.end());
+    for (const auto& [name, unit] : sorted_bindings) {
+      if (streamed_scope_names_.contains(name) || (!name.empty() && name.front() == '%')) {
+        continue;
+      }
+      auto fc = lnast->add_child(body_idx, Lnast_ntype::create_func_call());
+      lnast->add_child(fc, Lnast_node::create_ref(name));
+      lnast->add_child(fc, Lnast_node::create_const("import"));
+      lnast->add_child(fc, Lnast_node::create_const(unit));
+      streamed_scope_names_.insert(std::string(name));
+    }
+    // Const tuple/string rvalues and enums replay in SOURCE DECLARATION order
+    // (capture_stmt_order_): a const tuple may read an earlier const tuple's
+    // field or an earlier enum's entry, and an enum spread may splice an
+    // earlier const — hash-map order emitted such reads before their producer
+    // ("unresolved reference" at tolg). Enums are comptime bundles, not scalar
+    // constants; re-lowering the retained declaration gives a body read such
+    // as `Color.Green` a real local producer both when the comb is inlined and
+    // when it is compiled as its own module. This is declaration-point capture:
+    // later source edits/rebindings cannot change the captured value.
+    for (const auto& cs : capture_stmt_order_) {
+      if (cs.is_enum) {
+        replaying_capture_enum_ = true;
+        process_enum_assignment(cs.node);
+        replaying_capture_enum_ = false;
+        continue;
+      }
+      if (streamed_scope_names_.contains(cs.name)) {
+        continue;
+      }
+      const auto it = const_rvalue_nodes_.find(cs.name);
+      if (it == const_rvalue_nodes_.end()) {
+        continue;
+      }
+      auto value = expr_to_node(it->second);
+      auto st    = lnast->add_child(body_idx, Lnast_ntype::create_store());
+      lnast->add_child(st, Lnast_node::create_ref(cs.name));
+      lnast->add_child(st, value);
+      streamed_scope_names_.insert(cs.name);
+    }
+  }
   // Comb INPUT defaults (todo 3g E): the FIRST body statements, in declaration
   // order, so the default evaluates in param-tuple scope (an earlier param is
   // already visible) and is self-contained (survives func_extract). At a call
@@ -5097,6 +5494,59 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   }
   builder.pop_stmts();
   inflight_name_scopes_ = std::move(saved_inflight_scopes);
+  if (stream_lambda) {
+    // Reads that resolve in the enclosing streamed lambda but are neither
+    // constants/imports nor explicit local io become closure inputs.  Append
+    // them to the already-created input tuple; the tree is still mutable and
+    // no body copy/rebuild is needed.
+    std::vector<std::string>         runtime_captures;
+    absl::flat_hash_set<std::string> seen_captures;
+    for (const auto& rs : read_sites_) {
+      if (rs.is_call || rs.is_type || !outer_runtime_names.contains(rs.name) || streamed_scope_names_.contains(rs.name)
+          || !seen_captures.insert(rs.name).second) {
+        continue;
+      }
+      auto entry = lnast->add_child(in_idx, Lnast_ntype::create_store());
+      lnast->add_child(entry, Lnast_node::create_ref(rs.name));
+      lnast->add_child(entry, Lnast_node::create_const("nil"));
+      streamed_scope_names_.insert(rs.name);
+      streamed_lexical_names_.insert(rs.name);
+      runtime_captures.push_back(rs.name);
+    }
+    if (!runtime_captures.empty()) {
+      // Keyed by the DEFINING scope (the enclosing destination): sibling
+      // scopes may each declare a same-named helper with different captures.
+      I(!destination_stack_.empty());
+      streamed_capture_actuals_[streamed_actuals_key(destination_stack_.back().lnast->get_top_module_name(), streamed_entity)]
+          = runtime_captures;
+      patch_streamed_capture_calls(lnast, streamed_entity, runtime_captures);
+    }
+
+    // An untyped input or generic is a deferred template, matching the former
+    // extractor's metadata decision. SSA consumes the io node directly.
+    if (lnast->has_generics()) {
+      lnast->set_template(true);
+    } else {
+      for (auto entry : lnast->children(in_idx)) {
+        if (!Lnast_ntype::is_store(lnast->get_type(entry))) {
+          continue;
+        }
+        auto name_n = lnast->get_first_child(entry);
+        auto def_n  = name_n.is_invalid() ? name_n : lnast->get_sibling_next(name_n);
+        auto type_n = def_n.is_invalid() ? def_n : lnast->get_sibling_next(def_n);
+        if (!name_n.is_invalid() && lnast->get_name(name_n) != "self"
+            && (type_n.is_invalid() || (Lnast_ntype::is_const(lnast->get_type(def_n)) && lnast->get_name(def_n) == "..."))) {
+          lnast->set_template(true);
+          break;
+        }
+      }
+    }
+    auto completed = pop_streamed_destination();
+    if (!runtime_captures.empty()) {
+      patch_streamed_capture_calls(lnast, streamed_entity, runtime_captures);
+    }
+    root_lnast_->add_streamed_lambda(std::move(completed));
+  }
 }
 
 // Resolve a timing-index node to a compile-time integer. A
@@ -5727,6 +6177,18 @@ void Prp2lnast::process_enum_assignment(TSNode n) {
   if (ts_node_is_null(name)) {
     return;
   }
+  if (!replaying_capture_enum_ && conditional_depth_ == 0) {
+    // parse_next recycles the current construct's CST arena.  A later lambda
+    // still needs the enum's declaration-point value, so retain only this
+    // compact declaration in the persistent capture arena.  Only UNCONDITIONAL
+    // file-scope declarations qualify (the same rule as capture_const_bindings_
+    // / const_rvalue_nodes_): an enum local to a lambda/if body must not leak
+    // into sibling lambdas — replaying it there collided with the sibling's own
+    // same-named enum ("redeclaration of variable in the same scope").
+    prpparse::Ast* kept = clone_prp_subtree(retained_arena_, n.a);
+    prpparse::link_parents(kept);
+    capture_stmt_order_.push_back(Capture_stmt{.is_enum = true, .name = {}, .node = TSNode{kept, prp_buf.get()}});
+  }
   TSNode etype  = child_by_field(n, "type");    // `enum Color2:Rgb = (…)` payload type
   TSNode values = child_by_field(n, "values");  // the entries tuple
 
@@ -5911,6 +6373,9 @@ void Prp2lnast::emit_import_call(const Lnast_node& target, std::string_view unit
   lnast->add_child(idx, Lnast_node::create_const("import"));
   lnast->add_child(idx, Lnast_node::create_const(absl::StrCat("'", unit, "'")));
   attach_loc(idx, loc_node);  // → resolution diagnostics point at the call site
+  if (conditional_depth_ == 0 && target.is_ref()) {
+    capture_import_bindings_[std::string(target.get_name())] = absl::StrCat("'", unit, "'");
+  }
 }
 
 // Expression form `import("unit")`: validate the argument (exactly one, a
@@ -8468,13 +8933,13 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           // relational node — they previously fell through to `eq`, silently
           // turning `< rhs` into `== rhs`. Operand order is (subject, rhs).
           auto compare_ntype = use_case             ? Lnast_ntype::create_func_case()
-                               : use_does           ? Lnast_ntype::create_func_does()
-                               : use_in             ? Lnast_ntype::create_func_in()
-                               : pending_op == "<"  ? Lnast_ntype::create_lt()
-                               : pending_op == "<=" ? Lnast_ntype::create_le()
-                               : pending_op == ">"  ? Lnast_ntype::create_gt()
-                               : pending_op == ">=" ? Lnast_ntype::create_ge()
-                                                    : Lnast_ntype::create_eq();
+                                     : use_does           ? Lnast_ntype::create_func_does()
+                                     : use_in             ? Lnast_ntype::create_func_in()
+                                     : pending_op == "<"  ? Lnast_ntype::create_lt()
+                                     : pending_op == "<=" ? Lnast_ntype::create_le()
+                                     : pending_op == ">"  ? Lnast_ntype::create_gt()
+                                     : pending_op == ">=" ? Lnast_ntype::create_ge()
+                                                          : Lnast_ntype::create_eq();
           auto idx           = builder.add_child(compare_ntype);
           auto ref           = builder.mint_tmp_ref();
           lnast->add_child(idx, ref);
@@ -9421,6 +9886,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   lnast->add_child(idx, func_ref);
   add_generic_args_to_fcall(idx, generic_args);
   add_call_args_to_fcall(idx, call_args);
+  append_streamed_capture_actuals(idx, func_ref.get_name());
   attach_loc(idx, n);  // call-site span → upass argument-naming diagnostics point here
 
   // Validate the callee EXISTS (like a value/type read): a free call `foo(...)`

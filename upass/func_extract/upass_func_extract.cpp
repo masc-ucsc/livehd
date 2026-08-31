@@ -83,23 +83,23 @@ struct Lambda_extractor {
   std::shared_ptr<Lnast_manager> lm;
 
   std::vector<std::shared_ptr<Lnast>> extracted_lnasts;
-  absl::flat_hash_set<std::string>     extracted_names;
+  absl::flat_hash_set<std::string>    extracted_names;
   // Class-index keys of the func_def nodes pulled out — the rebuild skips these
   // subtrees (and only these) when copying the module body.
-  std::unordered_set<uint64_t> drop_keys;
+  std::unordered_set<uint64_t>        drop_keys;
 
   // Live walk-time capture state — identical to the old pass. See
   // upass_func_extract.hpp history for the per-map rationale; in short:
   // latest_outer_value/bundle/import hold the comptime constants visible at the
   // current def site, temp_* recover SSA-temp values, outer_non_const records
   // names disqualified from capture.
-  absl::flat_hash_map<std::string, Dlop>                                  latest_outer_value;
+  absl::flat_hash_map<std::string, Dlop>                                   latest_outer_value;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Dlop>> latest_outer_bundle;
-  absl::flat_hash_map<std::string, Dlop>                                  temp_scalar_value;
+  absl::flat_hash_map<std::string, Dlop>                                   temp_scalar_value;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Dlop>> temp_bundle_value;
-  absl::flat_hash_map<std::string, std::string>                           temp_import_text;
-  absl::flat_hash_map<std::string, std::string>                           latest_outer_import;
-  absl::flat_hash_set<std::string>                                        outer_non_const;
+  absl::flat_hash_map<std::string, std::string>                            temp_import_text;
+  absl::flat_hash_map<std::string, std::string>                            latest_outer_import;
+  absl::flat_hash_set<std::string>                                         outer_non_const;
 
   int  stmts_depth{0};
   bool drop_current_func_def{false};
@@ -432,8 +432,7 @@ struct Lambda_extractor {
     if (outer_non_const.contains(lhs_name)) {
       return;
     }
-    if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name)
-        || latest_outer_import.contains(lhs_name)) {
+    if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name) || latest_outer_import.contains(lhs_name)) {
       invalidate();
       return;
     }
@@ -504,6 +503,15 @@ struct Lambda_extractor {
     }
     const auto func_kind = std::string(current_text());
 
+    // prp2lnast leaves a compact declaration/hash marker in the source-unit
+    // wrapper after streaming the real body directly into a sibling Lnast.
+    // Drop the marker, but do not manufacture a second (empty) function.
+    if (func_kind.starts_with("__streamed_")) {
+      drop_current_func_def = true;
+      move_to_parent();
+      return;
+    }
+
     if ((func_kind != "comb" && func_kind != "pipe" && func_kind != "mod") || func_name.empty()) {
       move_to_parent();
       return;
@@ -552,7 +560,7 @@ struct Lambda_extractor {
 
     std::vector<std::string> generics;
     std::vector<std::string> generic_defaults;  // aligned; "" = no default (3g B)
-    if (move_to_sibling()) {  // kind -> generics
+    if (move_to_sibling()) {                    // kind -> generics
       if (lm->has_child()) {
         const auto saved_g = lm->save_cursor();
         move_to_child();
@@ -684,7 +692,7 @@ struct Lambda_extractor {
         process_func_def();
         if (drop_current_func_def) {
           drop_keys.insert(key_of(c));
-          any_dropped          = true;
+          any_dropped           = true;
           drop_current_func_def = false;
         }
         continue;  // never descend into a func_def body (verbatim, like the old pass)

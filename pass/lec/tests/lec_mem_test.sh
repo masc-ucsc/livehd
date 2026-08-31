@@ -99,6 +99,53 @@ module packed_state(input logic clk, input logic we, input logic [2:0] addr,
 endmodule
 EOF
 
+# A write port's din is irrelevant wherever its per-bit mask is zero. These
+# implementations intentionally compute different values only while `we=0`;
+# both memories hold in that case and perform the same write while `we=1`.
+# The memory-port cone decomposition must compare masked data, not raw din.
+cat > "$WORK/masked_din_ref.sv" <<'EOF'
+module masked_din(input logic clk, input logic we, input logic [2:0] addr,
+                  input logic [7:0] din, output logic [7:0] dout);
+  logic [7:0] mem [8];
+  always_ff @(posedge clk) if (we) mem[addr] <= din;
+  assign dout = mem[addr];
+endmodule
+EOF
+cat > "$WORK/masked_din_impl.sv" <<'EOF'
+module masked_din(input logic clk, input logic we, input logic [2:0] addr,
+                  input logic [7:0] din, output logic [7:0] dout);
+  logic [7:0] mem [8];
+  always_ff @(posedge clk) if (we) mem[addr] <= din ^ {8{!we}};
+  assign dout = mem[addr];
+endmodule
+EOF
+
+# One front end may duplicate a dynamic read while spelling the equivalent
+# address arithmetic differently. The read-port counts then differ, so LEC
+# must prove address correspondence instead of relying on port position.
+cat > "$WORK/unequal_reads_ref.sv" <<'EOF'
+module unequal_reads(input logic clk, input logic we, input logic [7:0] req,
+                     output logic [6:0] dout);
+  logic [6:0] mem [8];
+  logic [2:0] addr;
+  assign addr = ((req[0] + req[1]) + (req[2] + req[3]))
+              + ((req[4] + req[5]) + (req[6] + req[7]));
+  always_ff @(posedge clk) if (we) mem[0] <= mem[addr];
+  assign dout = mem[0];
+endmodule
+EOF
+cat > "$WORK/unequal_reads_impl.sv" <<'EOF'
+module unequal_reads(input logic clk, input logic we, input logic [7:0] req,
+                     output logic [6:0] dout);
+  logic [6:0] mem [8];
+  logic [2:0] addr_a, addr_b;
+  assign addr_a = ((((((req[0] + req[1]) + req[2]) + req[3]) + req[4]) + req[5]) + req[6]) + req[7];
+  assign addr_b = req[0] + (req[1] + (req[2] + (req[3] + (req[4] + (req[5] + (req[6] + req[7]))))));
+  always_ff @(posedge clk) if (we) mem[0] <= req[7] ? mem[addr_a] : mem[addr_b];
+  assign dout = mem[0];
+endmodule
+EOF
+
 compile() {  # $1=src $2=lgdir $3=reader [$4=top]
   local top="${4:-rf}"
   $LHD compile "$WORK/$1" --reader "$3" --top "$top" --emit-dir "lg:$WORK/$2" --workdir "$WORK/w_$2" \
@@ -114,6 +161,10 @@ compile narrow_shift_ref.sv  narrow_shift_ref  slang narrow_shift
 compile narrow_shift_impl.sv narrow_shift_impl slang narrow_shift
 compile packed_state_ref.sv  packed_state_ref  slang packed_state
 compile packed_state_impl.sv packed_state_impl slang packed_state
+compile masked_din_ref.sv  masked_din_ref  slang masked_din
+compile masked_din_impl.sv masked_din_impl slang masked_din
+compile unequal_reads_ref.sv  unequal_reads_ref  slang unequal_reads
+compile unequal_reads_impl.sv unequal_reads_impl slang unequal_reads
 
 # `auto`, not `engine=ind`. An inductive-only CEX starts from an ARBITRARY state
 # that may be UNREACHABLE, so `ind` alone can no longer report REFUTED for a
@@ -145,6 +196,10 @@ expect "commuted lane writes" "$(verdict lane_impl lane_ref rf_lane)" "PROVEN eq
 expect "self-determined shift count" "$(verdict narrow_shift_impl narrow_shift_ref narrow_shift)" "PROVEN equivalent"
 # One packed flop and one same-named Memory are the same state aggregate.
 expect "memory to packed-flop state" "$(verdict_ind packed_state_impl packed_state_ref packed_state)" "PROVEN equivalent"
+# Disabled write-data differences are unobservable when the masks agree.
+expect "masked write data" "$(verdict_ind masked_din_impl masked_din_ref masked_din)" "PROVEN equivalent"
+# Unequal dynamic-read counts still correspond through proven addresses.
+expect "unequal equivalent read ports" "$(verdict_ind unequal_reads_impl unequal_reads_ref unequal_reads)" "PROVEN equivalent"
 
 if [ $fail -ne 0 ]; then echo "lec_mem_test: FAILED"; exit 1; fi
 echo "lec_mem_test: PASSED"

@@ -30,25 +30,44 @@ sunsetting), and `inou/slang`. Standing constraints from the LNAST contract:
 A single `pass.upass` invocation processes each LNAST in `var.lnasts`:
 
 ```
-(0) semacheck            ─ one-shot begin_iteration() walk over the source
+(0) extract              ─ the Pyrope parser switches a destination stack at
+                           each named comb/pipe/mod, streaming directly into
+                           its final sibling LNAST and popping back at `}`.
+                           Nested functions naturally push another destination.
+                           The compatibility extractor only handles non-Pyrope
+                           or legacy trees that still contain real func_defs.
+(1) semacheck            ─ one-shot begin_iteration() walk over the source
                            tree (diagnostics point at user-shaped LNAST)
-(1) uPass_ssa::run       ─ whole-tree pre-pass: harvests io_meta (the comb
-                           inliner reads it mid-walk) and renames
-                           multi-assigned vars to SSA-unique names
-(2) runner walk          ─ ONE depth-first pre-order walk of the source
-                           tree. For each value node the runner resolves the
+(2) uPass_ssa::run       ─ harvests io_meta. Composite port field accesses and
+                           straight-line scalar SSA for generated scalar trees
+                           are handed to the runner; the conservative legacy
+                           tree rebuild remains for stale SSA, unsupported
+                           tuple-port operations, and source Pyrope that still
+                           needs control-flow SSA.
+(3) runner walk          ─ ONE depth-first pre-order walk of the source.
+                           Its first stage is the detupler: it learns tuple
+                           fields/types from the shared scoped symbol table
+                           and emits only scalar declarations/operations to
+                           SSA and the remaining passes. The aggregate tuple
+                           nodes are virtual and never enter the output tree.
+                           For each value node the runner resolves the
                            operands (dst = the live table bundle, src = one
                            Operand per child) and pushes
                            process_<op>(dst_name, dst, src) into every
                            active pass in resolved order (§1.1), collecting
                            keep/drop votes. Control/structure hooks
                            (if/stmts/range/attr_set/…) stay cursor-based.
-                           The runner then emits 0..N nodes into the staging
+                           The runner also scalarizes static tuple-port reads
+                           and writes and versions repeated scalar definitions
+                           selected by (2), while it emits 0..N nodes into the staging
                            tree, folding ref operands through try_fold_ref
                            (a direct table read) on the way out.
-(3) post-walk DCE        ─ dead_code_eliminate_staging: liveness backstop
-                           over the staging tree (io-root rule; see 1d)
-(4) finishers            ─ verifier, then assert: read-only walks of the
+(4) post-walk DCE        ─ dead_code_eliminate_staging: liveness backstop.
+                           Graph-only compilation records dead statement IDs
+                           for tolg to skip and does not copy the tree. LNAST
+                           output still rebuilds a clean tree because HHDS has
+                           no safe bulk-prune operation yet.
+(5) finishers            ─ verifier, then assert: read-only walks of the
                            emitted (dest) tree; cassert tally (§2)
 ```
 
@@ -106,8 +125,10 @@ Rules that matter more than the exact spelling:
 
 - `semacheck` runs before rewrites mutate the tree, so user diagnostics point
   at source-shaped LNAST.
-- SSA naming is complete before the runner walks; `bitwidth` and
-  `lnast_to_lgraph` consume SSA-stable names.
+- SSA naming is stable at each runner dispatch. The legacy path arrives
+  pre-versioned; the streaming path preserves source names in the shared
+  symbol table and emits SSA-versioned definitions/uses to the output tree.
+  `bitwidth` and `lnast_to_lgraph` therefore consume the same SSA-stable ABI.
 - Attribute conflict diagnostics are owned by `attributes`; `typecheck` is
   compile-time-only and propagates nothing to LGraph.
 - `bitwidth` must see every store before DCE.
@@ -213,13 +234,22 @@ the extracted body. Function scopes on the shared table are read-through
 (closure capture of outer comptime consts) / write-block (an outer write is
 a compile error).
 
-### SSA (whole-tree pass, before the runner)
+### SSA and tuple-port scalarization
 
 `uPass_ssa::run` runs once over each LNAST **before** the main runner
-(`pass_upass.cpp::work`). It harvests port names/widths into
-`lnast->io_meta()` and renames multi-assigned user vars to SSA-unique names.
-The runner therefore walks — and emits — post-SSA names. (`reg` names are
-never SSA-versioned; they carry timing.)
+(`pass_upass.cpp::work`) and always harvests port names/widths into
+`lnast->io_meta()`. Generated scalar LNASTs with only straight-line repeated
+definitions keep the parser/extractor tree: the runner versions each scalar
+definition and rewrites its later uses while streaming. Static tuple-port
+accesses similarly become direct dotted scalar bindings in the runner, so a
+composite signature alone no longer forces a compatibility copy. (`reg` and
+`wire` names are never SSA-versioned; they carry state/net identity.)
+
+The old rebuilding transformer remains the conservative fallback for stale
+private SSA names, dynamic or whole-tuple port operations, and hand-written
+Pyrope requiring control-flow SSA. `upass.ssa_stream=false` forces that path
+for differential testing. Both paths must lower equivalently; large generated
+designs are checked with LGraph LEC when this boundary changes.
 
 ### Typesystem (split between `typecheck` and `attributes`)
 

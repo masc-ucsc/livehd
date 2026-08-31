@@ -249,6 +249,11 @@ private:
   // Per-variable type recorded by a `type_spec` statement, folded into the
   // variable's first declaration (`mut x:T = v`).
   absl::flat_hash_map<std::string, std::string> type_specs_;
+  // Names introduced by `declare(..., type)`. Slang represents a structural
+  // type literal as type_spec(field, T)* + tuple_add(%tmp, field...)
+  // + store(type_name, %tmp). The type binding itself is compile-time residue
+  // after detupling; keep its tuple constructor out of executable Pyrope.
+  absl::flat_hash_set<std::string>              type_declared_;
   // 1-D declared array sizes (`x:[N]T`, any mode): write_store expands a whole
   // array-to-array copy (`d = q`) into per-element stores (the recompile has
   // no lowering for a multi-element store between memories).

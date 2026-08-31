@@ -15,7 +15,8 @@
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_coalescer.hpp.
-static upass::uPass_plugin plugin_coalescer("coalescer", upass::uPass_wrapper<uPass_coalescer>::get_upass, {"constprop", "bitwidth"});
+static upass::uPass_plugin plugin_coalescer("coalescer", upass::uPass_wrapper<uPass_coalescer>::get_upass,
+                                            {"constprop", "bitwidth"});
 
 void uPass_coalescer::set_options(const upass::Options_map& opts) {
   auto it = opts.find("coalescer");
@@ -37,6 +38,25 @@ void uPass_coalescer::set_options(const upass::Options_map& opts) {
 }
 
 void uPass_coalescer::begin_iteration() {
+  boundary_names_.clear();
+  if (const auto& ln = lm->get_lnast(); ln) {
+    for (const auto& e : ln->io_meta().inputs) {
+      boundary_names_.insert(e.name);
+    }
+    for (const auto& e : ln->io_meta().outputs) {
+      boundary_names_.insert(e.name);
+    }
+  }
+  if (const auto& ln = lm->get_lnast(); ln && ln->needs_stream_ssa()) {
+    // Streaming SSA assigns output names at the source statement's original
+    // position. Parking that statement and replaying it after later writes
+    // would make its RHS observe a newer version. Generated SSA-shaped units
+    // have only declaration/poison overwrites here, so coalescing has no useful
+    // DSE opportunity anyway.
+    enabled = false;
+    repeat_names_.clear();
+    return;
+  }
   // Only a name written MORE THAN ONCE can be dead-store-eliminated, so parking
   // a write-once name is pure overhead (measured 3,147,133 parks -> 8 DSE drops
   // on XiangShan's Rob.Rob, 70s of an 80s walk = 87%). Pre-scan the unit and
@@ -77,12 +97,20 @@ void uPass_coalescer::prescan_repeat_writes() {
   // genuine repeat-write is never missed (missing one would silently drop a
   // real DSE). Iterative walk to avoid deep recursion on large units.
   absl::flat_hash_map<std::string_view, int> cnt;
-  std::vector<Lnast_nid>                      stack{ln->get_root()};
+  std::vector<Lnast_nid>                     stack{ln->get_root()};
   while (!stack.empty()) {
     const Lnast_nid nid = stack.back();
     stack.pop_back();
+    const auto type = ln->get_type(nid);
+    // IO entries and declarations introduce names; they are not value writes.
+    // Counting them made every single assignment to a declared/port name look
+    // repeated, defeating the write-once fast path. Do not descend into the IO
+    // signature either: its tuple stores describe the ABI, not body drivers.
+    if (Lnast_ntype::is_io(type)) {
+      continue;
+    }
     const Lnast_nid c0 = ln->get_first_child(nid);
-    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
+    if (!Lnast_ntype::is_declare(type) && !c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
       ++cnt[ln->get_name(c0)];
     }
     for (const auto& c : ln->children(nid)) {
@@ -236,10 +264,15 @@ void uPass_coalescer::end_run() {
   std::print(stderr,
              "uPass stats [coalescer]: parked={} dse_dropped={} flushed={} flush_all_calls={} flush_all_keys={} (avg "
              "pending {:.1f}) unit={} vorigin={} enabled={}\n",
-             stat_parked, stat_dse_dropped, stat_flushed, stat_flush_all_calls, stat_flush_all_keys,
-             stat_flush_all_calls > 0 ? static_cast<double>(stat_flush_all_keys) / static_cast<double>(stat_flush_all_calls)
-                                      : 0.0,
-             ln ? ln->get_top_module_name() : "<null>", ln && ln->is_verilog_origin(), enabled);
+             stat_parked,
+             stat_dse_dropped,
+             stat_flushed,
+             stat_flush_all_calls,
+             stat_flush_all_keys,
+             stat_flush_all_calls > 0 ? static_cast<double>(stat_flush_all_keys) / static_cast<double>(stat_flush_all_calls) : 0.0,
+             ln ? ln->get_top_module_name() : "<null>",
+             ln && ln->is_verilog_origin(),
+             enabled);
 }
 
 bool uPass_coalescer::flush_one(const std::string& name) {

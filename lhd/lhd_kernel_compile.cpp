@@ -1152,6 +1152,19 @@ void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& to
 // terminal LNAST->LGraph sub-pass into the library at lib_path — the
 // CLI-level tolg:0|1 gate, derived from the requested emits.
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs) {
+  // Publish parser-streamed lambda siblings before lnastfmt and, critically,
+  // before the import-defer loop snapshots pristine trees. If pass.upass were
+  // the first owner to take them, a blocked import retry would erase the
+  // derived function while the source wrapper's transient handoff had already
+  // been consumed. Making them ordinary queue entries here gives every
+  // streamed function its own pristine retry body.
+  const auto source_count = var.lnasts.size();
+  for (std::size_t i = 0; i < source_count; ++i) {
+    for (auto& fn : var.lnasts[i]->take_streamed_lambdas()) {
+      var.add(std::move(fn));
+    }
+  }
+
   const auto redo_begin     = std::chrono::steady_clock::now();
   auto       account_redone = [&] {
     if (res.compile_cache.enabled) {
@@ -1459,7 +1472,23 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         if (!opts.top.empty() && opts.top != "-auto-top" && !labels.count("top")) {
           labels["top"] = opts.top;
         }
-        run_step("pass.formal", *active, labels, opts, res);
+        if (active != &var) {
+          Eprp_var formal_view;
+          for (const auto& graph : var.graphs) {
+            formal_view.add(graph);
+          }
+          std::vector<std::string> active_names;
+          active_names.reserve(active->graphs.size());
+          for (const auto& graph : active->graphs) {
+            if (graph) {
+              active_names.emplace_back(graph->get_name());
+            }
+          }
+          labels["active"] = join_csv(active_names);
+          run_step("pass.formal", formal_view, labels, opts, res);
+        } else {
+          run_step("pass.formal", *active, labels, opts, res);
+        }
       }
     }
 

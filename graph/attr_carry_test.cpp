@@ -63,8 +63,9 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::aggregate_extent).set(uint32_t{32});
   src.attr(la::const_value).set(std::string{"0xdeadbeef"});
   src.attr(la::lut).set(std::string{"1010"});
+  src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 20, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 21, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -88,6 +89,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::aggregate_extent).get(), 32u);
   EXPECT_EQ(dst.attr(la::const_value).get(), "0xdeadbeef");
   EXPECT_EQ(dst.attr(la::lut).get(), "1010");
+  EXPECT_EQ(dst.attr(la::legalize_inlined).get(), "callee.split");
   EXPECT_EQ(gu::match_of(dst), 9u) << "node-level match (semdiff stamps it, lhd tool reads it) must ride the node";
 }
 

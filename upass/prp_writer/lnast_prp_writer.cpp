@@ -2181,6 +2181,52 @@ void Lnast_prp_writer::collect_port_groups(Lnast_nid io_nid, bool is_mod) {
   auto in_tup  = lnast->get_child(io_nid);
   auto out_tup = in_tup.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(in_tup);
 
+  // Slang can preserve a packed-struct port as a nested tuple type instead of
+  // the already-flattened `base.field` IO entries handled below. Register the
+  // same bundle-field index for that representation so body reads print as
+  // real Pyrope paths (`din.fp`) rather than opaque escaped identifiers
+  // (`` `din.fp` ``). The latter is a different, undeclared variable after a
+  // round trip. render_type_at() serializes the nested signature itself.
+  auto register_nested = [&](auto&& self, Lnast_nid tuple, const std::string& base, const std::string& prefix) -> void {
+    for (auto field = lnast->get_child(tuple); !field.is_invalid(); field = lnast->get_sibling_next(field)) {
+      if (!Lnast_ntype::is_store(lnast->get_type(field))) {
+        continue;
+      }
+      auto name_nid = lnast->get_child(field);
+      if (name_nid.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(name_nid))) {
+        continue;
+      }
+      const std::string leaf(lnast->get_name(name_nid));
+      const std::string path = prefix.empty() ? leaf : prefix + "." + leaf;
+      bundle_fields_[base].insert(path);
+      declared_.insert(base + "." + path);
+      auto init_nid = lnast->get_sibling_next(name_nid);
+      auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
+      if (!type_nid.is_invalid() && Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
+        self(self, type_nid, base, path);
+      }
+    }
+  };
+  for (const auto& tuple : {in_tup, out_tup}) {
+    if (tuple.is_invalid()) {
+      continue;
+    }
+    for (auto port = lnast->get_child(tuple); !port.is_invalid(); port = lnast->get_sibling_next(port)) {
+      auto name_nid = lnast->get_child(port);
+      if (name_nid.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(name_nid))) {
+        continue;
+      }
+      auto init_nid = lnast->get_sibling_next(name_nid);
+      auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
+      if (type_nid.is_invalid() || !Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
+        continue;
+      }
+      const std::string base(lnast->get_name(name_nid));
+      declared_.insert(base);
+      register_nested(register_nested, type_nid, base, {});
+    }
+  }
+
   // Not a candidate leaf: an escaped Verilog id (`` `ar.x` `` — its dot is NOT
   // a field separator), a `%` temp, or an SSA-versioned name (strip_prefix
   // renames it; the io list should never carry one, but keep it per-leaf).
@@ -2414,6 +2460,12 @@ void Lnast_prp_writer::collect_body_bundles(Lnast_nid body_nid) {
   absl::flat_hash_map<std::string, std::vector<Leaf>> groups;
   absl::flat_hash_set<std::string>                    bare;    // names used WITHOUT a dot
   absl::flat_hash_set<std::string>                    vetoed;  // base cannot be regrouped
+  struct Typed_bundle {
+    std::vector<Leaf> leaves;
+    int64_t           decl_nid{0};
+    std::string       mode;
+  };
+  absl::flat_hash_map<std::string, Typed_bundle> typed_bundles;
 
   std::function<void(Lnast_nid)> scan = [&](Lnast_nid n) {
     for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
@@ -2441,11 +2493,37 @@ void Lnast_prp_writer::collect_body_bundles(Lnast_nid body_nid) {
           bare.insert(raw);
         }
       }
+      // Slang's aggregate pseudo-variable is represented as
+      //   type_spec(io.operation, u5) ... declare(io, none, wire)
+      // rather than one tuple-typed declare. Preserve those field types so the
+      // writer can reconstruct `wire io:(operation:u5, ...) = nil` below.
+      if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_type_spec) {
+        auto name = lnast->get_child(c);
+        auto type = name.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(name);
+        if (!name.is_invalid() && !type.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(name))) {
+          std::string raw(lnast->get_name(name));
+          const auto  dot = raw.find('.');
+          if (dot != std::string::npos && raw.front() != '`') {
+            typed_bundles[raw.substr(0, dot)].leaves.push_back(
+                {raw.substr(dot + 1), render_type_at(type), c.get_class_index().value});
+          }
+        }
+      }
       // A declare of an escaped dotted leaf is the regroup candidate.
       if (Lnast_ntype::is_declare(lnast->get_type(c))) {
         auto v = lnast->get_child(c);
         if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v))) {
           std::string raw(lnast->get_name(v));
+          if (raw.find('.') == std::string::npos) {
+            auto type = lnast->get_sibling_next(v);
+            auto qual = type.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(type);
+            if (!type.is_invalid() && lnast->get_type(type) == Lnast_ntype::Lnast_ntype_prim_type_none && !qual.is_invalid()
+                && (lnast->get_name(qual) == "wire" || lnast->get_name(qual) == "mut")) {
+              auto& bundle    = typed_bundles[raw];
+              bundle.decl_nid = c.get_class_index().value;
+              bundle.mode     = std::string(lnast->get_name(qual));
+            }
+          }
           if (raw.size() >= 2 && raw.front() == '`' && raw.back() == '`') {
             const std::string inner = raw.substr(1, raw.size() - 2);
             const auto        dot   = inner.find('.');
@@ -2491,6 +2569,83 @@ void Lnast_prp_writer::collect_body_bundles(Lnast_nid body_nid) {
   scan(body_nid);
 
   std::vector<std::string> rebuilt;
+  for (auto& [base, bundle] : typed_bundles) {
+    if (bundle.decl_nid == 0 || bundle.leaves.empty() || vetoed.count(base) != 0u) {
+      continue;
+    }
+    Port_group_node root;
+    bool            bad = false;
+    for (const auto& leaf : bundle.leaves) {
+      Port_group_node* node  = &root;
+      std::string_view path  = leaf.field;
+      size_t           start = 0;
+      for (;;) {
+        const auto  dot  = path.find('.', start);
+        const bool  last = dot == std::string_view::npos;
+        std::string comp(path.substr(start, last ? std::string_view::npos : dot - start));
+        if (!plain_ident(comp)) {
+          bad = true;
+          break;
+        }
+        Port_group_node* kid = nullptr;
+        for (auto& [name, child] : node->kids) {
+          if (name == comp) {
+            kid = child.get();
+            break;
+          }
+        }
+        if (kid == nullptr) {
+          node->kids.emplace_back(comp, std::make_unique<Port_group_node>());
+          kid = node->kids.back().second.get();
+        } else if (last || kid->is_leaf) {
+          bad = true;
+          break;
+        }
+        if (last) {
+          kid->is_leaf   = true;
+          kid->type_text = leaf.decl;
+          break;
+        }
+        node  = kid;
+        start = dot + 1;
+      }
+      if (bad) {
+        break;
+      }
+    }
+    if (bad) {
+      continue;
+    }
+    auto render = [&](auto&& self, const Port_group_node& node) -> std::string {
+      std::string out   = "(";
+      bool        first = true;
+      for (const auto& [name, child] : node.kids) {
+        if (!first) {
+          out += ", ";
+        }
+        out += quote_kw_path(name);
+        if (child->is_leaf) {
+          if (!child->type_text.empty()) {
+            out += ":" + child->type_text;
+          }
+        } else {
+          out += ":" + self(self, *child);
+        }
+        first = false;
+      }
+      return out + ")";
+    };
+    std::string text = bundle.mode + " " + quote_kw_path(base) + ":" + render(render, root);
+    if (bundle.mode == "wire") {
+      text += " = nil";
+    }
+    body_bundle_text_[bundle.decl_nid] = std::move(text);
+    declared_.insert(base);
+    for (const auto& leaf : bundle.leaves) {
+      bundle_fields_[base].insert(leaf.field);
+      declared_.insert(base + "." + leaf.field);
+    }
+  }
   for (const auto& base : order) {
     const auto& leaves = groups[base];
     if (leaves.size() < 2 || vetoed.count(base) != 0u || bare.count(base) != 0u || declared_.count(base) != 0u
@@ -4075,6 +4230,82 @@ std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
       std::string sz     = size_n.is_invalid() ? std::string{} : std::string(lnast->get_name(size_n));
       return sz + render_type_at(elem);
     }
+    case N::Lnast_ntype_tuple_add: {
+      // Inline tuple type as carried by Slang struct ports:
+      // tuple_add(store(fp,nil,u1), store(addr,nil,u5)) -> `(fp:u1, addr:u5)`.
+      // Keeping this shape in the emitted signature makes its dotted body
+      // reads declared and lets SSA flatten the same ABI again on recompile.
+      Port_group_node root;
+      for (auto field = lnast->get_child(type_nid); !field.is_invalid(); field = lnast->get_sibling_next(field)) {
+        if (!N::is_store(lnast->get_type(field))) {
+          continue;
+        }
+        auto name_nid = lnast->get_child(field);
+        if (name_nid.is_invalid() || !N::is_ref(lnast->get_type(name_nid))) {
+          continue;
+        }
+        auto        init_nid   = lnast->get_sibling_next(name_nid);
+        auto        field_type = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
+        std::string type_text;
+        if (!field_type.is_invalid()) {
+          type_text = render_type_at(field_type);
+        }
+
+        // A nested packed struct may arrive either as a nested tuple_add or as
+        // flat stores named `header.id`, `header.kind`. Rebuild the latter into
+        // `header:(id:T, kind:U)`; a dotted field spelling inside one tuple is
+        // an expression path, not a legal field declaration.
+        Port_group_node* node  = &root;
+        std::string_view path  = lnast->get_name(name_nid);
+        size_t           start = 0;
+        for (;;) {
+          const auto       dot  = path.find('.', start);
+          const bool       last = dot == std::string_view::npos;
+          std::string      comp(path.substr(start, last ? std::string_view::npos : dot - start));
+          Port_group_node* kid = nullptr;
+          for (auto& [name, child] : node->kids) {
+            if (name == comp) {
+              kid = child.get();
+              break;
+            }
+          }
+          if (kid == nullptr) {
+            node->kids.emplace_back(comp, std::make_unique<Port_group_node>());
+            kid = node->kids.back().second.get();
+          }
+          if (last) {
+            kid->is_leaf   = true;
+            kid->type_text = std::move(type_text);
+            break;
+          }
+          node  = kid;
+          start = dot + 1;
+        }
+      }
+      auto render = [&](auto&& self, const Port_group_node& node) -> std::string {
+        if (node.is_leaf) {
+          return node.type_text.empty() ? std::string{} : ":" + node.type_text;
+        }
+        std::string out   = "(";
+        bool        first = true;
+        for (const auto& [name, child] : node.kids) {
+          if (!first) {
+            out += ", ";
+          }
+          out += quote_kw_path(name);
+          if (child->is_leaf) {
+            if (!child->type_text.empty()) {
+              out += ":" + child->type_text;
+            }
+          } else {
+            out += ":" + self(self, *child);
+          }
+          first = false;
+        }
+        return out + ")";
+      };
+      return render(render, root);
+    }
     default: return {};  // comp_type_tuple / named-type ref — not yet serialised; drop
   }
 }
@@ -4255,10 +4486,35 @@ void Lnast_prp_writer::write_store() {
       print(std::format(":u{}", pit->second));
     }
   }
+  std::string tuple_field_path;
+  bool        tuple_field_path_ok = true;
+  for (auto level = lnast->get_sibling_next(first); !level.is_invalid() && !lnast->is_last_child(level);
+       level      = lnast->get_sibling_next(level)) {
+    if (lnast->get_type(level) != Lnast_ntype::Lnast_ntype_const) {
+      tuple_field_path_ok = false;
+      break;
+    }
+    std::string field(lnast->get_name(level));
+    if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
+      field = field.substr(1, field.size() - 2);
+    }
+    if (!tuple_field_path.empty()) {
+      tuple_field_path += ".";
+    }
+    tuple_field_path += field;
+  }
+  const auto quoted_tuple_path = tuple_field_path_ok ? quote_field_path(tuple_field_path) : std::nullopt;
+  const bool tuple_field_store = quoted_tuple_path && is_bundle_field(lhs + "." + tuple_field_path);
   while (move_to_sibling() && !is_last_child()) {
-    print("[");
-    print(render_value(cur, /*operand_ctx=*/false));
-    print("]");
+    if (!tuple_field_store) {
+      print("[");
+      print(render_value(cur, /*operand_ctx=*/false));
+      print("]");
+    }
+  }
+  if (tuple_field_store) {
+    print(".");
+    print(*quoted_tuple_path);
   }
   print(" = ");
   // An all-`?` poison whose width IS the target's declared width re-compacts to
@@ -5256,6 +5512,11 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
       if (!type_nid.is_invalid()) {
         note_port_width(strip_prefix(lnast->get_name(var_nid)), render_type_at(type_nid));
       }
+      auto qualifier_nid = type_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(type_nid);
+      if (!qualifier_nid.is_invalid() && lnast->get_type(qualifier_nid) == Lnast_ntype::Lnast_ntype_const
+          && lnast->get_name(qualifier_nid) == "type") {
+        type_declared_.insert(std::string(lnast->get_name(var_nid)));
+      }
     }
   }
   // Record a stage declare (`declare(var, type, reg, stages(min,max))`, the
@@ -5935,6 +6196,7 @@ void Lnast_prp_writer::analyze_folding() {
   tuple_get_nodes_.clear();
   store_nodes_.clear();
   type_specs_.clear();
+  type_declared_.clear();
   stage_decls_.clear();
 
   int index = 0;
@@ -6564,20 +6826,21 @@ std::string Lnast_prp_writer::render_tuple_get_rhs(Lnast_nid c0) {
   // keep the bracket-string form.
   if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
     std::string bn(strip_prefix(lnast->get_name(base)));
-    auto        idx0     = lnast->get_sibling_next(base);
+    auto        idx0 = lnast->get_sibling_next(base);
     // A module-instance result OR an imported PACKAGE base with a constant
     // identifier path prints as `base.field` (dot access), not
     // `base["field"]` — including provenance `pkg.PARAM` refs that arrive as
     // a tuple_get.
-    const bool  dot_base = instance_results_.count(bn) != 0u || is_imported_package_name(bn);
-    if (dot_base && !idx0.is_invalid() && lnast->get_sibling_next(idx0).is_invalid()
-        && lnast->get_type(idx0) == N::Lnast_ntype_const) {
+    if (!idx0.is_invalid() && lnast->get_sibling_next(idx0).is_invalid() && lnast->get_type(idx0) == N::Lnast_ntype_const) {
       std::string field(lnast->get_name(idx0));
       if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
         field = field.substr(1, field.size() - 2);
       }
-      if (auto field_path = quote_field_path(field)) {
-        return bn + "." + *field_path;  // postfix dot access (binds tight, never wrapped)
+      const bool dot_base = instance_results_.count(bn) != 0u || is_imported_package_name(bn) || is_bundle_field(bn + "." + field);
+      if (dot_base) {
+        if (auto field_path = quote_field_path(field)) {
+          return bn + "." + *field_path;  // postfix dot access (binds tight, never wrapped)
+        }
       }
     }
   }
@@ -6640,6 +6903,19 @@ bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
   }
   if (t == Lnast_ntype::Lnast_ntype_timecheck) {
     return true;  // inert; dropped (timing already carried by stage[N]/@[N])
+  }
+  if (t == Lnast_ntype::Lnast_ntype_tuple_add) {
+    auto tuple_tmp = lnast->get_child(nid);
+    auto next      = lnast->get_sibling_next(nid);
+    if (!tuple_tmp.is_invalid() && !next.is_invalid() && lnast->get_type(next) == Lnast_ntype::Lnast_ntype_store) {
+      auto type_name = lnast->get_child(next);
+      auto stored    = type_name.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(type_name);
+      if (!type_name.is_invalid() && !stored.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(stored))
+          && lnast->get_name(stored) == lnast->get_name(tuple_tmp)
+          && type_declared_.count(std::string(lnast->get_name(type_name))) != 0u) {
+        return true;  // structural type constructor, not a runtime tuple value
+      }
+    }
   }
   if (t == Lnast_ntype::Lnast_ntype_declare && !find_stages_child(nid).is_invalid()) {
     return true;  // stage declare — re-attached to its store as `stage[N] x = v`

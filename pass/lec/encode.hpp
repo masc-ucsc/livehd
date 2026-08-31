@@ -118,8 +118,11 @@ struct Encoded {
     cvc5::Term din;    // fitted to bits
   };
   struct Mem_rd_port {
-    cvc5::Term dout;  // the fresh symbol downstream logic consumes
-    cvc5::Term addr;  // fitted to addr_w
+    cvc5::Term dout;   // the fresh symbol downstream logic consumes
+    cvc5::Term addr;   // fitted to addr_w
+    // Exact latency-0 value (select(read_source, addr)). Null for a registered
+    // latency-1 read, whose current dout belongs to the previous cycle.
+    cvc5::Term value;
     // The dout reads the SHARED committed contents (fwd==0, not comb/ROM), so
     // two read ports with equal addresses MUST hold equal values -- the
     // precondition for merging the two sides' dout symbols. A forwarding or

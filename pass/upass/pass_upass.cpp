@@ -23,7 +23,6 @@
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
-#include "upass_detuple.hpp"       // pre-split tuple-typed memory/var lowering
 #include "upass_func_extract.hpp"  // front-end lambda split (2g)
 #include "upass_pipe.hpp"
 #include "upass_runner.hpp"
@@ -123,6 +122,10 @@ void Pass_upass::setup() {
   m1.add_label_optional("ssa",
                         "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
                         "rename multi-assigned user variables to SSA-unique names",
+                        "true");
+  m1.add_label_optional("ssa_stream",
+                        "fuse straight-line scalar SSA into the shared uPass runner for generated scalar LNASTs; "
+                        "false forces the legacy pre-runner SSA tree rebuild (useful for differential checking)",
                         "true");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional("typecheck", "enable typecheck upass (kind/operator/nil checks; runs after attributes)", "true");
@@ -269,9 +272,11 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto bw_txt      = get_label("bitwidth");
   bool do_bitwidth = bw_txt != "false" && bw_txt != "0";
 
-  auto ssa_txt = get_label("ssa");
-  bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
-  run_ssa      = do_ssa;
+  auto ssa_txt        = get_label("ssa");
+  bool do_ssa         = ssa_txt != "false" && ssa_txt != "0";
+  run_ssa             = do_ssa;
+  auto ssa_stream_txt = get_label("ssa_stream", "true");
+  stream_ssa          = ssa_stream_txt != "false" && ssa_stream_txt != "0";
 
   // tolg is a terminal LNAST->LGraph step, not part of the runner
   // order. Default off; enabled with tolg:1. Runs after the main walk so
@@ -462,6 +467,18 @@ void Pass_upass::work(Eprp_var& var) {
   const auto                        original_lnast_count = var.lnasts.size();
   absl::flat_hash_set<const Lnast*> function_bodies;
 
+  // prp2lnast already streams named lambdas into their final per-function
+  // trees.  Publish those siblings before the compatibility extractor scans
+  // the source wrappers.  The extractor remains for non-Pyrope producers and
+  // old/restored trees that still contain real func_def bodies.
+  for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
+    for (auto& fn : var.lnasts[idx]->take_streamed_lambdas()) {
+      function_bodies.insert(fn.get());
+      var.add(std::move(fn));
+    }
+  }
+  const auto split_lnast_count = var.lnasts.size();
+
   // ── Front-end lambda split (2g). Pull every comb/pipe/mod func_def out of
   // each entry-point tree into its own `top -> [io, stmts]` Lnast and drop it
   // from the module body, so the main walk + tolg never see func_defs. This is
@@ -471,19 +488,14 @@ void Pass_upass::work(Eprp_var& var) {
   // it never rebuilds a tree that dropped nothing. Iterate by index up to the
   // ORIGINAL count: the appended trees already arrive in extracted unit form
   // and carry no func_def to split. SSA below harvests io_meta from them.
-  for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
+  for (std::size_t idx = 0; idx < split_lnast_count; ++idx) {
     const auto ln = var.lnasts.at(idx);
-    if (ln->is_pre_elaborated() || ln->is_upass_converged()) {
+    if (ln->is_pre_elaborated() || ln->is_upass_converged() || function_bodies.contains(ln.get())) {
       continue;  // already detupled + lambda-split (loaded import / earlier round)
     }
-    TRACE_EVENT("pass", "upass.detuple_split", "unit", std::string(ln->get_top_module_name()));
+    TRACE_EVENT("pass", "upass.lambda_split", "unit", std::string(ln->get_top_module_name()));
     // Excerpt provider for any diagnostic emitted while this unit is split.
     livehd::diag::Locator_scope diag_scope(&ln->source_locator());
-    // Lower tuple-typed memory/var declarations into per-field scalar leaves
-    // BEFORE the lambda split, while a file-scope named type and the module
-    // using it are still one tree (so the type's field layout resolves locally,
-    // with no symbol table this early). Tolg has no tuples.
-    uPass_detuple::run(ln);
     for (const auto& new_ln : upass::extract_lambda_functions(ln)) {
       function_bodies.insert(new_ln.get());
       var.add(new_ln);
@@ -546,7 +558,7 @@ void Pass_upass::work(Eprp_var& var) {
         continue;  // body already SSA'd (ln: manifest io_meta / earlier round)
       }
       TRACE_EVENT("pass", "upass.ssa", "unit", std::string(ln->get_top_module_name()));
-      uPass_ssa::run(ln, &var.lnasts);
+      uPass_ssa::run(ln, &var.lnasts, up.stream_ssa);
     }
   }
 
@@ -559,6 +571,10 @@ void Pass_upass::work(Eprp_var& var) {
   // (The old code rebuilt this from scratch inside every runner, re-walking
   // every lnast's whole tree per unit — O(units^2 * tree), the XSCore "hang".)
   uPass_function_registry function_registry;
+  // Semantic tuple layouts are learned by the file-level runner and reused by
+  // the extracted function runners that follow it. This is deliberately a
+  // compact symbol-table side registry, never another LNAST/tree pass.
+  uPass_detuple_registry  detuple_registry;
 
   // Module names already in the queue, for O(1) dedup of runner-spawned
   // specializations below (was an O(lnasts) linear scan per spawn — O(M^2) on a
@@ -633,7 +649,7 @@ void Pass_upass::work(Eprp_var& var) {
     // via verifier_include_funcs:true — dropping the verifier here avoids
     // double-walking unproven function bodies into the aggregate.
     auto       order            = up.upass_order;
-    const bool is_function_body = function_bodies.contains(ln.get());
+    const bool is_function_body = function_bodies.contains(ln.get()) || !ln->get_lambda_kind().empty();
     if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
     }
@@ -645,8 +661,8 @@ void Pass_upass::work(Eprp_var& var) {
     // The "auto" test must match uPass_coalescer::set_options, which lowercases
     // the value before comparing — otherwise `coalescer=AUTO` reads as explicit
     // here and as auto there.
-    const auto coalescer_opt   = up.pass_options.find("coalescer");
-    bool       coalescer_auto  = coalescer_opt == up.pass_options.end();
+    const auto coalescer_opt  = up.pass_options.find("coalescer");
+    bool       coalescer_auto = coalescer_opt == up.pass_options.end();
     if (!coalescer_auto) {
       std::string v = coalescer_opt->second;
       std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -665,6 +681,7 @@ void Pass_upass::work(Eprp_var& var) {
     runner.set_preserve_param_provenance(up.preserve_param_provenance);
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(function_registry);  // 1i: comb bodies to inline from (shared, built once)
+    runner.set_detuple_registry(detuple_registry);
     if (runner.has_configuration_error()) {
       fail_upass_runtime("bad-configuration",
                          "io",
@@ -701,7 +718,7 @@ void Pass_upass::work(Eprp_var& var) {
         continue;
       }
       if (up.run_ssa) {
-        uPass_ssa::run(new_ln, &var.lnasts);
+        uPass_ssa::run(new_ln, &var.lnasts, up.stream_ssa);
       }
       function_bodies.insert(new_ln.get());
       var.add(new_ln);

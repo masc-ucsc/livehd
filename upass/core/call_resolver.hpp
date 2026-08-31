@@ -74,7 +74,8 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
 // name verbatim; the suffix scan uses str_tools::ends_with to match
 // `<module>.<name>` case-sensitively.
 template <typename Registry>
-std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::string_view name) {
+std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::string_view name,
+                                     std::string_view caller_unit = {}) {
   // Prefer a candidate carrying a real comb signature (non-empty io).
   auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
 
@@ -89,6 +90,28 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
   // timecheck, so the scan made callee resolution O(calls * registry).
   if (has_sig(exact)) {
     return exact;
+  }
+
+  // Lexical resolution: streamed nested helpers register as
+  // "<file>.<outer>.<name>", so a bare call from "<file>.<outer>" must bind
+  // its OWN helper even when a sibling scope defines a same-named one (two
+  // "…​.inner" entries made the suffix scan below ambiguous and the call
+  // failed as undefined). Walk the caller's prefix chain innermost-first.
+  if (!caller_unit.empty()) {
+    std::string scoped;
+    for (std::string_view unit = caller_unit;;) {
+      scoped.assign(unit);
+      scoped.push_back('.');
+      scoped.append(name);
+      if (auto it = function_registry.find(scoped); it != function_registry.end() && has_sig(it->second)) {
+        return it->second;
+      }
+      const auto dot = unit.rfind('.');
+      if (dot == std::string_view::npos) {
+        break;
+      }
+      unit = unit.substr(0, dot);
+    }
   }
 
   const std::string      suffix = "." + std::string(name);

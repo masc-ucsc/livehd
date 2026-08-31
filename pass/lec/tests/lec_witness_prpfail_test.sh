@@ -121,10 +121,11 @@ W7="$WORK/w7"
 $LHD lec --impl "$WORK/impl.prp" --ref "$WORK/impl.prp" --workdir "$W7" >/dev/null 2>&1
 ck "PROVEN => no prp"           '[ ! -f "$W7/simfail_dut.prp" ]'
 
-# ---- hierarchical DUTs: prp_writer re-emits sub-module inputs UNTYPED, so they
-# are auto-typed by width (else an internal `mod` boundary won't re-compile). The
-# setup-only then exercises the multi-level peek + VCD codegen (shared_ptr fix
-# through 2 hierarchy levels) hermetically.
+# ---- hierarchical DUTs: re-emitted sub-module inputs must remain explicitly
+# typed (`bool` may be preserved, or a width-derived `uN` may be emitted), else
+# an internal `mod` boundary won't re-compile. The setup-only then exercises the
+# multi-level peek + VCD codegen (shared_ptr fix through 2 hierarchy levels)
+# hermetically.
 cat > "$WORK/h_impl.prp" <<'EOF'
 mod adder(en:bool) -> (o:u8@[0]) {
   reg r:u8 = 0
@@ -148,7 +149,7 @@ EOF
 WH="$WORK/wh"
 $LHD lec --impl "$WORK/h_impl.prp" --ref "$WORK/h_ref.prp" --impl-top h_impl.topm --ref-top h_ref.topm --workdir "$WH" --set formal.simfail_run=false >/dev/null 2>&1
 ck "hier: prp generated"        '[ -f "$WH/simfail_topm.prp" ]'
-ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:u" "$WH/simfail_topm.prp"'
+ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:(bool|u[0-9]+)" "$WH/simfail_topm.prp"'
 SH="$WORK/sh"
 $LHD sim "$WH/simfail_topm.prp" --setup-only --set sim.vcd=true --workdir "$SH" >/dev/null 2>&1
 ck "hier: testbench sim-valid"  '[ -f "$SH/sim/drv.cpp" ]'
