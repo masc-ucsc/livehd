@@ -1,0 +1,123 @@
+module	verdict	bucket	sources	nodes	flops	memories	wall_s	peak_rss_kb	legacy_emit	detail
+intpipe_csr_file_fl_barrier	PROVEN	proven	63	65	5	0	5.71	6681256	NO_EMIT	1/1
+debug_breakpoint	PROVEN	proven	146	165	0	0	6.41	6698160	EMITTED	1/1
+intpipe_csr_pmu_read_interface	PROVEN	proven	148	185	6	0	6.40	6702284	NO_EMIT	1/1
+intpipe_csr_file_conv	PROVEN	proven	439	464	7	0	8.05	6745096	NO_EMIT	1/1
+intpipe_fp_scoreboard	PROVEN	proven	1300	1427	0	0	14.05	6890996	EMITTED	1/1
+intpipe_csr_replay	PROVEN	proven	1054	1133	6	0	12.05	6847476	NO_EMIT	1/1
+intpipe_imm	PROVEN	proven	226	242	0	0	7.32	6713132	EMITTED	1/1
+intpipe_inst_bits_stage	PROVEN	proven	176	176	32	0	6.82	6701764	EMITTED	1/1
+minion_dcache_128x64_1r1w_lram	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+intpipe_mask_scoreboard	PROVEN	proven	837	953	0	0	10.65	6810064	EMITTED	1/1
+intpipe_int_scoreboard	PROVEN	proven	943	1095	0	0	12.68	6839536	EMITTED	1/1
+minion_dcache_128x72_1r1w_lram	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_dcache_buffer_array	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_dcache_atomic_alu_unit	PROVEN	proven	849	919	0	0	10.43	6805252	EMITTED	1/1
+intpipe_csr_msgs	PROVEN	proven	6510	7447	53	1	89.64	7800672	NO_EMIT	1/1
+minion_dcache_cache_op_unit_l2	PROVEN	proven	1220	1426	36	0	13.38	6894980	NO_EMIT	1/1
+intpipe_alu	PROVEN	proven	4045	5118	0	0	45.08	7463452	EMITTED	1/1
+minion_dcache_data_array	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_dcache_lru_array	PROVEN	proven	255	286	16	0	6.71	6721720	EMITTED	1/1
+minion_dcache_metadata_array	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_dcache_pma_unit	PROVEN	proven	387	532	0	0	7.67	6747664	EMITTED	1/1
+minion_dcache_cache_op_unit	PROVEN	proven	3813	4248	73	0	35.10	7355712	NO_EMIT	1/1
+intpipe_decode	PROVEN	proven	6161	6659	0	0	70.78	7701012	EMITTED	1/1
+minion_dcache_scratchpad_ctrl	PROVEN	proven	140	165	3	0	6.06	6700452	EMITTED	1/1
+minion_dcache_miss_handler	PROVEN	proven	1500	1663	24	0	14.07	6929836	EMITTED	1/1
+minion_dcache_texsend	PROVEN	proven	7	0	0	0	5.31	6676632	EMITTED	1/1
+minion_dcache_store_merge_unit	PROVEN	proven	3011	3152	0	0	24.37	7163284	EMITTED	1/1
+minion_dcache_reduce	PROVEN	proven	2567	2945	64	4	22.78	7125952	NO_EMIT	1/1
+minion_dcache_tlb_array	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_dcache_writeback_unit	PROVEN	proven	329	357	15	0	6.95	6730752	EMITTED	1/1
+minion_dcache_miss_handler_unit	PROVEN	proven	3135	3556	55	0	27.68	7223972	NO_EMIT	1/1
+minion_frontend_rvc_expander	PROVEN	proven	1721	1829	0	0	15.07	6950548	EMITTED	1/1
+minion_debug_apb_slv	PROVEN	proven	617	695	8	0	8.63	6776020	NO_EMIT	1/1
+minion_frontend_thread_sched	PROVEN	proven	32	36	2	0	5.48	6677548	NO_EMIT	1/1
+minion_tlb	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+intpipe_mul_div_top	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_frontend_thread_buffer	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_dcache_replay_queue	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+null_vpu	PROVEN	proven	10	0	0	0	5.29	6678500	EMITTED	1/1
+tima_adder	PROVEN	proven	5	4	0	0	5.34	6676720	EMITTED	1/1
+trans_exp_rom_case_c0	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_68 bits=25 size=64 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=25 rdpo
+tima_top	PROVEN	proven	691	706	7	0	8.78	6785208	EMITTED	1/1
+trans_exp_rom_case_c1c2	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_100 bits=29 size=64 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=29 rdp
+trans_log_rom_case_c0	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_68 bits=26 size=64 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=26 rdpo
+trans_log_rom_case_c1c2	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_108 bits=26 size=64 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=26 rdp
+trans_rcp_rom_case_c0	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_48 bits=25 size=128 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=25 rdp
+trans_rcp_rom_case_c1c2	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_100 bits=26 size=128 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=26 rd
+trans_rsqrt_rom_case_c0	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_48 bits=26 size=256 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=26 rdp
+trans_rsqrt_rom_case_c1c2	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_100 bits=24 size=256 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=24 rd
+trans_sin_rom_case_c0	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_104 bits=38 size=64 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=38 rdp
+trans_sin_rom_case_c1c2	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_124 bits=44 size=64 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=44 rdp
+txfma_4_2_compressor	PROVEN	proven	33	42	0	0	5.48	6677196	EMITTED	1/1
+txfma_adder	NO_EMIT(filelist)	blocked-upstream							NO_EMIT	
+txfma_align_shf	PROVEN	proven	4	3	0	0	5.25	6674616	EMITTED	1/1
+trans_top	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_1324 bits=25 size=128 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=25 r
+txfma_booth_ppg_32r4_msb	PROVEN	proven	10	11	0	0	5.32	6679064	EMITTED	1/1
+txfma_booth_ppg_32r4	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_2244 bits=5 size=8 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=5 rdpor
+txfma_booth_ppg_32r4_norm	NO_EMIT(unknown)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_48 bits=5 size=8 addr_width=1 type=0 fwd=0 undef=0 posclk=0 wensize=5 rdports
+minion_dcache_tensor_load	PROVEN	proven	9349	11424	112	0	171.17	8387712	NO_EMIT	1/1
+txfma_c1	PROVEN	proven	156	178	0	0	6.44	6695700	EMITTED	1/1
+txfma_c0	PROVEN	proven	2268	2902	11	0	22.61	7110840	EMITTED	1/1
+txfma_4_2_compressor_array	PROVEN	proven	3480	4048	0	0	31.99	7307160	EMITTED	1/1
+txfma_c2	PROVEN	proven	1606	1785	0	0	14.62	6932872	EMITTED	1/1
+txfma_c3	PROVEN	proven	1895	2030	0	0	16.19	6977980	EMITTED	1/1
+txfma_csa	PROVEN	proven	17	21	0	0	5.43	6677092	EMITTED	1/1
+txfma_c4	PROVEN	proven	270	303	0	0	6.69	6723972	EMITTED	1/1
+txfma_c5	PROVEN	proven	526	601	0	0	8.19	6767184	EMITTED	1/1
+txfma_c6	PROVEN	proven	1028	1320	0	0	11.84	6865912	EMITTED	1/1
+intpipe_csr_file	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+txfmactl_top	PROVEN	proven	8508	10045	289	0	137.43	8257228	EMITTED	1/1
+txfma_e1	PROVEN	proven	421	489	0	0	7.71	6745544	EMITTED	1/1
+txfma_e4	PROVEN	proven	4	3	0	0	5.33	6677292	EMITTED	1/1
+txfma_e6	PROVEN	proven	115	133	0	0	5.93	6692144	EMITTED	1/1
+txfma_e2	PROVEN	proven	2017	2161	0	0	17.04	7011292	EMITTED	1/1
+txfma_exp_special_detect	PROVEN	proven	246	360	0	0	6.86	6726652	EMITTED	1/1
+txfma_ediff_opdorder_logic	PROVEN	proven	1397	1445	0	0	12.74	6897992	EMITTED	1/1
+minion_frontend	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+intpipe_rf	PROVEN	proven	1370	1618	65	0	13.72	6916632	EMITTED	1/1
+txfma_f4	PROVEN	proven	3114	4028	6	0	28.83	7271268	EMITTED	1/1
+txfma_f1	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_105292 bits=5 size=8 addr_width=1 type=1 fwd=0 undef=0 posclk=1 wensize=5 rdp
+minion_dcache_top	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+intpipe_top	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+txfma_frac_zero_detect	PROVEN	proven	3	4	0	0	5.32	6679164	EMITTED	1/1
+txfma_lxd	PROVEN	proven	1948	2659	0	0	19.36	7056960	EMITTED	1/1
+txfma_norm_shf	PROVEN	proven	17	19	0	0	5.41	6677796	EMITTED	1/1
+txfma_rnd_adder	PROVEN	proven	33	35	0	0	5.48	6679576	EMITTED	1/1
+txfmafrac_top	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_159544 bits=5 size=8 addr_width=1 type=1 fwd=0 undef=0 posclk=1 wensize=5 rdp
+txfma_top_fake	NO_EMIT(filelist)	blocked-upstream							NO_EMIT	
+txfma_trz	PROVEN	proven	169	167	0	0	6.08	6696192	EMITTED	1/1
+txfma_trz2	PROVEN	proven	984	1189	0	0	11.06	6849988	EMITTED	1/1
+txfma_wallace1	PROVEN	proven	8931	11043	0	0	141.12	8366112	EMITTED	1/1
+txfma_wallace2	PROVEN	proven	5430	6515	0	0	56.25	7678948	EMITTED	1/1
+vpu_bypass	PROVEN	proven	477	554	10	0	7.94	6753948	EMITTED	1/1
+txfma_top	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	[ERROR] pass.lean: memory node n_180048 bits=5 size=8 addr_width=1 type=1 fwd=0 undef=0 posclk=1 wensize=5 rdp
+vpu_decoder	PROVEN	proven	4424	4844	0	0	37.85	7431900	EMITTED	1/1
+vpu_ctrl	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_lane_tima	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_mask	PROVEN	proven	14590	14860	60	0	291.85	8980440	NO_EMIT	1/1
+vpu_ml	PROVEN	proven	4455	5046	170	0	41.08	7477636	EMITTED	1/1
+vpu_rf	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_sh_sw	PROVEN	proven	3014	3224	10	0	23.97	7199852	NO_EMIT	1/1
+vpu_tensora_rf	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_tensorb_rf	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_tensorc_rf	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_tensorfma	PROVEN	proven	2634	2971	123	0	22.58	7131004	EMITTED	1/1
+vpu_tensorquant	PROVEN	proven	1262	1436	34	0	12.73	6893956	EMITTED	1/1
+vpu_tensorreduce	PROVEN	proven	481	546	12	0	7.91	6758824	EMITTED	1/1
+vpu_tensortmp_rf	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+core_top	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_trans	PROVEN	proven	3852	4152	114	0	31.96	7324940	NO_EMIT	1/1
+vpu_lane	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+vpu_uinst_decoder	PROVEN	proven	525	572	0	0	8.01	6760188	EMITTED	1/1
+vpu_txfma_trans_top	NO_EMIT(compile)	blocked-upstream							NO_EMIT	
+minion_top	NO_EMIT(filelist)	blocked-upstream							NO_EMIT	
+vpu_top	NO_EMIT(filelist)	blocked-upstream							NO_EMIT	
+txfma_f5	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	
+txfma_f3	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	
+txfma_e5	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	
+txfmaexp_top	NO_EMIT(single_edge)	blocked-upstream							NO_EMIT	
+txfma_f0	NO_EMIT(timeout)	blocked-upstream							NO_EMIT	
+txfma_f2	NO_EMIT(timeout)	blocked-upstream							NO_EMIT	
+txfma_f6	NO_EMIT(timeout)	blocked-upstream							NO_EMIT	

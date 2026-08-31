@@ -47,10 +47,19 @@ CENSUS="${CENSUS:-$ROOT/generated/core-et/coreet_census.tsv}"
 mkdir -p "$LEANDIR"
 
 # ---------------------------------------------------------------- phase 1: emit
+# Per-module wall cap.  NOT a silent truncation: a module that hits it is
+# recorded as NO_EMIT(timeout) and counted, so the report says what was dropped.
+#
+# Needed because several CORE-ET top-levels (minion_top, vpu_top, txfmaexp_top,
+# the txfma_* family) hang the yosys front end -- the stored census records them
+# as stage=compile / FAIL -- and with 6 jobs they otherwise stall the whole phase
+# for hours before failing anyway.  Modules that succeed take seconds to minutes.
+EMIT_TIMEOUT="${EMIT_TIMEOUT:-900}"
+
 emit_one() {
   local m="$1" log="$OUTDIR/$m.emit.log"
   local rc=0
-  LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LEC_GATE=false STOP_AFTER=lean \
+  timeout "$EMIT_TIMEOUT" env LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LEC_GATE=false STOP_AFTER=lean \
     COREET_TOP="$m" OUT="$OUTDIR/mod/$m" \
     "$ROOT/scripts/run_coreet_module_lean.sh" > "$log" 2>&1 || rc=$?
 
@@ -64,7 +73,8 @@ emit_one() {
   else
     # Name the stage, not just the exit code.
     local stage=unknown
-    if   grep -q 'no \.sv\|missing RTL\|filelist' "$log" 2>/dev/null; then stage=filelist
+    if   [[ "$rc" -eq 124 ]]; then stage=timeout
+    elif grep -q 'no \.sv\|missing RTL\|filelist' "$log" 2>/dev/null; then stage=filelist
     elif grep -q 'compile exit=[1-9]\|"status":"fail"' "$log" 2>/dev/null;  then stage=compile
     elif grep -q 'single_edge' "$log" 2>/dev/null;                          then stage=single_edge
     elif grep -q 'pass.lean' "$log" 2>/dev/null;                            then stage=pass_lean
@@ -86,8 +96,8 @@ fi
 # ------------------------------------------------- phase 1b: same-binary legacy
 legacy_one() {
   local m="$1" log="$OUTDIR/$m.legacy.log"
-  LEAN_MODE=legacy LEAN_EMIT_FAST_BRIDGE=false RUN_LEAN=false RUN_LEC_GATE=false \
-    STOP_AFTER=lean COREET_TOP="$m" OUT="$OUTDIR/legacy/$m" \
+  timeout "$EMIT_TIMEOUT" env LEAN_MODE=legacy LEAN_EMIT_FAST_BRIDGE=false RUN_LEAN=false \
+    RUN_LEC_GATE=false STOP_AFTER=lean COREET_TOP="$m" OUT="$OUTDIR/legacy/$m" \
     "$ROOT/scripts/run_coreet_module_lean.sh" > "$log" 2>&1
   local f
   f="$(find "$OUTDIR/legacy/$m" -name "${m}_Lgraph.lean" 2>/dev/null | head -1)"
@@ -127,7 +137,7 @@ if [[ "$PHASE" == "all" || "$PHASE" == "report" ]]; then
     legacy="$(awk -F'\t' -v M="$m" '$1==M{print $2}' "$LEGACY_TSV" 2>/dev/null | head -1)"
     reason="$(awk -F'\t' -v M="$m" '$1==M{print $3}' "$LEGACY_TSV" 2>/dev/null | head -1)"
     [[ -z "$legacy" ]] && legacy="not-run"
-    prove="$(awk -F'\t' -v M="${m}_Lgraph" '$1==M{print $7"\t"$8"\t"$9"\t"$5"\t"$6}' "$PROVE_TSV" 2>/dev/null | head -1)"
+    prove="$(awk -F'\t' -v M="$m" '$1==M{print $7"\t"$8"\t"$9"\t"$5"\t"$6}' "$PROVE_TSV" 2>/dev/null | head -1)"
     exitc="$(cut -f1 <<<"$prove")"; ax="$(cut -f2 <<<"$prove")"
     verd="$(cut -f3 <<<"$prove")"; wall="$(cut -f4 <<<"$prove")"; rss="$(cut -f5 <<<"$prove")"
 

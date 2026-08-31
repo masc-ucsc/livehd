@@ -373,10 +373,55 @@ missing pin. One CORE-ET module (`core_top`) is blocked this way.
 blocked on them: negedge is `pass.single_edge`'s job, and depth > 1 would need N
 state elements per flop (`FlopDesc.depth` plus a per-flop state list).
 
+## CORE-ET sweep: 71 proven / 51 blocked-upstream / **0 blocked-here**
+
+`pass/lean/SWEEP_b1-b2.tsv`, all 122 modules.
+
+Every module the verified compiler accepted was typechecked and proved — 71/71,
+exit 0, clean axiom audit, no `sorryAx`. 152,434 nodes, 1,428 flops, 5 memory
+arrays; largest `vpu_mask` at 14,860 nodes.
+
+**The verified path is a strict superset of the legacy path here.** Zero modules
+where legacy emits and verified does not; **15 where verified proves what legacy
+cannot even emit** — and those 15 are *exactly* the async-reset set, confirmed by
+set comparison rather than inferred.
+
+Of the 51 blocked upstream, only **7** are fundamental to this model shape
+(genuine multi-clock). The rest: 17 phase-divider memory, 16 pass.lean ROM
+`init`, 9 front-end hangs, 2 `read_slang` failures.
+
+Two harness bugs were found while producing this, each of which would have
+misreported the result. The report looked up `<module>_Lgraph` while
+`run_lean_queue.sh` writes the bare module name, so all 71 proofs were invisible
+and it printed **"56 blocked-here"**. And the stage classifier grepped for
+`"status":"fail"`, which a pass.lean refusal also prints, so 16 pass.lean
+refusals were counted as compile failures. The regenerated report is cross-checked
+on two invariants — every `proven` row has `exit=0` in the queue summary, every
+`blocked-upstream` row has legacy refusing too — 122 rows, zero mismatches.
+
 ## Not done
 
-1. **The full sweep** — 78 CVA6 + 122 CORE-ET, bucketed *proven* /
-   *blocked upstream* / *blocked here*, into `pass/lean/SWEEP_b1-b2.tsv`.
+1. **CVA6.** `scripts/gen_cva6_wrappers.py` generates gate wrappers from slang's
+   elaborated AST; **23 of the 78 targets** now elaborate, against 10 hand-written.
+   The gap is three separate things: 26 targets are mutually exclusive variants
+   absent from this config (needs other configs — the script is config-agnostic),
+   17 skip on unpacked/interface port types, 12 generate but fail on package
+   sub-scopes, enum casts, or member access through a flattened port.
+
+   ~~CORE-ET (122) is running via `scripts/run_vc_sweep.sh`,~~
+   which now compares against a **same-binary legacy baseline** rather than the
+   stored census — the census is dated 2026-08-20 and the flop-pin guard landed
+   2026-08-25, so it reported false regressions (that is how
+   `minion_dcache_miss_handler_unit` first looked like one).
+
+   **CVA6 (78) is blocked on infrastructure that has nothing to do with this
+   branch.** `scripts/cva6_module_wrappers/` holds twelve HAND-WRITTEN
+   SystemVerilog gate modules, each encoding one target's parameters and its
+   `localparam type`s (e.g. `ras_t` is declared inside `frontend.sv:88`, not in a
+   package, so `cva6_ras_gate.sv` re-declares it). There is no generator. Ten of
+   the 78 are proven; reaching the rest means hand-writing ~68 wrappers, which is
+   RTL work, not a script run. The earlier `unknown package 'ariane_pkg'` failure
+   was a symptom of this, not a filelist typo to fix.
 2. **Differential comparison** against the legacy model (verification plan
    step 5).
 3. **The proof-producing reifier** — fixed-width `BitVec` records and fast named

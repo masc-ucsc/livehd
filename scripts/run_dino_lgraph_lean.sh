@@ -26,6 +26,9 @@ RUN_LEC_GATE="${RUN_LEC_GATE:-true}"
 STRICT="${LEAN_STRICT:-true}"
 MAX_WIDTH="${LEAN_MAX_WIDTH:-1048576}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
+# This branch's scalable path.  Set LEAN_MODE=legacy explicitly when comparing
+# against the older per-node generated proof model.
+LEAN_MODE="${LEAN_MODE:-verified_compiler}"
 
 HAGENT_BUILD="${HAGENT_BUILD:-/mada/users/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
 SC_DIR="${SC_DIR:-$HAGENT_BUILD/build_singlecyclecpu_d}"
@@ -88,6 +91,7 @@ run_design() {
     --set formal.lean.strict="$STRICT" \
     --set formal.lean.normalize=true \
     --set formal.lean.emit_cert="$EMIT_CERT" \
+    --set formal.lean.mode="$LEAN_MODE" \
     --set formal.lean.max_width="$MAX_WIDTH" \
     > "$log" 2>&1
   local status=$?

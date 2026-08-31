@@ -54,7 +54,8 @@ wait_for_free_slot() {
 # "the environment appears consistent" into "the environment is consistent".
 echo "[queue] building the Lean support library before any check..."
 if ! ( cd "$ROOT/formal/lean" && "$LAKE" build LeanSemanticPrimitives \
-                                        LeanSemanticPrimitives.Translation.OpBridge ); then
+                                        LeanSemanticPrimitives.Translation.OpBridge \
+                                        LeanSemanticPrimitives.Compiler.CompileDesign ); then
   echo "[queue] FATAL: the Lean support library does not build; refusing to check anything" >&2
   exit 4
 fi
