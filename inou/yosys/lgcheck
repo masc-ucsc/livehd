@@ -563,8 +563,11 @@ run_equiv_yosys() {
   fi
   # Portable watchdog: TERM the solver when the shared budget runs out, KILL it
   # if it ignores that, and report 124 so the caller sees a timeout (not a
-  # refutation) exactly as coreutils `timeout` would. Both loops poll instead of
-  # sleeping the whole span so the watchdog retires right after the solver does.
+  # refutation) exactly as coreutils `timeout` would. The watchdog polls in 1s
+  # ticks, so it must be RETIRED explicitly once the solver returns -- simply
+  # `wait`ing for it blocks until its next tick and added a flat second to every
+  # yosys run (four per lgcheck, and lgcheck runs once per LEC: ~4s of pure sleep
+  # on every check that took milliseconds of real work).
   local fired="$PWD/lgcheck_watchdog.$$"
   rm -f "$fired"
   "$YOSYS" "$@" &
@@ -589,6 +592,10 @@ run_equiv_yosys() {
   local wpid=$!
   local rc=0
   wait "$ypid" || rc=$?
+  # The solver is done; retire the watchdog instead of waiting out its tick. Its
+  # verdict is already recorded: `$fired` is created BEFORE the TERM, so a run
+  # the watchdog killed always leaves the marker behind.
+  kill -TERM "$wpid" 2>/dev/null
   wait "$wpid" 2>/dev/null
   if [ -e "$fired" ]; then
     rc=124

@@ -450,8 +450,8 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
      "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
      "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
-     "its dependents); the built-in path always rebuilds every translation unit. A `build.ninja` reproducing the "
-     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"                       },
+     "its dependents); the built-in path reuses whatever its own depfiles and command stamps show unchanged. A "
+     "`build.ninja` reproducing the exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
     {                   "jobs",
      "0",  Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "

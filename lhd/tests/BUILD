@@ -963,6 +963,12 @@ sh_test(
     name = "sim_color_llvm_smoke",
     size = "large",
     srcs = ["sim_color_llvm_smoke.sh"],
+    # The script builds its thirteen independent sim drivers in parallel waves
+    # (SIM_COLOR_SMOKE_JOBS, default 6). Declare that to Bazel so the test
+    # scheduler reserves the cores instead of stacking this test on top of a
+    # full slate of others -- the wall-clock-sensitive formal budget tests
+    # measure solver seconds and go flaky on an oversubscribed machine.
+    tags = ["cpu:6"],
     data = [
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",

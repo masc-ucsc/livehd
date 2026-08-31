@@ -92,8 +92,16 @@ grep -q "distrib" "$W/budget.out" \
   || fail "the toxic core must name a hard (distrib) obligation: $(cat "$W/budget.out")"
 budget_actual=$(sed -nE 's/.*budget 1s target \/ ([0-9]+\.[0-9]+)s actual.*/\1/p' "$W/budget.out" | head -1)
 [ -n "$budget_actual" ] || fail "could not read actual solver spend: $(cat "$W/budget.out")"
-awk -v actual="$budget_actual" 'BEGIN { exit !(actual < 10.0) }' \
-  || fail "total solver budget not honored: ${budget_actual}s solver time (want < 10s)"
+# This is a BLOWUP guard, not a precision bound. What it discriminates is
+# "the total was honored at all": an obligation that never got a grant does not
+# overshoot by a few seconds, it FREEZES on these 32-bit multiply identities, so
+# any finite bound catches it. The number therefore only has to sit clear of the
+# noise. The reported spend is cvc5's own WALL clock, so it stretches with host
+# load exactly like the `elapsed` cap below does -- measured 11.2s on a machine
+# running the rest of the suite against 5.2s idle, which is what made a 10s
+# bound fail roughly one run in three under `bazel test //lhd/tests:all`.
+awk -v actual="$budget_actual" 'BEGIN { exit !(actual < 20.0) }' \
+  || fail "total solver budget not honored: ${budget_actual}s solver time (want < 20s)"
 # Parsing/lowering and host contention are outside the solver budget. Retain a
 # broad wall cap to catch hangs without making a loaded CI worker fail a solver
 # accounting test whose own report is within bounds.

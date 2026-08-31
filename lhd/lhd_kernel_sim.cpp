@@ -14,6 +14,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <thread>
@@ -2300,23 +2301,137 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
   } else {
-    // Built-in fallback: compile every TU, `jobs` at a time, then link. No
-    // staleness check — this path always rebuilds, because without depfiles it
-    // cannot know which headers a TU read, and a wrong answer there is a
-    // silently stale binary reporting wrong simulation values.
+    // Built-in fallback: compile every TU, `jobs` at a time, then link, SKIPPING
+    // whatever is already up to date. Staleness is decided exactly the way the
+    // generated build.ninja decides it, and for the same reason it is sound
+    // there (see the write-if-different note above): the compiler emits a
+    // depfile (`-MD -MF`), so the headers a TU actually read are KNOWN rather
+    // than guessed, and a stamp beside each output records the command line
+    // that produced it, so a changed flag rebuilds even when no input is newer.
+    //
+    // This path used to rebuild unconditionally, on the grounds that without
+    // depfiles it could not know which headers a TU read. That is true, and the
+    // fix is to ASK the compiler rather than to give up: a build sandbox with no
+    // `ninja` on PATH (bazel's test PATH is exactly that) otherwise pays a full
+    // recompile on every `lhd sim` against an unchanged workdir — seconds per
+    // run, on every run.
+    //
+    // Ninja's freshness rule is reproduced verbatim, including its one gap: an
+    // output is fresh when it is NOT OLDER than its inputs, so a source
+    // rewritten inside the same filesystem timestamp tick as its object is
+    // missed (sub-second stamps make that window vanishing on APFS/ext4/btrfs).
+    auto mtime_of = [](const std::string& path) -> std::optional<fs::file_time_type> {
+      std::error_code ec;
+      const auto      t = fs::last_write_time(path, ec);
+      if (ec) {
+        return std::nullopt;
+      }
+      return t;
+    };
+    auto not_older_than_all = [&](const std::string& out, const std::vector<std::string>& ins) {
+      const auto ot = mtime_of(out);
+      if (!ot) {
+        return false;
+      }
+      for (const auto& in : ins) {
+        const auto it = mtime_of(in);
+        if (!it || *it > *ot) {
+          return false;  // a missing input is a rebuild too: it may reappear
+        }
+      }
+      return true;
+    };
+    auto stamp_path    = [](const std::string& out) { return out + ".cmd"; };
+    auto stamp_matches = [&](const std::string& out, const std::string& cmd) {
+      std::ifstream f(stamp_path(out));
+      if (!f.is_open()) {
+        return false;
+      }
+      const std::string prev((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+      return prev == cmd;
+    };
+    auto drop_stamp = [&](const std::string& out) {
+      std::error_code ec;
+      fs::remove(stamp_path(out), ec);
+    };
+    auto write_stamp = [&](const std::string& out, const std::string& cmd) {
+      std::ofstream f(stamp_path(out));
+      if (f.is_open()) {
+        f << cmd;
+      }
+    };
+    // A `-MD` depfile is one make rule: `out: prereq prereq \<newline> prereq`.
+    // Backslash-newline continues a line and `\ ` is a literal space in a path;
+    // nothing else in the format needs unescaping.
+    auto read_depfile = [](const std::string& dep) {
+      std::vector<std::string> prereqs;
+      std::ifstream            f(dep);
+      if (!f.is_open()) {
+        return prereqs;
+      }
+      const std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+      const auto        colon = all.find(':');
+      if (colon == std::string::npos) {
+        return prereqs;
+      }
+      std::string cur;
+      for (size_t i = colon + 1; i < all.size(); ++i) {
+        const char c = all[i];
+        if (c == '\\' && i + 1 < all.size()) {
+          const char n = all[i + 1];
+          if (n == '\n' || n == '\r') {
+            ++i;
+            continue;
+          }
+          if (n == ' ') {
+            cur += ' ';
+            ++i;
+            continue;
+          }
+        }
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+          if (!cur.empty()) {
+            prereqs.push_back(cur);
+            cur.clear();
+          }
+          continue;
+        }
+        cur += c;
+      }
+      if (!cur.empty()) {
+        prereqs.push_back(cur);
+      }
+      return prereqs;
+    };
+
     std::vector<std::string> cmds(tus.size()), outs(tus.size());
     std::vector<int>         rcs(tus.size(), 0);
     {
       std::atomic<size_t> cursor{0};
       auto                worker = [&] {
         for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          cmds[i] = std::format("{} {}{} -c {} -o {} 2>&1",
-                                shell_quote(cxx),
-                                cflags,
-                                llvm_kernels[i].empty() ? "" : " -emit-llvm",
-                                shell_quote(tus[i]),
-                                shell_quote(compile_objs[i]));
+          const std::string dep = compile_objs[i] + ".d";
+          cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
+                                              shell_quote(cxx),
+                                              cflags,
+                                              llvm_kernels[i].empty() ? "" : " -emit-llvm",
+                                              shell_quote(dep),
+                                              shell_quote(tus[i]),
+                                              shell_quote(compile_objs[i]));
+          if (stamp_matches(compile_objs[i], cmds[i])) {
+            const auto prereqs = read_depfile(dep);
+            // An empty prereq list means no usable depfile (ninja consumes and
+            // deletes them), which is a rebuild, not a free pass.
+            if (!prereqs.empty() && not_older_than_all(compile_objs[i], prereqs)) {
+              outs[i] = "(up to date)\n";
+              continue;
+            }
+          }
+          drop_stamp(compile_objs[i]);
           outs[i] = capture(cmds[i], rcs[i]);
+          if (rcs[i] == 0) {
+            write_stamp(compile_objs[i], cmds[i]);
+          }
         }
       };
       livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
@@ -2359,7 +2474,21 @@ void sim_command(Options& opts, Result& res) {
             llvm_cmds[i] += " " + shell_quote(kernel);
           }
           llvm_cmds[i] += " 2>&1";
-          llvm_outs[i]  = capture(llvm_cmds[i], llvm_rcs[i]);
+          // Inputs are fully known here (no headers), so the depfile has no role:
+          // the module bitcode, every kernel object, and the helper itself — the
+          // helper by path, because a rebuilt optimizer at the same path must not
+          // leave the old native object in place.
+          std::vector<std::string> ins{compile_objs[i], llvm_link_tool};
+          ins.insert(ins.end(), llvm_kernels[i].begin(), llvm_kernels[i].end());
+          if (stamp_matches(objs[i], llvm_cmds[i]) && not_older_than_all(objs[i], ins)) {
+            llvm_outs[i] = "(up to date)\n";
+            continue;
+          }
+          drop_stamp(objs[i]);
+          llvm_outs[i] = capture(llvm_cmds[i], llvm_rcs[i]);
+          if (llvm_rcs[i] == 0) {
+            write_stamp(objs[i], llvm_cmds[i]);
+          }
         }
       };
       livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
@@ -2387,12 +2516,16 @@ void sim_command(Options& opts, Result& res) {
     for (const auto& o : objs) {
       link += " " + shell_quote(o);
     }
-    link          += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
-    int  link_rc   = 0;
-    auto link_out  = capture(link, link_rc);
-    if (link_rc != 0) {
-      fail_build(link + "\n\n" + link_out, link_out);
-      return;
+    link += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
+    if (!stamp_matches(exe, link) || !not_older_than_all(exe, objs)) {
+      drop_stamp(exe);
+      int  link_rc  = 0;
+      auto link_out = capture(link, link_rc);
+      if (link_rc != 0) {
+        fail_build(link + "\n\n" + link_out, link_out);
+        return;
+      }
+      write_stamp(exe, link);
     }
   }
   build_phase.stop();
