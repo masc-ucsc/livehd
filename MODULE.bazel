@@ -184,14 +184,13 @@ http_archive(
 )
 
 # HHDS (plain git repo — see the iassert/hlop note above)
-# CO-DEVELOPMENT: swapped to the local checkout while the attr-only save lands.
-# Restore the git_repository (and bump the commit) before pushing.
-local_repository(name = "hhds", path = "../hhds")
-# git_repository(
-#     name = "hhds",
-#     commit = "767592d84cd6c6d60551316e23035f22869e9b42",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-# )
+git_repository(
+    name = "hhds",
+    commit = "ad9b10a906137ba76e237eed4cbcfcb8e9b6e8d3",  # "code review" (attr-only save landed)
+    remote = "https://github.com/masc-ucsc/hhds.git",
+)
+# For local co-development swap the git_repository above for:
+# local_repository(name = "hhds", path = "../hhds")
 
 # emhash — @hhds//hhds:core|graph dep on it. hhds's own MODULE.bazel declares
 # this wrapper, but a plain-repo fetch does not evaluate MODULE.bazel, so the
