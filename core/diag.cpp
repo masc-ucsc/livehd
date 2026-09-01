@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 #include "hhds/source_excerpt.hpp"
+#include "json_util.hpp"
 
 namespace livehd::diag {
 
@@ -30,31 +31,11 @@ std::string_view to_string(Severity s) {
 
 namespace {
 
-void json_escape(std::string& out, std::string_view s) {
-  for (char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-          out += buf;
-        } else {
-          out += c;
-        }
-    }
-  }
-}
-
 void append_kv_str(std::string& out, std::string_view key, std::string_view val) {
   out += '"';
   out += key;
   out += "\":\"";
-  json_escape(out, val);
+  json_util::escape_append(out, val);
   out += '"';
 }
 
@@ -157,7 +138,7 @@ std::string to_jsonl(const Diagnostic& d, uint64_t seq) {
         out += ',';
       }
       out += '"';
-      json_escape(out, d.see[i]);
+      json_util::escape_append(out, d.see[i]);
       out += '"';
     }
     out += ']';

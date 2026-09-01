@@ -23,6 +23,7 @@
 #include "cgen_llvm.hpp"
 #include "cgen_salt.hpp"       // livehd::kCgenSrcSalt — emitter content hash (L2)
 #include "diag.hpp"            // livehd::diag::err — Stage 0 comb-loop safety net
+#include "hash_util.hpp"
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
@@ -52,20 +53,6 @@ int wbits_of(const hhds::Pin_class& pin) {
   return b <= 0 ? 1 : b;
 }
 
-// EVERY port's clock driver. A Memory carries `<n>clock_pin` per port, so a
-// consumer that keeps ONE answer per array (the sim's array-wide write guard)
-// has to look at all of them before it can trust the first.
-std::vector<hhds::Pin_class> memory_clock_drivers_of(const hhds::Node_class& node) {
-  std::vector<hhds::Pin_class> out;
-  for (const auto& e : node.inp_edges()) {
-    const auto pn = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(e.sink.get_port_id()));
-    if (str_tools::ends_with(pn, "clock_pin")) {
-      out.push_back(e.driver);
-    }
-  }
-  return out;
-}
-
 // Edges of a node sorted by sink port_id (selector/operand order).
 auto sorted_inp(const hhds::Node_class& node) {
   auto edges = node.inp_edges();
@@ -73,42 +60,7 @@ auto sorted_inp(const hhds::Node_class& node) {
   return edges;
 }
 
-const char* op_name(Ntype_op op) {
-  switch (op) {
-    case Ntype_op::Sum       : return "Sum";
-    case Ntype_op::Mult      : return "Mult";
-    case Ntype_op::Div       : return "Div";
-    case Ntype_op::And       : return "And";
-    case Ntype_op::Or        : return "Or";
-    case Ntype_op::Xor       : return "Xor";
-    case Ntype_op::Not       : return "Not";
-    case Ntype_op::LT        : return "LT";
-    case Ntype_op::GT        : return "GT";
-    case Ntype_op::EQ        : return "EQ";
-    case Ntype_op::SHL       : return "SHL";
-    case Ntype_op::SRA       : return "SRA";
-    case Ntype_op::Mux       : return "Mux";
-    case Ntype_op::Hotmux    : return "Hotmux";
-    case Ntype_op::Get_mask  : return "Get_mask";
-    case Ntype_op::Set_mask  : return "Set_mask";
-    case Ntype_op::Sext      : return "Sext";
-    case Ntype_op::Concat    : return "Concat";
-    case Ntype_op::Ror       : return "Ror";
-    case Ntype_op::LUT       : return "LUT";
-    case Ntype_op::IO        : return "IO";
-    case Ntype_op::Memory    : return "Memory";
-    case Ntype_op::Flop      : return "Flop";
-    case Ntype_op::Latch     : return "Latch";
-    case Ntype_op::Fflop     : return "Fflop";
-    case Ntype_op::Sub       : return "Sub";
-    case Ntype_op::Nconst    : return "Nconst";
-    case Ntype_op::Clock_cell: return "Clock_cell";
-    case Ntype_op::Rem       : return "Rem";
-    case Ntype_op::AttrSet   : return "AttrSet";
-    case Ntype_op::Invalid   : return "Invalid";
-    default                  : return "op?";
-  }
-}
+const char* op_name(Ntype_op op) { return Ntype::get_name(op).data(); }
 
 // ---- Dead-temporary sweep over ONE finished method body ----
 //
@@ -515,36 +467,7 @@ hhds::Pin_class Cgen_sim::get_driver(const hhds::Pin_class& sink) {
 }
 
 hhds::Pin_class Cgen_sim::find_sink_pin(const hhds::Node_class& node, std::string_view name) {
-  if (node.is_invalid()) {
-    return {};
-  }
-  auto op = type_op_of(node);
-  if (op == Ntype_op::Sub) {
-    // Same invalid-on-miss contract for sub instances: resolve the name via the
-    // sub-graph's GraphIO decls and walk inp_edges — a declared input that was
-    // never connected has no materialized pin, and hhds get_sink_pin asserts.
-    auto sub_io = node.get_subnode_io();
-    if (!sub_io || !sub_io->has_input(name)) {
-      return {};
-    }
-    auto pid = sub_io->get_input_port_id(name);
-    for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_port_id() == pid) {
-        return e.sink;
-      }
-    }
-    return {};
-  }
-  auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
-    return {};
-  }
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.sink;
-    }
-  }
-  return {};
+  return livehd::graph_util::find_sink_pin(node, name);
 }
 
 hhds::Pin_class Cgen_sim::find_driver_pin(const hhds::Node_class& node, std::string_view name) {
@@ -643,11 +566,7 @@ std::string sim_const_expr(std::string_view pyrope_text, std::string_view width)
   // spelling) has exactly ONE static in the whole program however many sites
   // emit it. Shared with the too-wide-to-constant-evaluate path below.
   const auto once_per_program = [&] {
-    uint64_t key = 0xcbf29ce484222325ULL;
-    for (unsigned char ch : pyrope_text) {
-      key ^= ch;
-      key *= 0x100000001b3ULL;
-    }
+    const auto key = livehd::hash_util::fnv1a64(pyrope_text);
     return absl::StrCat("__lhd_unknown_literal<", width, ", ", key, "ull>(\"", pyrope_text, "\")");
   };
   if (pyrope_text.find('?') != std::string_view::npos) {
@@ -2217,24 +2136,14 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // parent with a stale child that declares no `refresh_negedge()`.
 static constexpr std::string_view kSimGenVersion = "simgen-64";
 
-static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
-  for (int i = 0; i < 8; ++i) {
-    h ^= (v >> (i * 8)) & 0xffu;
-    h *= 0x100000001b3ULL;
-  }
-  return h;
-}
+static inline uint64_t fnv1a(uint64_t h, uint64_t v) { return livehd::hash_util::fnv1a64_u64(v, h); }
 static inline uint64_t fnv1a_str(uint64_t h, std::string_view s) {
-  for (unsigned char c : s) {
-    h ^= c;
-    h *= 0x100000001b3ULL;
-  }
-  return fnv1a(h, s.size());
+  return livehd::hash_util::fnv1a64_u64(s.size(), livehd::hash_util::fnv1a64(s, h));
 }
 
 uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
   namespace gu                                       = livehd::graph_util;
-  uint64_t                                         h = 0xcbf29ce484222325ULL;
+  uint64_t                                         h = livehd::hash_util::kFnv1a64_offset;
   absl::flat_hash_map<hhds::Class_index, uint32_t> seq;
   uint32_t                                         ni = 0;
   for (auto n : g->body().nodes()) {
@@ -2948,7 +2857,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // member), so it recompiles when this interface changes, not when the body
   // (in the .cpp) does. The cycle()/reset_cycle() bodies live in the .cpp and
   // are compiled exactly once.
-  hout->append("// Generated by inou.cgen.sim (LiveHD, TODO 3d). Do not edit.\n");
+  hout->append("// Generated by inou.cgen.sim (LiveHD). Do not edit.\n");
   hout->append(
       "#pragma once\n#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n#include <vector>\n"
       "#include \"slop.hpp\"\n#include \"memory.hpp\"\n");
@@ -2966,7 +2875,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   // Source (<name>.cpp): includes its own header (which transitively pulls the
   // child interface headers) and holds every method body.
-  fout->append("// Generated by inou.cgen.sim (LiveHD, TODO 3d). Do not edit.\n");
+  fout->append("// Generated by inou.cgen.sim (LiveHD). Do not edit.\n");
   fout->append(absl::StrCat("#include \"", fstem, ".hpp\"\n"));
   fout->append("#include \"checkpoint.hpp\"  // name-keyed dump_state/load_state helpers\n");
   fout->append("#include <cassert>\n#include <cstddef>\n");
@@ -3146,12 +3055,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // probe must see every port's clock, and two DIFFERENT ones are refused
       // outright: inspecting one port and folding another's cone silently
       // either drops a gate or applies it to writes it does not qualify.
-      auto                         drivers = memory_clock_drivers_of(node);
       std::vector<hhds::Pin_class> distinct;
-      for (const auto& raw : drivers) {
+      livehd::graph_util::for_each_memory_clock_driver(node, [&](const hhds::Pin_class& raw) {
         auto rd = resolve_passthrough(raw);
         if (rd.is_invalid()) {
-          continue;
+          return;
         }
         const bool dup = std::any_of(distinct.begin(), distinct.end(), [&](const hhds::Pin_class& o) {
           return o.get_class_index() == rd.get_class_index();
@@ -3159,7 +3067,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!dup) {
           distinct.push_back(rd);
         }
-      }
+      });
       if (distinct.size() > 1) {
         livehd::diag::err("inou.cgen.sim", "gated-clock-unsupported", "unsupported")
             .msg("module `{}`: memory `{}` has {} distinct port clocks; inou.cgen.sim models one clock per array",

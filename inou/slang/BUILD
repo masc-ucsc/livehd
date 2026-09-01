@@ -18,6 +18,7 @@ cc_library(
     deps = [
         "@slang",  # Must be before pass because both have FMT and pass has priority (or slang fails)
     ] + [
+        "//core",
         "//pass/common:pass",
     ],
     alwayslink = True,  # Needed to have constructor called

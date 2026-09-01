@@ -30,7 +30,7 @@ void Inou_cgen::setup() {
   m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment)", "false");
   register_inou("cgen", m1);
 
-  // inou.cgen.sim — executable simulator code from an Lgraph (TODO 3d). Per-module
+  // inou.cgen.sim — executable simulator code from an Lgraph. Per-module
   // <name>.hpp written into `odir`; the standalone Bazel module scaffold around
   // them is written by the kernel's emit_sim_outputs.
   Eprp_method m2("inou.cgen.sim", "export executable simulator code from an Lgraph", &Inou_cgen::to_cgen_sim);
@@ -130,18 +130,18 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   TRACE_EVENT("inou", "sim_gen");
 
-  Inou_cgen  pp(var);
-  auto       dir               = pp.get_odir(var);
-  auto       vcd_out           = var.get("vcd");
-  auto       top               = var.get("top");
-  auto       fakedelay         = var.get("vcd_fake_delay");
-  auto       observe_s         = var.get("observe");
-  auto       runtime_support_s = var.get("runtime_support");
-  auto       slop_u_s          = var.get("slop_u");
-  auto       color_dirty_s     = var.get("color_dirty");
-  auto       debug_s           = var.get("debug");
-  auto       unknown_zero_s    = var.get("unknown_zero");
-  auto       backend           = var.get("backend");
+  Inou_cgen pp(var);
+  auto      dir               = pp.get_odir(var);
+  auto      vcd_out           = var.get("vcd");
+  auto      top               = var.get("top");
+  auto      fakedelay         = var.get("vcd_fake_delay");
+  auto      observe_s         = var.get("observe");
+  auto      runtime_support_s = var.get("runtime_support");
+  auto      slop_u_s          = var.get("slop_u");
+  auto      color_dirty_s     = var.get("color_dirty");
+  auto      debug_s           = var.get("debug");
+  auto      unknown_zero_s    = var.get("unknown_zero");
+  auto      backend           = var.get("backend");
   if (backend != "slop" && backend != "llvm") {
     livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("sim.backend expects slop|llvm, got '{}'", backend).emit();
     return;
@@ -406,18 +406,18 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const auto  plan_it = root_color_plans.find(g.get());
     const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
     Cgen_sim    p(dir,
-                  vcd_out,
-                  top,
-                  fakedelay,
-                  plan,
-                  compact_kernel_defs.contains(g.get()),
-                  observe_on,
-                  runtime_support_on,
-                  slop_u_on,
-                  color_dirty_on,
-                  debug_on,
-                  unknown_zero_on,
-                  backend == "llvm");
+               vcd_out,
+               top,
+               fakedelay,
+               plan,
+               compact_kernel_defs.contains(g.get()),
+               observe_on,
+               runtime_support_on,
+               slop_u_on,
+               color_dirty_on,
+               debug_on,
+               unknown_zero_on,
+               backend == "llvm");
     p.share_digest_memo(&digest_memo);
     p.do_from_graph(g);
   }

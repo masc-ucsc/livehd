@@ -2,9 +2,8 @@
 // details.
 #pragma once
 
-// Host memory facts for ABC memory admission (todo/livehd/2opt-incr.html
-// subtask 0): how much RAM this machine really has, and how much this process
-// is really using, right now.
+// Host memory facts for ABC memory admission: how much RAM this machine really
+// has, and how much this process is really using, right now.
 //
 // PHYSICAL memory only -- never swap, never "available including compressed".
 // The failure this guards against is the one that already happened: a

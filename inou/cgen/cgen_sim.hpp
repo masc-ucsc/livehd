@@ -19,7 +19,7 @@ class Color_plan;
 }
 
 // Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
-// library (TODO 3d, inou.cgen.sim). Structural twin of Cgen_verilog (same
+// library (inou.cgen.sim). Structural twin of Cgen_verilog (same
 // body().nodes(hhds::Node_order::forward) walk + Ntype_op dispatch via livehd::graph_util), but emits a
 // functional `Out cycle(In)` struct instead of inlined Verilog: one flat SSA
 // binding (Slop<W> v = a.op(b);) per node, registers as struct members. Each

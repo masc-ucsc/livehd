@@ -12,6 +12,7 @@
 
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "str_tools.hpp"
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_coalescer.hpp.
@@ -23,17 +24,14 @@ void uPass_coalescer::set_options(const upass::Options_map& opts) {
   if (it == opts.end()) {
     return;
   }
-  // Match the same lower/0/false/no/off truthiness convention pass.upass uses.
   // "auto" (the pass.upass label DEFAULT — every runner gets the label, so a
   // key-present check cannot tell "user said 1" from "nobody said anything")
   // keeps the begin_iteration verilog-origin self-disable armed; an explicit
   // 0/1 pins the behavior.
-  std::string v = it->second;
-  std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (v == "auto") {
+  if (str_tools::ascii_fold(it->second) == "auto") {
     return;
   }
-  enabled        = !(v.empty() || v == "0" || v == "false" || v == "no" || v == "off");
+  enabled        = str_tools::option_is_true(it->second);
   enabled_forced = true;
 }
 

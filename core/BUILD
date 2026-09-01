@@ -140,4 +140,13 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "util_smoke",
+    srcs = ["tests/util_smoke.cpp"],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # lconst tests removed; equivalent coverage lives in @hlop//hlop:dlop_test

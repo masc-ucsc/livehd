@@ -276,7 +276,7 @@ protected:
   // dispatch, combine the votes with the legacy classify_statement, emit.
   void process_drop_candidate_push(upass::Push_method fn, bool fold_all);
 
-  // task 2n Phase B: record one LSP semantic-index entry for the variable
+  // Record one LSP semantic-index entry for the variable
   // DEFINED at the current op node (its source-level name, resolved type/range,
   // and statement span), for textDocument/hover. Only the caller's
   // livehd::lsp_index::index().enabled() gate (set by the LSP, never the CLI)

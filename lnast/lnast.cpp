@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "hash_util.hpp"
+
 namespace {
 // Pre-register every Lnast attribute tag at static-init time. The HHDS
 // attribute registry is not thread-safe on first-touch — two threads racing
@@ -284,17 +286,13 @@ void Lnast::rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool) {
 }
 
 uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap) const {
-  constexpr uint64_t kFnvOffset = 0xcbf29ce484222325ULL;
-  constexpr uint64_t kFnvPrime  = 0x100000001b3ULL;
+  namespace hu = livehd::hash_util;
 
-  uint64_t h   = kFnvOffset;
+  uint64_t h   = hu::kFnv1a64_offset;
   auto     mix = [&h](std::string_view s) {
-    for (const unsigned char c : s) {
-      h ^= c;
-      h *= kFnvPrime;
-    }
+    h  = hu::fnv1a64(s, h);
     h ^= 0xffu;  // field separator so ("ab","c") and ("a","bc") differ
-    h *= kFnvPrime;
+    h *= hu::kFnv1a64_prime;
   };
 
   const auto parent = get_parent(ref_nid);

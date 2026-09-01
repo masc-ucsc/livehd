@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "json_util.hpp"
 #include "rapidjson/document.h"
 
 namespace livehd::formal {
@@ -18,28 +19,7 @@ namespace {
 
 constexpr int kSchema = 1;
 
-// Minimal JSON string escape (mirror of lhd_kernel's json_escape_min, kept
-// local so the cache stays a leaf module).
-std::string esc(std::string_view s) {
-  std::string o;
-  o.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-      case '"': o += "\\\""; break;
-      case '\\': o += "\\\\"; break;
-      case '\n': o += "\\n"; break;
-      case '\r': o += "\\r"; break;
-      case '\t': o += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          o += std::format("\\u{:04x}", static_cast<unsigned char>(c));
-        } else {
-          o += c;
-        }
-    }
-  }
-  return o;
-}
+std::string esc(std::string_view text) { return json_util::escape(text); }
 
 }  // namespace
 
@@ -148,7 +128,7 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
 
 std::optional<Cached_verdict> Verdict_cache::lookup(const std::string& key) {
   std::lock_guard lock(mutex_);
-  auto it = verdicts_.find(key);
+  auto            it = verdicts_.find(key);
   if (it == verdicts_.end()) {
     return std::nullopt;
   }
@@ -165,7 +145,7 @@ void Verdict_cache::insert(const std::string& key, Cached_verdict v) {
 
 std::optional<Strategy_hint> Verdict_cache::hint(const std::string& entity) const {
   std::lock_guard lock(mutex_);
-  auto it = hints_.find(entity);
+  auto            it = hints_.find(entity);
   if (it == hints_.end()) {
     return std::nullopt;
   }
@@ -180,7 +160,7 @@ void Verdict_cache::set_hint(const std::string& entity, Strategy_hint h) {
 
 std::optional<Pair_hint> Verdict_cache::pair_hint(const std::string& entity) const {
   std::lock_guard lock(mutex_);
-  auto it = pair_hints_.find(entity);
+  auto            it = pair_hints_.find(entity);
   if (it == pair_hints_.end()) {
     return std::nullopt;
   }
@@ -202,7 +182,7 @@ void Verdict_cache::clear_pair_hint(const std::string& entity) {
 
 bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
   std::lock_guard lock(mutex_);
-  auto it = unknowns_.find(key);
+  auto            it = unknowns_.find(key);
   if (it == unknowns_.end()) {
     return false;
   }
@@ -266,12 +246,12 @@ void Verdict_cache::save() const {
   out += std::format("  \"salt\": \"{:016x}\",\n", salt_);
   out += "  \"verdicts\": {\n";
   for (size_t i = 0; i < vkeys.size(); ++i) {
-    const auto& v = verdicts_.at(vkeys[i]);
-    out += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}}}{}\n",
-                                 esc(vkeys[i]),
-                                 esc(v.engine),
-                                 esc(v.detail),
-                                 v.elapsed_ms,
+    const auto& v  = verdicts_.at(vkeys[i]);
+    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}}}{}\n",
+                       esc(vkeys[i]),
+                       esc(v.engine),
+                       esc(v.detail),
+                       v.elapsed_ms,
                        i + 1 < vkeys.size() ? "," : "");
   }
   out += "  },\n";
@@ -284,23 +264,23 @@ void Verdict_cache::save() const {
     }
     std::sort(ukeys.begin(), ukeys.end());
     for (size_t i = 0; i < ukeys.size(); ++i) {
-      const auto& a = unknowns_.at(ukeys[i]);
-      out += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
-                                   esc(ukeys[i]),
-                                   a.timeout,
-                                   a.elapsed_ms,
-                                   i + 1 < ukeys.size() ? "," : "");
+      const auto& a  = unknowns_.at(ukeys[i]);
+      out           += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
+                         esc(ukeys[i]),
+                         a.timeout,
+                         a.elapsed_ms,
+                         i + 1 < ukeys.size() ? "," : "");
     }
   }
   out += "  },\n";
   out += "  \"hints\": {\n";
   for (size_t i = 0; i < hkeys.size(); ++i) {
-    const auto& h = hints_.at(hkeys[i]);
-    out += std::format("    \"{}\": {{\"engine\": \"{}\", \"split\": \"{}\", \"ms\": {}}}{}\n",
-                                 esc(hkeys[i]),
-                                 esc(h.engine),
-                                 esc(h.split),
-                                 h.elapsed_ms,
+    const auto& h  = hints_.at(hkeys[i]);
+    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"split\": \"{}\", \"ms\": {}}}{}\n",
+                       esc(hkeys[i]),
+                       esc(h.engine),
+                       esc(h.split),
+                       h.elapsed_ms,
                        i + 1 < hkeys.size() ? "," : "");
   }
   out += "  },\n";

@@ -17,6 +17,7 @@
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/tree_edit_distance.hpp"
+#include "json_util.hpp"
 #include "latch_contract.hpp"
 #include "legalize.hpp"
 #include "lhd_compile_cache.hpp"
@@ -788,33 +789,9 @@ std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln) {
   return out;
 }
 
-std::string json_escape_min(std::string_view s) {
-  // Full JSON string escaping: a raw newline/tab/control byte (e.g. in a unit
-  // name or import string) would otherwise produce invalid JSON. Mirrors
-  // core/diag.cpp json_escape.
-  std::string out;
-  for (char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-          out += buf;
-        } else {
-          out += c;
-        }
-    }
-  }
-  return out;
-}
+std::string json_escape_min(std::string_view text) { return livehd::json_util::escape(text); }
 
-// `lhd scan FILES...` — emit each pyrope file's import strings (raw, as
-// written; resolution lands with the task_1m_plan.md resolver). The payload
+// `lhd scan FILES...` — emit each pyrope file's import strings as written. The payload
 // rides the result envelope as the "scan" member, so BUILD generators
 // (gazelle-style) and depfile writers can consume one JSON object.
 void scan_command(Options& opts, Result& res) {
@@ -1601,7 +1578,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
   emit_isabelle_outputs(opts, res, var);
   emit_lean_outputs(opts, res, var);
   emit_verilog_outputs(opts, res, var);
-  emit_sim_outputs(opts, res, var);  // --emit-dir sim:DIR/ (inou.cgen.sim, TODO 3d)
+  emit_sim_outputs(opts, res, var);  // --emit-dir sim:DIR/ (inou.cgen.sim)
   // ln: emit is handled per-path by the caller (source publish vs plain forest),
   // so it is NOT done here.
   emit_pyrope_outputs(opts, res, var);             // --emit-dir pyrope:DIR/ (one .prp per unit)

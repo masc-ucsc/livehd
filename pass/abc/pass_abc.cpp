@@ -19,6 +19,7 @@
 #include "abc_map.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
+#include "json_util.hpp"
 #include "mem_lower.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
@@ -173,28 +174,7 @@ std::string default_library() {
 
 bool truthy(std::string_view v) { return v != "false" && v != "0" && v != ""; }
 
-// Minimal JSON string escape (module names / file paths can carry quotes or
-// backslashes; anything below 0x20 is escaped numerically).
-std::string jesc(std::string_view s) {
-  std::string out;
-  out.reserve(s.size());
-  for (char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\t': out += "\\t"; break;
-      case '\r': out += "\\r"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
-        } else {
-          out.push_back(c);
-        }
-    }
-  }
-  return out;
-}
+std::string jesc(std::string_view text) { return livehd::json_util::escape(text); }
 
 // Aggregate the per-region QoR rows, print the one-line summary (the step log
 // under lhd), and optionally write the qor.json sidecar (2opt-freq A). The
@@ -860,7 +840,7 @@ void Pass_abc::work(Eprp_var& var) {
     }
   }
 
-  // Memory admission (2opt-incr subtask 0). Raised HERE, not from map_region:
+  // Raise memory admission here, not from map_region:
   // .fatal() throws, and build_decomposition's callback runs above stop(), so
   // throwing from the region would skip Abc_Stop and leak the frame plus every
   // live network -- the opposite of what a memory guard should do.

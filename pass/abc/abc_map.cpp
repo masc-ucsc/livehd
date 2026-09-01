@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Region body <-> ABC translation for pass.abc (task 2a-abc). Each colored
+// Region body <-> ABC translation for pass.abc. Each colored
 // region (handed over by pass.partition's decomposition seam) is bit-blasted
 // into an ABC AIG netlist, optimized + technology-mapped by ABC against a
 // Liberty library, and read back as a netlist of 1-bit blackbox Sub cells named
@@ -890,7 +890,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-      "(was {} MiB, color added {} MiB){}, {}{}",
+                     "(was {} MiB, color added {} MiB){}, {}{}",
       region,
       blasted,
       total,
@@ -1303,12 +1303,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   constexpr size_t kMaxRefusals = 10;
   size_t           refusals     = 0;
   const auto       refuse       = [&](const hhds::Node_class& bad,
-                                      std::string_view        code,
-                                      std::string_view        category,
-                                      std::string_view        what,
-                                      std::string_view        hint     = {},
-                                      const hhds::Pin_class&  note_pin = {},
-                                      std::string_view        note_msg = {}) {
+                          std::string_view        code,
+                          std::string_view        category,
+                          std::string_view        what,
+                          std::string_view        hint     = {},
+                          const hhds::Pin_class&  note_pin = {},
+                          std::string_view        note_msg = {}) {
     unsupported = true;
     if (refusals++ >= kMaxRefusals) {
       return;  // counted; the post-loop summary reports the total

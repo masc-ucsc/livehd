@@ -9,6 +9,7 @@
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "str_tools.hpp"
 
 namespace livehd::color {
 
@@ -23,8 +24,7 @@ static bool is_special_wire_name(std::string_view wn) {
   if (wn.empty()) {
     return false;
   }
-  std::string lower(wn);
-  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+  const auto lower = str_tools::ascii_fold(wn);
   return lower.starts_with("clk") || lower.starts_with("clock") || lower.starts_with("rst") || lower.starts_with("reset");
 }
 

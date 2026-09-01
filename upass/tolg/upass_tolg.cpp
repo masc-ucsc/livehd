@@ -26,6 +26,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hlop/dlop.hpp"
+#include "json_util.hpp"
 #include "latch_contract.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
@@ -135,9 +136,9 @@ struct Val {
 // helpers register as "<file>.<outer>.<name>", and two same-named helpers in
 // sibling scopes otherwise make the suffix scan ambiguous), else a UNIQUE
 // "<module>.<name>" suffix match.
-[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view name,
+[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
                                                           const std::vector<std::shared_ptr<Lnast>>& registry,
-                                                          std::string_view caller_unit = {}) {
+                                                          std::string_view                           caller_unit = {}) {
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
   int                    suffix_matches = 0;
@@ -1330,22 +1331,8 @@ private:
                 lnast_->get_top_module_name());
       }
     }
-    auto jesc = [](std::string_view sv) {
-      std::string out;
-      out.reserve(sv.size());
-      for (char ch : sv) {
-        switch (ch) {
-          case '"' : out += "\\\""; break;
-          case '\\': out += "\\\\"; break;
-          case '\n': out += "\\n"; break;
-          case '\t': out += "\\t"; break;
-          default  : out.push_back(ch);
-        }
-      }
-      return out;
-    };
     std::string j  = "{\"schema_version\":1,";
-    j             += std::format("\"top\":\"{}\",", jesc(lnast_->get_graph_name()));
+    j             += std::format("\"top\":\"{}\",", livehd::json_util::escape(lnast_->get_graph_name()));
     j             += "\"algorithm\":\"block-attr\",\"params\":{},\"colors\":{},"
                      "\"region_opts\":{";
     bool first     = true;
@@ -1354,7 +1341,7 @@ private:
         j += ",";
       }
       first  = false;
-      j     += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, jesc(abc));
+      j     += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, livehd::json_util::escape(abc));
     }
     j += "}}";
     g_->get_input_node().attr(livehd::attrs::coloring_info).set(j);

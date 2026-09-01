@@ -194,7 +194,7 @@ struct match_t {
 };
 inline constexpr match_t match{};
 
-// Per-node formal-verification status (pass/formal, task 2f-formal). SPARSE
+// Per-node formal-verification status. SPARSE
 // (like match) so 0 is a real value. `proven` marks an obligation (a user
 // assert / assume / a built-in Hotmux one-hotness) that pass.formal discharged
 // by SMT: cgen elides its runtime check, and pass.abc may exploit a proven

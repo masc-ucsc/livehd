@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -19,6 +20,17 @@ class Lnast;
 namespace lhd {
 
 namespace fs = std::filesystem;
+
+// Cross-frontend graph names pair by canonical entity only when that entity is
+// unique within one side; ambiguous names retain their full spelling.
+class Entity_canonicalizer {
+public:
+  explicit Entity_canonicalizer(const Eprp_var& var);
+  [[nodiscard]] std::string operator()(std::string_view full_name) const;
+
+private:
+  std::unordered_map<std::string, size_t> counts_;
+};
 
 inline constexpr uint32_t kHhdsGraphBodyMagic = 0x48484742;  // "HHGB"
 inline constexpr uint32_t kHhdsTreeBodyMagic  = 0x48485442;  // "HHTB"

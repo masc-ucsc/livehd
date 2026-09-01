@@ -22,7 +22,9 @@
 #include "cell.hpp"  // Ntype_op
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
+#include "hash_util.hpp"
 #include "hhds/attrs/name.hpp"
+#include "json_util.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
 #include "semdiff.hpp"  // structural_identical
@@ -41,26 +43,8 @@ namespace gu = livehd::graph_util;
   return on;
 }
 
-// ---------------------------------------------------------------------------
-// Hash toolkit -- kept for Incr_cache::make_salt.
-// ---------------------------------------------------------------------------
-constexpr uint64_t mix64(uint64_t x) {
-  x ^= x >> 33U;
-  x *= 0xff51afd7ed558ccdULL;
-  x ^= x >> 33U;
-  x *= 0xc4ceb9fe1a85ec53ULL;
-  x ^= x >> 33U;
-  return x;
-}
-constexpr uint64_t hcombine(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
-uint64_t           hstr(std::string_view s) {
-  uint64_t h = 1469598103934665603ULL;  // FNV-1a
-  for (char c : s) {
-    h ^= static_cast<unsigned char>(c);
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
+using hash_util::combine64;
+using hash_util::fnv1a64;
 
 std::string digest_key(uint64_t h0, uint64_t h1, std::string_view recipe) {
   return std::format("{:016x}{:016x}|{}", h0, h1, recipe);
@@ -597,22 +581,6 @@ void Incr_cache::save() {
   }
   std::sort(keys.begin(), keys.end(), [](const auto* a, const auto* b) { return *a < *b; });
 
-  auto jesc = [](std::string_view s) {
-    std::string o;
-    o.reserve(s.size() + 8);
-    for (char c : s) {
-      switch (c) {
-        case '"' : o += "\\\""; break;
-        case '\\': o += "\\\\"; break;
-        case '\n': o += "\\n"; break;
-        case '\r': o += "\\r"; break;
-        case '\t': o += "\\t"; break;
-        default  : o += c; break;
-      }
-    }
-    return o;
-  };
-
   std::string out   = std::format("{{\"schema\":3,\"salt\":\"{:016x}\",\"regions\":{{", salt_);
   bool        first = true;
   for (const auto* k : keys) {
@@ -622,16 +590,16 @@ void Incr_cache::save() {
     }
     first  = false;
     out   += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
-                       jesc(*k),
-                       jesc(r.module),
-                       jesc(r.pre),
-                       jesc(r.recipe));
+                       json_util::escape(*k),
+                       json_util::escape(r.module),
+                       json_util::escape(r.pre),
+                       json_util::escape(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
-      out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.in[i]));
+      out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.in[i]));
     }
     out += "],\"out\":[";
     for (size_t i = 0; i < r.out.size(); ++i) {
-      out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.out[i]));
+      out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.out[i]));
     }
     out += std::format(
         "],\"gates\":{},\"area\":{},\"delay\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{},\"digest\":\"{:"
@@ -639,8 +607,8 @@ void Incr_cache::save() {
         r.gates,
         r.area,
         r.delay,
-        jesc(r.crit_output),
-        jesc(r.crit_src),
+        json_util::escape(r.crit_output),
+        json_util::escape(r.crit_src),
         r.div_blackbox,
         r.digest0,
         r.digest1);
@@ -675,17 +643,17 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // v6: the formal-assume don't-care inputs left the salt with the EXDC item
   // (2026-08-01) -- a v5 salt mixed in two bools that no longer exist.
   // v7: rows carry canonical digests and same-run cross-name reuse is enabled.
-  uint64_t h = hstr("abc-incr-v8");
-  h          = hcombine(h, kAbcSrcSalt);
+  uint64_t h = fnv1a64("abc-incr-v8");
+  h          = combine64(h, kAbcSrcSalt);
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    h = hcombine(h, hstr(bytes));
+    h = combine64(h, fnv1a64(bytes));
   } else {
-    h = hcombine(h, hstr(library_path));
+    h = combine64(h, fnv1a64(library_path));
   }
-  h = hcombine(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(map_memory));
-  h = hcombine(h, hstr(dff_cell));
+  h = combine64(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(map_memory));
+  h = combine64(h, fnv1a64(dff_cell));
   return h;
 }
 

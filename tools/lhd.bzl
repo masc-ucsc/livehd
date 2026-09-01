@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-"""Thin Starlark ruleset over the `lhd` stateless kernel (task 1y-bazel).
+"""Thin Starlark ruleset over the `lhd` stateless kernel.
 
 The kernel is a pure function (declared inputs, config) -> (declared outputs,
 exit code), so wiring it as a build action is a genrule: every input is

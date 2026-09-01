@@ -40,6 +40,7 @@
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
 #include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
+#include "str_tools.hpp"
 #include "taskflow/taskflow.hpp"
 
 namespace lhd {
@@ -364,35 +365,7 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
 // Entity tail of a full graph name ("file.entity" -> "entity"): the pair-hint
 // key basis on the non-hier path, aligned with the hier driver's entity-canon
 // def keys so a design proven either way shares its pair hints.
-static std::string lec_entity_of(std::string_view n) {
-  auto        d = n.rfind('.');
-  std::string entity(d == std::string_view::npos ? n : n.substr(d + 1));
-  const auto  spec = entity.find("__");
-  if (spec == std::string::npos || spec == 0 || spec + 2 >= entity.size()) {
-    return entity;
-  }
-  // uPass gives primitive-type template specializations a deterministic
-  // `<base>__uN_sN_bool` name. Slang has the already-elaborated module under
-  // `<base>`. Treat those as the same entity only when every suffix token is a
-  // primitive width; named/generic-value specializations remain distinct.
-  size_t p = spec + 2;
-  while (p < entity.size()) {
-    const size_t end   = entity.find('_', p);
-    const auto   token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
-    bool         width = token == "bool";
-    if (!width && token.size() >= 2 && (token[0] == 'u' || token[0] == 's')) {
-      width = std::all_of(token.begin() + 1, token.end(), [](unsigned char c) { return std::isdigit(c); });
-    }
-    if (!width) {
-      return entity;
-    }
-    if (end == std::string::npos) {
-      return entity.substr(0, spec);
-    }
-    p = end + 1;
-  }
-  return entity;
-}
+static std::string lec_entity_of(std::string_view n) { return str_tools::canonical_entity_name(n); }
 
 // If a refute's FIRST diverging signal is a TRUSTED box's input
 // ("bbin:<def>#inst:sig"), return that trusted def; else "". A trust box asserts
@@ -544,9 +517,9 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
     //     (proven at every occurrence under the parents' bindings). The encoder
     //     does not turn that into a hypothesis for the def on its own, so it is
     //     neither active nor an unchecked promotion here.
-    const auto base        = node.base_node();
-    const bool proven_hier = livehd::graph_util::has_proven(base)
-                             && livehd::graph_util::proven_of(base) == livehd::graph_util::kFormalAssumeHier;
+    const auto base = node.base_node();
+    const bool proven_hier
+        = livehd::graph_util::has_proven(base) && livehd::graph_util::proven_of(base) == livehd::graph_util::kFormalAssumeHier;
     if (!nocheck_by_name && (!livehd::graph_util::has_proven(base) || proven_hier)) {
       continue;
     }
@@ -618,27 +591,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     return trust_set.count(std::string{key}) > 0 || trust_set.count(entity_of(key)) > 0;
   };
-  absl::flat_hash_map<std::string, int> ref_ent_cnt, impl_ent_cnt;
-  for (auto& g : ref_var.graphs) {
-    if (g) {
-      ref_ent_cnt[entity_of(g->get_name())]++;
-    }
-  }
-  for (auto& g : impl_var.graphs) {
-    if (g) {
-      impl_ent_cnt[entity_of(g->get_name())]++;
-    }
-  }
-  auto canon_ref = [&](std::string_view full) -> std::string {
-    auto e  = entity_of(full);
-    auto it = ref_ent_cnt.find(e);
-    return it != ref_ent_cnt.end() && it->second == 1 ? e : std::string(full);
-  };
-  auto canon_impl = [&](std::string_view full) -> std::string {
-    auto e  = entity_of(full);
-    auto it = impl_ent_cnt.find(e);
-    return it != impl_ent_cnt.end() && it->second == 1 ? e : std::string(full);
-  };
+  Entity_canonicalizer                           canon_ref(ref_var);
+  Entity_canonicalizer                           canon_impl(impl_var);
   absl::flat_hash_map<std::string, hhds::Graph*> ref_by_name, impl_by_name;
   for (auto& g : ref_var.graphs) {
     if (g) {

@@ -127,7 +127,7 @@ bool read_message(std::string& body) {
         // forever (hang). Reject negative / non-numeric / out-of-range and treat
         // it as a missing length rather than crashing.
         errno          = 0;
-        char* end      = nullptr;
+        char*      end = nullptr;
         const auto raw = std::strtoull(val.c_str(), &end, 10);
         if (end != val.c_str() && errno == 0 && !val.empty() && val.front() != '-') {
           content_length = static_cast<size_t>(raw);
@@ -452,8 +452,8 @@ void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
     return {};
   };
 
-  absl::flat_hash_map<std::string, std::string>         unit_dir;      // unit -> source dir (case-sensitive)
-  std::unordered_set<std::string> parsed_paths;  // abs paths already loaded (exact filesystem paths)
+  absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir (case-sensitive)
+  std::unordered_set<std::string>               parsed_paths;  // abs paths already loaded (exact filesystem paths)
   for (const auto& ln : var.lnasts) {
     unit_dir[std::string(ln->get_top_module_name())] = dir_of(importer_path);
   }
@@ -512,7 +512,7 @@ void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
       try {
         Prp2lnast converter(path, name);
         var.add(converter.get_lnast());
-        unit_dir[name] = dir_of(path);
+        unit_dir[name]                                    = dir_of(path);
         // Span.file of everything minted from this sibling is
         // workspace_relative(path) — remember how to get back to the disk file
         // so definition Locations can carry a real file:// URI.
@@ -532,7 +532,7 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   sink.set_jsonl_path("off");    // in-memory only
   sink.set_step("lsp");
 
-  // task 2n Phase B: enable + reset the per-buffer semantic index. The upass
+  // Enable and reset the per-buffer semantic index. The upass
   // runner records definition sites into it during this run (gated on
   // enabled(), which only the LSP ever sets); hover reads it afterwards.
   livehd::lsp_index::index().set_enabled(true);
@@ -609,7 +609,7 @@ int severity_to_lsp(livehd::diag::Severity s) {
     case livehd::diag::Severity::error  : return 1;
     case livehd::diag::Severity::warning: return 2;
     case livehd::diag::Severity::note   : return 3;  // information
-    case livehd::diag::Severity::info   : return 3;  // information (progress)
+    case livehd::diag::Severity::info   : return 3;     // information (progress)
   }
   return 1;
 }
@@ -759,7 +759,7 @@ void handle_initialize(const rapidjson::Document& req) {
   w.Key("workspaceDiagnostics");
   w.Bool(false);
   w.EndObject();
-  w.Key("hoverProvider");  // task 2n Phase B (flag + handler land together)
+  w.Key("hoverProvider");
   w.Bool(true);
   w.Key("definitionProvider");  // 2n Phase C (flag + handler land together)
   w.Bool(true);
@@ -1264,7 +1264,7 @@ void handle_definition(const rapidjson::Document& req) {
   send_message(sb.GetString());
 }
 
-// textDocument/hover (task 2n Phase B; identifier-based lookup + cross-file
+// textDocument/hover (identifier-based lookup + cross-file
 // kinds added with Phase C). Re-analyze the buffer (the upass runner fills
 // livehd::lsp_index during the run), then answer, in order: the reaching
 // definition of the identifier under the cursor; the def entry whose statement
@@ -1539,7 +1539,7 @@ int run_stdio() {
     } else if (method == "textDocument/diagnostic") {
       handle_pull_diagnostic(doc);
     } else if (method == "textDocument/hover") {
-      handle_hover(doc);  // task 2n Phase B
+      handle_hover(doc);
     } else if (method == "textDocument/definition" || method == "textDocument/declaration") {
       handle_definition(doc);  // 2n Phase C
     } else if (method == "$/cancelRequest" || method == "$/setTrace") {

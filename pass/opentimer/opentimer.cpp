@@ -19,9 +19,11 @@
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"
 #include "flatten.hpp"
+#include "hash_util.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "json_util.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_opentimer.hpp"
@@ -139,13 +141,8 @@ template <typename Node>
   if constexpr (std::same_as<Node, hhds::Occurrence_node>) {
     const auto path = node.get_occurrence_index().path;
     if (!path.steps().empty()) {
-      uint64_t   hash = 1469598103934665603ULL;
-      const auto mix  = [&](uint64_t value) {
-        for (size_t byte = 0; byte < sizeof(value); ++byte) {
-          hash ^= (value >> (byte * 8)) & 0xffU;
-          hash *= 1099511628211ULL;
-        }
-      };
+      uint64_t   hash = livehd::hash_util::kFnv1a64_offset;
+      const auto mix  = [&](uint64_t value) { hash = livehd::hash_util::fnv1a64_u64(value, hash); };
       mix(static_cast<uint64_t>(path.root_gid()));
       for (const auto& step : path.steps()) {
         mix(static_cast<uint64_t>(step.subnode.gid));
@@ -253,27 +250,7 @@ inline void  del_delay(const hhds::Pin_class& pin) {
 inline void set_delay(const hhds::Occurrence_pin& pin, float d) { set_delay(pin.base_pin(), d); }
 inline void del_delay(const hhds::Occurrence_pin& pin) { del_delay(pin.base_pin()); }
 
-// Minimal JSON string escape for the timing report (pin names / file paths).
-std::string jesc(std::string_view s) {
-  std::string out;
-  out.reserve(s.size());
-  for (char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\t': out += "\\t"; break;
-      case '\r': out += "\\r"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
-        } else {
-          out.push_back(c);
-        }
-    }
-  }
-  return out;
-}
+std::string jesc(std::string_view text) { return livehd::json_util::escape(text); }
 
 // "file:line" of a node's srcid (empty when absent/unresolvable). Mapped gates
 // carry the srcid of the output cone they feed (pass.abc carry-through), so a
@@ -2036,21 +2013,6 @@ std::string Pass_opentimer::render_colors() const {
   if (!stats_) {
     return {};
   }
-  auto jesc = [](std::string_view in) {
-    std::string out;
-    out.reserve(in.size() + 8);
-    for (char c : in) {
-      switch (c) {
-        case '"' : out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default  : out += c; break;
-      }
-    }
-    return out;
-  };
   std::string j = ",\"colors\":[";
   for (size_t i = 0; i < color_qor_.size(); ++i) {
     const auto& row = color_qor_[i];
@@ -2337,52 +2299,41 @@ void Pass_opentimer::populate_table(const std::shared_ptr<hhds::Graph>& g) {
 }
 
 void Pass_opentimer::backpath_set_color(hhds::Node_class node, int color) {
-  I(color_of(node) == color);
+  while (true) {
+    I(color_of(node) == color);
 
-  // Find inp_edge with highest delay
-  hhds::Pin_class dpin;
-  float           dpin_delay = 0;
-  for (auto& e : node.inp_edges()) {
-    if (!has_delay(e.driver)) {
-      continue;
+    hhds::Pin_class dpin;
+    float           dpin_delay = 0;
+    for (const auto& edge : node.inp_edges()) {
+      if (!has_delay(edge.driver)) {
+        continue;
+      }
+      const auto delay = get_delay(edge.driver);
+      if (delay >= dpin_delay) {
+        dpin       = edge.driver;
+        dpin_delay = delay;
+      }
     }
-    auto delay = get_delay(e.driver);
-    if (delay < dpin_delay) {
-      continue;
+
+    if (dpin_delay <= 0 || is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+      return;
     }
-    dpin       = e.driver;
-    dpin_delay = delay;
-  }
 
-  if (dpin_delay <= 0) {
-    return;
-  }
+    auto       back_node = dpin.get_master_node();
+    const auto back_op   = type_op_of(back_node);
+    if (Ntype::is_loop_first(back_op) || Ntype::is_loop_last(back_op)) {
+      return;  // Do not cross constants/flops/memories.
+    }
 
-  if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
-    return;
-  }
+    if (!has_color(back_node)) {
+      set_color(back_node, color);
+      return;
+    }
+    if (color_of(back_node) >= color) {
+      return;
+    }
 
-  auto back_node = dpin.get_master_node();
-  auto back_op   = type_op_of(back_node);
-  if (Ntype::is_loop_first(back_op) || Ntype::is_loop_last(back_op)) {
-    return;  // Do not cross constants/flops/memories
-  }
-
-  std::cout << "---------DEP\n";
-  std::print("{}\n", debug_name(back_node));
-
-  if (!has_color(back_node)) {
     set_color(back_node, color);
-    return;
+    node = back_node;
   }
-  auto back_color = color_of(back_node);
-  if (back_color >= color) {
-    return;
-  }
-
-  set_color(back_node, color);
-
-  std::cout << "---------REC\n";
-  std::print("{}\n", debug_name(back_node));
-  backpath_set_color(back_node, color);  // recursive (should not be too deep stop in flops)
 }

@@ -23,34 +23,6 @@
 
 namespace livehd::graph_util {
 
-namespace {
-// Debug-print helper (mirrors the cgen_sim local; only used by split[dbg] lines).
-const char* op_name(Ntype_op op) {
-  switch (op) {
-    case Ntype_op::Sum     : return "Sum";
-    case Ntype_op::Mult    : return "Mult";
-    case Ntype_op::Div     : return "Div";
-    case Ntype_op::And     : return "And";
-    case Ntype_op::Or      : return "Or";
-    case Ntype_op::Xor     : return "Xor";
-    case Ntype_op::Not     : return "Not";
-    case Ntype_op::LT      : return "LT";
-    case Ntype_op::GT      : return "GT";
-    case Ntype_op::EQ      : return "EQ";
-    case Ntype_op::SHL     : return "SHL";
-    case Ntype_op::SRA     : return "SRA";
-    case Ntype_op::Mux     : return "Mux";
-    case Ntype_op::Hotmux  : return "Hotmux";
-    case Ntype_op::Get_mask: return "Get_mask";
-    case Ntype_op::Set_mask: return "Set_mask";
-    case Ntype_op::Sext    : return "Sext";
-    case Ntype_op::Concat  : return "Concat";
-    case Ntype_op::Nconst  : return "Nconst";
-    default                : return "op?";
-  }
-}
-}  // namespace
-
 // Break a FALSE word-level combinational loop through a PACKED wire. A single net
 // `W` driven by an `Or` (a bit-field pack) whose operands occupy DISJOINT constant
 // bit ranges is really a concat: a constant Get_mask slice of `W` reads only ONE
@@ -689,7 +661,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             if (whole_w == 0) {
               if (split_dbg) {
                 std::print("split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
-                           op_name(gu::type_op_of(d.get_master_node())),
+                           Ntype::get_name(gu::type_op_of(d.get_master_node())),
                            db,
                            gu::is_unsign(d));
               }
@@ -878,7 +850,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       }
     }
     if (split_dbg && res.is_invalid()) {
-      std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", op_name(op), lo, hi, depth);
+      std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", Ntype::get_name(op), lo, hi, depth);
     }
     if (!res.is_invalid() || cap_hit == cap_before) {
       // memoize successes always; memoize failures only when NOT tainted by a

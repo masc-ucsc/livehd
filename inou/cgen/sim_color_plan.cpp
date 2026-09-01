@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -23,6 +24,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "file_output.hpp"
+#include "hash_util.hpp"
 #include "latch_contract.hpp"
 #include "node_util.hpp"
 #include "port_reach.hpp"
@@ -336,6 +338,11 @@ Site_kind classify(const hhds::Occurrence_node& node) {
   return Site_kind::data;
 }
 
+// Second-lane parameters for the 128-bit structural digests below; the low
+// lane is the shared FNV-1a.
+constexpr uint64_t kHiLaneBasis = 7809847782465536322ULL;
+constexpr uint64_t kHiLanePrime = 14029467366897019727ULL;
+
 class Shape_hash_builder {
 public:
   void append_u64(uint64_t value) {
@@ -356,14 +363,14 @@ public:
 private:
   void append_byte(uint8_t byte) {
     lo_ ^= byte;
-    lo_ *= 1099511628211ULL;
+    lo_ *= livehd::hash_util::kFnv1a64_prime;
     hi_ ^= static_cast<uint64_t>(byte) + 0x9e;
-    hi_ *= 14029467366897019727ULL;
+    hi_ *= kHiLanePrime;
     hi_ ^= hi_ >> 29;
   }
 
-  uint64_t lo_ = 1469598103934665603ULL;
-  uint64_t hi_ = 7809847782465536322ULL;
+  uint64_t lo_ = livehd::hash_util::kFnv1a64_offset;
+  uint64_t hi_ = kHiLaneBasis;
 };
 
 // Structural refinement feeds only fixed-width integers into the digest, and
@@ -383,7 +390,7 @@ public:
   [[nodiscard]] std::array<uint64_t, 2> finish() const { return {avalanche(lo_), avalanche(hi_ ^ lo_)}; }
 
 private:
-  static uint64_t rotate_left(uint64_t value, unsigned shift) { return (value << shift) | (value >> (64 - shift)); }
+  static uint64_t rotate_left(uint64_t value, unsigned shift) { return std::rotl(value, static_cast<int>(shift)); }
 
   static uint64_t avalanche(uint64_t value) {
     value ^= value >> 27;
@@ -394,8 +401,8 @@ private:
     return value;
   }
 
-  uint64_t lo_ = 1469598103934665603ULL;
-  uint64_t hi_ = 7809847782465536322ULL;
+  uint64_t lo_ = livehd::hash_util::kFnv1a64_offset;
+  uint64_t hi_ = kHiLaneBasis;
 };
 
 std::string format_hash128(std::string_view prefix, const std::array<uint64_t, 2>& hash) {
@@ -581,18 +588,9 @@ std::string kernel_node_shape(const hhds::Node_class& node) {
 }
 
 std::array<uint64_t, 2> stable_hash128(std::string_view text) {
-  uint64_t lo = 1469598103934665603ULL;
-  uint64_t hi = 7809847782465536322ULL;
-  for (const unsigned char c : text) {
-    lo ^= c;
-    lo *= 1099511628211ULL;
-    hi ^= static_cast<uint64_t>(c) + 0x9e;
-    hi *= 14029467366897019727ULL;
-    hi ^= hi >> 29;
-  }
-  lo ^= text.size();
-  hi ^= text.size() << 1;
-  return {lo, hi};
+  Shape_hash_builder hash;
+  hash.append_text(text);
+  return hash.finish();
 }
 
 std::string stable_id(std::string_view text) { return format_hash128("s:", stable_hash128(text)); }

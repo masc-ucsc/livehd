@@ -31,10 +31,12 @@
 #include "cone_abc.hpp"
 #include "cprop.hpp"
 #include "encode.hpp"
+#include "hash_util.hpp"
 #include "host_mem.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "str_tools.hpp"
 
 namespace livehd::lec {
 
@@ -3034,31 +3036,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // mispaired box is a false-PROVEN hazard. An ambiguous entity keeps the
   // full name; its pairing degrades to one-sided obligations, which the
   // miters already gate to inconclusive (never a Proven/Refuted).
-  auto entity_of = [](std::string_view n) -> std::string {
-    auto        d = n.rfind('.');
-    std::string entity(d == std::string_view::npos ? n : n.substr(d + 1));
-    const auto  spec = entity.find("__");
-    if (spec == std::string::npos || spec == 0 || spec + 2 >= entity.size()) {
-      return entity;
-    }
-    size_t p = spec + 2;
-    while (p < entity.size()) {
-      const size_t end   = entity.find('_', p);
-      const auto   token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
-      bool         width = token == "bool";
-      if (!width && token.size() >= 2 && (token[0] == 'u' || token[0] == 's')) {
-        width = std::all_of(token.begin() + 1, token.end(), [](unsigned char c) { return std::isdigit(c); });
-      }
-      if (!width) {
-        return entity;
-      }
-      if (end == std::string::npos) {
-        return entity.substr(0, spec);
-      }
-      p = end + 1;
-    }
-    return entity;
-  };
+  auto entity_of = [](std::string_view name) { return str_tools::canonical_entity_name(name); };
   // Per design: entity -> the unique full callee name, or "" when ambiguous.
   absl::flat_hash_map<std::string, std::string> ref_ent_uniq, impl_ent_uniq;
   for (auto* g : {ref, impl}) {
@@ -4172,33 +4150,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         reset_negset[nm] = negreset;
       }
     };
-    // Canonical reset-name test (token-aware to avoid matching "first"/"burst").
-    // negreset (active-low) inferred from an _n / _ni / n suffix.
-    auto reset_name_polarity = [](const std::string& nm, bool& negreset) -> bool {
-      std::string lc = nm;
-      for (auto& c : lc) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      }
-      bool   tok_match = false;
-      size_t start     = 0;
-      for (size_t i = 0; i <= lc.size(); ++i) {
-        if (i == lc.size() || lc[i] == '_') {
-          std::string tok = lc.substr(start, i - start);
-          if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset"
-              || tok == "nrst" || tok == "nreset" || tok == "por") {
-            tok_match = true;
-          }
-          start = i + 1;
-        }
-      }
-      if (!tok_match) {
-        return false;
-      }
-      auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
-      negreset  = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
-                 || ends("nreset");
-      return true;
-    };
+    // Canonical reset-name test + active-low inference: str_tools shares it
+    // with the slang reset demotion so the token set cannot drift.
+    const auto reset_name_polarity
+        = [](std::string_view nm, bool& negreset) -> bool { return str_tools::reset_name_polarity(nm, negreset); };
 
     const bool phase_reset = opts.phase == "just_reset";
     const bool phase_run   = opts.phase == "after_reset";
@@ -9319,14 +9274,12 @@ std::optional<int> parse_guard_key(std::string_view name) {
 // cache-wide formal source salt handles changes that preserve their spelling.
 std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, const cvc5::Term& bad, const Lec_options& opts,
                                   const std::string& scope) {
-  uint64_t h0  = 1469598103934665603ULL;
-  uint64_t h1  = 1099511628211ULL ^ 0x9e3779b97f4a7c15ULL;
+  namespace hu = livehd::hash_util;
+  uint64_t h0  = hu::kFnv1a64_offset;
+  uint64_t h1  = hu::kFnv1a64_prime ^ 0x9e3779b97f4a7c15ULL;
   auto     mix = [&](std::string_view s) {
-    for (unsigned char c : s) {
-      h0  = (h0 ^ c) * 1099511628211ULL;
-      h1 ^= c + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2);
-    }
-    h0 = (h0 ^ 0xffU) * 1099511628211ULL;  // term boundary
+    h0 = (hu::fnv1a64(s, h0) ^ 0xffU) * hu::kFnv1a64_prime;  // 0xff = term boundary
+    h1 = hu::combine64(h1, hu::fnv1a64(s) ^ s.size());       // independent second lane
   };
   // v3: per-scope assume scoping — a block's assumes are now asserted as
   // `act => holds`, so the serialized assertion set changed shape AND the same

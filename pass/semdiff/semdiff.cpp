@@ -18,6 +18,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
+#include "hash_util.hpp"
 #include "node_util.hpp"
 
 namespace livehd::semdiff {
@@ -26,27 +27,11 @@ namespace gu = livehd::graph_util;
 
 namespace {
 
-// ---- hashing ---------------------------------------------------------------
-// A self-contained 64-bit mixer (no external dep). Signatures are compared by
-// value equality across the two designs, hashed in one process, so the mix only
-// needs to be deterministic within the run.
-constexpr uint64_t mix64(uint64_t x) {
-  x ^= x >> 33U;
-  x *= 0xff51afd7ed558ccdULL;
-  x ^= x >> 33U;
-  x *= 0xc4ceb9fe1a85ec53ULL;
-  x ^= x >> 33U;
-  return x;
-}
-constexpr uint64_t hcombine(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
-uint64_t           hstr(std::string_view s) {
-  uint64_t h = 1469598103934665603ULL;  // FNV-1a
-  for (char c : s) {
-    h ^= static_cast<unsigned char>(c);
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
+using hash_util::fnv1a64;
+using hash_util::mix64;
+
+constexpr uint64_t hcombine(uint64_t hash, uint64_t value) { return hash_util::combine64(hash, value); }
+constexpr uint64_t hstr(std::string_view text) { return fnv1a64(text); }
 
 // State cells are cut points (their data input is not followed): structure does
 // not flow through them unless matching_names seeds them by hierarchical name.

@@ -27,6 +27,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//pass/cprop:pass_cprop",
         "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget

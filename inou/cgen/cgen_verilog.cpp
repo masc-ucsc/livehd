@@ -420,46 +420,7 @@ hhds::Pin_class Cgen_verilog::get_driver(const hhds::Pin_class& sink) {
 }
 
 hhds::Pin_class Cgen_verilog::find_sink_pin(const hhds::Node_class& node, std::string_view name) {
-  if (node.is_invalid()) {
-    return {};
-  }
-  // For Sub nodes the sink name comes from the sub-graph's GraphIO and HHDS
-  // resolves it directly. For all other Ntype_op cells the sink name is a
-  // LiveHD convention (e.g. "a", "din", "clock_pin") — translate it to a
-  // port_id via Ntype before asking HHDS for the pin.
-  //
-  // HHDS asserts when get_sink_pin(port_id) is called for an unmaterialized
-  // pin. cgen frequently asks for optional pins (e.g. `reset_pin`, `async`,
-  // `negreset`, `initial` on a flop) that may not be connected at all. To
-  // emulate LiveHD's invalid-on-miss behaviour we walk inp_edges and match
-  // by port_id — slower than a direct fetch but safe.
-  auto op = type_op_of(node);
-  if (op == Ntype_op::Sub) {
-    // Same invalid-on-miss contract for sub instances: resolve the name via the
-    // sub-graph's GraphIO decls and walk inp_edges — a declared input that was
-    // never connected has no materialized pin, and hhds get_sink_pin asserts.
-    auto sub_io = node.get_subnode_io();
-    if (!sub_io || !sub_io->has_input(name)) {
-      return {};
-    }
-    auto pid = sub_io->get_input_port_id(name);
-    for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_port_id() == pid) {
-        return e.sink;
-      }
-    }
-    return {};
-  }
-  auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
-    return {};
-  }
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.sink;
-    }
-  }
-  return {};
+  return livehd::graph_util::find_sink_pin(node, name);
 }
 
 std::string Cgen_verilog::get_wire_or_const(const hhds::Pin_class& dpin) const {

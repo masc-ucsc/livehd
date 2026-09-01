@@ -683,7 +683,7 @@ inline void set_match(const hhds::Pin_class& pin, uint32_t id) {
   return a.has() ? a.get() : 0;
 }
 
-// Per-node formal-verification status (pass/formal, task 2f-formal). 0 == absent;
+// Per-node formal-verification status. 0 == absent;
 // pass.formal sets a small non-zero enum (see Formal_status in pass/formal).
 inline void                   set_proven(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::proven).set(v); }
 // Every consumer tests PRESENCE (has_proven / `if (auto a = ...; a.has())`), so
@@ -749,7 +749,17 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   }
   auto op = type_op_of(node);
   if (op == Ntype_op::Sub) {
-    return node.get_sink_pin(name);
+    auto sub_io = node.get_subnode_io();
+    if (!sub_io || !sub_io->has_input(name)) {
+      return {};
+    }
+    const auto pid = sub_io->get_input_port_id(name);
+    for (const auto& edge : node.inp_edges()) {
+      if (edge.sink.get_port_id() == pid) {
+        return edge.sink;
+      }
+    }
+    return {};
   }
   auto pid = Ntype::get_sink_pid(op, name);
   if (pid == livehd::Port_invalid) {
@@ -944,6 +954,18 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   auto drivers = sink.get_driver_pins();
   result.assign(drivers.begin(), drivers.end());
   return result;
+}
+
+// A Memory has one clock sink per port. Visit the drivers in HHDS edge order
+// without allocating a second container at each call site.
+template <typename Fn>
+inline void for_each_memory_clock_driver(const hhds::Node_class& node, Fn&& fn) {
+  for (const auto& edge : node.inp_edges()) {
+    const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(edge.sink.get_port_id()));
+    if (name.ends_with("clock_pin")) {
+      fn(edge.driver);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

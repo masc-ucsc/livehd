@@ -5,6 +5,7 @@
 #include "bitwidth.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "node_util.hpp"
 
 namespace gu = livehd::graph_util;
@@ -39,13 +40,6 @@ constexpr int32_t kSentinelBits = 32768;
 // Deterministic per-pin coin flip: a pure function of (seed, node, port), never
 // of traversal order, so `--set compile.bitfuzz.seed=N` reproduces exactly the
 // same cleared set on a re-run (what M3's bisect needs).
-[[nodiscard]] uint64_t splitmix64(uint64_t x) {
-  x += 0x9e3779b97f4a7c15ULL;
-  x  = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  x  = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
-  return x ^ (x >> 31);
-}
-
 [[nodiscard]] bool selected(uint64_t seed, const hhds::Node_class& node, hhds::Port_id pid, int pct) {
   if (pct >= 100) {
     return true;
@@ -53,7 +47,7 @@ constexpr int32_t kSentinelBits = 32768;
   if (pct <= 0) {
     return false;
   }
-  const auto h = splitmix64(seed ^ splitmix64((static_cast<uint64_t>(node.get_debug_nid()) << 16) ^ pid));
+  const auto h = hash_util::combine64(seed, (static_cast<uint64_t>(node.get_debug_nid()) << 16) ^ pid);
   return static_cast<int>(h % 100) < pct;
 }
 

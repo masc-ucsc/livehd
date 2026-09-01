@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "absl/container/inlined_vector.h"
+#include "str_tools.hpp"
 #include "upass_attributes.hpp"
 
 namespace upass {
@@ -48,15 +49,8 @@ bool value_is_truthy(std::string_view v) {
   if (v.empty()) {
     return true;
   }
-  std::string lower;
-  lower.reserve(v.size());
-  for (char c : v) {
-    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-  }
-  if (lower == "false" || lower == "0") {
-    return false;
-  }
-  return true;
+  const auto lower = str_tools::ascii_fold(v);
+  return !(lower == "false" || lower == "0");
 }
 }  // namespace
 

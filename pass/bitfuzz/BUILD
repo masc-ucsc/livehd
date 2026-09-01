@@ -14,6 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",

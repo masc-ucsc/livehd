@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "json_util.hpp"
 #include "lhd.hpp"
 #include "log.hpp"  // livehd::log::channels() for `lhd list log-channels`
 
@@ -31,26 +32,7 @@ void print_json_line(std::string_view s) {
   std::fputc('\n', stdout);
 }
 
-std::string json_escape(std::string_view s) {
-  std::string out;
-  out.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
-        } else {
-          out += c;
-        }
-    }
-  }
-  return out;
-}
+std::string json_escape(std::string_view text) { return livehd::json_util::escape(text); }
 
 // The one-line list view shows the first sentence of the registered help,
 // capped so one option stays one line; `lhd describe pass.flag` has the
@@ -347,9 +329,9 @@ std::string render_help_json(const Help_doc& doc) {
       }
       first  = false;
       out   += std::format(R"json({{"name":"{}","type":"{}","help":"{}")json",
-                           json_escape(arg.name),
-                           json_escape(arg.type),
-                           json_escape(arg.help));
+                         json_escape(arg.name),
+                         json_escape(arg.type),
+                         json_escape(arg.help));
       if (arg.positional) {
         out += R"json(,"positional":true)json";
       }

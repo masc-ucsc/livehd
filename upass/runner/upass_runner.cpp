@@ -2458,7 +2458,7 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
     check_bitsel_named_bundle();  // same rule, reached through `x#[..]`
   }
   const bool vote_drop = dispatch_push(fn, rn);
-  // task 2n Phase B: record the just-defined variable into the LSP semantic
+  // Record the just-defined variable into the LSP semantic
   // index, now that this op's bitwidth/kind facts are written. Gated on the
   // LSP-only global flag, so the normal CLI never enters record_lsp_def.
   if (livehd::lsp_index::index().enabled()) {
@@ -2476,7 +2476,7 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
 
 namespace {
 
-// task 2n — the scalar type of ONE bundle leaf for the LSP hover, from the
+// The scalar type of one bundle leaf for the LSP hover, from the
 // Entry's own facts alone: kind (bool/string/enum), else integer with bits
 // recomputed from the declared envelope and the bw_min/bw_max (or comptime
 // value) range labeled the same way a plain variable renders. Used for tuple
@@ -2605,7 +2605,7 @@ Bundle::Entry lsp_overlay_pending(Bundle::Entry fe, const Symbol_table& st, cons
   return fe;
 }
 
-// task 2n — a whole tuple for the LSP hover: each leaf with its scalar render,
+// A whole tuple for the LSP hover: each leaf with its scalar render,
 // `tuple(x: u4(bw_min=1, bw_max=1), y: string, …)`. non_attr_entries flattens
 // nested sub-bundles into dotted keys in canonical order; long tuples truncate
 // so the hover stays one-glance readable. `root` prefixes each leaf key for
@@ -2638,7 +2638,7 @@ std::string lsp_render_tuple(const Bundle& b, const Symbol_table& st, std::strin
 
 }  // namespace
 
-// task 2n Phase B — see the header. Statement-granularity span (operand refs
+// See the header. Statement-granularity span (operand refs
 // carry no SourceId; the enclosing op does), so selectionRange == range.
 void uPass_runner::record_lsp_def(std::string_view dst_name) {
   if (dst_name.empty() || Lnast::is_tmp(dst_name)) {
@@ -10382,8 +10382,7 @@ bool uPass_runner::try_detuple_declare() {
               return false;
             }
             init_values = &vit->second;
-            if (!init_values->named && !init_values->positional.empty()
-                && init_values->positional.size() != it->second.size()) {
+            if (!init_values->named && !init_values->positional.empty() && init_values->positional.size() != it->second.size()) {
               detuple_error("tuple-assignment-shape",
                             std::format("`{}` element initializer has {} entries but type `{}` has {} fields",
                                         var,
@@ -10401,8 +10400,8 @@ bool uPass_runner::try_detuple_declare() {
         Detuple_split split{.fields = it->second, .mode = mode_text, .memory = true, .dimension = dim_node};
         detuple_splits_.insert_or_assign(var, split);
         for (std::size_t i = 0; i < split.fields.size(); ++i) {
-          const auto&               field = split.fields[i];
-          const auto                leaf  = var + "." + field.name;
+          const auto&               field      = split.fields[i];
+          const auto                leaf       = var + "." + field.name;
           std::optional<Lnast_node> field_init = broadcast_init;
           if (init_values != nullptr) {
             if (init_values->named) {
@@ -10568,12 +10567,10 @@ bool uPass_runner::try_detuple_tuple_add() {
   // the same field-name set, else fall back to the loud verbatim replay.
   if (!detuple_pending_decl_->fields.empty()) {
     const auto& collected = detuple_pending_decl_->fields;
-    const bool  same_set  = collected.size() == shape.size()
-                          && std::all_of(shape.begin(), shape.end(), [&](const std::string& field_name) {
-                               return std::any_of(collected.begin(), collected.end(), [&](const auto& field) {
-                                 return field.name == field_name;
-                               });
-                             });
+    const bool  same_set
+        = collected.size() == shape.size() && std::all_of(shape.begin(), shape.end(), [&](const std::string& field_name) {
+            return std::any_of(collected.begin(), collected.end(), [&](const auto& field) { return field.name == field_name; });
+          });
     if (!same_set) {
       detuple_flush_pending_decl();
       return false;
@@ -10624,8 +10621,8 @@ std::string uPass_runner::detuple_registry_key(std::string_view type_name) const
   // it (reproduced: an 8-bit field truncated to another file's 2-bit layout).
   // Types are file-scoped, so qualify by the owning source unit: a function
   // body "file.entity[...]" shares its file wrapper's prefix.
-  const auto unit = root_lnast_->get_top_module_name();
-  const auto dot  = unit.find('.');
+  const auto  unit = root_lnast_->get_top_module_name();
+  const auto  dot  = unit.find('.');
   std::string key(unit.substr(0, dot));
   key.push_back('\n');  // '\n' cannot appear in a type identifier
   key.append(type_name);
@@ -10661,8 +10658,7 @@ void uPass_runner::detuple_commit_pending_split(const Detuple_pending_decl& pend
     for (const auto& [key, value] : init_values->fields) {
       (void)value;
       if (!field_exists(key)) {
-        detuple_error("tuple-assignment-shape",
-                      std::format("`{}` initializer names unknown field `{}`", pending.name, key));
+        detuple_error("tuple-assignment-shape", std::format("`{}` initializer names unknown field `{}`", pending.name, key));
         return;
       }
     }
@@ -11170,7 +11166,7 @@ void uPass_runner::process_lnast() {
         lm->restore_cursor(here);
       }
       bake_decl_pre_step(/*is_declare=*/true);  // Bake type/mode into the bundle first
-      // task 2n: a reg/wire declare's stores are never symbolically bound, so
+      // A reg/wire declare's stores are never symbolically bound, so
       // the push path records no def entry for them — record the declaration
       // site itself (now that the type/mode facts are baked). Non-state
       // declares record here too; the init store re-records with bw facts.

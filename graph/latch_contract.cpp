@@ -597,19 +597,6 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
 
 namespace {
 
-// A Memory has one clock sink per port. Looking only at the first silently
-// loses clock domains on multi-clock arrays.
-[[nodiscard]] std::vector<hhds::Pin_class> memory_clock_drivers(const hhds::Node_class& node) {
-  std::vector<hhds::Pin_class> out;
-  for (const auto& e : node.inp_edges()) {
-    const auto pn = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(e.sink.get_port_id()));
-    if (str_tools::ends_with(pn, "clock_pin")) {
-      out.push_back(e.driver);
-    }
-  }
-  return out;
-}
-
 [[nodiscard]] bool const_true(const hhds::Pin_class& p) {
   return !p.is_invalid() && gu::is_const_pin(p) && gu::hydrate_const(p).is_known_true();
 }
@@ -642,8 +629,8 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     return unknown;
   }
 
-  Clock_input_ports   result;
-  const Design_clocks clocks(def.get(), /*hier=*/false);
+  Clock_input_ports                                                   result;
+  const Design_clocks                                                 clocks(def.get(), /*hier=*/false);
   std::function<std::optional<uint32_t>(const hhds::Pin_class&, int)> root_port;
   root_port = [&](const hhds::Pin_class& driver, int depth) -> std::optional<uint32_t> {
     if (driver.is_invalid() || depth > 16) {
@@ -734,9 +721,7 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
   for (auto n : def->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
-      for (const auto& driver : memory_clock_drivers(n)) {
-        add_clock(driver);
-      }
+      gu::for_each_memory_clock_driver(n, add_clock);
       continue;
     }
     // A latch's gate IS its enable: `clock_pin` (pid 2) is RESERVED and tolg
@@ -901,9 +886,7 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass, const st
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
-      for (const auto& d : memory_clock_drivers(n)) {
-        mark_clock_net(d);
-      }
+      gu::for_each_memory_clock_driver(n, mark_clock_net);
       continue;
     }
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
@@ -1498,8 +1481,8 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     // requiring the whole expression to reduce to clk. Without the clock-phase
     // leaf check a module that ANDs a clock with an unrelated latched data bit
     // would match and sample its "enable" at an arbitrary time.
-    auto       latch_node   = latched.get_master_node();
-    const auto latch_enable = gu::get_driver_of_sink_name(latch_node, "enable");
+    auto       latch_node              = latched.get_master_node();
+    const auto latch_enable            = gu::get_driver_of_sink_name(latch_node, "enable");
     // EVERY leaf of that And cone is checked, not just "one of them is the
     // clock phase": the match result carries only `latch_transparent_arm`, so a
     // qualifier operand is DROPPED, and the Clock_cell built from it re-samples
@@ -2155,7 +2138,7 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
     // logic, not a Clock_cell carrying this exact enable pin. Decided per
     // port BEFORE the enable cone is minted, so an all-ports-gated instance
     // leaves no speculative orphan nodes behind.
-    const auto      guard_key = guard_root.is_invalid() ? guard : guard_root;
+    const auto            guard_key = guard_root.is_invalid() ? guard : guard_root;
     std::vector<uint32_t> ports_to_gate;
     for (const auto pid : clock_ports) {
       auto it = bound.find(pid);

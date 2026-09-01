@@ -58,6 +58,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//pass/common:pass",
         "@llvm-project//llvm:BitReader",

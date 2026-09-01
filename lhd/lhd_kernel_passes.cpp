@@ -211,32 +211,9 @@ void semdiff_command(Options& opts, Result& res) {
     // Mirrors lec_hierarchical's correspondence: defs pair by ENTITY (post-'.'
     // tail) when the entity is side-unique, else full name; scoped to --top's
     // transitive ref-side subtree when a top is given, else every shared def.
-    namespace gu   = livehd::graph_util;
-    auto entity_of = [](std::string_view n) -> std::string {
-      auto d = n.rfind('.');
-      return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
-    };
-    absl::flat_hash_map<std::string, int> ref_ent_cnt, impl_ent_cnt;
-    for (auto& g : ref_var.graphs) {
-      if (g) {
-        ref_ent_cnt[entity_of(g->get_name())]++;
-      }
-    }
-    for (auto& g : impl_var.graphs) {
-      if (g) {
-        impl_ent_cnt[entity_of(g->get_name())]++;
-      }
-    }
-    auto canon_ref = [&](std::string_view full) -> std::string {
-      auto e  = entity_of(full);
-      auto it = ref_ent_cnt.find(e);
-      return it != ref_ent_cnt.end() && it->second == 1 ? e : std::string(full);
-    };
-    auto canon_impl = [&](std::string_view full) -> std::string {
-      auto e  = entity_of(full);
-      auto it = impl_ent_cnt.find(e);
-      return it != impl_ent_cnt.end() && it->second == 1 ? e : std::string(full);
-    };
+    namespace gu = livehd::graph_util;
+    Entity_canonicalizer                           canon_ref(ref_var);
+    Entity_canonicalizer                           canon_impl(impl_var);
     absl::flat_hash_map<std::string, hhds::Graph*> ref_by_name, impl_by_name;
     for (auto& g : ref_var.graphs) {
       if (g) {
@@ -547,7 +524,8 @@ void harvest_abc_incremental(Result& res) {
     return;
   }
   const rapidjson::Value* abc = &d;
-  if (auto k = d.FindMember("kind"); k != d.MemberEnd() && k->value.IsString() && std::string_view{k->value.GetString()} == "synth") {
+  if (auto k = d.FindMember("kind");
+      k != d.MemberEnd() && k->value.IsString() && std::string_view{k->value.GetString()} == "synth") {
     auto a = d.FindMember("abc");
     if (a == d.MemberEnd() || !a->value.IsObject()) {
       return;
@@ -567,7 +545,7 @@ void harvest_abc_incremental(Result& res) {
     res.abc_incr.regions = r->value.Size();
     for (const auto& region : r->value.GetArray()) {
       if (auto c = region.FindMember("cache"); region.IsObject() && c != region.MemberEnd() && c->value.IsString()
-          && std::string_view{c->value.GetString()} == "store-failed") {
+                                               && std::string_view{c->value.GetString()} == "store-failed") {
         ++res.abc_incr.store_failed;
       }
     }
@@ -575,7 +553,7 @@ void harvest_abc_incremental(Result& res) {
   if (auto inc = abc->FindMember("incremental"); inc != abc->MemberEnd() && inc->value.IsObject()) {
     res.abc_incr.present = true;
     res.abc_incr.enabled = true;
-    double v            = 0;
+    double v             = 0;
     if (num(inc->value, "hits", v)) {
       res.abc_incr.hits = static_cast<uint64_t>(v);
     }

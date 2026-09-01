@@ -71,7 +71,7 @@ std::string sanitize(std::string_view s) {
 }
 
 // ---------------------------------------------------------------------------
-// Nid-free content signature for STABLE boundary port names (task 2a-incr).
+// Nid-free content signature for stable boundary port names.
 //
 // A boundary port becomes a wire the freshly rebuilt wrapper stitches BY NAME,
 // so a cached region body can only be reused if the port name is reproducible

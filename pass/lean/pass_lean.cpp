@@ -30,6 +30,7 @@
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
+#include "str_tools.hpp"
 
 static Pass_plugin pass_plugin_lean("pass_lean", Pass_lean::setup);
 
@@ -56,29 +57,6 @@ LeanCertWFFallback parse_cert_wf_fallback(std::string_view mode) {
     return LeanCertWFFallback::Eval;
   }
   return LeanCertWFFallback::Fail;
-}
-
-// Parse the max_width knob. "0"/"unlimited"/"inf"/"none" (case-insensitive) mean
-// no cap -> SIZE_MAX (every `w > max_width` guard is then always-false, so the
-// upper bound is disabled while the separate `w == 0` unsized-node check stays).
-// A positive integer sets that cap; empty/garbage falls back to the default.
-size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
-  if (s.empty()) {
-    return dflt;
-  }
-  std::string l(s);
-  for (auto& c : l) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  if (l == "unlimited" || l == "inf" || l == "none" || l == "0") {
-    return std::numeric_limits<size_t>::max();
-  }
-  try {
-    size_t v = std::stoul(l);
-    return v == 0 ? std::numeric_limits<size_t>::max() : v;
-  } catch (...) {
-    return dflt;
-  }
 }
 
 const std::unordered_set<std::string> kLeanReserved = {
@@ -1403,7 +1381,7 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
     cert_chunk_limit = 0;
   }
 
-  max_width = parse_max_width(var.get("max_width"));
+  max_width = str_tools::parse_max_width(var.get("max_width"));
 }
 
 void Pass_lean::setup() {

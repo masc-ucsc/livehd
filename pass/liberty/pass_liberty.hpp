@@ -3,7 +3,7 @@
 
 #include "pass.hpp"
 
-// pass.liberty — companion to pass.abc (task 2a-abc). The `gensim` subcommand
+// pass.liberty — companion to pass.abc. The `gensim` subcommand
 // reads a Liberty file and emits one LGraph behavioral model per combinational
 // cell, so the blackbox cell Subs in an ABC-mapped netlist resolve for LEC with
 // no PDK-Verilog dependency. Names + pins match the netlist Subs exactly (same

@@ -10,7 +10,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
 
-// pass/semdiff — structural diff/match between two LGraphs (task 2f-semdiff): a
+// pass/semdiff — structural diff/match between two LGraphs: a
 // *structural LEC*. It mirrors pass/lec's shape (two designs, a C++ API the
 // kernel calls directly), but instead of an SMT proof it establishes a
 // structural correspondence and isolates the regions that differ.

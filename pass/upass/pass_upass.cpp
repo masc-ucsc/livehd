@@ -19,6 +19,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "log.hpp"               // LHD_LOG developer tracing on the "upass" channel
+#include "str_tools.hpp"
 #include "perf_tracing.hpp"      // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
@@ -207,12 +208,7 @@ void Pass_upass::setup() {
 }
 
 Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
-  auto inherit_txt = std::string(var.get_stage("inherit", "true"));
-  std::transform(inherit_txt.begin(), inherit_txt.end(), inherit_txt.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  inherit_labels
-      = !(inherit_txt.empty() || inherit_txt == "0" || inherit_txt == "false" || inherit_txt == "no" || inherit_txt == "off");
+  inherit_labels = str_tools::option_is_true(var.get_stage("inherit", "true"));
 
   const auto get_label = [&](std::string_view label, std::string_view default_value = "") -> std::string_view {
     if (inherit_labels) {
@@ -226,11 +222,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order = parse_order_csv(order_txt);
   }
 
-  auto vif_txt = std::string(get_label("verifier_include_funcs", "false"));
-  std::transform(vif_txt.begin(), vif_txt.end(), vif_txt.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  verifier_include_funcs = !(vif_txt.empty() || vif_txt == "0" || vif_txt == "false" || vif_txt == "no" || vif_txt == "off");
+  verifier_include_funcs = str_tools::option_is_true(get_label("verifier_include_funcs", "false"));
 
   // Per-pass config forwarded to the runner. Pick up labels whose meaning
   // is pass-specific (as opposed to runner/order labels above).
@@ -664,9 +656,7 @@ void Pass_upass::work(Eprp_var& var) {
     const auto coalescer_opt  = up.pass_options.find("coalescer");
     bool       coalescer_auto = coalescer_opt == up.pass_options.end();
     if (!coalescer_auto) {
-      std::string v = coalescer_opt->second;
-      std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-      coalescer_auto = v == "auto";
+      coalescer_auto = str_tools::ascii_fold(coalescer_opt->second) == "auto";
     }
     if (ln->is_verilog_origin() && coalescer_auto) {
       order.erase(std::remove(order.begin(), order.end(), "coalescer"), order.end());

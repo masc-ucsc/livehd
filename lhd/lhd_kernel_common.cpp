@@ -39,6 +39,20 @@
 
 namespace lhd {
 
+Entity_canonicalizer::Entity_canonicalizer(const Eprp_var& var) {
+  for (const auto& graph : var.graphs) {
+    if (graph) {
+      ++counts_[str_tools::canonical_entity_name(graph->get_name())];
+    }
+  }
+}
+
+std::string Entity_canonicalizer::operator()(std::string_view full_name) const {
+  auto entity = str_tools::canonical_entity_name(full_name);
+  auto it     = counts_.find(entity);
+  return it != counts_.end() && it->second == 1 ? entity : std::string{full_name};
+}
+
 int step_counter = 0;  // per-process step sequence for log naming
 
 std::string join_csv(const std::vector<std::string>& v) {
@@ -1612,7 +1626,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
-// Run inou.cgen.sim (TODO 3d): a <module>.hpp interface + <module>.cpp body per
+// Run inou.cgen.sim: a <module>.hpp interface + <module>.cpp body per
 // graph into `odir`. Mirrors cgen_into — seed odir, run the step, then assert
 // each pair exists.
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
@@ -1950,7 +1964,7 @@ std::string sim_llvm_link_tool() {
   return {};
 }
 
-// `--emit-dir sim:DIR/` — inou.cgen.sim (TODO 3d). Writes a standalone Bazel
+// `--emit-dir sim:DIR/` — inou.cgen.sim. Writes a standalone Bazel
 // module of per-module Slop<N> structs over ../hlop: the pass writes a
 // <name>.hpp interface + a <name>.cpp body per module, here we add the build
 // scaffold (MODULE.bazel / BUILD) + manifest so `cd DIR && bazel build //:sim`

@@ -22,6 +22,7 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang/syntax/AllSyntax.h"
 #include "slang_context.hpp"
+#include "str_tools.hpp"
 
 using slang::ast::ExpressionKind;
 using slang::ast::StatementKind;
@@ -5183,27 +5184,10 @@ void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSy
   clear_pending_loc();
 }
 
-// Canonical reset-name test, token-aware to avoid matching "first"/"burst"
-// (mirrors pass/lec/query.cpp reset_name_polarity; polarity is irrelevant here
-// because a demoted reset is READ by the body, not wired to a reset pin).
-static bool is_reset_like_name(std::string_view nm) {
-  std::string lc(nm);
-  for (auto& c : lc) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  size_t start = 0;
-  for (size_t i = 0; i <= lc.size(); ++i) {
-    if (i == lc.size() || lc[i] == '_') {
-      std::string_view tok = std::string_view(lc).substr(start, i - start);
-      if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset" || tok == "nrst"
-          || tok == "nreset" || tok == "por") {
-        return true;
-      }
-      start = i + 1;
-    }
-  }
-  return false;
-}
+// Canonical reset-name test (shared with pass/lec/query.cpp via str_tools;
+// polarity is irrelevant here because a demoted reset is READ by the body, not
+// wired to a reset pin).
+static bool is_reset_like_name(std::string_view nm) { return str_tools::is_reset_like_name(nm); }
 
 void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) {
   using slang::ast::ProceduralBlockKind;

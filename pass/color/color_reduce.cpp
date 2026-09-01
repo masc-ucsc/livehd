@@ -16,6 +16,7 @@
 #include "cell.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
@@ -45,31 +46,13 @@ namespace gu = livehd::graph_util;
 using Node = hhds::Node_class;
 using Pin  = hhds::Pin_class;
 
-// ---------------------------------------------------------------------------
-// Hash toolkit -- the semdiff/abc_incr canonical-digest primitives. Kept
-// file-private like theirs (each digest must be free to evolve with its own
-// consumer's invalidation needs), and two-lane for the same reason abc_incr is:
-// a splice on a colliding digest is a MISCOMPILE, so the verify walk below is
+// Two-lane signatures use the shared deterministic hash primitives. A splice
+// on a colliding digest is a MISCOMPILE, so the verify walk below is
 // the gate and the digest only proposes -- but a weak digest would still flood
 // the walk with false buckets.
-// ---------------------------------------------------------------------------
-constexpr uint64_t mix64(uint64_t x) {
-  x ^= x >> 33U;
-  x *= 0xff51afd7ed558ccdULL;
-  x ^= x >> 33U;
-  x *= 0xc4ceb9fe1a85ec53ULL;
-  x ^= x >> 33U;
-  return x;
-}
-constexpr uint64_t hcombine(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
-uint64_t           hstr(std::string_view s) {
-  uint64_t h = 1469598103934665603ULL;  // FNV-1a
-  for (char c : s) {
-    h ^= static_cast<unsigned char>(c);
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
+using hash_util::combine64;
+using hash_util::fnv1a64;
+using hash_util::mix64;
 
 struct Sig {
   uint64_t    a = 0, b = 0;
@@ -79,9 +62,9 @@ struct Sig {
 constexpr uint64_t kLaneB = 0x9ae16a3b2f90404fULL;
 
 Sig sig_seed(uint64_t tag) { return {mix64(tag), mix64(tag ^ kLaneB)}; }
-Sig sig_comb(Sig h, Sig v) { return {hcombine(h.a, v.a), hcombine(h.b, mix64(v.b ^ kLaneB))}; }
+Sig sig_comb(Sig h, Sig v) { return {combine64(h.a, v.a), combine64(h.b, mix64(v.b ^ kLaneB))}; }
 Sig sig_u64(Sig h, uint64_t v) { return sig_comb(h, {v, v}); }
-Sig sig_str(Sig h, std::string_view s) { return sig_comb(h, {hstr(s), mix64(hstr(s) ^ kLaneB)}); }
+Sig sig_str(Sig h, std::string_view s) { return sig_comb(h, {fnv1a64(s), mix64(fnv1a64(s) ^ kLaneB)}); }
 
 // Fold a port-grouped operand list, commutative-normalizing WITHIN each
 // sink-port class (the semdiff/abc_incr fold_operands rule: `a+b == b+a` on

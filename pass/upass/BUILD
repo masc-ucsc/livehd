@@ -14,6 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//lnast",
         "//pass/common:pass",
         "//upass/assert:upass_assert",
