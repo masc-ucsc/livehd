@@ -33,8 +33,8 @@ namespace livehd::latch_contract {
 //   transparent-HIGH latch (enable active high) -> (enable, FALL)
 //   transparent-LOW  latch (enable active low)  -> (enable, RISE)
 //
-// For a latch the "net" is the ENABLE net — a latch's gate IS its enable
-// (user ruling 2026-07-20); there is no separate clock identity.
+// For a latch the "net" is the ENABLE net — a latch's gate IS its enable;
+// there is no separate clock identity.
 //
 // `net` is the ROOT driver the enable/clock cone resolves to, walked back
 // through the identity and boolean-shaping nodes tolg inserts, so two latches

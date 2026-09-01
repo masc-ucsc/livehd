@@ -315,9 +315,8 @@ private:
   //
   // UNIFORM: combinational temps, IO ports, memories, registers/flops/latches
   // and color boundary slots all follow the SAME rule -- there is no exemption
-  // for state, for reset-free state, or for module boundaries. (An earlier
-  // spelling of this comment claimed one; the carve-out was a mistake and was
-  // repealed 2026-08-14.) false = everything is Slop<n>.
+  // for state, for reset-free state, or for module boundaries.
+  // false = everything is Slop<n>.
   bool                           slop_u_         = true;
   bool                           color_dirty_    = true;  // cross-cycle color activation and boundary change tracking
   // sim.debug keeps the materializing Slop_u landing in generated code so an

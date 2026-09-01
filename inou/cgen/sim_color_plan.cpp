@@ -1299,7 +1299,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     // stale value, so drop it only to keep the Kahn diagnostic readable and fail
     // the plan exactly as the stall did.
     //
-    // MEASURED on XiangShan `Backend` 2026-08-18: `self-edges-dropped=0`. No
+    // MEASURED on XiangShan `Backend`: `self-edges-dropped=0`. No
     // design has produced one; the 307,612 blocked sites there come from a
     // 77-hop combinational ring, NOT from self edges (see the cycle extractor
     // below, and docs/opt_loop_incr.md). Do not read this guard as the fix for

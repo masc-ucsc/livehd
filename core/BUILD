@@ -58,6 +58,22 @@ cc_library(
     }),
 )
 
+# Core headers whose semantics feed the formal verdict cache without changing
+# the design digests (canonical_entity_name decides box PAIRING, and
+# reset_name_polarity decides which inputs the reset harness drives). Hashed
+# into //lhd:formal_salt so a future edit here invalidates cached verdicts —
+# the same rule that keeps pass/lec + pass/semdiff inside the salt.
+# hash_util.hpp rides along for free (its edits change digest values and thus
+# keys anyway, but keeping it salted removes the need to re-audit that).
+filegroup(
+    name = "formal_srcs",
+    srcs = [
+        "hash_util.hpp",
+        "str_tools.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "vcd_sample",
     srcs = [

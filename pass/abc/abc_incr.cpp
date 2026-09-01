@@ -641,9 +641,12 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // v5: partition boundary INPUT naming is now bidirectional (producer + consumer
   // cone, Proposal 2), so a v4 cache's port names no longer match.
   // v6: the formal-assume don't-care inputs left the salt with the EXDC item
-  // (2026-08-01) -- a v5 salt mixed in two bools that no longer exist.
+  // -- a v5 salt mixed in two bools that no longer exist.
   // v7: rows carry canonical digests and same-run cross-name reuse is enabled.
-  uint64_t h = fnv1a64("abc-incr-v8");
+  // v9: hashing moved to core/hash_util (canonical FNV offset basis; the local
+  // copy used the truncated one) -- every salt/digest value shifted, so the
+  // tag is bumped to keep this history honest (v8 values never coexist).
+  uint64_t h = fnv1a64("abc-incr-v9");
   h          = combine64(h, kAbcSrcSalt);
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {

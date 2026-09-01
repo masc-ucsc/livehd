@@ -70,6 +70,7 @@
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "lsp_index.hpp"
 #include "range_bits.hpp"
 
@@ -8310,14 +8311,12 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     mangled += suffix[i];
   }
   if (ambiguous) {
-    uint64_t h = 1469598103934665603ull;  // FNV-1a offset basis
+    namespace hu = livehd::hash_util;
+    uint64_t h   = hu::kFnv1a64_offset;
     for (const auto& s : suffix) {
       h ^= 0x01;  // component separator (never in an identifier/width token)
-      h *= 1099511628211ull;
-      for (unsigned char c : s) {
-        h ^= c;
-        h *= 1099511628211ull;
-      }
+      h *= hu::kFnv1a64_prime;
+      h  = hu::fnv1a64(s, h);
     }
     mangled += std::format("_h{:08x}", static_cast<uint32_t>(h & 0xffffffffu));
   }

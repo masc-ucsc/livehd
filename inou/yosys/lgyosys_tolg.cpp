@@ -2697,8 +2697,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // imported as NEGEDGE. Both silent. The polarity is derived from every
       // CLOCKED port now, read ports included, which fixes both.
       //
-      // A memory whose ports DISAGREE is a shape LiveHD does not model. User
-      // ruling 2026-08-02: it is NOT a read error -- the language allows it, so
+      // A memory whose ports DISAGREE is a shape LiveHD does not model. It is
+      // NOT a read error -- the language allows it, so
       // parse it, keep it, let it regenerate -- it is a FORMAL error. The
       // sentinel below carries "mixed" downstream; pass/lec refuses such a memory
       // BY NAME and the user opts back in per memory with

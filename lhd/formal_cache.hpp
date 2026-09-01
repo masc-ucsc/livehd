@@ -11,7 +11,7 @@
 // pass/lec + pass/semdiff + the cvc5 pin — //lhd:formal_salt), so any prover
 // change drops every cached verdict on load, with no human in the loop.
 //
-// Strategy hints are the cache's third record kind (user note 2026-07-10):
+// Strategy hints are the cache's third record kind:
 // which `auto` choice WON per def — keyed by canonical entity NAME, not digest,
 // so a hint survives the design edit that misses the verdict cache and the
 // next run tries the known-good strategy first. Hints are heuristic-only (they
@@ -42,7 +42,7 @@ struct Strategy_hint {
   long long   elapsed_ms = 0;
 };
 
-// Fourth record kind (ruling 2026-07-10): an Unknown ATTEMPT ledger — not a
+// Fourth record kind: an Unknown ATTEMPT ledger — not a
 // verdict (the def still reports inconclusive), just "this exact digest+options
 // already came back Unknown at this budget", so an unchanged re-run skips the
 // re-grind instead of burning the full solver budget again. Salt-gated with the

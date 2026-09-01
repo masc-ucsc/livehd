@@ -211,7 +211,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
   // livehd::run_workers, not std::thread: render_def_rhs recurses once per
   // folded single-use temp, and a default secondary-thread stack (512 KiB on
   // macOS) held only ~34 such levels at -O0 -- CVA6's unrolled packed-array
-  // write chains died there with `Bus error: 10` (2026-08-21).
+  // write chains died there with `Bus error: 10`.
   std::atomic<size_t> next{0};
   const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
   const size_t        nw = std::min({jobs.size(), hw, size_t{16}});

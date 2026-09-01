@@ -2505,7 +2505,7 @@ private:
       TSNode      fn   = field(n, "function");
       std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
       if (fnnm == "cassert") {
-        // `cassert` is an ELABORATION check (user ruling, 2026-07-25), not a
+        // `cassert` is an ELABORATION check, not a
         // simulation one: it must fold to true at build time or it is a diag
         // error. upass.tolg (check_unlowered_casserts) already decided every
         // cassert of this `test` block's `%`-named unit — so by the time this

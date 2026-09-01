@@ -49,7 +49,7 @@ hhds::Node_class add_latch(hhds::Graph& g, const std::string& name, const hhds::
   gu::set_unsign(q);
   enable.connect_sink(gu::setup_sink_by_name(l, "enable"));
   if (active_low) {
-    // posclk on a Latch is the ENABLE POLARITY (user ruling 2026-07-20):
+    // posclk on a Latch is the ENABLE POLARITY:
     // known-false = active LOW. This is the yosys-importer shape; from Pyrope
     // the polarity lives in the enable CONE instead.
     gu::create_const(g, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(l, "posclk"));

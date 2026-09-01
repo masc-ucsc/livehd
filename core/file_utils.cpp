@@ -16,7 +16,7 @@
 #include <libproc.h>
 #endif
 
-std::string file_utils::get_exe_path() {
+std::string livehd::file_utils::get_exe_path() {
   char exePath[PATH_MAX] = {
       0,
   };

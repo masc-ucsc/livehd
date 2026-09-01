@@ -5335,7 +5335,7 @@ bool Lnast_prp_writer::operands_stable_deep(Lnast_nid def_node, int d, int u, ui
 // expanded once, every operand edge looked at once), but a recursive descent
 // would nest one C++ frame per temp of the longest not-yet-memoized chain --
 // i.e. its stack depth is set by the DESIGN, exactly what this summary exists to
-// cap for render_def_rhs. MEASURED 2026-08-21: a 500-deep `((x<<1)|x[i])` temp
+// cap for render_def_rhs. MEASURED: a 500-deep `((x<<1)|x[i])` temp
 // chain put 1,069 frames here and overflowed a 512 KiB worker stack. The frame
 // vector below grows on the heap instead, and the walk's stack use is O(1).
 //

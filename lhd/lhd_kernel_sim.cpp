@@ -1412,8 +1412,7 @@ std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, c
 // generate a C++ driver that runs the `tick` loop and turns `assert`s into
 // runtime checks, then host-compile + run it and report pass/fail.
 //
-// NOT bazel — this comment used to say "bazel-build", and it was wrong. Setup
-// does write a standalone bazel module next to the sources (BUILD +
+// NOT bazel. Setup does write a standalone bazel module next to the sources (BUILD +
 // MODULE.bazel, see sim_into in lhd_kernel_common.cpp) so the dir stays
 // hand-buildable with `cd <simdir> && bazel run //:drv`, but `lhd sim` never
 // invokes it: it shells out to the host compiler directly (the "fast run path"
@@ -1896,7 +1895,7 @@ void sim_command(Options& opts, Result& res) {
   }
 
   // -O2, not -O1 (todo/livehd/2f-latch M7 efficiency item b). The optimization
-  // level is NOT the lever here; the job count is. Measured 2026-07-30 on
+  // level is NOT the lever here; the job count is. Measured on
   // dino's whole-CPU driver (18 TUs, 5372 generated lines, 18-core arm64):
   //
   //   one serial clang++ over all TUs   -O2 36.5s  -O1 31.6s  -Os 30.9s  -O0 17.3s
@@ -2822,7 +2821,7 @@ std::string locate_lgcheck() {
       return fs::absolute(cand).string();
     }
   }
-  auto exe_dir = file_utils::get_exe_path();
+  auto exe_dir = livehd::file_utils::get_exe_path();
   for (const auto& cand : {std::string{"./inou/yosys/lgcheck"},
                            std::string{"inou/yosys/lgcheck"},
                            exe_dir + "/../inou/yosys/lgcheck",
@@ -2851,7 +2850,7 @@ std::string locate_lgcheck_yosys() {
       return fs::absolute(cand).string();
     }
   }
-  auto exe_dir = file_utils::get_exe_path();
+  auto exe_dir = livehd::file_utils::get_exe_path();
   for (const auto& cand : {std::string{"bazel-bin/inou/yosys/yosys2"},
                            exe_dir + "/../inou/yosys/yosys2",
                            exe_dir + "/lhd.runfiles/_main/inou/yosys/yosys2",
@@ -2953,7 +2952,7 @@ std::string locate_yosys_slang_plugin() {
       return fs::absolute(cand).string();
     }
   }
-  auto exe_path = file_utils::get_exe_path();
+  auto exe_path = livehd::file_utils::get_exe_path();
   for (const auto& cand : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
                            absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
                            absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {

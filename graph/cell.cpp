@@ -293,8 +293,8 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       // commit-class analysis needs no per-op special case. `pipe_min`/
       // `pipe_max` are deliberately absent: a latch has no pipeline depth.
       //
-      // `posclk` ON A LATCH IS THE ENABLE POLARITY, NOT A CLOCK (user ruling,
-      // 2026-07-20). A latch has an `enable` signal and the only question is
+      // `posclk` ON A LATCH IS THE ENABLE POLARITY, NOT A CLOCK. A latch has an
+      // `enable` signal and the only question is
       // whether it is active HIGH or active LOW:
       //     unset / true  -> enable is active HIGH: transparent while enable==1,
       //                      so it COMMITS on that net's FALL

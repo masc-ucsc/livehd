@@ -1488,7 +1488,7 @@ private:
           } else if (info.has_posclk && !info.posclk_val) {
             // ACTIVE-LOW ENABLE IS NOT EXPRESSIBLE IN THE PYROPE SHAPE, and
             // wiring it as a bare pin flip is a SILENT MISCOMPILE (measured
-            // 2026-07-20 — this is exactly the "posclk double-negation" a
+            // — this is exactly the "posclk double-negation" a
             // symmetric before/after gate cannot see; it was caught only by
             // LEC-ing against an independent golden).
             //
@@ -1543,7 +1543,7 @@ private:
       // which is why pin_map_-first is wrong), then fall back to pin_map_ for
       // the internal-wire case. get_input_pin would assert on a non-input.
       if (info.is_latch) {
-        // no clock identity: the gate IS the enable (user ruling, 2f-latch M2)
+        // no clock identity: the gate IS the enable
       } else if (!info.clock_pin_name.empty()) {
         // 2c-wire — a wire clock signal (a gated/derived clock): use its DRIVER
         // (din) directly, not the passthrough buffer (cgen drops a buffer whose
@@ -1628,8 +1628,7 @@ private:
       }
 
       // Reset wiring. Effective init: an explicit `initial=N` attr overrides
-      // the declare's [value]; "nil" (or absent) = NO reset (confirmed
-      // 2026-06-07 ruling).
+      // the declare's [value]; "nil" (or absent) = NO reset.
       const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
       const bool        has_init = !init.empty() && init != "nil";
       const bool        rp_false = info.reset_pin_name == "false";
@@ -3484,8 +3483,8 @@ private:
   };
 
   // fcall(ref dst, ref __memory, ref cfg) — direct Memory-cell instantiation
-  // (08-memories.md RTL form). The cfg vocabulary is the cell pins VERBATIM
-  // (decision 2026-06-09): addr/bits/clock_pin/din/enable/fwd/posclk/type/
+  // (08-memories.md RTL form). The cfg vocabulary is the cell pins VERBATIM:
+  // addr/bits/clock_pin/din/enable/fwd/posclk/type/
   // wensize/size/rdport + init — no `latency`, type picks 0 async / 1 sync /
   // 2 array, rdport entries are strictly 0/1, dout comes back as a tuple
   // indexed by read-port order. Returns false when the call is not __memory.
@@ -4182,7 +4181,7 @@ private:
       // 1a-mem reset-restore — a concrete-init reg array with a bound reset
       // re-loads its init while reset is held. `reg arr:[N]T = <const>` is the
       // same statement a scalar `reg r:uW = <const>` makes: that const is the
-      // reset value of every entry (user ruling 2026-08-20). A memory has no
+      // reset value of every entry. A memory has no
       // parallel reset port to realize it with, so the restore is a SWEEP: one
       // write port (addr=<sweep counter>, din=init[addr], enable=reset) plus a
       // small counter that advances one entry per cycle while reset is high.
@@ -6048,8 +6047,8 @@ private:
         nxt  = lnast_->get_sibling_next(nxt);
       }
     }
-    // `cassert` is an ELABORATION check (user ruling, 2026-07-25): the upass
-    // must fold it here, or it fails. It never becomes an fproperty, so it
+    // `cassert` is an ELABORATION check: the upass must fold it here, or it
+    // fails. It never becomes an fproperty, so it
     // never reaches pass.formal and never survives into the netlist as a
     // runtime check — that is exactly what distinguishes it from `assert`.
     if (kind == "cassert") {
@@ -9101,7 +9100,7 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
           auto       mode     = lnast->get_name(c2);
           // 1a-mem — an array reg is a memory, and `reg arr:[N]T = <const>`
           // means exactly what it means on a scalar: that const is the RESET
-          // value of every entry (user ruling 2026-08-20), so an init'd array
+          // value of every entry, so an init'd array
           // needs the implicit reset input just like a flop does. A memory has
           // no parallel reset port, so finalize_mems() realizes the reset as a
           // one-write-per-cycle SWEEP; that is a lowering detail, not a reason
@@ -9714,8 +9713,8 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast>& lnast, const 
       .fatal();
 }
 
-// `cassert` is an ELABORATION check (user ruling, 2026-07-25): the compiler
-// folds it to true, or it is a diagnostic error. It never becomes an LGraph
+// `cassert` is an ELABORATION check: the compiler folds it to true, or it
+// is a diagnostic error. It never becomes an LGraph
 // node, a netlist check, a simulation check or a formal obligation — that is
 // exactly what separates it from `assert`. `lower_cassert` enforces that for
 // every lambda BODY the builder walks, but two trees are handed to tolg and

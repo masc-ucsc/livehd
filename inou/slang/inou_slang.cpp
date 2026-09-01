@@ -62,7 +62,7 @@ std::optional<std::string> find_ware_rtl_dir() {
   }
 
   // 2. `<exe>.runfiles/...` sitting next to the binary (direct ./bazel-bin run).
-  const fs::path  exe_dir = file_utils::get_exe_path();
+  const fs::path  exe_dir = livehd::file_utils::get_exe_path();
   std::error_code ec;
   for (const auto& e : fs::directory_iterator(exe_dir, ec)) {
     if (e.path().extension() == ".runfiles") {

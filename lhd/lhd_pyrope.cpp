@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "diag.hpp"
+#include "file_utils.hpp"
 #include "lhd.hpp"
 #include "livehd_lsp.hpp"
 #include "prpfmt_api.h"
@@ -22,13 +23,11 @@ namespace {
 // Slurp a file into a string. Returns false (and leaves `out` untouched) if the
 // file cannot be opened.
 bool read_file(const std::string& path, std::string& out) {
-  std::ifstream ifs(path, std::ios::binary);
-  if (!ifs.is_open()) {
+  auto content = livehd::file_utils::read_file(path);
+  if (!content) {
     return false;
   }
-  std::ostringstream ss;
-  ss << ifs.rdbuf();
-  out = ss.str();
+  out = std::move(*content);
   return true;
 }
 

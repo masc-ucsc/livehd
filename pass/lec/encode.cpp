@@ -1271,8 +1271,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // ports do not all commit on the same edge, so the reader could not
         // represent it and said so. A latch may mix phases -- that is what the
         // formal phase schedule is for -- a memory may not; the encoder has ONE
-        // commit point per memory. This is a FORMAL refusal, not a read error
-        // (user ruling 2026-08-02): the language allows the shape, so it parses
+        // commit point per memory. This is a FORMAL refusal, not a read error:
+        // the language allows the shape, so it parses
         // and regenerates, and the user opts back in per memory.
         if (!mc.ignored && gu::is_const_pin(e.driver) && gu::hydrate_const(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
           // Offer a name mem_ignored actually ACCEPTS. `debug_name` carries a

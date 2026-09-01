@@ -250,9 +250,9 @@ struct Lec_options {
   // attempt and then latches `unknown_at`, which the cycle loop skips. Removing
   // that freeze turns this into units x cycles x floor.
   //
-  // Default 20s (user ruling 2026-07-28). It was 1s — the value both floors
-  // were hardcoded to before it became a knob — and 1s is far too small for a
-  // unit to earn a real verdict on anything but a trivial def.
+  // Default 20s. 1s (the value both floors were hardcoded to before this
+  // became a knob) is far too small for a unit to earn a real verdict on
+  // anything but a trivial def.
   //
   // The measured symptom on a wide design: minion_lec took
   // `minion_dcache_miss_handler` to REFUTED in 2253ms on one run and to UNKNOWN
@@ -267,7 +267,7 @@ struct Lec_options {
   // target/actual/units/floored, so the overrun is never silent.
   int         min_timeout         = 20;
   // HARD wall backstop on a forked proof worker, as a multiple of `timeout`
-  // (0 = off, the pre-2026-08-03 behavior). `timeout` is armed as cvc5
+  // (0 = off). `timeout` is armed as cvc5
   // `tlimit-per`, which the ResourceManager can only check at a spendResource
   // point — so it cannot preempt ONE long call. A flat (box-free) miter takes
   // the eager bit-blaster path, where the whole query IS one CaDiCaL solve
@@ -585,7 +585,7 @@ struct Lec_options {
   // and strictly zero-cost when off: with stats false the engines pass a NULL
   // accumulator, so no Solve_probe impl is built, no plugin is registered and
   // no statistics snapshot is taken. A plain bool -- the expensive plugin tier
-  // rides this same flag (user ruling); there is deliberately no "deep" value.
+  // rides this same flag; there is deliberately no "deep" value.
   bool stats = false;
 
   // Heuristic-only strategy replay from the persistent cache. `auto` tries a
@@ -807,8 +807,8 @@ struct Prop_result {
   std::string   instance;
   // The obligation's ASSUME SCOPE: the formal block's dotted name WITHOUT the
   // "@instance" suffix, so every instance context of one authored block shares
-  // it ("" = the design tier). Blocks are independent tests (user ruling,
-  // 2026-07-25): an obligation is discharged under exactly its own scope's
+  // it ("" = the design tier). Blocks are independent tests: an obligation
+  // is discharged under exactly its own scope's
   // assumes plus the always-in-force design-tier ones, never under a sibling
   // block's. See prove_properties' per-scope activation literals.
   std::string   scope;

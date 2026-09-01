@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "file_utils.hpp"
 #include "json_util.hpp"
 #include "rapidjson/document.h"
 
@@ -24,14 +25,12 @@ std::string esc(std::string_view text) { return json_util::escape(text); }
 }  // namespace
 
 Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std::move(workdir)), salt_(salt) {
-  std::ifstream in(workdir_ + "/formal_cache.json", std::ios::binary);
-  if (!in) {
+  const auto content = livehd::file_utils::read_file(workdir_ + "/formal_cache.json");
+  if (!content) {
     return;
   }
-  std::stringstream ss;
-  ss << in.rdbuf();
   rapidjson::Document doc;
-  doc.Parse(ss.str().c_str());
+  doc.Parse(content->c_str());
   if (doc.HasParseError() || !doc.IsObject()) {
     return;  // corrupt cache: start empty (it is only ever a speedup)
   }

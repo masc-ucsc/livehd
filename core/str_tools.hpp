@@ -174,31 +174,35 @@ namespace str_tools {
 // Canonical cross-frontend module identity. Pyrope graph names include a file
 // prefix and primitive template widths (`file.foo__u8_bool`), while an
 // elaborated Verilog frontend exposes the same definition as `foo`.
+// The result is always a subview of `name`, so the scan runs on string_views
+// and allocates exactly once, on return (callers key maps with std::string).
+// The uPass mangling this parses is minted in upass_runner (`<base>__uN_sN_bool`
+// primitive specializations); named/generic-value specializations stay distinct.
 [[nodiscard]] inline std::string canonical_entity_name(std::string_view name) {
-  const auto  dot = name.rfind('.');
-  std::string entity(dot == std::string_view::npos ? name : name.substr(dot + 1));
-  const auto  specialization = entity.find("__");
-  if (specialization == std::string::npos || specialization == 0 || specialization + 2 >= entity.size()) {
-    return entity;
+  const auto dot    = name.rfind('.');
+  const auto entity = dot == std::string_view::npos ? name : name.substr(dot + 1);
+  const auto specialization = entity.find("__");
+  if (specialization == std::string_view::npos || specialization == 0 || specialization + 2 >= entity.size()) {
+    return std::string(entity);
   }
 
   size_t pos = specialization + 2;
   while (pos < entity.size()) {
     const auto end   = entity.find('_', pos);
-    const auto token = std::string_view(entity).substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    const auto token = entity.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos);
     bool       width = token == "bool";
     if (!width && token.size() >= 2 && (token.front() == 'u' || token.front() == 's')) {
       width = std::all_of(token.begin() + 1, token.end(), [](unsigned char ch) { return std::isdigit(ch); });
     }
     if (!width) {
-      return entity;
+      return std::string(entity);
     }
-    if (end == std::string::npos) {
-      return entity.substr(0, specialization);
+    if (end == std::string_view::npos) {
+      return std::string(entity.substr(0, specialization));
     }
     pos = end + 1;
   }
-  return entity;
+  return std::string(entity);
 }
 
 }  // namespace str_tools

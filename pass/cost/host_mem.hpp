@@ -32,10 +32,9 @@
 //    the translated netlist (measured 2.5x-29.6x; read_lib's fixed cost dominates
 //    small regions), so bytes-per-gate cannot be calibrated externally.
 //
-// CORRECTION (2026-07-15): an earlier version of this comment claimed
-// setrlimit(RLIMIT_AS/RLIMIT_DATA/RLIMIT_RSS) "returns EINVAL on Darwin ... the
-// only mechanism available is sampling our own RSS." That was wrong. RLIMIT_AS's
-// floor on Darwin is the task's *current* virtual_size -- an arm64 process
+// setrlimit(RLIMIT_AS/RLIMIT_DATA/RLIMIT_RSS) is NOT unsupported on Darwin,
+// despite the EINVAL an absolute small limit gets. RLIMIT_AS's floor on
+// Darwin is the task's *current* virtual_size -- an arm64 process
 // reserves ~415 GiB of PROT_NONE VA at startup, so an absolute small limit
 // EINVALs for being BELOW the floor, not for being unsupported. Set it to
 // (virtual_size + a bounded allocation allowance) and it enforces to the byte

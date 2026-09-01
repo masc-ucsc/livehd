@@ -2373,8 +2373,8 @@ void Prp2lnast::process_statement(TSNode n) {
     TSNode func = child_by_field(n, "function");
     if (!ts_node_is_null(func)) {
       auto fname = trim(get_text(func));
-      // `requires`/`ensures` were REMOVED from the language (user ruling,
-      // 2026-07-25): they never generated an obligation, and a silent-no-op
+      // `requires`/`ensures` were REMOVED from the language: they never
+      // generated an obligation, and a silent-no-op
       // contract is worse than no contract. They are now ordinary undefined
       // calls — write `assume` for a precondition, `assert` for a
       // postcondition.

@@ -448,8 +448,8 @@ static void lec_store_pair_hint(livehd::formal::Verdict_cache* vcache, const std
 }
 
 // Disclose helper-conditioned lec verdicts. NOTHING in the driver sets these
-// counters today: lec no longer consumes formal-block sidecars (user ruling,
-// 2026-07-25 — blocks are independent `lhd formal verify` tests, and lec's
+// counters today: lec no longer consumes formal-block sidecars (blocks are
+// independent `lhd formal verify` tests, and lec's
 // single impl==ref obligation could only take their assumes globally). The
 // ENGINE-side capability in query.cpp (Lec_options::assumptions + the monitor
 // encode) is deliberately retained so re-admitting blocks later is an explicit
@@ -551,7 +551,7 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
 // dependency DAG over the defs present in both libraries (paired by ENTITY — see
 // below), scope it to the picked TOP pair and its transitive descendants (a
 // whole-design library may hold many defs unrelated to --ref-top; those are NOT
-// proven as extra roots — ruling 2026-07-10), topo-order the subtree
+// proven as extra roots), topo-order the subtree
 // leaves-first, and LEC each def under the `auto` portfolio. Record the proven
 // set; for each parent, force-black-box its PROVEN child instances (--collapse) so
 // the parent proof stops re-solving them, while a child NOT provable in isolation
@@ -1550,7 +1550,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         return true;  // no analysis at all for this def
       }
-      // Unknown-attempt ledger (ruling 2026-07-10): an unchanged def that
+      // Unknown-attempt ledger: an unchanged def that
       // already came back Unknown at this (or a larger) budget skips the
       // re-grind — it still REPORTS inconclusive, exactly as a re-run would;
       // no verdict is transferred. A digest/option change, a larger
@@ -2255,8 +2255,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // child's immediate PARENT: re-prove the parent with that child INLINED and
   // everything else still boxed. If the parent proves, its own boundary
   // behaviour is intact, and since every ancestor already proved with the
-  // parent BOXED, the whole chain closes — there is nothing to check higher up
-  // (user ruling 2026-08-02). Only if the parent is still unresolved does the
+  // parent BOXED, the whole chain closes — there is nothing to check higher
+  // up. Only if the parent is still unresolved does the
   // escalation move up a level.
   std::vector<uint8_t> unconditional(order.size(), 0);
   // True when def `i` has NO undischarged premise -- i.e. it is non-unconditional
@@ -3233,7 +3233,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       .msg("lec: creating counterexample simulation test {}", simfail_path)
       .emit();
 
-  const std::string lhd_bin = file_utils::get_exe_path() + "/lhd";
+  const std::string lhd_bin = livehd::file_utils::get_exe_path() + "/lhd";
 
   std::string       impl_top = lecfail_simple_name(impl_top_full);
   std::string       ref_top  = lecfail_simple_name(ref_top_full);
@@ -4032,10 +4032,11 @@ void lec_command(Options& opts, Result& res) {
     return;
   }
 
-  // Formal BLOCKS are a `lhd formal verify` construct, not a lec one (user
-  // ruling, 2026-07-25): a block is an independent test, while lec has a single
+  // Formal BLOCKS are a `lhd formal verify` construct, not a lec one: a block
+  // is an independent test, while lec has a single
   // obligation (impl == ref) that a block's assumes could only condition
-  // globally — which is precisely the cross-block poisoning that ruling removes.
+  // globally — which is precisely the cross-block poisoning this separation
+  // removes.
   // lec still honors the design's OWN assumes (fproperty Subs in the graph, see
   // query.cpp's graph_has_assume), so an environment constraint written in the
   // design tier reaches lec exactly as before. A sidecar is refused loudly
@@ -5023,7 +5024,7 @@ void lec_command(Options& opts, Result& res) {
                     "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
   }
 
-  // VERDICT TAXONOMY (user ruling 2026-08-02):
+  // VERDICT TAXONOMY:
   //
   //   REFUTED   BMC found a counterexample                       -> exit 10
   //   UNKNOWN   the solver TIMED OUT / gave up, decided nothing  -> formal.strict
@@ -5156,8 +5157,7 @@ void lec_command(Options& opts, Result& res) {
       // UNKNOWN is the solver giving up: it found NO counterexample but could not
       // complete the proof. It is STILL a hard failure, because it PROVED NOTHING and
       // an exit-0 inconclusive is indistinguishable from a real proof to any gate
-      // built on this run (user ruling: "an inconclusive should be a fail, user can
-      // ignore but not be the default"). `formal.strict` defaults TRUE and is the
+      // built on this run. `formal.strict` defaults TRUE and is the
       // opt-out: setting it false downgrades this to the loud warning below. A
       // non-empty witness fails regardless of the knob — the miter surfaced an actual
       // diff (an incomplete-correspondence partial miter, or an `auto` run whose ind
@@ -5285,7 +5285,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       .msg("formal verify: creating counterexample simulation test {}", simfail_path)
       .emit();
 
-  const std::string lhd_bin = file_utils::get_exe_path() + "/lhd";
+  const std::string lhd_bin = livehd::file_utils::get_exe_path() + "/lhd";
   std::string       top     = lecfail_simple_name(top_full);
 
   // Import the ORIGINAL source when it is a Pyrope file with a `pub` top (a fix
@@ -6351,7 +6351,7 @@ void formal_verify_command(Options& opts, Result& res) {
         if (blk.stmts.empty()) {
           continue;  // nothing to prove (aliases only)
         }
-        // Where the block binds (user ruling, 2026-07-08): the verified top
+        // Where the block binds: the verified top
         // itself when the target IS the top (or unnamed), else EVERY instance
         // of the target module inside the top — the property must hold for
         // each one (reported as block@instance).

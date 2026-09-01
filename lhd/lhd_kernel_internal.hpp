@@ -7,10 +7,10 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "eprp.hpp"
 #include "lhd.hpp"
 
@@ -29,7 +29,7 @@ public:
   [[nodiscard]] std::string operator()(std::string_view full_name) const;
 
 private:
-  std::unordered_map<std::string, size_t> counts_;
+  absl::flat_hash_map<std::string, size_t> counts_;
 };
 
 inline constexpr uint32_t kHhdsGraphBodyMagic = 0x48484742;  // "HHGB"
@@ -38,7 +38,7 @@ inline constexpr uint32_t kHhdsTreeBodyMagic  = 0x48485442;  // "HHTB"
 // One --set/--config namespace. `list` controls `lhd list options`/`describe`
 // VISIBILITY only — validation and merge_sets accept every named namespace, so
 // a legacy spelling keeps working while the listing shows one canonical name
-// per option (user ruling 2026-07-17: sim.* IS the sim vocabulary (compile.sim.* deleted); the formal
+// per option (sim.* IS the sim vocabulary (compile.sim.* deleted); the formal
 // tools share the `formal.` root — formal.lec.* / formal.isabelle.* /
 // formal.lean.* — with options common across them listed once as formal.*).
 struct Set_pass {
@@ -62,7 +62,7 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "spec_mining_timeout", "simfail",      "simfail_run", "split",  "stats",          "strict", "timeout", "witness",
 };
 
-// REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one
+// REMOVED namespaces/flags (no back-compat): using one
 // errors with a directed "use X instead" hint. `formal_split` = the lec split
 // (common flags -> formal.<f>, pairing machinery -> formal.lec.<f>).
 struct Renamed_ns {

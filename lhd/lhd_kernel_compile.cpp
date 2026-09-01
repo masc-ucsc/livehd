@@ -789,6 +789,9 @@ std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln) {
   return out;
 }
 
+// Kernel-wide alias (declared in lhd_kernel_internal.hpp; ~15 call sites
+// across the kernel TUs). The name predates the shared escaper: it now does
+// FULL escaping via json_util, not the historical minimal set.
 std::string json_escape_min(std::string_view text) { return livehd::json_util::escape(text); }
 
 // `lhd scan FILES...` — emit each pyrope file's import strings as written. The payload

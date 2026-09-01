@@ -40,7 +40,7 @@ Inou_yosys_api::Inou_yosys_api(Eprp_var& var, bool do_read) : Pass("inou.yosys",
 void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
   auto script = var.get("script");
 
-  auto main_path = file_utils::get_exe_path();
+  auto main_path = livehd::file_utils::get_exe_path();
 
   std::vector<std::string> alt_paths{"/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/",
                                      "/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/",
@@ -296,7 +296,7 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   vars.set("path", path);
 
   // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
-  auto        exe_path = file_utils::get_exe_path();
+  auto        exe_path = livehd::file_utils::get_exe_path();
   std::string slang_plugin_path;
   for (const auto& candidate : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
                                 absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),

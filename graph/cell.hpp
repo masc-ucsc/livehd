@@ -117,8 +117,8 @@ enum class Ntype_op : uint8_t {
   // AttrSet moves Last_invalid, which resizes the three `Last_invalid`-sized
   // tables below.
   //
-  // It does NOT invalidate serialized lgdbs (an earlier version of this comment
-  // claimed it did): `Last_invalid` is a compile-time sentinel that is never
+  // It does NOT invalidate serialized lgdbs: `Last_invalid` is a compile-time
+  // sentinel that is never
   // stored in a node and never serialized, and appending a slot leaves every
   // existing op's raw value unchanged. Only the reverse direction breaks -- an
   // lgdb written WITH the new op and read by an OLDER binary indexes past the
@@ -196,8 +196,8 @@ public:
   // Memory `posclk` SENTINEL: the source memory's ports do NOT all commit on the
   // same clock edge, so the cell's ONE global polarity cannot represent it.
   //
-  // The language permits such a memory and the readers must not reject it (user
-  // ruling 2026-08-02: parse it, keep it, let it regenerate) — but it is a weird
+  // The language permits such a memory and the readers must not reject it
+  // (parse it, keep it, let it regenerate) — but it is a weird
   // shape LiveHD does not model, so FORMAL refuses it BY NAME and the user opts
   // back in per memory with `--set formal.ignore_memory=<name>`, which blackboxes
   // it. See pass/lec/encode.cpp and pass/lec/README.md §2.
@@ -377,7 +377,18 @@ public:
     return {"Y"};
   }
 
-  static std::string_view get_name(Ntype_op op) { return cell_name_sv[static_cast<size_t>(op)]; }
+  // Range-checked: an lgdb written by a NEWER binary can carry an appended
+  // op's raw value (see the forward-compat note above), and type_op_of hands
+  // it through unclamped — out-of-range folds into "invalid" instead of
+  // indexing past cell_name_sv. Entries are whole string literals, so the
+  // returned view's .data() is NUL-terminated (op_name in cgen relies on it).
+  static std::string_view get_name(Ntype_op op) {
+    const auto idx = static_cast<size_t>(op);
+    if (idx >= cell_name_sv.size()) {
+      return "invalid";
+    }
+    return cell_name_sv[idx];
+  }
 
   static Ntype_op get_op(std::string_view name) {
     const auto it = cell_name_map.find(name);

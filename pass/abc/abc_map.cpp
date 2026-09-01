@@ -4102,7 +4102,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // so a duplicate that the reference still spells one way becomes an
     // asymmetric pair: the post-synthesis LEC corresponds state BY NAME, and
     // every name-keyed map between here and cgen has to pick one of the two.
-    // Measured (2026-08-28, bedrock br_fifo_shared_*): a genvar-loop
+    // Measured (bedrock br_fifo_shared_*): a genvar-loop
     // instantiation whose instances shared a name flattened to two registers
     // under one name, and the mapped netlist then computed
     // `{credit_initial[5:3], credit_initial[5:3]}` where the RTL gives

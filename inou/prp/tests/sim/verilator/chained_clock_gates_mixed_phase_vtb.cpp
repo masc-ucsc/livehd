@@ -1,8 +1,7 @@
 // Verilator twin of inou/prp/tests/sim/chained_clock_gates_mixed_phase.prp.
 //
 // THE POINT OF THIS FILE. `lhd sim` refuses the fixture with
-// `gated-clock-unsupported`, and after the 2026-08-05 chain work it refuses for
-// the RIGHT reason: the chain resolves, but its second cell is the ACTIVE-LOW
+// `gated-clock-unsupported`, for the RIGHT reason: the chain resolves, but its second cell is the ACTIVE-LOW
 // flavour, which gates the FALLING edge — and cgen.sim commits at the tick's
 // rise, so folding it into a per-tick guard would move the commit half a period
 // silently. Refusing is correct; being unable to simulate the design is the

@@ -655,7 +655,7 @@ private:
   // recursive spine (render_def_rhs -> render_value -> render_def_rhs, one level
   // per folded temp) carries a small frame: at -O0 every local of every case of
   // a single big function is live for the whole call, and the merged 13.8 KiB
-  // frame is what overflowed a 512 KiB worker stack on CVA6 (2026-08-21).
+  // frame is what overflowed a 512 KiB worker stack on CVA6.
   std::string        render_infix_rhs(Lnast_nid def, Lnast_ntype::Lnast_ntype_int t, std::string_view sym, bool operand_ctx);
   std::string        render_get_mask_rhs(Lnast_nid c0, bool operand_ctx);
   std::string        render_concat_rhs(Lnast_nid c0, bool operand_ctx);

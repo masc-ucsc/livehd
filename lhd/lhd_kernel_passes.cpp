@@ -208,9 +208,12 @@ void semdiff_command(Options& opts, Result& res) {
 
   if (hier) {
     // ---- hierarchical stats sweep: every def pair, entity-canonicalized ------
-    // Mirrors lec_hierarchical's correspondence: defs pair by ENTITY (post-'.'
-    // tail) when the entity is side-unique, else full name; scoped to --top's
-    // transitive ref-side subtree when a top is given, else every shared def.
+    // Mirrors lec_hierarchical's correspondence: defs pair by CANONICAL entity
+    // (post-'.' tail with primitive `__uN/sN/bool` specialization suffixes
+    // stripped — str_tools::canonical_entity_name; before the consolidation
+    // semdiff used the bare tail and did NOT actually mirror lec) when the
+    // entity is side-unique, else full name; scoped to --top's transitive
+    // ref-side subtree when a top is given, else every shared def.
     namespace gu = livehd::graph_util;
     Entity_canonicalizer                           canon_ref(ref_var);
     Entity_canonicalizer                           canon_impl(impl_var);

@@ -8,8 +8,8 @@
 // exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. lhd drives
 // the registered EPRP methods programmatically (Eprp::run_method_now) plus
 // the direct C++ entry points (Lnast::dump, uPass_tolg::run,
-// livehd::Hhds_graph_library). The legacy lgshell REPL was removed
-// 2026-06-04 (lhd is the only driver; `lhd pyrope lsp` serves the LSP).
+// livehd::Hhds_graph_library). lhd is the only driver; `lhd pyrope lsp`
+// serves the LSP.
 
 #include <cstddef>
 #include <limits>

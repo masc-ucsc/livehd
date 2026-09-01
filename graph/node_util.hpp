@@ -740,8 +740,9 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
 // to a port_id via Ntype, then walk inp_edges() to find a sink pin with the
 // matching port_id. This emulates LiveHD's "invalid pin on missing pin"
 // behaviour (HHDS asserts when get_sink_pin is called on an unmaterialized
-// pin). For Sub nodes the name path goes through HHDS's get_sink_pin
-// directly because the sub-graph's GraphIO carries the names.
+// pin). Sub nodes get the SAME invalid-on-miss contract: the name resolves via
+// the sub-graph's GraphIO decls, and a declared input that was never connected
+// has no materialized pin, so it comes back invalid instead of asserting.
 
 [[nodiscard]] inline hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name) {
   if (node.is_invalid()) {
@@ -779,7 +780,19 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   }
   auto op = type_op_of(node);
   if (op == Ntype_op::Sub) {
-    return node.get_sink_pin(name);
+    // Same invalid-on-miss contract as the Node_class overload above: hhds
+    // get_sink_pin asserts on a declared-but-unconnected input.
+    auto sub_io = node.get_subnode_io();
+    if (!sub_io || !sub_io->has_input(name)) {
+      return {};
+    }
+    const auto sub_pid = sub_io->get_input_port_id(name);
+    for (const auto& e : node.inp_edges()) {
+      if (e.sink.get_port_id() == sub_pid) {
+        return e.sink;
+      }
+    }
+    return {};
   }
   auto pid = Ntype::get_sink_pid(op, name);
   if (pid == livehd::Port_invalid) {
@@ -956,13 +969,20 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   return result;
 }
 
-// A Memory has one clock sink per port. Visit the drivers in HHDS edge order
-// without allocating a second container at each call site.
+// A Memory has one clock sink per port: `clock_pin` is a fixed base offset, so
+// port i's clock sits at raw pid = i*Memory_port_stride + offset (graph/cell.cpp).
+// Visit EVERY port's clock driver in HHDS edge order — a consumer that keeps ONE
+// answer per array (e.g. the sim's array-wide write guard) has to look at all of
+// them before it can trust the first; looking only at the first silently loses
+// clock domains on multi-clock arrays. Tests the raw pid directly instead of
+// get_sink_name: that helper builds a std::string per edge (absl::StrCat above
+// the stride) on what is a hot per-node path.
 template <typename Fn>
 inline void for_each_memory_clock_driver(const hhds::Node_class& node, Fn&& fn) {
+  I(type_op_of(node) == Ntype_op::Memory, "for_each_memory_clock_driver decodes Memory port blocks; got a non-Memory node");
+  const auto clock_off = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
   for (const auto& edge : node.inp_edges()) {
-    const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(edge.sink.get_port_id()));
-    if (name.ends_with("clock_pin")) {
+    if (edge.sink.get_port_id() % Ntype::Memory_port_stride == clock_off) {
       fn(edge.driver);
     }
   }

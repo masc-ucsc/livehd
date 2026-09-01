@@ -22,7 +22,7 @@
 // is the whole blast-radius argument, and it is why this can land without
 // re-baselining the corpus.
 //
-// SCOPE (user ruling 2026-07-24): VERIFICATION AND SIMULATION ONLY, never on
+// SCOPE: VERIFICATION AND SIMULATION ONLY, never on
 // the synthesis path — slot enables and a phase divider cost QoR, and the
 // netlist handed to ABC must still contain a real `always_latch`. But it must
 // stand as a genuinely semantics-preserving transformation, not a formal-only

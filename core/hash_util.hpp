@@ -7,11 +7,9 @@
 
 namespace livehd::hash_util {
 
-// Canonical 64-bit FNV-1a parameters. Several pre-consolidation copies used a
-// truncated offset basis (1469598103934665603, the canonical value with its
-// last digit dropped); every digest built on these is an internal cache key or
-// uniquifier, so standardizing on the canonical basis only costs a one-time
-// cache refill.
+// Canonical 64-bit FNV-1a parameters. Every digest built on these is an
+// internal cache key or uniquifier, so a parameter change only costs a
+// one-time cache refill — nothing persists across versions by hash value.
 inline constexpr uint64_t kFnv1a64_offset = 0xcbf29ce484222325ULL;  // 14695981039346656037
 inline constexpr uint64_t kFnv1a64_prime  = 0x100000001b3ULL;       // 1099511628211
 

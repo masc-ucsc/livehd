@@ -50,7 +50,10 @@ Entity_canonicalizer::Entity_canonicalizer(const Eprp_var& var) {
 std::string Entity_canonicalizer::operator()(std::string_view full_name) const {
   auto entity = str_tools::canonical_entity_name(full_name);
   auto it     = counts_.find(entity);
-  return it != counts_.end() && it->second == 1 ? entity : std::string{full_name};
+  if (it != counts_.end() && it->second == 1) {
+    return entity;  // NRVO/move — the ternary form copied on the common path
+  }
+  return std::string{full_name};
 }
 
 int step_counter = 0;  // per-process step sequence for log naming
@@ -1447,14 +1450,12 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
                     std::format("ln: input is not a forest directory: {}", dir),
                     "expected a directory produced by --emit-dir ln:DIR/ (forest.txt + manifest.json)"};
   }
-  std::ifstream mifs(dir + "/manifest.json");
-  if (!mifs.is_open()) {
+  const auto manifest_json = livehd::file_utils::read_file(dir + "/manifest.json");
+  if (!manifest_json) {
     throw Lhd_error{"missing_file", std::format("missing {}/manifest.json", dir), ""};
   }
-  std::ostringstream moss;
-  moss << mifs.rdbuf();
   rapidjson::Document doc;
-  doc.Parse(moss.str().c_str());
+  doc.Parse(manifest_json->c_str());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("units") || !doc["units"].IsArray()) {
     throw Lhd_error{"config", std::format("malformed manifest.json in {}", dir), ""};
   }
@@ -1597,10 +1598,8 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      std::ifstream      ifs(std::format("{}/{}.v", e.path, cgen_verilog_file_stem(n)));
-      std::ostringstream oss;
-      oss << ifs.rdbuf();
-      manifest.emplace_back(n, hash_bytes(oss.str()));
+      const auto content = livehd::file_utils::read_file(std::format("{}/{}.v", e.path, cgen_verilog_file_stem(n)));
+      manifest.emplace_back(n, hash_bytes(content.value_or("")));
     }
     write_manifest(e.path, "verilog", manifest);
     res.outputs.push_back(e.path);
@@ -1662,7 +1661,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   }
   labels["runtime_support"] = opts.sim_runtime_support ? "true" : "false";
   merge_sets(opts, "compile.cgen", labels);
-  // sim.* is the ONE sim vocabulary (user ruling 2026-07-17): the codegen
+  // sim.* is the ONE sim vocabulary: the codegen
   // options ride the same names as the runtime `lhd sim` command, and the
   // compile.sim.* spelling does not exist (a --set of it errors with the
   // inline sim.* suggestion).
@@ -1782,7 +1781,7 @@ std::string find_header_in_runfiles(std::string_view header) {
       roots.emplace_back(v);
     }
   }
-  for (fs::path p = file_utils::get_exe_path(); !p.empty() && p != p.root_path(); p = p.parent_path()) {
+  for (fs::path p = livehd::file_utils::get_exe_path(); !p.empty() && p != p.root_path(); p = p.parent_path()) {
     if (p.filename().string().find(".runfiles") != std::string::npos) {
       roots.push_back(p);
       break;
@@ -1798,7 +1797,7 @@ std::string find_header_in_runfiles(std::string_view header) {
   // silently miss (slop.hpp/iassert.hpp still resolve from the ../hlop dev layout).
   {
     std::error_code   rec;
-    const std::string exe_dir = file_utils::get_exe_path();  // the DIRECTORY holding the binary
+    const std::string exe_dir = livehd::file_utils::get_exe_path();  // the DIRECTORY holding the binary
     for (fs::directory_iterator it(exe_dir, fs::directory_options::skip_permission_denied, rec), end; !exe_dir.empty() && it != end;
          it.increment(rec)) {
       if (rec) {
@@ -2073,26 +2072,20 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
            ")\n";
   }
 
+  // A missing file hashes as empty bytes.
   std::vector<std::pair<std::string, uint64_t>> manifest;
   for (const auto& n : names) {
-    std::ostringstream oss;
+    std::string bytes;
     for (const char* ext : {"hpp", "cpp"}) {
-      std::ifstream ifs(std::format("{}/{}.{}", dir, n, ext));
-      oss << ifs.rdbuf();
+      bytes += livehd::file_utils::read_file(std::format("{}/{}.{}", dir, n, ext)).value_or("");
     }
-    manifest.emplace_back(n, hash_bytes(oss.str()));
+    manifest.emplace_back(n, hash_bytes(bytes));
   }
   for (const auto& source : color_aux_sources) {
-    std::ifstream      ifs(std::format("{}/{}", dir, source));
-    std::ostringstream oss;
-    oss << ifs.rdbuf();
-    manifest.emplace_back(source, hash_bytes(oss.str()));
+    manifest.emplace_back(source, hash_bytes(livehd::file_utils::read_file(std::format("{}/{}", dir, source)).value_or("")));
   }
   for (const auto& object : color_objects) {
-    std::ifstream      ifs(std::format("{}/{}", dir, object), std::ios::binary);
-    std::ostringstream oss;
-    oss << ifs.rdbuf();
-    manifest.emplace_back(object, hash_bytes(oss.str()));
+    manifest.emplace_back(object, hash_bytes(livehd::file_utils::read_file(std::format("{}/{}", dir, object)).value_or("")));
   }
   write_manifest(dir, "sim", manifest);
   res.outputs.push_back(dir);
@@ -2113,7 +2106,7 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    // The formal tools share the `formal.` root (user ruling 2026-07-17):
+    // The formal tools share the `formal.` root:
     // formal.strict / formal.normalize apply to every emitter, and the
     // tool-specific formal.isabelle.* overrides them.
     for (const auto& [k, v] : opts.sets) {
@@ -2192,14 +2185,12 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
     names.erase(std::unique(names.begin(), names.end()), names.end());
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      auto          f = std::format("{}/{}.prp", e.path, n);
-      std::ifstream ifs(f);
-      if (!ifs.is_open()) {
+      auto       f       = std::format("{}/{}.prp", e.path, n);
+      const auto content = livehd::file_utils::read_file(f);
+      if (!content) {
         throw Lhd_error{"internal", std::format("pass.prp_writer did not produce {}", f), "check the step log in --workdir"};
       }
-      std::ostringstream oss;
-      oss << ifs.rdbuf();
-      manifest.emplace_back(n, hash_bytes(oss.str()));
+      manifest.emplace_back(n, hash_bytes(*content));
     }
     write_manifest(e.path, "pyrope", manifest);
     res.outputs.push_back(e.path);

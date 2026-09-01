@@ -44,7 +44,7 @@ namespace livehd::port_reach {
 // the disjoint `Or`-of-`SHL` concat idiom (or a pass-through of a sliced
 // callee output) — the shape a packed struct port lowers to. They are what
 // lets the partitioner refine to BIT level when a port-grain cycle demands it
-// (2026-08-06 ruling: refine only under loop pressure — slices with identical
+// (refine only under loop pressure — slices with identical
 // supports merge back to the port grain downstream).
 struct In_atom {
   uint32_t pid = 0;

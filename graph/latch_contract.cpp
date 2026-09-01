@@ -271,7 +271,7 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
 }
 
 // The enable's EFFECTIVE parity, folding in the polarity pin. `posclk` on a
-// Latch is the ENABLE POLARITY (user ruling): known-false = active LOW, which
+// Latch is the ENABLE POLARITY: known-false = active LOW, which
 // flips the transparent level and therefore the phase.
 Phase latch_phase(const hhds::Node_class& n) {
   Phase ph = resolve_phase(gu::get_driver_of_sink_name(n, "enable"));
@@ -1049,9 +1049,9 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
     }
     // A GATE ON AN ALREADY GATED CLOCK. `is_clock` cannot see this operand as a
     // clock — only nets a flop actually clocks on (plus a conventionally named
-    // input) are roots, and an intermediate gate output is neither — so before
-    // 2026-08-05 the inner gate was filed as an ENABLE, the cone came out with
-    // ZERO clock operands, and the whole chain was refused as "some other
+    // input) are roots, and an intermediate gate output is neither — so without
+    // recursing here the inner gate is filed as an ENABLE, the cone comes out
+    // with ZERO clock operands, and the whole chain is refused as "some other
     // derived clock". minion's VPU lane cascades three of these
     // (`cgate_txfma` -> `txfma_top` -> a per-stage re-gate), which is why the
     // recursion lives HERE, in the shared recognizer, rather than in any one
@@ -1673,8 +1673,8 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
     return out;
   }
   // A GATE CELL's own clock port. Its only state element is the enable latch,
-  // whose gate is its ENABLE (a latch has no clock_pin -- user ruling
-  // 2026-07-20), so the scan below finds nothing and the cell looks like it has
+  // whose gate is its ENABLE (a latch has no clock_pin), so the scan below
+  // finds nothing and the cell looks like it has
   // no clock port at all. That breaks a GATE CHAIN: the outer gate's clk port is
   // fed by the inner gate's output, and without this the inner one is never seen
   // as driving a clock, never materializes, and stays an opaque Sub -- which

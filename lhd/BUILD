@@ -16,6 +16,7 @@ load("//tools:copt_default.bzl", "COPTS")
 genrule(
     name = "formal_salt",
     srcs = [
+        "//core:formal_srcs",  # canonical_entity_name / reset_name_polarity moved here; pairing + reset semantics must stay salted
         "//pass/lec:formal_srcs",
         "//pass/semdiff:formal_srcs",
         "//packages:cvc5_repo.bzl",
@@ -54,6 +55,7 @@ genrule(
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/semdiff",
         "//pass/upass:pass_upass",
+        "//upass/runner:upass_runner",  # the lowering itself: a genrule src of a cc_library hashes only THAT target's archive, and pass_upass's does not contain upass_runner.o
         "//upass/tolg:upass_tolg",
     ],
     outs = ["compile_salt.hpp"],

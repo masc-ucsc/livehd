@@ -202,7 +202,7 @@ public:
     // stall diagnostic readable; the plan is still failed (versioning_complete =
     // false, one witness in errors_) so the module is refused rather than
     // silently scheduled against a stale value.
-    // MEASURED 2026-08-18: no design has produced one (XiangShan `Backend` is 0).
+    // MEASURED: no design has produced one (XiangShan `Backend` is 0).
     uint64_t self_edges_dropped        = 0;
     uint64_t version_sites             = 0;
     uint64_t version_edges             = 0;

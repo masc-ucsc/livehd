@@ -64,7 +64,10 @@ constexpr uint64_t kLaneB = 0x9ae16a3b2f90404fULL;
 Sig sig_seed(uint64_t tag) { return {mix64(tag), mix64(tag ^ kLaneB)}; }
 Sig sig_comb(Sig h, Sig v) { return {combine64(h.a, v.a), combine64(h.b, mix64(v.b ^ kLaneB))}; }
 Sig sig_u64(Sig h, uint64_t v) { return sig_comb(h, {v, v}); }
-Sig sig_str(Sig h, std::string_view s) { return sig_comb(h, {fnv1a64(s), mix64(fnv1a64(s) ^ kLaneB)}); }
+Sig sig_str(Sig h, std::string_view s) {
+  const auto f = fnv1a64(s);  // hash once; this runs per node per digest round
+  return sig_comb(h, {f, mix64(f ^ kLaneB)});
+}
 
 // Fold a port-grouped operand list, commutative-normalizing WITHIN each
 // sink-port class (the semdiff/abc_incr fold_operands rule: `a+b == b+a` on

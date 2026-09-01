@@ -1387,7 +1387,7 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
 // run), and it does NOT trigger the lecfail testbench (gated on Refuted) — which is
 // right, since a single-step CEX may not replay from reset.
 //
-// Cost of this choice (accepted, user ruling 2026-07-16): an equivalent design whose
+// Cost of this choice (accepted): an equivalent design whose
 // ind refutes from an UNREACHABLE state and whose bmc times out now exits 1 rather
 // than 0. Prefer a false alarm you can investigate over a silent false PASS; the
 // detail spells out that the CEX may be an unreachable step-case.
@@ -2521,7 +2521,7 @@ int pipeline_flush_latency(hhds::Graph* g) {
 // Top-level primary-input carrier, shared by both designs and by BOTH engines
 // (BMC's collect_ins and the inductive scan_inputs).
 //
-// OWNER RULING (2026-08-14): a width/sign disagreement between the two sides'
+// RULE: a width/sign disagreement between the two sides'
 // declaration of the same port is reconciled by ENLARGING the smaller view to
 // match the larger, never by refusing and never by truncating.
 //
@@ -8304,7 +8304,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.verdict  = Verdict::Unknown;
       res.detail  += "; matched portion DIFFERS (witness below; may be an artifact of the unmatched cut points)";
     } else if (has_state_cut) {
-      // ONLY A SURE COUNTEREXAMPLE IS A FAILURE (user ruling 2026-08-02).
+      // ONLY A SURE COUNTEREXAMPLE IS A FAILURE.
       //
       // The inductive step starts from an ARBITRARY equal state, so a
       // single-step CEX may sit on a state the design can never reach -- and
@@ -9681,8 +9681,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // silent skip. The FREEZE of already-bounded obligations (below) is what bounds
   // the total — this only ensures no single obligation-check runs unbounded.
   // No-op accounting when the budget is off.
-  // Per-scope assume ACTIVATION literals (formal blocks are independent tests —
-  // user ruling, 2026-07-25). Each formal block gets one fresh Boolean constant;
+  // Per-scope assume ACTIVATION literals (formal blocks are independent
+  // tests). Each formal block gets one fresh Boolean constant;
   // the block's free assumes are asserted as `act => holds` instead of `holds`,
   // and an obligation belonging to that block is checked with its own `act`
   // added to the checkSatAssuming set. A sibling block's `act` stays FREE, so
@@ -9822,31 +9822,10 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // Reset detection (structural reset_pin inputs + canonical names, or the
   // authoritative formal.reset spec) — single-design copy of prove_equal's rules.
   Io_name_map<bool> reset_negset;
-  auto              reset_name_polarity = [](const std::string& nm, bool& negreset) -> bool {
-    std::string lc = nm;
-    for (auto& c : lc) {
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    bool   tok_match = false;
-    size_t start     = 0;
-    for (size_t i = 0; i <= lc.size(); ++i) {
-      if (i == lc.size() || lc[i] == '_') {
-        std::string tok = lc.substr(start, i - start);
-        if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset" || tok == "nrst"
-            || tok == "nreset" || tok == "por") {
-          tok_match = true;
-        }
-        start = i + 1;
-      }
-    }
-    if (!tok_match) {
-      return false;
-    }
-    auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
-    negreset = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
-               || ends("nreset");
-    return true;
-  };
+  // Same shared rule as prove_equal's harness: the token set lives in
+  // str_tools so verify and lec cannot drift apart.
+  auto reset_name_polarity
+      = [](std::string_view nm, bool& negreset) -> bool { return str_tools::reset_name_polarity(nm, negreset); };
   const bool phase_reset = opts.phase == "just_reset";
   const bool phase_run   = opts.phase == "after_reset";
   if (phase_reset || phase_run) {
@@ -10988,8 +10967,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       solver.push();
       // Frame-0 free state; frame-1 state pinned to frame-0's next-state.
       // Step-frame inputs are free EXCEPT the primary resets, which are pinned
-      // to their DEASSERTED level in the after_reset phase (user ruling,
-      // 2026-07-08): the step then quantifies over post-reset free-running
+      // to their DEASSERTED level in the after_reset phase: the step then
+      // quantifies over post-reset free-running
       // states only, upgrading invariants a mid-trace reset would break. The
       // narrowing is disclosed in the run detail below. NOTE: only PRIMARY reset
       // INPUTS are pinned (an environment assumption) — a DERIVED/internal reset

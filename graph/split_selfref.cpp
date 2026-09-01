@@ -61,7 +61,7 @@ enum Stop_reason : unsigned {
 // together -- keeping them apart is how a guard comes to be sized for a stack
 // the pass does not actually run on.
 //
-// MEASURED on XiangShan `Rob`, 2026-08-17: the walk crashed at depth 1024 on an
+// MEASURED on XiangShan `Rob`: the walk crashed at depth 1024 on an
 // 8 MB stack, i.e. ~8 KB per frame for this 470-line lambda.
 inline constexpr size_t kSplitFrameBytes  = 8u * 1024;
 // The stack the ESCALATED local wire walk gets. Reserved
@@ -296,8 +296,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   // the global ceiling is the real anti-blowup net and is loose because distinct
   // sub-slices are memoized and shared across readers.
   //
-  // MEASURED 2026-08-17, and the answer is that raising this does NOT help the
-  // design that motivated asking. XiangShan `Rob` leaves 914 on-cycle reads
+  // MEASURED: raising this does NOT help the design that motivated asking. XiangShan `Rob` leaves 914 on-cycle reads
   // undissolved with the node budget reported as exhausted; growing the
   // allowance 8x ran three extra fixpoint rounds, rewired exactly the same
   // 315,791 reads, and cost +5.5% wall and 10.4 GB peak RSS for nothing. The
@@ -326,7 +325,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   // the caller's to decide (kSplitInlineDepth on its own stack,
   // kSplitWorkerDepth on the escalated one), not a constant here.
   //
-  // MEASURED on XiangShan `Rob`, 2026-08-17: at 64 this was the ONLY limit that
+  // MEASURED on XiangShan `Rob`: at 64 this was the ONLY limit that
   // fired (the node budget took the blame for years because both set the same
   // flag; raising the budget 8x dissolved zero reads). 256 changed nothing —
   // the failing descents go far deeper — and 1024 died with a stack overflow on
@@ -1487,8 +1486,7 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
   // through two or three DIFFERENT instances is unschedulable for a consumer
   // whose model makes a comb callee ONE ATOMIC node — but no caller has that
   // model any more. `inou.cgen.sim` dissolves those rings by CALLEE
-  // PARTITIONING (per-output-group `__settle_g<k>` methods, the 2026-08-06
-  // ruling) and `inou.cgen.verilog` schedules across the boundary read-only
+  // PARTITIONING (per-output-group `__settle_g<k>` methods) and `inou.cgen.verilog` schedules across the boundary read-only
   // (comb_emit_order); the callers left are pass.legalize (every compile) and
   // the LEC prep path. Traversing through instances would inline whole
   // multi-instance rings out of the emitted netlist AND — since this rewrites

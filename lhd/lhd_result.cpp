@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd.hpp"
@@ -32,13 +33,11 @@ namespace fs = std::filesystem;
 namespace {
 
 void append_file_content(std::string& buf, const std::string& path) {
-  std::ifstream ifs(path, std::ios::binary);
-  if (!ifs.is_open()) {
-    return;  // the run itself reports missing_file with a proper diagnostic
+  // A missing file appends nothing: the run itself reports missing_file with a
+  // proper diagnostic.
+  if (auto content = livehd::file_utils::read_file(path)) {
+    buf += *content;
   }
-  std::ostringstream oss;
-  oss << ifs.rdbuf();
-  buf += oss.str();
 }
 
 // Hash a directory input (a design blob) deterministically: sorted relative

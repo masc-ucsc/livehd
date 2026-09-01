@@ -1430,8 +1430,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .fatal();
       }
       // A read port nothing consumes simply has no dout pin, and nothing to
-      // drive. This used to say create_driver_pin, which is find-or-CREATE: a
-      // writer quietly growing the caller's graph to name a net no one reads.
+      // drive. NOT create_driver_pin, which is find-or-CREATE: a writer
+      // quietly growing the caller's graph to name a net no one reads.
       const auto dout_pid = static_cast<uint32_t>(n_wr_ports + n_rd_pos);
       ++n_rd_pos;
       if (!live_dout_pids.contains(dout_pid)) {

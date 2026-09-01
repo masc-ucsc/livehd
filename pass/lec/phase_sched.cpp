@@ -371,8 +371,8 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     }
     Phase_endpoint e;
     const bool     is_latch = op == Ntype_op::Latch;
-    // A latch's window is controlled by its ENABLE (its gate IS its enable, user
-    // ruling 2026-07-20); everything else by `clock_pin`.
+    // A latch's window is controlled by its ENABLE (its gate IS its enable);
+    // everything else by `clock_pin`.
     const auto     ctrl     = lc::sink_driver_hier(node, is_latch ? "enable" : "clock_pin");
     // An ALWAYS-OPEN latch (no enable pin -- tolg wires none when every path
     // writes the reg -- or a constant-true one) stores nothing. Classify it

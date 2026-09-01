@@ -766,9 +766,8 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     // branch too whenever sim.slop_u declared them `Slop_u<W>` -- that type IS
     // canonical, and mark_slop_u_binding() records them. A SIGNED boundary is
     // still not canonical and takes the physical W-bit -> non-negative
-    // conversion below. (This comment used to say boundaries are "deliberately
-    // not canonical"; that exemption was repealed 2026-08-14 and the branch
-    // immediately below exists specifically to serve them.)
+    // conversion below. The branch immediately below exists specifically to
+    // serve unsigned boundaries.
     const int source_bits = wbits_of(dpin);
     if (canonical_.contains(dpin.get_class_index()) && source_bits > 0 && source_bits <= target_bits) {
       // Keep operand()'s concrete-Slop contract even when `base` is a Slop_u.
@@ -3039,9 +3038,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           .emit();
       return;
     }
-    // A MEMORY is state too, and its clock is the same question. Before
-    // 2026-08-05 this loop iterated `is_type_flop` only, so a clock-gated
-    // memory compiled CLEAN and wrote every tick with the gate as dead code —
+    // A MEMORY is state too, and its clock is the same question. Iterating
+    // `is_type_flop` only would let a clock-gated memory compile CLEAN and
+    // write every tick with the gate as dead code —
     // the silent half of this gap (`inou.cgen.verilog` gets it right on the
     // same graph: the emitted `cgen_memory_*` instance takes `.clk(clk & en)`).
     // The fold itself lands on the write enable further down; here we only
@@ -3495,8 +3494,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
       }
     }
-    // name fallback for the common `clock` port -- UNCONDITIONAL (user ruling
-    // 2026-07-18): an input named `clock` is always THE clock waveform, never
+    // name fallback for the common `clock` port -- UNCONDITIONAL: an input
+    // named `clock` is always THE clock waveform, never
     // an ordinary traced signal. Generated RTL (CIRCT) stamps a clock port on
     // every module including pure-comb ones and modules whose only state is a
     // Memory array (no flops); tracing those as data made the synthetic clock
@@ -5830,8 +5829,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // This is what cgen_memory_*.v under a 2-state simulator (Verilator)
       // reads back, and mem_wensize_lanes pins it: a wensize lane the test
       // never writes must read 0, which a PRNG fill turned into a
-      // seed-dependent value. The flop power-on PRNG ruling (2026-08-09) is
-      // about FLOPS and stands unchanged; sim.init_zero still exists to zero
+      // seed-dependent value. The flop power-on PRNG rule is about FLOPS and
+      // stands unchanged; sim.init_zero still exists to zero
       // those. State WITH a runtime initializer or a reset keeps the seeded
       // unknown fill below -- lhd_sim_init_zero_test pins that reset-only
       // state stays unknown until its reset actually asserts.
@@ -8306,8 +8305,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const size_t      observation = report.find("observation-map begin");
       const auto        schedule
           = observation == std::string::npos ? std::string_view{report} : std::string_view{report}.substr(0, observation);
-      const uint64_t schedule_digest = fnv1a_str(0xcbf29ce484222325ULL, schedule);
-      const uint64_t binding_digest  = fnv1a_str(0xcbf29ce484222325ULL, report);
+      const uint64_t schedule_digest = fnv1a_str(livehd::hash_util::kFnv1a64_offset, schedule);
+      const uint64_t binding_digest  = fnv1a_str(livehd::hash_util::kFnv1a64_offset, report);
       fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, ",
                                 cpp_string_literal("sim-color-boundary-abi-v2"),
                                 ");\n",
