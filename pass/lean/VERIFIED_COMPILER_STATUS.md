@@ -530,14 +530,97 @@ indices stay stable — and the immutable table rides `SourceDesc.memConst` with
 inferred table's entry count need not be a power of two and `addr_width` rounds
 up, so `2 ^ aw` would return a fabricated entry instead of the defined zero.
 
+## CVA6: generated wrappers, proven end to end
+
+`pass/lean/SWEEP_cva6.tsv`.
+
+**22 of 22 emitted modules PROVEN**, zero gate failures — the first demonstration
+that a wrapper *generated* from slang's AST survives RTL → LGraph → DesignCert →
+Lean. (23 attempted; `cva6_tlb` hit the 1800 s emit cap. The manual path spent
+**5 h 12 m** on that module, so it needs a bigger budget, not a fix.)
+
+Against the manual path on the same modules:
+
+| module | manual | this branch |
+|---|---:|---:|
+| `compressed_decoder` | 162 s | **23.7 s** |
+| `csr_buffer` | 77 s | **10.7 s** |
+| `controller` | 35 s | **11.2 s** |
+
+`fpu_wrap` at 899.6 s is the outlier; everything else is under 26 s. Note the
+fixed cost cuts the other way on tiny modules — `ras` took 7 s manually and
+26.3 s here, because ~10–25 s of `native_decide` literal compilation dominates
+when there is almost nothing to prove.
+
+### Wrapper generation
+
+`scripts/gen_cva6_wrappers.py`, from slang's elaborated AST. Measured by running
+slang on every generated wrapper — generation is NOT compilation, and quoting the
+generation count misled three times in this work.
+
+| | targets (of 78) | wrappers (of 128) |
+|---|---:|---:|
+| hand-written, before | 10 | 12 |
+| first generator | 23 | 65 |
+| + `CVA6Cfg`/imports | 23 | 50 |
+| + companion type package | 33 | 65 |
+| + packed-array-of-named-struct | 26† | 74 |
+| + nested structs, enums, type params | 33 | 74 |
+| **+ `TypeAlias.target`** | **37** | **89** |
+
+† generation rose 35 → 52 targets at that step while elaboration *fell* to 26:
+the fix moved modules from "skipped" to "generated but still broken". That gap is
+why every row here is an elaboration count.
+
+Five distinct defects, each verified on the modules that failed:
+
+1. **Packed array of a named struct** (17 modules) — `scoreboard_entry_t [N-1:0]`
+   arrives as a `PackedArrayType` *dict* whose element is an unexpanded reference,
+   so the width was unmeasurable and `bare_type_name` declined (dict, not string).
+   Reported as "unpacked/unknown" when it is neither.
+2. **Nested struct flattened** (13) — `scoreboard_entry_t.ex` (an `exception_t`)
+   rendered as `logic [202:0]`: bit-accurate but nameless, so
+   `instruction_o.ex.valid` failed. `render_field_type` now recurses, emitting
+   nested structs inline.
+3. **Enum field** (9) — `operation` is `ariane_pkg::fu_op`, which `resolve_type`
+   missed, so it fell back to `logic` and the DUT could not pass it to
+   `op_is_branch`. The qualified name is kept instead.
+4. **Type parameter bound to a width** — drops the fields.
+5. **`TypeAlias.target` never indexed** (~18) — the one that mattered most. For
+   the whole hpdcache family *every* mention of `hpdcache_req_sid_t` is a
+   cross-scope reference string (`cva6_hpdcache_wrapper.hpdcache_req_sid_t`); the
+   structure appears in exactly one place, a `TypeAlias` node's `target` field,
+   which the index never read because it only looked at `type`.
+
+Fix 4 had to be **undone** for type parameters. Preferring the bare name there is
+wrong because most such names are the module's own `parameter type`
+(`parameter type hpdcache_req_sid_t = logic`, `hpdcache_ctrl.sv:44`), which no
+import can declare. Reconstruction is correct — and only safe *because* fixes 2
+and 3 made the reconstruction preserve nested structs and enum names.
+
+### Running it
+
+`scripts/run_cva6_vc_sweep.sh`. One trap encoded there: the stress runner asks
+bender for `--top <module>_gate`, which bender cannot know, and silently produces
+an **empty filelist** — surfacing much later as "top module not found among 438
+declarations". Use the static full-core filelist and let yosys pick the top.
+
 ## Not done
 
-1. **CVA6.** `scripts/gen_cva6_wrappers.py` generates gate wrappers from slang's
-   elaborated AST; **23 of the 78 targets** now elaborate, against 10 hand-written.
-   The gap is three separate things: 26 targets are mutually exclusive variants
-   absent from this config (needs other configs — the script is config-agnostic),
-   17 skip on unpacked/interface port types, 12 generate but fail on package
-   sub-scopes, enum casts, or member access through a flattened port.
+1. **CVA6 — 15 of 78 targets still lack a working wrapper.** See the CVA6
+   section below for what is done. The remaining 15 are almost all one shape:
+   `use of undeclared identifier` on the PARENT module's `localparam type`
+   (`fu_data_t`, `scoreboard_entry_t`, `fetch_entry_t`, `cmo_req_t`,
+   `axi_req_t`) — the same family as the `TypeAlias.target` fix, on routes the
+   index still does not reach. They are the large pipeline modules (`frontend`,
+   `id_stage`, `issue_stage`, `commit_stage`, `ex_stage`, `scoreboard`), so they
+   are worth chasing. One is different: `cva6_hpdcache_wrapper` fails with
+   `cannot select range of [63:32] from 'logic[0:0]'` — a reconstruction that
+   produced too narrow a type, not a missing name.
+
+   The other 26 of the 78 are mutually exclusive variants absent from this
+   config; they need the other config filelists, and the generator is
+   config-agnostic.
 
    ~~CORE-ET (122) is running via `scripts/run_vc_sweep.sh`,~~
    which now compares against a **same-binary legacy baseline** rather than the

@@ -105,11 +105,46 @@ def build_type_index(root):
         if nm and isinstance(t, dict) and t.get("kind") in (
                 "PackedStructType", "PackedArrayType", "EnumType"):
             TYPE_INDEX.setdefault(nm, t)
+        # A TypeAlias carries its expansion under `target`, NOT `type` -- and for
+        # the hpdcache family that is the ONLY place the structure appears.  Every
+        # other mention of e.g. `hpdcache_req_sid_t` is a cross-scope reference
+        # string (`cva6_hpdcache_wrapper.hpdcache_req_sid_t`), so missing `target`
+        # meant the type was unresolvable anywhere and 18 modules fell back to a
+        # bare name that no import could declare.
+        if nm and n.get("kind") == "TypeAlias" and isinstance(n.get("target"), dict):
+            TYPE_INDEX.setdefault(nm, n["target"])
         for v in n.values():
             if isinstance(v, (dict, list)):
                 walk(v)
     walk(root)
     return TYPE_INDEX
+
+
+def packed_array_of_named(t):
+    """`<elemName> <range>` for a packed array whose element cannot be expanded.
+
+    slang gives such a port a PackedArrayType DICT whose `elementType` is a
+    reference STRING it never expanded -- e.g. `scoreboard_entry_t [1:0]`.  The
+    width is therefore unknown, and `bare_type_name` declines because the port
+    type is a dict rather than a string, so the port was reported as
+    "unpacked/unknown" and the whole module skipped.  17 of the 78 CVA6 targets
+    were lost this way, all to this one shape.
+
+    But the RTL itself writes exactly `scoreboard_entry_t [N-1:0] port`
+    (core/scoreboard.sv:43), and the wrapper imports the packages, so the
+    declaration can simply be reproduced.
+    """
+    if not isinstance(t, dict) or t.get("kind") != "PackedArrayType":
+        return None
+    rng = t.get("range", "")
+    elem = t.get("elementType")
+    if isinstance(elem, dict):
+        # An expanded element has a computable width; the normal path handles it.
+        return None
+    en = bare_type_name(elem)
+    if not en or not rng:
+        return None
+    return f"{en} {rng}"
 
 
 def bare_type_name(t):
@@ -198,16 +233,42 @@ def type_width(t):
 
 
 def render_field_type(t):
-    """SystemVerilog text for a field's type (packed only)."""
+    """SystemVerilog text for a field's type (packed only).
+
+    NESTED STRUCTS ARE EMITTED INLINE, not flattened.  Collapsing a nested struct
+    to `logic [w-1:0]` is bit-accurate but loses the field NAMES, and the DUT then
+    fails on `instruction_o.ex.valid` with "invalid member access for type
+    'logic[202:0]'" -- 13 of the remaining CVA6 failures were this one thing,
+    `scoreboard_entry_t.ex` (an `exception_t`) rendered as a 203-bit vector.
+
+    Recursing keeps the wrapper self-contained: no dependency on whether the
+    nested type happens to have an importable name.
+    """
+    raw = t
     t = resolve_type(t)
     if not isinstance(t, dict):
-        return "logic"
+        # Unexpanded named type -- use the NAME.  slang reports these already
+        # package-qualified (`ariane_pkg::fu_op`), and the previous fallback to
+        # `logic` is what produced "no implicit conversion from 'logic' to
+        # 'fu_op'": an ENUM field silently became a bare bit, so the DUT could
+        # not pass it to a function expecting the enum.
+        bn = bare_type_name(raw)
+        return bn if bn else "logic"
     k = t.get("kind")
+    if k == "EnumType":
+        # An enum must keep its name for the same reason.
+        bn = bare_type_name(raw)
+        if bn:
+            return bn
     if k == "ScalarType":
         return "logic"
     if k == "PackedArrayType":
         inner = render_field_type(t.get("elementType", {}))
         return f"{inner} {t.get('range','')}"
+    if k == "PackedStructType":
+        fields = sorted(t.get("members", []), key=lambda m: m.get("bitOffset", 0), reverse=True)
+        body = " ".join(f"{render_field_type(f.get('type', {}))} {f.get('name')};" for f in fields)
+        return "struct packed { " + body + " }"
     w = type_width(t)
     return f"logic [{w-1}:0]" if w else "logic"
 
@@ -251,34 +312,52 @@ def gen_wrapper(defn, inst):
         if pq:
             tp_binds.append((tp["name"], pq))
             continue
-        t = resolve_type(tp.get("type"))
+        t   = resolve_type(tp.get("type"))
         bn0 = bare_type_name(tp.get("type"))
-        if t is None and bn0:
-            tp_binds.append((tp["name"], bn0))
-            continue
-        nm = f"{tp['name']}__r"
-        if isinstance(t, dict) and t.get("kind") == "PackedStructType":
-            pkg_types.append(render_struct(t, nm).replace("  typedef", "  typedef"))
+        nm  = f"{tp['name']}__r"
+
+        # RECONSTRUCT whenever the type can be expanded, and bind the parameter to
+        # the reconstruction.
+        #
+        # An earlier revision preferred the bare NAME here, to stop a flat
+        # `logic [w-1:0]` typedef dropping a struct's fields.  That was wrong for
+        # the commonest case: most of these names are the module's OWN
+        # `parameter type` (e.g. `hpdcache_req_sid_t` is declared as
+        # `parameter type hpdcache_req_sid_t = logic` in hpdcache_ctrl.sv:44), so
+        # NO import can make the name visible and the wrapper failed with "use of
+        # undeclared identifier" -- 18 modules.
+        #
+        # Reconstruction is now safe for the field-access concern too, because
+        # `render_struct`/`render_field_type` recurse into nested structs and keep
+        # enum names, so the rebuilt type carries its fields.
+        if isinstance(t, dict):
+            if t.get("kind") == "PackedStructType":
+                pkg_types.append(render_struct(t, nm))
+            else:
+                w = type_width(t)
+                if w:
+                    pkg_types.append(f"  typedef {render_field_type(t)} {nm};"
+                                     if render_field_type(t) != "logic" or w == 1
+                                     else f"  typedef logic [{w-1}:0] {nm};")
+                else:
+                    if bn0:
+                        tp_binds.append((tp["name"], bn0))
+                        continue
+                    unresolved.append(tp["name"])
+                    continue
             tp_binds.append((tp["name"], nm))
             local_name[tp["name"]] = nm
             if bn0:
+                # Ports naming the same type must use the SAME reconstruction, or
+                # they refer to an identifier the wrapper never declares.
                 recon[bn0] = nm
+            continue
+
+        # Not expandable: the name is all we have.
+        if bn0:
+            tp_binds.append((tp["name"], bn0))
         else:
-            w = type_width(t) if isinstance(t, dict) else None
-            if w:
-                pkg_types.append(f"  typedef logic [{w-1}:0] {nm};")
-                tp_binds.append((tp["name"], nm))
-                local_name[tp["name"]] = nm
-                if bn0:
-                    recon[bn0] = nm
-            else:
-                bn = bare_type_name(tp.get("type"))
-                if bn:
-                    tp_binds.append((tp["name"], bn))
-                else:
-                    unresolved.append(tp["name"])
-    if unresolved:
-        return None, f"unresolved type parameter(s): {', '.join(unresolved)}"
+            unresolved.append(tp["name"])
 
     decls, conns, glue = [], [], []
     for p in ports:
@@ -296,6 +375,11 @@ def gen_wrapper(defn, inst):
             bn = bare_type_name(raw)
             if bn:
                 decls.append(f"  {d} {recon.get(bn, bn)} {nm}")
+                conns.append(f"      .{nm}({nm})")
+                continue
+            pa = packed_array_of_named(t)
+            if pa:
+                decls.append(f"  {d} {pa} {nm}")
                 conns.append(f"      .{nm}({nm})")
                 continue
             return None, f"port `{nm}` has an unpacked/unknown type"
