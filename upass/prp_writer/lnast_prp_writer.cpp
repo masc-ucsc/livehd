@@ -3389,9 +3389,38 @@ void Lnast_prp_writer::write_if_chain(bool continuation) {
     return;
   }
 
+  // The LEADING arm gets the same dead-arm treatment as the `elif`s below: a
+  // condition folded to `false` cannot execute, and its body may read names
+  // nothing declares (whatever would have declared them was not elaborated
+  // either), so the emitted .prp would not read back. Skipping it promotes the
+  // next arm to the leading `if`. When only the `else` survives, its body runs
+  // unconditionally — kept braced (`if true`) so the arm's scope is unchanged.
+  auto cond = render_value(cur, /*operand_ctx=*/false);
+  while (cond == "false" && !is_last_child()) {
+    if (!move_to_sibling()) {  // this arm's stmts, unwritten
+      move_to_parent();
+      return;
+    }
+    if (!move_to_sibling()) {  // next condition, or the trailing else-stmts
+      move_to_parent();
+      return;
+    }
+    cond = is_last_child() ? "true" : render_value(cur, /*operand_ctx=*/false);
+    if (cond == "true") {  // else-stmts: `cur` IS the body, not a condition
+      print(continuation ? " elif true {\n" : "if true {\n");
+      ++depth;
+      write_node();
+      --depth;
+      print_indent();
+      print("}");
+      move_to_parent();
+      return;
+    }
+  }
+
   // First child: condition (ref or const) — inline a single-use temp condition.
   print(continuation ? " elif " : (unique ? "unique if " : "if "));
-  print(render_value(cur, /*operand_ctx=*/false));
+  print(cond);
   print(" {\n");
   ++depth;
 
@@ -3430,8 +3459,23 @@ void Lnast_prp_writer::write_if_chain(bool continuation) {
       print("}");
     } else {
       // elif condition — inline a single-use temp condition.
+      auto econd = render_value(cur, /*operand_ctx=*/false);
+      // An arm whose condition folded to `false` can never execute, so drop it
+      // rather than emit `elif false { … }`. That is not merely noise: the body
+      // may READ names nothing declares, because whatever would have declared
+      // them was not elaborated either. picorv32 hits this twice — a
+      // `genblk1_pcpi_mul_wr` from a generate block that is off, and the
+      // `PROGADDR_IRQ` parameter of a disabled IRQ path — and the emitted .prp
+      // then cannot be read back, i.e. Verilog -> Pyrope stops round-tripping.
+      // Dropping a provably dead arm preserves behavior.
+      if (econd == "false") {
+        if (!move_to_sibling()) {  // skip the arm's stmts, unwritten
+          break;
+        }
+        continue;
+      }
       print(" elif ");
-      print(render_value(cur, /*operand_ctx=*/false));
+      print(econd);
       print(" {\n");
       ++depth;
       if (!move_to_sibling()) {
