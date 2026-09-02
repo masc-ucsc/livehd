@@ -456,68 +456,57 @@ struct Named_value_collector : public slang::ast::ASTVisitor<Named_value_collect
   }
 };
 
-// Collect the base symbol of every member-access (`x.field`) in the module, so
-// the caller knows which struct nets are read by-field (vs only whole).
-struct Member_read_collector : public slang::ast::ASTVisitor<Member_read_collector, slang::ast::VisitFlags::AllGood> {
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
-  void                                                 handle(const slang::ast::MemberAccessExpression& ma) {
-    if (const auto* sym = lhs_base_symbol(ma.value())) {
-      out->insert(sym);
-    }
-    visitDefault(ma);
-  }
-};
+// The per-module struct-usage pre-scan (Slang_module_state::Struct_use): ONE
+// body walk records, per packed-struct VARIABLE, how it is accessed —
+//   field_read    the base symbol of a member access `x.field`;
+//   deep_accessed a select/member access whose base is itself a member access
+//                 (`c0.field[i]`, `c0.field.sub`): the per-field bundle path only
+//                 resolves single-level `c0.field`, so a deeper access roots at a
+//                 FLAT bus and collides with the bundle leaves;
+//   deep_written  an lvalue below top level (`io.sub.x = v`, `io.f[i] = v`): the
+//                 bundle path has no whole-struct net for resolve_packed_lvalue
+//                 to root the read-modify-write on (a deep READ is safe — it
+//                 routes through the leaf; see field_forces_flat_bus /
+//                 is_scalar_struct_var);
+//   whole_copied  any struct read as a whole (bare RHS name) and the destination
+//                 of a bare-name `dst = src` copy: the bundle path detuples per
+//                 top-level field and would silently DROP a nested-struct/array
+//                 field, so the copy keeps a flat bus.
+// `pattern_assigned` comes from collect_struct_pattern_assigns (continuous
+// assigns only).
+struct Struct_use_collector : public slang::ast::ASTVisitor<Struct_use_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Slang_module_state::Struct_use>* out = nullptr;
 
-// Flags a packed-struct VAR accessed BELOW its top level (`c0.field[i]`,
-// `c0.field.sub`): the per-field bundle path only resolves single-level
-// `c0.field`, so a deeper access roots at a FLAT bus and collides with the bundle
-// leaves. Such vars must stay a flat bus.
-struct Deep_struct_access_collector : public slang::ast::ASTVisitor<Deep_struct_access_collector, slang::ast::VisitFlags::AllGood> {
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
-  void                                                 note(const slang::ast::Expression& base) {
+  Slang_module_state::Struct_use* use_of(const slang::ast::Expression& base) {
+    const auto* sym = lhs_base_symbol(base);
+    return sym == nullptr ? nullptr : &(*out)[sym];
+  }
+  // `base` is what a select/member access sits on.
+  void note_deep_access(const slang::ast::Expression& base) {
     if (base.kind == slang::ast::ExpressionKind::MemberAccess) {
-      if (const auto* sym = lhs_base_symbol(base.as<slang::ast::MemberAccessExpression>().value())) {
-        out->insert(sym);
+      if (auto* u = use_of(base.as<slang::ast::MemberAccessExpression>().value())) {
+        u->deep_accessed = true;
       }
     }
   }
-  void handle(const slang::ast::ElementSelectExpression& e) {
-    note(e.value());
-    visitDefault(e);
-  }
-  void handle(const slang::ast::RangeSelectExpression& e) {
-    note(e.value());
-    visitDefault(e);
-  }
-  void handle(const slang::ast::MemberAccessExpression& ma) {
-    note(ma.value());
-    visitDefault(ma);
-  }
-};
-
-// Flags a packed-struct VAR deep-WRITTEN (`io.sub.x = v`, `io.field[i] = v`):
-// the per-field bundle path has no whole-struct net for resolve_packed_lvalue to
-// root the read-modify-write on, so a deep-written struct with a nested field
-// must stay a flat bus. (A deep READ of a nested-struct field is safe — it
-// routes through the leaf net; see field_forces_flat_bus / is_scalar_struct_var.)
-struct Deep_struct_write_collector : public slang::ast::ASTVisitor<Deep_struct_write_collector, slang::ast::VisitFlags::AllGood> {
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
-  // `base` is the value() the OUTERMOST lvalue select/member sits on; the write
-  // is "deep" when that base is itself a member/element/range select.
-  void                                                 note_deep(const slang::ast::Expression& base) {
+  // `base` is what the OUTERMOST lvalue select/member sits on; the write is
+  // deep when that base is itself a member/element/range select.
+  void note_deep_write(const slang::ast::Expression& base) {
     if (base.kind == slang::ast::ExpressionKind::MemberAccess || base.kind == slang::ast::ExpressionKind::ElementSelect
         || base.kind == slang::ast::ExpressionKind::RangeSelect) {
-      if (const auto* sym = lhs_base_symbol(base)) {
-        out->insert(sym);
+      if (auto* u = use_of(base)) {
+        u->deep_written = true;
       }
     }
   }
   void note_lhs(const slang::ast::Expression& lhs) {
     switch (lhs.kind) {
-      case slang::ast::ExpressionKind::MemberAccess : note_deep(lhs.as<slang::ast::MemberAccessExpression>().value()); return;
-      case slang::ast::ExpressionKind::ElementSelect: note_deep(lhs.as<slang::ast::ElementSelectExpression>().value()); return;
-      case slang::ast::ExpressionKind::RangeSelect  : note_deep(lhs.as<slang::ast::RangeSelectExpression>().value()); return;
-      case slang::ast::ExpressionKind::Conversion   : note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
+      case slang::ast::ExpressionKind::MemberAccess: note_deep_write(lhs.as<slang::ast::MemberAccessExpression>().value()); return;
+      case slang::ast::ExpressionKind::ElementSelect:
+        note_deep_write(lhs.as<slang::ast::ElementSelectExpression>().value());
+        return;
+      case slang::ast::ExpressionKind::RangeSelect: note_deep_write(lhs.as<slang::ast::RangeSelectExpression>().value()); return;
+      case slang::ast::ExpressionKind::Conversion : note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
       case slang::ast::ExpressionKind::Concatenation:
         for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
           note_lhs(*op);
@@ -526,42 +515,46 @@ struct Deep_struct_write_collector : public slang::ast::ASTVisitor<Deep_struct_w
       default: return;
     }
   }
-  void handle(const slang::ast::AssignmentExpression& a) {
-    note_lhs(a.left());
-    visitDefault(a);
-  }
-};
-
-// Flags a packed-struct VAR that is WHOLE-COPIED (`a = b` as bare names): the
-// per-field bundle path detuples the copy per-top-level-field, silently DROPPING
-// a field that is a nested struct / array. Flattening keeps the copy intact. Only
-// whole-copied structs pay the flat-bus cost (field-access-only structs stay
-// bundled).
-struct Struct_whole_copy_collector : public slang::ast::ASTVisitor<Struct_whole_copy_collector, slang::ast::VisitFlags::AllGood> {
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
-  void                                                 note(const slang::ast::Expression& e) {
+  void note_whole(const slang::ast::Expression& e) {
     if (e.kind == slang::ast::ExpressionKind::NamedValue) {
       const auto& nv = e.as<slang::ast::NamedValueExpression>();
       if (nv.symbol.getType().getCanonicalType().isStruct()) {
-        out->insert(&nv.symbol);
+        (*out)[&nv.symbol].whole_copied = true;
       }
     }
   }
+
+  void handle(const slang::ast::MemberAccessExpression& ma) {
+    if (auto* u = use_of(ma.value())) {
+      u->field_read = true;
+    }
+    note_deep_access(ma.value());
+    visitDefault(ma);
+  }
+  void handle(const slang::ast::ElementSelectExpression& e) {
+    note_deep_access(e.value());
+    visitDefault(e);
+  }
+  void handle(const slang::ast::RangeSelectExpression& e) {
+    note_deep_access(e.value());
+    visitDefault(e);
+  }
   void handle(const slang::ast::AssignmentExpression& a) {
+    note_lhs(a.left());
     // A struct read as a whole (bare RHS name) keeps a flat bus so read_struct_whole
     // reassembles it. Its DESTINATION is a genuine whole-copy only when the RHS is
     // ALSO a bare struct name (`dst = src`) — a pattern assign `io = '{...}` is
     // per-field driven, so its bare-name LHS must NOT be flagged (that false
     // positive kept Type B nested-struct io bundles flat; small_todo_working.md
     // "Type B" — `io` looked whole-copied purely because of its own `'{...}` LHS).
-    note(a.right());
+    note_whole(a.right());
     const slang::ast::Expression* r = &a.right();
     while (r->kind == slang::ast::ExpressionKind::Conversion) {
       r = &r->as<slang::ast::ConversionExpression>().operand();
     }
     if (r->kind == slang::ast::ExpressionKind::NamedValue
         && r->as<slang::ast::NamedValueExpression>().symbol.getType().getCanonicalType().isStruct()) {
-      note(a.left());  // genuine `dst = src` copy destination
+      note_whole(a.left());  // genuine `dst = src` copy destination
     }
     visitDefault(a);
   }
@@ -1546,91 +1539,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 
   auto unit_name = module_name_of(symbol);
 
-  // Save in-flight per-module state (a submodule definition lowers
-  // recursively from its instantiation site).
-  auto saved_builder           = std::move(builder_);
-  auto saved_body              = body_;
-  auto saved_eval              = std::move(eval_ctx_);
-  auto saved_sym_lname         = std::move(sym_lname_);
-  auto saved_local_params      = std::move(local_param_lname_);
-  auto saved_used              = std::move(used_names_);
-  auto saved_inputs            = std::move(input_syms_);
-  auto saved_outputs           = std::move(output_syms_);
-  auto saved_output_info       = std::move(output_info_);
-  auto saved_bundle_ports      = std::move(bundle_port_info_);
-  auto saved_bundle_shadow     = std::move(bundle_out_shadow_);
-  auto saved_regs              = std::move(reg_syms_);
-  auto saved_wires             = std::move(wire_syms_);
-  auto saved_wire_split        = std::move(wire_split_tmp_);
-  auto saved_wire_flat         = std::move(wire_split_flat_);
-  auto saved_latches           = std::move(latch_syms_);
-  auto saved_partial_reg       = std::move(partial_reg_shadow_);
-  auto saved_mems              = std::move(mem_syms_);
-  auto saved_declared          = std::move(declared_);
-  auto saved_prefix            = std::move(genblk_prefix_);
-  auto saved_unroll_budget     = unroll_budget_;
-  auto saved_failed            = module_failed_;
-  auto saved_proc_kind         = proc_kind_;
-  auto saved_style             = std::move(proc_assign_style_);
-  auto saved_blocking          = std::move(proc_blocking_written_);
-  auto saved_bools             = std::move(bool_values_);
-  auto saved_mem_info          = std::move(mem_info_);
-  auto saved_reg_declared      = std::move(reg_declared_);
-  auto saved_tuple_names       = std::move(tuple_type_names_);
-  auto saved_emitted_types     = std::move(emitted_tuple_types_);
-  auto saved_local_cnt         = local_cnt_;
-  // The struct-classification collector sets are rebuilt per module below —
-  // save them too, or the parent module resumes with the CHILD's sets after a
-  // mid-emission recursive instance lowering, flipping is_scalar_struct_var
-  // between a var's store and its later reads (Alu_3's `io_in = '{...}` stored
-  // flat, but every read after the aluModule instance resolved through
-  // never-written leaves -> io_out_valid stuck 0).
-  auto saved_pattern_assigned  = std::move(struct_pattern_assigned_);
-  auto saved_field_read        = std::move(struct_field_read_);
-  auto saved_deep_accessed     = std::move(struct_deep_accessed_);
-  auto saved_whole_copied      = std::move(struct_whole_copied_);
-  auto saved_deep_written      = std::move(struct_deep_written_);
-  auto saved_packed_mem_regs   = std::move(packed_mem_regs_);
-  auto saved_array_reset_lanes = std::move(array_reset_lanes_);
-  auto saved_pending_resets    = std::move(pending_async_resets_);
-  auto saved_reg_init_vals     = std::move(reg_init_vals_);
-  auto saved_reg_init_applied  = std::move(reg_init_applied_);
-  auto saved_reset_attr_syms   = std::move(reset_attr_syms_);
-
-  builder_ = Lnast_builder();
-  sym_lname_.clear();
-  used_names_.clear();
-  input_syms_.clear();
-  output_syms_.clear();
-  output_info_.clear();
-  bundle_port_info_.clear();
-  bundle_out_shadow_.clear();
-  reg_syms_.clear();
-  cont_assign_syms_.clear();
-  wire_syms_.clear();
-  wire_split_tmp_.clear();
-  wire_split_flat_.clear();
-  latch_syms_.clear();
-  partial_reg_shadow_.clear();
-  mem_syms_.clear();
-  declared_.clear();
-  genblk_prefix_.clear();
-  module_failed_ = false;
-  proc_kind_     = Proc_kind::none;
-  proc_assign_style_.clear();
-  proc_blocking_written_.clear();
-  bool_values_.clear();
-  mem_info_.clear();
-  reg_declared_.clear();
-  tuple_type_names_.clear();
-  emitted_tuple_types_.clear();
-  packed_mem_regs_.clear();
-  array_reset_lanes_.clear();
-  pending_async_resets_.clear();
-  reg_init_vals_.clear();
-  reg_init_applied_.clear();
-  reset_attr_syms_.clear();
-  local_cnt_ = 0;
+  // Fresh per-module state; the enclosing module's (a submodule definition
+  // lowers recursively from its first instantiation site) comes back on every
+  // exit path.
+  const Module_state_scope module_scope(this);
+  // A loop can lower before any driver/process re-arms the budget (a localparam
+  // initializer calling a function with a loop), so start every module full.
+  unroll_budget_ = options_.unroll_limit;
 
   body_ = body;
   eval_ctx_.emplace(body->asSymbol(), slang::ast::EvalFlags::CacheResults);
@@ -1682,36 +1597,17 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   }
 
   emit_module_io(symbol, in_tup, out_tup);
-  local_param_lname_.clear();
-  emit_local_param_consts(*body);
+  // Every classification pre-scan runs BEFORE the first expression lowers:
+  // is_scalar_struct_var memoizes over the port/reg sets and struct_use_.
   collect_state_vars(*body);
   collect_blocking_ff_state(*body);
-  struct_pattern_assigned_.clear();
   collect_struct_pattern_assigns(*body);
-  struct_field_read_.clear();
   {
-    Member_read_collector mrc;
-    mrc.out = &struct_field_read_;
-    body->visit(mrc);
+    Struct_use_collector suc;
+    suc.out = &struct_use_;
+    body->visit(suc);
   }
-  struct_deep_accessed_.clear();
-  {
-    Deep_struct_access_collector dac;
-    dac.out = &struct_deep_accessed_;
-    body->visit(dac);
-  }
-  struct_whole_copied_.clear();
-  {
-    Struct_whole_copy_collector swc;
-    swc.out = &struct_whole_copied_;
-    body->visit(swc);
-  }
-  struct_deep_written_.clear();
-  {
-    Deep_struct_write_collector dwc;
-    dwc.out = &struct_deep_written_;
-    body->visit(dwc);
-  }
+  emit_local_param_consts(*body);
   // Packed arrays written through a whole-array RANGE select (`arr[2:1] <= v`).
   // Only the FLAT bus representation lowers that write correctly (set_mask
   // composes it), so these must stay out of the packed-2D memory classifier
@@ -2252,50 +2148,6 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     lowered_[body] = builder_.lnast;
     ordered_lnasts_.push_back(builder_.lnast);
   }
-
-  // restore the enclosing module's state
-  builder_                 = std::move(saved_builder);
-  body_                    = saved_body;
-  eval_ctx_                = std::move(saved_eval);
-  sym_lname_               = std::move(saved_sym_lname);
-  local_param_lname_       = std::move(saved_local_params);
-  used_names_              = std::move(saved_used);
-  input_syms_              = std::move(saved_inputs);
-  output_syms_             = std::move(saved_outputs);
-  output_info_             = std::move(saved_output_info);
-  bundle_port_info_        = std::move(saved_bundle_ports);
-  bundle_out_shadow_       = std::move(saved_bundle_shadow);
-  reg_syms_                = std::move(saved_regs);
-  wire_syms_               = std::move(saved_wires);
-  wire_split_tmp_          = std::move(saved_wire_split);
-  wire_split_flat_         = std::move(saved_wire_flat);
-  latch_syms_              = std::move(saved_latches);
-  partial_reg_shadow_      = std::move(saved_partial_reg);
-  mem_syms_                = std::move(saved_mems);
-  declared_                = std::move(saved_declared);
-  genblk_prefix_           = std::move(saved_prefix);
-  unroll_budget_           = saved_unroll_budget;
-  module_failed_           = saved_failed;
-  proc_kind_               = saved_proc_kind;
-  proc_assign_style_       = std::move(saved_style);
-  proc_blocking_written_   = std::move(saved_blocking);
-  bool_values_             = std::move(saved_bools);
-  mem_info_                = std::move(saved_mem_info);
-  reg_declared_            = std::move(saved_reg_declared);
-  tuple_type_names_        = std::move(saved_tuple_names);
-  emitted_tuple_types_     = std::move(saved_emitted_types);
-  local_cnt_               = saved_local_cnt;
-  struct_pattern_assigned_ = std::move(saved_pattern_assigned);
-  struct_field_read_       = std::move(saved_field_read);
-  struct_deep_accessed_    = std::move(saved_deep_accessed);
-  struct_whole_copied_     = std::move(saved_whole_copied);
-  struct_deep_written_     = std::move(saved_deep_written);
-  packed_mem_regs_         = std::move(saved_packed_mem_regs);
-  array_reset_lanes_       = std::move(saved_array_reset_lanes);
-  pending_async_resets_    = std::move(saved_pending_resets);
-  reg_init_vals_           = std::move(saved_reg_init_vals);
-  reg_init_applied_        = std::move(saved_reg_init_applied);
-  reset_attr_syms_         = std::move(saved_reset_attr_syms);
 
   return ok;
 }
@@ -3072,6 +2924,15 @@ bool Slang_context::whole_copied_selfref_pattern(const slang::ast::ValueSymbol& 
 }
 
 bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
+  if (auto it = scalar_struct_var_cache_.find(&sym); it != scalar_struct_var_cache_.end()) {
+    return it->second;
+  }
+  const bool r = classify_scalar_struct_var(sym);
+  scalar_struct_var_cache_.emplace(&sym, r);
+  return r;
+}
+
+bool Slang_context::classify_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
   // Ports are already flat (CIRCT/firtool flattens struct ports to scalars), and
   // a clocked struct keeps the existing flat-reg-bus path; only a comb/wire/mut
   // scalar packed struct becomes a per-field bundle.
@@ -3110,17 +2971,18 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
   // the whole-net granularity is cyclic. Keep it a bundle — the pattern splits
   // one element per leaf (assign_struct_whole), deep reads route through the
   // covering leaf (Type B), and the whole copy reassembles from the leaves.
-  if (struct_whole_copied_.contains(&sym) || struct_deep_written_.contains(&sym)) {
+  const auto use = struct_use_of(sym);
+  if (use.whole_copied || use.deep_written) {
     for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
       if (!field_type_is_struct_free(f.getType())) {
-        if (struct_deep_written_.contains(&sym) || !whole_copied_selfref_pattern(sym)) {
+        if (use.deep_written || !whole_copied_selfref_pattern(sym)) {
           return false;  // nested struct / array-of-struct field
         }
         break;  // self-ref pattern: bundle-safe, flat would be a false loop
       }
     }
   }
-  if (struct_deep_accessed_.contains(&sym)) {
+  if (use.deep_accessed) {
     for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
       if (field_forces_flat_bus(f.getType())) {
         // KNOWN OPEN (the DataModule__16entry / Entries* SIM comb-loop
@@ -3137,6 +2999,14 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
     }
   }
   return true;
+}
+
+bool Slang_context::is_plain_scalar_net(const slang::ast::ValueSymbol& sym) const {
+  const auto& ct = sym.getType().getCanonicalType();
+  // isIntegral already implies hasFixedRange and rules out every unpacked array
+  // (so every flat_port_syms_ entry); is_scalar_struct_var is false for a
+  // non-struct. mem_syms_ still matters: a memory-ized packed 2-D reg is integral.
+  return ct.isIntegral() && !ct.isStruct() && !ct.isPackedUnion() && !mem_syms_.contains(&sym) && !flat_port_syms_.contains(&sym);
 }
 
 bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
@@ -3328,7 +3198,7 @@ void Slang_context::collect_struct_pattern_assigns(const slang::ast::Scope& scop
                           || rhs->kind == ExpressionKind::StructuredAssignmentPattern
                           || rhs->kind == ExpressionKind::ReplicatedAssignmentPattern;
       if (is_pat && lhs->kind == ExpressionKind::NamedValue) {
-        struct_pattern_assigned_.insert(&lhs->as<slang::ast::NamedValueExpression>().symbol);
+        struct_use_[&lhs->as<slang::ast::NamedValueExpression>().symbol].pattern_assigned = true;
       }
     } else if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
       const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
@@ -3361,7 +3231,7 @@ void Slang_context::declare_struct_leaves(const slang::ast::ValueSymbol& sym) {
   // A real tuple only when it is cyclic (wire), all-scalar, AND per-field driven
   // (a `'{...}` pattern assignment) — so detuple can split it. An instance-output
   // net or a whole-expression-driven struct is not pattern-assigned and stays flat.
-  si.is_tuple = si.is_wire && all_scalar && struct_pattern_assigned_.contains(&sym);
+  si.is_tuple = si.is_wire && all_scalar && struct_use_of(sym).pattern_assigned;
   auto  base  = lname_of(sym);
   auto& ln    = *builder_.lnast;
   set_pending_loc(sym.location);
@@ -4460,8 +4330,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           if (input_syms_.contains(&sym) || reg_syms_.contains(&sym) || declared_.contains(&sym) || wire_syms_.contains(&sym)) {
             return;  // ports/regs are already order-free names; pre-declared nets keep their form
           }
-          const auto& ct = sym.getType().getCanonicalType();
-          if (!ct.isIntegral() || ct.isStruct() || ct.isPackedUnion()) {
+          if (!is_plain_scalar_net(sym)) {
             return;  // plain scalar nets only (an edge source is 1-bit in practice)
           }
           const auto* psc = sym.getParentScope();
@@ -4572,9 +4441,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         const auto* psc = sym->getParentScope();
         const bool  module_level
             = psc != nullptr && (&psc->asSymbol() == body_ || psc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-        const auto& ct = sym->getType().getCanonicalType();
-        if (module_level && ct.isIntegral() && !ct.isStruct() && !ct.isPackedUnion() && !is_scalar_struct_var(*sym)
-            && !flat_port_syms_.contains(sym) && !mem_syms_.contains(sym)) {
+        if (module_level && is_plain_scalar_net(*sym)) {
           wire_syms_.insert(sym);
         }
       }
@@ -4589,11 +4456,10 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       // The split is a PLAIN-SCALAR device (a `mut` accumulator with a scalar
       // poison, whole/bit-slice writes). Skip anything with FIELDS or its own
       // machinery: a struct/union (per-field bundle OR flat-bus — both take
-      // whole+field writes a scalar poison would mistype), a bundle port, a
-      // flat-port/memory net, or a non-integral type.
-      const auto& ct = vs->getType().getCanonicalType();
-      if (ct.isStruct() || ct.isPackedUnion() || !ct.isIntegral() || is_scalar_struct_var(*vs) || bundle_port_of(*vs) != nullptr
-          || flat_port_syms_.contains(vs) || mem_syms_.contains(vs)) {
+      // whole+field writes a scalar poison would mistype), a flat-port/memory
+      // net, a non-integral type — and a bundle port, which a packed-VECTOR
+      // bundle makes a plain integral, so it needs its own check.
+      if (!is_plain_scalar_net(*vs) || bundle_port_of(*vs) != nullptr) {
         continue;
       }
       // Split when the net has more than one DRIVER (co-writers across blocks,
@@ -4796,9 +4662,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
             || input_syms_.contains(&vsym) || output_syms_.contains(&vsym)) {
           continue;
         }
-        const auto& ct = vsym.getType().getCanonicalType();
-        if (!ct.isIntegral() || !ct.hasFixedRange() || ct.isStruct() || ct.isPackedUnion() || is_scalar_struct_var(vsym)
-            || mem_syms_.contains(&vsym) || flat_port_syms_.contains(&vsym)) {
+        if (!is_plain_scalar_net(vsym)) {
           continue;  // structs / memories / flattened buses have their own pre-declare
         }
         if (!writers_of.contains(&vsym)) {
@@ -4832,8 +4696,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         continue;
       }
       // Scalars only: an aggregate output rides the bundle/shadow machinery.
-      const auto& ct = vs->getType().getCanonicalType();
-      if (!ct.isIntegral() || ct.isStruct() || ct.isPackedUnion() || is_scalar_struct_var(*vs) || mem_syms_.contains(vs)) {
+      if (!is_plain_scalar_net(*vs)) {
         continue;
       }
       const auto& ln = sym_lname_.at(sym);
@@ -5065,6 +4928,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // decl-only `= nil` in the emitted Pyrope -> "incompletely driven").
         // Nested fields are flattened scalar leaves since the Type-B bundle
         // work, so leaf<->whole round-trips cleanly for them too.
+        const auto use = struct_use_of(ns);
         if (const char* dbg = std::getenv("SLANG_DUMP_NETINIT"); dbg != nullptr && ns.name.find(dbg) != std::string_view::npos) {
           std::fprintf(stderr,
                        "[SLANG_NETINIT] '%s' scalar_struct=%d all_scalar=%d field_read=%d deep_access=%d "
@@ -5072,13 +4936,13 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
                        std::string(ns.name).c_str(),
                        is_scalar_struct_var(ns) ? 1 : 0,
                        struct_is_all_scalar(ns) ? 1 : 0,
-                       struct_field_read_.contains(&ns) ? 1 : 0,
-                       struct_deep_accessed_.contains(&ns) ? 1 : 0,
-                       struct_whole_copied_.contains(&ns) ? 1 : 0,
-                       struct_deep_written_.contains(&ns) ? 1 : 0);
+                       use.field_read ? 1 : 0,
+                       use.deep_accessed ? 1 : 0,
+                       use.whole_copied ? 1 : 0,
+                       use.deep_written ? 1 : 0);
         }
         if (is_scalar_struct_var(ns)
-            && (std::getenv("SLANG_NETINIT_OLDGATE") == nullptr || struct_is_all_scalar(ns) || struct_field_read_.contains(&ns))) {
+            && (std::getenv("SLANG_NETINIT_OLDGATE") == nullptr || struct_is_all_scalar(ns) || use.field_read)) {
           current_assign_nonblocking_ = false;
           if (assign_struct_whole(ns, *ns.getInitializer())) {
             clear_pending_loc();

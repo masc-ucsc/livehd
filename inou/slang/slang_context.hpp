@@ -19,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -45,70 +46,22 @@
 #include "lnast_builder.hpp"
 // clang-format on
 
-class Slang_context {
-public:
-  struct Options {
-    int  unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
-    // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
-    // unrolling it here. LNAST already owns loops with `break`/`continue`
-    // (uPass lowers func_break/func_continue to loop_exec/loop_next_active, the
-    // semantics the slang-side `broken`-flag unroll can only approximate), and
-    // Pyrope forbids shadowing — which is fine, because lname_of already
-    // uniquifies per SYMBOL (`c`, `c_s1`, …), so an inner declaration that
-    // shadows an outer one comes out under its own name.
-    //
-    // OFF by default: the rolled body keeps the index as a RUNTIME ref instead
-    // of const-folding it, so uPass (not slang) decides the final shape. A loop
-    // whose shape is not canonical still unrolls here.
-    bool roll_loops                = false;
-    bool keep_timecheck            = false;
-    // The USER passed --ignore-unknown-modules (inou_slang always injects it
-    // at the slang level so the reader owns the policy): lower unknown-module
-    // instances as blackbox sub-instances instead of a clean error.
-    bool blackbox_unknown          = false;
-    // Keep a package parameter reference as a symbolic `pkg.PARAM` (emitting a
-    // `pub comptime const` package unit) instead of folding it to its literal —
-    // for readable, provenance-preserving Pyrope emission. OFF by default: it
-    // requires the constprop preserve-mode + prp_writer package-import synthesis
-    // (WIP), so a normal compile keeps folding as before.
-    bool preserve_param_provenance = false;
-    // Emit a qualifying packed-struct PORT (struct_port_bundle_ok) as a Pyrope
-    // tuple/bundle port — a tuple-typed io entry plus tuple_get/field-store
-    // body accesses — instead of one flat bus. Defaulted ON by the CLI exactly
-    // when preserve_param_provenance defaults ON (pyrope-emitting, no-graphs
-    // compile); a graphs flow keeps flat ports (that flat lgraph is the LEC
-    // reference).
-    bool struct_port_bundles       = false;
-    // Pack the TOP module's IO into flat buses even while every internal
-    // module keeps bundles. Verilog-vs-Verilog equivalence (lgcheck/yosys
-    // `miter`) needs the emitted TOP interface to match the source module's
-    // port list, and only the top's: submodule interfaces are internal to each
-    // netlist. Off by default — LiveHD's own representation is the bundle.
-    bool flat_top_io               = false;
-  };
+// ── per-module lowering state ─────────────────────────────────────────────
+// Everything that describes ONE module body while it lowers: the Lnast under
+// construction, its symbol tables, and the role/shape classification of its
+// variables. lower_module starts every module from a default-constructed copy
+// and, because a submodule definition lowers RECURSIVELY from its first
+// instantiation site, swaps the enclosing module's copy out and back in around
+// the child (Slang_context::Module_state_scope). A per-module table declared
+// anywhere else silently survives that swap -- the bug that once flipped
+// is_scalar_struct_var between a var's store and its later reads (Alu_3's
+// `io_in` stored flat, then read through never-written leaves).
+//
+// Slang_context derives from it privately so the visitor code keeps naming the
+// members directly.
+struct Slang_module_state {
+  Lnast_builder builder_;
 
-  Slang_context() = default;
-
-  void set_source_manager(const slang::SourceManager* sm) { sm_ = sm; }
-  void set_options(const Options& o) { options_ = o; }
-
-  void process_root(const slang::ast::RootSymbol& root);
-
-  std::vector<std::shared_ptr<Lnast>> pick_lnast();
-
-private:
-  // ── shared state ───────────────────────────────────────────────────────────
-  const slang::SourceManager* sm_ = nullptr;
-  Options                     options_;
-  Lnast_builder               builder_;
-
-  // module-definition body -> finished Lnast (nullptr while in flight).
-  absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::shared_ptr<Lnast>> lowered_;
-  absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::string>            module_names_;
-  absl::flat_hash_set<std::string>                                                   module_names_used_;
-  std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
-
-  // ── per-module state (reset by lower_module) ───────────────────────────────
   const slang::ast::InstanceBodySymbol*                       body_ = nullptr;
   std::optional<slang::ast::EvalContext>                      eval_ctx_;
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> sym_lname_;
@@ -168,51 +121,8 @@ private:
   // stateless `mut`, i.e. the whole register vanished. Filled by
   // collect_blocking_ff_state, refused by lower_ff_process.
   absl::flat_hash_set<const slang::ast::Symbol*>              blocking_ff_state_;
-  // Stack of `broken` flag lnames, innermost unrolled loop last. A loop whose
-  // body contains a `break` guards each iteration on its flag and the break
-  // raises it. A loop that owns no flag pushes the EMPTY SENTINEL rather than
-  // nothing: a `break` inside it must NOT reach into an outer loop's flag and
-  // terminate the wrong loop, so the sentinel makes own_brk_flag() answer "no
-  // flag of mine" and the break is refused instead.
-  std::vector<std::string>                                    break_flags_;
-  // One entry per enclosing loop currently being lowered: true when that loop
-  // became an LNAST `for` (rolled), false when it is being unrolled here. Only
-  // the NEAREST enclosing loop matters — a `break` binds to it — so this must be
-  // pushed by every loop lowering, not only the ones that own a break flag.
-  std::vector<bool>                                           loop_rolled_;
-  // The `broken` flag of the NEAREST enclosing loop, or nullptr when that loop
-  // has none of its own (a rolled LNAST `for`, whose break is a marker uPass
-  // lowers, or a while/repeat/foreach that pushed the sentinel).
-  [[nodiscard]] const std::string*                            own_brk_flag() const {
-    if (!loop_rolled_.empty() && loop_rolled_.back()) {
-      return nullptr;  // rolled: func_break owns the semantics
-    }
-    if (break_flags_.empty() || break_flags_.back().empty()) {
-      return nullptr;
-    }
-    return &break_flags_.back();
-  }
-  // RAII push/pop for a loop lowering that owns NO break flag (while, do-while,
-  // repeat, foreach). Both stacks must be balanced on every exit path, and
-  // those loops have many.
-  class Unflagged_loop_scope {
-  public:
-    explicit Unflagged_loop_scope(Slang_context* self) : self_(self) {
-      self_->loop_rolled_.push_back(false);
-      self_->break_flags_.emplace_back();  // sentinel: this loop owns no flag
-    }
-    Unflagged_loop_scope(const Unflagged_loop_scope&)            = delete;
-    Unflagged_loop_scope& operator=(const Unflagged_loop_scope&) = delete;
-    ~Unflagged_loop_scope() {
-      self_->break_flags_.pop_back();
-      self_->loop_rolled_.pop_back();
-    }
-
-  private:
-    Slang_context* self_;
-  };
-  absl::flat_hash_set<const slang::ast::Symbol*> mem_syms_;             // unpacked arrays lowered as memories
-  absl::flat_hash_set<const slang::ast::Symbol*> mem_wensize_emitted_;  // memories whose wensize attr was emitted
+  absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;             // unpacked arrays lowered as memories
+  absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
   // CLOCKED memories that already took a read-modify-write partial store, per
   // written leaf ("" for a scalar memory's word, the field name for a tuple
   // memory). A second one on the same leaf cannot be merged: both write ports
@@ -254,39 +164,7 @@ private:
   };
   absl::flat_hash_map<const slang::ast::ValueSymbol*, Pending_async_reset> pending_async_resets_;
 
-  // ── structure (slang_structure.cpp) ───────────────────────────────────────
-  bool        lower_module(const slang::ast::InstanceSymbol& symbol);
-  std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
-  void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
-  void        collect_state_vars(const slang::ast::Scope& body);
-  void        collect_blocking_ff_state(const slang::ast::Scope& body);
-  // Module bodies emit DRIVERS (continuous assigns, processes, instances) in
-  // dataflow dependency order, not source order: LNAST/tolg resolve reads
-  // sequentially, while verilog wires are order-free nets. Combinational
-  // cycles fall back to source order + settled reads (LNAST-tier only).
-  void        lower_members(const slang::ast::Scope& scope);
-  void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
-  void        lower_comb_process(const slang::ast::Statement& body);
-  void        lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
-                               std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
-  void        emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
-                                   bool edge_pos);
-  void        finalize_pending_async_resets();
-  void        lower_instance(const slang::ast::InstanceSymbol& inst);
-  // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
-  // no definition, so port directions come from the collect-pass inference
-  // (`conn_is_out`, aligned with getPortConnections()). Lowered as a func_call
-  // to the definition name; the callee is recorded as an external module on
-  // the unit's Lnast so the pyrope emission writes its `import` + call.
-  void        lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
-  // Unknown-module definition names already diagnosed (one warning per name,
-  // not per instance — XS-scale designs instantiate one SRAM macro x100s).
-  absl::flat_hash_set<std::string> unknown_warned_;
-  void lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
-  void declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
-  void declare_reg(const slang::ast::ValueSymbol& sym);
   absl::flat_hash_set<const slang::ast::Symbol*> reg_declared_;
-
   // Unpacked-array (memory) info per declared array symbol (2s-D).
   struct Mem_info {
     int64_t lower       = 0;  // declared numeric lower bound (memory index bias)
@@ -324,21 +202,12 @@ private:
     std::vector<Dim> dims;
     size_t           rank() const { return dims.empty() ? 1 : dims.size(); }
   };
-  absl::flat_hash_map<const slang::ast::Symbol*, Mem_info>  mem_info_;
+  absl::flat_hash_map<const slang::ast::Symbol*, Mem_info>                   mem_info_;
   // Per-module stable name for each struct element type (keyed by the canonical
   // type pointer so two memories of the same struct share one typedef) and the
   // set of typedef names already emitted into this module's stmts.
-  absl::flat_hash_map<const slang::ast::Type*, std::string> tuple_type_names_;
-  absl::flat_hash_set<std::string>                          emitted_tuple_types_;
-  std::string                                               tuple_type_name(const slang::ast::Type& elem);
-  // Emit a `type T=(...)` region (once per type per module) in the no-default
-  // form upass.detuple resolves: declare(T,prim_type_none,'type') + per-field
-  // type_spec + tuple_add(Ttemp, field…) + store(T,Ttemp).
-  void                                                      emit_tuple_typedef(const Mem_info& mi);
-  // Per-field tuple-memory primitives (PRE-detuple shapes).
-  void emit_field_store(const std::string& mem_name, const std::string& idx, const std::string& field_name, const std::string& val);
-  std::string            emit_field_read_chain(const std::string& mem_name, const std::string& idx, const std::string& field_name);
-  const Mem_info::Field* find_tuple_field(const Mem_info& mi, std::string_view name) const;
+  absl::flat_hash_map<const slang::ast::Type*, std::string>                  tuple_type_names_;
+  absl::flat_hash_set<std::string>                                           emitted_tuple_types_;
   // Power-on memory contents harvested from `initial begin mem[k]=v; … end`
   // blocks (a pre-pass in lower_module, BEFORE the declares emit). Keyed by the
   // array symbol; the inner map is index→value. declare_unpacked emits these as
@@ -353,13 +222,6 @@ private:
   absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>           reg_init_vals_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                        reg_init_applied_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                        reset_attr_syms_;
-  // Walk an `initial` block body collecting constant scalar-register writes
-  // into reg_init_vals_ and constant memory-element writes into mem_init_vals_.
-  void collect_initial_values(const slang::ast::Statement& stmt);
-  // Emit the comp_type_array declare for an unpacked array (reg or mut).
-  // Returns false (with a diagnostic) for shapes the reader cannot lower.
-  bool declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg);
-
   // Unpacked-array PORTS are not memories: an `output T arr[N-1:0]` port lowers
   // to a FLAT packed [N*elem_bits-1:0] IO bus (Verilator/yosys flatten unpacked
   // ports the same way, so LEC lines up), and element access `arr[i]` becomes a
@@ -367,19 +229,19 @@ private:
   // descending ranges and `(upper-i)*elem_bits` for ascending ranges. Symbols
   // here carry their range in mem_info_ but route through bit-slice get/set
   // instead of store/tuple_get.
-  absl::flat_hash_set<const slang::ast::Symbol*>                           flat_port_syms_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                             flat_port_syms_;
   // Unpacked arrays indexed by a NON-constant selector somewhere in the module.
   // A comb plain-vector array that is NEVER runtime-indexed is safe to flatten
   // to a packed bus (constant element offsets, set_mask composition); a
   // runtime-indexed one must stay a memory (dynamic-shift flattening mismatches
   // — see the `tuplish` regression). Populated by a pre-pass in lower_module.
-  absl::flat_hash_set<const slang::ast::Symbol*>                           runtime_indexed_arrays_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                             runtime_indexed_arrays_;
   // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
   // somewhere — a firtool-style register file. These memory-ize (one `__memory`
   // node) instead of flattening to a single N*W-bit flop, so they LEC against an
   // equivalent Pyrope memory. Populated by the runtime-index pre-pass; the
   // declare + element read/write consult it to route through the memory path.
-  absl::flat_hash_set<const slang::ast::Symbol*>                           packed_mem_regs_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                             packed_mem_regs_;
   // Per-ENTRY async-reset values for a packed 2-D reg whose reset arm loads a
   // pattern rather than one repeated value (`spec_table <= '{33,…,1,0}` — how
   // firtool spells an index-initialized rename/free-list table). The reset
@@ -388,16 +250,7 @@ private:
   // the reset-arm pre-pass in lower_members (BEFORE the declares emit, like
   // mem_init_vals_); declare_reg emits them as the array's tuple initializer
   // and the async-reset lowering then skips its scalar `initial` for these.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> array_reset_lanes_;
-  // True iff `sym`'s canonical type is a packed 2-D array of an integral element
-  // wider than 1 bit (a true `reg [N-1:0][W-1:0]`, W>1 — NOT a 1-D packed vector
-  // whose element is a single bit). Fills N (size), W (elem_bits), the element
-  // signedness and the outer range lower bound when it returns true.
-  static bool is_packed_2d_array(const slang::ast::Type& type, int64_t& size, int& elem_bits, bool& elem_signed, int64_t& lower);
-  // Flat bit-slice read/write of an unpacked-array port element (reuses the
-  // packed set_mask / shift+mask machinery).
-  std::string flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi);
-  void        flat_port_write(const slang::ast::ElementSelectExpression& es, const Mem_info& mi, const std::string& rhs);
+  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>>   array_reset_lanes_;
 
   // ── scalar packed-struct vars as per-field BUNDLES ─────────────────────────
   // A scalar (non-array, non-reg, non-port) packed-struct variable lowers to one
@@ -426,40 +279,288 @@ private:
     bool               is_tuple = false;
   };
   absl::flat_hash_map<const slang::ast::Symbol*, Struct_info> struct_var_info_;
-  // Scalar packed-struct vars assigned a whole `'{...}` pattern somewhere (i.e.
-  // driven per-field, like the ALU `io`). Only such a struct is emitted as a real
-  // tuple — one whose drivers are NOT per-field (an instance-output net, a whole
-  // expression copy) cannot be detuple-split, so it keeps the flat-leaf form.
-  // Populated by a pre-scan in lower_module; reset per module.
-  absl::flat_hash_set<const slang::ast::Symbol*>              struct_pattern_assigned_;
-  void                                                        collect_struct_pattern_assigns(const slang::ast::Scope& scope);
-  // Base symbols read via member-access (`x.field`) anywhere in the module.
-  // A net-initializer struct (`wire struct{...} x = '{...}`) is split into
-  // per-field leaves only when x is field-read (else the whole-net assign is
-  // kept — splitting a whole-read-only nested struct breaks its reassembly).
-  // Populated by a body-wide pre-scan in lower_module; reset per module.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_field_read_;
-  // Packed-struct vars accessed BELOW top level (`c0.field[i]`, `c0.field.sub`) or
-  // WHOLE-COPIED (`a = b` as bare names): a nested/array-field struct in either case
-  // is mis-lowered by the per-field bundle path, so it must stay a flat bus. Scoped
-  // to those vars (not every nested/array struct) to keep struct-heavy designs fast.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_deep_accessed_;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_whole_copied_;
-  // Packed-struct vars deep-WRITTEN (`io.sub.x = v`): a read-modify-write on a
-  // nested field roots at the whole-struct net (resolve_packed_lvalue), which a
-  // per-field bundle lacks, so a deep-written struct with a nested field stays a
-  // flat bus. Deep READS of a nested-struct field route through the leaf and are
-  // safe to bundle (small_todo_working.md Type B).
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_deep_written_;
+  // How each packed-struct VARIABLE is used across the module body, from the
+  // one pre-scan in lower_module (Struct_use_collector + collect_struct_pattern_assigns).
+  // is_scalar_struct_var turns these into the bundle-vs-flat-bus decision.
+  struct Struct_use {
+    // Assigned a whole `'{...}` pattern somewhere (i.e. driven per-field, like
+    // the ALU `io`). Only such a struct is emitted as a real tuple — one whose
+    // drivers are NOT per-field (an instance-output net, a whole expression
+    // copy) cannot be detuple-split, so it keeps the flat-leaf form.
+    bool pattern_assigned = false;
+    // Read via member-access (`x.field`). A net-initializer struct
+    // (`wire struct{...} x = '{...}`) is split into per-field leaves only when x
+    // is field-read (else the whole-net assign is kept — splitting a
+    // whole-read-only nested struct breaks its reassembly).
+    bool field_read       = false;
+    // Accessed BELOW top level (`c0.field[i]`, `c0.field.sub`) or WHOLE-COPIED
+    // (`a = b` as bare names): a nested/array-field struct in either case is
+    // mis-lowered by the per-field bundle path, so it must stay a flat bus.
+    // Scoped to those vars (not every nested/array struct) to keep struct-heavy
+    // designs fast.
+    bool deep_accessed    = false;
+    bool whole_copied     = false;
+    // Deep-WRITTEN (`io.sub.x = v`): a read-modify-write on a nested field roots
+    // at the whole-struct net (resolve_packed_lvalue), which a per-field bundle
+    // lacks, so a deep-written struct with a nested field stays a flat bus. Deep
+    // READS of a nested-struct field route through the leaf and are safe to
+    // bundle (small_todo_working.md Type B).
+    bool deep_written     = false;
+  };
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Struct_use>   struct_use_;
+  // Memos of the two per-symbol struct predicates. Both are answered from the
+  // pre-scan record above plus the port/reg sets, all of which are final
+  // before the first body expression lowers.
+  mutable absl::flat_hash_map<const slang::ast::ValueSymbol*, bool> selfref_pattern_cache_;
+  mutable absl::flat_hash_map<const slang::ast::ValueSymbol*, bool> scalar_struct_var_cache_;
+
+  // ── packed-struct PORTS as tuple bundles (M7) ─────────────────────────────
+  // A qualifying packed-struct port is emitted as a TUPLE-typed io entry
+  // (store(port, nil, tuple_add(per-field store)) — the exact prp2lnast
+  // tuple-port shape upass.ssa flattens into dotted leaf ports). Body accesses
+  // use the "hand-flattened twin" LEAF form (2-child store/read + set_mask on
+  // the dotted leaf `port.field` — what SSA's port flatten rewrites tuple ops
+  // INTO), so they ride the normal scalar SSA: the tuple-op route versions
+  // top-level field stores but leaves if-arm stores on the base name and
+  // binds reads to the FIRST version, which breaks the always_comb idiom
+  // (poison + default + conditional overrides + field RMW). A whole-port read
+  // reassembles (shift/or of the leaves in packed order), a whole-port write
+  // splits per field. Keyed by the port's internalSymbol; fields in SV
+  // declaration order (first-declared = MSB — the LEC leaf↔flat-bus
+  // correspondence). A REG-driven bundle output port is re-routed at
+  // declare_reg time to a flat shadow reg bridged per-field onto the tuple
+  // leaves (the entry is erased here so body accesses go flat).
+  absl::flat_hash_map<const slang::ast::Symbol*, Struct_info> bundle_port_info_;
+  // COMB bundle OUTPUT ports drive a local per-field SHADOW accumulator
+  // (`<port>__bpo.<field>` mut leaves, poison-initialized) and the port leaf
+  // gets exactly ONE top-level store — the end-of-module bridge
+  // `port.field = <shadow>.field`. Rationale: upass.ssa's port-tuple flatten
+  // (on the RECOMPILE of the emitted Pyrope) SSA-versions top-level stores to
+  // an output tuple leaf but leaves if-arm stores on the base name; with >=2
+  // top-level stores (poison + the SV `'0` default) the final version commit
+  // clobbers every arm write (minion_dcache_writeback_unit's l2_req_data_o
+  // refuted as constant 0). A local shadow rides the normal, proven scalar
+  // SSA; the single-store bridge is safe in both directions. Keyed by the
+  // port's internalSymbol; body reads AND writes of the port redirect here.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> bundle_out_shadow_;
+
+  // Provenance: MODULE-LOCAL params (`localparam CNT_MAX = …` at module-body
+  // scope) become body-level `comptime const` declarations, and their refs stay
+  // symbolic (package_symbol_ref consults this map). Per-module state.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> local_param_lname_;
+  // LiveHD's typechecker kinds comparison/logical results as bool with no
+  // implicit bool<->int interop; Verilog comparison results are 1-bit ints.
+  // Expression temps may stay bool (if-conds, &&/||) but anything reaching an
+  // integer context (stores, arithmetic, concat, ports) materializes to 0/1.
+  absl::flat_hash_set<std::string>                            bool_values_;
+  int                                                         local_cnt_ = 0;
+};
+
+class Slang_context : private Slang_module_state {
+public:
+  struct Options {
+    int  unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
+    // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
+    // unrolling it here. LNAST already owns loops with `break`/`continue`
+    // (uPass lowers func_break/func_continue to loop_exec/loop_next_active, the
+    // semantics the slang-side `broken`-flag unroll can only approximate), and
+    // Pyrope forbids shadowing — which is fine, because lname_of already
+    // uniquifies per SYMBOL (`c`, `c_s1`, …), so an inner declaration that
+    // shadows an outer one comes out under its own name.
+    //
+    // OFF by default: the rolled body keeps the index as a RUNTIME ref instead
+    // of const-folding it, so uPass (not slang) decides the final shape. A loop
+    // whose shape is not canonical still unrolls here.
+    bool roll_loops                = false;
+    bool keep_timecheck            = false;
+    // The USER passed --ignore-unknown-modules (inou_slang always injects it
+    // at the slang level so the reader owns the policy): lower unknown-module
+    // instances as blackbox sub-instances instead of a clean error.
+    bool blackbox_unknown          = false;
+    // Keep a package parameter reference as a symbolic `pkg.PARAM` (emitting a
+    // `pub comptime const` package unit) instead of folding it to its literal —
+    // for readable, provenance-preserving Pyrope emission. OFF by default: it
+    // requires the constprop preserve-mode + prp_writer package-import synthesis
+    // (WIP), so a normal compile keeps folding as before.
+    bool preserve_param_provenance = false;
+    // Emit a qualifying packed-struct PORT (struct_port_bundle_ok) as a Pyrope
+    // tuple/bundle port — a tuple-typed io entry plus tuple_get/field-store
+    // body accesses — instead of one flat bus. Defaulted ON by the CLI exactly
+    // when preserve_param_provenance defaults ON (pyrope-emitting, no-graphs
+    // compile); a graphs flow keeps flat ports (that flat lgraph is the LEC
+    // reference).
+    bool struct_port_bundles       = false;
+    // Pack the TOP module's IO into flat buses even while every internal
+    // module keeps bundles. Verilog-vs-Verilog equivalence (lgcheck/yosys
+    // `miter`) needs the emitted TOP interface to match the source module's
+    // port list, and only the top's: submodule interfaces are internal to each
+    // netlist. Off by default — LiveHD's own representation is the bundle.
+    bool flat_top_io               = false;
+  };
+
+  Slang_context() = default;
+
+  void set_source_manager(const slang::SourceManager* sm) { sm_ = sm; }
+  void set_options(const Options& o) { options_ = o; }
+
+  void process_root(const slang::ast::RootSymbol& root);
+
+  std::vector<std::shared_ptr<Lnast>> pick_lnast();
+
+private:
+  // ── shared state ───────────────────────────────────────────────────────────
+  const slang::SourceManager* sm_ = nullptr;
+  Options                     options_;
+
+  // module-definition body -> finished Lnast (nullptr while in flight).
+  absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::shared_ptr<Lnast>> lowered_;
+  absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::string>            module_names_;
+  absl::flat_hash_set<std::string>                                                   module_names_used_;
+  std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
+
+  // ── per-module state ───────────────────────────────────────────────────────
+  // Lives in Slang_module_state (the private base) so lower_module can swap it
+  // as ONE unit around a recursive submodule lowering.
+  Slang_module_state& module_state() { return *this; }
+  class Module_state_scope {
+  public:
+    explicit Module_state_scope(Slang_context* self)
+        : self_(self), saved_(std::exchange(self->module_state(), Slang_module_state{})) {}
+    Module_state_scope(const Module_state_scope&)            = delete;
+    Module_state_scope& operator=(const Module_state_scope&) = delete;
+    ~Module_state_scope() { self_->module_state() = std::move(saved_); }
+
+  private:
+    Slang_context*     self_;
+    Slang_module_state saved_;
+  };
+  // Stack of `broken` flag lnames, innermost unrolled loop last. A loop whose
+  // body contains a `break` guards each iteration on its flag and the break
+  // raises it. A loop that owns no flag pushes the EMPTY SENTINEL rather than
+  // nothing: a `break` inside it must NOT reach into an outer loop's flag and
+  // terminate the wrong loop, so the sentinel makes own_brk_flag() answer "no
+  // flag of mine" and the break is refused instead.
+  std::vector<std::string>         break_flags_;
+  // One entry per enclosing loop currently being lowered: true when that loop
+  // became an LNAST `for` (rolled), false when it is being unrolled here. Only
+  // the NEAREST enclosing loop matters — a `break` binds to it — so this must be
+  // pushed by every loop lowering, not only the ones that own a break flag.
+  std::vector<bool>                loop_rolled_;
+  // The `broken` flag of the NEAREST enclosing loop, or nullptr when that loop
+  // has none of its own (a rolled LNAST `for`, whose break is a marker uPass
+  // lowers, or a while/repeat/foreach that pushed the sentinel).
+  [[nodiscard]] const std::string* own_brk_flag() const {
+    if (!loop_rolled_.empty() && loop_rolled_.back()) {
+      return nullptr;  // rolled: func_break owns the semantics
+    }
+    if (break_flags_.empty() || break_flags_.back().empty()) {
+      return nullptr;
+    }
+    return &break_flags_.back();
+  }
+  // RAII push/pop for a loop lowering that owns NO break flag (while, do-while,
+  // repeat, foreach). Both stacks must be balanced on every exit path, and
+  // those loops have many.
+  class Unflagged_loop_scope {
+  public:
+    explicit Unflagged_loop_scope(Slang_context* self) : self_(self) {
+      self_->loop_rolled_.push_back(false);
+      self_->break_flags_.emplace_back();  // sentinel: this loop owns no flag
+    }
+    Unflagged_loop_scope(const Unflagged_loop_scope&)            = delete;
+    Unflagged_loop_scope& operator=(const Unflagged_loop_scope&) = delete;
+    ~Unflagged_loop_scope() {
+      self_->break_flags_.pop_back();
+      self_->loop_rolled_.pop_back();
+    }
+
+  private:
+    Slang_context* self_;
+  };
+
+  // ── structure (slang_structure.cpp) ───────────────────────────────────────
+  bool        lower_module(const slang::ast::InstanceSymbol& symbol);
+  std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
+  void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
+  void        collect_state_vars(const slang::ast::Scope& body);
+  void        collect_blocking_ff_state(const slang::ast::Scope& body);
+  // Module bodies emit DRIVERS (continuous assigns, processes, instances) in
+  // dataflow dependency order, not source order: LNAST/tolg resolve reads
+  // sequentially, while verilog wires are order-free nets. Combinational
+  // cycles fall back to source order + settled reads (LNAST-tier only).
+  void        lower_members(const slang::ast::Scope& scope);
+  void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
+  void        lower_comb_process(const slang::ast::Statement& body);
+  void lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
+                        std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
+  void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
+                            bool edge_pos);
+  void finalize_pending_async_resets();
+  void lower_instance(const slang::ast::InstanceSymbol& inst);
+  // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
+  // no definition, so port directions come from the collect-pass inference
+  // (`conn_is_out`, aligned with getPortConnections()). Lowered as a func_call
+  // to the definition name; the callee is recorded as an external module on
+  // the unit's Lnast so the pyrope emission writes its `import` + call.
+  void lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
+  // Unknown-module definition names already diagnosed (one warning per name,
+  // not per instance — XS-scale designs instantiate one SRAM macro x100s).
+  absl::flat_hash_set<std::string> unknown_warned_;
+  void lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
+  void declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
+  void declare_reg(const slang::ast::ValueSymbol& sym);
+
+  std::string tuple_type_name(const slang::ast::Type& elem);
+  // Emit a `type T=(...)` region (once per type per module) in the no-default
+  // form upass.detuple resolves: declare(T,prim_type_none,'type') + per-field
+  // type_spec + tuple_add(Ttemp, field…) + store(T,Ttemp).
+  void        emit_tuple_typedef(const Mem_info& mi);
+  // Per-field tuple-memory primitives (PRE-detuple shapes).
+  void emit_field_store(const std::string& mem_name, const std::string& idx, const std::string& field_name, const std::string& val);
+  std::string            emit_field_read_chain(const std::string& mem_name, const std::string& idx, const std::string& field_name);
+  const Mem_info::Field* find_tuple_field(const Mem_info& mi, std::string_view name) const;
+  // Walk an `initial` block body collecting constant scalar-register writes
+  // into reg_init_vals_ and constant memory-element writes into mem_init_vals_.
+  void                   collect_initial_values(const slang::ast::Statement& stmt);
+  // Emit the comp_type_array declare for an unpacked array (reg or mut).
+  // Returns false (with a diagnostic) for shapes the reader cannot lower.
+  bool                   declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg);
+
+  // True iff `sym`'s canonical type is a packed 2-D array of an integral element
+  // wider than 1 bit (a true `reg [N-1:0][W-1:0]`, W>1 — NOT a 1-D packed vector
+  // whose element is a single bit). Fills N (size), W (elem_bits), the element
+  // signedness and the outer range lower bound when it returns true.
+  static bool is_packed_2d_array(const slang::ast::Type& type, int64_t& size, int& elem_bits, bool& elem_signed, int64_t& lower);
+  // Flat bit-slice read/write of an unpacked-array port element (reuses the
+  // packed set_mask / shift+mask machinery).
+  std::string flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi);
+  void        flat_port_write(const slang::ast::ElementSelectExpression& es, const Mem_info& mi, const std::string& rhs);
+
+  // ── scalar packed-struct vars as per-field BUNDLES ─────────────────────────
+  void       collect_struct_pattern_assigns(const slang::ast::Scope& scope);
+  // The pre-scan record of `sym` (all-false for a var no collector touched).
+  Struct_use struct_use_of(const slang::ast::ValueSymbol& sym) const {
+    auto it = struct_use_.find(&sym);
+    return it == struct_use_.end() ? Struct_use{} : it->second;
+  }
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
-  // clocked regs, and arrays — those keep their existing lowering).
-  bool                                                        is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  // clocked regs, and arrays — those keep their existing lowering). Memoized;
+  // classify_scalar_struct_var holds the rule.
+  bool                      is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  bool                      classify_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  // A PLAIN SCALAR NET: a packed integral value with no fields and no
+  // representation of its own — not a struct/union (bundle or flat bus), not a
+  // memory-ized array (mem_syms_ also holds the memory-ized PACKED 2-D regs,
+  // which are integral), not a flattened unpacked-array port. The wire
+  // classification, the split-wire device and the lazy-declare hoists all key
+  // on exactly this class; site-specific extras (module level, port/reg
+  // exclusions, bundle ports) stay at the site.
+  bool                      is_plain_scalar_net(const slang::ast::ValueSymbol& sym) const;
   // Whole-copied struct whose single whole-net driver is a SELF-REFERENCING
   // '{...}' pattern with one element per top field (CIRCT's `_out_output`
   // idiom): the flat bus would be a false combinational loop, so it stays a
   // bundle (per-field leaves) instead. Pure over the AST — cached by symbol.
-  bool whole_copied_selfref_pattern(const slang::ast::ValueSymbol& sym) const;
-  mutable absl::flat_hash_map<const slang::ast::ValueSymbol*, bool> selfref_pattern_cache_;
+  bool                      whole_copied_selfref_pattern(const slang::ast::ValueSymbol& sym) const;
   const Struct_info::Field* find_struct_field(const Struct_info& si, std::string_view name) const;
   // Declare the per-field leaf nets (called from declare_value_symbol).
   void                      declare_struct_leaves(const slang::ast::ValueSymbol& sym);
@@ -488,31 +589,15 @@ private:
   std::string read_struct_whole(const slang::ast::ValueSymbol& sym);
 
   // ── packed-struct PORTS as tuple bundles (M7) ─────────────────────────────
-  // A qualifying packed-struct port is emitted as a TUPLE-typed io entry
-  // (store(port, nil, tuple_add(per-field store)) — the exact prp2lnast
-  // tuple-port shape upass.ssa flattens into dotted leaf ports). Body accesses
-  // use the "hand-flattened twin" LEAF form (2-child store/read + set_mask on
-  // the dotted leaf `port.field` — what SSA's port flatten rewrites tuple ops
-  // INTO), so they ride the normal scalar SSA: the tuple-op route versions
-  // top-level field stores but leaves if-arm stores on the base name and
-  // binds reads to the FIRST version, which breaks the always_comb idiom
-  // (poison + default + conditional overrides + field RMW). A whole-port read
-  // reassembles (shift/or of the leaves in packed order), a whole-port write
-  // splits per field. Keyed by the port's internalSymbol; fields in SV
-  // declaration order (first-declared = MSB — the LEC leaf↔flat-bus
-  // correspondence). A REG-driven bundle output port is re-routed at
-  // declare_reg time to a flat shadow reg bridged per-field onto the tuple
-  // leaves (the entry is erased here so body accesses go flat).
-  absl::flat_hash_map<const slang::ast::Symbol*, Struct_info> bundle_port_info_;
   // TYPE-ONLY qualification, shared by the child def and every parent
   // instantiation site (that determinism keeps the two consistent): the
   // canonical port type is a packed STRUCT (not union/enum, not an array of
   // structs), and every field is an integral scalar/packed vector/enum — no
   // struct/union/multi-dim-array-typed fields (those keep today's flat port).
-  static bool                                                 struct_port_bundle_ok(const slang::ast::Type& t);
+  static bool                            struct_port_bundle_ok(const slang::ast::Type& t);
   // Field list (SV declaration order, first = MSB) of a qualifying struct
   // port type — the shared shape between emit_module_io and lower_instance.
-  static std::vector<Struct_info::Field>                      struct_port_fields(const slang::ast::Type& t);
+  static std::vector<Struct_info::Field> struct_port_fields(const slang::ast::Type& t);
   // Full qualification of a port at def AND call sites (option + plain name +
   // type rule). Deterministic: consults no body uses.
   bool                             bundle_port_qualifies(const slang::ast::PortSymbol& port, std::string_view owner_def = {}) const;
@@ -524,24 +609,12 @@ private:
   // and every instance call make the same decision without expanding top IO.
   absl::flat_hash_set<std::string> vector_bundle_ports_;
   const Struct_info*               bundle_port_of(const slang::ast::Symbol& sym) const;
-  // COMB bundle OUTPUT ports drive a local per-field SHADOW accumulator
-  // (`<port>__bpo.<field>` mut leaves, poison-initialized) and the port leaf
-  // gets exactly ONE top-level store — the end-of-module bridge
-  // `port.field = <shadow>.field`. Rationale: upass.ssa's port-tuple flatten
-  // (on the RECOMPILE of the emitted Pyrope) SSA-versions top-level stores to
-  // an output tuple leaf but leaves if-arm stores on the base name; with >=2
-  // top-level stores (poison + the SV `'0` default) the final version commit
-  // clobbers every arm write (minion_dcache_writeback_unit's l2_req_data_o
-  // refuted as constant 0). A local shadow rides the normal, proven scalar
-  // SSA; the single-store bridge is safe in both directions. Keyed by the
-  // port's internalSymbol; body reads AND writes of the port redirect here.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::string> bundle_out_shadow_;
   // Body-access base name of a bundle port: the shadow for a comb output,
   // the port name itself for inputs (and reg-bridged outputs, which are
   // erased from bundle_port_info_ before any body access).
-  std::string                                                 bundle_port_body_base(const slang::ast::Symbol& sym);
+  std::string                      bundle_port_body_base(const slang::ast::Symbol& sym);
   // Whole-port value from per-field tuple_gets (mirror read_struct_whole).
-  std::string                                                 read_bundle_port_whole(const slang::ast::ValueSymbol& sym);
+  std::string                      read_bundle_port_whole(const slang::ast::ValueSymbol& sym);
   // Whole-port write: slice an already-lowered flat value onto the fields
   // (mirror assign_struct_whole_value). false when sym is not a bundle port.
   bool assign_bundle_port_whole_value(const slang::ast::ValueSymbol& sym, const std::string& value, slang::SourceLocation loc);
@@ -634,14 +707,10 @@ private:
   // of value == the port width mints/returns the imported alias text
   // (`pkg.P_T`); nullopt when the dim carries no (recoverable) param name.
   std::optional<std::string> port_dim_alias(const slang::ast::PortSymbol& port, int bits, bool is_signed);
-  // Provenance: MODULE-LOCAL params (`localparam CNT_MAX = …` at module-body
-  // scope) become body-level `comptime const` declarations, and their refs stay
-  // symbolic (package_symbol_ref consults this map). Per-module state.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::string> local_param_lname_;
-  void                                                        emit_local_param_consts(const slang::ast::Scope& body);
-  void                                                        emit_package_units();  // one namespace .prp per referenced package
-  std::string lower_select(const slang::ast::Expression& expr);                      // Element/Range select rvalue
-  std::string lower_concat(const slang::ast::ConcatenationExpression& expr);
+  void                       emit_local_param_consts(const slang::ast::Scope& body);
+  void                       emit_package_units();                              // one namespace .prp per referenced package
+  std::string                lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
+  std::string                lower_concat(const slang::ast::ConcatenationExpression& expr);
   // A constant bit WINDOW of a named root: `x`, `x[7:4]`, `io.f[3]`, `p[2][5:0]`
   // normalized to (root expression, 0-based low bit from the root's LSB, width).
   // `key` is a semantic identity for the root — two windows with the same key
@@ -682,11 +751,6 @@ private:
   std::string                       lower_unpacked_read(const slang::ast::Expression& expr);  // memory/array element read
 
   // ── bool/int kind discipline ───────────────────────────────────────────────
-  // LiveHD's typechecker kinds comparison/logical results as bool with no
-  // implicit bool<->int interop; Verilog comparison results are 1-bit ints.
-  // Expression temps may stay bool (if-conds, &&/||) but anything reaching an
-  // integer context (stores, arithmetic, concat, ports) materializes to 0/1.
-  absl::flat_hash_set<std::string> bool_values_;
   bool        is_bool_value(const std::string& v) const { return v == "true" || v == "false" || bool_values_.contains(v); }
   std::string mark_bool(std::string v) {
     bool_values_.insert(v);
@@ -696,7 +760,6 @@ private:
   // A unique non-`___` local (the `___` namespace is single-write SSA; a
   // multi-written mux temp must not use it).
   std::string fresh_local(std::string_view stem);
-  int         local_cnt_ = 0;
 
   // In-flight assignment target value for compound assigns (`a += b` lowers
   // the RHS with LValueReference reading this) - CIRCT's lvalue stack, depth 1.
