@@ -378,6 +378,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# WINDOWED temporal operators: SVA's `##[m:n]`. The window looks FORWARD from
+# the anchor cycle, which the engine (backward-indexing only) supports by
+# RETIMING the statement, so the monitor stays combinational here too. The
+# directional claims in this test hold one way and refute the other, which is
+# what catches a window read backwards or off by one.
+sh_test(
+    name = "lhd_formal_window_test",
+    size = "large",
+    srcs = ["lhd_formal_window_test.sh"],
+    data = ["//lhd"],
+)
+
 # SystemVerilog IMMEDIATE assert/assume become design obligations (the same
 # LNAST cassert -> fproperty path a Pyrope `assert` takes). These used to be
 # dropped silently, so a design whose properties are all immediate asserts

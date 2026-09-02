@@ -17,6 +17,10 @@
 #   * two different depths compose in one property;
 #   * `past(x, 0)` is x, and a non-literal depth / non-signal argument is a
 #     usage error rather than a wrong answer.
+#
+# rose/fell/stable/changed also accept a WINDOW as a second argument
+# (`rose(x, 1..=10)`); that is lhd_formal_window_test's subject. Here the only
+# claim about the second argument is that a bare COUNT is not one.
 
 set -u
 
@@ -188,11 +192,12 @@ const dut = import("dly.dly")
 
 formal dly.bad_arity {
   mut acc = dut
-  assert(rose(acc.dout, 2) == 0, "rose takes one argument")
+  assert(rose(acc.dout, 2) == 0, "a bare count is not a window")
 }
 EOF
 OUT="$W/arity.out"
 "$LHD" formal verify "$W/dly.prp" "$W/arity.verify.prp" --top dly --workdir "$W/wa" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "rose() with two arguments must be refused: $(cat "$OUT")"
+[ $? -ne 0 ] || fail "rose() with a bare count must be refused: $(cat "$OUT")"
+grep -qi 'must be a window' "$OUT" || fail "the refusal must point at the window syntax: $(cat "$OUT")"
 
 echo "PASS: lhd formal verify past/rose/fell/stable/changed"

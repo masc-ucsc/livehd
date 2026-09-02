@@ -6475,49 +6475,113 @@ void formal_verify_command(Options& opts, Result& res) {
             }
             return s;
           };
-          // The temporal vocabulary, all of it depth-1 history except `past`
-          // itself. Ports are integers (a 1-bit signal is u1), so a truth test
-          // is `!= 0` — pyrope keeps bool and int apart, and `and` is
-          // boolean-only, so each operand is a comparison.
+          // The temporal vocabulary. Ports are integers (a 1-bit signal is u1),
+          // so a truth test is `!= 0` — pyrope keeps bool and int apart, and
+          // `and` is boolean-only, so each operand is a comparison.
+          //
+          // WINDOWS. `rose(x, 1..=10)` and friends are SVA's `##[1:10]`: they
+          // look FORWARD from the property's anchor cycle. The engine only
+          // indexes backward (`Bind::delay` reaches into mon_hist), so a forward
+          // window is implemented by RETIMING the whole statement instead of
+          // teaching the engine to look ahead: if the largest forward offset in
+          // a statement is F, every term is additionally delayed by F, which
+          // makes offset `+k` become backward delay `F-k` — all non-negative, so
+          // every reference is ordinary history. The property is then evaluated
+          // for anchor cycle `c` at unroll cycle `c+F`, and the existing
+          // `cyc < max_delay` rule skips (and discloses) the cycles that have no
+          // anchor. No engine change, no auxiliary state, and the shift applies
+          // to the bare signal reads in the statement too — `rose(req) implies
+          // rose(ack, 1..=10)` must read `req` at the anchor, not at `c+F`.
           struct Top {
             std::string_view name;
-            int              nargs;
+            int              nargs;    // 2 = takes a second argument
+            bool             window;   // second argument is a bounded range, not a count
+            bool             wneed;    // ...and it is REQUIRED
           };
-          static constexpr std::array<Top, 5> kTemporal{
-              {{"past", 2}, {"rose", 1}, {"fell", 1}, {"stable", 1}, {"changed", 1}}
+          static constexpr std::array<Top, 7> kTemporal{{{"past", 2, false, false},
+                                                         {"rose", 2, true, false},
+                                                         {"fell", 2, true, false},
+                                                         {"stable", 2, true, false},
+                                                         {"changed", 2, true, false},
+                                                         {"eventually", 2, true, true},
+                                                         {"always", 2, true, true}}};
+
+          // A bounded window literal: `lo..=hi` (inclusive) or `lo..<hi`.
+          struct Window {
+            int lo = 1;
+            int hi = 1;
+          };
+          auto parse_window = [&](const std::string& s, std::string_view opname) -> Window {
+            const auto dots = s.find("..");
+            const bool incl = dots != std::string::npos && dots + 2 < s.size() && s[dots + 2] == '=';
+            const bool excl = dots != std::string::npos && dots + 2 < s.size() && s[dots + 2] == '<';
+            if (dots == std::string::npos || (!incl && !excl)) {
+              throw Lhd_error{"usage",
+                              std::format("formal block '{}': `{}` window '{}' is not a bounded range", blk.name, opname, s),
+                              "write a literal range, e.g. eventually(x, 1..=32) or rose(x, 1..<10)"};
+            }
+            const std::string lo_s = trim(s.substr(0, dots));
+            const std::string hi_s = trim(s.substr(dots + 3));
+            auto              num  = [&](const std::string& t) {
+              if (t.empty() || t.find_first_not_of("0123456789") != std::string::npos) {
+                throw Lhd_error{"usage",
+                                             std::format("formal block '{}': `{}` window bound '{}' is not a literal cycle",
+                                                         blk.name,
+                                                         opname,
+                                                         t),
+                                             "both ends must be compile-time numbers: rose(x, 1..=10)"};
+              }
+              return std::stoi(t);
+            };
+            Window w;
+            w.lo = num(lo_s);
+            w.hi = excl ? num(hi_s) - 1 : num(hi_s);
+            if (w.hi < w.lo) {
+              throw Lhd_error{"usage",
+                              std::format("formal block '{}': `{}` window {}..{} is empty", blk.name, opname, w.lo, w.hi),
+                              "a window must name at least one cycle; `1..<2` is the single cycle 1"};
+            }
+            return w;
           };
 
-          for (auto& st : blk_stmts) {
-            // Scan OUTSIDE string literals: an obligation's message is part of
-            // the statement text, so `assert(..., "past(x, 0) is x")` would
-            // otherwise be read as a call and rejected for naming no signal.
-            bool in_str = false;
-            for (size_t pos = 0; pos < st.text.size();) {
-              const char c = st.text[pos];
-              if (in_str && c == '\\') {
-                pos += 2;  // escaped char inside the message
+          // Locate the next bare temporal call at or after `from`, skipping
+          // string literals (an obligation's message is part of the statement
+          // text, so `assert(..., "past(x, 0) is x")` must not read as a call).
+          struct Call {
+            size_t      pos   = std::string::npos;
+            size_t      close = std::string::npos;
+            const Top*  op    = nullptr;
+            std::string arg;
+            std::string second;  // "" when the call has one argument
+          };
+          auto next_call = [&](const std::string& text, size_t from) -> Call {
+            Call  c;
+            bool  in_str = false;
+            for (size_t pos = 0; pos < text.size();) {
+              const char ch = text[pos];
+              if (in_str && ch == '\\') {
+                pos += 2;
                 continue;
               }
-              if (c == '"') {
+              if (ch == '"') {
                 in_str = !in_str;
                 ++pos;
                 continue;
               }
-              if (in_str) {
+              if (in_str || pos < from) {
                 ++pos;
                 continue;
               }
               const Top* op = nullptr;
               for (const auto& t : kTemporal) {
-                if (st.text.compare(pos, t.name.size(), t.name) == 0 && pos + t.name.size() < st.text.size()
-                    && st.text[pos + t.name.size()] == '(') {
+                if (text.compare(pos, t.name.size(), t.name) == 0 && pos + t.name.size() < text.size()
+                    && text[pos + t.name.size()] == '(') {
                   op = &t;
                   break;
                 }
               }
-              // Only a bare call, not the tail of a longer identifier.
               if (op == nullptr
-                  || (pos > 0 && (std::isalnum(static_cast<unsigned char>(st.text[pos - 1])) != 0 || st.text[pos - 1] == '_'))) {
+                  || (pos > 0 && (std::isalnum(static_cast<unsigned char>(text[pos - 1])) != 0 || text[pos - 1] == '_'))) {
                 ++pos;
                 continue;
               }
@@ -6526,10 +6590,10 @@ void formal_verify_command(Options& opts, Result& res) {
               // expression), but the diagnosis has to name the real call.
               const size_t open  = pos + op->name.size();
               size_t       close = std::string::npos;
-              for (size_t i = open, depth = 0; i < st.text.size(); ++i) {
-                if (st.text[i] == '(') {
+              for (size_t i = open, depth = 0; i < text.size(); ++i) {
+                if (text[i] == '(') {
                   ++depth;
-                } else if (st.text[i] == ')' && --depth == 0) {
+                } else if (text[i] == ')' && --depth == 0) {
                   close = i;
                   break;
                 }
@@ -6539,55 +6603,182 @@ void formal_verify_command(Options& opts, Result& res) {
                                 std::format("formal block '{}': unterminated `{}(` in a property", blk.name, op->name),
                                 "temporal operators take one signal, e.g. rose(x) or past(x, 2)"};
               }
-              const std::string inner = st.text.substr(open + 1, close - open - 1);
+              const std::string inner = text.substr(open + 1, close - open - 1);
               const auto        comma = inner.find(',');
-              const std::string arg   = trim(comma == std::string::npos ? inner : inner.substr(0, comma));
-              const std::string cnt   = comma == std::string::npos ? std::string{} : trim(inner.substr(comma + 1));
-              if ((op->nargs == 2) != (comma != std::string::npos)) {
+              c.pos                   = pos;
+              c.close                 = close;
+              c.op                    = op;
+              c.arg                   = trim(comma == std::string::npos ? inner : inner.substr(0, comma));
+              c.second                = comma == std::string::npos ? std::string{} : trim(inner.substr(comma + 1));
+              return c;
+            }
+            return c;
+          };
+
+          // Validate one call and report the forward reach it needs (0 for the
+          // backward-only forms). Shared by both passes so the two cannot drift.
+          auto call_window = [&](const Call& c) -> Window {
+            const std::string_view nm = c.op->name;
+            if (c.second.empty()) {
+              if (c.op->wneed) {
                 throw Lhd_error{"usage",
-                                std::format("formal block '{}': `{}` takes {} argument(s)", blk.name, op->name, op->nargs),
+                                std::format("formal block '{}': `{}` needs a bounded window", blk.name, nm),
+                                "eventually(x, 1..=32) / always(x, 1..=10) — an unbounded deadline is out of scope"};
+              }
+              if (nm == "past") {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': `past` takes 2 argument(s)", blk.name),
                                 "past(x, 2) samples 2 cycles back; rose/fell/stable/changed take just the signal"};
               }
-              int n = 1;
-              if (op->nargs == 2) {
-                if (cnt.empty() || cnt.find_first_not_of("0123456789") != std::string::npos) {
-                  throw Lhd_error{"usage",
-                                  std::format("formal block '{}': past() depth '{}' is not a literal cycle count", blk.name, cnt),
-                                  "write past(x, 2) — the depth must be a compile-time number"};
-                }
-                n = std::stoi(cnt);
-              }
-              const auto* base = idx_of(arg);
-              if (base == nullptr) {
-                throw Lhd_error{"usage",
-                                std::format("formal block '{}': `{}` argument must be one signal the block names, got '{}'",
-                                            blk.name,
-                                            op->name,
-                                            arg),
-                                "rose(acc.req) / past(acc.req, 2) are supported; an expression like rose(a and b) is not"};
-              }
-              // COPY the base ident first: hist_port may push a new history port
-              // into blk_inputs, and that reallocation invalidates `base`.
-              const std::string base_ident = base->ident;
-              const std::string p1         = hist_port(*base, n);
-              std::string       repl;
-              if (op->name == "past") {
-                repl = p1;
-              } else if (op->name == "rose") {
-                repl = std::format("(({} == 0) and ({} != 0))", p1, base_ident);
-              } else if (op->name == "fell") {
-                repl = std::format("(({} != 0) and ({} == 0))", p1, base_ident);
-              } else if (op->name == "stable") {
-                repl = std::format("({} == {})", base_ident, p1);
-              } else {  // changed
-                repl = std::format("({} != {})", base_ident, p1);
-              }
-              st.text.replace(pos, close - pos + 1, repl);
-              if (p1 != base_ident) {
-                st.idents.push_back(p1);
-              }
-              pos += repl.size();
+              return Window{0, 0};  // the unwindowed edge/stability forms
             }
+            if (nm == "past") {
+              if (c.second.find("..") != std::string::npos) {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': `past` takes a cycle count, not a window", blk.name),
+                                "past(x, 2) is one sample; use eventually/always/rose(x, 1..=10) for a window"};
+              }
+              if (c.second.find_first_not_of("0123456789") != std::string::npos) {
+                throw Lhd_error{
+                    "usage",
+                    std::format("formal block '{}': past() depth '{}' is not a literal cycle count", blk.name, c.second),
+                    "write past(x, 2) — the depth must be a compile-time number"};
+              }
+              return Window{0, 0};  // backward only
+            }
+            if (c.second.find("..") == std::string::npos) {
+              throw Lhd_error{"usage",
+                              std::format("formal block '{}': `{}` second argument must be a window, got '{}'",
+                                          blk.name,
+                                          nm,
+                                          c.second),
+                              "a bare count is `past`; a window is a range, e.g. rose(x, 1..=10)"};
+            }
+            return parse_window(c.second, nm);
+          };
+
+          for (auto& st : blk_stmts) {
+            // PASS 1: the statement's forward reach F.
+            int F = 0;
+            for (size_t from = 0;;) {
+              const Call c = next_call(st.text, from);
+              if (c.op == nullptr) {
+                break;
+              }
+              F    = std::max(F, call_window(c).hi);
+              from = c.close + 1;
+            }
+            // PASS 2: rewrite left to right. Temporal calls expand to history
+            // ports; every OTHER read of a block signal is shifted by F so the
+            // whole statement speaks about the anchor cycle.
+            std::string out;
+            bool        in_str = false;
+            for (size_t pos = 0; pos < st.text.size();) {
+              const char ch = st.text[pos];
+              if (in_str) {
+                out += ch;
+                if (ch == '\\' && pos + 1 < st.text.size()) {
+                  out += st.text[pos + 1];
+                  pos += 2;
+                  continue;
+                }
+                if (ch == '"') {
+                  in_str = false;
+                }
+                ++pos;
+                continue;
+              }
+              if (ch == '"') {
+                in_str = true;
+                out += ch;
+                ++pos;
+                continue;
+              }
+              const Call c = next_call(st.text, pos);
+              if (c.op != nullptr && c.pos == pos) {
+                const auto* base = idx_of(c.arg);
+                if (base == nullptr) {
+                  throw Lhd_error{"usage",
+                                  std::format("formal block '{}': `{}` argument must be one signal the block names, got '{}'",
+                                              blk.name,
+                                              c.op->name,
+                                              c.arg),
+                                  "rose(acc.req) / past(acc.req, 2) are supported; an expression like rose(a and b) is not"};
+                }
+                // COPY the base first: hist_port may push a new history port
+                // into blk_inputs, and that reallocation invalidates `base`.
+                const livehd::formal_blocks::Input base_copy = *base;
+                const std::string_view             nm        = c.op->name;
+                // `port(d)` — the signal `d` cycles before the CURRENT unroll
+                // cycle, remembering that every term already carries the shift.
+                auto port = [&](int d) {
+                  const std::string id = hist_port(base_copy, d);
+                  if (id != base_copy.ident) {
+                    st.idents.push_back(id);
+                  }
+                  return id;
+                };
+                std::string repl;
+                if (nm == "past") {
+                  repl = port(std::stoi(c.second) + F);
+                } else {
+                  const Window w      = call_window(c);
+                  const bool   windowed = !c.second.empty();
+                  // Unwindowed forms are the single anchor cycle: offset 0.
+                  const int    klo    = windowed ? w.lo : 0;
+                  const int    khi    = windowed ? w.hi : 0;
+                  // `stable`/`always` are universal over the window, the rest
+                  // existential — the doc's OR/AND split.
+                  const bool   univ   = (nm == "stable" || nm == "always");
+                  std::string  acc;
+                  for (int k = klo; k <= khi; ++k) {
+                    const int   d = F - k;  // >= 0: F is the largest hi in the statement
+                    std::string term;
+                    if (nm == "rose") {
+                      term = std::format("(({} == 0) and ({} != 0))", port(d + 1), port(d));
+                    } else if (nm == "fell") {
+                      term = std::format("(({} != 0) and ({} == 0))", port(d + 1), port(d));
+                    } else if (nm == "stable") {
+                      term = std::format("({} == {})", port(d), port(d + 1));
+                    } else if (nm == "changed") {
+                      term = std::format("({} != {})", port(d), port(d + 1));
+                    } else {  // eventually / always: the value itself
+                      term = std::format("({} != 0)", port(d));
+                    }
+                    acc = acc.empty() ? term : std::format("({} {} {})", acc, univ ? "and" : "or", term);
+                  }
+                  repl = acc;
+                }
+                out += repl;
+                pos = c.close + 1;
+                continue;
+            }
+              // A bare read of a block signal: shift it to the anchor cycle.
+              if (F > 0 && (std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_')) {
+                size_t end = pos;
+                while (end < st.text.size()
+                       && (std::isalnum(static_cast<unsigned char>(st.text[end])) != 0 || st.text[end] == '_'
+                           || st.text[end] == '.')) {
+                  ++end;
+                }
+                const std::string ident = st.text.substr(pos, end - pos);
+                if (const auto* base = idx_of(ident); base != nullptr) {
+                  const livehd::formal_blocks::Input base_copy = *base;
+                  const std::string                  id        = hist_port(base_copy, F);
+                  if (id != base_copy.ident) {
+                    st.idents.push_back(id);
+                  }
+                  out += id;
+                } else {
+                  out += ident;
+                }
+                pos = end;
+                continue;
+              }
+              out += ch;
+              ++pos;
+            }
+            st.text = std::move(out);
           }
         }
 
