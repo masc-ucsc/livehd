@@ -15,6 +15,7 @@
 #include <charconv>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -79,33 +80,71 @@ namespace {
 // Liberty's characterized load -- dino had 283 nets over 32 sinks and a mapped
 // net with 384 -- and `pass.opentimer` then EXTRAPOLATES off the end of the NLDM
 // table (an `a21oi_1` came out at 3090 ns against a ~0.05 ns intrinsic delay).
-// `buffer -N` caps mapped fanout exactly, and `dnsize` area-recovers around the
-// inserted buffers. `map_region` runs `upsize; dnsize` afterwards ONLY when
-// this result still misses `{D}`: upsize optimizes for the fastest achievable
-// delay rather than the requested budget. On the 16x32 Bedrock one-hot mux,
-// running it despite meeting 100 ps changed 30.79 um^2 at 52.22 ps into 45.72
-// um^2 at 46.47 ps -- a 48% area increase. These are SCL commands: they need a
-// MAPPED network, so they must follow `&put`, and they need `pLibScl`, which
-// `read_lib -s` loads.
+// `buffer -N` caps mapped fanout exactly, and `dnsize {B}` area-recovers around
+// the inserted buffers DOWN TO the region's delay budget (`-D <budget>`: a bare
+// `dnsize` would only preserve whatever delay the mapper landed on). The mapper
+// runs on `read_lib -s`'s unit-delay GENLIB, so `&nf` produces a min-depth
+// mapping on the smallest cells and the SCL steps own every physical decision;
+// `map_region` then runs `upsize {B}; dnsize {B}` ONLY when this result still
+// misses the budget, and the unbounded `upsize; dnsize` only when even that
+// does: upsize optimizes for the fastest achievable delay rather than the
+// requested budget. On the 16x32 Bedrock one-hot mux, running it despite
+// meeting 100 ps changed 30.79 um^2 at 52.22 ps into 45.72 um^2 at 46.47 ps --
+// a 48% area increase. These are SCL commands: they need a MAPPED network, so
+// they must follow `&put`, and they need `pLibScl`, which `read_lib -s` loads.
 //
 // It cannot fix everything: a net driven by a NATIVE (unblasted) node -- a wide
 // SRA, packed wiring, a region boundary -- never reaches ABC, so its fanout
 // survives. Those are the residual over-limit nets.
-constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put";
+constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o";
 
 // Appended to a BUILT-IN flow when max_fanout != 0. Not part of the constants
 // above so that max_fanout=0 yields a clean unbuffered string rather than a
-// stripped one; a custom flow places `{F}` (the bare number) itself.
-constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize";
+// stripped one; a custom flow places `{F}` (the bare number) and `{B}` itself.
+// `{B}` is the region's delay BUDGET as `-D <ps>` (target minus the register
+// margin when the region holds flops; empty without a target, so the tail
+// degrades to a bare `dnsize`): `dnsize -D` lets the down-sizing consume the
+// slack up to the budget instead of preserving the delay it started from.
+constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize {B}";
+
+// The AREA candidate. Same pre-mapping optimization as kCombFlow, then `dch -f;
+// amap` (a choice-aware area-oriented mapper in the plain network space; amap
+// keeps latches and, like `&nf`, ignores the GENLIB's delays) and a sizing tail
+// that first UPSIZES to the budget -- amap's min-size cells rarely meet a tight
+// target on their own -- and then down-sizes back to it. map_region runs it
+// only for a region whose delay flow already met its budget, and keeps it only
+// when it ALSO meets the budget with less SCL area; the delay flow's netlist
+// wins every tie. Measured over 15 lhdtrack designs against the delay flow
+// alone (geomean area vs yosys): sky130 1.22 -> 1.07 with every design inside
+// its 20 ns budget (br_enc_countones 903 -> 741 um^2, br_counter_incr 472 ->
+// 414, mul 1738 -> 1615); on ASAP7 it wins alu (15.0 -> 13.9 um^2 at 299 of a
+// 300 ps period), barrel_shifter and br_enc_countones. It costs one more full
+// ABC run per qualifying region (~+200 ms on br_amba_axi2axil, the largest of
+// the 15; ~15% of pass.abc wall).
+constexpr std::string_view kAreaFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; dch -f; amap";
+constexpr std::string_view kAreaTail = "; buffer -N {F}; upsize {B}; dnsize {B}";
 
 // The MAPPER step of both built-in flows, spelled once so map_region's
 // area-recovery pass can replay exactly it -- and nothing else -- after `&undo`.
 constexpr std::string_view kMapCmd = "&nf {D}";
 
-// The buffering tail with the delay BUDGET handed to `dnsize`. A bare `dnsize`
-// preserves whatever delay the mapper landed on; `-D` lets it downsize toward
-// the requested target instead, which is the point of the area-recovery pass.
-constexpr std::string_view kBufferTailBudget = "; buffer -N {F}; dnsize {D}";
+// The MAPPED-network hand-back both built-in flows END with. `-o` matters:
+// when `&put` rebuilds the logic network it "decouples" every CO driver
+// (Abc_NtkFromCellMappedGia -> Abc_NtkLogicMakeSimpleCos): a CI feeding a CO
+// gets a buffer, and a gate feeding two or more COs gets -- WITHOUT `-o` -- a
+// duplicate of itself, a real second cell (2,802 exact-duplicate comb cells on
+// the lhdtrack asap7 corpus against yosys's 92; br_amba_axi_demux 171 of them)
+// or -- WITH `-o` -- a CO-only buffer. The read-back aliases every such buffer
+// away (identity-buffer bypass in map_region, see is_identity_gate), so `-o`
+// turns the duplicates into nothing at all. Measured with the bypass in place,
+// br_amba_axi_demux asap7: 2,704 -> 2,533 ABC cells, 158.6 -> 146.7 um^2 of
+// ABC comb area (sky130 11,482 -> 9,990), ABC's own and OpenTimer's delay
+// unchanged. The cost: a gate that used to be duplicated now drives every one
+// of those COs itself (fanout still capped by the `buffer -N` tail), so a
+// whole-netlist STA can see a heavier driver. The unmapped `&put` in the middle
+// of the flow is unaffected (an AIG has no CO decoupling). The area-recovery
+// remap replays exactly this step after `&undo`, so it is spelled once.
+constexpr std::string_view kPutCmd = "&put -o";
 
 // Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow; the
 // latches only carry the registers across ABC so it can optimize the logic
@@ -119,13 +158,19 @@ constexpr std::string_view kBufferTailBudget = "; buffer -N {F}; dnsize {D}";
 // forbids. Opt in explicitly per run or per region when that is understood:
 // `--set pass.abc.flow="strash; &get -n; &dc4; dretime; &dch -f; &nf {D};
 // &put"` (the read-back stays robust to reshaped latches).
-constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put";
+constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o";
 
 // The remap in map_region assumes both built-in flows END with the mapper step
-// followed by `&put`, because `&undo` reverses exactly one GIA transformation.
-static_assert(kCombFlow.ends_with("; &nf {D}; &put"));
-static_assert(kSeqFlow.ends_with("; &nf {D}; &put"));
+// followed by kPutCmd, because `&undo` reverses exactly one GIA transformation.
+static_assert(kCombFlow.ends_with("; &nf {D}; &put -o"));
+static_assert(kSeqFlow.ends_with("; &nf {D}; &put -o"));
+static_assert(kCombFlow.ends_with(kPutCmd) && kSeqFlow.ends_with(kPutCmd));
 static_assert(kCombFlow.find(kMapCmd) != std::string_view::npos);
+// The tails size to the BUDGET ({B}); `{D}` there would size to the full
+// period and hand every flop-bearing region back to OpenSTA over by the
+// register overhead.
+static_assert(kBufferTail.find("{B}") != std::string_view::npos && kBufferTail.find("{D}") == std::string_view::npos);
+static_assert(kAreaTail.find("{B}") != std::string_view::npos && kAreaTail.find("{D}") == std::string_view::npos);
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -254,6 +299,48 @@ bool lib_has_nldm_timing(const SC_Lib* lib) {
   auto* timing = Scl_CellPinTime(inv, 0);
   return timing != nullptr && Vec_FltSize(&timing->pCellRise.vIndex0) > 1 && Vec_FltSize(&timing->pCellRise.vIndex1) > 1;
 }
+
+// The identity-buffer bypass (map_region read-back, pass 1b). ABC materializes
+// a pure WIRE as a Liberty buffer whenever a CI drives a CO or one gate drives
+// two or more COs (Abc_NtkLogicMakeSimpleCos, run by `&put` and once more by
+// Abc_NtkToNetlist): every PI->PO, latchQ->PO, PI->latchD and blackbox-boundary
+// feed-through bit costs a cell. Yosys never pays it -- its ABC sub-netlist is
+// built per signal, so a signal is never both PI and PO and no CO ever shares a
+// driver. Measured on the lhdtrack corpus (asap7, syn_lhd_verilog): 20,905
+// buffers = 4.1% of ALL cell area against yosys's 4; br_demux_onehot was 512
+// HB1xp67 out of 528 cells (95.5% of its area, 31.26 vs yosys 1.40 um^2), and
+// br_amba_apb_timing_slice 213 (108 flopQ->out + 105 in->flopD). These two
+// predicates pick out exactly those buffers so the read-back can alias the
+// buffer's output net to its input net instead of minting a Sub.
+//
+// A gate qualifies when it is a single-input NON-inverting function. Mio derives
+// uTruth for every gate it reads and 0xAA.. is "output = input 0" -- the very
+// test Mio_LibraryDetectSpecialGates uses to pick the library buffer -- so this
+// is independent of which drive strength `dnsize`/`upsize` landed on. ...
+bool is_identity_gate(Mio_Gate_t* g) {
+  return Mio_GateReadPinNum(g) == 1 && Mio_GateReadTruth(g) == 0xAAAAAAAAAAAAAAAAULL;
+}
+
+// ... and its output net feeds nothing but COs (a PO or a latch input: the two
+// object kinds Abc_ObjIsCo names). A MakeSimpleCos buffer feeds exactly its
+// CO(s); a `buffer -N` fanout-tree buffer always feeds at least one node
+// (`buffer` never buffers CI nets, fBufPis=0), so the rule removes EVERY
+// decoupling buffer and keeps EVERY fanout buffer. The tail buffers must stay:
+// with max_fanout=0 br_amba_axi_shrinker's opensta went 292 -> 1146 ps. An
+// inverted CI->CO edge is a real INV cell and never matches either.
+bool only_co_fanouts(Abc_Obj_t* net) {
+  if (Abc_ObjFanoutNum(net) == 0) {
+    return false;
+  }
+  Abc_Obj_t* f = nullptr;
+  int        k = 0;
+  Abc_ObjForEachFanout(net, f, k) {
+    if (!Abc_ObjIsCo(f)) {
+      return false;
+    }
+  }
+  return true;
+}
 }  // namespace
 
 // A built-in flow gains the buffering tail; a caller-supplied flow does not (it
@@ -269,6 +356,8 @@ std::string Mapper::resolve_flow(std::string_view builtin) const {
 std::string Mapper::subst_flow(std::string f) const {
   f = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
   f = flag_subst(std::move(f), "{L}", 'L', opts_.load);
+  // {B} is the region budget, already spelled as a flag (`-D <ps>`) or empty.
+  f = subst(std::move(f), "{B}", budget_flag_);
   // {F} is the bare fanout NUMBER (buffer's -N takes it), not a flag.
   return subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
 }
@@ -276,6 +365,44 @@ std::string Mapper::subst_flow(std::string f) const {
 std::string Mapper::comb_flow() const { return subst_flow(opts_.flow.empty() ? resolve_flow(kCombFlow) : opts_.flow); }
 
 std::string Mapper::seq_flow() const { return subst_flow(opts_.flow.empty() ? resolve_flow(kSeqFlow) : opts_.flow); }
+
+std::string Mapper::area_flow() const {
+  if (opts_.area_flow == "none") {
+    return {};
+  }
+  if (!opts_.area_flow.empty()) {
+    return subst_flow(opts_.area_flow);  // caller-owned, like `flow`: no tail is appended
+  }
+  std::string f = std::string{kAreaFlow};
+  if (opts_.max_fanout != 0) {
+    f += kAreaTail;  // one unit with the fanout cap, exactly like kBufferTail
+  }
+  return subst_flow(std::move(f));
+}
+
+double Mapper::reg_margin_ps() const {
+  if (opts_.reg_margin == "auto") {
+    // The cell the netlist's registers become. Without one (register=false, or
+    // a library with no plain DFF) the flops stay native and are mapped later
+    // by whoever consumes the netlist -- their overhead is unknown here, so
+    // none is assumed rather than a guess that would silently move every
+    // region's budget.
+    return dff_.has_value() ? dff_->clk_to_q_ps + dff_->setup_ps : 0.0;
+  }
+  char*        end = nullptr;
+  const double v   = std::strtod(opts_.reg_margin.c_str(), &end);
+  return (end != opts_.reg_margin.c_str() && *end == '\0' && v > 0.0) ? v : 0.0;
+}
+
+float Mapper::region_budget(float target, bool has_flops) const {
+  if (target <= 0.0f) {
+    return target;
+  }
+  if (!has_flops) {
+    return target;
+  }
+  return std::max(1.0f, target - static_cast<float>(reg_margin_ps()));
+}
 
 bool Mapper::nldm_requested() const {
   // The GENLIB is installed ONCE, in start(), before any region maps: swapping
@@ -302,26 +429,55 @@ std::string Mapper::resolve_recipe() const {
   // by mode, and the mode is in the salt); '|' separates fields that never
   // contain '|'.
   //
-  // `nldm` is NOT derivable from the flow string: a region whose region_opts
-  // override `delay` back to empty maps with the run's gain-100 GENLIB yet
-  // spells the same `&nf` command as a plain unit-delay run. Without this field
-  // the incremental cache would hand that netlist (and its picosecond QoR row)
-  // to a later run that never installed the physical GENLIB. The Liberty
-  // content is already in Incr_cache::make_salt, so the request is the only
-  // missing half of the decision.
+  // `nldm` ("SCL sizing/timing requested") is NOT derivable from the flow
+  // string: a region whose region_opts override `delay` back to empty spells
+  // the same `&nf` command as a plain untimed run, yet its QoR row is in
+  // picoseconds from the SCL timer. Without this field the incremental cache
+  // would hand that row to a later run that never asked for timing. The
+  // Liberty content is already in Incr_cache::make_salt, so the request is the
+  // only missing half of the decision.
   //
   // `arelax` joins them for the same reason `nldm` did: the area-recovery remap
   // re-maps a region that beat its budget, so two runs that spell an identical
   // flow still produce different netlists (and different QoR rows) when the cap
   // differs.
-  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}",
+  //
+  // `genlib`/`area`/`margin`/`objective` pin the mapping objective: the mapper
+  // now runs on the unit-delay GENLIB (a row mapped under the old gain-100 one
+  // spells the same `&nf` command), the area candidate re-maps a region whose
+  // delay flow met its budget (a run with a different `area_flow`, or with
+  // the candidate off, must never reuse the winner of a comparison it did not
+  // run), and the register margin decides that budget (already spelled into
+  // the tails' `-D` for this region; repeated here so a margin change under a
+  // flop-less region still reads as a different recipe).
+  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}|genlib=unit|area={}|margin={}|"
+                     "objective=budget",
                      comb_flow(),
                      seq_flow(),
                      static_cast<int>(opts_.adder),
                      opts_.block_size,
                      static_cast<int>(opts_.multiplier),
                      nldm_requested() ? 1 : 0,
-                     opts_.area_relax_pct);
+                     opts_.area_relax_pct,
+                     opts_.area_flow == "none" ? std::string{"none"} : area_flow(),
+                     reg_margin_ps());
+}
+
+void Mapper::ensure_dff_cells() {
+  // Register mapping target: scan the Liberty for a plain posedge D-flop (ABC's
+  // read_lib already dropped it, so this is a separate text scan). A missing DFF
+  // cell is not fatal — the read-back keeps flops native (the same shape as
+  // register=false) so the netlist stays correct, just not fully cell-mapped.
+  if (!startup_opts_.map_register || dff_preset_) {
+    return;
+  }
+  auto sel    = liberty::resolve_dff_cells(startup_opts_.library, startup_opts_.dff_cell);
+  dff_        = sel.base;
+  dff_ladder_ = sel.ladder;
+  if (dff_.has_value() && dff_ladder_.empty()) {
+    dff_ladder_.push_back(*dff_);  // a ladder always has its base rung
+  }
+  dff_preset_ = true;  // resolved once; the pick is constant for the run
 }
 
 bool Mapper::start() {
@@ -382,51 +538,66 @@ bool Mapper::start() {
           .fatal();
       return false;
     }
+    // Cheapest gate per (pins, truth) for the QN read-back's inverting-twin
+    // swap (see twin_index_). Multi-output and >6-input cells are already gone
+    // (`read_lib -s`; Mio_GateReadTruth is 0 past 6 inputs) -- skip the latter.
+    twin_index_.clear();
+    Mio_Gate_t* g = nullptr;
+    Mio_LibraryForEachGate(mio, g) {
+      const int n = Mio_GateReadPinNum(g);
+      if (n > 6) {
+        continue;
+      }
+      const auto key = std::pair<int, uint64_t>{n, static_cast<uint64_t>(Mio_GateReadTruth(g))};
+      auto       it  = twin_index_.find(key);
+      if (it == twin_index_.end() || Mio_GateReadArea(g) < Mio_GateReadArea(static_cast<Mio_Gate_t*>(it->second))) {
+        twin_index_[key] = g;
+      }
+    }
   }
 
   if (nldm_requested()) {
-    auto* scl = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
-    if (lib_has_nldm_timing(scl)) {
-      // Gain 0 (read_lib's default) intentionally creates a unit-delay GENLIB
-      // (every pin 1.00), so every mapped delay is logic depth. Reinstall the
-      // GENLIB from the parsed NLDM at ABC's conventional gain=100 operating
-      // point; slew=0 asks ABC to choose a representative slew from the
-      // library. Keep every drive strength (fUseAll) so the SCL dnsize tail can
-      // consider every legal drive strength while recovering area.
-      const void* before_mio = Abc_FrameReadLibGen();
-      Abc_SclInstallGenlib(scl, 0.0f, 100.0f, 1, 0);
-      Mio_LibraryTransferCellIds();
-      // `Abc_SclInstallGenlib` is void: when the derived GENLIB fails to parse
-      // it only PRINTS and leaves the previous library installed. And ABC's SCL
-      // timer bails out of `Abc_SclMioGates2SclGates` with a null gate vector
-      // -- which the very next timing walk dereferences -- when the active
-      // GENLIB has no buffer cell. Verify both before trusting the physical
-      // path, or a "successful" install silently degrades into wrong numbers
-      // (or a segfault) later.
-      auto* mio = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
-      if (mio == nullptr || static_cast<const void*>(mio) == before_mio) {
-        std::print("[pass.abc] delay target: ABC could not derive a gain GENLIB from '{}'; keeping unit delay\n",
-                   startup_opts_.library);
-      } else if (Mio_LibraryReadBuf(mio) == nullptr) {
-        std::print(
-            "[pass.abc] delay target: '{}' has no buffer cell, so ABC cannot time a mapped network; "
-            "keeping unit delay\n",
-            startup_opts_.library);
-      } else {
-        nldm_genlib_loaded_ = true;
-      }
+    // The mapper keeps `read_lib -s`'s unit-delay GENLIB (every pin 1.00: `&nf`
+    // minimizes logic depth on the smallest cells) and the SCL steps -- the
+    // `buffer`/`upsize`/`dnsize` tails and the `stime`-shaped QoR timer, all of
+    // which walk `pAbc->pLibScl`'s per-pin NLDM surfaces -- own every physical
+    // decision. The gain-100 GENLIB this used to install for a delay target
+    // (`Abc_SclInstallGenlib(scl, 0, 100, fUseAll=1, 0)`) made `&nf` chase
+    // delay it could not see the budget for: measured over 15 lhdtrack
+    // designs it cost 1.63x yosys's area on ASAP7 (unit + `dnsize -D`: 1.24x)
+    // and 1.15x on sky130 (1.22x before the area candidate, 1.07x with it) for
+    // the same number of periods met. What the SCL path needs is 2-D tables;
+    // a scalar-only Liberty keeps the unbuffered, unsized mapping (see the
+    // tail strip in map_region) and says so once.
+    if (lib_has_nldm_timing(static_cast<SC_Lib*>(Abc_FrameReadLibScl()))) {
+      scl_timing_ok_ = true;
     } else {
-      std::print("[pass.abc] delay target: '{}' has no 2-D slew/load NLDM tables; ABC is using unit delay\n",
+      std::print("[pass.abc] delay target: '{}' has no 2-D slew/load NLDM tables; ABC cannot size or time cells\n",
                  startup_opts_.library);
     }
   }
 
-  // Register mapping target: scan the Liberty for a plain posedge D-flop (ABC's
-  // read_lib already dropped it, so this is a separate text scan). A missing DFF
-  // cell is not fatal — the read-back keeps flops native (the same shape as
-  // register=false) so the netlist stays correct, just not fully cell-mapped.
+  ensure_dff_cells();
   if (startup_opts_.map_register) {
-    dff_ = liberty::find_dff_cell(startup_opts_.library, startup_opts_.dff_cell);
+    if (dff_.has_value() && startup_opts_.verbose) {
+      std::string rungs;
+      for (const auto& c : dff_ladder_) {
+        rungs += std::format("{}{} ({:.4f})", rungs.empty() ? "" : ", ", c.name, c.area);
+      }
+      std::print("[pass.abc] register cell: {} (d={}, clk={}, {}={}{}); drive ladder: {}; overhead clk->Q {:.1f} + setup {:.1f} ps "
+                 "(reg_margin={} -> {:.1f} ps)\n",
+                 dff_->name,
+                 dff_->d_pin,
+                 dff_->clk_pin,
+                 dff_->q_inverted ? "qn" : "q",
+                 dff_->q_pin,
+                 dff_->q_inverted ? ", output inverted" : "",
+                 rungs,
+                 dff_->clk_to_q_ps,
+                 dff_->setup_ps,
+                 startup_opts_.reg_margin,
+                 reg_margin_ps());
+    }
     if (!dff_.has_value()) {
       livehd::diag::warn("pass.abc", "no-dff-cell", "unsupported")
           .msg("pass.abc register=true: no {} in '{}' — keeping flops native (no DFF-cell mapping)",
@@ -441,11 +612,11 @@ bool Mapper::start() {
 void Mapper::stop() {
   if (pabc_ != nullptr) {
     Abc_Stop();
-    pabc_               = nullptr;
-    // The frame owned the derived GENLIB; a later start() must re-decide.
+    pabc_          = nullptr;
+    // The frame owned the parsed SCL library; a later start() must re-decide.
     // (`lib_loaded_` deliberately survives -- work() reads abc_started() AFTER
     // stop() to report whether ABC ran at all.)
-    nldm_genlib_loaded_ = false;
+    scl_timing_ok_ = false;
 #if defined(__APPLE__)
     // Abc_Stop releases the frame's last networks to malloc, but Darwin may
     // retain those pages and their xzone reservations. A large final color can
@@ -944,7 +1115,8 @@ void rewrite_trivial_rems(hhds::Graph* g) {
   }
   for (auto n : to_fix) {
     auto          a  = gu::get_driver_of_sink_name(n, "a");
-    const auto&   bc = gu::const_of(gu::get_driver_of_sink_name(n, "b"));
+    auto          b  = gu::get_driver_of_sink_name(n, "b");  // named: gcc -Wdangling-reference on const_of(temporary)
+    const auto&   bc = gu::const_of(b);
     const int64_t bv = bc.to_just_i64();
     const int64_t ba = bv < 0 ? -bv : bv;
 
@@ -1028,8 +1200,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   struct Opts_restore {
     Map_options*       dst;
     const Map_options* src;
-    ~Opts_restore() { *dst = *src; }
-  } opts_restore{&opts_, &saved_opts};
+    std::string*       budget_flag;  // the `{B}` substitution is per region too
+    ~Opts_restore() {
+      *dst = *src;
+      budget_flag->clear();
+    }
+  } opts_restore{&opts_, &saved_opts, &budget_flag_};
   // Structural input size belongs in every QoR row, including cache hits. It
   // makes recipe/runtime changes explainable without relying on module names:
   // mapped gates are only known after ABC and can move with the very recipe
@@ -1050,12 +1226,22 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     const int bits  = gu::bits_of(node.create_driver_pin(0));
     register_bits  += static_cast<uint64_t>(std::max(bits, 1));
   }
+  // Off by default (register_max_bits=0): every flop maps, as yosys does. The
+  // old 4096-bit default was tripped by a single bit-blasted 64x64 memory
+  // (mem_lower puts the entry flops in the memory's region) and silently
+  // handed those flops to lhdtrack's yosys normalize instead of pass.abc. A
+  // diag, not a print: the decision changes the netlist's cell mix and has to
+  // land in the diagnostics stream next to memory-max-bits, where a QoR
+  // reader looks for "why is this register native".
   if (opts_.map_register && opts_.register_max_bits != 0 && register_bits > opts_.register_max_bits) {
     opts_.map_register = false;
-    std::print("[pass.abc] region '{}': keeping {} register bits native (limit {})\n",
-               rb.module_name,
-               register_bits,
-               opts_.register_max_bits);
+    livehd::diag::info("pass.abc", "register-kept-native", "unsupported")
+        .msg("pass.abc region '{}': keeping {} register bits native (above register_max_bits={}); the data cones are still "
+             "mapped",
+             rb.module_name,
+             register_bits,
+             opts_.register_max_bits)
+        .emit();
   }
 
   // A coarse size tier is intentionally selected before color-keyed overrides:
@@ -1088,6 +1274,32 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (apply_region_overrides(rb)) {
     tool_owned_flow = false;
   }
+  // The region's delay BUDGET: the target minus the register margin when the
+  // region holds flops (mapped or native -- a native flop is mapped to the
+  // same cell by whoever times the netlist, so its overhead is on the path
+  // either way). Spelled into `{B}` before ANY flow string of this region is
+  // resolved: the built-in tails' `dnsize`/`upsize` take it as `-D`, and the
+  // recipe below therefore carries it verbatim. ABC's `-D` is an integer
+  // (atoi), so the budget is floored to whole picoseconds and the ladder below
+  // compares against the same value it sized to.
+  float delay_target = 0.0f;
+  {
+    char*       end = nullptr;
+    const float t   = std::strtof(opts_.delay.c_str(), &end);
+    if (!opts_.delay.empty() && end != opts_.delay.c_str() && *end == '\0' && t > 0.0f) {
+      delay_target = t;
+    }
+  }
+  ensure_dff_cells();  // the auto margin needs the DFF pick (start() is lazy, below the cache lookup)
+  const float budget = delay_target > 0.0f ? std::floor(region_budget(delay_target, register_bits > 0)) : -1.0f;
+  budget_flag_       = budget > 0.0f ? std::format("-D {}", static_cast<int>(budget)) : std::string{};
+  // Is the ABC command list this region runs the BUILT-IN one (kSeqFlow /
+  // kCombFlow + tail)? Stricter than `tool_owned_flow`, which stays true under
+  // a size-tier `small_flow`/`large_flow` -- a user-authored command list that
+  // may retime (`dretime`) or sequentially sweep (`scorr`/`lcorr`). The QN
+  // AIG-side encoding (Seq_flop::d_inverted) is exact only under combinational
+  // transformations, so it is gated on THIS flag, not on flow ownership.
+  const bool builtin_flow = opts_.flow.empty();
   if (opts_.verbose) {
     uint64_t input_bits  = 0;
     uint64_t output_bits = 0;
@@ -1620,9 +1832,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // --- sequential: each region Flop -> N 1-bit ABC latches (seq=true only) ---
   // The latch output (Q) seeds bitnet so the combinational cells read it as a
   // source; the latch input (D) is wired to the folded next-state cone AFTER the
-  // comb loop (it may depend on logic that has not been bit-blasted yet). Flops
-  // stay NATIVE on read-back (never mapped to library DFFs) -- the latch only
-  // exists so ABC can optimize/retime across the register boundary.
+  // comb loop (it may depend on logic that has not been bit-blasted yet). On
+  // read-back a latch becomes a plain Liberty DFF cell (register=true) or a
+  // native flop; either way the latch is what lets ABC optimize across the
+  // register boundary.
   struct Seq_flop {
     hhds::Node_class        node;
     std::string             root;
@@ -1630,6 +1843,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     hhds::Pin_class         q_pin;
     hhds::Pin_class         din_drv, en_drv, rst_drv, rval_drv, clk_drv;
     bool                    neg_reset = false;
+    // The register has a SYNCHRONOUS reset (`reset_pin` driven, `async` not
+    // asserted): the reset is folded into the latch's D cone as
+    // `rst ? rval : (en ? din : Q)` and `initial` is the RESET value, not a
+    // power-on one. Snapshotted like has_init (the read-back decides per bit
+    // whether an init must keep a native flop, and `rst_drv` is a source-side
+    // handle the rewritten region no longer resolves).
+    bool                    has_reset = false;
     // The `initial` (power-on / reset) value, SNAPSHOT at crossing time. The
     // read-back below runs after map_region has rewritten the region, so the
     // source const node behind `rval_drv` may already be gone -- re-reading the
@@ -1637,6 +1857,19 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // into a plain DFF cell (measured: abc_flat_names lost `a.r`/`b.r`).
     bool                    has_init  = false;
     Dlop                    init_val;
+    // The latch carries ~next_state and the read-back wires the DFF cell's QN
+    // pin as Q. Set only for an init-less register mapped to a QN-only cell
+    // under the BUILT-IN flow: the inversion the QN cell needs then lands in
+    // the mapper's own phase assignment (`&nf` costs both phases of every
+    // node), which is where it is cheapest in aggregate -- +52 um^2 of comb
+    // over the 10-test asap7 set (mixed per test: br_credit_sender -6.8,
+    // br_arb_rr +3.3, br_ram_flops +28) against ~560 um^2 of flop savings,
+    // where the flow-independent read-back absorption (pass 1b twin swap /
+    // D inverter) costs ~0.03 per flop (~+230 um^2). The encoding is exact only
+    // under combinational transformations (the machine ABC sees is
+    // BO' = ~F(BO, x)), hence the flow gate; every other latch keeps the honest
+    // next state and takes the read-back path.
+    bool                    d_inverted = false;
     std::vector<Abc_Obj_t*> bi;  // per-bit latch BI (data-in terminal)
   };
   // Region-input driver -> port name. Used twice: to reconnect a flop
@@ -1704,9 +1937,19 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   std::vector<Seq_flop>                 flops;
   // Registers that cannot be represented by the selected plain Liberty DFF
   // stay native boundaries. A derived clock has no native source after latch
-  // read-back. A reset has no corresponding pin on that DFF: folding it into D
-  // loses an asynchronous reset edge, and also discards the source register's
-  // reset/initial contract before the first clock edge.
+  // read-back. An ASYNCHRONOUS reset is an event, not data: folding it into D
+  // would make the reset land only on a clock edge (and pass/lec's encode.cpp
+  // models async and sync resets differently under the phase schedule). A
+  // SYNCHRONOUS reset is exactly a D-cone mux with priority over the enable
+  // (`if (rst) q <= rval; else if (en) q <= din;` is what cgen emits and what
+  // the LEC encodes, ITE(rst, init, ITE(en, din, q))), so it crosses ABC like
+  // any other next-state logic and maps to a plain DFF cell; its `initial` is
+  // the reset value, realized on D, never a power-on value (cvc5 + lgyosys both
+  // prove the folded netlist against the reset_pin+initial source). Keeping
+  // sync-reset registers native cost br_delay's Pyrope flow 32 native flops
+  // that yosys's normalize then mapped to DFFHQNx1 + 64 INVx1 + 24 extra HB1
+  // (18.196 vs 17.729 um^2, 114.5 vs 102.8 ps on ASAP7), and left every
+  // reset-cone node native with fanout 77-113 (br_amba_axi_demux 2045 ps).
   absl::flat_hash_set<hhds::Node_class> clk_demoted;
   absl::flat_hash_set<hhds::Node_class> reset_demoted;
   if (opts_.map_register) {
@@ -1730,13 +1973,23 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
       f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
       f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
-      // ABC latches and the selected plain Liberty DFF have no reset pin. Keep
-      // every reset-bearing flop native so cgen retains the exact synchronous
-      // or asynchronous reset behavior and its initial/reset value. The data
-      // cone still crosses the boundary and is technology-mapped.
+      // ABC latches and the selected plain Liberty DFF have no reset pin. Only
+      // an ASYNCHRONOUS reset needs one (see the set's comment above): keep
+      // that flop native so cgen retains the `or posedge rst` event and its
+      // reset value; its data cone still crosses the boundary and is mapped.
+      // The `async` sink is a comptime flavour pin set by tolg (`async=true` /
+      // `sync=false`, upass.reset_style=async) and the slang reader for an
+      // `always_ff @(posedge clk or posedge rst)`; cgen and pass/lec read it
+      // the same way -- const and not known-false => asynchronous, anything
+      // else (absent, or a malformed non-const driver) => synchronous -- so
+      // the fold agrees with both the emitted Verilog and the LEC model.
       if (!f.rst_drv.is_invalid()) {
-        reset_demoted.insert(n);
-        continue;
+        auto async = gu::get_driver_of_sink_name(n, "async");
+        if (async.is_const() && !gu::const_of(async).is_known_false()) {
+          reset_demoted.insert(n);
+          continue;
+        }
+        f.has_reset = true;
       }
       // tolg may wrap a call-site clock in 1-bit Get_mask coercions (`x:u1`
       // casts survive cprop when the source is signed). On a 1-bit operand they are wire
@@ -1776,14 +2029,26 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto rval     = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
       f.has_init    = has_rval;
       f.init_val    = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
-      auto& slots   = bitnet[f.q_pin];
+      // A resetless init is a TRUE power-on value: that bit is rebuilt native
+      // on read-back and must keep the honest encoding (its latch init would
+      // be complemented too). With a reset the init is the reset value, folded
+      // into D below, and the bit maps to a cell like an init-less one.
+      const bool power_on_init = has_rval && !f.has_reset;
+      f.d_inverted             = dff_.has_value() && dff_->q_inverted && !power_on_init && builtin_flow;
+      auto& slots              = bitnet[f.q_pin];
       for (int b = 0; b < f.bits; ++b) {
         auto* bo    = Abc_NtkCreateBo(manNtk);
         auto* latch = Abc_NtkCreateLatch(manNtk);
         auto* bi    = Abc_NtkCreateBi(manNtk);
         Abc_ObjAddFanin(bo, latch);
         Abc_ObjAddFanin(latch, bi);
-        if (has_rval) {
+        // Only a power-on init is told to ABC. A reset-backed register powers
+        // on X exactly like the DFF cell it maps to (the reset value arrives
+        // through D on the first asserted edge); declaring its reset value as
+        // the latch init would let a sequential user flow (`dretime`, `scorr`)
+        // assume a start state the cell never provides. The built-in flows
+        // contain no sequential optimization, so this is about honesty, not QoR.
+        if (power_on_init) {
           rval.bit_test(b) ? Abc_LatchSetInit1(latch) : Abc_LatchSetInit0(latch);
         } else {
           Abc_LatchSetInitDc(latch);
@@ -1823,8 +2088,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                    "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected");
     report_demoted(reset_demoted,
                    "reset-native",
-                   "reset-bearing register(s) kept as native flops — the selected plain DFF cell has no reset pin; "
-                   "their surrounding data cones are still mapped");
+                   "asynchronous-reset register(s) kept as native flops — the selected plain DFF cell has no "
+                   "asynchronous reset pin (a synchronous reset is folded into D and mapped); their surrounding data "
+                   "cones are still mapped");
   }
 
   // A very wide OR of non-overlapping, constant-position shifts is a packed-bus
@@ -2190,7 +2456,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // Flop node is rebuilt unchanged on read-back (never bit-blasted). In seq
     // mode flops instead cross into ABC as 1-bit latches (handled above), so they
     // are excluded from the boundary set there — EXCEPT registers demoted for a
-    // region-internal clock or reset, which take this boundary path.
+    // region-internal clock or an asynchronous reset, which take this boundary
+    // path.
     bool       flop_boundary = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n) || reset_demoted.contains(n));
     // A LATCH is a boundary in BOTH modes, unconditionally (2f-latch M2).
     // TERMINOLOGY TRAP: an ABC/AIGER "latch" is an edge-triggered unit-delay
@@ -2766,7 +3033,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
       }
       bool                    uns = gu::is_unsign(a_d) && gu::is_unsign(b_d);
-      int                     w   = std::max(gu::bits_of(a_d), gu::bits_of(b_d)) + 1;
+      // eff_width: a constant operand has no bits attribute (see the EQ case).
+      int                     w   = std::max(eff_width(a_d), eff_width(b_d)) + 1;
       int                     bs  = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(w);
       std::vector<Abc_Obj_t*> av(w);
       std::vector<Abc_Obj_t*> bv(w);
@@ -2790,9 +3058,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (ds.size() <= 1) {
         slots[0] = abc_const_bit(true);
       } else {
+        // A constant operand usually carries NO bits attribute (bits_of == 0):
+        // size it from its VALUE (eff_width), or an all-constant compare -- the
+        // shape mem_lower builds for a constant-address port -- degenerates to
+        // a 1-bit (parity) compare and every EQ against a constant wider than
+        // its other operand only checks the low bits (x[3:0] == 8'd100 mapped
+        // to x == 4). Soundness fix, LEC-verified on the multi-write tile.
         int w = 0;
         for (const auto& d : ds) {
-          w = std::max(w, gu::bits_of(d));
+          w = std::max(w, d.is_const() ? eff_width(d) : gu::bits_of(d));
         }
         ++w;
         std::vector<std::vector<Abc_Obj_t*>> operands(ds.size());
@@ -3152,15 +3426,19 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   trace_stage("blast-complete");
 
   // --- sequential: wire each latch's data-in (D) to the folded next-state ---
-  // Reset-bearing flops were kept as native boundaries above because the
-  // selected plain DFF cannot represent their reset/initial contract. Thus the
-  // remaining native LGraph flop's next state is enable? din : Q. Folding
-  // enable into the AIG means the reconstructed flop is a plain
-  // D-flop (only clock + power-on init reattached), and ABC sees the true
-  // next-state function so retiming/sweeping stays sound.
+  // Asynchronous-reset flops were kept as native boundaries above because the
+  // selected plain DFF cannot represent the reset event. Every crossed flop's
+  // next state is therefore `rst ? rval : (en ? din : Q)` -- a synchronous
+  // reset has priority over the enable, exactly cgen's
+  // `if (rst) q <= rval; else if (en) q <= din;` and pass/lec's
+  // ITE(rst, init, ITE(en, din, q)) -- and a missing `initial` resets to 0
+  // like tolg's nil init. Folding enable and reset into the AIG means the
+  // reconstructed flop is a plain D-flop (only clock + a resetless power-on
+  // init reattached), and ABC sees the true next-state function so
+  // retiming/sweeping stays sound.
   // enable/reset are single control signals: an N-bit pin asserts on (pin != 0),
-  // i.e. the OR-reduction of its bits (matches cgen/yosys reg semantics). Reduce
-  // once per flop, not per data bit.
+  // i.e. the OR-reduction of its bits (matches cgen/yosys reg semantics and the
+  // LEC's `rst != 0`). Reduce once per flop, not per data bit.
   auto reduce_or = [&](const hhds::Pin_class& p) -> Abc_Obj_t* {
     int w = gu::bits_of(p);
     if (w <= 0) {
@@ -3188,9 +3466,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       if (rst_active != nullptr) {
         Abc_Obj_t* rval = f.rval_drv.is_invalid() ? abc_const_bit(false) : abc_bit(f.rval_drv, b);
-        d               = abc_mux(rst_active, rval, d);  // reset? rval : (...)
+        d               = abc_mux(rst_active, rval, d);  // reset? rval : (en? din : Q)
       }
-      Abc_ObjAddFanin(f.bi[b], d);
+      // QN cell under the built-in flow: the latch stores ~next_state (abc_not
+      // folds constants; strash turns it into a complemented edge), so `&nf`
+      // maps ~f as part of its own phase assignment and mints an INV only where
+      // nothing absorbs it (a D fed straight by a port). It does perturb the
+      // mapping either way -- same binary, br_arb_rr comb 205 gates / 14.70
+      // um^2 -> 244 / 17.96, br_credit_sender 67.0 -> 60.2 -- but the aggregate
+      // is far cheaper than the read-back absorption (Seq_flop::d_inverted),
+      // which the other latches take.
+      Abc_ObjAddFanin(f.bi[b], f.d_inverted ? abc_not(d) : d);
     }
   }
 
@@ -3220,13 +3506,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       Abc_ObjAssignName(onet, const_cast<char*>(nm.c_str()), nullptr);
       Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
       auto* obj = Abc_NtkCreatePo(manNtk);
-      // A PO is already a connectivity boundary. An explicit identity node
-      // here becomes a real Liberty buffer after mapping; wide shared-Sub
-      // inputs then pay one bogus cell per boundary bit (Rob: 523 x 10,260).
-      // Give the same source node a uniquely named NET alias instead: ABC's
-      // netlist checker requires unique CO net names, but an alias carries no
-      // Boolean node and therefore maps to no cell. Read-back pairs POs by
-      // creation order.
+      // A PO is already a connectivity boundary, so the source node gets a
+      // uniquely named NET alias rather than an explicit identity node (ABC's
+      // netlist checker requires unique CO net names; an explicit node would
+      // cost wide shared-Sub inputs one cell per boundary bit, Rob: 523 x
+      // 10,260). The alias alone does NOT avoid a cell, though: `&put`
+      // re-decouples every CO driver (Abc_NtkLogicMakeSimpleCos), so a PO fed
+      // straight by a PI, a latch Q or a blackbox output comes back as a
+      // Liberty buffer anyway -- 512 of br_demux_onehot's 528 cells were
+      // exactly that. What removes them is the identity-buffer bypass in the
+      // read-back (is_identity_gate / only_co_fanouts, pass 1b), which aliases
+      // the buffer's output net to its input net and mints no Sub. Read-back
+      // pairs POs by creation order.
       Abc_ObjAddFanin(obj, onet);
       po_order.emplace_back(po, b);
     }
@@ -3299,13 +3590,45 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   auto* pLogic = Abc_NtkToLogic(manNtk);
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
+  auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
+  // Which mapping OBJECTIVE steps may run on this region. The budget ladder
+  // (below) needs the built-in or a size-tier flow (`tool_owned_flow`: a user
+  // command list is run verbatim and never re-sized), a Liberty the SCL steps
+  // can walk, and a delay target. The area CANDIDATE is stricter: it belongs to
+  // the BUILT-IN objective only (a size tier is a deliberately cheap or
+  // deliberately direct mapper -- re-running `dch -f; amap` on it would defeat
+  // it), it is bounded by `large_ge` even when the large tier is off (`amap`
+  // on a 123k-node mem_lower tile would double the ABC time of the one region
+  // that already dominates), it is switched off by `area_flow=none`, and it
+  // skips the dummy-PO sentinel (nothing to compare on a region with no real
+  // outputs).
+  const bool  ladder_on      = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
+  const std::string area_cmd = area_flow();
+  const bool  candidate_on   = ladder_on && builtin_flow && !area_cmd.empty() && !has_dummy_po
+                            && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
+  // The area candidate re-maps from the SAME pre-flow logic network, so keep a
+  // copy of it before the frame takes ownership of `pLogic`: every
+  // Abc_FrameReplaceCurrentNetwork below DELETES the network it replaces. The
+  // copy lives until the decision is made (or an early return), so at that
+  // point two networks are alive at once -- the mapped result and this logic
+  // dup -- which the RSS admission check after the flow sees as part of the
+  // region's footprint.
+  Abc_Ntk_t* pre = candidate_on ? Abc_NtkDup(pLogic) : nullptr;
+  struct Pre_guard {
+    Abc_Ntk_t** ntk;
+    ~Pre_guard() {
+      if (*ntk != nullptr) {
+        Abc_NtkDelete(*ntk);
+        *ntk = nullptr;
+      }
+    }
+  } pre_guard{&pre};
   // Regions are independent synthesis jobs, not interactive ABC undo steps.
   // SetCurrentNetwork links the previous (potentially enormous) region as a
   // backup; carrying that network into every later job caused tiny regions to
   // stall after Rob's 10k-bit pack.  Replace deletes the old current network
   // while retaining the parsed Liberty library and command aliases.
   Abc_FrameReplaceCurrentNetwork(frame, pLogic);
-  auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
   // The `{F}` tail is SCL: `buffer`/`dnsize` TIME the mapped network,
   // walking the per-pin NLDM tables of `pAbc->pLibScl`. A Liberty with no
   // `lu_table_template` builds none -- ABC says exactly that ("Templates are not
@@ -3319,14 +3642,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // Strip the tail rather than predicting it: the decision is a pure function of
   // the Liberty, and the Liberty content is already folded into the incremental
   // cache salt (Incr_cache::make_salt), so a recipe that still names the tail
-  // cannot be reused across a library where the answer differs.
+  // cannot be reused across a library where the answer differs. The area
+  // candidate's tail (`upsize {B}; dnsize {B}`) needs no strip: the candidate
+  // only runs under scl_timing_ok_, which is the same predicate.
   if (opts_.max_fanout != 0) {
-    // Same predicate the GENLIB install uses. `vTempls` was a proxy for it and
-    // is wrong in BOTH directions: the Liberty reader consumes the templates
-    // while building the per-pin surfaces, so ASAP7 leaves it empty (the tail
-    // was silently dropped and fanout left uncapped), while a scalar-only
-    // Liberty that merely declares a template passed it and drove the SCL timer
-    // into its abort.
+    // Same predicate the SCL gate uses. `vTempls` was a proxy for it and is
+    // wrong in BOTH directions: the Liberty reader consumes the templates while
+    // building the per-pin surfaces, so ASAP7 leaves it empty (the tail was
+    // silently dropped and fanout left uncapped), while a scalar-only Liberty
+    // that merely declares a template passed it and drove the SCL timer into
+    // its abort.
     const auto*       scl  = static_cast<const SC_Lib*>(Abc_FrameReadLibScl());
     const bool        able = lib_has_nldm_timing(scl);
     const std::string tail = subst_flow(std::string{kBufferTail});
@@ -3348,7 +3673,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   // Can the area-recovery pass below replay JUST the mapper? `&undo` reverses one
   // GIA transformation, so the flow has to END with the built-in mapper step plus
-  // `&put` and (when it is on) the buffering tail -- anything after that would
+  // kPutCmd and (when it is on) the buffering tail -- anything after that would
   // survive the undo and be applied twice. Derive it from the RESOLVED string
   // rather than from `tool_owned_flow`: that flag is computed before the
   // size-tier `small_flow`/`large_flow` substitution, so a tier flow is still
@@ -3356,27 +3681,36 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const std::string map_step   = subst_flow(std::string{kMapCmd});
   const std::string flow_tail  = subst_flow(std::string{kBufferTail});
   const bool        tail_on    = !flow_tail.empty() && flow.ends_with(flow_tail);
-  const std::string remap_post = std::string{"; &put"} + (tail_on ? subst_flow(std::string{kBufferTailBudget}) : "");
-  const bool        remappable = tool_owned_flow && flow.ends_with(map_step + "; &put" + (tail_on ? flow_tail : ""));
+  const std::string put_step   = std::string{"; "} + std::string{kPutCmd};
+  const std::string remap_post = put_step + (tail_on ? flow_tail : "");
+  const bool        remappable = tool_owned_flow && flow.ends_with(map_step + remap_post);
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
   }
 
-  // A delay is a BUDGET, in both directions.
+  // A delay is a BUDGET, in both directions -- and the budget is the target
+  // minus the register margin (see `budget` above). The SCL timer sees one
+  // region's combinational cone; OpenSTA's period check also pays the launch
+  // flop's clk->Q and the capture flop's setup (69 ps of a 400 ps ASAP7 period
+  // on br_arb_rr), so a region timed to the full target misses by exactly that.
   //
-  // MISS: ABC's `upsize` ignores &nf's -D target and always chases the fastest
-  // cell assignment; the following `dnsize` then preserves that newly tightened
-  // delay instead of recovering toward the requested budget. Time the built-in
-  // flow first and invoke the speed-grade sweep only for a real miss.
+  // The ladder, cheapest step first, each only when the previous still misses:
+  //
+  //   1. the flow's own `buffer -N; dnsize -D <budget>` (already run);
+  //   2. `upsize -D <budget>; dnsize -D <budget>`: `upsize -D` stops as soon as
+  //      the SCL delay is inside the budget (sclUpsize.c) and the down-size
+  //      recovers around it -- the bounded speed-grade step;
+  //   3. `upsize; dnsize`, the UNBOUNDED sweep: `upsize` without a target
+  //      chases the fastest cell assignment and `dnsize` then preserves that
+  //      newly tightened delay instead of the budget. Only for a real miss.
   //
   // SLACK: `&nf -D` is silently IGNORED by ABC's mapper -- giaNf.c consults only
   // `Jf_Par_t::MapDelayTarget`, which the `-D` switch never writes (it sets the
   // unread `DelayTarget`), so the sole knob that relaxes required times is `-R`,
-  // a PERCENTAGE of the mapper's own achieved delay. The built-in flow therefore
-  // always mapped for minimum delay and paid area for timing nothing asked for.
-  // That is invisible under a tight ASAP7 target and enormous under a relaxed
-  // sky130 one, where a region beats its clock by 6-380x. Re-map with the
+  // a PERCENTAGE of the mapper's own achieved delay (logic DEPTH on the
+  // unit-delay GENLIB). Under a tight ASAP7 target the margin is nil; under a
+  // relaxed sky130 one a region beats its clock by 6-380x. Re-map with the
   // measured slack handed back as `-R`, bounded by `area_relax`.
   //
   // Only `&nf` is repeated, not the whole flow: `&undo` restores the GIA the
@@ -3384,14 +3718,28 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // -- the expensive part -- run once. It restores only ONE step, which is why
   // there is no second undo back to the minimum-delay netlist; the relaxation is
   // capped by the slack that was actually measured, and a miss is repaired with
-  // the same budget-directed sizing the MISS path uses.
+  // the same budget-directed sizing step 2 uses.
   //
-  // Custom flows remain fully caller-owned: neither path touches them.
-  const auto scl_qor = [&]() -> std::optional<std::pair<float, double>> {
-    auto* mapped = Abc_FrameReadNtk(frame);
+  // Then the AREA CANDIDATE (kAreaFlow): a region that met its budget is
+  // re-mapped from the pre-flow copy with `dch -f; amap` + `buffer; upsize -D;
+  // dnsize -D`, timed by the same SCL timer, and the netlist with the smaller
+  // SCL area AMONG THOSE THAT MEET THE BUDGET is kept (the delay flow wins a
+  // tie). Both networks are complete mapped logic networks, so the read-back
+  // below is indifferent to which one won: the identity-buffer bypass works on
+  // amap's decoupling buffers (Amap_ManProduceNetwork calls
+  // Abc_NtkLogicMakeSimpleCos with fDuplicate=0, so they are buffers, not
+  // duplicated gates), and the latches -- including the QN encoding's ~f --
+  // pass through amap untouched (it maps the combinational logic between them).
+  //
+  // Custom flows remain fully caller-owned: none of this touches them.
+  const auto scl_qor = [&](Abc_Ntk_t* mapped) -> std::optional<std::pair<float, double>> {
     if (mapped == nullptr || !Abc_NtkIsMappedLogic(mapped)) {
       return std::nullopt;
     }
+    // Matching ABC's `stime` (Abc_SclTimePerform): it first REFUSES a network
+    // that is not in topo order or has dangling nodes -- the SCL timer
+    // propagates in object-id order, so without that gate a bad network yields
+    // a silently wrong number instead of no number.
     auto*                                   timing_ntk = mapped->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(mapped) : mapped;
     std::optional<std::pair<float, double>> out;
     if (Abc_SclCheckNtk(timing_ntk, 0)) {
@@ -3404,43 +3752,94 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     return out;
   };
-  if (tool_owned_flow && nldm_genlib_loaded_ && !opts_.delay.empty()) {
-    char*       end    = nullptr;
-    const float target = std::strtof(opts_.delay.c_str(), &end);
-    if (end != opts_.delay.c_str() && *end == '\0' && target > 0.0f) {
-      const auto first = scl_qor();
-      if (first && first->first > target) {
-        if (Cmd_CommandExecute(frame, "upsize; dnsize") != 0) {
+  // What the objective decided, for the QoR row (filled below).
+  std::string                             candidate;
+  std::optional<std::pair<float, double>> delay_flow_qor;
+  std::optional<std::pair<float, double>> area_flow_qor;
+  if (ladder_on) {
+    const std::string size_to_budget = std::format("upsize {0}; dnsize {0}", budget_flag_);
+    auto              d1             = scl_qor(Abc_FrameReadNtk(frame));
+    if (d1 && d1->first > budget) {
+      if (Cmd_CommandExecute(frame, size_to_budget.c_str()) != 0) {
+        livehd::diag::err("pass.abc", "abc-flow", "internal")
+            .msg("ABC budget sizing failed for region '{}' after missing delay budget {} ps: {}", rb.module_name, budget, size_to_budget)
+            .fatal();
+        return;
+      }
+      d1 = scl_qor(Abc_FrameReadNtk(frame));
+    }
+    if (d1 && d1->first > budget) {
+      if (Cmd_CommandExecute(frame, "upsize; dnsize") != 0) {
+        livehd::diag::err("pass.abc", "abc-flow", "internal")
+            .msg("ABC conditional sizing failed for region '{}' after missing delay budget {} ps", rb.module_name, budget)
+            .fatal();
+        return;
+      }
+      d1 = scl_qor(Abc_FrameReadNtk(frame));
+    } else if (d1 && remappable) {
+      const int relax = area_relax_percent(budget, d1->first, opts_.area_relax_pct);
+      if (relax > 0) {
+        const std::string remap = std::format("&undo; {} -R {}{}", map_step, relax, remap_post);
+        if (Cmd_CommandExecute(frame, remap.c_str()) != 0) {
           livehd::diag::err("pass.abc", "abc-flow", "internal")
-              .msg("ABC conditional sizing failed for region '{}' after missing delay target {}", rb.module_name, opts_.delay)
+              .msg("ABC area-recovery remap failed for region '{}': {}", rb.module_name, remap)
               .fatal();
           return;
         }
-      } else if (first && remappable) {
-        const int relax = area_relax_percent(target, first->first, opts_.area_relax_pct);
-        if (relax > 0) {
-          const std::string remap = std::format("&undo; {} -R {}{}", map_step, relax, remap_post);
-          if (Cmd_CommandExecute(frame, remap.c_str()) != 0) {
-            livehd::diag::err("pass.abc", "abc-flow", "internal")
-                .msg("ABC area-recovery remap failed for region '{}': {}", rb.module_name, remap)
-                .fatal();
-            return;
-          }
-          // The relaxation was derived from the SCL timer while `-R` relaxes the
-          // mapper's own gain model, so the two can disagree. Repair with the
-          // same budget-directed sizing the MISS path uses rather than trusting
-          // the request.
-          const auto second = scl_qor();
-          if (second && second->first > target
-              && Cmd_CommandExecute(frame, std::format("upsize -D {0}; dnsize -D {0}", opts_.delay).c_str()) != 0) {
+        // The relaxation was derived from the SCL timer while `-R` relaxes the
+        // mapper's own depth model, so the two can disagree. Repair with the
+        // same budget-directed sizing step 2 uses rather than trusting the
+        // request.
+        d1 = scl_qor(Abc_FrameReadNtk(frame));
+        if (d1 && d1->first > budget) {
+          if (Cmd_CommandExecute(frame, size_to_budget.c_str()) != 0) {
             livehd::diag::err("pass.abc", "abc-flow", "internal")
                 .msg("ABC sizing repair failed for region '{}' after area recovery", rb.module_name)
                 .fatal();
             return;
           }
+          d1 = scl_qor(Abc_FrameReadNtk(frame));
         }
       }
     }
+    delay_flow_qor = d1;
+    if (pre != nullptr && d1 && d1->first <= budget) {
+      // Keep the delay flow's result aside (Abc_NtkDup copies the Mio gate
+      // pointers of a mapped network, abcObj.c Abc_NtkDupObj) and hand the
+      // pre-flow copy to the frame -- which deletes the delay result the frame
+      // held -- for the second mapping.
+      Abc_Ntk_t* delay_ntk = Abc_NtkDup(Abc_FrameReadNtk(frame));
+      Abc_FrameReplaceCurrentNetwork(frame, pre);
+      pre = nullptr;  // owned by the frame now
+      if (Cmd_CommandExecute(frame, area_cmd.c_str()) != 0) {
+        Abc_NtkDelete(delay_ntk);
+        livehd::diag::err("pass.abc", "abc-flow", "internal")
+            .msg("ABC area-candidate flow failed for region '{}': {}", rb.module_name, area_cmd)
+            .fatal();
+        return;
+      }
+      area_flow_qor = scl_qor(Abc_FrameReadNtk(frame));
+      if (area_flow_qor && area_flow_qor->first <= budget && area_flow_qor->second < d1->second) {
+        Abc_NtkDelete(delay_ntk);
+        candidate = "area";
+      } else {
+        Abc_FrameReplaceCurrentNetwork(frame, delay_ntk);  // deletes the area result
+        candidate = "delay";
+      }
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': budget {} ps: delay flow {:.1f} ps / {:.2f}, area flow {} -> kept {}\n",
+                   rb.module_name,
+                   budget,
+                   d1->first,
+                   d1->second,
+                   area_flow_qor ? std::format("{:.1f} ps / {:.2f}", area_flow_qor->first, area_flow_qor->second) : "untimed",
+                   candidate);
+      }
+    }
+  }
+  if (pre != nullptr) {
+    Abc_NtkDelete(pre);  // the candidate did not run (budget missed, or untimed)
+    pre = nullptr;
   }
   trace_stage("flow-complete");
 
@@ -3469,27 +3868,28 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         ++q.div_blackbox;  // unmapped cone: the region score is partial
       }
     }
+    q.budget    = budget;
+    q.candidate = candidate;
+    if (delay_flow_qor) {
+      q.delay_flow_delay = delay_flow_qor->first;
+      q.delay_flow_area  = delay_flow_qor->second;
+    }
+    if (area_flow_qor) {
+      q.area_flow_delay = area_flow_qor->first;
+      q.area_flow_area  = area_flow_qor->second;
+    }
     if (auto* pMappedLogic = Abc_FrameReadNtk(frame); pMappedLogic != nullptr && Abc_NtkIsMappedLogic(pMappedLogic)) {
       q.delay = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
       q.area  = Abc_NtkGetMappedArea(pMappedLogic);
       q.gates = Abc_NtkNodeNum(pMappedLogic);
-      if (nldm_genlib_loaded_) {
-        // Abc_NtkDelayTrace uses the gain-model GENLIB. Once the sizing tail has
-        // selected concrete drive strengths, time the resulting network with
-        // those cells' actual NLDM surfaces, matching ABC's `stime` command
-        // (Abc_SclTimePerform). `stime` first REFUSES a network that is not in
-        // topo order or has dangling nodes: the SCL timer propagates in
-        // object-id order, so without that gate a bad network yields a silently
-        // wrong number instead of the honest delay-trace estimate.
-        auto* timing_ntk = pMappedLogic->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(pMappedLogic) : pMappedLogic;
-        if (Abc_SclCheckNtk(timing_ntk, 0)) {
-          auto* timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_ntk, 0, 1, 0.0f, 0);
-          q.delay      = timing->MaxDelay0;
-          q.area       = timing->SumArea0;
-          Abc_SclManFree(timing);
-        }
-        if (timing_ntk != pMappedLogic) {
-          Abc_NtkDelete(timing_ntk);
+      if (scl_timing_ok_) {
+        // Abc_NtkDelayTrace reads the unit-delay GENLIB (logic depth). Once the
+        // sizing steps have selected concrete drive strengths, time the
+        // resulting network with those cells' actual NLDM surfaces, matching
+        // ABC's `stime` (the same timer the budget ladder judged by).
+        if (const auto phys = scl_qor(pMappedLogic)) {
+          q.delay = phys->first;
+          q.area  = phys->second;
         }
       }
       // Worst-arrival REGION output (the delay trace leaves per-node arrivals
@@ -3738,6 +4138,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const auto                    mapped_obj_slots = static_cast<size_t>(Abc_NtkObjNumMax(mapped));
   std::vector<hhds::Pin_class>  net2drv(mapped_obj_slots);
   std::vector<hhds::Node_class> mapped_node2sub(mapped_obj_slots);
+  // Identity-buffer bypass (is_identity_gate above): a bypassed buffer's OUTPUT
+  // net resolves to its INPUT net. Resolved lazily in get_net_driver rather
+  // than copied at bypass time because the input net's driver may not exist
+  // yet -- a latch Q net is only filled in pass 1c, after the gate pass -- and
+  // every consumer (gate fanins, flop/DFF din, POs, blackbox inputs) already
+  // goes through get_net_driver, so no pass has to move.
+  std::vector<int32_t>          net_alias(mapped_obj_slots, -1);
+  int                           bypassed_bufs  = 0;
   auto                          set_net_driver = [&](Abc_Obj_t* net, const hhds::Pin_class& driver) {
     I(net != nullptr);
     const auto id = static_cast<size_t>(Abc_ObjId(net));
@@ -3748,7 +4156,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (net == nullptr) {
       return {};
     }
-    const auto id = static_cast<size_t>(Abc_ObjId(net));
+    auto id = static_cast<size_t>(Abc_ObjId(net));
+    // Follow the alias chain (a bypassed buffer fed by another bypassed
+    // buffer). An alias only ever points from a buffer's output net to its
+    // input net, so the chain is acyclic and ends at a real driver.
+    while (id < net_alias.size() && net_alias[id] >= 0) {
+      id = static_cast<size_t>(net_alias[id]);
+    }
     if (id >= net2drv.size()) {
       return {};
     }
@@ -3939,8 +4353,145 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   trace_stage("readback-pis");
 
-  // pass 1b: each mapped gate -> a Sub; map its output net -> Sub output pin
+  // Surviving latches (stable vBoxes order) and their source-flop
+  // correspondence. Shared by pass 1b's QN-inversion absorption and pass 1c's
+  // register read-back.
+  //
+  // Per-latch source flop, so clock, reset and init are decided PER FLOP (not
+  // region-wide): the crossing creates latches in flops order, one per bit, so
+  // when the latch count is preserved (the default flow does not retime) latch
+  // k maps to its origin flop. A retime-reshaped count falls back to the first
+  // flop (clock/reset) and to ABC's own latch init.
+  std::vector<Abc_Obj_t*>      lat;
+  std::vector<const Seq_flop*> latch_owner;
+  std::vector<int>             latch_owner_bit;
+  int                          crossed_bits = 0;
+  if (opts_.map_register && !flops.empty()) {
+    Abc_NtkForEachLatch(mapped, pObj, i) { lat.push_back(pObj); }
+    for (const auto& f : flops) {
+      crossed_bits += f.bits;
+    }
+    if (static_cast<int>(lat.size()) == crossed_bits) {
+      for (const auto& f : flops) {
+        for (int b = 0; b < f.bits; ++b) {
+          latch_owner.push_back(&f);
+          latch_owner_bit.push_back(b);
+        }
+      }
+    }
+  }
+  // A latch init is a TRUE power-on value only when its source flop has NO
+  // reset. With a (synchronous) reset, the init is the reset value — already
+  // folded into the D cone — so the flop resets to it and LEC pins reset; a
+  // plain DFF cell (power-on X, exactly like the reset flop's own cgen) is then
+  // equivalent and the bit maps to a cell. Only a resetless init must keep its
+  // native flop.
+  //
+  // Retime-reshaped fallback (no per-latch owner): a retimed latch has no
+  // single source register, so "reset-backed" is a REGION property there. It
+  // holds only when every crossed register has a reset -- then no latch can
+  // carry a power-on contract and all of them may take cells. With even one
+  // resetless-init register in the mix a latch with a concrete init is kept
+  // native (with that init): dropping a real power-on value is the silent
+  // miscompile, keeping an extra native flop is merely conservative. This is
+  // reachable only under a user retime flow (`dretime`) on a region mixing
+  // memory-init flops (mem_lower) with reset registers.
+  auto owner_has_reset = [&](int k) -> bool {
+    if (k < static_cast<int>(latch_owner.size())) {
+      return latch_owner[k]->has_reset;
+    }
+    return std::all_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.has_reset; });
+  };
+  // ABC is allowed to pick a concrete value for a don't-care latch init while
+  // optimizing. That choice is an internal optimization witness, NOT a new
+  // hardware power-on guarantee: materializing it on read-back refines an
+  // init-less source flop to zero and makes post-synthesis formal comparison
+  // spuriously fail. Whenever the latch count is preserved, recover init from
+  // the SNAPSHOT taken at crossing time (Seq_flop::has_init -- the source pin
+  // is no longer resolvable here) instead of asking the optimized ABC latch.
+  // Only the retime-reshaped fallback lacks a source-bit correspondence and
+  // therefore has to use ABC's transformed init.
+  //
+  // Answers the POWER-ON init only: a reset-backed bit's `initial` is its
+  // reset value, realized on D, and is dropped here on purpose -- a rebuilt
+  // native flop or a DFF cell carrying it as a power-on value would claim a
+  // start state the source register (power-on X, then reset) never had.
+  auto source_init_bit = [&](int k) -> std::optional<bool> {
+    if (owner_has_reset(k)) {
+      return std::nullopt;
+    }
+    if (k < static_cast<int>(latch_owner.size())) {
+      const auto* f = latch_owner[k];
+      if (!f->has_init) {
+        return std::nullopt;
+      }
+      return f->init_val.bit_test(latch_owner_bit[k]);
+    }
+    int v = Abc_LatchInit(lat[k]);  // 1=zero, 2=one, else dc/none
+    if (v == 1 || v == 2) {
+      return v == 2;
+    }
+    return std::nullopt;
+  };
+  // resetless power-on init: such a bit must keep a native flop so the value
+  // survives (a plain DFF cell has no init pin)
+  auto needs_native = [&](int k) -> bool { return source_init_bit(k).has_value(); };
+
+  // QN cell (dff_->q_inverted): the cell computes QN(t+1) = !D(t) and the
+  // read-back wires its QN pin as the register's Q, so the D pin must see ~f.
+  // A latch crossed with Seq_flop::d_inverted already holds it (built-in flow).
+  // For every OTHER cell-bound latch -- a user or size-tier flow, which may
+  // retime, or a reshaped latch count -- `qn_dnet` holds the data-in nets that
+  // feed NOTHING but that latch's BI, so their driver can be rewritten to
+  // compute ~f without touching any other consumer. Pass 1b absorbs the
+  // inversion there: a root inverter is dropped (the net aliases to the
+  // inverter's input), any other root gate is swapped for its inverting twin
+  // when the library has one (twin_index_; AND2x2 -> NAND2xp33 is a saving,
+  // AOI21xp33 -> AO21x1 costs 0.0146, both below INVx1's 0.0437), and what it
+  // could not absorb gets one inverter on D in pass 2b. Exact under any flow
+  // (it is a local rewrite of the MAPPED netlist, not of the machine ABC
+  // optimized). yosys keeps the inversion on the Q side as an INV cell that
+  // survives on ~40% of ASAP7 flops; the D side has fanout 1, so a min-size
+  // cell always suffices and the register's own drive ladder carries the Q
+  // fanout.
+  absl::flat_hash_set<Abc_Obj_t*> qn_dnet;
+  absl::flat_hash_set<Abc_Obj_t*> qn_absorbed;  // subset whose driver now computes ~f
+  if (dff_.has_value() && dff_->q_inverted) {
+    for (size_t k = 0; k < lat.size(); ++k) {
+      if (needs_native(static_cast<int>(k)) || (k < latch_owner.size() && latch_owner[k]->d_inverted)) {
+        continue;
+      }
+      auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(lat[k]));  // latch <- BI <- D net
+      if (Abc_ObjFanoutNum(dnet) == 1) {
+        qn_dnet.insert(dnet);
+      }
+    }
+  }
+  auto* const  mio_inv  = static_cast<Mio_Gate_t*>(Mio_LibraryReadInv(static_cast<Mio_Library_t*>(Abc_FrameReadLibGen())));
+  const double inv_area = mio_inv != nullptr ? Mio_GateReadArea(mio_inv) : 0.0;
+  auto         is_inverter = [](Mio_Gate_t* g) {
+    return Mio_GateReadPinNum(g) == 1 && static_cast<uint64_t>(Mio_GateReadTruth(g)) == ~UINT64_C(0xAAAAAAAAAAAAAAAA);
+  };
+  auto inverting_twin = [&](Mio_Gate_t* g) -> Mio_Gate_t* {
+    const int n = Mio_GateReadPinNum(g);
+    if (n > 6) {
+      return nullptr;
+    }
+    auto it = twin_index_.find(std::pair<int, uint64_t>{n, ~static_cast<uint64_t>(Mio_GateReadTruth(g))});
+    return it == twin_index_.end() ? nullptr : static_cast<Mio_Gate_t*>(it->second);
+  };
+  int qn_dropped = 0;  // root inverters removed
+  int qn_swapped = 0;  // root gates replaced by their inverting twin
+
+  // pass 1b: each mapped gate -> a Sub; map its output net -> Sub output pin.
+  // A decoupling buffer -- single-input identity gate whose output feeds only
+  // COs -- is not a gate at all (see is_identity_gate): alias its output net to
+  // its input net and mint nothing, so the CO reads the buffer's own driver
+  // (a PI bit, a latch Q, a blackbox output, or the gate that `&put -o` would
+  // otherwise have duplicated). No cell_desc call either: a bypassed cell must
+  // not leave an unused cell decl in the output library.
   std::vector<std::pair<hhds::Node_class, Abc_Obj_t*>> gates;
+  double                                               emitted_area = 0.0;
   Abc_NtkForEachNode(mapped, pObj, i) {
     auto* g = static_cast<Mio_Gate_t*>(pObj->pData);
     if (g == nullptr) {
@@ -3955,6 +4506,35 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       Abc_NtkDelete(mapped);
       return;
     }
+    if (Abc_ObjFaninNum(pObj) == 1 && is_identity_gate(g)) {
+      auto* onet = Abc_ObjFanout0(pObj);  // netlist: node -> its output net
+      if (only_co_fanouts(onet)) {
+        // output net -> input net; mapped_node2sub stays invalid for this node
+        // (the srcmap attribution walk below guards on it)
+        net_alias[static_cast<size_t>(Abc_ObjId(onet))] = static_cast<int32_t>(Abc_ObjId(Abc_ObjFanin0(pObj)));
+        ++bypassed_bufs;
+        continue;
+      }
+    }
+    if (auto* onet = Abc_ObjFanout0(pObj); qn_dnet.contains(onet)) {
+      // The D-cone root of a QN-cell register (see qn_dnet): absorb the
+      // inversion here when that is free or cheaper than an inverter.
+      if (Abc_ObjFaninNum(pObj) == 1 && is_inverter(g)) {
+        net_alias[static_cast<size_t>(Abc_ObjId(onet))] = static_cast<int32_t>(Abc_ObjId(Abc_ObjFanin0(pObj)));
+        qn_absorbed.insert(onet);
+        ++qn_dropped;
+        continue;
+      }
+      if (auto* twin = inverting_twin(g); twin != nullptr && Mio_GateReadArea(twin) - Mio_GateReadArea(g) < inv_area) {
+        // The twin computes ~g over the same pins in the same order, so pass 2
+        // wires it exactly like g. The ABC node takes the twin so that the
+        // mapped network and the netlist agree (srcmap, cell_desc).
+        pObj->pData = twin;
+        g           = twin;
+        qn_absorbed.insert(onet);
+        ++qn_swapped;
+      }
+    }
     auto& desc = cell_desc(g);
     auto  sub  = gu::create_typed_node(*body, Ntype_op::Sub);
     sub.set_subnode(desc.io);
@@ -3967,6 +4547,26 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     I(obj_id < mapped_node2sub.size());
     mapped_node2sub[obj_id] = sub;
     gates.emplace_back(sub, pObj);
+    emitted_area += Mio_GateReadArea(g);
+  }
+  // QoR accounting. `gates`/`area` were read off the mapped LOGIC network
+  // above, which still carries the decoupling buffers -- and Abc_NtkToNetlist
+  // can add a few more of its own (a `buffer -N` leaf left feeding several
+  // COs), which that count never saw. abc.json `total.area` is what lhdtrack
+  // scores as lhd_area and the incremental cache stores this same row, so
+  // both must describe the cells actually minted: br_demux_onehot reported
+  // 528 gates / 31.26 um^2 for a netlist of 16 cells. Mio's gate area is the
+  // Liberty area (the GENLIB is derived from the parsed SC_Lib), i.e. the
+  // same quantity the SCL timer summed. `delay` is deliberately left alone:
+  // it still includes one buffer on a feed-through path (pessimistic by a
+  // buffer delay only when such a path is the region's critical one).
+  // The QN twin swap changes a cell's area without changing the count, and a
+  // dropped root inverter is a cell the ABC network still holds: both make the
+  // minted netlist the only truthful source too.
+  if (bypassed_bufs != 0 || qn_dropped != 0 || qn_swapped != 0 || static_cast<int>(gates.size()) != qor_.back().gates) {
+    qor_.back().bypassed = bypassed_bufs;
+    qor_.back().gates    = static_cast<int>(gates.size());
+    qor_.back().area     = emitted_area;
   }
   trace_stage("readback-gates");
 
@@ -3991,8 +4591,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // din is wired in pass 2b, like a native flop's). `dff_` is set only when the
   // Liberty had a plain posedge D-flop; otherwise the native path below runs.
   struct Recon_dff {
-    hhds::Node_class sub;
-    Abc_Obj_t*       dnet;
+    hhds::Node_class          sub;
+    Abc_Obj_t*                dnet;
+    const liberty::Dff_cell*  cell;   // the ladder rung this Sub instantiates (pass 2b wires its d_pin)
+    bool                      d_inv;  // QN cell whose D-cone root could not absorb the inversion: add an inverter on D
   };
   std::vector<Recon_dff> dff_recon;
   bool                   init_dropped = false;  // a concrete power-on init lost to a plain DFF cell
@@ -4016,62 +4618,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     };
     auto region_clk = body_pin_for_src(flops.front().clk_drv);
 
-    // surviving latches, in stable vBoxes order
-    std::vector<Abc_Obj_t*> lat;
-    Abc_NtkForEachLatch(mapped, pObj, i) { lat.push_back(pObj); }
+    // surviving latches (`lat`, filled before pass 1b) in stable vBoxes order
     int m = static_cast<int>(lat.size());
 
-    // Per-latch source flop, so clock and reset are decided PER FLOP (not region-
-    // wide): the crossing creates latches in flops order, one per bit, so when the
-    // latch count is preserved (the default flow does not retime) latch k maps to
-    // its origin flop. A retime-reshaped count falls back to the first flop.
-    int total_bits = 0;
-    for (const auto& f : flops) {
-      total_bits += f.bits;
-    }
-    std::vector<const Seq_flop*> latch_owner;
-    std::vector<int>             latch_owner_bit;
-    if (m == total_bits) {
-      for (const auto& f : flops) {
-        for (int b = 0; b < f.bits; ++b) {
-          latch_owner.push_back(&f);
-          latch_owner_bit.push_back(b);
-        }
-      }
-    }
     auto owner_clk = [&](int k) -> hhds::Pin_class {
       return k < static_cast<int>(latch_owner.size()) ? body_pin_for_src(latch_owner[k]->clk_drv) : region_clk;
-    };
-    // A latch init is a TRUE power-on value only when its source flop has NO
-    // reset. With a reset, the init is the reset value — already folded into the D
-    // cone — so the flop resets to it and LEC pins reset; a plain DFF cell (power-
-    // on X, exactly like the reset flop's own cgen) is then equivalent and the bit
-    // can map to a cell. Only a resetless init must keep its native flop.
-    auto owner_has_reset = [&](int k) -> bool {
-      return k < static_cast<int>(latch_owner.size()) ? !latch_owner[k]->rst_drv.is_invalid() : !flops.front().rst_drv.is_invalid();
-    };
-    // ABC is allowed to pick a concrete value for a don't-care latch init while
-    // optimizing. That choice is an internal optimization witness, NOT a new
-    // hardware power-on guarantee: materializing it on read-back refines an
-    // init-less source flop to zero and makes post-synthesis formal comparison
-    // spuriously fail. Whenever the latch count is preserved, recover init from
-    // the SNAPSHOT taken at crossing time (Seq_flop::has_init -- the source pin
-    // is no longer resolvable here) instead of asking the optimized ABC latch.
-    // Only the retime-reshaped fallback lacks a source-bit correspondence and
-    // therefore has to use ABC's transformed init.
-    auto source_init_bit = [&](int k) -> std::optional<bool> {
-      if (k < static_cast<int>(latch_owner.size())) {
-        const auto* f = latch_owner[k];
-        if (!f->has_init) {
-          return std::nullopt;
-        }
-        return f->init_val.bit_test(latch_owner_bit[k]);
-      }
-      int v = Abc_LatchInit(lat[k]);  // 1=zero, 2=one, else dc/none
-      if (v == 1 || v == 2) {
-        return v == 2;
-      }
-      return std::nullopt;
     };
 
     // Original-name reconstruction: with the latch count preserved, latches
@@ -4087,7 +4638,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       int             start;
     };
     std::vector<Span> spans;
-    if (m == total_bits) {
+    if (m == crossed_bits) {
       int s = 0;
       for (const auto& f : flops) {
         spans.push_back({&f, s});
@@ -4125,7 +4676,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     };
     // Rebuild one native flop covering the latches `idx` (bit 0 first): Q bits
     // feed the mapped logic via net2drv, din is Set_mask-reassembled in pass
-    // 2b, and the power-on init is recovered from the latch init values.
+    // 2b, and a POWER-ON init is recovered from the source snapshot (or, in
+    // the reshaped fallback, the latch init values). A synchronous reset is
+    // already in the D cone, so the rebuilt flop carries neither a reset_pin
+    // nor the reset value as an init -- the plain `always @(posedge)` with the
+    // mux on D is the same machine (proven by cvc5/lgyosys in lhd_abc_seq_test).
     auto build_native_flop = [&](const std::string& name, const hhds::Pin_class& clk, const std::vector<int>& idx) {
       int  k = static_cast<int>(idx.size());
       auto F = gu::create_typed_node(*body, Ntype_op::Flop);
@@ -4179,11 +4734,42 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // (never through the AIG). A plain posedge D-flop cell has NO init pin, so a
       // latch carrying a concrete power-on init CANNOT be represented by the cell
       // without changing power-on behavior — such a bit stays a native flop (the
-      // netlist stays equivalent), only init-less bits become DFF cells.
-      auto io           = liberty::create_dff_io(*outlib_, *dff_);
-      // resetless power-on init: such a bit must keep a native flop so the
-      // value survives
-      auto needs_native = [&](int k) -> bool { return source_init_bit(k).has_value() && !owner_has_reset(k); };
+      // netlist stays equivalent); init-less and synchronous-reset bits (their
+      // init is the reset value on D) become DFF cells under the register name.
+      // The AIG-side QN encoding (Seq_flop::d_inverted) is exact only while
+      // latch k is still the latch flop-bit k crossed as: with the count
+      // reshaped there is no telling which BI nets carry ~f, and reading a QN
+      // pin as Q on the wrong one is a silent miscompile. Unreachable (only the
+      // built-in flow sets d_inverted, and it never retimes); a guard, not a
+      // path -- every other flow takes the read-back absorption.
+      if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.d_inverted; })) {
+        livehd::diag::err("pass.abc", "abc-readback", "internal")
+            .msg("pass.abc region '{}': the latch set was reshaped ({} latches for {} register bits) under the QN-only DFF "
+                 "cell '{}' -- the D-side inversion cannot be attributed; the built-in flow never retimes",
+                 rb.module_name,
+                 m,
+                 crossed_bits,
+                 dff_->name)
+            .fatal();
+        Abc_NtkDelete(mapped);
+        return;
+      }
+      // One IO decl per ladder rung actually used (create_dff_io is find-or-
+      // create, so an unused rung leaves no stray decl in the output library).
+      std::vector<std::shared_ptr<hhds::GraphIO>> rung_io(dff_ladder_.size());
+      auto                                        rung_for_fanout = [&](int fanout) -> size_t {
+        // <=8 loads: x1 (the fastest rung there per the NLDM tables, and 97%
+        // of registers); <=16: x2; above: x3 -- clamped to the ladder the
+        // library has (test.lib / sky130 have one rung; ASAP7 three).
+        const size_t want = fanout <= 8 ? 0 : (fanout <= 16 ? 1 : 2);
+        return std::min(want, dff_ladder_.size() - 1);
+      };
+      auto rung_io_for = [&](size_t r) {
+        if (!rung_io[r]) {
+          rung_io[r] = liberty::create_dff_io(*outlib_, dff_ladder_[r]);
+        }
+        return rung_io[r];
+      };
       // `owner` names the SOURCE register bit this latch came from (empty when
       // the latch count was reshaped and no correspondence survives). A mapped
       // DFF cell otherwise lands as `g<abcId>_<cell>`, which drops the register
@@ -4191,20 +4777,27 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // — `id_q` then has no counterpart in the netlist and the def can only come
       // back inconclusive (every //bench:*_synth_lec_* target).
       auto map_dff_cell = [&](int k, const std::string& owner = {}) {
-        auto* L    = lat[k];
-        auto* qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
-        auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
-        auto  sub  = gu::create_typed_node(*body, Ntype_op::Sub);
-        sub.set_subnode(io);
-        sub.attr(hhds::attrs::name).set(owner.empty() ? std::format("g{}_{}", Abc_ObjId(L), dff_->name) : unique_flop_name(owner));
-        auto q = sub.create_driver_pin(dff_->q_pin);
+        auto*       L    = lat[k];
+        auto*       qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
+        auto*       dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
+        const auto  r    = rung_for_fanout(Abc_ObjFanoutNum(qnet));
+        const auto& cell = dff_ladder_[r];
+        auto        sub  = gu::create_typed_node(*body, Ntype_op::Sub);
+        sub.set_subnode(rung_io_for(r));
+        sub.attr(hhds::attrs::name).set(owner.empty() ? std::format("g{}_{}", Abc_ObjId(L), cell.name) : unique_flop_name(owner));
+        // The cell's output pin IS the register's Q for every consumer -- for
+        // a QN cell because the D side carries ~f: crossed that way
+        // (Seq_flop::d_inverted), absorbed in pass 1b, or an inverter added in
+        // pass 2b (`d_inv`).
+        auto q = sub.create_driver_pin(cell.q_pin);
         gu::set_bits(q, 1);
         gu::set_unsign(q);
         set_net_driver(qnet, q);
         if (auto lclk = owner_clk(k); !lclk.is_invalid()) {
-          lclk.connect_sink(sub.create_sink_pin(dff_->clk_pin));
+          lclk.connect_sink(sub.create_sink_pin(cell.clk_pin));
         }
-        dff_recon.push_back({sub, dnet});
+        const bool crossed_inverted = k < static_cast<int>(latch_owner.size()) && latch_owner[k]->d_inverted;
+        dff_recon.push_back({sub, dnet, &cell, cell.q_inverted && !crossed_inverted && !qn_absorbed.contains(dnet)});
       };
       auto native_single = [&](int k) {
         init_dropped = true;
@@ -4225,9 +4818,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             std::iota(idx.begin(), idx.end(), sp.start);
             build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
           } else {
-            // init-less register -> per-bit DFF cells; a mixed register
-            // (should not occur: init is stamped per register) degrades to
-            // per-bit handling, never to a dropped init
+            // init-less or sync-reset register -> per-bit DFF cells; a mixed
+            // register (should not occur: init is stamped per register)
+            // degrades to per-bit handling, never to a dropped init
             for (int b = 0; b < sp.f->bits; ++b) {
               int k = sp.start + b;
               // Per-bit name under the source register: a 1-bit register keeps
@@ -4356,12 +4949,40 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   // pass 2b (register=true): wire each mapped DFF Sub's D pin from its latch's
   // data-in net (each DFF cell is 1-bit, so no Set_mask reassembly is needed).
+  // A QN cell whose D-cone root could not absorb the inversion (pass 1b: the
+  // root feeds other logic too, is a port / another register's Q, or has no
+  // inverting twin) gets one min-size inverter here, on the D side: fanout 1,
+  // so INVx1 always suffices, and the register's own drive ladder carries the
+  // Q fanout. Still 0.2916 + 0.0437 against DFFHQx4's 0.3645.
+  int    qn_inv_cells = 0;
+  double qn_inv_area  = 0;
   for (auto& rd : dff_recon) {
     auto d = get_net_driver(rd.dnet);
     if (d.is_invalid()) {
       d = const0_pin();
     }
-    d.connect_sink(rd.sub.create_sink_pin(dff_->d_pin));
+    if (rd.d_inv) {
+      I(mio_inv != nullptr);  // start() refuses a Liberty without an inverter
+      auto& desc = cell_desc(mio_inv);
+      auto  inv  = gu::create_typed_node(*body, Ntype_op::Sub);
+      inv.set_subnode(desc.io);
+      inv.attr(hhds::attrs::name).set(std::format("{}__dinv", std::string{rd.sub.attr(hhds::attrs::name).get_or("")}));
+      d.connect_sink(inv.create_sink_pin(desc.input_names.front()));
+      d = inv.create_driver_pin(desc.output_name);
+      gu::set_bits(d, 1);
+      gu::set_unsign(d);
+      ++qn_inv_cells;
+      qn_inv_area += inv_area;
+    }
+    d.connect_sink(rd.sub.create_sink_pin(rd.cell->d_pin));
+  }
+  // Those inverters are minted standard cells the mapped LOGIC network never
+  // saw: count them where the identity-buffer bypass corrected the same row,
+  // so abc.json `gates`/`area` (what lhdtrack scores as lhd_area, and what the
+  // incremental cache persists) describe the netlist that was actually written.
+  if (qn_inv_cells != 0) {
+    qor_.back().gates += qn_inv_cells;
+    qor_.back().area  += qn_inv_area;
   }
   trace_stage("readback-fanins");
 
@@ -4718,6 +5339,7 @@ void Mapper::report_completion(const Region_qor& q) {
                                     {"input_nodes", std::to_string(q.input_nodes)},
                                     {"input_ge", std::to_string(q.input_ge)},
                                     {"gates", std::to_string(q.gates)},
+                                    {"bypassed", std::to_string(q.bypassed)},
                                     {"area", std::format("{:.2f}", q.area)},
                                     {"delay", std::format("{:.2f}", q.delay)},
                                     {"ms", std::format("{:.1f}", q.ms)},

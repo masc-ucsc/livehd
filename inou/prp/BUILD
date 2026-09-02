@@ -51,6 +51,7 @@ filegroup(
     name = "abc_tests",
     srcs = [
         "tests/abc/test.lib",
+        "tests/abc/test_qn.lib",
         "tests/abc/timing.lib",
         "tests/pyrope/abc_arith.prp",
         "tests/pyrope/abc_block_attr.prp",

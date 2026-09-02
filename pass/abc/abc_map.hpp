@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "abc_arith.hpp"  // arith::Adder_kind
@@ -57,13 +58,19 @@ struct Map_options {
   // array + address decode). register=true maps flops to Liberty DFF cells (falls
   // back to native flops when the library has none); false keeps them native
   // (cgen emits `always @(posedge clk)`). memory=true bit-blasts a Memory into a
-  // register array + read/write mux logic; false keeps it as a native instance.
+  // register array + read/write mux logic (the default since the constant-
+  // address / per-lane mem_lower rework: 0.83x the area and 0.57x the period of
+  // a native-boundary memory on ASAP7 over lhdtrack's 27 memory tests); false
+  // keeps it as a native instance. Memories above pass.abc.memory_max_bits stay
+  // native either way (mem_lower.hpp).
   bool              map_register      = true;
-  bool              map_memory        = false;
+  bool              map_memory        = true;
   // Keep an oversized register payload native even when map_register is true.
   // ABC represents every bit as a separate latch and some generated blocks put
-  // thousands of state bits in one color; 0 disables the per-region guard.
-  uint64_t          register_max_bits = 4096;
+  // thousands of state bits in one color; 0 (the default) disables the
+  // per-region guard: a bit-blasted 64x64 memory alone is 4096 bits, and a
+  // native register is one yosys's normalize maps instead of pass.abc.
+  uint64_t          register_max_bits = 0;
   // Optional explicit DFF cell name for register mapping (empty => auto-detect a
   // plain posedge D-flop from the Liberty).
   std::string       dff_cell;
@@ -79,6 +86,19 @@ struct Map_options {
   // mapping. Needs a physical (NLDM) Liberty and a `delay` target: with neither
   // there is no budget to be inside of.
   uint32_t          area_relax_pct   = 200;
+  // The AREA candidate (map_region's second mapping of a region whose delay
+  // flow met its budget): empty = the built-in `dch -f; amap` flow, "none"
+  // disables the candidate, anything else is an ABC command string run
+  // verbatim ({D}/{L}/{F}/{B} substituted) in place of the built-in one.
+  std::string       area_flow;
+  // Register overhead subtracted from `delay` to form a region's budget when
+  // the region holds flops: "auto" = the mapped DFF cell's clk->Q + setup read
+  // off its Liberty timing tables (liberty::Dff_cell), "<ps>" = that many
+  // picoseconds, "0" = no margin. ABC's SCL timer sees only the combinational
+  // cone; the period OpenSTA checks includes the launch flop's clk->Q and the
+  // capture flop's setup (69 ps of a 400 ps ASAP7 period on br_arb_rr), so a
+  // region sized to the full period misses it by exactly that.
+  std::string       reg_margin       = "auto";
   bool              verbose          = false;
   // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
   // CSKA/CLA block width (0 => auto from the operating width).
@@ -140,11 +160,31 @@ struct Region_qor {
   // there is no per-op post-ABC attribution, so a region sum is the whole
   // measurement. Every production run therefore validates both predictors.
   uint64_t    pred_aig    = 0;
-  int         gates       = 0;      // mapped standard cells
-  double      area        = 0.0;    // sum of Liberty cell areas
+  int         gates       = 0;      // mapped standard cells actually minted (bypassed buffers excluded)
+  double      area        = 0.0;    // sum of their Liberty cell areas
+  // Identity buffers ABC minted to decouple a CI->CO / gate->many-CO edge that
+  // the read-back aliased away (pass 1b): not in `gates`/`area`, not in the
+  // netlist. Diagnostic only -- a cache hit reports 0 (the row is not
+  // persisted with it; its gates/area are already net of the bypass).
+  int         bypassed    = 0;
   float       delay       = -1.0f;  // critical arrival (unit-delay depth, or ps with an NLDM GENLIB); <0 => unavailable
   std::string crit_output;          // region output port with the worst arrival
   std::string crit_src;             // "file:line" of that output's original driver (may be empty)
+  // The mapping-objective decision (map_region's budget ladder), diagnostic
+  // only -- a cache hit reports none of it. `budget` is the region's delay
+  // budget in ps (target minus the register margin when it holds flops; <0 =
+  // no target). `candidate` names which mapping the region kept: "delay" (the
+  // `&nf`-based delay flow, sized to the budget) or "area" (the `amap`-based
+  // area flow, kept only when it ALSO met the budget with less SCL area);
+  // empty when no comparison ran (no target, custom flow, dummy-PO region,
+  // area_flow=none, over large_ge). The two pairs are the SCL timer's numbers
+  // for each candidate at decision time (<0 = not run).
+  float       budget           = -1.0f;
+  std::string candidate;
+  float       delay_flow_delay = -1.0f;
+  double      delay_flow_area  = -1.0;
+  float       area_flow_delay  = -1.0f;
+  double      area_flow_area   = -1.0;
   // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
   // gates/area/delay under-report — the score is partial until the div is
   // strength-reduced away. Surfaced so an agent never trusts a blind score.
@@ -198,6 +238,17 @@ public:
   // overrides (coloring_info "region_opts") are read per region in map_region.
   void set_region_opts(Region_opts_map m) { region_opts_cli_ = std::move(m); }
 
+  // Pre-resolved register-mapping cells (liberty::resolve_dff_cells on the
+  // run-level library + dff_cell option). pass.abc resolves them ONCE up front
+  // because the incremental-cache salt needs the pick before any region maps
+  // and abc.json reports it after; start() then skips its own Liberty scan.
+  // Without this call start() resolves them itself.
+  void set_dff_cells(const liberty::Dff_selection& sel) {
+    dff_        = sel.base;
+    dff_ladder_ = sel.ladder;
+    dff_preset_ = true;
+  }
+
   // QoR rows accumulated by map_region, one per successfully mapped region.
   [[nodiscard]] const std::vector<Region_qor>& qor() const { return qor_; }
   // False only when every region was restored from the incremental cache.
@@ -226,17 +277,34 @@ private:
   bool                                          flat_               = false;
   void*                                         pabc_               = nullptr;  // Abc_Frame_t*
   bool                                          lib_loaded_         = false;
-  // The active GENLIB contains all cells with physical NLDM-derived delays, so
-  // ABC's sizing tail may safely introduce any SCL drive-strength variant.
-  bool                                          nldm_genlib_loaded_ = false;
+  // A delay target was requested AND the Liberty carries the 2-D NLDM
+  // slew/load surfaces the SCL commands walk (lib_has_nldm_timing): the
+  // `buffer`/`upsize`/`dnsize` steps and the SCL QoR timer may run. The mapper
+  // itself always works on `read_lib -s`'s unit-delay GENLIB (every pin 1.00):
+  // the gain-100 physical GENLIB it used to install for a delay target bought
+  // nothing the sizing steps do not do better -- measured over 15 lhdtrack
+  // designs (geomean vs yosys, area/OpenSTA delay): gain GENLIB 1.63/0.81 on
+  // ASAP7 and 1.15/0.85 on sky130 against unit-delay + `dnsize -D` 1.24/0.88
+  // and 1.22/0.93 at the same number of periods met; `amap` (the area
+  // candidate) ignores GENLIB delays entirely (bit-identical netlists either
+  // way).
+  bool                                          scl_timing_ok_      = false;
   // One-shot: the Liberty gave ABC no SCL library, so the max_fanout tail
   // cannot run (see the strip in map_region). Warn once per Mapper, not once
   // per region.
   bool                                          warned_no_scl_      = false;
   // Plain posedge D-flop found in the Liberty (register mapping target). Empty
   // when map_register is off or the library has no DFF cell — the read-back then
-  // keeps flops native. Detected once in start().
+  // keeps flops native. Detected once in start() (or handed in by set_dff_cells).
   std::optional<liberty::Dff_cell>              dff_;
+  // Drive ladder of dff_ (same pins/polarity, area ascending, dff_ first). The
+  // read-back picks a rung per register by its Q net's mapped fanout because
+  // ABC's `buffer -N` tail never buffers a latch output (a CI): on ASAP7 a
+  // fanout-45 register on DFFHQNx1 cost br_amba_axi2axil 542 -> 637 ps; x3
+  // holds 574. Below ~8 loads x1 is the FASTEST rung (73 vs 80 ps clk->Q
+  // against DFFHQx4 per the NLDM tables) and 97% of registers sit there.
+  std::vector<liberty::Dff_cell>                dff_ladder_;
+  bool                                          dff_preset_ = false;
   hhds::GraphLibrary*                           outlib_ = nullptr;  // where blackbox cell defs are declared
   Incr_cache*                                   incr_   = nullptr;  // optional region cache (2opt-incr)
   std::vector<Region_qor>                       qor_;
@@ -276,6 +344,16 @@ private:
   };
   absl::flat_hash_map<const void*, Cell_desc> cell_descs_;
 
+  // Inverting twins for the QN-cell read-back: every Liberty gate indexed by
+  // (pin count, truth table) so a mapped D-cone root can be swapped for the
+  // cheapest cell computing its COMPLEMENT over the same pins in the same
+  // order (AND2x2 -> NAND2xp33, AOI21xp33 -> AO21x1, XOR -> XNOR). Keyed the
+  // way ABC dedups gates itself: Mio truth tables are replicated 64-bit words
+  // (mioUtils.c), so `~truth` is the complement for any pin count <= 6. Built
+  // once per start() from the Mio library; values are Mio_Gate_t* (opaque
+  // here so abc headers stay in the .cpp).
+  absl::flat_hash_map<std::pair<int, uint64_t>, void*> twin_index_;
+
   // Whether this run asks for a physical (gain-based NLDM) GENLIB: a run-level
   // `delay`, or a CLI region_opts delay override. Constant for the whole run
   // (the GENLIB is installed once in start()) and folded into resolve_recipe.
@@ -283,8 +361,27 @@ private:
 
   [[nodiscard]] std::string comb_flow() const;
   [[nodiscard]] std::string seq_flow() const;
+  // The area candidate's command list (kAreaFlow + its sizing tail, or the
+  // user's `area_flow`), substituted like comb_flow(). "none" => empty.
+  [[nodiscard]] std::string area_flow() const;
   [[nodiscard]] std::string resolve_flow(std::string_view builtin) const;
   [[nodiscard]] std::string subst_flow(std::string f) const;
+
+  // The register margin `reg_margin` resolves to, in ps (0 = none).
+  [[nodiscard]] double reg_margin_ps() const;
+  // A region's delay budget: `target` minus the register margin when the
+  // region holds flops, floored at 1 ps (a budget of 0 would read as "no
+  // target" to ABC's `-D`). <= 0 target => no budget (returns target).
+  [[nodiscard]] float region_budget(float target, bool has_flops) const;
+  // The per-region `{B}` substitution (`-D <budget>` for the sizing steps of
+  // the built-in tails, empty without a target): set by map_region before it
+  // resolves any flow string for the region, cleared on exit.
+  std::string budget_flag_;
+  // Resolve dff_/dff_ladder_ from the run-level library unless preset. Called
+  // from start() and, because the register margin needs the cell before the
+  // first region's recipe is formed (ahead of the lazy start()), from
+  // map_region.
+  void ensure_dff_cells();
 
   // The resolved per-region ABC recipe, serialized VERBATIM for the incremental
   // cache's recipe gate: the pre-ABC lgraph does not encode it, so two regions

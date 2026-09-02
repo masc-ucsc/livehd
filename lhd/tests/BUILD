@@ -1360,7 +1360,42 @@ sh_test(
     srcs = ["lhd_abc_seq_test.sh"],
     data = _FLOW_DATA + [
         "abc_async_reset.prp",
+        "abc_qn_fanout.prp",
+        "abc_qn_twin.prp",
         "abc_resetless_sync.prp",
+        "//inou/prp:abc_tests",
+    ],
+)
+
+# pass.abc memory=true (the default) bit-blast, on the shapes the constant-
+# address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
+# (32x8 guards on ABC input nodes + mapped cells; 8x8 LEC'd with cvc5 AND
+# lgyosys against the source memory through gensim cell models), a whole-array
+# read_all memory (was refused), memory=false / memory_max_bits keeping a memory
+# native, and the wide-constant EQ (`x[3:0] == 8'd100` -> constant 0).
+sh_test(
+    name = "lhd_abc_memlower_test",
+    size = "large",
+    srcs = ["lhd_abc_memlower_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_memall.sv",
+        "abc_memtile.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
+# pass/lec memory <-> storage-flop bank bridge: a resetless 1rd/1wr register
+# file bit-blasted by pass.abc memory=true (one-bit DFF cells on a Q cell, on a
+# QN-only cell through the Flop(Not(D)) model, and whole native storage flops
+# under register_max_bits=1) is PROVEN unbounded with cvc5 against its Memory
+# through gensim models, lgyosys does not refute, and the same bank shape with
+# a corrupted write address still REFUTES.
+sh_test(
+    name = "lhd_lec_membank_test",
+    size = "medium",
+    srcs = ["lhd_lec_membank_test.sh"],
+    data = _FLOW_DATA + [
+        "lec_membank.sv",
         "//inou/prp:abc_tests",
     ],
 )

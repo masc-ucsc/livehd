@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <print>
 #include <string>
@@ -20,6 +21,7 @@
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "json_util.hpp"
+#include "liberty_dff.hpp"
 #include "mem_lower.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
@@ -39,7 +41,9 @@ void Pass_abc::setup() {
   m.add_label_optional(
       "flow",
       "ABC command string, run verbatim (empty => the built-in comb/seq default). "
-      "Commands run in order, ';'-separated; {D}/{L} are substituted from the delay/load options. "
+      "Commands run in order, ';'-separated; {D}/{L} are substituted from the delay/load options, {F} is the bare "
+      "max_fanout number and {B} the region's delay BUDGET as `-D <ps>` (delay minus reg_margin when the region holds "
+      "flops; empty without a delay) for the SCL sizing commands. "
       "A custom flow must still include a technology-mapping step (`&nf {D}`) so the result is a cell netlist. "
       "The standard abc.rc synthesis scripts and their short-name building blocks are pre-registered as aliases, "
       "so flow=\"resyn2\" works just like in an interactive ABC shell.\n"
@@ -49,6 +53,8 @@ void Pass_abc::setup() {
       "AIG opt scripts:  resyn  resyn2  resyn2a  resyn3  compress  compress2  choice  choice2\n"
       "resub scripts:    resyn2rs  compress2rs  src_rw  src_rs  src_rws    (raw form: rs -K <cut-size> -N <max-nodes>)\n"
       "GIA (& space):    &get/&put move the AIG in/out; &dch &fraig &if &nf &deepsyn &resub &mfs &dc3 &dc4\n"
+      "                  (the built-in flows end in `&put -o`: a gate feeding several outputs is then decoupled with a\n"
+      "                  buffer the read-back removes instead of a duplicated gate; a custom flow may do the same)\n"
       "                  (bound &deepsyn with -J <no-improve> and/or -T <seconds>: with neither it runs ~1e5 passes)\n"
       "\n"
       "examples:\n"
@@ -66,8 +72,9 @@ void Pass_abc::setup() {
   // the extrapolation. Nets driven by NATIVE (unblasted) nodes never reach ABC
   // and keep their fanout regardless.
   m.add_label_optional("max_fanout",
-                       "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize` to the "
-                       "built-in flow (0 disables it). A custom `flow` places `{F}` -- the bare number -- itself",
+                       "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
+                       "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
+                       "number -- and `{B}` itself",
                        "16");
   // A delay target is a BUDGET. ABC's own `&nf -D` is a no-op for the mapper
   // (giaNf.c reads MapDelayTarget, which `-D` never writes), so without this the
@@ -75,11 +82,31 @@ void Pass_abc::setup() {
   // ASAP7 target and pure waste under a relaxed sky130 one, where the mapped
   // region beats its clock by an order of magnitude and pays area for it.
   m.add_label_optional("area_relax",
-                       "max percent of measured timing SLACK to trade back for area: when the mapped region beats the "
-                       "`delay` budget, pass.abc re-maps with ABC's `&nf -R <pct>` relaxation, bounded by both this cap "
-                       "and the real slack. 0 disables it (always map for minimum delay). Requires `delay` and an NLDM "
-                       "Liberty",
+                       "max percent of measured timing SLACK to trade back for area: when the mapped region beats its "
+                       "delay budget, pass.abc re-maps with ABC's `&nf -R <pct>` relaxation (a percentage of the "
+                       "mapper's own logic depth on the unit-delay GENLIB), bounded by both this cap and the real slack, "
+                       "then re-sizes to the budget. 0 disables it. Requires `delay` and an NLDM Liberty",
                        "200");
+  // The mapping objective's second half (S5): a region whose delay flow met its
+  // budget is mapped once more for area and the smaller netlist that still
+  // meets the budget is kept. Measured over 15 lhdtrack designs: sky130 area
+  // 1.22 -> 1.07x yosys with every design inside its 20 ns period.
+  m.add_label_optional("area_flow",
+                       "ABC command string for the AREA candidate mapped after a region's delay flow met its budget "
+                       "(empty => the built-in `strash; &get -n; &fraig -x; &put; dc2; strash; dch -f; amap` + "
+                       "`buffer -N {F}; upsize {B}; dnsize {B}`; `none` disables the candidate; anything else runs "
+                       "verbatim with {D}/{L}/{F}/{B} substituted). The candidate is kept only when it also meets the "
+                       "budget with less SCL area. Requires `delay` and an NLDM Liberty",
+                       "");
+  // ABC's SCL timer sees one region's combinational cone; the period OpenSTA
+  // checks also pays the launch flop's clk->Q and the capture flop's setup (69
+  // ps of a 400 ps ASAP7 period on br_arb_rr), so a region sized to the full
+  // period misses it by exactly that.
+  m.add_label_optional("reg_margin",
+                       "register overhead subtracted from `delay` to form a flop-bearing region's budget: `auto` = the "
+                       "mapped DFF cell's clk->Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 57 ps, "
+                       "sky130 dfxtp_1 372 ps), a number = that many ps, 0 = no margin",
+                       "auto");
   m.add_label_optional("small_flow",
                        "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
                        "[small_min_ge, small_ge]; "
@@ -101,16 +128,25 @@ void Pass_abc::setup() {
                        "true");
   m.add_label_optional("register_max_bits",
                        "with register=true, keep a region's flops native when their total Q width exceeds this many bits "
-                       "(0 disables the guard)",
-                       "4096");
+                       "(0, the default, disables the guard: every flop maps, a bit-blasted 64x64 memory alone is 4096 "
+                       "bits)",
+                       "0");
   m.add_label_optional("memory",
                        "true|false bit-blast a Memory into a DFF-cell array + read/write mux logic (true) vs keep it as a "
                        "native memory instance (false)",
-                       "false");
+                       "true");
+  m.add_label_optional("memory_max_bits",
+                       "with memory=true, keep a Memory whose storage (bits x size) exceeds this many bits as a native "
+                       "instance and say which (0 disables the guard)",
+                       "65536");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",
                        "");
-  m.add_label_optional("delay", "{D} substitution in flow", "");
+  m.add_label_optional("delay",
+                       "the timing BUDGET in ps (ABC normalizes every Liberty to ps): `{D}` in a flow, and the target "
+                       "the built-in objective sizes to (minus reg_margin when the region holds flops) and judges the "
+                       "area candidate against. Empty = untimed (logic-depth mapping, no sizing)",
+                       "");
   m.add_label_optional("load", "{L} substitution in flow", "");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
@@ -216,7 +252,8 @@ absl::flat_hash_map<std::string, uint64_t> physical_instances(const Abc_hier& hi
 }
 
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
-              const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started, const Abc_hier& hier) {
+              const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started, const Abc_hier& hier,
+              const livehd::liberty::Dff_selection& dff_sel) {
   // PHYSICAL totals: a region's gates times the number of times its module is
   // instantiated (a replicated loop body N times, a shared `tap` 64 times).
   // The per-module sums are kept beside them as module_gates/module_area —
@@ -236,6 +273,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   double   tarea_phys        = 0.0;
   int      tgates            = 0;
   double   tarea             = 0.0;
+  int      tbypassed         = 0;
+  int      tarea_won         = 0;  // regions where the area candidate replaced the delay flow's netlist
+  int      tdelay_won        = 0;  // regions where the comparison ran and the delay flow stayed
   int      tdivbb            = 0;  // blackboxed div/mod cones (the score under-reports)
   uint64_t tinput_nodes      = 0;
   uint64_t tinput_ge         = 0;
@@ -250,6 +290,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   for (size_t r = 0; r < qor.size(); ++r) {
     tgates       += qor[r].gates;
     tarea        += qor[r].area;
+    tbypassed    += qor[r].bypassed;
+    tarea_won    += qor[r].candidate == "area" ? 1 : 0;
+    tdelay_won   += qor[r].candidate == "delay" ? 1 : 0;
     tgates_phys  += static_cast<uint64_t>(qor[r].gates) * inst_of(qor[r]);
     tarea_phys   += qor[r].area * static_cast<double>(inst_of(qor[r]));
     tdivbb       += qor[r].div_blackbox;
@@ -307,6 +350,45 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
   j += std::format("\"register\":{},\"memory\":{},", opts.map_register ? "true" : "false", opts.map_memory ? "true" : "false");
+  // The per-region register guard (0 = every flop maps), so a QoR reader can
+  // tell "kept native by limit" from "kept native by contract" (an
+  // asynchronous reset) without the diagnostics stream.
+  j += std::format("\"register_max_bits\":{},", opts.register_max_bits);
+  if (opts.map_register && dff_sel.base.has_value()) {
+    // The register cell(s) the netlist was written with, and how many of each
+    // it holds (PHYSICAL, weighted by instantiation like `gates`): counted off
+    // the emitted netlist so an all-hit incremental run reports the same
+    // histogram as the run that mapped it. A QN cell says so, because its
+    // inversion lives in the D cones (or, under a user flow, in explicit
+    // inverters) and an area/timing reader comparing against yosys's Q-side
+    // INV needs to know which encoding it is looking at.
+    std::map<std::string, uint64_t> dff_count;  // ladder rung -> instances (std::map: stable JSON order)
+    for (const auto& c : dff_sel.ladder) {
+      dff_count.emplace(c.name, 0);
+    }
+    for (const auto& [src, kids] : hier.children) {
+      const auto     it   = instances.find(src);
+      const uint64_t mult = it == instances.end() ? 0 : it->second;
+      for (const auto& [child, n] : kids) {
+        if (auto dc = dff_count.find(child); dc != dff_count.end()) {
+          dc->second += mult * n;
+        }
+      }
+    }
+    j += std::format("\"dff\":{{\"cell\":\"{}\",\"q_inverted\":{},\"ladder\":[",
+                     jesc(dff_sel.base->name),
+                     dff_sel.base->q_inverted ? "true" : "false");
+    for (size_t i = 0; i < dff_sel.ladder.size(); ++i) {
+      j += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(dff_sel.ladder[i].name));
+    }
+    j += "],\"cells\":{";
+    bool first = true;
+    for (const auto& [name, n] : dff_count) {
+      j    += std::format("{}\"{}\":{}", first ? "" : ",", jesc(name), n);
+      first = false;
+    }
+    j += "}},";
+  }
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
   // `gates`/`area` are PHYSICAL (region x instantiations); `module_gates`/
   // `module_area` are the per-mapped-module sums (what abc worked on once).
@@ -329,6 +411,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   }
   if (tdivbb > 0) {
     j += std::format(",\"div_blackbox\":{}", tdivbb);
+  }
+  if (tbypassed > 0) {
+    j += std::format(",\"bypassed\":{}", tbypassed);  // identity buffers aliased away on read-back (not in gates/area)
+  }
+  if (tarea_won + tdelay_won > 0) {
+    // How often the area candidate won: the objective's own scoreboard, so a
+    // reader can tell "the candidate never qualifies here" from "it qualifies
+    // and loses" without opening every region row.
+    j += std::format(",\"area_candidate_won\":{},\"delay_candidate_won\":{}", tarea_won, tdelay_won);
   }
   if (worst >= 0) {
     const auto& w  = qor[static_cast<size_t>(worst)];
@@ -382,8 +473,26 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (q.div_blackbox > 0) {
       j += std::format(",\"div_blackbox\":{}", q.div_blackbox);
     }
+    if (q.bypassed > 0) {
+      j += std::format(",\"bypassed\":{}", q.bypassed);
+    }
     if (q.delay >= 0) {
       j += std::format(",\"delay\":{:.4f}", q.delay);
+    }
+    if (q.budget >= 0) {
+      j += std::format(",\"budget\":{:.1f}", q.budget);  // ps: delay target minus the register margin when the region has flops
+    }
+    if (!q.candidate.empty()) {
+      // Which mapping the region kept and what each looked like to the SCL
+      // timer at decision time (delay ps / area), so lhdtrack can see the
+      // objective's choice rather than infer it from the totals.
+      j += std::format(",\"candidate\":\"{}\"", q.candidate);
+    }
+    if (q.delay_flow_delay >= 0) {
+      j += std::format(",\"delay_flow\":{{\"delay\":{:.4f},\"area\":{:.4f}}}", q.delay_flow_delay, q.delay_flow_area);
+    }
+    if (q.area_flow_delay >= 0) {
+      j += std::format(",\"area_flow\":{{\"delay\":{:.4f},\"area\":{:.4f}}}", q.area_flow_delay, q.area_flow_area);
     }
     if (!q.crit_output.empty()) {
       j += std::format(",\"critical_output\":\"{}\"", jesc(q.crit_output));
@@ -488,8 +597,9 @@ void Pass_abc::work(Eprp_var& var) {
   auto large_flow          = std::string{var.get("large_flow", "")};
   auto large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool map_register        = truthy(var.get("register", "true"));
-  bool map_memory          = truthy(var.get("memory", "false"));
-  auto register_max_bits_s = std::string{var.get("register_max_bits", "4096")};
+  bool map_memory          = truthy(var.get("memory", "true"));
+  auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "65536")};
+  auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
   auto delay               = std::string{var.get("delay", "")};
   auto load                = std::string{var.get("load", "")};
   bool verbose             = truthy(var.get("verbose", "false"));
@@ -498,6 +608,8 @@ void Pass_abc::work(Eprp_var& var) {
   auto mult_s              = std::string{var.get("multiplier", "array")};
   auto qor_path            = std::string{var.get("qor", "")};
   auto region_opts_s       = std::string{var.get("region_opts", "")};
+  auto area_flow           = std::string{var.get("area_flow", "")};
+  auto reg_margin          = std::string{var.get("reg_margin", "auto")};
   auto mem_budget_s        = std::string{var.get("memory_budget_mb", "0")};
   auto time_budget_s       = std::string{var.get("time_budget_ms", "0")};
   bool allow_oversize      = truthy(var.get("allow_oversize", "false"));
@@ -622,7 +734,22 @@ void Pass_abc::work(Eprp_var& var) {
       return;
     }
   }
-  uint64_t register_max_bits = 4096;
+  // No silent fallback, as for max_fanout: a mistyped margin would quietly
+  // move every flop-bearing region's budget.
+  if (reg_margin != "auto") {
+    const auto* b = reg_margin.data();
+    const auto* e = reg_margin.data() + reg_margin.size();
+    double      v = 0;
+    auto [p, ec]  = std::from_chars(b, e, v);
+    if (ec != std::errc{} || p != e || v < 0) {
+      livehd::diag::err("pass.abc", "bad-reg-margin", "io")
+          .msg("pass.abc: reg_margin must be `auto` or a non-negative number of picoseconds, got '{}'", reg_margin)
+          .hint("auto = the mapped DFF cell's clk->Q + setup from the Liberty; 0 disables the margin")
+          .fatal();
+      return;
+    }
+  }
+  uint64_t register_max_bits = 0;
   {
     auto* b      = register_max_bits_s.data();
     auto* e      = register_max_bits_s.data() + register_max_bits_s.size();
@@ -630,6 +757,18 @@ void Pass_abc::work(Eprp_var& var) {
     if (ec != std::errc{} || p != e) {
       livehd::diag::err("pass.abc", "bad-register-max-bits", "io")
           .msg("pass.abc: register_max_bits must be a non-negative integer, got '{}'", register_max_bits_s)
+          .fatal();
+      return;
+    }
+  }
+  uint64_t memory_max_bits = 65536;
+  {
+    auto* b      = memory_max_bits_s.data();
+    auto* e      = memory_max_bits_s.data() + memory_max_bits_s.size();
+    auto [p, ec] = std::from_chars(b, e, memory_max_bits);
+    if (ec != std::errc{} || p != e) {
+      livehd::diag::err("pass.abc", "bad-memory-max-bits", "io")
+          .msg("pass.abc: memory_max_bits must be a non-negative integer, got '{}'", memory_max_bits_s)
           .fatal();
       return;
     }
@@ -651,6 +790,8 @@ void Pass_abc::work(Eprp_var& var) {
   opts.flow              = flow;
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
   opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
+  opts.area_flow         = area_flow;
+  opts.reg_margin        = reg_margin;
   opts.small_flow        = small_flow;
   opts.small_min_ge      = small_min_ge;
   opts.small_ge          = small_ge;
@@ -751,15 +892,16 @@ void Pass_abc::work(Eprp_var& var) {
   }
   opts.library = library;
 
-  // memory=true: bit-blast every Memory into native flops + comb BEFORE
-  // partitioning, so the normal flow tech-maps the resulting muxes/flops. Deleted
-  // Memory nodes never reach the boundary code; any memory left native (an
-  // unsupported shape) still cuts as a boundary (the memory=false behavior).
+  // memory=true (the default): bit-blast every Memory into native flops + comb
+  // BEFORE partitioning, so the normal flow tech-maps the resulting muxes/flops.
+  // Deleted Memory nodes never reach the boundary code; any memory left native
+  // (an unsupported shape, or storage above memory_max_bits) still cuts as a
+  // boundary (the memory=false behavior).
   if (map_memory) {
     // Whole scratch library, not just the `var.graphs`-named subset: flatten
     // inlines closure-only callees into the top, so a Memory left native inside
     // one would reach the mapper as a boundary in a memory=true run.
-    livehd::abc::lower_memories(scratch_graphs);
+    livehd::abc::lower_memories(scratch_graphs, memory_max_bits);
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
@@ -774,6 +916,14 @@ void Pass_abc::work(Eprp_var& var) {
   // living inside it would self-destruct -- refuse the overlap.
   auto                                     cache_dir = std::string{var.get("cache_dir", "")};
   std::unique_ptr<livehd::abc::Incr_cache> incr;
+  // The register cell is resolved HERE, once, rather than in Mapper::start():
+  // the cache salt below needs the resolved pick (not the raw, usually empty,
+  // `dff_cell` option) before any region is digested, and abc.json reports it
+  // even on an all-hit run that never starts ABC. The mapper takes it as-is.
+  livehd::liberty::Dff_selection dff_sel;
+  if (map_register) {
+    dff_sel = livehd::liberty::resolve_dff_cells(opts.library, opts.dff_cell);
+  }
   if (!cache_dir.empty()) {
     std::error_code ec;
     const auto      canon_cache = std::filesystem::weakly_canonical(cache_dir, ec);
@@ -785,9 +935,13 @@ void Pass_abc::work(Eprp_var& var) {
           .fatal();
       return;
     }
-    incr = std::make_unique<livehd::abc::Incr_cache>(
+    // Salt on the RESOLVED cell: an unresolved pick (no DFF in the library, or
+    // an unknown `dff_cell` name) falls back to the raw option so the two
+    // failure shapes stay distinct keys too.
+    const std::string dff_desc = dff_sel.base.has_value() ? livehd::liberty::dff_descriptor(*dff_sel.base) : opts.dff_cell;
+    incr                       = std::make_unique<livehd::abc::Incr_cache>(
         cache_dir,
-        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, opts.dff_cell));
+        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, dff_desc));
   }
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one
@@ -805,6 +959,9 @@ void Pass_abc::work(Eprp_var& var) {
   mapper.set_outlib(&outlib);
   mapper.set_flat(flat_whole_design);
   mapper.set_region_opts(std::move(region_opts));
+  if (map_register) {
+    mapper.set_dff_cells(dff_sel);
+  }
   if (incr) {
     mapper.set_incr(incr.get());
   }
@@ -867,7 +1024,7 @@ void Pass_abc::work(Eprp_var& var) {
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started(), hier);
+  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started(), hier, dff_sel);
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

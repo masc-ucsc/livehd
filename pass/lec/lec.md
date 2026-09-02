@@ -222,6 +222,27 @@ everything the encoder needs.
   comptime `init` constant — built **per design** (not pinned onto the shared
   symbol, which would be a vacuous proof when the two inits differ), so equal
   inits prove and differing inits refute.
+- **Memory <-> mapped storage bank** (query.cpp `find_mem_entry_bank` and the
+  two bridges that consume it): `pass.abc memory=true` bit-blasts a Memory
+  `<mem>` into per-entry flops `<mem>__mem<i>` (pass/abc/mem_lower.cpp) and the
+  DFF-cell read-back splits each into one-bit cells `<mem>__mem<i>_<b>`, so a
+  netlist LEC holds the array on one side and N (or N x bits) flop cuts on the
+  other. When the bank is TOTAL -- every entry 0..N-1 present at the exact
+  width, none of its keys on the memory side -- both engines tie them by name:
+  BMC seeds entry i of the shared initial array from the bank's power-on
+  symbols (a deterministic function of the free init, never a constant, so
+  equal designs prove and a divergent write still refutes on the write path);
+  the inductive flop-cut miter assumes cell (i,b) = bit b of `select(A, i)` and
+  proves each cell's next state against `select(A', i)`. A partial bank is no
+  tie at all. Measured on the lhdtrack `lec_netlist` flow with memory=true:
+  br_ram_flops_tile (16x32, EnableReset=0) refuted both cvc5 obligations at
+  checked step 1 on a read of never-written entry 0 and now proves UNBOUNDED
+  (ind, ~1 s). The same tie exists for a single packed size*bits flop (the
+  slang const-indexed unpacked array). Companion rule in `pass.liberty gensim`:
+  a QN cell is modeled `Flop(Not(D))` so the model's state IS the pin the
+  netlist observes -- `Not(Flop(D))` shared the complement and refuted every
+  resetless register read before its first write on ASAP7 only. Regression:
+  `lhd/tests/lhd_lec_membank_test.sh`.
 - **Hierarchy**: a **combinational** `Sub` whose def is supplied via `lhd lec
   --lib lg:DIR` is **flattened inline** (def encoded with inputs bound to the
   instance's input Vals, outputs wired onto its output pins) — the prime use is

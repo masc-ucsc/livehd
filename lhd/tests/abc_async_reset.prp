@@ -1,7 +1,9 @@
-// A Liberty containing only a plain DFF cannot represent either reset contract.
-// The async register must react without a clock edge; the sync register must
-// retain its reset/initial value rather than become an X-valued plain DFF before
-// the first edge. pass.abc may still map both surrounding data cones.
+// A Liberty containing only a plain DFF cannot represent an ASYNCHRONOUS reset:
+// that register must react without a clock edge, so it stays a native flop
+// (its data cone is still mapped). The SYNCHRONOUS register is a D-cone mux
+// (`rst ? 0ub1111 : d ^ k`, reset over enable) and maps to DFF cells
+// `sync_state_<bit>`: its `initial` is the reset value realized on D, and a
+// plain DFF powers on X exactly like the source register's own always block.
 pub mod abc_async_reset(clk:u1, rst:u1, d:u4) -> (async_q:u4@[], sync_q:u4@[]) {
   reg async_state:u4:[clock_pin=ref clk, reset_pin=ref rst, sync=false] = 0
   reg sync_state:u4:[clock_pin=ref clk, reset_pin=ref rst, sync=true] = 0ub1111

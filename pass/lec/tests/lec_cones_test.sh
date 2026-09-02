@@ -152,11 +152,19 @@ fi
 MSRC=inou/prp/tests/pyrope/abc_mem.prp
 MTOP=abc_mem.abc_mem
 if [ -f "$MSRC" ]; then
-  mnetlist() {  # $1=name $2=src
+  # `abc.memory=false`: this section is about the array-vs-array cut, so the
+  # Memory must SURVIVE mapping as a native instance. pass.abc's default flipped
+  # to memory=true (bit-blast: `mem__mem<i>` storage flops), under which the
+  # impl has no array at all -- the memory<->storage-bank bridge pairs the flops
+  # with the ref array and cvc5 discharges those per-entry cuts, so "every cut
+  # discharged by the cone pass" is the wrong expectation there (see the
+  # memory=true pair below for that shape).
+  mnetlist() {  # $1=name $2=src [$3=extra pass.abc --set]
     "$LHD" compile "$2" --emit-dir lg:"$WORK/$1.lg" > "$WORK/$1.build" 2>&1 \
       && "$LHD" pass color flat --top "$MTOP" lg:"$WORK/$1.lg" >> "$WORK/$1.build" 2>&1 \
       && "$LHD" pass abc --top "$MTOP" --workdir "$WORK/$1.wd" lg:"$WORK/$1.lg" \
                 --emit-dir lg:"$WORK/$1.net" --set abc.library="$LIB" --set abc.register=false \
+                --set "abc.memory=${3:-false}" \
                 >> "$WORK/$1.build" 2>&1
   }
   # BAD differs from GOOD ONLY in the memory WRITE ADDRESS cone.
@@ -191,6 +199,35 @@ if [ -f "$MSRC" ]; then
     fi
   else
     echo "FAIL: could not build the memory netlists"; fail=1
+  fi
+
+  # The SAME pair under pass.abc's default memory=true: the impl carries 8 whole
+  # storage flops `mem__mem<i>` (register=false keeps them native) and no array.
+  # pass/lec's memory<->storage-bank bridge pairs them with the ref's array in
+  # both engines, so the good netlist is PROVEN -- unbounded, through the
+  # inductive flop-cut miter -- and the corrupted write address still REFUTES
+  # (the tie is a name-directed correspondence, not an assumption about data).
+  if mnetlist mgood_bb "$MSRC" true && mnetlist mbad_bb "$WORK/abc_mem_bad.prp" true; then
+    "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mgood_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
+           --set formal.lec.cones=true > "$WORK/lec_mgood_bb.txt" 2>&1
+    MRC=$?
+    if [ "$MRC" = 0 ] && grep -q "PROVEN equivalent" "$WORK/lec_mgood_bb.txt" \
+       && grep -q '"bounded":false' "$WORK/lec_mgood_bb.txt"; then
+      echo "ok: bit-blasted memory (memory=true) PROVEN unbounded through the storage-bank bridge"
+    else
+      echo "FAIL: the bit-blasted memory was not proven unbounded (rc=$MRC)"
+      grep -oE "(PROVEN|REFUTED|UNKNOWN)[^;]*" "$WORK/lec_mgood_bb.txt" | head -1; fail=1
+    fi
+    "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mbad_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
+           --set formal.lec.cones=true > "$WORK/lec_mbad_bb.txt" 2>&1
+    MBRC=$?
+    if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad_bb.txt"; then
+      echo "ok: broken memory WRITE ADDRESS under memory=true -> REFUTED (the bank bridge never masks it)"
+    else
+      echo "FAIL: a broken memory write address under memory=true was not refuted (rc=$MBRC)"; fail=1
+    fi
+  else
+    echo "FAIL: could not build the memory=true netlists"; fail=1
   fi
 fi
 

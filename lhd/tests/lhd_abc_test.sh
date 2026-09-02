@@ -92,11 +92,15 @@ fi
 
 echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative control)"
 
-# A delay target must switch ABC from read_lib's default unit-delay GENLIB to a
-# GENLIB derived from the Liberty's 2-D NLDM tables. Without that conversion,
-# `&nf -D 1000` constrains logic depth and the reported delay stays a small
-# integer. The timed run also exercises the SCL sizing tail with two NAND drive
-# strengths; ABC must be able to find every cell that dnsize considers.
+# A delay target must switch the reported QoR from read_lib's unit-delay logic
+# depth to the SCL timer's physical picoseconds (the Liberty's 2-D NLDM
+# tables): untimed, the delay is a small integer; timed, it is a real delay.
+# The mapper itself stays on the unit-delay GENLIB (the gain-100 GENLIB it
+# used to derive for a delay target is gone: measured 1.63x yosys's area on
+# ASAP7 against 1.24x without it), and the timed run exercises the SCL sizing
+# tail with two NAND drive strengths -- ABC must be able to find every cell
+# that dnsize/upsize consider -- plus the budget ladder's area candidate
+# (qor.json says which mapping each region kept).
 T="$W/timing"
 mkdir -p "$T"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/unit" --set abc.library="$TIMING_LIB" \
@@ -107,11 +111,15 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/timed" --set abc.library=
 timed_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
 awk -v unit="$unit_delay" -v timed="$timed_delay" 'BEGIN { exit !(unit > 0 && unit < 10 && timed > 10) }' \
   || fail "delay target did not activate NLDM timing (unit=$unit_delay timed=$timed_delay)"
-# Every Liberty cell must appear (all drive strengths), plus ABC's two constant
-# gates. Derived from the .lib so adding a cell does not silently break this.
-want_gates=$(( $(grep -c '^  cell(' "$TIMING_LIB") + 2 ))
-grep -q "Derived GENLIB library .* with $want_gates gates .* gain 100.00" "$T/w_timed/logs/"*_lhd_pass_abc.log \
-  || fail "timed mapping did not derive an all-drive-strength gain-100 GENLIB ($want_gates gates expected)"
+grep -q "Derived GENLIB" "$T/w_timed/logs/"*_lhd_pass_abc.log \
+  && fail "timed mapping re-derived a gain GENLIB: the mapper must stay on read_lib's unit-delay GENLIB"
+# The objective ran: a 1000 ps budget (no flops here, so no register margin)
+# and a decided candidate on the one region, with both SCL pairs recorded.
+grep -q '"budget":1000.0' "$T/w_timed/qor.json" || fail "timed qor.json carries no 1000 ps region budget"
+grep -q '"candidate":"\(area\|delay\)"' "$T/w_timed/qor.json" || fail "timed qor.json records no area/delay candidate decision"
+grep -q '"delay_flow":{"delay":[0-9.]*,"area":[0-9.]*}' "$T/w_timed/qor.json" || fail "timed qor.json lacks the delay-flow SCL pair"
+grep -q '"area_flow":{"delay":[0-9.]*,"area":[0-9.]*}' "$T/w_timed/qor.json" || fail "timed qor.json lacks the area-flow SCL pair"
+grep -q '"budget"' "$T/w_unit/qor.json" && fail "untimed qor.json must not carry a budget"
 run compile lg:"$T/timed" --top "$TOP" --recipe O0 --emit-dir verilog:"$T/netv" --workdir "$T/w_emit"
 run pass liberty gensim "$TIMING_LIB" --emit-dir lg:"$T/models" --workdir "$T/w_models"
 run compile lg:"$T/models" --recipe O0 --emit-dir verilog:"$T/modelsv" --workdir "$T/w_modelsv"
@@ -227,3 +235,47 @@ grep -q '"code":"native-comb-boundary"' "$C/ot.jsonl" \
   || fail "opentimer did not report its partial native-combinational timing boundary"
 grep -q '"kind":"sta"' "$C/w5/timing.json" || fail "native-boundary timing report missing"
 echo "PASS: pass.abc preserves combinational SCCs and opentimer reports their explicit timing cuts"
+
+# ---------------------------------------------------------------------------
+# Feed-through wires must not become buffer cells. ABC materializes a Liberty
+# buffer for every CI->CO edge and -- with the built-in flow's `&put -o` -- for
+# every extra CO a gate drives (Abc_NtkLogicMakeSimpleCos, run by `&put` and by
+# Abc_NtkToNetlist); the read-back aliases those away instead of minting a Sub.
+# Before that: 512 of br_demux_onehot's 528 cells were such buffers (95% of its
+# area), and this very fixture mapped to 10 cells (8 BUFx1 + a duplicated XOR).
+# state=din2 (PI->latch D), out2=state (latch Q->PO) and out4 sharing out3's XOR
+# (one gate -> 2 POs) are pure wiring: the netlist must carry NO buffer cell,
+# exactly the one real gate (gates == the logic-only count), and stay
+# LEC-equivalent to its partition twin.
+# ---------------------------------------------------------------------------
+FT="$W/feedthrough"
+mkdir -p "$FT"
+cat >"$FT/abc_feedthrough.prp" <<'EOF'
+pub mod abc_feedthrough(clk:u1, din:u4, din2:u4, a:u1, b:u1) -> (out:u4@[0], out2:u4@[1], out3:u1@[0], out4:u1@[0]) {
+  reg state:u4:[clock_pin=ref clk] = nil
+  state = din2
+  out = din
+  out2 = state
+  out3 = a ^ b
+  out4 = a ^ b
+}
+EOF
+run compile "$FT/abc_feedthrough.prp" --top abc_feedthrough --recipe O1 --emit-dir lg:"$FT/lg" --workdir "$FT/w1"
+run pass color synth --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --workdir "$FT/w2"
+run pass partition --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --emit-dir lg:"$FT/re" --workdir "$FT/w3"
+"$LHD" pass abc --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --emit-dir lg:"$FT/net" --set abc.library="$LIB" \
+    -q --result-json "$FT/r.json" --workdir "$FT/w4" \
+  || fail "pass abc on the feed-through design -> $(cat "$FT/r.json" 2>/dev/null)"
+ft_total=$(grep -o '"total":{[^}]*}' "$FT/r.json" | head -1)
+echo "$ft_total" | grep -q '"gates":1,' || fail "feed-through design must map to exactly one real gate: $ft_total"
+echo "$ft_total" | grep -q '"bypassed":9' || fail "expected 9 bypassed identity buffers (8 CI->CO + 1 gate->2nd CO): $ft_total"
+run compile lg:"$FT/net" --top abc_feedthrough.abc_feedthrough --recipe O0 --emit-dir verilog:"$FT/netv" --workdir "$FT/w5"
+! grep -hq "^BUFx1 " "$FT/netv/"*.v || fail "a feed-through wire became a BUFx1 buffer cell"
+ft_cells=$(grep -hc "^\(NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1\) " "$FT/netv/"*.v | tr -d ' ')
+[ "$ft_cells" = "1" ] || fail "feed-through netlist must hold exactly one comb cell (gates == logic-only count), got $ft_cells"
+grep -hq "^DFFx1 " "$FT/netv/"*.v || fail "the resetless register did not map to DFF cells"
+grep -hq "out2 = ({state_3\|out2 = {state_3" "$FT/netv/"*.v || fail "flop Q -> output is not a direct wire in the netlist"
+run pass liberty gensim "$LIB" --emit-dir lg:"$FT/models" --workdir "$FT/w6"
+run lec --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc_feedthrough.abc_feedthrough \
+    --set formal.solver=cvc5 --workdir "$FT/w7"
+echo "PASS: feed-through wires map to no buffer cell (identity-buffer bypass) and the netlist stays LEC-equivalent"

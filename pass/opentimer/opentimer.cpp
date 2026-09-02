@@ -719,15 +719,19 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     if (!io) {
       return false;
     }
-    const std::string tname{io->get_name()};
+    const std::string_view tname = io->get_name();
     if (auto it = liberty_cell_memo.find(tname); it != liberty_cell_memo.end()) {
       return it->second;
     }
     const auto& lib     = timer.celllib(ot::MAX);
-    const bool  is_cell = lib && lib->cell(tname) != nullptr;
-    liberty_cell_memo.emplace(tname, is_cell);
+    const bool  is_cell = lib && lib->cell(std::string{tname}) != nullptr;
+    liberty_cell_memo.emplace(std::string{tname}, is_cell);
     return is_cell;
   };
+
+  // The boundary and gate phases below walk the same immutable leaf set. Reuse
+  // one traversal result instead of recreating it independently for each.
+  const auto nodes       = leaf_nodes(g);
   // ABC's builtin tie cells (emitted when the Liberty has no constant cells).
   // Named once so the 3rd and 5th phases agree these are NOT gates.
   const auto is_tie_cell = [](const auto& node) -> bool {
@@ -1507,7 +1511,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // that creates its bit-net PI. OpenTimer then rejects the connection while
   // still returning success, and the PI appears later -- leaving a silently
   // incomplete timing graph.
-  for (auto& node : leaf_nodes(g)) {
+  for (auto node : nodes) {
     auto op = type_op_of(node);
     if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory && op != Ntype_op::Div && op != Ntype_op::Rem) {
       continue;
@@ -1560,7 +1564,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // iterates the flattened leaf set (forward_hier descends design modules;
   // Liberty-cell leaves are yielded via opaque_gids_), so gates from every
   // instance land in the single ot::Timer under their hier-unique names.
-  for (auto& node : leaf_nodes(g)) {
+  for (auto node : nodes) {
     auto op = type_op_of(node);
     if (op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op) || node.base_node().attr(livehd::attrs::native_comb_boundary).has()
         || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory || op == Ntype_op::Div || op == Ntype_op::Rem) {

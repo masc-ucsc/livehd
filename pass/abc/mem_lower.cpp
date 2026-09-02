@@ -4,6 +4,8 @@
 
 #include <format>
 #include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -44,6 +46,14 @@ spool_ptr<Dlop> bit_mask(int b) {
 
 // Node factory that stamps the memory's color on every gate it builds so the new
 // logic lands in the memory's original partition region.
+//
+// Everything below works on LANES (a `masksize`-wide write-enable group, the
+// whole word when wensize==1), never on single bits: abc_map bit-blasts a
+// bits-wide Mux into exactly one AND-OR per bit, and Get_mask/Set_mask/Concat
+// with constant masks are pure wiring there (and a slice / `{}` in cgen, a
+// concat/extract in the lec encoder). The old per-bit getbit + and2 + mux +
+// concat plumbing cost 97 nodes per (entry, port) on a 32-bit word (122k
+// input_nodes for one 32x32 tile, report_9681 finding 2) for the same AIG.
 struct Builder {
   hhds::Graph& g;
   int32_t      color;
@@ -99,23 +109,50 @@ struct Builder {
     gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, *bit_mask(b)));
     return d1(n);
   }
-  // concat 1-bit lanes[0..w-1] (LSB first) into a w-bit unsigned value
-  hhds::Pin_class concat(const std::vector<hhds::Pin_class>& lanes) {
-    int w = static_cast<int>(lanes.size());
-    if (w == 1) {
+  // Lane `l` (w bits, LSB-first) of the `total`-bit value p: bits
+  // [l*w, (l+1)*w). A single-lane value is returned as is; otherwise a
+  // Get_mask with the contiguous lane mask, which every consumer treats as a
+  // slice (zero gates).
+  hhds::Pin_class getlane(const hhds::Pin_class& p, int l, int w, int total) {
+    if (w == total && l == 0) {
+      return p;
+    }
+    auto n = mk(Ntype_op::Get_mask);
+    gu::setup_sink_by_name(n, "a").connect_driver(p);
+    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, *Dlop::get_mask_value((l + 1) * w - 1, l * w)));
+    return dw(n, w);
+  }
+  // Fit an arbitrary driver to an unsigned w-bit value (truncate / zero-extend),
+  // the same view the old per-bit getbit(p, b), b < w, fold took of a port's
+  // data. Free when the driver already is exactly that.
+  hhds::Pin_class fit(const hhds::Pin_class& p, int w) {
+    if (gu::bits_of(p) == w && gu::is_unsign(p)) {
+      return p;
+    }
+    auto n = mk(Ntype_op::Get_mask);
+    gu::setup_sink_by_name(n, "a").connect_driver(p);
+    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, *Dlop::get_mask_value(w - 1, 0)));
+    return dw(n, w);
+  }
+  // Pack equal-width lanes (LSB first, each `w` bits) into one unsigned
+  // lanes.size()*w-bit value through a Concat cell. The cell's sinks are
+  // interleaved (value, width) pairs MSB-FIRST (graph/node_util.hpp Concat
+  // contract), so cell lane i carries lanes[n-1-i]. Pins are created in
+  // descending pid order: hhds keeps a node's pin list sorted, and ascending
+  // creation rescans the growing list per pin (O(n^2) on a wide read_all).
+  hhds::Pin_class pack(const std::vector<hhds::Pin_class>& lanes, int w) {
+    const int n = static_cast<int>(lanes.size());
+    if (n == 1) {
       return lanes[0];
     }
-    hhds::Pin_class acc = konst_i(0);
-    for (int b = 0; b < w; ++b) {
-      auto sm = mk(Ntype_op::Set_mask);
-      gu::setup_sink_by_name(sm, "a").connect_driver(acc);
-      gu::setup_sink_by_name(sm, "mask").connect_driver(gu::create_const(g, *bit_mask(b)));
-      gu::setup_sink_by_name(sm, "value").connect_driver(lanes[b]);
-      acc = sm.create_driver_pin(0);
-      gu::set_bits(acc, b + 1);
-      gu::set_unsign(acc);
+    auto c      = mk(Ntype_op::Concat);
+    auto wconst = konst_i(w);
+    for (int i = n - 1; i >= 0; --i) {
+      const auto data_pid = static_cast<hhds::Port_id>(2 * i);
+      wconst.connect_sink(c.create_sink_pin(data_pid + 1));
+      lanes[static_cast<size_t>(n - 1 - i)].connect_sink(c.create_sink_pin(data_pid));
     }
-    return acc;  // w bits
+    return dw(c, n * w);
   }
 };
 
@@ -127,9 +164,29 @@ struct Port {
 
 int const_i(const hhds::Pin_class& d, int def) { return d.is_const() ? static_cast<int>(gu::const_of(d).to_just_i64()) : def; }
 
+// The address of a port when it is a plain non-negative integer constant, i.e.
+// decidable at build time (nullopt = keep the runtime compare). A negative or
+// x-bearing constant address stays on the runtime EQ path so its (degenerate)
+// value is compared bit-exactly rather than second-guessed here. The value may
+// be >= size: an out-of-range constant write selects no entry and an
+// out-of-range constant read yields 0 (the value the one-hot Hotmux returns
+// when no arm hits), matching inou/cgen's inline array emission which skips
+// such a write and slang, which rejects the index at elaboration anyway.
+std::optional<int64_t> const_addr(const hhds::Pin_class& a) {
+  if (!a.is_const()) {
+    return std::nullopt;
+  }
+  const auto& v = gu::const_of(a);
+  if (v.has_unknowns() || v.is_negative() || !v.is_just_i64()) {
+    return std::nullopt;
+  }
+  return v.to_just_i64();
+}
+
 // Lower one Memory node into flops + comb. Returns false (node left intact) for
-// shapes not handled here (whole-array cells, negedge, type==2 arrays).
-bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
+// shapes not handled here (whole-array cells, negedge, type==2 arrays) and for
+// a memory above `max_bits` storage bits (0 = no limit).
+bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   int                 bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
   spool_ptr<Dlop>     fwd;  // per-(read,write) matrix; arbitrary precision
   hhds::Pin_class     init_drv;
@@ -191,9 +248,15 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     }
   }
 
+  std::string base = std::string{gu::node_name_of(mem)};
+  if (base.empty()) {
+    base = std::format("mem{}", mem.get_debug_nid());
+  }
+
   auto bail = [&](std::string_view why) {
     livehd::diag::warn("pass.abc", "memory-unlowered", "unsupported")
-        .msg("pass.abc memory=true: memory in '{}' not bit-blasted ({}) — kept as a native instance",
+        .msg("pass.abc memory=true: memory '{}' in '{}' not bit-blasted ({}) — kept as a native instance",
+             base,
              std::string{g.get_name()},
              why)
         .emit();
@@ -215,6 +278,25 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   if (masksize <= 0 || masksize * wensize != bits) {
     return bail("non-uniform write-mask granularity");
   }
+  // memory_max_bits: a bit-blasted memory is one DFF cell per storage bit plus
+  // its write muxes, so a big SRAM-class array would swamp ABC (and is a macro
+  // in any real flow, never standard cells). Above the limit it stays a native
+  // instance, as memory=false keeps every memory. A note, not a warning: the
+  // outcome is the documented one, the user just needs to see which memory it
+  // was to raise the limit deliberately.
+  if (max_bits > 0 && static_cast<uint64_t>(bits) * static_cast<uint64_t>(size) > max_bits) {
+    livehd::diag::info("pass.abc", "memory-max-bits", "unsupported")
+        .msg("pass.abc memory=true: memory '{}' in '{}' ({} x {} = {} bits) is above memory_max_bits={} — kept as a native "
+             "instance",
+             base,
+             std::string{g.get_name()},
+             size,
+             bits,
+             static_cast<uint64_t>(bits) * static_cast<uint64_t>(size),
+             max_bits)
+        .emit();
+    return false;
+  }
 
   std::vector<Port> wr, rd;
   for (auto& [pidx, p] : ports) {
@@ -223,13 +305,30 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     if (role < 0) {  // infer when the rdport const is absent: a din pin => write
       role = p.din.is_invalid() ? 1 : 0;
     }
+    if (p.addr.is_invalid() || (role != 1 && p.din.is_invalid())) {
+      return bail(std::format("port {} has no {} pin", pidx, p.addr.is_invalid() ? "address" : "write-data"));
+    }
     (role == 1 ? rd : wr).push_back(p);
   }
-  int  n_wr    = static_cast<int>(wr.size());
+  int n_wr = static_cast<int>(wr.size());
+  int n_rd = static_cast<int>(rd.size());
   // `fwd` is a per-(read,write) matrix (graph/cell.cpp): bit r*n_wr + w says
   // read port r forwards write port w. Dlop::bit_test is arbitrary precision,
   // so wide (many-port) shapes do not truncate.
   auto fwd_bit = [&](int r, int w) -> int { return (fwd && fwd->bit_test(r * n_wr + w)) ? 1 : 0; };
+
+  // Which outputs are consumed: read port r drives pid n_wr + r (cgen), the
+  // whole-array read drives the reserved Memory_readall_pid. Decided BEFORE
+  // any node is built so an unmodelable output bails with nothing dangling.
+  const int                ra_pid = static_cast<int>(Ntype::Memory_readall_pid);
+  std::set<int>            out_pids;
+  for (const auto& out : mem.out_edges()) {
+    int pid = static_cast<int>(out.driver.get_port_id());
+    if (pid != ra_pid && (pid < n_wr || pid >= n_wr + n_rd)) {
+      return bail(std::format("unmodeled memory output pid {}", pid));
+    }
+    out_pids.insert(pid);
+  }
 
   // Past every bail(): this memory IS being bit-blasted, so an ordering="none"
   // matrix is about to be refined away. Say so once, here, rather than have the
@@ -248,11 +347,6 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   int32_t color     = gu::has_color(mem) ? gu::color_of(mem) : 0;
   bool    has_color = gu::has_color(mem);
   Builder B{g, color, has_color};
-
-  std::string base = std::string{gu::node_name_of(mem)};
-  if (base.empty()) {
-    base = std::format("mem{}", mem.get_debug_nid());
-  }
 
   // storage: one bits-wide flop per entry, power-on init from the `init` pin.
   bool has_init = init_drv.is_const();
@@ -300,74 +394,158 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     }
   }
 
-  auto en_group_bit = [&](const Port& p, int bit) -> hhds::Pin_class {
-    if (p.en.is_invalid()) {
-      return B.konst_i(1);  // no enable pin => always written
+  // Constant-address ports are decided here, at build time, instead of feeding
+  // an all-constant EQ per (entry, port) to ABC. Besides the node count, that
+  // shape was the one the EQ width bug (abc_map.cpp, EQ case) miscompiled:
+  // the bedrock multi-write tiles (br_fifo_shared_dynamic_flops: 32 write
+  // ports, wr_addr_k = k) selected every same-parity entry per port.
+  std::vector<std::optional<int64_t>> wr_caddr(n_wr), rd_caddr(n_rd);
+  for (int ji = 0; ji < n_wr; ++ji) {
+    wr_caddr[ji] = const_addr(wr[ji].addr);
+  }
+  for (int r = 0; r < n_rd; ++r) {
+    rd_caddr[r] = const_addr(rd[r].addr);
+  }
+
+  // Per write port, per lane: the data lane and the enable bit, built ONCE and
+  // shared by every entry the port can reach (a runtime-address port reaches all
+  // of them). An INVALID pin stands for "always" throughout: no enable pin, or
+  // an address match decided true at build time.
+  std::vector<std::vector<hhds::Pin_class>> wr_din_lane(n_wr, std::vector<hhds::Pin_class>(wensize));
+  std::vector<std::vector<hhds::Pin_class>> wr_en_bit(n_wr, std::vector<hhds::Pin_class>(wensize));
+  for (int ji = 0; ji < n_wr; ++ji) {
+    const auto& p   = wr[ji];
+    auto        din = B.fit(p.din, bits);
+    for (int l = 0; l < wensize; ++l) {
+      wr_din_lane[ji][l] = B.getlane(din, l, masksize, bits);
+      if (p.en.is_invalid()) {
+        continue;  // no enable pin => always written
+      }
+      if (p.en.is_const()) {  // fold a constant enable here rather than mask a literal
+        wr_en_bit[ji][l] = B.konst_i(gu::const_of(p.en).bit_test(static_cast<size_t>(l)) ? 1 : 0);
+      } else {
+        wr_en_bit[ji][l] = B.getbit(p.en, l);
+      }
     }
-    return B.getbit(p.en, bit / masksize);
+  }
+  // sel = a & b with an invalid operand meaning true.
+  auto and_opt = [&](const hhds::Pin_class& a, const hhds::Pin_class& b) -> hhds::Pin_class {
+    if (a.is_invalid()) {
+      return b;
+    }
+    if (b.is_invalid()) {
+      return a;
+    }
+    return B.and2(a, b);
+  };
+  // Fold one write into a lane: no mux at all when the select is decided at
+  // build time (true: the data replaces the lane; false: nothing), one
+  // masksize-wide Mux otherwise. The mux WRAPS the previous value, so the last
+  // port folded is the outermost and wins a same-address collision.
+  auto fold_lane = [&](hhds::Pin_class& lane, const hhds::Pin_class& sel, const hhds::Pin_class& din_l) {
+    if (sel.is_invalid() || sel.is_known_true()) {
+      lane = din_l;
+      return;
+    }
+    if (sel.is_known_false()) {
+      return;
+    }
+    lane = B.mux(sel, lane, din_l, masksize);
   };
 
   // write next-state: for each entry, fold the write ports in ASCENDING order so
-  // the highest-numbered enabled port wins a same-address collision (cgen).
+  // the highest-numbered enabled port wins a same-address collision (cgen). A
+  // constant-address port is folded into ITS entry only — the others never see
+  // it (no EQ, no mux) — and is skipped entirely when the address is out of
+  // range. The order of the fold is the priority, so ports are skipped, never
+  // reordered.
   for (int en = 0; en < size; ++en) {
-    std::vector<hhds::Pin_class> nb(bits);
-    for (int b = 0; b < bits; ++b) {
-      nb[b] = B.getbit(data_q[en], b);  // hold
+    std::vector<hhds::Pin_class> lane(wensize);
+    for (int l = 0; l < wensize; ++l) {
+      lane[l] = B.getlane(data_q[en], l, masksize, bits);  // hold
     }
-    for (const auto& p : wr) {
-      auto match = B.eq(p.addr, B.konst_i(en));  // waddr == en
-      for (int b = 0; b < bits; ++b) {
-        auto sel  = B.and2(en_group_bit(p, b), match);
-        auto dinb = B.getbit(p.din, b);
-        nb[b]     = B.mux(sel, nb[b], dinb, 1);  // sel ? din : hold
+    bool touched = false;
+    for (int ji = 0; ji < n_wr; ++ji) {
+      if (wr_caddr[ji] && *wr_caddr[ji] != en) {
+        continue;  // a constant address elsewhere (or out of range) never touches this entry
+      }
+      hhds::Pin_class match;  // invalid = matches at build time (constant address == en)
+      if (!wr_caddr[ji]) {
+        match = B.eq(wr[ji].addr, B.konst_i(en));  // waddr == en
+      }
+      touched = true;
+      for (int l = 0; l < wensize; ++l) {
+        fold_lane(lane[l], and_opt(wr_en_bit[ji][l], match), wr_din_lane[ji][l]);
       }
     }
-    B.concat(nb).connect_sink(gu::setup_sink_by_name(data_flop[en], "din"));
+    // An entry no port can ever write holds its power-on value: din = Q.
+    auto nb = touched ? B.pack(lane, masksize) : data_q[en];
+    nb.connect_sink(gu::setup_sink_by_name(data_flop[en], "din"));
   }
 
-  // read ports: address mux (Hotmux over the one-hot address) -> forwarding ->
-  // optional read-latency register. dout driver pid = n_wr + read-rank (cgen).
+  // read ports: address mux -> forwarding -> optional read-latency register.
+  // dout driver pid = n_wr + read-rank (cgen). A read nobody consumes builds
+  // nothing.
   std::map<int, hhds::Pin_class> read_dout;
-  for (int r = 0; r < static_cast<int>(rd.size()); ++r) {
-    const auto&                  p = rd[r];
-    std::vector<hhds::Pin_class> onehot(size);
-    for (int en = 0; en < size; ++en) {
-      onehot[en] = B.eq(p.addr, B.konst_i(en));
+  for (int r = 0; r < n_rd; ++r) {
+    if (!out_pids.contains(n_wr + r)) {
+      continue;
     }
-    auto hm = B.mk(Ntype_op::Hotmux);
-    gu::setup_sink_by_name(hm, "s").connect_driver(B.concat(onehot));
-    for (int en = 0; en < size; ++en) {
-      gu::setup_sink_by_name(hm, std::format("p{}", en + 1)).connect_driver(data_q[en]);
+    const auto&     p = rd[r];
+    hhds::Pin_class dmem;
+    if (rd_caddr[r]) {
+      // A constant address is a plain wire onto the entry's Q (out of range: 0,
+      // what the one-hot Hotmux below yields when no arm hits).
+      dmem = (*rd_caddr[r] < size) ? data_q[static_cast<size_t>(*rd_caddr[r])] : B.konst_i(0);
+    } else {
+      // Hotmux over the one-hot address decode. Measured a wash against a
+      // binary mux tree once mapped (report_9681 finding 4: abc_map builds both
+      // as AND-OR covers), so the one-hot form stays.
+      std::vector<hhds::Pin_class> onehot(size);
+      for (int en = 0; en < size; ++en) {
+        onehot[en] = B.eq(p.addr, B.konst_i(en));
+      }
+      auto hm = B.mk(Ntype_op::Hotmux);
+      gu::setup_sink_by_name(hm, "s").connect_driver(B.pack(onehot, 1));
+      for (int en = 0; en < size; ++en) {
+        gu::setup_sink_by_name(hm, std::format("p{}", en + 1)).connect_driver(data_q[en]);
+      }
+      dmem = B.dw(hm, bits);
     }
-    hhds::Pin_class dmem = B.dw(hm, bits);
     // read-enable: a disabled read yields 0 here (cgen models it as X, a
     // don't-care). Skip the gate when the enable is a constant-true.
     if (!p.en.is_invalid() && !p.en.is_known_true()) {
-      dmem = B.mux(B.getbit(p.en, 0), B.konst_i(0), dmem, bits);
+      dmem = p.en.is_known_false() ? B.konst_i(0) : B.mux(B.getbit(p.en, 0), B.konst_i(0), dmem, bits);
     }
     // forwarding: fold the forwarding write ports in ASCENDING order so the
     // HIGHEST-numbered enabled port ends up outermost and wins — the same
     // priority as the write next-state fold above, as cgen/cgen_sim/lec all
-    // use. (Each B.mux wraps the previous value, so the last port folded is
-    // the outermost and therefore the winner.)
-    std::vector<hhds::Pin_class> db(bits);
-    for (int b = 0; b < bits; ++b) {
-      db[b] = B.getbit(dmem, b);
+    // use. A const/const address pair is decided here: unequal never collides
+    // (no EQ, no mux), equal collides whenever the port is enabled.
+    std::vector<hhds::Pin_class> lane(wensize);
+    for (int l = 0; l < wensize; ++l) {
+      lane[l] = B.getlane(dmem, l, masksize, bits);
     }
+    bool touched = false;
     for (int ji = 0; ji < n_wr; ++ji) {
       // `fwd` is a per-(read,write) matrix (graph/cell.cpp): bit r*n_wr + ji.
       if (fwd_bit(r, ji) == 0) {
         continue;
       }
-      const auto& wp     = wr[ji];
-      auto        amatch = B.eq(wp.addr, p.addr);  // waddr == raddr
-      for (int b = 0; b < bits; ++b) {
-        auto sel  = B.and2(en_group_bit(wp, b), amatch);
-        auto dinb = B.getbit(wp.din, b);
-        db[b]     = B.mux(sel, db[b], dinb, 1);
+      hhds::Pin_class amatch;  // invalid = equal constant addresses
+      if (rd_caddr[r] && wr_caddr[ji]) {
+        if (*rd_caddr[r] != *wr_caddr[ji]) {
+          continue;
+        }
+      } else {
+        amatch = B.eq(wr[ji].addr, p.addr);  // waddr == raddr
+      }
+      touched = true;
+      for (int l = 0; l < wensize; ++l) {
+        fold_lane(lane[l], and_opt(wr_en_bit[ji][l], amatch), wr_din_lane[ji][l]);
       }
     }
-    hhds::Pin_class dout = B.concat(db);
+    hhds::Pin_class dout = touched ? B.pack(lane, masksize) : dmem;
     if (mtype == 1) {  // synchronous read: register the resolved value once
       auto F = B.mk(Ntype_op::Flop);
       F.attr(hhds::attrs::name).set(std::format("{}__rdlat{}", base, p.block));
@@ -382,23 +560,21 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     read_dout[n_wr + r] = dout;
   }
 
+  // Whole-array read (the reserved Memory_readall_pid driver, size*bits wide):
+  // the concatenation of the entry flops with entry 0 in the LOW bits — the
+  // layout graph/cell.cpp fixes for `init`/`update`, inou/cgen emits (`assign
+  // <ra> = <array>` over a `reg [size-1:0][bits-1:0]`, i.e. {data[size-1], ...,
+  // data[0]}) and pass/lec encodes (CONCAT of SELECT(a_cur, i), i ascending
+  // into the high bits). It reads the COMMITTED contents, never a same-cycle
+  // write: that is the lec encoder's a_cur, and cgen refuses a read_all memory
+  // with a non-zero fwd/undef matrix, so no forwarding can apply here.
+  if (out_pids.contains(ra_pid)) {
+    read_dout[ra_pid] = B.pack(data_q, bits);
+  }
+
   // rewire the memory's read-data consumers onto the new douts, then drop it.
-  bool ok = true;
   for (const auto& out : mem.out_edges()) {
-    int  pid = static_cast<int>(out.driver.get_port_id());
-    auto it  = read_dout.find(pid);
-    if (it == read_dout.end() || it->second.is_invalid()) {
-      ok = false;  // an output we did not model (e.g. read_all) — cannot lower
-      break;
-    }
-  }
-  if (!ok) {
-    // Leave the (already-built) helper logic dangling-but-harmless and keep the
-    // native memory: dead logic is dropped by cprop/dce downstream.
-    return bail("unmodeled memory output (read_all / async whole-array read)");
-  }
-  for (const auto& out : mem.out_edges()) {
-    read_dout[static_cast<int>(out.driver.get_port_id())].connect_sink(out.sink);
+    read_dout.at(static_cast<int>(out.driver.get_port_id())).connect_sink(out.sink);
   }
   mem.del_node();
   return true;
@@ -406,7 +582,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
 
 }  // namespace
 
-int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, uint64_t max_bits) {
   int lowered = 0;
   for (const auto& gp : graphs) {
     if (!gp) {
@@ -419,7 +595,7 @@ int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
       }
     }
     for (const auto& m : mems) {
-      if (lower_one(*gp, m)) {
+      if (lower_one(*gp, m, max_bits)) {
         ++lowered;
       }
     }

@@ -281,14 +281,24 @@ void Pass_liberty::gensim(Eprp_var& var) {
   Abc_Stop();
 
   // ABC's read_lib drops sequential cells, so the Mio loop above never sees the
-  // flop. Scan the Liberty text directly for a plain posedge D-flop and emit a
-  // `q = Flop(clk, d)` model so pass.abc's mapped-DFF Subs resolve for LEC/sim.
-  if (auto dff = livehd::liberty::find_dff_cell(files)) {
-    livehd::liberty::emit_dff_model(outlib, *dff);
+  // flop. Scan the Liberty text directly for the plain posedge D-flop pass.abc
+  // picks and emit a `q = Flop(clk, d)` model -- `Flop(Not(d))` for a QN cell,
+  // the state IS the pin (see emit_dff_model) -- so its mapped-DFF Subs resolve
+  // for LEC/sim. The whole drive ladder is modeled: pass.abc instantiates any
+  // rung by Q-net fanout (DFFHQNx1/x2/x3 on ASAP7), and an unmodeled rung would
+  // leave the LEC a blackbox.
+  for (const auto& dff : livehd::liberty::resolve_dff_cells(files).ladder) {
+    livehd::liberty::emit_dff_model(outlib, dff);
     ++modeled;
     if (verbose) {
-      std::print("[pass.liberty] gensim: DFF model '{}' (d={}, clk={}, q={})\n", dff->name, dff->d_pin, dff->clk_pin,
-                 dff->q_pin);
+      std::print("[pass.liberty] gensim: DFF model '{}' (d={}, clk={}, {}={}{}, area={})\n",
+                 dff.name,
+                 dff.d_pin,
+                 dff.clk_pin,
+                 dff.q_inverted ? "qn" : "q",
+                 dff.q_pin,
+                 dff.q_inverted ? " = Flop(Not(d))" : "",
+                 dff.area);
     }
   }
   if (verbose) {

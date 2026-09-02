@@ -70,11 +70,19 @@ run compile lg:"$D/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$D/rev" --wo
 NV=$(ls "$D/netv/"*.v | wc -l | tr -d ' ')
 [ "$NV" = "1" ] || fail "expected exactly one netlist .v, got $NV"
 grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$D/netv/"*.v || fail "no standard cells in the flat netlist"
-# hier_seq's `reg r:u8 = 0` requests Pyrope's implicit reset, and the test
-# Liberty has no reset-capable DFF, so pass.abc keeps those registers NATIVE
-# while still mapping their data cones (same contract lhd_abc_seq_test pins).
-grep -hq "posedge" "$D/netv/"*.v || fail "reset-bearing native flops were lost in the flat netlist"
-! grep -hq "DFFx1 " "$D/netv/"*.v || fail "a reset-bearing flop became a plain DFFx1 in the flat netlist"
+# hier_seq's `reg r:u8 = 0` requests Pyrope's implicit SYNCHRONOUS reset. That
+# reset is a D-cone mux (reset has priority over the enable), so pass.abc folds
+# it into the latch and every one of the six 8-bit registers (delayer.r x4,
+# stage_unit.r x2) maps to plain DFFx1 cells named after the register under
+# its flattened hierarchical name (`\a.d1.r_<bit>`); no native `always` block
+# survives (same contract lhd_abc_seq_test pins on abc_seq/abc_async_reset).
+! grep -hq "posedge" "$D/netv/"*.v || fail "a synchronous-reset register stayed a native flop in the flat netlist"
+N_DFF=$(grep -h "^DFFx1 " "$D/netv/"*.v | wc -l | tr -d ' ')
+[ "$N_DFF" = 48 ] || fail "expected 48 DFFx1 cells (6 registers x 8 bits) in the flat netlist, got $N_DFF"
+for inst in a.d1 a.d2 a b.d1 b.d2 b; do
+  n=$(grep -hE "^DFFx1 \\\\${inst}\\.r_[0-7] " "$D/netv/"*.v | wc -l | tr -d ' ')
+  [ "$n" = 8 ] || fail "register '${inst}.r' did not map to 8 DFFx1 cells under its hierarchical name (got $n): $(grep -h '^DFFx1 ' "$D/netv/"*.v | head -12)"
+done
 ! grep -hq "__c[0-9]" "$D/netv/"*.v || fail "a __c<color> region module leaked into the flat netlist"
 ! grep -hq "stage_unit\b" "$D/netv/"*.v || fail "a child module instance survived the flatten"
 
@@ -83,11 +91,11 @@ cat "$D/rev/"*.v > "$D/ref.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
 echo "PASS: flat netlist LEC-equivalent to the flat original-logic twin"
 
-# Flop-name preservation on the native read-back: abc_flat_names' registers
-# carry an implicit power-on init and NO reset, so register=true (default)
-# cannot map them to plain DFF cells — each must be rebuilt as ONE multi-bit
-# native flop under its ORIGINAL hierarchical name (never anonymous per-bit
-# __rinit/__r flops; the LEC's tier-1 state pairing leans on those names).
+# Flop-name preservation through the flatten: abc_flat_names' registers are
+# declared without an initializer (no init, no reset), so register=true maps
+# them to per-bit DFF cells — each under its ORIGINAL hierarchical name (never
+# anonymous per-bit __rinit/__r/g<id> flops; the LEC's tier-1 state pairing
+# leans on those names).
 FIX2=inou/prp/tests/pyrope/abc_flat_names.prp
 TOP2=abc_flat_names.top
 [ -f "$FIX2" ] || fail "missing fixture $FIX2"
@@ -105,10 +113,11 @@ run compile lg:"$D2/re" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/rev" -
 # name has to survive as `\a.r_<bit>` on the cell instances. (It must NOT be
 # asserted as one multi-bit native `reg \a.r`: that only happened because ABC
 # picked a concrete value for the DON'T-CARE latch init, and materializing that
-# optimization witness as a hardware power-on value is exactly what pass.abc now
+# optimization witness as a hardware power-on value is exactly what pass.abc
 # refuses. What this fixture pins is the NAME correspondence the LEC's tier-1
-# state pairing needs — `canon_flop_name` folds the per-bit spelling — not which
-# of the two encodings ABC's internal choice happens to select.)
+# state pairing needs — `canon_flop_name` folds the per-bit spelling. The
+# multi-bit `reg` alternative is kept for a Liberty without a DFF cell, where
+# the read-back rebuilds native flops.)
 for inst in a b; do
   grep -hqE "^reg \\[[0-9]+:0\\] \\\\${inst}\\.r " "$D2/netv/"*.v \
     || grep -hqE "DFFx1 \\\\${inst}\\.r_[0-9]+ " "$D2/netv/"*.v \

@@ -1,7 +1,20 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
+
+# The DFF-cell picker's sources, hashed into //pass/abc:abc_salt: the pick
+# (cell name, QN-as-Q polarity, drive ladder) is baked into every cached mapped
+# body, so a change here must invalidate the incremental cache like a mapper
+# change does.
+filegroup(
+    name = "liberty_dff_srcs",
+    srcs = [
+        "liberty_dff.cpp",
+        "liberty_dff.hpp",
+    ],
+    visibility = ["//pass/abc:__pkg__"],
+)
 
 # Liberty DFF-cell scan + model, shared with pass.abc (no Pass_plugin so it can be
 # depended on without pulling the pass.liberty command registration).
@@ -14,6 +27,20 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+    ],
+)
+
+# The DFF-cell parse/rank contract on synthetic Liberty text shaped like the
+# PDKs pass.abc maps against (ASAP7 QN family, sky130 dfxtp/dfxbp), the negedge
+# and clear/preset rejections, and the area ranking.
+cc_test(
+    name = "liberty_dff_test",
+    size = "small",
+    srcs = ["liberty_dff_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":liberty_dff",
+        "@googletest//:gtest_main",
     ],
 )
 

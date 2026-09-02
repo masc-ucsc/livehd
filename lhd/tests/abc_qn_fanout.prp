@@ -1,0 +1,12 @@
+// A 1-bit resetless register fanning out to 20 XOR cones. ABC's `buffer -N`
+// tail never buffers a latch output (a CI), so the mapped Q net keeps its 20
+// loads and pass.abc's DFF drive ladder must put this register on the strongest
+// rung the library has (test_qn.lib: DFFNx2), while a fanout-1 register (abc_
+// resetless_sync) stays on the x1 base rung. The D input comes straight from a
+// port: under a QN cell that is the one place the D-side inversion has nothing
+// to absorb into, so exactly one inverter cell is expected there.
+pub mod abc_qn_fanout(clk:u1, d:u1, x:u20) -> (q:u20@[]) {
+  reg state:u1:[clock_pin=ref clk] = nil
+  state = d
+  q = if state != 0 { ~x } else { x }
+}

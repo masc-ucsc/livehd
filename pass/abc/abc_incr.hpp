@@ -118,10 +118,14 @@ public:
   [[nodiscard]] const std::string& dir() const { return dir_; }
 
   // Salt for the whole cache: the global inputs the per-region compare does not
-  // see. Library CONTENT, sequential-mapping mode, DFF cell, plus a schema tag
-  // bumped when the mapper's read-back or the cache shape changes.
+  // see. Library CONTENT, sequential-mapping mode, the RESOLVED DFF cell
+  // (liberty::dff_descriptor -- name:d:clk:q:inverted -- of the auto-pick, not
+  // the raw `dff_cell` option, which is empty by default: a cached mapped body
+  // names its DFF Sub decl and reads its QN pin as Q, so a different pick must
+  // be a different key), plus a schema tag bumped when the mapper's read-back
+  // or the cache shape changes.
   [[nodiscard]] static uint64_t make_salt(std::string_view library_path, bool map_register, bool map_memory,
-                                          std::string_view dff_cell);
+                                          std::string_view dff_desc);
 
 private:
   std::string dir_;

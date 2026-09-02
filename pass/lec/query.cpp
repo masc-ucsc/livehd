@@ -2630,6 +2630,63 @@ inline void merge_top_in(Top_in& slot, int w, bool sgn) {
   return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {ones});
 }
 
+// ── pass.abc memory=true storage-flop bank of a Memory ─────────────────────
+// pass/abc/mem_lower.cpp bit-blasts a Memory `<mem>` (size x bits) into one
+// bits-wide storage flop per entry named `<mem>__mem<i>`, and the DFF-cell
+// read-back (abc_map.cpp map_dff_cell) then splits each into one-bit library
+// cells `<mem>__mem<i>_<b>` (b = 0..bits-1, LSB first). The mapped design thus
+// carries EITHER shape per entry -- the whole flop when the register stayed
+// native (a Liberty without a DFF cell, register_max_bits), the bit cells
+// otherwise -- while the source design carries the Memory. Both LEC engines
+// need that correspondence: without it the entry cuts and the Memory's array
+// are unrelated free symbols, and a read of a never-written entry (a resetless
+// register file right after reset: br_ram_flops_tile 16x32, EnableReset=0)
+// refutes at the first checked step on a difference the hardware cannot show.
+//
+// Resolve, for one Memory whose canonical name is `mem_name`, the flop-side key
+// of every storage cut. Name-directed and TOTAL: every entry 0..size-1 must be
+// covered at the exact width, so a bank that merely shares the prefix, an entry
+// mapped at another width, or a cut that also exists on the memory side (then
+// it is a matched cut in its own right) yields no bank at all -- the caller
+// then falls back to today's independent symbols, never to a partial tie.
+struct Mem_entry_bank {
+  std::vector<std::string>              entry_keys;  // per entry: the bits-wide flop key, "" when bit-blasted
+  std::vector<std::vector<std::string>> bit_keys;    // per entry: the one-bit cell keys LSB first, empty when whole
+};
+std::optional<Mem_entry_bank> find_mem_entry_bank(const std::string&      mem_name,
+                                                  const Mem_sig&          sig,
+                                                  const Io_name_map<int>& bank_flops,
+                                                  const Io_name_map<int>& mem_side_flops) {
+  if (mem_name.empty() || sig.size <= 0 || sig.bits <= 0) {
+    return std::nullopt;
+  }
+  Mem_entry_bank out;
+  out.entry_keys.assign(static_cast<size_t>(sig.size), std::string{});
+  out.bit_keys.assign(static_cast<size_t>(sig.size), {});
+  for (int i = 0; i < sig.size; ++i) {
+    const std::string ek = std::format("{}__mem{}", mem_name, i);
+    if (auto it = bank_flops.find(ek); it != bank_flops.end()) {
+      if (it->second != sig.bits || mem_side_flops.contains(ek)) {
+        return std::nullopt;
+      }
+      out.entry_keys[static_cast<size_t>(i)] = ek;
+      continue;
+    }
+    std::vector<std::string> bits;
+    bits.reserve(static_cast<size_t>(sig.bits));
+    for (int b = 0; b < sig.bits; ++b) {
+      std::string bk  = std::format("{}_{}", ek, b);
+      auto        bit = bank_flops.find(bk);
+      if (bit == bank_flops.end() || bit->second != 1 || mem_side_flops.contains(bk)) {
+        return std::nullopt;
+      }
+      bits.push_back(std::move(bk));
+    }
+    out.bit_keys[static_cast<size_t>(i)] = std::move(bits);
+  }
+  return out;
+}
+
 struct Packed_scalar_bridge {
   std::string              wide_key;
   std::vector<std::string> bit_keys;  // LSB first
@@ -4552,9 +4609,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // of the flop's free init symbol (never a constant), so equal designs prove
     // and a divergent written value still refutes on the write path.
     {
-      // Per-design memory cut keys (shape-only occ, matching build_shared_mems).
+      // Per-design memory cut keys (shape-only occ, matching build_shared_mems)
+      // plus the canonical hier name the storage-flop bank bridge below keys on.
+      struct Mem_cut {
+        Mem_sig     sig;
+        std::string name;
+      };
       auto collect_mem_keys = [&](hhds::Graph* g) {
-        Io_name_map<Mem_sig> out;
+        Io_name_map<Mem_cut> out;
         Io_name_map<int>     occ;
         for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
           if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
@@ -4566,7 +4628,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
           std::string key = mem_state_key(sig, occ[sg]++);
-          out.emplace(key, sig);  // first occurrence wins (matches build_shared_mems)
+          out.emplace(key, Mem_cut{sig, eff(node.get_hier_name())});  // first occurrence wins (matches build_shared_mems)
         }
         return out;
       };
@@ -4604,11 +4666,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // other (require uniqueness so an arbitrary width collision does not mis-pair
       // — sound either way, but a mis-pair would leave the block REFUTED, no worse
       // than today's independent-init behavior).
-      auto try_bridge = [&](const Io_name_map<Mem_sig>& mem_side,
-                            const Io_name_map<Mem_sig>& other_mem_side,
+      auto try_bridge = [&](const Io_name_map<Mem_cut>& mem_side,
+                            const Io_name_map<Mem_cut>& other_mem_side,
                             const Io_name_map<int>&     mem_side_flops,
                             const Io_name_map<int>&     other_side_flops) {
-        for (const auto& [mkey, sig] : mem_side) {
+        for (const auto& [mkey, mc] : mem_side) {
+          const Mem_sig& sig = mc.sig;
           if (other_mem_side.count(mkey)) {
             continue;  // memory corresponds to a memory -> already shared, no bridge
           }
@@ -4648,6 +4711,88 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       };
       try_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);  // ref memory <-> impl wide flop
       try_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w);  // impl memory <-> ref wide flop
+
+      // ── Memory <-> storage-flop bank init bridge ────────────────────────
+      // The pass.abc memory=true shape (find_mem_entry_bank): the other design
+      // holds the Memory `<mem>` as per-entry flops `<mem>__mem<i>` or their
+      // one-bit DFF cells `<mem>__mem<i>_<b>`. Same construction as the wide-flop
+      // bridge above -- entry i of the shared initial array := that entry's
+      // power-on symbol (the bit cells concatenated MSB first), so the array is
+      // a deterministic FUNCTION of the bank's free init, never a constant:
+      // equal designs prove and a divergent written value still refutes on the
+      // write path. SOUND only as a total tie, which the finder guarantees.
+      // Measured on the lhdtrack lec_netlist flow with memory=true
+      // (register_max_bits=0, ASAP7): br_ram_flops_tile refuted both cvc5
+      // obligations at checked step 1 (rd_data ref=0xFFFFFFFF impl=0xFFFFFFFE
+      // on a read of never-written entry 0 right after reset) and proves with
+      // this tie. The inductive engine has its own twin below (the flop-cut
+      // miter needs the next-state side as well).
+      auto try_bank_bridge = [&](const Io_name_map<Mem_cut>& mem_side,
+                                 const Io_name_map<Mem_cut>& other_mem_side,
+                                 const Io_name_map<int>&     mem_side_flops,
+                                 const Io_name_map<int>&     bank_side_flops) {
+        // A name shared by two memories on the memory side cannot direct a tie.
+        absl::flat_hash_map<std::string, int> name_count;
+        for (const auto& [mkey, mc] : mem_side) {
+          ++name_count[mc.name];
+        }
+        for (const auto& [mkey, mc] : mem_side) {
+          if (other_mem_side.count(mkey) || mc.name.empty() || name_count[mc.name] != 1) {
+            continue;
+          }
+          auto sit = ref_mem.find(mkey);
+          if (sit == ref_mem.end()) {
+            continue;  // no shared array was built for this key
+          }
+          auto bank = find_mem_entry_bank(mc.name, mc.sig, bank_side_flops, mem_side_flops);
+          if (!bank) {
+            continue;
+          }
+          cvc5::Term arr = sit->second;  // base = shared free array; every entry overwritten below
+          bool       ok  = true;
+          for (int i = 0; i < mc.sig.size && ok; ++i) {
+            const auto ix = static_cast<size_t>(i);
+            cvc5::Term entry;
+            if (!bank->entry_keys[ix].empty()) {
+              auto fv = ref_state.find(bank->entry_keys[ix]);
+              if (fv == ref_state.end() || fv->second.width != mc.sig.bits) {
+                ok = false;
+                break;
+              }
+              entry = fv->second.term;
+            } else {
+              for (int b = mc.sig.bits - 1; b >= 0; --b) {  // MSB first, as CONCAT expects
+                auto fv = ref_state.find(bank->bit_keys[ix][static_cast<size_t>(b)]);
+                if (fv == ref_state.end() || fv->second.width != 1) {
+                  ok = false;
+                  break;
+                }
+                entry = entry.isNull() ? fv->second.term : tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {entry, fv->second.term});
+              }
+            }
+            if (!ok) {
+              break;
+            }
+            arr = tm.mkTerm(cvc5::Kind::STORE,
+                            {arr, tm.mkBitVector(static_cast<uint32_t>(mc.sig.addr_w), static_cast<uint64_t>(i)), entry});
+          }
+          if (!ok) {
+            continue;
+          }
+          ref_mem[mkey]  = arr;
+          impl_mem[mkey] = arr;
+          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+            std::fprintf(stderr,
+                         "[LEC_MEMBANK bmc] memory '%s' (%dx%d) initial array tied to its storage-flop bank (%s)\n",
+                         mc.name.c_str(),
+                         mc.sig.size,
+                         mc.sig.bits,
+                         bank->entry_keys[0].empty() ? "one-bit cells" : "whole entries");
+          }
+        }
+      };
+      try_bank_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);  // ref memory <-> impl bank
+      try_bank_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w);  // impl memory <-> ref bank
     }
 
     // A persistent WRITABLE memory may still have comptime power-on contents.
@@ -5846,9 +5991,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     int                      bits        = 0;     // array element width
     bool                     mem_in_impl = true;  // which design owns the Memory
     std::string              wide_flop_key;       // nonempty: one packed size*bits flop instead of a bank
-    std::vector<std::string> flop_keys;           // canon flop key per index 0..N-1
+    std::vector<std::string> flop_keys;           // canon flop key per index 0..N-1 ("" for a bit-blasted entry)
     std::vector<int>         flop_w;              // real width per index
     std::vector<bool>        flop_sgn;
+    // pass.abc memory=true bank (find_mem_entry_bank): per index, the one-bit
+    // DFF-cell keys LSB first when that entry is bit-blasted; empty otherwise.
+    std::vector<std::vector<std::string>> bit_keys;
   };
   std::vector<Bridge> bridges;
   {
@@ -5947,6 +6095,73 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     };
     pair_wide_side(ref_flops, impl_flops, ref_mems, impl_mems, /*mem_in_impl=*/true);   // ref wide flop <-> impl memory
     pair_wide_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl wide flop <-> ref memory
+
+    // The pass.abc memory=true storage bank (find_mem_entry_bank): the Memory
+    // `<mem>` on one side, per-entry flops `<mem>__mem<i>` or their one-bit DFF
+    // cells `<mem>__mem<i>_<b>` on the other. Name-directed, so it claims the
+    // memory BEFORE the suffix-shape detector below, whose `<base>_<idx>` split
+    // sees each bit-blasted entry as its own N-bit "bank" and would pair a
+    // 16x16 memory with the 16 cells of ONE entry (a wrong relation is only an
+    // unprovable step, never a false proof, but it is the shape that matters
+    // for every mapped netlist). Current state: flop_i / cell (i,b) := entry i
+    // of the shared array (its bit b); next state: the per-cell twin in the
+    // bridge miter below.
+    auto pair_entry_bank_side = [&](const Io_name_map<FlopRec>& bank_flops,
+                                    const Io_name_map<FlopRec>& mem_side_flops,
+                                    const Io_name_map<MemRec>&  bank_side_mems,
+                                    const Io_name_map<MemRec>&  mem_side_mems,
+                                    bool                        mem_in_impl) {
+      Io_name_map<int> bank_w, mem_w;
+      for (const auto& [key, rec] : bank_flops) {
+        bank_w.emplace(key, rec.w);
+      }
+      for (const auto& [key, rec] : mem_side_flops) {
+        mem_w.emplace(key, rec.w);
+      }
+      absl::flat_hash_map<std::string, int> name_count;
+      for (const auto& [mkey, mrec] : mem_side_mems) {
+        ++name_count[mrec.name];
+      }
+      for (const auto& [mkey, mrec] : mem_side_mems) {
+        auto& used = mem_in_impl ? used_impl_mem : used_ref_mem;
+        if (used.count(mkey) || bank_side_mems.count(mkey) || !shared_mems.count(mkey) || mrec.name.empty()
+            || name_count[mrec.name] != 1) {
+          continue;
+        }
+        auto bank = find_mem_entry_bank(mrec.name, mrec.sig, bank_w, mem_w);
+        if (!bank) {
+          continue;
+        }
+        Bridge br;
+        br.mem_key     = mkey;
+        br.addr_w      = mrec.sig.addr_w;
+        br.size        = mrec.sig.size;
+        br.bits        = mrec.sig.bits;
+        br.mem_in_impl = mem_in_impl;
+        br.flop_keys   = bank->entry_keys;
+        br.bit_keys    = bank->bit_keys;
+        br.flop_w.assign(br.flop_keys.size(), mrec.sig.bits);
+        br.flop_sgn.assign(br.flop_keys.size(), false);
+        for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+          if (auto fit = bank_flops.find(br.flop_keys[i]); fit != bank_flops.end()) {
+            br.flop_w[i]   = fit->second.w;
+            br.flop_sgn[i] = fit->second.sgn;
+          }
+        }
+        bridges.push_back(std::move(br));
+        used.insert(mkey);
+        if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+          std::fprintf(stderr,
+                       "[LEC_MEMBANK ind] memory '%s' (%dx%d) paired with its storage-flop bank (%s)\n",
+                       mrec.name.c_str(),
+                       mrec.sig.size,
+                       mrec.sig.bits,
+                       bank->entry_keys[0].empty() ? "one-bit cells" : "whole entries");
+        }
+      }
+    };
+    pair_entry_bank_side(ref_flops, impl_flops, ref_mems, impl_mems, /*mem_in_impl=*/true);   // ref bank <-> impl memory
+    pair_entry_bank_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl bank <-> ref memory
 
     // Banks among the flops that have NO counterpart on the other side: group keys
     // by stripping a trailing "_<idx>"; a base with a contiguous 0..N-1 of uniform
@@ -6063,6 +6278,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (size_t i = 0; i < br.flop_keys.size(); ++i) {
         cvc5::Term sel
             = tm.mkTerm(cvc5::Kind::SELECT, {A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+        if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
+          // bit-blasted entry: cell b holds bit b of the entry
+          for (size_t b = 0; b < br.bit_keys[i].size(); ++b) {
+            auto op                    = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(b), static_cast<uint32_t>(b)});
+            shared[br.bit_keys[i][b]] = Val{tm.mkTerm(op, {sel}), 1, false};
+          }
+          continue;
+        }
         Val cur                 = Val{fit_to(tm, Val{sel, br.bits, false}, br.flop_w[i]), br.flop_w[i], br.flop_sgn[i]};
         shared[br.flop_keys[i]] = cur;
       }
@@ -6630,14 +6853,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;
     }
     for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+      cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT,
+                                 {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+      if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
+        // bit-blasted entry: cell b's next state vs bit b of the entry's next value
+        for (size_t b = 0; b < br.bit_keys[i].size(); ++b) {
+          std::string bkey = std::string("\x01nxt:") + br.bit_keys[i][b];
+          bank_out_set.insert(bkey);
+          auto bit_it = bank_enc.outputs.find(bkey);
+          if (bit_it == bank_enc.outputs.end()) {
+            continue;
+          }
+          auto       op   = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(b), static_cast<uint32_t>(b)});
+          cvc5::Term mbit = tm.mkTerm(op, {sel});
+          bridge_diffs.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, bit_it->second, 1), mbit}));
+        }
+        continue;
+      }
       std::string nxt_key = std::string("\x01nxt:") + br.flop_keys[i];
       bank_out_set.insert(nxt_key);
       auto fit_it = bank_enc.outputs.find(nxt_key);
       if (fit_it == bank_enc.outputs.end()) {
         continue;
       }
-      cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT,
-                                 {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
       int        w   = std::max(br.flop_w[i], br.bits);
       cvc5::Term bnk = fit_to(tm, fit_it->second, w);
       cvc5::Term mem = fit_to(tm, Val{sel, br.bits, false}, w);

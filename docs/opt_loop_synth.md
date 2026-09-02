@@ -334,7 +334,7 @@ today, for the record:
 | `pass.abc.adder` | **`rca`** (ripple-carry) | `pass_abc.cpp:73` |
 | `pass.abc.block_size` | `0` (auto) | `pass_abc.cpp:74` |
 | `pass.abc.multiplier` | `array` (only kind implemented) | `abc_map.hpp:44` |
-| `pass.abc.register` / `memory` | `true` / `false` | `pass_abc.cpp:59,63` |
+| `pass.abc.register` / `memory` | `true` / `true` (memories bit-blast to DFF cells up to `memory_max_bits`, default 65536) | `pass_abc.cpp` |
 | `pass.color.synth_alg` | `synth` (`pipe` \| `synth` \| `cones`) | `pass_color.cpp:56` |
 | `pass.color.min_ge` | `1000` GE | `pass_color.cpp:65` |
 | `pass.color.max_ge` | `25_000` synthesis GE (16 GiB / 15-min per-color calibration) | `pass_color.cpp:89` |

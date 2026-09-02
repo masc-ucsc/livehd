@@ -630,7 +630,7 @@ void Incr_cache::save() {
   livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls
 }
 
-uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory, std::string_view dff_cell) {
+uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory, std::string_view dff_desc) {
   // The generated source salt automatically covers mapper/read-back and ABC
   // revision changes. Keep the schema tag for persistent on-disk shape changes
   // that older readers cannot parse; stale bodies must never survive either.
@@ -646,7 +646,10 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // v9: hashing moved to core/hash_util (canonical FNV offset basis; the local
   // copy used the truncated one) -- every salt/digest value shifted, so the
   // tag is bumped to keep this history honest (v8 values never coexist).
-  uint64_t h = fnv1a64("abc-incr-v9");
+  // v10: the DFF item is the RESOLVED cell descriptor (name:d:clk:q:inverted),
+  // and a mapped body may hold QN-cell Subs whose latch carried ~D; a v9 cache
+  // keyed on the empty raw option could serve DFFHQx4 bodies under the QN pick.
+  uint64_t h = fnv1a64("abc-incr-v10");
   h          = combine64(h, kAbcSrcSalt);
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {
@@ -656,7 +659,7 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
     h = combine64(h, fnv1a64(library_path));
   }
   h = combine64(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(map_memory));
-  h = combine64(h, fnv1a64(dff_cell));
+  h = combine64(h, fnv1a64(dff_desc));
   return h;
 }
 

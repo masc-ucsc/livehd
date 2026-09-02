@@ -13,6 +13,10 @@ load("//tools:copt_default.bzl", "COPTS")
 # F8), so a partitioner change can invalidate a mapped body just as a mapper
 # change can.
 #
+# `pass/liberty/liberty_dff.*` too: it picks the DFF cell a mapped body's Sub
+# decl names (and whether its QN pin is read as Q), so a ranking change confined
+# to that file must invalidate cached bodies exactly like a mapper change.
+#
 # `abc_salt.hpp` is excluded from the glob because it is this rule's own OUTPUT;
 # globbing a generated header back in as a source is a cycle.
 filegroup(
@@ -33,6 +37,7 @@ genrule(
     name = "abc_salt",
     srcs = [
         ":mapper_srcs",
+        "//pass/liberty:liberty_dff_srcs",
         "//pass/partition:partition_srcs",
         "//:MODULE.bazel",
     ],

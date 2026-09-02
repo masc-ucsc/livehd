@@ -678,7 +678,7 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
     default:
       emit_unsupported(expr.sourceRange,
                        "unsupported-unary-op",
-                       std::string("unary operator '") + std::string(slang::ast::toString(expr.op)) + "' is not supported");
+                       std::format("unary operator #{} is not supported", static_cast<int>(expr.op)));
       return "0";
   }
 }

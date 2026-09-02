@@ -11,7 +11,9 @@
 // flop for 2 cycles total, `top` combines two stage_units. Flops live in
 // `delayer` (reg r) and `stage_unit` (reg r), so `pass color synth` must split
 // each def at its registers, and the named flops exercise abc seq=true
-// flop-name preservation. The shared `m` value also gives acyclic coloring a
+// flop-name preservation (`= 0` is Pyrope's implicit synchronous reset: the
+// registers map to DFF cells `r_<bit>`, `\a.d1.r_<bit>` under a whole-design
+// flatten). The shared `m` value also gives acyclic coloring a
 // real internal fanout, independent of frontend width/sign wrappers. Registers
 // only store (no narrowing) because runtime wrap/sat has no tolg lowering yet.
 

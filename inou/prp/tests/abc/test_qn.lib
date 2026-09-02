@@ -1,0 +1,122 @@
+/* test.lib plus the ASAP7-shaped QN flop family: the register-mapping pick must
+ * be the smallest-area PLAIN POSEDGE flop even when its only output is the
+ * complement (`next_state : "!D"` + `pin (QN) {function : "IQN"}` is exactly how
+ * ASAP7 spells DFFHQNx1..x3, 0.2916 um^2 against DFFHQx4's 0.3645).
+ *   DFFNx1  area 5   QN-only posedge  -> the pick (beats DFFx1's 6)
+ *   DFFNx2  area 5.5 same pins        -> the second drive-ladder rung
+ *   DFFNLx1 area 4   clocked_on "!CLK" -> NEGEDGE decoy: cheapest, must never win
+ *   AND2x1  area 3.5 the inverting twin of NAND2x1 (3): under a user flow the
+ *           read-back swaps a NAND2 D-cone root for it (3.5 - 3 < INVx1's 1)
+ */
+library(test_qn_lib) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  capacitive_load_unit (1,pf);
+  default_inout_pin_cap : 0.0;
+  default_input_pin_cap : 0.0;
+  default_output_pin_cap : 0.0;
+  default_fanout_load : 1.0;
+
+  cell(INVx1) {
+    area : 1;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(BUFx1) {
+    area : 2;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(NAND2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A B)'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(NOR2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A+B)'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(AND2x1) {
+    area : 3.5;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A B)";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.25");} cell_fall(scalar){values("0.25");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.25");} cell_fall(scalar){values("0.25");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(XOR2x1) {
+    area : 5;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A^B)";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.3");} cell_fall(scalar){values("0.3");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.3");} cell_fall(scalar){values("0.3");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(DFFx1) {
+    area : 6;
+    ff(IQ, IQN) { next_state : "D"; clocked_on : "CLK"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1;
+      timing() { related_pin : "CLK"; timing_type : hold_rising;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");} } }
+    pin(Q)   { direction : output; function : "IQ";
+      timing() { related_pin : "CLK"; timing_type : rising_edge;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(DFFNx1) {
+    area : 5;
+    ff(IQN, IQNN) { next_state : "!D"; clocked_on : "CLK"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1;
+      timing() { related_pin : "CLK"; timing_type : hold_rising;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");} } }
+    pin(QN)  { direction : output; function : "IQN";
+      timing() { related_pin : "CLK"; timing_type : rising_edge;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(DFFNx2) {
+    area : 5.5;
+    ff(IQN, IQNN) { next_state : "!D"; clocked_on : "CLK"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1;
+      timing() { related_pin : "CLK"; timing_type : hold_rising;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");} } }
+    pin(QN)  { direction : output; function : "IQN";
+      timing() { related_pin : "CLK"; timing_type : rising_edge;
+                 cell_rise(scalar){values("0.08");} cell_fall(scalar){values("0.08");}
+                 rise_transition(scalar){values("0.08");} fall_transition(scalar){values("0.08");} } }
+  }
+  cell(DFFNLx1) {
+    area : 4;
+    ff(IQN, IQNN) { next_state : "!D"; clocked_on : "!CLK"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1;
+      timing() { related_pin : "CLK"; timing_type : hold_falling;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");} } }
+    pin(QN)  { direction : output; function : "IQN";
+      timing() { related_pin : "CLK"; timing_type : falling_edge;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+}

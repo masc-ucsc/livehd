@@ -8094,10 +8094,15 @@ public:
         a_max = a_min;  // bare-pipe (1,0) sentinel realizes at min
       }
       const std::string name(lnast_->get_name(name_nid));
-      auto              sink = g_->get_output_pin(name);
-      if (sink.is_invalid()) {
+      const auto        io = g_->get_io();
+      if (!io || !io->has_output(name)) {
+        // A tuple-typed output store names the aggregate here, while the graph
+        // boundary contains only its flattened dotted leaves. There is no
+        // aggregate pin to stamp; each leaf carries the stage annotation from
+        // the normal tuple flattening path.
         continue;
       }
+      auto sink = g_->get_output_pin(name);
       sink.attr(livehd::attrs::pending_time).set({a_min, a_max});
       pending_checks_.push_back({sink, name, a_min, a_max, /*is_sink=*/true});
     }
