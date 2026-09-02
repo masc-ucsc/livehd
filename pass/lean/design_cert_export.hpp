@@ -34,7 +34,11 @@
 namespace lean_design_cert {
 
 // Source kinds, matching `CertBuild::source_kind` exactly.
-enum class SourceKind { Input = 0, Const = 1, Flop = 2, MemImage = 3 };
+// Matches `CertBuild::source_kind` exactly.  `RomConst` is an IMMUTABLE table:
+// unlike `MemImage` it has no entry in `RuntimeState.mems`, because a ROM carries
+// nothing from cycle to cycle.  (A type=1 SYNCHRONOUS ROM is still not stateless
+// -- its registered read port becomes an ordinary FlopDesc.)
+enum class SourceKind { Input = 0, Const = 1, Flop = 2, MemImage = 3, RomConst = 4 };
 
 struct SourceIn {
   uint32_t    id       = 0;  // emitter id
@@ -51,6 +55,10 @@ struct SourceIn {
   uint32_t    reset_input      = 0;    // ORDINAL of the driving primary input
   std::string reset_value      = "0";  // Lean `Int`
   bool        reset_active_low = false;
+  // RomConst only: `size` entries, each `width` bits, entry 0 first.  The Lean
+  // side bounds reads by `contents.size`, NOT by 2^addr_w -- an inferred table's
+  // entry count need not be a power of two and `addr_width` rounds up.
+  std::vector<std::string> rom_contents;
 };
 
 struct NodeIn {
@@ -194,6 +202,19 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
         src_lines.push_back("SourceDesc.memImg " + std::to_string(s.ordinal) + " " + std::to_string(s.addr_w) + " "
                             + std::to_string(s.width));
         break;
+      case SourceKind::RomConst: {
+        std::string tbl = "#[";
+        for (size_t i = 0; i < s.rom_contents.size(); ++i) {
+          if (i) {
+            tbl += ", ";
+          }
+          tbl += s.rom_contents[i];
+        }
+        tbl += "]";
+        src_lines.push_back("SourceDesc.memConst " + std::to_string(s.addr_w) + " " + std::to_string(s.width) + " "
+                            + tbl);
+        break;
+      }
     }
   }
 

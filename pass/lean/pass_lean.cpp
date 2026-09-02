@@ -222,6 +222,24 @@ struct Memory_info {
   std::vector<size_t>           write_ports;
   bool                          sync = false;                   // type == 1 (registered read data)
   std::map<size_t, std::string> read_reg_field;                 // port_id -> st_ read-data register field (sync only)
+
+  // Initialization / whole-array pins (graph/cell.cpp pids 11..14).  RECORDED
+  // during the pin walk and CLASSIFIED after it: the strict ROM test needs the
+  // read/write port split, and `memory_policy_summary` needs it too -- reporting
+  // from inside the walk printed `rdports=0 wrports=0 addr_width=1` (struct
+  // defaults) for memories that in fact have a read port, because a ROM's port
+  // pins sit at raw pids 0/2/4/10, all BELOW `init` at 11.
+  Node_pin init_pin;
+  Node_pin update_pin;
+  Node_pin update_enable_pin;
+  Node_pin bulk_reset_pin;
+
+  // Immutable ROM: `init` is a constant AND no write port is active AND `update`
+  // is not driven AND the type is one whose read semantics we model.  A WRITABLE
+  // initialized memory is RAM-with-initial-contents, which is a different thing
+  // and is refused rather than silently treated as constant.
+  bool                     is_rom = false;
+  std::vector<std::string> rom_contents;  // `size` entries, each `bits` wide, entry 0 first
 };
 
 struct LeanCtx {
@@ -229,6 +247,11 @@ struct LeanCtx {
   std::string  top_name;
   std::string  base_name;
   bool         strict = true;
+  // `formal.lean.mode=verified_compiler`.  Read by parse_memory_info: features
+  // whose Lean counterpart exists ONLY in the verified-compiler model (ROM
+  // contents, async reset, a nonzero reset value) are accepted there and still
+  // refused on the legacy path, where the corresponding state is unconstrained.
+  bool         verified_compiler = false;
   size_t       max_width = 1024;
 
   absl::flat_hash_set<std::string> used_fields;
@@ -273,18 +296,92 @@ void check_width(const LeanCtx& ctx, const Node& node, uint32_t w, std::string_v
   }
 }
 
+uint32_t minimal_unsigned_const_width(const Dlop& v);  // defined below
+
+// Width of a constant pin's VALUE.
+//
+// `bits_of()` is 0 on a const pin: the value implies the width
+// (inou/yosys/lgyosys_tolg.cpp:477, and its `dpin_width` does exactly this).
+// `pass/lec/encode.cpp:648` resolves a constant the same way -- value width
+// first, adapted to the operator context after.
+uint32_t intrinsic_const_width(const Dlop& v) {
+  if (!v.is_just_i64()) {
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+  }
+  const int64_t iv = v.to_just_i64();
+  if (iv < 0) {
+    // A negative literal needs its sign bit; get_bits() already counts it.
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+  }
+  return minimal_unsigned_const_width(v);
+}
+
 uint32_t pin_width(const LeanCtx& ctx, const Node_pin& pin, const Node& owner) {
   auto w = raw_pin_width(pin);
-  if (w == 0 || static_cast<size_t>(w) > ctx.max_width) {
-    if (pin_is_const(pin)) {
-      return 1;
+
+  if (pin_is_const(pin)) {
+    const auto v = pin_const_value(pin);
+    if (w == 0) {
+      // UNSIZED constant: the value carries the width.  Returning 1 here (as this
+      // did) modeled `0x6000000` as a single bit, i.e. as 0 -- and because the
+      // fast model and the certificate share this function they truncated
+      // IDENTICALLY, so step 5 proved and the LEC gate (which compares RTL to
+      // LGraph, not the model to either) never looked.  The result was a model
+      // that silently disagreed with the RTL and passed both gates.
+      const auto iw = intrinsic_const_width(v);
+      if (static_cast<size_t>(iw) > ctx.max_width) {
+        fatal(ctx, "node n_" + std::to_string(node_id(owner)) + ": unsized constant needs " + std::to_string(iw)
+                       + " bits > max_width=" + std::to_string(ctx.max_width));
+      }
+      return iw;
     }
+    if (static_cast<size_t>(w) > ctx.max_width) {
+      // Do NOT fall back to 1: silently remodeling a too-wide constant as one bit
+      // is the same failure in a different disguise.
+      fatal(ctx, "node n_" + std::to_string(node_id(owner)) + ": constant pin width " + std::to_string(w)
+                     + " > max_width=" + std::to_string(ctx.max_width));
+    }
+    // DECLARED width: honour it, but only if it can hold the value.  A value
+    // above its declared unsigned width makes the attribute "a lie" and
+    // "downstream emit/LEC silently diverges" -- graph/node_util.hpp:323 asserts
+    // exactly this in debug builds.  Refuse rather than widen (which would
+    // contradict the graph) or truncate (which would drop real bits).
+    if (ctx.strict && !v.has_unknowns() && !v.is_negative()
+        && intrinsic_const_width(v) > static_cast<uint32_t>(w)) {
+      fatal(ctx, "node n_" + std::to_string(node_id(owner)) + ": constant pin declares width " + std::to_string(w)
+                     + " but its value needs " + std::to_string(intrinsic_const_width(v))
+                     + " bits (graph/node_util.hpp:323 -- the bits attribute does not hold the value). "
+                       "Fix or explicitly truncate this constant upstream; pass.lean will not guess.");
+    }
+    return static_cast<uint32_t>(w);
+  }
+
+  if (w == 0 || static_cast<size_t>(w) > ctx.max_width) {
     if (ctx.strict) {
       check_width(ctx, owner, w, "pin");
     }
     return 1;
   }
   return static_cast<uint32_t>(w);
+}
+
+// Width for a DATA operand of a width-sensitive operator.
+//
+// Operator-aware, per pass/lec/encode.cpp:648's "value width, then adapt to the
+// operator context".  An unsized constant must be at least as wide as the
+// operation, because its minimal width can put a 1 in the top bit: `0x6000000`
+// is 27 bits minimally, so an SRA that reads its operand SIGNED would see
+// bit 26 set and compute a negative quotient.  At the operation's own 29 bits it
+// is positive, which is what the RTL means.
+//
+// Non-constant pins are returned unchanged -- widening a real signal here would
+// change the emitted model for designs that are already proven.
+uint32_t data_dep_width(const LeanCtx& ctx, const Node_pin& pin, const Node& owner, uint32_t op_w) {
+  const auto pw = pin_width(ctx, pin, owner);
+  if (!pin_is_const(pin)) {
+    return pw;
+  }
+  return std::max(pw, op_w);
 }
 
 uint32_t node_width(const LeanCtx& ctx, const Node& node) {
@@ -413,18 +510,20 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       mi.ports[port_id].enable = e.driver;
     } else if (pname == "clock_pin") {
       mi.ports[port_id].clock = e.driver;
+    } else if (pname == "init") {
+      mi.init_pin = e.driver;
+    } else if (pname == "update") {
+      mi.update_pin = e.driver;
+    } else if (pname == "update_enable") {
+      mi.update_enable_pin = e.driver;
+    } else if (pname == "reset") {
+      mi.bulk_reset_pin = e.driver;
     } else {
-      // No silent drop.  graph/cell.cpp gives the Memory cell pins 0..15, and the
-      // arms above cover 12 of them.  The rest -- `init` (11), and the WHOLE-ARRAY
-      // trio `update` (12) / `update_enable` (13) / `reset` (14) -- change the
-      // cell's semantics: when `update` is driven the cell carries ONE bulk
-      // next-state bus instead of N per-entry write ports, and `reset` restores
-      // `init`.  None of that is modeled, so falling through would emit a memory
-      // with no bulk update and no reset and call it a faithful model.
-      fatal(ctx,
-            memory_policy_summary(mi) + ". unsupported Memory pin `" + pname + "` (raw pid " + std::to_string(raw_pid)
-                + ") is driven. pass.lean models per-entry read/write ports only; `init`/`update`/`update_enable`/`reset` "
-                  "(whole-array contents, bulk next-state, bulk enable, reset) have no counterpart in the emitted model.");
+      // No silent drop: graph/cell.cpp gives the Memory cell pids 0..15 and the
+      // arms above now cover all of them, so reaching here means the cell grew a
+      // pin this pass has never seen.
+      fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + ": unknown Memory pin `" + pname + "` (raw pid "
+                     + std::to_string(raw_pid) + ") is driven.");
     }
   }
 
@@ -480,6 +579,103 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // to these per-port driver pins; the emitter binds n_<mem>_p<pid> to match.
   for (size_t k = 0; k < mi.read_ports.size(); ++k) {
     mi.ports[mi.read_ports[k]].driver_pid = static_cast<uint32_t>(mi.write_ports.size() + k);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Initialization / whole-array classification.  Deliberately AFTER the pin
+  // walk, the port split and `addr_width`, so every diagnostic below can report
+  // the real shape.
+  // ---------------------------------------------------------------------------
+  if (!mi.update_pin.is_invalid() || !mi.update_enable_pin.is_invalid() || !mi.bulk_reset_pin.is_invalid()) {
+    // A WHOLE-ARRAY cell: one bulk next-state bus instead of N per-entry write
+    // ports, and `reset` restores `init` at runtime (graph/cell.cpp:234-241).
+    // None of that is modeled; `init` is a RUNTIME bus in this shape, not
+    // contents, so it must not be mistaken for a ROM table.
+    fatal(ctx, memory_policy_summary(mi)
+                   + ". this is a WHOLE-ARRAY Memory cell (`update`/`update_enable`/`reset` driven): one bulk "
+                     "next-state bus instead of per-entry write ports, and `init` carries the runtime reset-value "
+                     "bus rather than contents. pass.lean models per-entry ports only.");
+  }
+
+  if (!mi.init_pin.is_invalid()) {
+    // STRICT: only an immutable table becomes `memConst`.
+    if (!mi.write_ports.empty()) {
+      fatal(ctx, memory_policy_summary(mi)
+                     + ". `init` is driven on a memory that also has " + std::to_string(mi.write_ports.size())
+                     + " write port(s): that is RAM WITH INITIAL CONTENTS, which needs an initial-state constraint on "
+                       "mutable memory state, not the immutable-table model. Refusing rather than dropping the "
+                       "initial contents.");
+    }
+    if (!pin_is_const(mi.init_pin)) {
+      fatal(ctx, memory_policy_summary(mi)
+                     + ". `init` is driven by a NON-CONSTANT pin; contents must be comptime for the immutable-table "
+                       "model.");
+    }
+    if (mi.type == 2) {
+      // encode.cpp:3466 models a type-2 array's init as a per-cycle BASE value
+      // that writes then override -- combinational-array semantics, not a
+      // persistent ROM.  With no write ports the two coincide, but saying so
+      // here would bake an unproven coincidence into the model.
+      fatal(ctx, memory_policy_summary(mi)
+                     + ". `init` on a type=2 COMBINATIONAL array is a per-cycle base value that writes override "
+                       "(pass/lec/encode.cpp:3466), which is not the persistent-ROM model. Refusing pending "
+                       "combinational-array semantics.");
+    }
+    if (!(mi.type == 0 || mi.type == 1)) {
+      fatal(ctx, memory_policy_summary(mi) + ". `init` on unsupported memory type " + std::to_string(mi.type) + ".");
+    }
+
+    const auto iv = pin_const_value(mi.init_pin);
+    if (iv.has_unknowns()) {
+      fatal(ctx, memory_policy_summary(mi)
+                     + ". `init` has X/Z bits; the strict certificate rejects four-valued contents.");
+    }
+
+    // Arbitrary-width unpack.  `init` is `size*bits` wide -- 1600 bits for a
+    // 64x25 table, 6656 for 256x26 -- so NEVER `to_just_i64()` (it asserts above
+    // 62 bits, hlop/dlop.cpp:2667).  Row-major, entry 0 in the low `bits`
+    // (graph/cell.cpp:235); same recipe as cgen_verilog.cpp:1430-1433.
+    const auto mask = Dlop::get_mask_value(static_cast<int>(mi.bits));
+    mi.rom_contents.reserve(static_cast<size_t>(mi.size));
+    for (uint64_t i = 0; i < mi.size; ++i) {
+      auto entry = iv.sra_op(*Dlop::create_integer(static_cast<int64_t>(i) * static_cast<int64_t>(mi.bits)))->and_op(*mask);
+      if (entry->is_known_zero()) {
+        mi.rom_contents.emplace_back("0");
+      } else if (entry->is_just_i64()) {
+        mi.rom_contents.emplace_back(std::to_string(entry->to_just_i64()));
+      } else {
+        mi.rom_contents.emplace_back(entry->to_decimal_string());
+      }
+    }
+
+    // Self-check: REPACK every entry and compare against the hydrated constant,
+    // truncated to size*bits.  `compileDesign_correct` says the compiled program
+    // means what the DesignCert says -- it cannot know whether this C++ unpacked
+    // the table correctly, so a wrong extraction would be PROVED CORRECT against
+    // the wrong contents.  Checked over every entry, not sampled.
+    {
+      auto repacked = Dlop::create_integer(0);
+      for (uint64_t i = 0; i < mi.size; ++i) {
+        auto entry = iv.sra_op(*Dlop::create_integer(static_cast<int64_t>(i) * static_cast<int64_t>(mi.bits)))->and_op(*mask);
+        repacked   = repacked->or_op(*entry->shl_op(*Dlop::create_integer(static_cast<int64_t>(i) * static_cast<int64_t>(mi.bits))));
+      }
+      const auto total = Dlop::get_mask_value(static_cast<int>(mi.size * mi.bits));
+      const auto want  = iv.and_op(*total);
+      if (!repacked->and_op(*total)->same_repr(*want)) {
+        fatal(ctx, memory_policy_summary(mi)
+                       + ". INTERNAL: ROM contents failed the repack self-check -- the unpacked entries do not "
+                         "reassemble into the `init` constant. Refusing rather than emitting a table that would be "
+                         "proved correct against the wrong contents.");
+      }
+    }
+
+    if (!ctx.verified_compiler) {
+      fatal(ctx, memory_policy_summary(mi)
+                     + ". `init` (ROM contents) needs formal.lean.mode=verified_compiler. The legacy path's memory "
+                       "state is an UNCONSTRAINED function with no initial-state constraint, so accepting the "
+                       "contents there would prove a theorem about an arbitrary table.");
+    }
+    mi.is_rom = true;
   }
 
   // type 0/2 = async/array (combinational read); type 1 = sync-read (registered
@@ -1038,7 +1234,9 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
       if (drivers.size() != 2) {
         fatal(ctx, "SRA node n_" + std::to_string(node_id(node)) + " is not binary.");
       }
-      const auto vw = pin_width(ctx, drivers[0], node);
+      // Data operand: at least the operation width, so an unsized constant's
+      // minimal width cannot put a 1 in the sign bit of a SIGNED read.
+      const auto vw = data_dep_width(ctx, drivers[0], node, w);
       auto sw = pin_width(ctx, drivers[1], node);
       if (pin_is_const(drivers[1])) {
         sw = std::max<uint32_t>(sw, minimal_unsigned_const_width(pin_const_value(drivers[1])));
@@ -1240,6 +1438,16 @@ struct CertBuild {
   // Verified-compiler exporter: the constant's Lean `Int` text, kept verbatim so
   // `SourceDesc.const` need not re-parse it out of `source_exprs`.
   std::map<uint32_t, std::string> source_const_int;
+  // ROM tables, by array-source id: `size` entries, each `bits` wide, entry 0
+  // first.  Source kind 4 (an IMMUTABLE table) as opposed to kind 3 (a mutable
+  // array image carried in RuntimeState).
+  std::map<uint32_t, std::vector<std::string>> source_rom_contents;
+  // Synthetic read-data registers of SYNC memories, by their source id ->
+  // (width, cert id of the next value).  A sync memory is not stateless even
+  // when its table is immutable: the registered read port IS state, and the
+  // certificate already models it as `if read_enable then table[addr] else old`
+  // (an Op_MuxBool).  These become ordinary FlopDescs in the DesignCert.
+  std::map<uint32_t, std::pair<uint32_t, uint32_t>> sync_read_regs;
   uint32_t next_synth_id = 1000000000;
 
   // ---- Memory decomposition (step 5 memory path) --------------------------
@@ -1460,7 +1668,8 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
       {
         size_t di = 0;
         for (const auto& e : inp_edges_ordered(node)) {
-          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : pin_width(ctx, e.driver, node);
+          const uint32_t dw
+              = (di == 1) ? shift_dep_width(ctx, e.driver, node) : data_dep_width(ctx, e.driver, node, w);
           deps.push_back(cert_dep_id(ctx, build, e.driver, dw));
           ++di;
         }
@@ -1493,7 +1702,8 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
         // mk_bv 1 32 = 0 and the sext_bridge amt.toNat = a.width side goal fails.
         size_t di = 0;
         for (const auto& e : inp_edges_ordered(node)) {
-          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : pin_width(ctx, e.driver, node);
+          const uint32_t dw
+              = (di == 1) ? shift_dep_width(ctx, e.driver, node) : data_dep_width(ctx, e.driver, node, w);
           deps.push_back(cert_dep_id(ctx, build, e.driver, dw));
           ++di;
         }
@@ -1611,9 +1821,12 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
   build.source_ids.insert(ids.array_src);
   build.source_exprs[ids.array_src] = "memenc s." + mi.field;
   build.source_leaf[ids.array_src]  = "s." + mi.field;
-  build.source_kind[ids.array_src]  = 3;
+  build.source_kind[ids.array_src]  = mi.is_rom ? 4 : 3;
   build.source_width[ids.array_src] = mi.bits;
   build.mem_valued.insert(ids.array_src);
+  if (mi.is_rom) {
+    build.source_rom_contents[ids.array_src] = mi.rom_contents;
+  }
 
   // Write chain for a given set of write ordinals, shared across reads that
   // forward from the same set.  The empty set is the committed image itself.
@@ -1688,6 +1901,10 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
       build.source_leaf[one_src]  = "BitVec.ofInt 1 (Int.ofNat 1)";
       build.source_kind[one_src]  = 1;
       build.source_width[one_src] = 1;
+      // The verified-compiler exporter emits `SourceDesc.const w v` for kind 1
+      // and reads the value from here; a synthetic constant must record it too,
+      // or the export fatals with "constant source id N has no value".
+      build.source_const_int[one_src] = "Int.ofNat 1";
 
       const uint32_t raw_id = build.next_synth_id++;
       emit(raw_id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, one_src}, bv_ty,
@@ -1701,6 +1918,7 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
 
       ids.rdreg_src[pidx]     = reg_src;
       ids.rdreg_next[pidx]    = nxt_id;
+      build.sync_read_regs[reg_src] = {mi.bits, nxt_id};
       ids.read_out[pidx]      = reg_src;
       build.mem_read_id[rkey] = reg_src;
       // No ctx.mem_read_fv entry: driver_expr resolves a sync read to `s.<field>`.
@@ -1827,6 +2045,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ctx.top_name  = base_name;
   ctx.strict    = strict;
   ctx.max_width = max_width;
+  ctx.verified_compiler = verified_compiler;
 
   auto gio = g->get_io();
   uint32_t next_input_source_id = 2000000000;
@@ -1889,11 +2108,12 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // state field.  Mirrors pass.isabelle parse_memory_info + memory field naming.
   for (auto& mn : memory_nodes) {
     auto mi = parse_memory_info(ctx, mn);
-    if (verified_compiler && mi.sync) {
-      fatal(ctx,
-            "verified_compiler does not yet export synchronous-read memory state: the registered read-data value "
-            "must be represented as an explicit DesignCert flop/source and next-state update");
-    }
+    // A SYNC memory's registered read-data value is now exported exactly as this
+    // guard demanded: cert_memory_expand records it in `CertBuild::sync_read_regs`
+    // and the DesignCert exporter turns each one into an ordinary FlopDesc whose
+    // `din` is the Op_MuxBool `if read_enable then table[addr] else old`.  A ROM
+    // is immutable, but a SYNCHRONOUS ROM is not stateless -- the register is
+    // state, and it is carried in RuntimeState.flops.
     std::string mem_raw;
     for (const auto& e : mn.out_edges()) {
       auto wn = livehd::graph_util::wire_name(e.driver);
@@ -2192,12 +2412,28 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         flop_ordinal[kv.first] = k++;
         flop_order.push_back(kv.first);
       }
+      // A SYNC memory's registered read port is state, even when its table is
+      // immutable.  cert_memory_expand already models it as
+      // `if read_enable then table[addr] else old` (an Op_MuxBool over the
+      // register's own source), so it is an ordinary flop here -- appended after
+      // the real flops so `RuntimeState.flops` indices stay stable.  Without
+      // this the export fatals on "flop source id N has no flop ordinal",
+      // because these source ids are synthetic (>= 1e9), not LGraph nids.
+      for (const auto& kv : cert_build.sync_read_regs) {
+        flop_ordinal[kv.first] = k++;
+        flop_order.push_back(kv.first);
+      }
     }
     std::map<uint32_t, uint32_t> mem_ordinal;     // array_src id -> index
     std::vector<uint32_t>        mem_order;
     {
       uint32_t k = 0;
       for (const auto& kv : mem_cert_ids) {
+        // ROMs are immutable: no RuntimeState.mems entry, so no ordinal and no
+        // MemoryDesc.  Their contents ride SourceDesc.memConst instead.
+        if (ctx.memory_info.at(kv.first).is_rom) {
+          continue;
+        }
         mem_ordinal[kv.second.array_src] = k++;
         mem_order.push_back(kv.first);
       }
@@ -2280,6 +2516,23 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           }
           break;
         }
+        case 4: {
+          // Immutable table.  No `RuntimeState.mems` entry and no ordinal: a ROM
+          // carries nothing from cycle to cycle.
+          s.kind = lean_design_cert::SourceKind::RomConst;
+          auto it = cert_build.source_rom_contents.find(sid);
+          if (it == cert_build.source_rom_contents.end() || it->second.empty()) {
+            fatal(ctx, "internal: ROM source id " + std::to_string(sid) + " has no contents");
+          }
+          s.rom_contents = it->second;
+          for (const auto& kv : mem_cert_ids) {
+            if (kv.second.array_src == sid) {
+              s.addr_w = ctx.memory_info.at(kv.first).addr_width;
+              break;
+            }
+          }
+          break;
+        }
         case 3: {
           s.kind    = lean_design_cert::SourceKind::MemImage;
           if (auto it = mem_ordinal.find(sid); it != mem_ordinal.end()) {
@@ -2322,6 +2575,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
 
     for (auto fid : flop_order) {
       lean_design_cert::FlopIn f;
+      // A synthetic sync-read register: width and next value come from the
+      // memory decomposition, and it has no enable and no reset -- the enable is
+      // already folded into its next value by cert_memory_expand.
+      if (auto sr = cert_build.sync_read_regs.find(fid); sr != cert_build.sync_read_regs.end()) {
+        f.width = sr->second.first;
+        f.din   = sr->second.second;
+        din.flops.push_back(f);
+        continue;
+      }
       f.width = ctx.flop_width.at(fid);
       if (auto it = flop_din_cert_ids.find(fid); it != flop_din_cert_ids.end()) {
         f.din = it->second;

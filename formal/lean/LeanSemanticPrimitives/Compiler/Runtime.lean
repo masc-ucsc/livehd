@@ -51,6 +51,12 @@ def sourceValue (i : RuntimeInput) (s : RuntimeState) : SourceDesc → CertVal
       let asserted : Bool := if al then !(bv_nonzero r) else bv_nonzero r
       .bv (if asserted then mk_bv w rv else bv_resize w (s.flops[idx]?.getD (mk_bv w 0)))
   | .memImg idx _ _  => .mem (s.mems[idx]?.getD (fun _ => mk_bv 0 0))
+  | .memConst _ dw contents =>
+      -- Bound by `contents.size`, NOT `2 ^ aw`: an inferred table's entry count
+      -- need not be a power of two, and `aw = ceil_log2 size` rounds up.
+      .mem (fun x => if 0 ≤ x ∧ x.toNat < contents.size
+                     then mk_bv dw (contents[x.toNat]!)
+                     else mk_bv dw 0)
 
 /-- The initial slot environment: every source slot, in order. -/
 def sourceEnvArr (srcs : Array SourceDesc) (i : RuntimeInput) (s : RuntimeState) : SlotEnv :=

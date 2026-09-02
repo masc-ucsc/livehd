@@ -399,6 +399,137 @@ refusals were counted as compile failures. The regenerated report is cross-check
 on two invariants — every `proven` row has `exit=0` in the queue summary, every
 `blocked-upstream` row has legacy refusing too — 122 rows, zero mismatches.
 
+## Constant width: a bug that passed both gates
+
+`pin_width` returned **1** for any constant pin whose `bits` attribute was 0 or
+above `max_width`. So `0x6000000` on an unsized pin was modeled as one bit —
+i.e. as **0**.
+
+**Why nothing caught it.** The fast model and the certificate both call
+`pin_width`, so they truncated *identically* and step 5's equality held over the
+same wrong number. The LEC gate compares the RTL against the LGraph and never
+reads the certificate. A model that silently disagreed with the RTL passed both.
+
+Found while checking a ROM's output against its RTL literals: index 0 gave
+**16** where the RTL says `58'h00c000000000010` = **3377699720527888**. The ROM
+table was right; the *constant bit planes* reconstructed outside the Memory node
+were being dropped.
+
+Six of the then-71 proven modules were affected — including
+`minion_dcache_cache_op_unit_l2`, which carried a **215-digit** value at width 1.
+
+### The resolver
+
+`bits_of()` is 0 on a const pin because the value implies the width
+(`inou/yosys/lgyosys_tolg.cpp:477`, whose `dpin_width` does exactly this;
+`pass/lec/encode.cpp:648` resolves the same way). So:
+
+| case | behaviour |
+|---|---|
+| `bits = 0` | **intrinsic value width**, never 1 |
+| `bits > 0`, value fits | preserve the declared width |
+| `bits > 0`, value does not fit | **reject** in strict mode |
+| `bits > max_width` | **reject**, never fall back to 1 |
+
+A declared width that cannot hold its value is the lie `graph/node_util.hpp:323`
+asserts against in debug builds — so it is refused, not widened (which would
+contradict the graph) and not truncated (which would drop real bits).
+`intpipe_alu`'s 30 width-6 constants carrying 64 now hit this, surfacing the
+graph violation instead of hiding it.
+
+### Operator-aware, not merely minimal
+
+`data_dep_width(pin, owner, op_w) = max(intrinsic, op_w)` for **constant** data
+operands, applied to the SRA/SHL data operand in both the fast model and the
+certificate. `0x6000000` is 27 bits minimally — and at 27 bits its top bit is
+set, so an SRA reading its operand *signed* computes a negative quotient. At the
+operation's own 29 bits it is positive, which is what the RTL means. Non-constant
+pins are unchanged, so no already-proven model shifts underneath.
+
+Result: `SourceDesc.const 1 (100663296)` → `SourceDesc.const 29 (100663296)`, and
+the 58-bit ROM output now equals the RTL literal exactly at every index checked.
+
+### The gate that closes the class
+
+`pass/lean/scripts/cert_lgraph_diff.py` — because any gate built from pass.lean's
+own extractor would miss this for the same reason the others did.
+
+* **invariant**: every non-negative `SourceDesc.const w v` has `v < 2^w`, and
+  every ROM entry fits its data width;
+* **differential**: re-render the *same* post-cprop LGraph through
+  `inou.cgen.verilog`, whose `const_to_verilog` / `dpin_width` resolve widths
+  independently, and compare the constants.
+
+The same invariant is in `vc_gates.py`, so it runs on every swept file — and the
+sweep now gates **before** proving. Both gates fail on the pre-fix export and
+pass on the fixed one.
+
+Regressions: `pass/lean/tests/width_regress/` — unsized positive (the sign-bit
+trap), unsized negative, 58- and 64-bit constants, constant shift amount with
+constant data, wide AND operand, equality against a wide constant. `check.py`
+compares the evaluated model against values computed from the RTL literals, not
+from any pass.lean artifact.
+
+## ROM support (Memory `init`)
+
+Sixteen CORE-ET modules were blocked on a driven `init` pin. They are constant
+lookup tables — VPU transcendental coefficients and Booth encoders — inferred by
+yosys from a `unique case`, not written as memory arrays in the RTL.
+
+**They are kept as Memory nodes.** Tested and rejected: `yosys.memory_mode=collect`
+selects the script branch with no `memory` pass at all, and the Memory node still
+appears — the inference is upstream, in `read_slang`/`proc`. Expanding a table
+back into mux nodes would also discard IR structure, and a genuine `$readmemh`
+ROM cannot be un-inferred at all, so `init` support is needed regardless.
+
+### Classification is strict
+
+`init` has **two disjoint meanings** (`graph/cell.cpp:234-241`), discriminated by
+whether `update` is driven: contents (comptime) versus a runtime reset-value bus.
+Only an immutable table becomes `memConst`. Refused, each with its own reason:
+a whole-array cell (`update`/`update_enable`/`reset` driven); a memory with write
+ports (that is RAM *with initial contents*, needing an initial-state constraint on
+mutable state); a non-constant `init`; and `type == 2`, whose init is a per-cycle
+base value that writes override (`pass/lec/encode.cpp:3466`), not a persistent ROM.
+
+Classification runs **after** the full pin walk. Previously it fired from inside
+it, so the diagnostic printed `rdports=0 wrports=0 addr_width=1` — struct
+defaults — for memories that do have a read port, because a ROM's port pins sit
+at raw pids 0/2/4/10, all below `init` at 11.
+
+### Contents
+
+One const pin, `size*bits` wide: 1600 bits for 64×25, 6656 for 256×26. Unpacked
+with `sra_op`/`and_op` — never `to_just_i64()`, which asserts above 62 bits. A
+**full repack self-check** then reassembles every entry and compares against the
+hydrated constant: `compileDesign_correct` cannot know whether this C++ unpacked
+the table correctly, so a wrong extraction would otherwise be *proved correct*
+against the wrong contents.
+
+Legacy mode still refuses ROMs: its memory state is an unconstrained function
+with no initial-state constraint, so accepting contents there would prove a
+theorem about an arbitrary table.
+
+### A synchronous ROM is not stateless
+
+An earlier draft of this document claimed a ROM "has no state at all" and that
+the `type == 1` modules needed only `init`. That is wrong. A synchronous ROM is
+
+    immutable contents  +  a registered read-data value
+    next_read_data = if read_enable then table[address] else old_read_data
+
+The certificate already modeled this (an `Op_MuxBool` over the register's own
+source); what was missing was the export. Each sync read register now becomes an
+ordinary `FlopDesc` — appended after the real flops so `RuntimeState.flops`
+indices stay stable — and the immutable table rides `SourceDesc.memConst` with
+**no** `MemoryDesc` and no `RuntimeState.mems` entry.
+
+### Bounds
+
+`memConst` reads are bounded by `contents.size`, **not** `2 ^ addr_width`: an
+inferred table's entry count need not be a power of two and `addr_width` rounds
+up, so `2 ^ aw` would return a fabricated entry instead of the defined zero.
+
 ## Not done
 
 1. **CVA6.** `scripts/gen_cva6_wrappers.py` generates gate wrappers from slang's

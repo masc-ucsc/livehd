@@ -53,8 +53,11 @@ def main() -> int:
     n_src = len(re.findall(r"SourceDesc\.", text))
     n_nod = len(re.findall(r"origin :=", text))
     say(f"sources={n_src} nodes={n_nod}")
-    if n_nod == 0:
-        fails.append("no nodes emitted")
+    # A design whose outputs are ALL constant-driven has zero computed nodes and
+    # is perfectly valid -- `null_vpu` and `minion_dcache_texsend` are exactly
+    # that, and both prove.  What is not valid is an EMPTY certificate.
+    if n_nod == 0 and n_src == 0:
+        fails.append("empty certificate: no sources and no nodes")
 
     # --- required declarations --------------------------------------------
     for d in ("_designCert", "_step", "_compiles", "_step_correct"):
@@ -79,6 +82,26 @@ def main() -> int:
         if "_residual" in m.group(1):
             fails.append("a multi-line theorem statement names a ResidualProgram "
                          "(kernel-defeq blowup)")
+
+    # --- constants must fit their declared width ---------------------------
+    # The failure this catches shipped and passed BOTH other gates: the fast
+    # model and the certificate share `pin_width`, so an unsized constant
+    # modeled at width 1 truncated IDENTICALLY on both sides and step 5 proved;
+    # the LEC gate compares RTL to LGraph and never reads the certificate.
+    # graph/node_util.hpp:323 calls a width that cannot hold its value "a lie".
+    for m in re.finditer(r"SourceDesc\.const\s+(\d+)\s+\(\(?(-?)Int\.ofNat\s+(\d+)\)?\)", text):
+        w, neg, v = int(m.group(1)), m.group(2), int(m.group(3))
+        if not neg and v >= (1 << w):
+            fails.append(f"const width {w} cannot hold value {v} (needs {v.bit_length()} bits)")
+
+    # ROM entries must fit the table's data width.
+    for m in re.finditer(r"SourceDesc\.memConst\s+(\d+)\s+(\d+)\s+#\[([^\]]*)\]", text):
+        dw = int(m.group(2))
+        body = m.group(3).strip()
+        for i, e in enumerate(body.split(",") if body else []):
+            ev = int(e)
+            if ev < 0 or ev >= (1 << dw):
+                fails.append(f"ROM entry {i} = {ev} does not fit dw={dw}")
 
     # --- no placeholders ---------------------------------------------------
     n_sorry = len(re.findall(r"\bsorry\b", text))

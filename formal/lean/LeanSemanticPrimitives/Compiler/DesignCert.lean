@@ -59,6 +59,24 @@ inductive SourceDesc where
                (activeLow : Bool)
   /-- current (pre-edge) image of memory `idx` -/
   | memImg (idx : Nat) (aw dw : Nat)
+  /-- An IMMUTABLE table: a ROM's contents, inlined.
+
+  Distinct from `memImg` because a ROM has no entry in `RuntimeState.mems` at
+  all — there is nothing to carry from cycle to cycle. The exporter emits this
+  only under the strict test in `parse_memory_info`: no active write port,
+  `update` not driven, `init` constant, and a supported memory type.
+
+  **The bound is `contents.size`, not `2 ^ aw`.** An inferred table's entry count
+  need not be a power of two, and `addr_width = ceil_log2(size)` rounds up — so
+  `2 ^ aw` would silently read a fabricated entry for an out-of-range address
+  instead of the defined zero. `aw` is retained for shape/documentation only.
+
+  Note this is the ASYNCHRONOUS (combinational-read) half of ROM support. A
+  `type == 1` synchronous ROM is this table PLUS a read-data register, which the
+  certificate carries as an ordinary flop (`flopQ` + a `FlopDesc` whose `din` is
+  `if read_enable then table[addr] else old`) — a ROM is immutable, but a
+  synchronous ROM is NOT stateless. -/
+  | memConst (aw dw : Nat) (contents : Array Int)
 deriving Repr, Inhabited, DecidableEq
 
 /-- A node in the dense space.  `deps` are GLOBAL slot indices. -/
