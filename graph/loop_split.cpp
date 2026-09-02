@@ -29,7 +29,7 @@ hhds::Pin_class skip_identities(hhds::Pin_class d) {
     }
     auto a    = get_driver_of_sink_name(n, "a");
     auto mask = get_driver_of_sink_name(n, "mask");
-    if (a.is_invalid() || mask.is_invalid() || !is_const_pin(mask)) {
+    if (a.is_invalid() || mask.is_invalid() || !mask.is_const()) {
       return d;
     }
     const auto bits     = bits_of(a);
@@ -37,7 +37,7 @@ hhds::Pin_class skip_identities(hhds::Pin_class d) {
     if (bits <= 0 || (out_bits > 0 && out_bits < bits)) {
       return d;
     }
-    const auto value    = hydrate_const(mask);
+    const auto& value    = const_of(mask);
     const bool all_bits = value.is_just_i64() && value.to_just_i64() == -1;
     if (!all_bits) {
       auto full = Dlop::get_mask_value(bits);

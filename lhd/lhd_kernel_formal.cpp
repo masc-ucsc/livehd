@@ -759,7 +759,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         return pname == canonical_top_name ? port : std::string{};  // a top port IS a root
       }
-      if (gu::is_const_pin(cr.net)) {
+      if (cr.net.is_const()) {
         return "";
       }
       auto       n  = cr.net.get_master_node();
@@ -769,7 +769,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
       if (op == Ntype_op::And || op == Ntype_op::Or) {  // an inline gate, likewise
         for (const auto& e : n.inp_edges()) {
-          if (gu::is_const_pin(e.driver)) {
+          if (e.driver.is_const()) {
             continue;
           }
           if (std::string r = root_of(e.driver, pname, depth + 1); !r.empty()) {

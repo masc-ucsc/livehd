@@ -327,7 +327,7 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
   };
   auto const_edge_line = [&](const auto& inp) {
     os << std::format("    const {} -> {}  ({}b)\n",
-                      gu::hydrate_const(inp.driver).to_pyrope(),
+                      gu::const_of(inp.driver).to_pyrope(),
                       end_name(inp.sink),
                       gu::bits_of(inp.driver));
   };
@@ -349,7 +349,7 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
         edge_line(out);
       }
       for (const auto& inp : pin.inp_edges()) {
-        if (gu::is_const_pin(inp.driver)) {
+        if (inp.driver.is_const()) {
           const_edge_line(inp);
         }
       }
@@ -359,16 +359,12 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
     if (!node.has_inp_edges() && !node.has_out_edges()) {  // fast: don't materialize the edge vectors
       continue;
     }
-    if (gu::type_op_of(node) == Ntype_op::Nconst) {
-      os << std::format("  {} = {}\n", gu::debug_name(node), gu::hydrate_const(node).to_pyrope());
-    } else {
-      os << std::format("  {}\n", gu::debug_name(node));
-    }
+    os << std::format("  {}\n", gu::debug_name(node));
     for (const auto& out : node.out_edges()) {
       edge_line(out);
     }
     for (const auto& inp : node.inp_edges()) {
-      if (gu::is_const_pin(inp.driver)) {
+      if (inp.driver.is_const()) {
         const_edge_line(inp);
       }
     }

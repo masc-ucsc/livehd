@@ -125,9 +125,7 @@ struct Port {
   int             role  = -1;  // 1 = read, 0 = write, -1 = infer
 };
 
-int const_i(const hhds::Pin_class& d, int def) {
-  return gu::is_const_pin(d) ? static_cast<int>(gu::hydrate_const(d).to_just_i64()) : def;
-}
+int const_i(const hhds::Pin_class& d, int def) { return d.is_const() ? static_cast<int>(gu::const_of(d).to_just_i64()) : def; }
 
 // Lower one Memory node into flops + comb. Returns false (node left intact) for
 // shapes not handled here (whole-array cells, negedge, type==2 arrays).
@@ -166,8 +164,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
         break;
       case kBits: bits = const_i(drv, bits); break;
       case kFwd:
-        if (gu::is_const_pin(drv)) {
-          fwd = Dlop::clone(gu::hydrate_const(drv));
+        if (drv.is_const()) {
+          fwd = Dlop::clone(gu::const_of(drv));
         }
         break;
       case kPosclk : posclk = const_i(drv, posclk); break;
@@ -185,7 +183,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
         // at all.) Reported below rather than dropped silently: the choice is
         // only sound in ONE lec direction, and it makes the emitted RTL differ
         // (x vs. the committed value) depending on whether abc ran.
-        if (gu::is_const_pin(drv) && !gu::hydrate_const(drv).is_known_false()) {
+        if (drv.is_const() && !drv.is_known_false()) {
           undef_refined = true;
         }
         break;
@@ -257,8 +255,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   }
 
   // storage: one bits-wide flop per entry, power-on init from the `init` pin.
-  bool has_init = !init_drv.is_invalid() && gu::is_const_pin(init_drv);
-  Dlop init_val = has_init ? gu::hydrate_const(init_drv) : Dlop{};
+  bool has_init = init_drv.is_const();
+  Dlop init_val = has_init ? gu::const_of(init_drv) : Dlop{};
   // A read-only memory (a ROM: no write ports) with init contents cannot be
   // bit-blasted soundly: cgen emits a flop's init only under a reset (the init IS
   // the reset value), so a resetless storage flop would power on as X and the
@@ -344,7 +342,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     hhds::Pin_class dmem = B.dw(hm, bits);
     // read-enable: a disabled read yields 0 here (cgen models it as X, a
     // don't-care). Skip the gate when the enable is a constant-true.
-    if (!p.en.is_invalid() && !(gu::is_const_pin(p.en) && gu::hydrate_const(p.en).is_known_true())) {
+    if (!p.en.is_invalid() && !p.en.is_known_true()) {
       dmem = B.mux(B.getbit(p.en, 0), B.konst_i(0), dmem, bits);
     }
     // forwarding: fold the forwarding write ports in ASCENDING order so the

@@ -825,7 +825,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
       const auto op = type_op_of(node);
       cn.op[i]      = static_cast<uint8_t>(op);
-      if (op == Ntype_op::Get_mask && graph_util::is_const_pin(graph_util::get_driver_of_sink_name(node, "mask"))) {
+      if (op == Ntype_op::Get_mask && graph_util::get_driver_of_sink_name(node, "mask").is_const()) {
         f |= kConstMaskGet;
       } else if (op == Ntype_op::SRA && graph_util::shift_mux_count(node) != 0) {
         f |= kRuntimeSra;

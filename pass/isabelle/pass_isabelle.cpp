@@ -59,7 +59,7 @@ Ntype_op node_op(const Node& node) { return livehd::graph_util::type_op_of(node)
 
 bool node_is_op(const Node& node, Ntype_op op) { return node_op(node) == op; }
 
-bool node_is_const(const Node& node) { return livehd::graph_util::is_type_const(node) || node_op(node) == Ntype_op::Nconst; }
+bool node_is_const(const Node& node) { return livehd::graph_util::is_type_const(node); }
 
 bool node_is_flop(const Node& node) { return livehd::graph_util::is_type_flop(node); }
 
@@ -67,7 +67,7 @@ bool node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory
 
 bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
 
-bool pin_is_const(const Node_pin& pin) { return livehd::graph_util::is_const_pin(pin); }
+bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
 livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
   auto edges = node.inp_edges();
@@ -91,9 +91,7 @@ uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(liveh
 
 uint32_t raw_node_width(const Node& node) { return raw_pin_width(node.create_driver_pin(0)); }
 
-Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::hydrate_const(pin); }
-
-Dlop node_const_value(const Node& node) { return livehd::graph_util::hydrate_const(node); }
+const Dlop& pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
 
 CertWFMode parse_cert_wf_mode(std::string_view mode) {
   if (mode == "eval") {
@@ -999,8 +997,6 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
 
   if (op_expr.empty()) {
     switch (node_op(node)) {
-      case Ntype_op::Nconst: op_expr = "Op_Const " + int_of_const(ctx, node, node_const_value(node), w); break;
-
       case Ntype_op::Sum: {
         std::vector<uint32_t> a_terms, b_terms;
         for (const auto& e : inp_edges_ordered(node)) {
@@ -1904,13 +1900,6 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
   // SHL's variadic B), use `inp_edges_ordered()` to get stable ordering.
 
   switch (op) {
-    case Ntype_op::Nconst: {
-      // Dlop expression is inlined at use site by driver_expr().
-      // But emit_node_expr is called when the node is in the let-chain
-      // (which we suppress for Dlop). If somehow reached, format directly.
-      return lit_const_at(ctx, node, node_const_value(node), w);
-    }
-
     case Ntype_op::IO: throw Emit_error("internal: emit_node_expr called on IO node");
 
     case Ntype_op::Sum: {

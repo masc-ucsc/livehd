@@ -98,8 +98,8 @@ struct Val {
       }
     }
   }
-  if (livehd::graph_util::is_const_pin(p)) {
-    auto v = livehd::graph_util::hydrate_const(p);
+  if (p.is_const()) {
+    const auto& v = livehd::graph_util::const_of(p);
     if (v.is_just_i64()) {
       return mw_of_val(v.to_just_i64());
     }
@@ -123,8 +123,8 @@ struct Val {
   if (p.is_invalid()) {
     return false;
   }
-  if (livehd::graph_util::is_const_pin(p)) {
-    auto v = livehd::graph_util::hydrate_const(p);
+  if (p.is_const()) {
+    const auto& v = livehd::graph_util::const_of(p);
     return !v.has_unknowns() && v.is_negative();
   }
   return !is_unsign(p);
@@ -212,7 +212,7 @@ struct Pending_rec {
 // corpus re-baselined first.
 std::string_view illegal_clock_op(hhds::Pin_class d) {
   for (int hops = 0; hops < 8 && !d.is_invalid(); ++hops) {
-    if (livehd::graph_util::is_graph_input_pin(d) || livehd::graph_util::is_const_pin(d)) {
+    if (livehd::graph_util::is_graph_input_pin(d) || d.is_const()) {
       return {};
     }
     auto       n  = d.get_master_node();
@@ -464,8 +464,8 @@ public:
           // A const driver carries no `bits` attr; size from the constant's own
           // width (the width cgen emits for the literal) so `out:int = 300` is
           // not squeezed into a single bit.
-          if (livehd::graph_util::is_const_pin(it->second)) {
-            dbits = livehd::graph_util::hydrate_const(it->second).get_bits();
+          if (it->second.is_const()) {
+            dbits = livehd::graph_util::const_of(it->second).get_bits();
           } else {
             dbits = mw_lookup(e.name);
           }
@@ -652,7 +652,16 @@ private:
 
   [[nodiscard]] Val leaf(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto    c  = Dlop::from_pyrope(lnast_->get_name(nid));
+      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
+      if (c->is_invalid()) {
+        error_at(nid, "upass.tolg: malformed constant literal '{}'", lnast_->get_name(nid));
+      }
+      if (c->is_nil()) {
+        // A bare `nil` literal that reaches a graph leaf has always lowered to
+        // the integer 0 (the structural nil paths are handled by their own
+        // rules); say so here -- the constant pool refuses Nil as a value.
+        c = Dlop::create_integer(0);
+      }
       int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_bits()));
       return {create_const(*g_, *c), mw};
     }
@@ -1293,7 +1302,7 @@ private:
           continue;
         }
         auto op = livehd::graph_util::type_op_of(n);
-        if (op == Ntype_op::Nconst || op == Ntype_op::IO) {
+        if (op == Ntype_op::IO) {
           continue;
         }
         if (livehd::graph_util::node_color_of(n) != 0) {
@@ -1382,8 +1391,7 @@ private:
         break;
       }
       auto e_hold = driver_at(em, static_cast<hhds::Port_id>(q_arm + 1));
-      if (e_hold.is_invalid() || !livehd::graph_util::is_const_pin(e_hold)
-          || !livehd::graph_util::hydrate_const(e_hold).is_known_false()) {
+      if (e_hold.is_invalid() || !e_hold.is_const() || !livehd::graph_util::const_of(e_hold).is_known_false()) {
         break;
       }
       din = q_arm == 0 ? d1 : d0;
@@ -1696,13 +1704,16 @@ private:
         // initializer, so a malformed parse can still arrive here — reject it
         // rather than deref a null Dlop.
         auto iv = Dlop::from_pyrope(init);
-        if (!iv) {
+        if (iv->is_invalid()) {
           error_here(
               "upass.tolg: reg '{}' reset/initial value '{}' is not a "
               "compile-time constant",
               name,
               init);
           return;
+        }
+        if (iv->is_nil()) {
+          iv = Dlop::create_integer(0);  // as always: a nil initial value is 0
         }
         setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *iv));
       }
@@ -4524,7 +4535,10 @@ private:
               iit = attrs.find("init");
             }
             if (iit != attrs.end() && iit->second != "false") {
-              if (auto iv = Dlop::from_pyrope(iit->second)) {
+              if (auto iv = Dlop::from_pyrope(iit->second); !iv->is_invalid()) {
+                if (iv->is_nil()) {
+                  iv = Dlop::create_integer(0);  // as always: a nil init is 0
+                }
                 for (const auto& e : mi.node.inp_edges()) {
                   if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {  // init (pid 11)
                     e.del_edge();
@@ -6052,7 +6066,7 @@ private:
     // never reaches pass.formal and never survives into the netlist as a
     // runtime check — that is exactly what distinguishes it from `assert`.
     if (kind == "cassert") {
-      if (!livehd::graph_util::is_const_pin(cond.pin)) {
+      if (!cond.pin.is_const()) {
         error_at(nid,
                  {"cassert-not-comptime", "unsupported"},
                  "upass.tolg: cassert condition did not fold to a compile-time "
@@ -6064,7 +6078,7 @@ private:
       // same predicate: an X/unknown constant pin is const and not known-false,
       // so it would slip through as "proven" and emit a full netlist. A cassert
       // the compiler cannot decide is exactly the case that must fail.
-      if (!livehd::graph_util::hydrate_const(cond.pin).is_known_true()) {
+      if (!livehd::graph_util::const_of(cond.pin).is_known_true()) {
         error_at(nid, {"cassert-false", "unsupported"}, "upass.tolg: cassert condition is not true at compile time");
       }
       return;  // folded true: discharged here, nothing to materialize
@@ -6714,7 +6728,7 @@ private:
       // become signed when any operand may be negative, so remember the
       // widest lossless signed representation while walking the inputs.
       signed_mw     = std::max(signed_mw, v.mw + (pin_can_be_negative(v.pin) ? 0 : 1));
-      if (wmode == OpW::andw && livehd::graph_util::is_const_pin(v.pin)) {
+      if (wmode == OpW::andw && v.pin.is_const()) {
         // A bitwise AND is bounded by its NARROWEST NON-NEGATIVE operand: `x & m`
         // can only keep bits that `m` has set, so the result never exceeds m --
         // whatever x is, and however wide.
@@ -6738,7 +6752,7 @@ private:
         // a reference temporary constant before tolg, and that constant is just
         // as valid a mask. The value comes from that pin, so there is no second
         // Dlop parse.
-        const auto cv = livehd::graph_util::hydrate_const(v.pin);
+        const auto& cv = livehd::graph_util::const_of(v.pin);
         if (cv.is_numeric() && !cv.is_negative() && (!any_nonneg || v.mw < min_nonneg_mw)) {
           min_nonneg_mw = v.mw;
           any_nonneg    = true;
@@ -6752,7 +6766,7 @@ private:
         if (Lnast_ntype::is_const(lnast_->get_type(c))) {
           // Read back the const pin leaf() built, rather than re-parsing the
           // same literal text a second time.
-          const auto cv = livehd::graph_util::hydrate_const(v.pin);
+          const auto& cv = livehd::graph_util::const_of(v.pin);
           if (cv.is_just_i64()) {
             shl_amt = cv.to_just_i64();
           }
@@ -8243,7 +8257,7 @@ public:
         return -1;
       }
       auto mn = dpin.get_master_node();
-      if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
+      if (mn.is_invalid() || is_type_const(mn)) {
         return -1;
       }
       auto it = idx.find(mn.get_debug_nid());
@@ -8690,7 +8704,7 @@ private:
       return {0, 0, false};
     }
     auto mn = dpin.get_master_node();
-    if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
+    if (mn.is_invalid() || is_type_const(mn)) {
       return {0, 0, true};
     }
     auto it = tr_.find(mn.get_debug_nid());
@@ -8773,7 +8787,7 @@ private:
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
         } else if (sink_name == "type" && raw_pid < kStride) {
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
-          if (auto v = livehd::graph_util::hydrate_const(e.driver); v.is_just_i64() && v.to_just_i64() == 1) {
+          if (const auto& v = livehd::graph_util::const_of(e.driver); v.is_just_i64() && v.to_just_i64() == 1) {
             mem_clocked = true;  // sync read: dout is registered
           }
         }

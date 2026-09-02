@@ -10,6 +10,7 @@
 #include <set>
 #include <sstream>
 #include <tuple>
+#include <utility>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -688,9 +689,9 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
   auto same_pin_attrs = [&](auto ap, auto bp) {
     return same_attr(ap, bp, livehd::attrs::bits) && same_attr(ap, bp, livehd::attrs::pin_offset)
            && same_attr(ap, bp, livehd::attrs::pin_name) && same_attr(ap, bp, livehd::attrs::pin_delay)
-           && ap.attr(livehd::attrs::pin_signed).has() == bp.attr(livehd::attrs::pin_signed).has()
-           && same_attr(ap, bp, livehd::attrs::pin_const_value) && same_range_attr(ap, bp, livehd::attrs::time_range)
-           && same_range_attr(ap, bp, livehd::attrs::pending_time);
+           && ap.attr(livehd::attrs::pin_signed).has() == bp.attr(livehd::attrs::pin_signed).has() && ap.is_const() == bp.is_const()
+           && (!ap.is_const() || ap.const_value()->same_repr(*bp.const_value()))
+           && same_range_attr(ap, bp, livehd::attrs::time_range) && same_range_attr(ap, bp, livehd::attrs::pending_time);
   };
 
   std::vector<hhds::Node_class> anodes;
@@ -713,9 +714,25 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
     auto bn = bnodes[i];
     if (!same_attr(an, bn, hhds::attrs::name) || !same_attr(an, bn, livehd::attrs::color)
         || !same_attr(an, bn, livehd::attrs::place) || !same_attr(an, bn, livehd::attrs::proven)
-        || !same_attr(an, bn, livehd::attrs::runtime_check) || !same_attr(an, bn, livehd::attrs::const_value)
-        || !same_attr(an, bn, livehd::attrs::lut) || !same_range_attr(an, bn, livehd::attrs::time_range)
-        || !same_range_attr(an, bn, livehd::attrs::pending_time)) {
+        || !same_attr(an, bn, livehd::attrs::runtime_check) || !same_attr(an, bn, livehd::attrs::lut)
+        || !same_range_attr(an, bn, livehd::attrs::time_range) || !same_range_attr(an, bn, livehd::attrs::pending_time)) {
+      return false;
+    }
+    // CONSTANT operands, compared from the SINK side. Constants are pool pins
+    // on the CONST_NODE singleton, which body().nodes() skips, so a const ->
+    // node edge is never an out_edge of anything walked here: without this,
+    // `x + 1` and `x + 2` compared identical.
+    const auto const_operands = [](const hhds::Node_class& n) {
+      std::vector<std::pair<uint32_t, std::string>> v;
+      for (const auto& edge : n.inp_edges()) {
+        if (edge.driver.is_const()) {
+          v.emplace_back(static_cast<uint32_t>(edge.sink.get_port_id()), edge.driver.const_value()->serialize());
+        }
+      }
+      std::sort(v.begin(), v.end());
+      return v;
+    };
+    if (const_operands(an) != const_operands(bn)) {
       return false;
     }
     std::vector<hhds::Edge_class> ae;

@@ -186,7 +186,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "ad9b10a906137ba76e237eed4cbcfcb8e9b6e8d3",  # "code review" (attr-only save landed)
+    commit = "5e54a0d7772c20bc945edfc0bea92fef9f7be027",  # constant pool (Dlop by value on CONST pins)
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:

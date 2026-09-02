@@ -255,8 +255,8 @@ TEST(GeWeight, ConstantsAndIoWeighNothing) {
   gio->add_output("y", 1);
   auto g = gio->create_graph();
 
-  auto k = create_typed_node(*g, Ntype_op::Nconst, 32);
-  EXPECT_EQ(ge_weight(k), 0u);
+  auto k = create_const(*g, *Dlop::create_integer(7)).get_master_node();
+  EXPECT_EQ(ge_weight(k), 0u) << "constants live on the builtin CONST_NODE";
 
   EXPECT_EQ(ge_weight(g->get_input_pin("a").get_master_node()), 0u) << "graph IO is a builtin node";
   EXPECT_EQ(ge_weight(hhds::Node_class{}), 0u) << "an invalid handle weighs nothing";

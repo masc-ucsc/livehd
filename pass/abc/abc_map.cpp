@@ -926,10 +926,10 @@ void rewrite_trivial_rems(hhds::Graph* g) {
     }
     auto b = gu::get_driver_of_sink_name(n, "b");
     auto a = gu::get_driver_of_sink_name(n, "a");
-    if (b.is_invalid() || a.is_invalid() || !gu::is_const_pin(b)) {
+    if (b.is_invalid() || a.is_invalid() || !b.is_const()) {
       continue;
     }
-    const auto bc = gu::hydrate_const(b);
+    const auto& bc = gu::const_of(b);
     if (bc.has_unknowns() || !bc.is_just_i64()) {
       continue;
     }
@@ -944,7 +944,7 @@ void rewrite_trivial_rems(hhds::Graph* g) {
   }
   for (auto n : to_fix) {
     auto          a  = gu::get_driver_of_sink_name(n, "a");
-    auto          bc = gu::hydrate_const(gu::get_driver_of_sink_name(n, "b"));
+    const auto&   bc = gu::const_of(gu::get_driver_of_sink_name(n, "b"));
     const int64_t bv = bc.to_just_i64();
     const int64_t ba = bv < 0 ? -bv : bv;
 
@@ -1424,8 +1424,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (auto it = slots.find(eff); it != slots.end()) {
       return it->second;
     }
-    if (gu::is_const_pin(drv)) {
-      auto  val  = gu::hydrate_const(drv);
+    if (drv.is_const()) {
+      const auto& val  = gu::const_of(drv);
       auto* net  = abc_const_bit(val.bit_test(eff));
       slots[eff] = net;
       return net;
@@ -1457,8 +1457,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         alias.base       = gu::get_driver_of_sink_name(master, "a");
         alias.value      = gu::get_driver_of_sink_name(master, "value");
         auto mask_driver = gu::get_driver_of_sink_name(master, "mask");
-        if (gu::is_const_pin(mask_driver)) {
-          const auto mask     = gu::hydrate_const(mask_driver);
+        if (mask_driver.is_const()) {
+          const auto& mask     = gu::const_of(mask_driver);
           const bool negative = mask.is_negative();
           const int  prefix   = std::max(0, static_cast<int>(mask.get_bits()) - (negative ? 1 : 0));
           const int  limit    = w == 0 ? prefix : std::min(prefix, w);
@@ -1543,7 +1543,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           continue;
         }
         const int bit = eff - lane.offset;
-        if (gu::is_const_pin(lane.value)) {
+        if (lane.value.is_const()) {
           net = abc_bit(lane.value, bit);
         } else {
           const int ew = std::max(1, gu::real_width(lane.value));
@@ -1581,21 +1581,21 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   // Width hints are literal at region boundaries and on internal nets alike.
   auto eff_width = [&](const hhds::Pin_class& d) -> int {
-    if (gu::is_const_pin(d)) {
+    if (d.is_const()) {
       // A constant driver usually carries NO bits attribute (bits_of == 0), so
       // An unstamped constant would clamp to 1 bit and a width-sensitive consumer
       // (mult/sra) would read e.g. 342 as its bit 0 only — collapsing the whole
       // cone to a constant (the const-mult miscompile). Size a constant from
       // its VALUE: get_bits() is the minimal two's-complement width, which is
       // exactly how the LEC reads the literal.
-      return std::max(1, static_cast<int>(gu::hydrate_const(d).get_bits()));
+      return std::max(1, static_cast<int>(gu::const_of(d).get_bits()));
     }
     return real_width(d);
   };
   // Bit i of an operand as the LEC sees it: the real bit below its effective
   // width, then sign/zero extension above it.
   auto abc_eff_bit = [&](const hhds::Pin_class& d, int i) -> Abc_Obj_t* {
-    if (gu::is_const_pin(d)) {
+    if (d.is_const()) {
       // Constants are exact in abc_bit: with no bits attr (w == 0) it reads the
       // literal's two's-complement bit at ANY position (negatives sign-extend
       // via bit_test), and with a stamped attr it clamps like every other
@@ -1659,14 +1659,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     const auto a        = gu::get_driver_of_sink_name(src_node, "a");
     const auto b        = gu::get_driver_of_sink_name(src_node, "b");
     auto       ait      = region_in_name.find(a);
-    if (!a.is_invalid() && gu::is_const_pin(b) && (gu::is_const_pin(a) || ait != region_in_name.end())) {
+    if (!a.is_invalid() && b.is_const() && (a.is_const() || ait != region_in_name.end())) {
       auto node = gu::create_typed_node(*rb.body, single_shift_op);
-      if (gu::is_const_pin(a)) {
-        gu::create_const(*rb.body, gu::hydrate_const(a)).connect_sink(gu::setup_sink_by_name(node, "a"));
+      if (a.is_const()) {
+        gu::create_const(*rb.body, gu::const_of(a)).connect_sink(gu::setup_sink_by_name(node, "a"));
       } else {
         rb.body->get_input_pin(ait->second).connect_sink(gu::setup_sink_by_name(node, "a"));
       }
-      gu::create_const(*rb.body, gu::hydrate_const(b)).connect_sink(gu::setup_sink_by_name(node, "b"));
+      gu::create_const(*rb.body, gu::const_of(b)).connect_sink(gu::setup_sink_by_name(node, "b"));
       auto out  = node.create_driver_pin(0);
       int  bits = 1;
       for (const auto& port : rb.outputs) {
@@ -1753,8 +1753,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
         auto a    = gu::get_driver_of_sink_name(m, "a");
         auto mask = gu::get_driver_of_sink_name(m, "mask");
-        if (a.is_invalid() || real_width(a) != 1 || mask.is_invalid() || !gu::is_const_pin(mask)
-            || !gu::hydrate_const(mask).bit_test(0)) {
+        if (a.is_invalid() || real_width(a) != 1 || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
           break;
         }
         f.clk_drv = a;  // get_mask(bit0) of a 1-bit wire == the wire
@@ -1766,15 +1765,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // connection. Demote the register to a boundary box (the register=false
       // machinery): it stays a native flop and its clock cone is
       // technology-mapped and reconnected like any comb-driven boundary input.
-      if (!f.clk_drv.is_invalid() && !gu::is_const_pin(f.clk_drv) && !region_in_name.contains(f.clk_drv)) {
+      if (!f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
         clk_demoted.insert(n);
         continue;
       }
-      if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); !nr.is_invalid() && gu::is_const_pin(nr)) {
-        f.neg_reset = gu::hydrate_const(nr).bit_test(0);
+      if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
+        f.neg_reset = gu::const_of(nr).bit_test(0);
       }
-      bool has_rval = !f.rval_drv.is_invalid() && gu::is_const_pin(f.rval_drv);
-      auto rval     = has_rval ? gu::hydrate_const(f.rval_drv) : Dlop{};
+      bool has_rval = f.rval_drv.is_const();
+      auto rval     = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
       f.has_init    = has_rval;
       f.init_val    = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
       auto& slots   = bitnet[f.q_pin];
@@ -1866,7 +1865,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // disjoint wide-OR shape below is wiring rather than Boolean logic.
   const auto const_operand = [](const hhds::Node_class& n, std::string_view sink) {
     const auto d = gu::get_driver_of_sink_name(n, sink);
-    return !d.is_invalid() && gu::is_const_pin(d);
+    return d.is_const();
   };
   // A Concat lane whose driver is WIDER than its declared window is a width
   // boundary only the native reconstruction path can spell (see fit_native_ins,
@@ -1910,7 +1909,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int                           unshifted_lanes = 0;
     std::string                   reject;
     for (const auto& e : n.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
+      if (e.driver.is_const()) {
         // A constant lane is already synthesized: zero is padding and one
         // fixes the corresponding output bit. It needs no Liberty cell and
         // does not participate in variable-lane overlap.
@@ -1932,7 +1931,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       const auto a = gu::get_driver_of_sink_name(shl, "a");
       const auto b = gu::get_driver_of_sink_name(shl, "b");
-      if (a.is_invalid() || !gu::is_const_pin(b)) {
+      if (a.is_invalid() || !b.is_const()) {
         packing = false;
         reject  = "shift lacks data or constant amount";
         break;
@@ -2006,7 +2005,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   for (const auto& port : rb.outputs) {
     const auto n            = port.src_driver.get_master_node();
     const auto op           = gu::type_op_of(n);
-    const bool constant_shl = op == Ntype_op::SHL && gu::is_const_pin(gu::get_driver_of_sink_name(n, "b"));
+    const bool constant_shl = op == Ntype_op::SHL && gu::get_driver_of_sink_name(n, "b").is_const();
     const bool wide_pack    = node_output_width(n) >= kNativeWiringBits && (op == Ntype_op::Concat || op == Ntype_op::Set_mask);
     if (!region.contains(n) || (!constant_shl && !wide_pack)) {
       continue;
@@ -2017,7 +2016,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   for (size_t head = 0; head < exported_wiring.size(); ++head) {
     for (const auto& e : exported_wiring[head].inp_edges()) {
-      if (e.driver.is_invalid() || gu::is_const_pin(e.driver)) {
+      if (e.driver.is_invalid() || e.driver.is_const()) {
         continue;
       }
       const auto parent = e.driver.get_master_node();
@@ -2302,7 +2301,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // for native flop/latch boundaries.
     for (const auto& e : n.inp_edges()) {
       int pid = static_cast<int>(e.sink.get_port_id());
-      if (gu::is_const_pin(e.driver)) {
+      if (e.driver.is_const()) {
         bb.const_ins.emplace_back(pid, e.driver);
       } else {
         const auto lane_fit      = concat_lane_width.find(pid);
@@ -2380,7 +2379,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       size_t count = 0;
       for (const auto& e : n.inp_edges()) {
         const auto& d = e.driver;
-        if (d.is_invalid() || gu::is_const_pin(d) || ready.contains(d) || region_input_index.contains(d)) {
+        if (d.is_invalid() || d.is_const() || ready.contains(d) || region_input_index.contains(d)) {
           continue;
         }
         ++count;
@@ -2439,7 +2438,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         for (const auto& n : stuck) {
           for (const auto& e : n.inp_edges()) {
             const auto& d = e.driver;
-            if (d.is_invalid() || gu::is_const_pin(d) || ready.contains(d) || region_input_index.contains(d)) {
+            if (d.is_invalid() || d.is_const() || ready.contains(d) || region_input_index.contains(d)) {
               continue;
             }
             const auto dn = d.get_master_node();
@@ -2606,7 +2605,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // out[j] = a[positions[j]] where positions = mask-selected source bits.
       auto a_drv = gu::get_driver_of_sink_name(n, "a");
       auto m_drv = gu::get_driver_of_sink_name(n, "mask");
-      if (!gu::is_const_pin(m_drv)) {
+      if (!m_drv.is_const()) {
         refuse(n,
                "unsupported-cell",
                "unsupported",
@@ -2615,12 +2614,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                m_drv,
                "mask driven here");
       } else {
-        auto mask   = gu::hydrate_const(m_drv);
+        const auto& mask   = gu::const_of(m_drv);
         bool neg    = mask.is_negative();
         int  mb     = mask.get_bits();
         int  pmb    = neg ? mb - 1 : mb;
         int  a_bits = gu::bits_of(a_drv);
-        if (a_bits == 0 && gu::is_const_pin(a_drv)) {
+        if (a_bits == 0 && a_drv.is_const()) {
           // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
           // eff_width above — create_const stamps only the value, never a width).
           // The zero-extend idiom Get_mask(a, -1) puts EVERY source position in
@@ -2629,7 +2628,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           // output bit, silently replacing the literal with 0. Note abc_bit is
           // never reached, so its unmaterialized-driver diagnostic cannot warn.
           // Size the literal from its VALUE, exactly as eff_width does.
-          a_bits = std::max(1, static_cast<int>(gu::hydrate_const(a_drv).get_bits()));
+          a_bits = std::max(1, static_cast<int>(gu::const_of(a_drv).get_bits()));
         }
         std::vector<int> pos;
         for (int k = 0; k < pmb; ++k) {
@@ -2651,7 +2650,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // Pure wiring, resolved lazily by abc_bit above. Do not materialize every
       // bit of a wide sparse-update bus here.
       auto m_drv = gu::get_driver_of_sink_name(n, "mask");
-      if (!gu::is_const_pin(m_drv)) {
+      if (!m_drv.is_const()) {
         refuse(n,
                "unsupported-cell",
                "unsupported",
@@ -2666,7 +2665,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // and pass/lec/encode proves against. out[i] = a[min(i, keep-1)].
       auto a_drv = gu::get_driver_of_sink_name(n, "a");
       auto b_drv = gu::get_driver_of_sink_name(n, "b");
-      if (!gu::is_const_pin(b_drv)) {
+      if (!b_drv.is_const()) {
         refuse(n,
                "unsupported-cell",
                "unsupported",
@@ -2674,7 +2673,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                {},
                b_drv,
                "bit position driven here");
-      } else if (int keep = static_cast<int>(gu::hydrate_const(b_drv).to_just_i64()); keep < 1) {
+      } else if (int keep = static_cast<int>(gu::const_of(b_drv).to_just_i64()); keep < 1) {
         refuse(n,
                "unsupported-cell",
                "unsupported",
@@ -2831,8 +2830,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       std::vector<Abc_Obj_t*> sh;  // empty => no amount (result == a)
       if (!b_d.is_invalid()) {
-        if (gu::is_const_pin(b_d)) {
-          auto amt_c = gu::hydrate_const(b_d);
+        if (b_d.is_const()) {
+          const auto& amt_c = gu::const_of(b_d);
           if (amt_c.has_unknowns() || amt_c.is_negative()) {
             // Unknown and negative are DIFFERENT failures and get different
             // reports. An unknown (`?`) amount is a value that was never given
@@ -2919,11 +2918,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             break;
           }
           auto mask_drv = gu::get_driver_of_sink_name(sink_node, "mask");
-          if (!gu::is_const_pin(mask_drv)) {
+          if (!mask_drv.is_const()) {
             all_slices = false;
             break;
           }
-          const auto mask = gu::hydrate_const(mask_drv);
+          const auto& mask = gu::const_of(mask_drv);
           if (mask.is_negative()) {
             all_slices = false;
             break;
@@ -2954,8 +2953,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       Abc_Obj_t*              fill = a_sign ? av[cw - 1] : abc_const_bit(false);  // sign bit (arith) or 0 (logical)
       std::vector<Abc_Obj_t*> res;                                                // cw-wide shifted value
-      if (gu::is_const_pin(b_d)) {
-        auto amt_c = gu::hydrate_const(b_d);
+      if (b_d.is_const()) {
+        const auto& amt_c = gu::const_of(b_d);
         if (amt_c.has_unknowns() || amt_c.is_negative()) {
           refuse_shift_amount(n, "sra", amt_c, b_d);  // see the SHL arm for why the two cases are reported apart
         } else {
@@ -2986,10 +2985,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         int64_t         bias           = 0;
         bool            affine         = false;
         auto            positive_const = [](const hhds::Pin_class& pin, int64_t& value) {
-          if (!gu::is_const_pin(pin)) {
+          if (!pin.is_const()) {
             return false;
           }
-          const auto c = gu::hydrate_const(pin);
+          const auto& c = gu::const_of(pin);
           if (!c.is_just_i64() || c.is_negative()) {
             return false;
           }
@@ -3858,7 +3857,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
     for (const auto& [pid, cdrv] : bb.const_ins) {
-      gu::create_const(*body, gu::hydrate_const(cdrv)).connect_sink(nn.create_sink_pin(pid));
+      gu::create_const(*body, gu::const_of(cdrv)).connect_sink(nn.create_sink_pin(pid));
     }
     // flop boundary: control pins straight from a region input reconnect to the
     // body input pin directly (the clock/reset never enters the AIG).
@@ -4010,8 +4009,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (auto it = src_in_to_name.find(d); it != src_in_to_name.end()) {
         return body->get_input_pin(it->second);
       }
-      if (gu::is_const_pin(d)) {
-        return gu::create_const(*body, gu::hydrate_const(d));
+      if (d.is_const()) {
+        return gu::create_const(*body, gu::const_of(d));
       }
       return {};
     };

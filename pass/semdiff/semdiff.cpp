@@ -331,20 +331,20 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
       // and an explicit `true` must fold IDENTICALLY or the two spellings of
       // the same cell would stop pairing.
       bool pos = true;
-      if (auto pc = gu::get_driver_of_sink_name(node, "posclk"); !pc.is_invalid() && gu::is_const_pin(pc)) {
-        pos = !gu::hydrate_const(pc).is_known_false();
+      if (auto pc = gu::get_driver_of_sink_name(node, "posclk"); pc.is_const()) {
+        pos = !gu::const_of(pc).is_known_false();
       }
       c.kind = hcombine(c.kind, hstr(pos ? "\x01commit+" : "\x01commit-"));
     }
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
       // Reset/init value folds into the identity — the 2f-lec precondition:
       // state with differing reset values must never pair.
-      if (auto init_d = gu::get_driver_of_sink_name(node, "initial"); !init_d.is_invalid() && gu::is_const_pin(init_d)) {
-        c.kind = hcombine(c.kind, hstr(gu::hydrate_const(init_d).serialize()));
+      if (auto init_d = gu::get_driver_of_sink_name(node, "initial"); init_d.is_const()) {
+        c.kind = hcombine(c.kind, hstr(gu::const_of(init_d).serialize()));
       }
     } else if (op == Ntype_op::Memory) {
-      if (auto size_d = gu::get_driver_of_sink_name(node, "size"); !size_d.is_invalid() && gu::is_const_pin(size_d)) {
-        c.kind = hcombine(c.kind, hstr(gu::hydrate_const(size_d).serialize()));
+      if (auto size_d = gu::get_driver_of_sink_name(node, "size"); size_d.is_const()) {
+        c.kind = hcombine(c.kind, hstr(gu::const_of(size_d).serialize()));
       }
     }
     // WIDTH is folded in LAST, and kept in a separate twin, because it is the
@@ -399,7 +399,7 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
         c.in_anchors.push_back(t);
         continue;
       }
-      if (gu::is_const_pin(drv)) {
+      if (drv.is_const()) {
         continue;
       }
       auto m = drv.get_master_node();
@@ -1112,10 +1112,10 @@ std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& n
   }
   const int bits     = gu::bits_of(a);
   const int out_bits = node_out_bits(node);
-  if (a.is_invalid() || mask.is_invalid() || bits <= 0 || out_bits != bits || !gu::is_const_pin(mask)) {
+  if (a.is_invalid() || mask.is_invalid() || bits <= 0 || out_bits != bits || !mask.is_const()) {
     return std::nullopt;
   }
-  const auto value = gu::hydrate_const(mask);
+  const auto& value = gu::const_of(mask);
   if (value.has_unknowns()) {
     return std::nullopt;
   }
@@ -1134,7 +1134,7 @@ std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& n
 }
 
 hhds::Pin_class skip_identity_get_masks(hhds::Pin_class pin) {
-  for (int hops = 0; hops < 64 && !pin.is_invalid() && !gu::is_graph_input_pin(pin) && !gu::is_const_pin(pin); ++hops) {
+  for (int hops = 0; hops < 64 && !pin.is_invalid() && !gu::is_graph_input_pin(pin) && !pin.is_const(); ++hops) {
     auto input = identity_get_mask_input(pin.get_master_node());
     if (!input) {
       break;
@@ -1173,9 +1173,9 @@ void collect_structural_sinks(const hhds::Pin_class& sink, std::vector<hhds::Pin
 // below folds operands EXACTLY the way the signatures did. Returns false when the
 // driver has no forward signature yet (i.e. it is past a frontier).
 //
-// The const case is not optional: a pid-encoded const (e.g. a get_mask's mask)
-// has no CONST_NODE in forward_class, so an obligation that only consulted fsig
-// would miss a changed constant entirely.
+// The const case is not optional: a constant driver (a CONST_NODE pool pin,
+// e.g. a get_mask's mask) is not a forward_class node, so an obligation that
+// only consulted fsig would miss a changed constant entirely.
 bool resolve_driver(const Side& s, const hhds::Pin_class& drv, uint64_t& out) {
   auto structural_drv = skip_identity_get_masks(drv);
   if (gu::is_graph_input_pin(structural_drv)) {
@@ -1184,12 +1184,12 @@ bool resolve_driver(const Side& s, const hhds::Pin_class& drv, uint64_t& out) {
                                        : static_cast<uint64_t>(static_cast<uint32_t>(structural_drv.get_port_id())));
     return true;
   }
-  if (gu::is_const_pin(structural_drv)) {
-    // A constant operand (incl. the pid-encoded const that drives e.g. a
+  if (structural_drv.is_const()) {
+    // A constant operand (a CONST_NODE pool pin, e.g. the one that drives a
     // get_mask's mask) is anchored by value — its CONST_NODE is not a
     // forward_class node, so resolve it here or forward would stall and the
     // node would fall back to a coarser backward (symmetric) match.
-    out = hcombine(hstr("\x01const"), hstr(gu::hydrate_const(structural_drv).serialize()));
+    out = hcombine(hstr("\x01const"), hstr(gu::const_of(structural_drv).serialize()));
     return true;
   }
   auto it = s.fsig.find(structural_drv.get_master_node().get_class_index());
@@ -1257,13 +1257,6 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       s.fvals.insert(s.fsig[ci]);
       continue;
     }
-    if (op == Ntype_op::Nconst) {
-      uint64_t h = hcombine(hstr("\x01const"), hstr(gu::const_value_of(node)));
-      h          = hcombine(h, node_kind_key(node));
-      s.fsig[ci] = h;
-      s.fvals.insert(h);
-      continue;
-    }
     if (is_state(op)) {
       continue;  // unseeded state cell => forward frontier
     }
@@ -1310,7 +1303,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
         continue;
       }
       auto op = gu::type_op_of(node);
-      if (op == Ntype_op::Nconst || is_state(op)) {
+      if (is_state(op)) {
         continue;  // const already signed; unseeded state is a real frontier
       }
       bool                                            ready = true;
@@ -1603,8 +1596,8 @@ bool is_persistent_state(const hhds::Node_class& node) {
     return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch;
   }
   auto type = gu::get_driver_of_sink_name(node, "type");
-  if (!type.is_invalid() && gu::is_const_pin(type)) {
-    const auto value = gu::hydrate_const(type);
+  if (type.is_const()) {
+    const auto& value = gu::const_of(type);
     if (value.is_just_i64() && value.to_just_i64() == 2) {
       return false;
     }
@@ -1858,8 +1851,8 @@ uint64_t driver_desc(const hhds::Pin_class& drv, bool a_side, const Bimap& ab, c
   if (gu::is_graph_input_pin(drv)) {
     return hcombine(hstr("\x01I"), hstr(drv.get_pin_name()));
   }
-  if (gu::is_const_pin(drv)) {
-    return hcombine(hstr("\x01C"), hstr(gu::hydrate_const(drv).serialize()));
+  if (drv.is_const()) {
+    return hcombine(hstr("\x01C"), hstr(gu::const_of(drv).serialize()));
   }
   auto     dm = drv.get_master_node();
   uint64_t pid;
@@ -1967,10 +1960,10 @@ bool occurrence_all_bits_mask(const hhds::Occurrence_node& node) {
     return false;
   }
   auto mask = occurrence_value_input(node, "mask");
-  if (!mask || !gu::is_const_pin(*mask)) {
+  if (!mask || !mask->is_const()) {
     return false;
   }
-  const auto value = gu::hydrate_const(*mask);
+  const auto& value = gu::const_of(*mask);
   return !value.has_unknowns() && value.is_just_i64() && value.to_just_i64() == -1;
 }
 
@@ -2026,9 +2019,6 @@ public:
   bool every_live_node_consumed() {
     for (const auto& node : view_.nodes(hhds::Node_order::forward)) {
       const auto op = gu::type_op_of(node);
-      if (op == Ntype_op::Nconst) {
-        continue;
-      }
       if (op == Ntype_op::Sub) {
         continue;  // occurrence view also surfaces the expanded wrapper
       }
@@ -2104,8 +2094,8 @@ private:
     }
 
     std::optional<Fold_key> result;
-    if (gu::is_const_pin(pin)) {
-      result = fold_atom("const", gu::hydrate_const(pin).serialize());
+    if (pin.is_const()) {
+      result = fold_atom("const", gu::const_of(pin).serialize());
     } else if (gu::is_graph_input_pin(pin)) {
       if (auto index = loop_index_value(pin)) {
         result = fold_atom("const", Dlop::create_integer(*index)->serialize());
@@ -2128,10 +2118,10 @@ private:
       // a normal node with its own width and operand.
       if (occurrence_all_bits_mask(node)) {
         auto       input           = occurrence_value_input(node, "a");
-        const bool input_preserves = input
-                                     && ((gu::is_const_pin(*input) && !gu::hydrate_const(*input).has_unknowns()
-                                          && !gu::hydrate_const(*input).is_negative())
-                                         || occurrence_width(*input) >= width);
+        const bool input_preserves
+            = input
+              && ((input->is_const() && !gu::const_of(*input).has_unknowns() && !gu::const_of(*input).is_negative())
+                  || occurrence_width(*input) >= width);
         if (input && native_width >= width && input_preserves) {
           result = at_width(*input, width);
         }
@@ -2168,15 +2158,15 @@ private:
     if (pin.is_invalid()) {
       return false;
     }
-    if (!gu::is_const_pin(pin) && !gu::is_graph_input_pin(pin)) {
+    if (!pin.is_const() && !gu::is_graph_input_pin(pin)) {
       const auto node = pin.get_master_node();
       visited_.insert(node.get_occurrence_index());
       if (occurrence_all_bits_mask(node)) {
         auto       input           = occurrence_value_input(node, "a");
-        const bool input_preserves = input
-                                     && ((gu::is_const_pin(*input) && !gu::hydrate_const(*input).has_unknowns()
-                                          && !gu::hydrate_const(*input).is_negative())
-                                         || occurrence_width(*input) >= width);
+        const bool input_preserves
+            = input
+              && ((input->is_const() && !gu::const_of(*input).has_unknowns() && !gu::const_of(*input).is_negative())
+                  || occurrence_width(*input) >= width);
         if (input && occurrence_width(pin) >= width && input_preserves) {
           return collect_sum(*input, width, terms);
         }
@@ -2193,8 +2183,8 @@ private:
             exact_unsigned_sum = false;
             break;
           }
-          if (gu::is_const_pin(edge.driver)) {
-            const auto value = gu::hydrate_const(edge.driver);
+          if (edge.driver.is_const()) {
+            const auto& value = gu::const_of(edge.driver);
             if (value.has_unknowns() || value.is_negative()) {
               exact_unsigned_sum = false;
               break;
@@ -2224,8 +2214,8 @@ private:
         return any;
       }
     }
-    if (gu::is_const_pin(pin)) {
-      const auto c = gu::hydrate_const(pin);
+    if (pin.is_const()) {
+      const auto& c = gu::const_of(pin);
       if (!c.has_unknowns() && c.is_known_zero()) {
         // +0 is the additive identity of the modulus being compared: cprop
         // drops a Sum's lone zero addend, so the unrolled side may lack the
@@ -2242,7 +2232,7 @@ private:
   }
 
   std::optional<Fold_key> native(const hhds::Occurrence_pin& pin) {
-    if (pin.is_invalid() || gu::is_const_pin(pin) || gu::is_graph_input_pin(pin)) {
+    if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
       return at_width(pin, std::max(1, occurrence_width(pin)));
     }
     const auto node = pin.get_master_node();
@@ -2312,7 +2302,7 @@ int graph_input_uses(const hhds::Pin_class& root, const hhds::Pin_class& wanted,
   if (gu::is_graph_input_pin(root)) {
     return root.get_port_id() == wanted.get_port_id() ? 1 : 0;
   }
-  if (gu::is_const_pin(root)) {
+  if (root.is_const()) {
     return 0;
   }
   auto node = root.get_master_node();
@@ -2414,7 +2404,7 @@ bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool sta
       carry_driver = edge.driver;
     }
   }
-  if (output_edges != 1 || carry_driver.is_invalid() || gu::is_const_pin(carry_driver) || gu::is_graph_input_pin(carry_driver)
+  if (output_edges != 1 || carry_driver.is_invalid() || carry_driver.is_const() || gu::is_graph_input_pin(carry_driver)
       || gu::type_op_of(carry_driver.get_master_node()) != Ntype_op::Sum) {
     return false;
   }

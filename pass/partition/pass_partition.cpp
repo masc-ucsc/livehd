@@ -28,7 +28,7 @@
 #include "occurrence_materialize.hpp"
 #include "str_tools.hpp"
 
-using namespace livehd::graph_util;  // type_op_of, node_color_of, is_const_pin, ...
+using namespace livehd::graph_util;  // type_op_of, node_color_of, const_of, ...
 using livehd::color::is_partitionable;
 using livehd::color::NO_COLOR;
 
@@ -107,8 +107,8 @@ uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_clas
     return it->second;
   }
   constexpr uint64_t kSeed = 0xcbf29ce484222325ULL;
-  if (gu::is_const_pin(pin)) {  // constant: its value is its identity
-    uint64_t h = sig_str(sig_mix(kSeed, 1), gu::hydrate_const(pin).serialize());
+  if (pin.is_const()) {  // constant: its value is its identity
+    uint64_t h = sig_str(sig_mix(kSeed, 1), gu::const_of(pin).serialize());
     memo[pin]  = h;
     return h;
   }
@@ -206,8 +206,8 @@ uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::P
         cnode          = sig_mix(cnode, static_cast<uint64_t>(snk.get_port_id()));
         std::vector<uint64_t> cin;
         for (const auto& ie : cm.inp_edges()) {
-          if (gu::is_const_pin(ie.driver)) {
-            cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::hydrate_const(ie.driver).serialize()),
+          if (ie.driver.is_const()) {
+            cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
                                   static_cast<uint64_t>(ie.sink.get_port_id())));
           }
         }
@@ -544,7 +544,7 @@ bool Partitioner::collect() {
     for (const auto& e : n.inp_edges()) {
       auto dn   = e.driver.get_master_node();
       auto spid = e.sink.get_port_id();
-      if (gu::is_const_pin(e.driver)) {
+      if (e.driver.is_const()) {
         // internal_edges_/const_edges_ recreate connectivity for the classic
         // (no-hook) rebuild AND the incremental pre-body (build_pre_): both feed
         // the SAME construction, so a comment-only recompile yields a byte-stable
@@ -582,7 +582,7 @@ bool Partitioner::collect() {
       for (const auto& e : opin.inp_edges()) {
         auto d  = e.driver;
         auto dn = d.get_master_node();
-        if (gu::is_const_pin(d)) {
+        if (d.is_const()) {
           top_outputs_.push_back(OutWire{decl.name, OutWire::Const, {}, {}, d});
         } else if (gu::is_graph_input_pin(d)) {
           top_outputs_.push_back(OutWire{decl.name, OutWire::Primary, {}, std::string{gu::pin_name_of(d)}, {}});
@@ -951,13 +951,13 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
   }
   // Constant edges, one recreated const node per SOURCE pin: the input had one
   // const feeding K sinks, so the module gets one too -- per-edge recreation
-  // minted K duplicate Nconst nodes (plus pins and value attrs) into the output
-  // library for every shared constant.
+  // minted K duplicate constant pins into the output library's pool for every
+  // shared constant.
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> const_map;
   for (const auto& e : rconsts) {
     auto it = const_map.find(e.cdriver);
     if (it == const_map.end()) {
-      it = const_map.emplace(e.cdriver, gu::create_const(*body, gu::hydrate_const(e.cdriver))).first;
+      it = const_map.emplace(e.cdriver, gu::create_const(*body, gu::const_of(e.cdriver))).first;
     }
     auto sp = node_map[e.snode].create_sink_pin(e.spid);
     it->second.connect_sink(sp);
@@ -1231,7 +1231,7 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
   for (const auto& e : rconsts) {
     auto cit = const_map.find(e.cdriver);
     if (cit == const_map.end()) {
-      cit = const_map.emplace(e.cdriver, gu::create_const(*body, gu::hydrate_const(e.cdriver))).first;
+      cit = const_map.emplace(e.cdriver, gu::create_const(*body, gu::const_of(e.cdriver))).first;
     }
     cit->second.connect_sink(node_map[e.snode].create_sink_pin(e.spid));
   }
@@ -1282,7 +1282,7 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
 void Partitioner::emit_top_passthrough_outputs(hhds::Graph* body) {
   for (const auto& ow : top_outputs_) {
     if (ow.kind == OutWire::Const) {
-      gu::create_const(*body, gu::hydrate_const(ow.cdriver)).connect_sink(body->get_output_pin(ow.oname));
+      gu::create_const(*body, gu::const_of(ow.cdriver)).connect_sink(body->get_output_pin(ow.oname));
     } else if (ow.kind == OutWire::Primary) {
       body->get_input_pin(ow.primary_name).connect_sink(body->get_output_pin(ow.oname));
     }
@@ -1430,7 +1430,7 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
     } else if (ow.kind == OutWire::Primary) {
       t->get_input_pin(ow.primary_name).connect_sink(out_sink);
     } else {  // Const
-      gu::create_const(*t, gu::hydrate_const(ow.cdriver)).connect_sink(out_sink);
+      gu::create_const(*t, gu::const_of(ow.cdriver)).connect_sink(out_sink);
     }
   }
 

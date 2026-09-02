@@ -660,7 +660,7 @@ void Pass_formal::work(Eprp_var& var) {
         continue;
       }
       auto out = prover.is_true(cond);
-      if (is_top && !out.stateful && !gu::is_const_pin(cond)) {
+      if (is_top && !out.stateful && !cond.is_const()) {
         // A selected top has no parent that can discharge a precondition over
         // its primary IO. It is therefore an environment constraint by
         // construction: keep it active as a hypothesis here instead of failing

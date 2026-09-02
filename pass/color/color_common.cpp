@@ -121,8 +121,7 @@ int apply_coloring(hhds::Graph* g, const Node2Id& node2id_in, const Color_opts& 
           const auto op                     = livehd::graph_util::type_op_of(n);
           sizes->color_max_node_op[color]   = std::string{Ntype::get_name(op)};
           if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
-            sizes->color_max_node_const_shift[color]
-                = livehd::graph_util::is_const_pin(livehd::graph_util::get_driver_of_sink_name(n, "b"));
+            sizes->color_max_node_const_shift[color] = livehd::graph_util::get_driver_of_sink_name(n, "b").is_const();
           }
         }
       }

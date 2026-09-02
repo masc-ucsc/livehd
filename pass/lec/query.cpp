@@ -297,9 +297,9 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
       auto& f = m[canon_flop_name(node.get_hier_name())];
       ++f.count;
       f.width = graph_util::bits_of(node.get_driver_pin(0));
-      if (auto d = graph_util::get_driver_of_sink_name(node, "initial"); !d.is_invalid() && graph_util::is_const_pin(d)) {
+      if (auto d = graph_util::get_driver_of_sink_name(node, "initial"); d.is_const()) {
         f.has_init = true;
-        f.init     = graph_util::hydrate_const(d).serialize();
+        f.init     = graph_util::const_of(d).serialize();
       }
     }
     return m;
@@ -1665,7 +1665,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   absl::flat_hash_map<uint64_t, uint64_t> cone;  // node nid -> candidate bitmask of its input cone
   long long                               dbg_nodes = 0, dbg_sra = 0, dbg_shl = 0, dbg_mux = 0, dbg_varctrl = 0;
   auto                                    score_ctrl = [&](const hhds::Pin& ctrl, long long weight) {
-    if (ctrl.is_invalid() || graph_util::is_const_pin(ctrl)) {
+    if (ctrl.is_invalid() || ctrl.is_const()) {
       return;
     }
     ++dbg_varctrl;
@@ -2458,8 +2458,8 @@ int pipeline_flush_latency(hhds::Graph* g) {
       return 0;
     }
     auto pm = graph_util::get_driver_of_sink_name(node, "pipe_min");
-    if (!pm.is_invalid() && graph_util::is_const_pin(pm)) {
-      int d = static_cast<int>(graph_util::hydrate_const(pm).to_just_i64());
+    if (pm.is_const()) {
+      int d = static_cast<int>(graph_util::const_of(pm).to_just_i64());
       if (d > 1) {
         return d;
       }
@@ -2469,7 +2469,7 @@ int pipeline_flush_latency(hhds::Graph* g) {
   auto make_frame = [](const hhds::Occurrence_node& node) {
     Frame frame{node, std::string(node.get_hier_name()), {}};
     for (const auto& e : node.inp_edges()) {
-      if (graph_util::is_graph_input_pin(e.driver) || graph_util::is_const_pin(e.driver)) {
+      if (graph_util::is_graph_input_pin(e.driver) || e.driver.is_const()) {
         continue;
       }
       frame.deps.push_back(e.driver.get_master_node());
@@ -4143,9 +4143,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;
         }
         bool negreset = false;
-        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset");
-            !neg_d.is_invalid() && graph_util::is_const_pin(neg_d)) {
-          negreset = !graph_util::hydrate_const(neg_d).is_known_false();
+        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
+          negreset = !graph_util::const_of(neg_d).is_known_false();
         }
         reset_negset[nm] = negreset;
       }
@@ -4373,9 +4372,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
               continue;
             }
             auto        init_d    = graph_util::get_driver_of_sink_name(node, "initial");
-            std::string init_text = init_d.is_invalid()                ? "absent"
-                                    : graph_util::is_const_pin(init_d) ? graph_util::hydrate_const(init_d).to_binary()
-                                                                       : "nonconst";
+            std::string init_text = init_d.is_invalid() ? "absent"
+                                    : init_d.is_const() ? graph_util::const_of(init_d).to_binary()
+                                                        : "nonconst";
             keys.insert(std::format("[{} init={}] {}  <=  {}",
                                     Ntype::get_name(graph_util::type_op_of(node)),
                                     init_text,
@@ -4672,12 +4671,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         std::string sg   = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key  = mem_state_key(sig, occ[sg]++);
         auto        init = graph_util::get_driver_of_sink_name(node, "init");
-        if (init.is_invalid() || !graph_util::is_const_pin(init)) {
+        if (init.is_invalid() || !init.is_const()) {
           continue;
         }
 
         const int   width = sig.size * sig.bits;
-        std::string bin   = graph_util::hydrate_const(init).to_binary();
+        std::string bin   = graph_util::const_of(init).to_binary();
         for (auto& ch : bin) {
           if (ch != '0' && ch != '1') {
             ch = '0';
@@ -4735,8 +4734,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         std::string key  = mem_state_key(sig, occ[sg]++);
         int         type = -1;
         auto        tpin = graph_util::get_driver_of_sink_name(node, "type");
-        if (!tpin.is_invalid() && graph_util::is_const_pin(tpin)) {
-          type = static_cast<int>(graph_util::hydrate_const(tpin).to_just_i64());
+        if (tpin.is_const()) {
+          type = static_cast<int>(graph_util::const_of(tpin).to_just_i64());
         }
         out.emplace(key, type);
       }
@@ -8435,7 +8434,7 @@ bool has_direct_boundary_feedback(const hhds::Node_class& sub) {
   while (!pending.empty()) {
     auto driver = pending.back();
     pending.pop_back();
-    if (driver.is_invalid() || gu::is_const_pin(driver) || gu::is_graph_input_pin(driver)) {
+    if (driver.is_invalid() || driver.is_const() || gu::is_graph_input_pin(driver)) {
       continue;
     }
     auto node = driver.get_master_node();
@@ -9870,9 +9869,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           continue;
         }
         bool negreset = false;
-        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset");
-            !neg_d.is_invalid() && graph_util::is_const_pin(neg_d)) {
-          negreset = !graph_util::hydrate_const(neg_d).is_known_false();
+        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
+          negreset = !graph_util::const_of(neg_d).is_known_false();
         }
         reset_negset[nm] = negreset;
       }

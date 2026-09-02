@@ -145,10 +145,10 @@ struct Ctrl_pids {
 // Any other remainder is a blackbox here (see the Div arm).
 [[nodiscard]] inline bool rem_is_power_of_two_mask(const hhds::Node_class& node) {
   const auto b = get_driver_of_sink_name(node, "b");
-  if (b.is_invalid() || !is_const_pin(b)) {
+  if (b.is_invalid() || !b.is_const()) {
     return false;
   }
-  const auto v = hydrate_const(b);
+  const auto& v = const_of(b);
   if (v.is_negative()) {
     return false;
   }
@@ -208,7 +208,7 @@ struct Ctrl_pids {
     case Ntype_op::Get_mask:
     case Ntype_op::Set_mask: {
       const auto mask = get_driver_of_sink_name(node, "mask");
-      if (mask.is_invalid() || is_const_pin(mask)) {
+      if (mask.is_invalid() || mask.is_const()) {
         return 0;
       }
       return atleast1(ge_detail::out_width(node));  // ~1 gate/bit of masking

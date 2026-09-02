@@ -209,13 +209,13 @@ struct Color_opts {
 // A node participates in partitioning iff it is a regular (non-builtin) node
 // that is neither a constant nor graph IO. INPUT/OUTPUT/CONST live on the HHDS
 // singleton nodes (nid < 4<<2, caught by is_builtin_node); legacy LiveHD
-// constants are Ntype_op::Nconst regular nodes.
+// constants are CONST_NODE pool pins, never body nodes.
 [[nodiscard]] inline bool is_partitionable(const hhds::Node_class &n) {
   if (n.is_invalid() || livehd::graph_util::is_builtin_node(n)) {
     return false;
   }
   auto op = livehd::graph_util::type_op_of(n);
-  return op != Ntype_op::Nconst && op != Ntype_op::IO && op != Ntype_op::Invalid;
+  return op != Ntype_op::IO && op != Ntype_op::Invalid;
 }
 
 // Write `node2id` onto `g`'s regular nodes. Applies the continuous split when

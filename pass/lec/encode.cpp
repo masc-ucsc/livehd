@@ -84,11 +84,11 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
       int  data_ins = 0;
       bool identity = true;
       for (const auto& e : p.get_master_node().inp_edges()) {
-        if (gu::is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           if (op == Ntype_op::And) {
-            identity &= !gu::hydrate_const(e.driver).and_op(*Dlop::create_integer(1))->is_known_false();
+            identity &= !gu::const_of(e.driver).and_op(*Dlop::create_integer(1))->is_known_false();
           } else {
-            identity &= gu::hydrate_const(e.driver).is_known_zero();
+            identity &= gu::const_of(e.driver).is_known_zero();
           }
           continue;
         }
@@ -170,7 +170,7 @@ static Clock_cell_use<Pin> clock_cell_on(Pin p) {
   Clock_cell_use<Pin> r;
   for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
     p = peel_clock_width(p);
-    if (gu::is_graph_input_pin(p) || gu::is_const_pin(p)) {
+    if (gu::is_graph_input_pin(p) || p.is_const()) {
       return r;
     }
     auto       n  = p.get_master_node();
@@ -181,13 +181,13 @@ static Clock_cell_use<Pin> clock_cell_on(Pin p) {
         switch (static_cast<int>(e.sink.get_port_id())) {
           case 2: r.clk_ref = e.driver; break;
           case 3:
-            if (gu::is_const_pin(e.driver)) {
-              const auto dc = gu::hydrate_const(e.driver);
-              r.div         = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
+            if (e.driver.is_const()) {
+              const auto& dc = gu::const_of(e.driver);
+              r.div          = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
             }
             break;
           case 4 : r.en = e.driver; break;
-          case 6 : r.invert = gu::is_const_pin(e.driver) && !gu::hydrate_const(e.driver).is_known_false(); break;
+          case 6 : r.invert = e.driver.is_const() && !e.driver.is_known_false(); break;
           default: break;
         }
       }
@@ -220,7 +220,7 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
   if (depth > 64) {
     return false;
   }
-  if (p.is_invalid() || gu::is_const_pin(p)) {
+  if (p.is_invalid() || p.is_const()) {
     return true;
   }
   if (!resolve_clk_input(p).is_invalid()) {
@@ -240,7 +240,7 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
     // second one. Constants are tie-offs, not enables.
     int data_ins = 0;
     for (const auto& e : n.inp_edges()) {
-      if (!gu::is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         ++data_ins;
       }
     }
@@ -263,8 +263,8 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
     Pin data;
     int data_ins = 0;
     for (const auto& e : n.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
-        if (gu::hydrate_const(e.driver).is_known_false()) {
+      if (e.driver.is_const()) {
+        if (gu::const_of(e.driver).is_known_false()) {
           return false;  // `clk & 0` is a constant, not a clock
         }
         continue;
@@ -464,10 +464,10 @@ Term exact_get_mask_x_plane(cvc5::TermManager& tm, const hhds::Occurrence_node& 
     return Term();  // `a` is fully known; the plane can only come from the mask pin
   }
   auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
-  if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
+  if (mask_pin.is_invalid() || !mask_pin.is_const()) {
     return Term();
   }
-  Dlop mask = gu::hydrate_const(mask_pin);
+  Dlop mask = gu::const_of(mask_pin);
   if (mask.has_unknowns()) {
     return Term();  // an unknown mask selects unknown POSITIONS: smear
   }
@@ -502,10 +502,10 @@ Term exact_sext_x_plane(cvc5::TermManager& tm, const hhds::Occurrence_node& node
     return Term();
   }
   auto pos_pin = gu::get_driver_of_sink_name(node, "b");
-  if (pos_pin.is_invalid() || !gu::is_const_pin(pos_pin)) {
+  if (pos_pin.is_invalid() || !pos_pin.is_const()) {
     return Term();
   }
-  Dlop posc = gu::hydrate_const(pos_pin);
+  Dlop posc = gu::const_of(pos_pin);
   if (posc.has_unknowns() || !posc.is_just_i64()) {
     return Term();
   }
@@ -554,10 +554,10 @@ std::string Encoder::flop_key(std::string_view hier) const {
 // ref init `0sb1<64x?>` -> 2^64 vs the recompiled impl's 0-init).
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined) {
   auto init_d = gu::get_driver_of_sink_name(node, "initial");
-  if (init_d.is_invalid() || !gu::is_const_pin(init_d)) {
+  if (init_d.is_invalid() || !init_d.is_const()) {
     return std::nullopt;
   }
-  Dlop c = gu::hydrate_const(init_d);
+  Dlop c = gu::const_of(init_d);
   if (x_as_undefined && c.has_unknowns()) {
     return std::nullopt;
   }
@@ -579,10 +579,10 @@ std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& n
 
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_node& node, int width, bool x_as_undefined) {
   auto init_d = gu::get_driver_of_sink_name(node, "initial");
-  if (init_d.is_invalid() || !gu::is_const_pin(init_d)) {
+  if (init_d.is_invalid() || !init_d.is_const()) {
     return std::nullopt;
   }
-  Dlop c = gu::hydrate_const(init_d);
+  Dlop c = gu::const_of(init_d);
   if (x_as_undefined && c.has_unknowns()) {
     return std::nullopt;
   }
@@ -610,8 +610,8 @@ std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_no
 // (the emitted side expands the stages into d real flops).
 static int flop_depth(const hhds::Occurrence_node& node) {
   auto pm = gu::get_driver_of_sink_name(node, "pipe_min");
-  if (!pm.is_invalid() && gu::is_const_pin(pm)) {
-    auto d = gu::hydrate_const(pm).to_just_i64();
+  if (pm.is_const()) {
+    auto d = gu::const_of(pm).to_just_i64();
     if (d > 1) {
       return static_cast<int>(d);
     }
@@ -636,16 +636,16 @@ Mem_sig read_mem_sig(const hhds::Node_class& node) {
     auto raw_pid  = static_cast<int>(e.sink.get_port_id());
     auto pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
     if (pin_name == "bits") {
-      if (gu::is_const_pin(e.driver)) {
-        sig.bits = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+      if (e.driver.is_const()) {
+        sig.bits = static_cast<int>(gu::const_of(e.driver).to_just_i64());
       }
     } else if (pin_name == "size") {
-      if (gu::is_const_pin(e.driver)) {
-        sig.size = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+      if (e.driver.is_const()) {
+        sig.size = static_cast<int>(gu::const_of(e.driver).to_just_i64());
       }
     } else if (std::string_view(pin_name).find("rdport") != std::string_view::npos) {
-      if (gu::is_const_pin(e.driver)) {
-        if (gu::hydrate_const(e.driver).is_known_false()) {
+      if (e.driver.is_const()) {
+        if (gu::const_of(e.driver).is_known_false()) {
           ++sig.n_wr;
         } else {
           ++sig.n_rd;
@@ -785,7 +785,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
   // bit-vector literal of `width` bits from a constant pin's Dlop.
   auto const_val = [&](const auto& dpin) -> Val {
-    Dlop c     = gu::hydrate_const(dpin);
+    Dlop c     = gu::const_of(dpin);
     int  width = std::max(1, c.get_bits());
     bool sgn   = c.is_negative();
     Term t;
@@ -834,7 +834,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   std::string missing_driver_key;
   auto        driver_val = [&](const auto& dpin, bool& ok) -> Val {
     ok = true;
-    if (gu::is_const_pin(dpin)) {
+    if (dpin.is_const()) {
       return const_val(dpin);
     }
     if (gu::is_graph_input_pin(dpin)) {
@@ -1262,7 +1262,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       const auto  raw = static_cast<int>(e.sink.get_port_id());
       std::string pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
       if (pn == "posclk") {
-        if (gu::is_const_pin(e.driver) && gu::hydrate_const(e.driver).is_known_false()) {
+        if (e.driver.is_known_false()) {
           return fail_unsupported("memory '" + gu::debug_name(node)
                                   + "' is written on the FALLING clock edge, which this encoder does not model "
                                     "(it treats every memory write as landing once per step)");
@@ -1274,7 +1274,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // commit point per memory. This is a FORMAL refusal, not a read error:
         // the language allows the shape, so it parses
         // and regenerates, and the user opts back in per memory.
-        if (!mc.ignored && gu::is_const_pin(e.driver) && gu::hydrate_const(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
+        if (!mc.ignored && e.driver.is_const() && gu::const_of(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
           // Offer a name mem_ignored actually ACCEPTS. `debug_name` carries a
           // node-id prefix ("memory_36:m") that differs between the two designs,
           // so the bare leaf is the spelling that works on both sides.
@@ -1342,11 +1342,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       std::string pn      = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
       size_t      pid     = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
       if (pn == "wensize") {
-        mc.wensize = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+        mc.wensize = static_cast<int>(gu::const_of(e.driver).to_just_i64());
       } else if (pn == "fwd") {
-        mc.fwd = Dlop::clone(gu::hydrate_const(e.driver));
+        mc.fwd = Dlop::clone(gu::const_of(e.driver));
       } else if (pn == "undef") {
-        mc.undef = Dlop::clone(gu::hydrate_const(e.driver));
+        mc.undef = Dlop::clone(gu::const_of(e.driver));
       } else if (pn == "update") {
         mc.update   = e.driver;
         mc.is_whole = true;
@@ -1357,8 +1357,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       } else if (pn == "init") {
         mc.init = e.driver;  // whole-array runtime reset-value bus
       } else if (pn == "type") {
-        if (gu::is_const_pin(e.driver)) {
-          mtype = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+        if (e.driver.is_const()) {
+          mtype = static_cast<int>(gu::const_of(e.driver).to_just_i64());
         }
       } else if (pn == "bits" || pn == "size" || pn == "posclk" || ends_with(pn, "clock_pin")) {
         // config / clock: abstracted out of the relational encoding
@@ -1373,7 +1373,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         } else if (ends_with(pn, "enable")) {
           mc.ports[pid].en = e.driver;
         } else if (ends_with(pn, "rdport")) {
-          mc.ports[pid].rd = !gu::hydrate_const(e.driver).is_known_false();
+          // A comptime pin: a non-constant driver is not "read port" -- probe
+          // it (const_of on a wire is a hard abort).
+          mc.ports[pid].rd = e.driver.is_const() && !gu::const_of(e.driver).is_known_false();
         }
       }
     }
@@ -1574,7 +1576,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     absl::flat_hash_map<std::string, bool> clock_dep_memo;
     absl::flat_hash_set<std::string>       clock_dep_visiting;
     auto                                   clock_dependent = [&](auto&& self, const hhds::Occurrence_pin& p) -> bool {
-      if (p.is_invalid() || gu::is_const_pin(p) || gu::is_graph_input_pin(p)) {
+      if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
         return false;
       }
       auto              n = p.get_master_node();
@@ -1667,10 +1669,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // inp_edges(). Encoding an extra unreachable node is harmless; skipping a
       // live producer is not.
       if (!node.base_node().has_out_edges()) {
-        continue;
-      }
-      // Constants are resolved on demand at use sites.
-      if (op == Ntype_op::Nconst) {
         continue;
       }
       // Flops were cut above (Q seeded; next-state emitted below) — skip the cell.
@@ -2195,8 +2193,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
 
         bool active_low = false;
-        if (auto inv = cell_sink("invert"); !inv.is_invalid() && gu::is_const_pin(inv)) {
-          active_low = !gu::hydrate_const(inv).is_known_false();
+        if (auto inv = cell_sink("invert"); inv.is_const()) {
+          active_low = !gu::const_of(inv).is_known_false();
         }
         Term level            = active_low ? tm_.mkTerm(Kind::OR, {ref_hot, tm_.mkTerm(Kind::NOT, {en_hot})})
                                            : tm_.mkTerm(Kind::AND, {ref_hot, en_hot});
@@ -2355,8 +2353,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           {
             bool every = !all.empty();
             for (const auto& e : node.inp_edges()) {
-              if (gu::is_const_pin(e.driver)) {
-                if (gu::hydrate_const(e.driver).is_negative()) {
+              if (e.driver.is_const()) {
+                if (gu::const_of(e.driver).is_negative()) {
                   continue;  // negative literal: signed in the emitted text
                 }
                 continue;  // non-negative constant: sign-transparent
@@ -2587,10 +2585,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               break;
             }
           }
-          if (pos_pin.is_invalid() || !gu::is_const_pin(pos_pin)) {
+          if (pos_pin.is_invalid() || !pos_pin.is_const()) {
             return fail_unsupported("Sext with non-constant position not supported (M1)");
           }
-          Dlop posc = gu::hydrate_const(pos_pin);
+          Dlop posc = gu::const_of(pos_pin);
           if (!posc.is_just_i64()) {
             return fail_unsupported("Sext position too wide (M1)");
           }
@@ -2625,10 +2623,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               break;
             }
           }
-          if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
+          if (mask_pin.is_invalid() || !mask_pin.is_const()) {
             return fail_unsupported("Get_mask with non-constant mask not supported (M1)");
           }
-          Dlop mask = gu::hydrate_const(mask_pin);
+          Dlop mask = gu::const_of(mask_pin);
           if (mask.is_just_i64() && mask.to_just_i64() == -1) {
             // zero-extend (sign -> unsigned cast)
             Val zext{a.term, a.width, false};
@@ -2657,14 +2655,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               break;
             }
           }
-          if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
+          if (mask_pin.is_invalid() || !mask_pin.is_const()) {
             return fail_unsupported("Set_mask with non-constant mask not supported (M1)");
           }
           if (pid(0).empty()) {
             return fail("Set_mask missing a");
           }
           const Val& a    = pid(0)[0];
-          Dlop       mask = gu::hydrate_const(mask_pin);
+          Dlop       mask = gu::const_of(mask_pin);
           if (mask.is_known_zero()) {
             result = fit(a, W);  // nothing replaced
             break;
@@ -3007,7 +3005,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // build) — surface it instead of silently dropping logic.
   for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
     auto op = gu::type_op_of(node);
-    if (!node.base_node().has_out_edges() || op == Ntype_op::Nconst || op == Ntype_op::Flop || op == Ntype_op::Memory) {
+    if (!node.base_node().has_out_edges() || op == Ntype_op::Flop || op == Ntype_op::Memory) {
       continue;
     }
     if (phased && op == Ntype_op::Latch) {
@@ -3041,7 +3039,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         bool hopped = false;
         for (const auto& e : cur.inp_edges()) {
           const auto& drv = e.driver;
-          if (gu::is_const_pin(drv)) {
+          if (drv.is_const()) {
             continue;
           }
           if (gu::is_graph_input_pin(drv)) {
@@ -3430,7 +3428,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     auto       transparent_arm = [&](const hhds::Occurrence_node& n) -> hhds::Occurrence_pin {
       auto q  = n.get_driver_pin(0);
       auto dd = hier_sink_driver(n, "din");
-      if (dd.is_invalid() || gu::is_const_pin(dd) || gu::is_graph_input_pin(dd)) {
+      if (dd.is_invalid() || dd.is_const() || gu::is_graph_input_pin(dd)) {
         return {};
       }
       auto mux = dd.get_master_node();
@@ -3481,8 +3479,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     bool has_enable         = false;
     Term en_hot;
     if (auto en_d = absorb_gate ? hhds::Occurrence_pin{} : hier_sink_driver(node, "enable"); !en_d.is_invalid()) {
-      if (gu::is_const_pin(en_d)) {
-        enable_const_false = gu::hydrate_const(en_d).is_known_false();
+      if (en_d.is_const()) {
+        enable_const_false = gu::const_of(en_d).is_known_false();
       } else {
         Val ev = driver_val(en_d, ok);
         if (!ok) {
@@ -3505,21 +3503,21 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // divergence. Measured on tests/equiv/flop_reset_matrix, whose six flops
     // cover the async/sync x posedge/negedge matrix.
     bool async_reset = false;
-    if (auto a_d = hier_sink_driver(node, "async"); !a_d.is_invalid() && gu::is_const_pin(a_d)) {
-      async_reset = !gu::hydrate_const(a_d).is_known_false();
+    if (auto a_d = hier_sink_driver(node, "async"); a_d.is_const()) {
+      async_reset = !gu::const_of(a_d).is_known_false();
     }
     bool has_reset = false;
     Term rst_hot;
     Term initv;
-    if (auto rst_d = hier_sink_driver(node, "reset_pin"); !rst_d.is_invalid() && !gu::is_const_pin(rst_d)) {
+    if (auto rst_d = hier_sink_driver(node, "reset_pin"); !rst_d.is_invalid() && !rst_d.is_const()) {
       Val rv = driver_val(rst_d, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' reset not encodable");
       }
       Term rbit     = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
       bool negreset = false;
-      if (auto neg_d = hier_sink_driver(node, "negreset"); !neg_d.is_invalid() && gu::is_const_pin(neg_d)) {
-        negreset = !gu::hydrate_const(neg_d).is_known_false();
+      if (auto neg_d = hier_sink_driver(node, "negreset"); neg_d.is_const()) {
+        negreset = !gu::const_of(neg_d).is_known_false();
       }
       rst_hot = negreset ? tm_.mkTerm(Kind::NOT, {rbit}) : rbit;
       initv   = bv_const(tm_, w, 0);
@@ -3636,9 +3634,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
         int divv = 1;
-        if (!div_d.is_invalid() && gu::is_const_pin(div_d)) {
-          const auto dc = gu::hydrate_const(div_d);
-          divv          = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
+        if (div_d.is_const()) {
+          const auto& dc = gu::const_of(div_d);
+          divv           = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
         }
         if (divv != 1) {
           // Deliberately NOT approximated. A divider's INITIAL PHASE has to be
@@ -3647,7 +3645,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           return fail_unsupported("flop '" + gu::debug_name(node) + "' is clocked by a Clock_cell with div=" + std::to_string(divv)
                                   + ", which is not implemented (v1 is div=1 only)");
         }
-        if (!inv_d.is_invalid() && gu::is_const_pin(inv_d) && !gu::hydrate_const(inv_d).is_known_false()) {
+        if (inv_d.is_const() && !inv_d.is_known_false()) {
           // An inverted gate output commits on the OPPOSITE edge, which is a
           // negedge flop -- pass.single_edge's job (P=2), not something a
           // one-step-is-one-commit encoding can express.
@@ -3792,8 +3790,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
           const Term prev_hot = tm_.mkTerm(Kind::DISTINCT, {pit->second.term, bv_const(tm_, 1, 0)});
           bool       posedge  = true;
-          if (auto pc = hier_sink_driver(node, "posclk"); !pc.is_invalid() && gu::is_const_pin(pc)) {
-            posedge = !gu::hydrate_const(pc).is_known_false();
+          if (auto pc = hier_sink_driver(node, "posclk"); pc.is_const()) {
+            posedge = !gu::const_of(pc).is_known_false();
           }
           commits = posedge ? tm_.mkTerm(Kind::AND, {tm_.mkTerm(Kind::NOT, {prev_hot}), cur_hot})
                             : tm_.mkTerm(Kind::AND, {prev_hot, tm_.mkTerm(Kind::NOT, {cur_hot})});
@@ -4319,8 +4317,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // array term => provably equal values. A forwarding / combinational read
       // sources this design's OWN a_next, so nothing can be assumed about it.
       const bool shared_cur = !mc.is_comb && !mc.is_rom && rd_src == mc.a_cur;
-      out.mem_rd[mc.key].push_back(
-          Encoded::Mem_rd_port{mc.rd_fresh[k], addr, mc.mtype == 1 ? Term{} : real, shared_cur});
+      out.mem_rd[mc.key].push_back(Encoded::Mem_rd_port{mc.rd_fresh[k], addr, mc.mtype == 1 ? Term{} : real, shared_cur});
       if (mc.mtype == 1 && shared_reads != nullptr) {
         // Sync read (latency-1): rd_fresh is the CURRENT registered dout (seeded
         // from shared_reads in phase 1); THIS cycle's read is its NEXT state,

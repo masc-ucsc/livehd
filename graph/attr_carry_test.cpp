@@ -61,11 +61,10 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::aggregate_bit_offset).set(uint32_t{8});
   src.attr(la::aggregate_bit_width).set(uint32_t{16});
   src.attr(la::aggregate_extent).set(uint32_t{32});
-  src.attr(la::const_value).set(std::string{"0xdeadbeef"});
   src.attr(la::lut).set(std::string{"1010"});
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 21, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 20, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -87,7 +86,6 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::aggregate_bit_offset).get(), 8u);
   EXPECT_EQ(dst.attr(la::aggregate_bit_width).get(), 16u);
   EXPECT_EQ(dst.attr(la::aggregate_extent).get(), 32u);
-  EXPECT_EQ(dst.attr(la::const_value).get(), "0xdeadbeef");
   EXPECT_EQ(dst.attr(la::lut).get(), "1010");
   EXPECT_EQ(dst.attr(la::legalize_inlined).get(), "callee.split");
   EXPECT_EQ(gu::match_of(dst), 9u) << "node-level match (semdiff stamps it, lhd tool reads it) must ride the node";
@@ -104,20 +102,18 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   src.attr(la::bits).set(int32_t{13});
   src.attr(la::pin_signed).set(la::pin_signed_t::value_type{});
   src.attr(la::pin_delay).set(float{2.5});
-  src.attr(la::pin_const_value).set(std::string{"0b1011"});
   src.attr(la::match).set(uint32_t{42});
   src.attr(la::pin_name).set(std::string{"wire_x"});
   src.attr(la::pin_offset).set(int32_t{6});
   src.attr(la::time_range).set(la::time_range_t::value_type{.min = 0, .max = 3});
   src.attr(la::pending_time).set(la::pending_time_t::value_type{.min = 1, .max = 2});
-  static_assert(kPinTagsStamped == 9, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kPinTagsStamped == 8, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_pin_attrs(src, dst);
 
   EXPECT_EQ(dst.attr(la::bits).get(), 13);
   EXPECT_TRUE(dst.attr(la::pin_signed).has());
   EXPECT_FLOAT_EQ(dst.attr(la::pin_delay).get(), 2.5F);
-  EXPECT_EQ(dst.attr(la::pin_const_value).get(), "0b1011");
   EXPECT_EQ(dst.attr(la::match).get(), 42u);
   EXPECT_EQ(dst.attr(la::pin_name).get(), "wire_x");
   EXPECT_EQ(dst.attr(la::pin_offset).get(), 6);

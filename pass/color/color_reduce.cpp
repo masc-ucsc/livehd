@@ -211,7 +211,7 @@ bool const_value_is_structural(const Node& n, const Pin& sink) {
 }
 
 Sig const_token(const Pin& d, bool value_sensitive) {
-  const auto v = gu::hydrate_const(d);
+  const auto& v = gu::const_of(d);
   Sig        h = sig_seed(0xc0157e2ULL);
   h            = sig_u64(h, static_cast<uint64_t>(v.get_bits()));
   h            = sig_u64(h, (v.is_negative() ? 2ULL : 0ULL) | (v.has_unknowns() ? 1ULL : 0ULL));
@@ -262,7 +262,7 @@ void compute_signatures(Cone& k, const absl::flat_hash_map<Node, int32_t>& cone_
           continue;
         }
         Sig t;
-        if (gu::is_const_pin(d)) {
+        if (d.is_const()) {
           t = const_token(d, const_value_is_structural(n, e.sink));
         } else if (auto m = d.get_master_node(); is_member(m)) {
           auto ms = sig.find(m);
@@ -402,7 +402,7 @@ bool is_wide_dynamic_shift_node(const Node& n) {
     return false;
   }
   const auto amount = gu::get_driver_of_sink_name(n, "b");
-  return !amount.is_invalid() && !gu::is_const_pin(amount);
+  return !amount.is_invalid() && !amount.is_const();
 }
 
 // The ONE producer the two-member exception below may absorb: ADDRESS
@@ -412,8 +412,8 @@ bool is_wide_dynamic_shift_node(const Node& n) {
 // producer is a 9-bit `index + 1`. None of them changes the order of magnitude
 // of the body the singleton exception already admits. A Mux, a Mult, a Div, a
 // wide bitwise op or a SECOND shift does, so those keep the normal guards.
-// Nconst is absent on purpose: is_partitionable excludes constants, so a const
-// is a cone LEAF, never a member.
+// A constant is absent on purpose: constants are CONST_NODE pool pins, not body
+// nodes, so a const is a cone LEAF, never a member.
 bool is_address_arith_node(const Node& n) {
   switch (gu::type_op_of(n)) {
     case Ntype_op::Sum:
@@ -603,7 +603,7 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
     for (const auto& n : k.members) {
       for (const auto& e : n.inp_edges()) {
         const auto& d = e.driver;
-        if (d.is_invalid() || gu::is_const_pin(d)) {
+        if (d.is_invalid() || d.is_const()) {
           continue;
         }
         if (auto it = cone_of.find(d.get_master_node()); it != cone_of.end() && it->second == static_cast<int32_t>(c)) {
@@ -703,8 +703,8 @@ bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const 
       continue;
     }
     Opnd o;
-    if (gu::is_const_pin(d)) {
-      const auto v = gu::hydrate_const(d);
+    if (d.is_const()) {
+      const auto& v = gu::const_of(d);
       o.kind       = 0;
       o.cval       = v.serialize();
       o.cunk       = v.has_unknowns();
@@ -980,7 +980,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
   // that can never truncate; sign follows the value.
   std::vector<std::pair<uint32_t, bool>> cshape(plan.const_ports.size());
   for (size_t c = 0; c < plan.const_ports.size(); ++c) {
-    const auto v = gu::hydrate_const(slots[plan.const_ports[c]].rep_pin);
+    const auto& v = gu::const_of(slots[plan.const_ports[c]].rep_pin);
     cshape[c]    = {static_cast<uint32_t>(v.get_bits()) + 1U, !v.is_negative()};
     auto nm      = std::format("c{}", c);
     gio->add_input(nm, pid++);
@@ -1046,7 +1046,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
     auto neo = node_map.at(n);
     for (const auto& e : n.inp_edges()) {
       const auto& d = e.driver;
-      if (d.is_invalid() || gu::is_const_pin(d)) {
+      if (d.is_invalid() || d.is_const()) {
         continue;
       }
       auto sp = neo.create_sink_pin(e.sink.get_port_id());
@@ -1075,7 +1075,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
       } else {
         auto cit = const_map.find(slots[s].rep_pin);
         if (cit == const_map.end()) {
-          cit = const_map.emplace(slots[s].rep_pin, gu::create_const(*body, gu::hydrate_const(slots[s].rep_pin))).first;
+          cit = const_map.emplace(slots[s].rep_pin, gu::create_const(*body, gu::const_of(slots[s].rep_pin))).first;
         }
         cit->second.connect_sink(sp);
       }
@@ -1131,18 +1131,6 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
     readers.push_back({static_cast<uint32_t>(e.driver.get_port_id()), e.driver, e.sink});
   }
 
-  // Const nodes the cone consumes: candidates for the dangling sweep below.
-  absl::flat_hash_set<Node> const_masters;
-  for (const auto& n : occ.members) {
-    for (const auto& e : n.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
-        if (auto cm = e.driver.get_master_node(); gu::type_op_of(cm) == Ntype_op::Nconst && !gu::is_builtin_node(cm)) {
-          const_masters.insert(cm);
-        }
-      }
-    }
-  }
-
   // The instance. Anonymous on purpose (partition's hier-name transparency
   // convention -- cgen synthesizes a stable u_<module> at emit), and NOT
   // colored: color ids are per-def region ids that pass.partition consumes,
@@ -1191,19 +1179,6 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
   for (const auto& n : occ.members) {
     n.del_node();
     ++st.nodes_deleted;
-  }
-  // Consts whose only readers were the cone are dangling now.
-  for (const auto& cm : const_masters) {
-    bool used = false;
-    for (const auto& e : cm.out_edges()) {
-      (void)e;
-      used = true;
-      break;
-    }
-    if (!used) {
-      cm.del_node();
-      ++st.nodes_deleted;
-    }
   }
 }
 
@@ -1319,7 +1294,7 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     job.promoted.assign(job.slots.size(), false);
     for (size_t s = 0; s < job.slots.size(); ++s) {
       for (const auto& m : job.matches) {
-        if (gu::hydrate_const(m.occ_slot_pins[s]).serialize() != job.slots[s].rep_val) {
+        if (gu::const_of(m.occ_slot_pins[s]).serialize() != job.slots[s].rep_val) {
           job.promoted[s] = true;
           break;
         }

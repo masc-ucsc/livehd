@@ -62,10 +62,7 @@ constexpr int32_t kSentinelBits = 32768;
   }
   for (const auto& e : node.inp_edges()) {
     const auto& d = e.driver;
-    if (d.is_invalid() || gu::is_graph_input_pin(d) || gu::is_const_pin(d)) {
-      continue;
-    }
-    if (gu::type_op_of(d.get_master_node()) == Ntype_op::Nconst) {
+    if (d.is_invalid() || gu::is_graph_input_pin(d) || d.is_const()) {
       continue;
     }
     if (is_pathological(gu::bits_of(d))) {
@@ -93,7 +90,6 @@ struct Snap {
 //   graph IO      - the source RTL interface; bitwidth pins them anyway
 //                   (bitwidth.cpp:167-172) and the LEC comparison is only
 //                   well-defined while both sides keep the same port widths.
-//   Nconst        - the width IS the value (process_const re-derives it).
 //   const pins    - same, and they live on the shared CONST_NODE singleton.
 //   Memory        - state contract, plus its geometry sinks must stay constant
 //                   (process_memory hard-errors otherwise).
@@ -106,7 +102,7 @@ struct Snap {
   std::vector<Snap> out;
   for (auto node : g->body().nodes()) {
     const auto op = gu::type_op_of(node);
-    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || op == Ntype_op::Sub || op == Ntype_op::Memory) {
+    if (op == Ntype_op::Invalid || op == Ntype_op::Sub || op == Ntype_op::Memory) {
       continue;
     }
     const bool is_state = op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch;
@@ -132,7 +128,7 @@ struct Snap {
       }
     }
     for (const auto& dpin : dpins) {
-      if (dpin.is_invalid() || !dpin.is_driver() || gu::is_const_pin(dpin)) {
+      if (dpin.is_invalid() || !dpin.is_driver() || dpin.is_const()) {
         continue;
       }
       if (is_state && !selected(opts.seed, node, dpin.get_port_id(), opts.reg_pct)) {

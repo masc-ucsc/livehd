@@ -36,7 +36,7 @@ namespace {
 
 bool posclk_is_false(const hhds::Occurrence_node& n) {
   auto pc = lc::sink_driver_hier(n, "posclk");
-  return !pc.is_invalid() && gu::is_const_pin(pc) && gu::hydrate_const(pc).is_known_false();
+  return pc.is_known_false();
 }
 
 // A resolved clock cone: the ROOT net it hangs off, the accumulated edge parity,
@@ -77,8 +77,8 @@ std::string cone_digest(const hhds::Occurrence_pin& p, int depth = 0) {
   if (gu::is_graph_input_pin(p)) {
     return "i:" + std::string(gu::pin_name_of(p));
   }
-  if (gu::is_const_pin(p)) {
-    return "k:" + gu::hydrate_const(p).to_string();
+  if (p.is_const()) {
+    return "k:" + gu::const_of(p).to_string();
   }
   if (depth >= 8) {
     return "...";
@@ -114,7 +114,7 @@ bool reaches_clock(const hhds::Occurrence_pin& p, const lc::Design_clocks& clock
   if (clocks.is_clock(cr.net)) {
     return true;
   }
-  if (gu::is_graph_input_pin(cr.net) || gu::is_const_pin(cr.net)) {
+  if (gu::is_graph_input_pin(cr.net) || cr.net.is_const()) {
     return false;
   }
   auto       n  = cr.net.get_master_node();
@@ -126,7 +126,7 @@ bool reaches_clock(const hhds::Occurrence_pin& p, const lc::Design_clocks& clock
     return false;
   }
   for (const auto& e : n.inp_edges()) {
-    if (!gu::is_const_pin(e.driver) && reaches_clock(e.driver, clocks, depth + 1)) {
+    if (!e.driver.is_const() && reaches_clock(e.driver, clocks, depth + 1)) {
       return true;
     }
   }
@@ -142,15 +142,15 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
     if (cr.net.is_invalid()) {
       return ch;
     }
-    if (gu::is_graph_input_pin(cr.net) || gu::is_const_pin(cr.net)) {
+    if (gu::is_graph_input_pin(cr.net) || cr.net.is_const()) {
       ch.root = cr.net;
       return ch;
     }
     auto       n  = cr.net.get_master_node();
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Clock_cell) {
-      if (auto d = lc::sink_driver_hier(n, "div"); !d.is_invalid() && gu::is_const_pin(d)) {
-        const auto dv = gu::hydrate_const(d);
+      if (auto d = lc::sink_driver_hier(n, "div"); d.is_const()) {
+        const auto& dv = gu::const_of(d);
         const int  iv = dv.is_just_i64() ? static_cast<int>(dv.to_just_i64()) : 0;
         if (iv != 1) {
           // A divider's INITIAL PHASE is part of its identity; recording only
@@ -162,11 +162,10 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
           return ch;
         }
       }
-      if (auto inv = lc::sink_driver_hier(n, "invert");
-          !inv.is_invalid() && gu::is_const_pin(inv) && !gu::hydrate_const(inv).is_known_false()) {
+      if (auto inv = lc::sink_driver_hier(n, "invert"); inv.is_const() && !inv.is_known_false()) {
         ch.guard_before_fall = true;
       }
-      if (auto en = lc::sink_driver_hier(n, "en"); !en.is_invalid() && !gu::is_const_pin(en)) {
+      if (auto en = lc::sink_driver_hier(n, "en"); !en.is_invalid() && !en.is_const()) {
         ch.guards.push_back(en);
         ch.gated = true;
       }
@@ -191,7 +190,7 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
       std::vector<hhds::Occurrence_pin> ens;
       int                               n_clock = 0;
       for (const auto& e : n.inp_edges()) {
-        if (gu::is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           continue;
         }
         if (reaches_clock(e.driver, clocks, depth + 1)) {
@@ -213,7 +212,7 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
           // comb enable cone; an INLINED cell brings the latch itself, so undo
           // it here the same way `pass.single_edge` does.
           const auto er = lc::control_root(en, /*stop_at_clock_cell=*/true);
-          if (er.net.is_invalid() || gu::is_graph_input_pin(er.net) || gu::is_const_pin(er.net)) {
+          if (er.net.is_invalid() || gu::is_graph_input_pin(er.net) || er.net.is_const()) {
             continue;
           }
           auto en_node = er.net.get_master_node();
@@ -379,7 +378,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     // BEFORE any clock question is asked: it has no window, so it has no closing
     // edge and no phase, and resolving its constant control cone would land on a
     // "derived clock" and refuse what is really a combinational buffer.
-    if (is_latch && (ctrl.is_invalid() || (gu::is_const_pin(ctrl) && !gu::hydrate_const(ctrl).is_known_false()))) {
+    if (is_latch && (ctrl.is_invalid() || (ctrl.is_const() && !ctrl.is_known_false()))) {
       e.transparent = true;
       e.phase       = Phase::Rise;
       ++plan.n_latch_transparent;

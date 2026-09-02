@@ -13,6 +13,7 @@
 #include "occurrence_materialize.hpp"
 
 #include <format>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -76,12 +77,14 @@ hhds::Pin_class driver_of(const hhds::Node_class& n, hhds::Port_id pid) {
 // Orders the expanded occurrences by the constant on their index input, so the
 // test does not depend on node-creation order leaking through body().nodes().
 std::vector<hhds::Node_class> subs_by_index(hhds::Graph* g) {
-  auto v = subs_of(g);
-  std::ranges::sort(v, [](const hhds::Node_class& a, const hhds::Node_class& b) {
-    const auto da = driver_of(a, kPidIdx);
-    const auto db = driver_of(b, kPidIdx);
-    return gu::hydrate_const(da).to_just_i64() < gu::hydrate_const(db).to_just_i64();
-  });
+  auto       v   = subs_of(g);
+  // Total on a missing/non-constant index driver (sorts first) so the ASSERTs
+  // downstream report the broken ordinal instead of an abort inside sort.
+  const auto key = [](const hhds::Node_class& n) {
+    const auto d = driver_of(n, kPidIdx);
+    return d.is_const() ? gu::const_of(d).to_just_i64() : std::numeric_limits<int64_t>::min();
+  };
+  std::ranges::sort(v, [&](const hhds::Node_class& a, const hhds::Node_class& b) { return key(a) < key(b); });
   return v;
 }
 
@@ -209,7 +212,7 @@ TEST(ReplicaExpand, IndexConstantPerOrdinal) {
   for (std::size_t r = 0; r < reps.size(); ++r) {
     const auto d = driver_of(reps[r], kPidIdx);
     ASSERT_FALSE(d.is_invalid()) << "ordinal " << r << " has no index driver";
-    EXPECT_EQ(gu::hydrate_const(d).to_just_i64(), want[r]);
+    EXPECT_EQ(gu::const_of(d).to_just_i64(), want[r]);
   }
 }
 

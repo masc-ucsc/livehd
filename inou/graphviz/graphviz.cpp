@@ -22,11 +22,10 @@
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::color_of;
+using livehd::graph_util::const_of;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::has_color;
 using livehd::graph_util::has_name;
-using livehd::graph_util::hydrate_const;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::pin_name_of;
@@ -57,8 +56,7 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
   close(fd);
 }
 
-void Graphviz::populate_lg_handle_xedge(const hhds::Node_class& node, const hhds::Edge_class& out, std::string& data,
-                                        bool verbose) {
+void Graphviz::populate_lg_handle_xedge(const hhds::Edge_class& out, std::string& data, bool verbose) {
   std::string dp_pid;
   std::string sp_pid;
   if (verbose) {
@@ -87,7 +85,7 @@ void Graphviz::populate_lg_handle_xedge(const hhds::Node_class& node, const hhds
   auto pn      = pin_name_of(out.driver);
   auto dp_name = graphviz_legalize_name(!pn.empty() ? pn : std::string_view{"unk"});
 
-  if (is_const_pin(out.driver) || type_op_of(node) == Ntype_op::Nconst) {
+  if (out.driver.is_const()) {
     data += std::format(" {} -> {} [ label = <{}b:({},{})> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
   } else {
     data += std::format(" {} -> {} [ label = <{}b:({},{}):{}> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
@@ -275,25 +273,20 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
         color = absl::StrCat("fillcolor = \"", it->second, "\" ");
       }
     }
-    if (type_op_of(node) == Ntype_op::Nconst) {
-      auto v  = hydrate_const(node);
-      data   += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, v.to_pyrope());
-    } else {
-      data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
-    }
+    data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
 
     for (const auto& out : node.out_edges()) {
-      populate_lg_handle_xedge(node, out, data, verbose);
+      populate_lg_handle_xedge(out, data, verbose);
     }
 
     if (verbose) {
       // CONST_NODE is a builtin singleton skipped by body().nodes(), so const
       // edges are invisible from the driver side. Show them from the sink.
       for (const auto& inp : node.inp_edges()) {
-        if (!is_const_pin(inp.driver)) {
+        if (!inp.driver.is_const()) {
           continue;
         }
-        auto v  = hydrate_const(inp.driver);
+        const auto& v  = const_of(inp.driver);
         data   += std::format(" const_{} [ label = <{}> ];\n",
                               graphviz_legalize_name(v.to_pyrope()),
                               graphviz_legalize_name(v.to_pyrope()));
@@ -313,7 +306,7 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
       auto io_name  = graphviz_legalize_name(decl.name);
       data         += std::format(" {} [ label = <{}> ];\n", io_name, io_name);
       for (const auto& out : pin.out_edges()) {
-        populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
+        populate_lg_handle_xedge(out, data, verbose);
       }
     }
     for (const auto& decl : gio->get_output_pin_decls()) {
@@ -322,14 +315,14 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
       auto             dbits    = bits_of(pin);
       data                     += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(decl.name), dst_str, dbits);
       for (const auto& out : pin.out_edges()) {
-        populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
+        populate_lg_handle_xedge(out, data, verbose);
       }
       if (verbose) {
         for (const auto& inp : pin.inp_edges()) {
-          if (!is_const_pin(inp.driver)) {
+          if (!inp.driver.is_const()) {
             continue;
           }
-          auto v  = hydrate_const(inp.driver);
+          const auto& v  = const_of(inp.driver);
           data   += std::format(" const_{} [ label = <{}> ];\n",
                                 graphviz_legalize_name(v.to_pyrope()),
                                 graphviz_legalize_name(v.to_pyrope()));

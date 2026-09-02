@@ -23,7 +23,6 @@
 
 #include "ann_place.hpp"
 #include "hhds/attr.hpp"
-#include "hhds/attrs/const_payload.hpp"
 
 namespace livehd::attrs {
 
@@ -249,21 +248,6 @@ LIVEHD_AGGREGATE_INT_ATTR(aggregate_extent);
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair
 // were write-only and are gone.
 
-// Per-node serialized Dlop value used by Nconst cells.
-// Replaces Lgraph_attributes::const_map (which stored Dlop::serialize()).
-struct const_value_t {
-  using value_type = std::string;
-  using storage    = hhds::flat_storage;
-};
-inline constexpr const_value_t const_value{};
-
-// Per-pin serialized Dlop value carried on CONST_NODE pins whose port_id is
-// beyond the small-int fast-path range (`Const_small_pid_count`). For pins in
-// the small-int range, the value is encoded directly in the port_id (scheme
-// A) and this attribute is absent.
-using pin_const_value_t = hhds::attrs::const_payload_t;
-inline constexpr pin_const_value_t pin_const_value{};
-
 // Per-node serialized LUT-table Dlop used by LUT cells.
 // Replaces Lgraph_attributes::lut_map.
 struct lut_t {
@@ -316,8 +300,6 @@ inline constexpr Attr_kind attr_kind<pin_signed_t> = Attr_kind::driver_pin;
 template <>
 inline constexpr Attr_kind attr_kind<pin_delay_t> = Attr_kind::driver_pin;
 template <>
-inline constexpr Attr_kind attr_kind<pin_const_value_t> = Attr_kind::driver_pin;
-template <>
 inline constexpr Attr_kind attr_kind<match_t> = Attr_kind::driver_pin;
 template <>
 inline constexpr Attr_kind attr_kind<pin_name_t> = Attr_kind::edge;
@@ -364,8 +346,6 @@ inline constexpr Attr_kind attr_kind<aggregate_bit_width_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<aggregate_extent_t> = Attr_kind::node;
 template <>
-inline constexpr Attr_kind attr_kind<const_value_t> = Attr_kind::node;
-template <>
 inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
 
 // EVERY LiveHD attribute tag, in one list. graph/cell.cpp pre-registers from it
@@ -398,8 +378,6 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(aggregate_bit_width)            \
   X(aggregate_extent)               \
   X(place)                          \
-  X(const_value)                    \
-  X(pin_const_value)                \
   X(lut)                            \
   X(time_range)                     \
   X(pending_time)

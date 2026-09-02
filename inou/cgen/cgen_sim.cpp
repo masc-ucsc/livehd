@@ -21,8 +21,8 @@
 #include "attrs.hpp"
 #include "cell.hpp"  // Ntype / Ntype_op
 #include "cgen_llvm.hpp"
-#include "cgen_salt.hpp"       // livehd::kCgenSrcSalt — emitter content hash (L2)
-#include "diag.hpp"            // livehd::diag::err — Stage 0 comb-loop safety net
+#include "cgen_salt.hpp"  // livehd::kCgenSrcSalt — emitter content hash (L2)
+#include "diag.hpp"       // livehd::diag::err — Stage 0 comb-loop safety net
 #include "hash_util.hpp"
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
@@ -32,11 +32,10 @@
 #include "str_tools.hpp"      // str_tools::ends_with
 
 using livehd::graph_util::bits_of;
+using livehd::graph_util::const_of;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::default_instance_name;
 using livehd::graph_util::get_driver_of_sink_name;
-using livehd::graph_util::hydrate_const;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_type_flop;
 using livehd::graph_util::is_type_register;
 using livehd::graph_util::is_type_sub;
@@ -719,8 +718,8 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   if (dpin.is_invalid()) {
     return absl::StrCat("Slop<", tw, ">::create_integer(0)");
   }
-  if (is_const_pin(dpin)) {
-    const auto c = hydrate_const(dpin);
+  if (dpin.is_const()) {
+    const auto& c = const_of(dpin);
     if (c.is_integer() && c.is_just_i64()) {  // fast path -- the overwhelmingly common case
       return absl::StrCat("Slop<", tw, ">::create_integer(", c.to_just_i64(), ")");
     }
@@ -791,8 +790,8 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
   if (dpin.is_invalid()) {
     return absl::StrCat("Slop<", fw, ">::create_integer(0)");
   }
-  if (is_const_pin(dpin)) {
-    const auto c = hydrate_const(dpin);
+  if (dpin.is_const()) {
+    const auto& c = const_of(dpin);
     if (c.is_integer() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
@@ -825,8 +824,8 @@ std::string Cgen_sim::stored_operand(const hhds::Pin_class& dpin, int fallback_b
   if (dpin.is_invalid()) {
     return absl::StrCat("Slop<", fw, ">::create_integer(0)");
   }
-  if (is_const_pin(dpin)) {
-    const auto c = hydrate_const(dpin);
+  if (dpin.is_const()) {
+    const auto& c = const_of(dpin);
     if (c.is_integer() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
@@ -892,8 +891,8 @@ bool Cgen_sim::proven_canonical_unsigned_result(const hhds::Node_class& node, co
     if (op == Ntype_op::SHL && edge.sink.get_port_id() != 0) {
       continue;  // shift amount, not a result value
     }
-    if (is_const_pin(edge.driver)) {
-      if (hydrate_const(edge.driver).is_negative()) {
+    if (edge.driver.is_const()) {
+      if (const_of(edge.driver).is_negative()) {
         return false;
       }
     } else if (!is_unsign(edge.driver)) {
@@ -939,8 +938,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   auto       e  = sorted_inp(node);
 
   const auto operation_width = [&](const hhds::Pin_class& pin) {
-    if (is_const_pin(pin)) {
-      return std::max({wbits_of(pin), static_cast<int>(hydrate_const(pin).get_bits()), 1});
+    if (pin.is_const()) {
+      return std::max({wbits_of(pin), static_cast<int>(const_of(pin).get_bits()), 1});
     }
     const int bits = std::max(wbits_of(pin), 1);
     return is_unsign(pin) ? bits + 1 : bits;
@@ -1108,8 +1107,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // constant, hand the int64 overload the number directly instead of
       // materializing a whole Slop<W> constant just to pass it (which, at
       // W > 64, was a multi-word object built per shift).
-      if (is_const_pin(e[1].driver)) {
-        const auto amt = hydrate_const(e[1].driver);
+      if (e[1].driver.is_const()) {
+        const auto& amt = const_of(e[1].driver);
         if (amt.is_integer() && amt.is_just_i64() && amt.to_just_i64() >= 0) {
           return absl::StrCat("Slop<",
                               tw,
@@ -1165,8 +1164,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // A profile of the dino CPU put 68.9% of simulation time inside
       // get_mask_op and another 27.8% inside from_pyrope parsing the wide mask
       // CONSTANTS it is called with, against 2.2% in the actual module bodies.
-      if (is_const_pin(e[1].driver)) {
-        const auto mv = hydrate_const(e[1].driver);
+      if (e[1].driver.is_const()) {
+        const auto& mv = const_of(e[1].driver);
         if (!mv.has_unknowns()) {
           // (a) mask == -1 is the to-positive idiom. The value is read UNSIGNED
           // (zext_to), which already yields a non-negative value, so making it
@@ -1258,8 +1257,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // compare width to the mask's true span so the value operand undergoes a
       // genuine SIGNED cross-width widen (sign-extend) rather than a same-width
       // no-op copy that would read the out-of-range bits as 0.
-      if (is_const_pin(e[1].driver)) {
-        cw = std::max(cw, static_cast<int>(hydrate_const(e[1].driver).get_bits()));
+      if (e[1].driver.is_const()) {
+        cw = std::max(cw, static_cast<int>(const_of(e[1].driver).get_bits()));
       }
       // The value is normally read UNSIGNED (get_mask yields a non-negative
       // magnitude). Two corrections, both keyed off a CONSTANT mask:
@@ -1278,10 +1277,10 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // declared width into account, not just its storage sign.
       int  val_sign   = -1;
       bool single_bit = false;
-      if (is_const_pin(e[1].driver)) {
-        auto mv    = hydrate_const(e[1].driver);
-        val_sign   = (mv.is_just_i64() && mv.to_just_i64() == -1) ? -1 : 0;
-        single_bit = !mv.is_negative() && mv.popcount() == 1;
+      if (e[1].driver.is_const()) {
+        const auto& mv = const_of(e[1].driver);
+        val_sign       = (mv.is_just_i64() && mv.to_just_i64() == -1) ? -1 : 0;
+        single_bit     = !mv.is_negative() && mv.popcount() == 1;
       }
       std::string gm = absl::StrCat("(", operand(e[0].driver, cw, val_sign), ".get_mask_op(", operand(e[1].driver, cw, -1), "))");
       if (single_bit) {
@@ -1305,8 +1304,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // asking set_mask_op() to rediscover the range on every execution. This
       // works for wide masks too: no from_pyrope constant, get_bits, ctz/clz,
       // or contiguity scan remains in the generated program.
-      if (is_const_pin(e[1].driver)) {
-        const auto mv = hydrate_const(e[1].driver);
+      if (e[1].driver.is_const()) {
+        const auto& mv = const_of(e[1].driver);
         if (!mv.has_unknowns() && !mv.is_negative()) {
           const auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
           if (mb >= 0 && me > mb && me <= wbits) {
@@ -1314,7 +1313,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
               return operand(e[2].driver, wbits);  // every result bit is replaced
             }
             const auto base = operand(e[0].driver, wbits, -1);
-            if (is_const_pin(e[2].driver) && hydrate_const(e[2].driver).is_known_zero()) {
+            if (e[2].driver.is_known_false()) {
               return absl::StrCat(base, ".clear_mask_op_opt(", mb, ", ", me, ")");
             }
             return absl::StrCat(base, ".set_mask_op_opt(", mb, ", ", me, ", ", operand(e[2].driver, wbits), ")");
@@ -1444,11 +1443,11 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
       int frombit = wbits - 1;
-      if (e.size() > 1 && is_const_pin(e[1].driver)) {
+      if (e.size() > 1 && e[1].driver.is_const()) {
         // LGraph Sext(a, b) keeps b bits [b-1:0] (cgen_verilog emits `a[b-1:0]`),
         // i.e. the sign bit is at b-1. Slop::sext_op(fb) takes fb as the sign-bit
         // position, so pass b-1 (NOT b) or the value stays unsigned/off-by-one.
-        frombit = static_cast<int>(hydrate_const(e[1].driver).to_just_i64()) - 1;
+        frombit = static_cast<int>(const_of(e[1].driver).to_just_i64()) - 1;
       }
       // read the source wide enough to preserve the sign bit before extending
       int sw = std::max({wbits, frombit + 1, wbits_of(e[0].driver)});
@@ -1497,10 +1496,10 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // the signed-carrier arithmetic (an unknown-carrying `0ub?` arm used to
         // demand the carrier here and fatal on a graph tolg had sized right).
         const auto arm_width = [](const hhds::Pin_class& pin) {
-          if (!is_const_pin(pin)) {
+          if (!pin.is_const()) {
             return std::max(wbits_of(pin), 1);
           }
-          return std::max(1, static_cast<int>(livehd::graph_util::literal_payload_bits(hydrate_const(pin))));
+          return std::max(1, static_cast<int>(livehd::graph_util::literal_payload_bits(const_of(pin))));
         };
         const int false_w = arm_width(e[1].driver);
         const int true_w  = arm_width(e[2].driver);
@@ -1525,8 +1524,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // Mux and Hotmux selectors have widths independent of their result. A
       // Hotmux uses one selector bit per arm; a 3+-arm Mux uses the full integer
       // index so an out-of-range high bit must not be truncated into range.
-      const int  sel_w = is_const_pin(e[0].driver) ? std::max({wbits_of(e[0].driver), hydrate_const(e[0].driver).get_bits(), 1})
-                                                   : std::max(wbits_of(e[0].driver), 1);
+      const int  sel_w = e[0].driver.is_const() ? std::max({wbits_of(e[0].driver), const_of(e[0].driver).get_bits(), 1})
+                                                : std::max(wbits_of(e[0].driver), 1);
       const auto sel   = operand(e[0].driver, sel_w, /*unsigned=*/-1);
       if (op == Ntype_op::Hotmux && n_vals > 192) {
         // A parameter-pack Hotmux instantiates one concept operand per arm;
@@ -1621,7 +1620,7 @@ absl::flat_hash_set<uint32_t> sub_false_loop_output_pids(const hhds::Node_class&
   while (!stk.empty()) {
     auto d = stk.back();
     stk.pop_back();
-    if (d.is_invalid() || gu::is_const_pin(d)) {
+    if (d.is_invalid() || d.is_const()) {
       continue;
     }
     auto m = d.get_master_node();
@@ -1671,7 +1670,7 @@ bool compact_loop_has_external_ring(const hhds::Node_class& s) {
   while (!stk.empty()) {
     auto d = stk.back();
     stk.pop_back();
-    if (d.is_invalid() || gu::is_const_pin(d)) {
+    if (d.is_invalid() || d.is_const()) {
       continue;
     }
     auto n = d.get_master_node();
@@ -1725,7 +1724,7 @@ bool callee_is_moore(const std::shared_ptr<hhds::Graph>& cg, const SIO& sio) {
   while (!stk.empty()) {
     auto d = stk.back();
     stk.pop_back();
-    if (d.is_invalid() || gu::is_const_pin(d)) {
+    if (d.is_invalid() || d.is_const()) {
       continue;
     }
     if (gu::is_graph_input_pin(d)) {
@@ -1804,7 +1803,7 @@ absl::flat_hash_set<uint32_t> callee_state_only_outputs(const std::shared_ptr<hh
     while (!stk.empty() && state_only) {
       auto d = stk.back();
       stk.pop_back();
-      if (d.is_invalid() || gu::is_const_pin(d)) {
+      if (d.is_invalid() || d.is_const()) {
         continue;
       }
       if (gu::is_graph_input_pin(d)) {
@@ -1908,10 +1907,10 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
         break;
       }
       if (e.size() >= 2) {  // binary form: identity only for the mask==-1 idiom
-        if (!is_const_pin(e[1].driver)) {
+        if (!e[1].driver.is_const()) {
           break;
         }
-        auto mv = hydrate_const(e[1].driver);
+        const auto& mv = const_of(e[1].driver);
         if (!mv.is_just_i64() || mv.to_just_i64() != -1) {
           break;
         }
@@ -2192,11 +2191,16 @@ uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
         h = fnv1a(h, 0);
       }
     }
-    if (op == Ntype_op::Nconst) {
-      h = fnv1a_str(h, hydrate_const(n.get_driver_pin(0)).to_pyrope());
-    }
     for (auto e : n.inp_edges()) {
       h = fnv1a(h, static_cast<uint64_t>(e.sink.get_port_id()));
+      if (e.driver.is_const()) {
+        // A constant operand is its VALUE, not its pool slot: slots are handed
+        // out in creation order, so `x + 1` and `x + 2` would otherwise digest
+        // the same and a warm workdir would be reused with a stale constant.
+        h = fnv1a(h, 0x434f4e5354ULL);  // "CONST"
+        h = fnv1a_str(h, const_of(e.driver).serialize());
+        continue;
+      }
       h = fnv1a(h, seq[e.driver.get_master_node().get_class_index()]);
       h = fnv1a(h, static_cast<uint64_t>(e.driver.get_port_id()));
     }
@@ -2483,8 +2487,7 @@ std::vector<hhds::Pin_class> Cgen_sim::icg_guards(const hhds::Pin_class& clock_d
     }
     auto            guards  = cone->enables;
     hhds::Pin_class clk_net = cone->clock;
-    for (int hops = 0;
-         hops < 4 && !clk_net.is_invalid() && !is_const_pin(clk_net) && !livehd::graph_util::is_graph_input_pin(clk_net);
+    for (int hops = 0; hops < 4 && !clk_net.is_invalid() && !clk_net.is_const() && !livehd::graph_util::is_graph_input_pin(clk_net);
          ++hops) {
       auto inner = livehd::latch_contract::clock_op_of(clk_net, *clocks);
       if (!inner || inner->div != 1) {
@@ -2545,7 +2548,7 @@ bool Cgen_sim::plain_clock_cone(const hhds::Pin_class& clock_driver, const liveh
   hhds::Pin_class p     = clock_driver;
   bool            moved = false;
   for (int hops = 0; hops < 16 && !p.is_invalid(); ++hops) {
-    if (livehd::graph_util::is_graph_input_pin(p) || is_const_pin(p)) {
+    if (livehd::graph_util::is_graph_input_pin(p) || p.is_const()) {
       break;
     }
     auto       n  = p.get_master_node();
@@ -2553,10 +2556,10 @@ bool Cgen_sim::plain_clock_cone(const hhds::Pin_class& clock_driver, const liveh
     auto       e  = sorted_inp(n);
     if (op == Ntype_op::Get_mask && !e.empty()) {
       if (e.size() >= 2) {
-        if (!is_const_pin(e[1].driver)) {
+        if (!e[1].driver.is_const()) {
           break;
         }
-        auto mv = hydrate_const(e[1].driver);
+        const auto& mv = const_of(e[1].driver);
         if (!mv.is_just_i64() || mv.to_just_i64() != -1) {
           break;  // only the to-positive `mask == -1` idiom is an identity
         }
@@ -2566,11 +2569,11 @@ bool Cgen_sim::plain_clock_cone(const hhds::Pin_class& clock_driver, const liveh
       continue;
     }
     if ((op == Ntype_op::And || op == Ntype_op::EQ) && e.size() == 2) {
-      const int ci = is_const_pin(e[1].driver) ? 1 : (is_const_pin(e[0].driver) ? 0 : -1);
+      const int ci = e[1].driver.is_const() ? 1 : (e[0].driver.is_const() ? 0 : -1);
       if (ci < 0) {
         break;  // both operands real: an ICG cone (`clk & en`), never an identity
       }
-      auto cv = hydrate_const(e[ci].driver);
+      const auto& cv = const_of(e[ci].driver);
       if (op == Ntype_op::And) {
         // `x & <low mask>`: the width mask the slang reader puts on a boolean
         // control. Any other constant trims real bits.
@@ -2800,7 +2803,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (const auto& d : gio->get_output_pin_decls()) {
       auto opin = g->get_output_pin(d.name);
       auto drv  = opin.is_invalid() ? hhds::Pin_class{} : get_driver(opin);
-      if (!drv.is_invalid() && !livehd::graph_util::is_const_pin(drv)) {
+      if (!drv.is_invalid() && !drv.is_const()) {
         auto m = drv.get_master_node();
         if (!m.is_invalid() && live_.insert(m.get_class_index()).second) {
           lstk.push_back(m);
@@ -2940,10 +2943,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           break;
         }
         if (e.size() >= 2) {
-          if (!is_const_pin(e[1].driver)) {
+          if (!e[1].driver.is_const()) {
             break;
           }
-          auto mv = hydrate_const(e[1].driver);
+          const auto& mv = const_of(e[1].driver);
           if (!mv.is_just_i64() || mv.to_just_i64() != -1) {
             break;
           }
@@ -2985,9 +2988,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
         auto        cone = livehd::latch_contract::clock_op_of(d, design_clocks);
         std::string dbg  = absl::StrCat("[clkdbg] flop ",
-                                       debug_name(node),
-                                       " clock_op_of=",
-                                       cone ? (cone->clock_inverted ? "INVERTED" : (cone->div != 1 ? "DIV" : "cone")) : "nullopt");
+                                        debug_name(node),
+                                        " clock_op_of=",
+                                        cone ? (cone->clock_inverted ? "INVERTED" : (cone->div != 1 ? "DIV" : "cone")) : "nullopt");
         if (cone) {
           absl::StrAppend(&dbg,
                           " clock=",
@@ -3019,7 +3022,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                           " gin=",
                           livehd::graph_util::is_graph_input_pin(p) ? pin_name_of(p) : "-",
                           "\n");
-          if (livehd::graph_util::is_graph_input_pin(p) || is_const_pin(p)) {
+          if (livehd::graph_util::is_graph_input_pin(p) || p.is_const()) {
             continue;
           }
           for (auto e : n.inp_edges()) {
@@ -3081,7 +3084,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return;
       }
       auto d = distinct.empty() ? hhds::Pin_class{} : distinct.front();
-      if (d.is_invalid() || livehd::graph_util::is_graph_input_pin(d) || is_const_pin(d)) {
+      if (d.is_invalid() || livehd::graph_util::is_graph_input_pin(d) || d.is_const()) {
         continue;  // unclocked array, or a plain clock net
       }
       if (!icg_guards(d, clock_port, &design_clocks).empty() || plain_clock_cone(d, design_clocks)) {
@@ -3123,7 +3126,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           continue;  // not a clock port the child clocks state on
         }
         auto d = resolve_passthrough(e.driver);
-        if (d.is_invalid() || livehd::graph_util::is_graph_input_pin(d) || is_const_pin(d)) {
+        if (d.is_invalid() || livehd::graph_util::is_graph_input_pin(d) || d.is_const()) {
           continue;  // a plain clock net: forwarded (or ungated) as-is
         }
         // Exactly the emit-site arm that DROPS the word: a decoded gate whose
@@ -3259,8 +3262,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (!slop_u_ || !unsign) {
       return operand(pin, bits);
     }
-    if (!pin.is_invalid() && is_const_pin(pin)) {
-      const auto value = hydrate_const(pin);
+    if (pin.is_const()) {
+      const auto& value = const_of(pin);
       if (value.is_integer() && value.is_just_i64()) {
         return absl::StrCat("Slop_u<", bits, ">::create_integer(", value.to_just_i64(), ")");
       }
@@ -3341,8 +3344,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     auto qpin  = node.get_driver_pin(0);
     int  depth = 1;
-    if (auto pm = get_driver(find_sink_pin(node, "pipe_min")); !pm.is_invalid() && is_const_pin(pm)) {
-      depth = std::max<int>(1, static_cast<int>(hydrate_const(pm).to_just_i64()));
+    if (auto pm = get_driver(find_sink_pin(node, "pipe_min")); pm.is_const()) {
+      depth = std::max<int>(1, static_cast<int>(const_of(pm).to_just_i64()));
     }
     Flop f{node,
            unique_member(cpp_id(wire_name(qpin))),
@@ -3399,7 +3402,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (ce.empty()) {
           break;
         }
-        if (ce.size() >= 2 && !is_const_pin(ce[1].driver)) {
+        if (ce.size() >= 2 && !ce[1].driver.is_const()) {
           break;
         }
         cd = ce[0].driver;
@@ -3429,7 +3432,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (cd_name == ref_clock && !livehd::latch_contract::Design_clocks::name_looks_like_clock(cd_name)
             && type_op_of(node) != Ntype_op::Latch) {
           auto pc        = get_driver(find_sink_pin(node, "posclk"));
-          ref_needs_edge = !pc.is_invalid() && is_const_pin(pc) && hydrate_const(pc).is_known_false();
+          ref_needs_edge = pc.is_known_false();
         }
         if (cd_name != ref_clock || ref_needs_edge) {
           f.sec_clock   = get_driver(find_sink_pin(node, "clock_pin"));
@@ -3442,8 +3445,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // commits in. On a LATCH the SAME pin means enable polarity instead, so it
     // must never reach f.posedge: a latch always commits in the primary
     // sub-tick and carries its polarity in `neg_enable` (M8 step 0d).
-    if (auto pc = get_driver(find_sink_pin(node, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
-      const bool pos = !hydrate_const(pc).is_known_false();
+    if (auto pc = get_driver(find_sink_pin(node, "posclk")); pc.is_const()) {
+      const bool pos = !const_of(pc).is_known_false();
       if (type_op_of(node) == Ntype_op::Latch) {
         f.neg_enable = !pos;
       } else {
@@ -3615,15 +3618,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       auto pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
       auto pid = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
       if (pn == "bits") {
-        m.bits = static_cast<int>(hydrate_const(e.driver).to_just_i64());
+        m.bits = static_cast<int>(const_of(e.driver).to_just_i64());
       } else if (pn == "size") {
-        m.size = static_cast<int>(hydrate_const(e.driver).to_just_i64());
+        m.size = static_cast<int>(const_of(e.driver).to_just_i64());
       } else if (pn == "type") {
-        m.type = static_cast<int>(hydrate_const(e.driver).to_just_i64());
+        m.type = static_cast<int>(const_of(e.driver).to_just_i64());
       } else if (pn == "fwd") {
-        m.fwd = Dlop::clone(hydrate_const(e.driver));
+        m.fwd = Dlop::clone(const_of(e.driver));
       } else if (pn == "undef") {
-        m.undef = Dlop::clone(hydrate_const(e.driver));
+        m.undef = Dlop::clone(const_of(e.driver));
       } else if (pn == "update") {
         m.update = e.driver;
       } else if (pn == "update_enable") {  // MUST precede ends_with("enable") below
@@ -3633,7 +3636,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       } else if (pn == "init") {
         m.init = e.driver;  // whole-array reset-value bus (runtime); plain mem: comptime, still assumed 0
       } else if (pn == "wensize") {
-        m.wensize = static_cast<int>(hydrate_const(e.driver).to_just_i64());
+        m.wensize = static_cast<int>(const_of(e.driver).to_just_i64());
       } else {
         if (pv.size() <= pid) {
           pv.resize(pid + 1);
@@ -3648,7 +3651,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         } else if (str_tools::ends_with(pn, "din")) {
           pv[pid].din = e.driver;
         } else if (str_tools::ends_with(pn, "rdport")) {
-          pv[pid].rd = !hydrate_const(e.driver).is_known_false();
+          pv[pid].rd = e.driver.is_const() && !const_of(e.driver).is_known_false();
         }
       }
     }
@@ -3864,8 +3867,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         info.latch = true;
       } else if (is_type_flop(pn)) {
         bool pos = true;
-        if (auto pc = get_driver(find_sink_pin(pn, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
-          pos = !hydrate_const(pc).is_known_false();
+        if (auto pc = get_driver(find_sink_pin(pn, "posclk")); pc.is_const()) {
+          pos = !const_of(pc).is_known_false();
         }
         info.posedge |= pos;
         info.negedge |= !pos;
@@ -4347,7 +4350,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       if (is_type_flop(node)) {
         const auto posclk = get_driver(find_sink_pin(node, "posclk"));
-        if (!mixed_edges && !posclk.is_invalid() && is_const_pin(posclk) && hydrate_const(posclk).is_known_false()) {
+        if (!mixed_edges && posclk.is_known_false()) {
           staged = false;
           break;
         }
@@ -4371,7 +4374,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             continue;
           }
           const auto guard = get_driver(find_sink_pin(node, decl.name));
-          if (!mixed_edges && !guard.is_invalid() && (!is_const_pin(guard) || !hydrate_const(guard).is_known_true())) {
+          if (!mixed_edges && !guard.is_invalid() && (!guard.is_known_true())) {
             staged = false;
           }
           break;
@@ -4519,15 +4522,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto name = Ntype::get_sink_name(Ntype_op::Memory, raw);
       const auto port = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
       if (name == "bits") {
-        memory.bits = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+        memory.bits = static_cast<int>(const_of(edge.driver).to_just_i64());
       } else if (name == "size") {
-        memory.size = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+        memory.size = static_cast<int>(const_of(edge.driver).to_just_i64());
       } else if (name == "type") {
-        memory.type = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+        memory.type = static_cast<int>(const_of(edge.driver).to_just_i64());
       } else if (name == "fwd") {
-        memory.fwd = Dlop::clone(hydrate_const(edge.driver));
+        memory.fwd = Dlop::clone(const_of(edge.driver));
       } else if (name == "undef") {
-        memory.undef = Dlop::clone(hydrate_const(edge.driver));
+        memory.undef = Dlop::clone(const_of(edge.driver));
       } else if (name == "update") {
         memory.update = edge.driver;
       } else if (name == "update_enable") {
@@ -4537,7 +4540,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       } else if (name == "init") {
         memory.init = edge.driver;
       } else if (name == "wensize") {
-        memory.wensize = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+        memory.wensize = static_cast<int>(const_of(edge.driver).to_just_i64());
       } else {
         if (ports_by_id.size() <= port) {
           ports_by_id.resize(port + 1);
@@ -4552,7 +4555,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         } else if (str_tools::ends_with(name, "din")) {
           ports_by_id[port].din = edge.driver;
         } else if (str_tools::ends_with(name, "rdport")) {
-          ports_by_id[port].rd = !hydrate_const(edge.driver).is_known_false();
+          ports_by_id[port].rd = edge.driver.is_const() && !const_of(edge.driver).is_known_false();
         }
       }
     }
@@ -4652,7 +4655,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       return false;
     }
     const auto guard = get_driver(find_sink_pin(sub, "__valid"));
-    if (guard.is_invalid() || (is_const_pin(guard) && hydrate_const(guard).is_known_true())) {
+    if (guard.is_invalid() || (guard.is_known_true())) {
       return false;
     }
     // A definition forwarding its own activation is inside the same region,
@@ -4662,9 +4665,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // The direct rung consumes the plan's execution slots over the complete
   // ordinary occurrence tree. Unsupported state protocols fail closed here;
   // no state class is silently approximated by the retired module scheduler.
-  const bool staged_flat = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
-                           && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
-  bool direct_color_supported = color_root;
+  const bool staged_flat            = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
+                                      && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
+  bool       direct_color_supported = color_root;
   if (direct_color_supported) {
     const bool  color_debug      = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
     const auto& hierarchy_clocks = hierarchy_clocks_for_root();
@@ -5821,7 +5824,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // `init` bus, which genuinely IS a whole-array value, keeps that shape.
     const auto mem_type_name = value_type(m.bits, m.unsign);
     const auto mem_unknown   = unknown_value(m.bits, m.unsign);
-    if (!m.init.is_invalid() && is_const_pin(m.init)) {
+    if (m.init.is_const()) {
       fout->append(
           absl::StrCat("    ", m.member, ".apply_update(", stored_value_operand(m.init, m.bits * m.size, m.unsign), ");\n"));
     } else if (m.init.is_invalid() && m.reset.is_invalid()) {
@@ -5924,7 +5927,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     while (!work.empty()) {
       auto p = work.back();
       work.pop_back();
-      if (p.is_invalid() || is_const_pin(p) || !seen.insert(p.get_class_index()).second) {
+      if (p.is_invalid() || p.is_const() || !seen.insert(p.get_class_index()).second) {
         continue;
       }
       auto n = p.get_master_node();
@@ -5961,7 +5964,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     while (!work.empty()) {
       auto pp = work.back();
       work.pop_back();
-      if (pp.is_invalid() || is_const_pin(pp) || !seen.insert(pp.get_class_index()).second) {
+      if (pp.is_invalid() || pp.is_const() || !seen.insert(pp.get_class_index()).second) {
         continue;
       }
       auto n = pp.get_master_node();
@@ -5993,7 +5996,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         while (!sw.empty()) {
           auto pp = sw.back();
           sw.pop_back();
-          if (pp.is_invalid() || is_const_pin(pp) || !seen.insert(pp.get_class_index()).second) {
+          if (pp.is_invalid() || pp.is_const() || !seen.insert(pp.get_class_index()).second) {
             continue;
           }
           auto n = pp.get_master_node();
@@ -6396,7 +6399,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           ensure_fn(m.update);
           fout->append(
               absl::StrCat("    ", m.member, ".apply_update(", stored_value_operand(m.update, m.bits * m.size, m.unsign), ");\n"));
-        } else if (!m.registered() && !m.init.is_invalid() && is_const_pin(m.init)) {
+        } else if (!m.registered() && m.init.is_const()) {
           // Combinational per-port array (`mut t:[..] = <const>`): re-seed the
           // whole array to its comptime init at the START of every cycle. Writes
           // are forwarded to the same-cycle read below and also committed to
@@ -6440,7 +6443,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (wp.rd || wp.addr.is_invalid() || wp.din.is_invalid() || wp.wridx < staged || wp.wridx >= upto) {
               continue;
             }
-            if (!wp.enable.is_invalid() && is_const_pin(wp.enable) && hydrate_const(wp.enable).is_known_false()) {
+            if (wp.enable.is_known_false()) {
               continue;  // never fires
             }
             ensure_fn(wp.addr);
@@ -6531,7 +6534,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (!live_dout_pids.contains(static_cast<uint32_t>(rd_order[i]->dout_pid))) {
               continue;
             }
-            auto dp = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
+            auto dp                        = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
             dout2idx[dp.get_class_index()] = static_cast<int>(i);
           }
           // deps[i] = read ports whose dout appears in port i's address cone
@@ -6542,7 +6545,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             while (!work.empty()) {
               auto pp = work.back();
               work.pop_back();
-              if (pp.is_invalid() || is_const_pin(pp) || !seen_p.insert(pp.get_class_index()).second) {
+              if (pp.is_invalid() || pp.is_const() || !seen_p.insert(pp.get_class_index()).second) {
                 continue;
               }
               if (auto it = dout2idx.find(pp.get_class_index()); it != dout2idx.end()) {
@@ -6618,7 +6621,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // UNDEF-then-FWD-then-stored chain does (and at latency 1 the same
             // resolved value is what the read register latches, at the edge).
             stage_through(read_prefix(p.rdidx));  // program-order staging, see above
-            ensure_fn(p.addr);  // computed read address emitted before this early (loop_last) memory node
+            ensure_fn(p.addr);                    // computed read address emitted before this early (loop_last) memory node
             int  ab  = std::max(1, bits_of(p.addr));
             auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
             fout->append(absl::StrCat("    ",
@@ -6719,7 +6722,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           break;
         }
       }
-      if (active.is_invalid() || (is_const_pin(active) && hydrate_const(active).is_known_true())) {
+      if (active.is_invalid() || (active.is_known_true())) {
         return {};
       }
       // The caller already skipped this whole definition when its own
@@ -6735,7 +6738,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return {};
       }
       ensure_fn(active);
-      if (!is_const_pin(active) && !pin2var.contains(active.get_class_index())) {
+      if (!active.is_const() && !pin2var.contains(active.get_class_index())) {
         return {};  // unresolved feedback: the ordinary call path diagnoses it
       }
       std::string cond = absl::StrCat("(", operand(active, 1), ").is_known_true()");
@@ -6757,7 +6760,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           return {};
         }
         ensure_fn(reset);
-        if (!is_const_pin(reset) && !pin2var.contains(reset.get_class_index())) {
+        if (!reset.is_const() && !pin2var.contains(reset.get_class_index())) {
           return {};
         }
         absl::StrAppend(&cond, " || (", operand(reset, 1), rp.active_low ? ").is_known_false()" : ").is_known_true()");
@@ -6914,7 +6917,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // Stage 0: a valid, non-const driver feeding this instance input that is
           // not yet bound is a combinational cycle threading THROUGH this atomic Sub
           // call (the false-loop-through-instance case). Report it precisely.
-          if (!value_drv.is_invalid() && !is_const_pin(value_drv) && !pin2var.contains(value_drv.get_class_index())
+          if (!value_drv.is_invalid() && !value_drv.is_const() && !pin2var.contains(value_drv.get_class_index())
               && !cycle_reported_) {
             livehd::diag::err("inou.cgen.sim", "comb-loop-through-instance", "unsupported")
                 .msg(
@@ -7076,7 +7079,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
     absl::flat_hash_set<pin_key_t> prefetch_seen;
     auto                           ensure_ready_impl = [&](auto&& self, const hhds::Pin_class& drv) -> void {
-      if (drv.is_invalid() || is_const_pin(drv)) {
+      if (drv.is_invalid() || drv.is_const()) {
         return;
       }
       if (pin2var.contains(drv.get_class_index())) {
@@ -7365,30 +7368,30 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       auto initp    = get_driver(find_sink_pin(f.node, "initial"));
       auto enp      = get_driver(find_sink_pin(f.node, "enable"));
       bool negreset = false;
-      if (auto np = get_driver(find_sink_pin(f.node, "negreset")); !np.is_invalid() && is_const_pin(np)) {
-        negreset = !hydrate_const(np).is_known_false();
+      if (auto np = get_driver(find_sink_pin(f.node, "negreset")); np.is_const()) {
+        negreset = !const_of(np).is_known_false();
       }
       const std::string rstval = initp.is_invalid() ? absl::StrCat(value_type(f.bits, f.unsign), "::create_integer(0)")
                                                     : stored_value_operand(initp, f.bits, f.unsign);
       std::string       rtest;  // C++ bool: reset asserted (empty = no reset)
       bool              reset_always = false;
       if (!rstp.is_invalid()) {
-        if (is_const_pin(rstp)) {
-          reset_always = !hydrate_const(rstp).is_known_false();
+        if (rstp.is_const()) {
+          reset_always = !const_of(rstp).is_known_false();
         } else {
           rtest = absl::StrCat(raw_operand(rstp, 1), negreset ? ".is_known_false()" : ".is_known_true()");
         }
       }
       std::string etest;  // C++ bool: write enabled (empty = always)
-      if (!enp.is_invalid() && !is_const_pin(enp)) {
+      if (!enp.is_invalid() && !enp.is_const()) {
         // `neg_enable` = an active-LOW latch gate: transparent while enable == 0.
         // is_known_false() rather than !is_known_true(), so an UNKNOWN enable
         // fails closed (holds) on both polarities instead of writing on X.
         etest = absl::StrCat(raw_operand(enp, 1), f.neg_enable ? ".is_known_false()" : ".is_known_true()");
-      } else if (!enp.is_invalid() && f.neg_enable && is_const_pin(enp)) {
+      } else if (!enp.is_invalid() && f.neg_enable && enp.is_const()) {
         // A CONSTANT active-low gate folds here: const 0 => permanently
         // transparent (write every tick), anything else => never writes.
-        if (!hydrate_const(enp).is_known_false()) {
+        if (!const_of(enp).is_known_false()) {
           etest = "false";
         }
       }
@@ -7417,8 +7420,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // unconditional evaluation (transparency semantics), and VCD builds keep
       // the eager form (an X-window dump reads dins the gate would skip).
       const bool  lazy_guard = !f.is_latch && !latch_low && !latch_high && vcd_file.empty()
-                              && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
-                              && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
+                               && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
+                               && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
       std::string gcond;
       if (lazy_guard) {
         if (with_cen) {
@@ -7509,7 +7512,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // so visiting each node once is exactly equivalent and linear.
     absl::flat_hash_set<hhds::Class_index> invalidate_seen;
     auto                                   invalidate_upstream_impl = [&](auto&& self, const hhds::Pin_class& p) -> void {
-      if (p.is_invalid() || is_const_pin(p) || livehd::graph_util::is_graph_input_pin(p)) {
+      if (p.is_invalid() || p.is_const() || livehd::graph_util::is_graph_input_pin(p)) {
         return;
       }
       auto n = p.get_master_node();
@@ -7860,7 +7863,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           if (p.rd || p.addr.is_invalid() || p.din.is_invalid()) {
             continue;
           }
-          if (!p.enable.is_invalid() && is_const_pin(p.enable) && hydrate_const(p.enable).is_known_false()) {
+          if (p.enable.is_known_false()) {
             continue;
           }
           if (lazy_wr) {
@@ -8619,7 +8622,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (base_in[input].driver.get_definition_index() == target.get_definition_index()) {
           return occurrence_edge->driver;
         }
-        if (base_in[input].driver.is_invalid() || is_const_pin(base_in[input].driver)
+        if (base_in[input].driver.is_invalid() || base_in[input].driver.is_const()
             || livehd::graph_util::is_graph_input_pin(base_in[input].driver)) {
           continue;
         }
@@ -8689,10 +8692,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // silent wrong value under `Slop_u<mag>::not_op`, whose extra bit always
     // complements to 1.
     const auto bool_const_expr = [&](const hhds::Occurrence_pin& pin) {
-      const auto cpin  = pin.base_pin();
-      const auto value = hydrate_const(cpin);
-      const int  gb    = static_cast<int>(value.get_bits());
-      const int  mag   = std::max({wbits_of(cpin), value.is_negative() ? gb : gb - 1, 1});
+      const auto  cpin  = pin.base_pin();
+      const auto& value = const_of(cpin);
+      const int   gb    = static_cast<int>(value.get_bits());
+      const int   mag   = std::max({wbits_of(cpin), value.is_negative() ? gb : gb - 1, 1});
       return Bool_expr{operand(cpin, 1), 1, mag};
     };
     // `~x` used as a boolean has to be complemented at the VALUE's width and
@@ -8728,7 +8731,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (pin.is_invalid() || depth > 32) {
         return {};
       }
-      if (is_const_pin(pin)) {
+      if (pin.is_const()) {
         return bool_const_expr(pin);
       }
       if (livehd::graph_util::is_graph_input_pin(pin) && pin.get_graph() == g) {
@@ -8870,7 +8873,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (pin.is_invalid() || depth > 32) {
         return {};
       }
-      if (is_const_pin(pin)) {
+      if (pin.is_const()) {
         return bool_const_expr(pin);
       }
       if (livehd::graph_util::is_graph_input_pin(pin) && pin.get_graph() == g) {
@@ -8938,7 +8941,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       return {};
     };
-    const auto occurrence_guard_expr       = [&](const hhds::Occurrence_pin&             pin,
+    const auto occurrence_guard_expr = [&](const hhds::Occurrence_pin&             pin,
                                            const hhds::Pin_class&                  clock_root,
                                            livehd::sim::Color_plan::Execution_slot target_slot,
                                            int depth) { return occurrence_guard_value(pin, clock_root, target_slot, depth).text; };
@@ -9285,10 +9288,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto  consumer_node    = color_plan_->sites()[consumer_version.base_site].node.base_node();
       if (type_op_of(consumer_node) == Ntype_op::Get_mask && consumer.port == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
         for (const auto& edge : consumer_node.inp_edges()) {
-          if (edge.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") || !is_const_pin(edge.driver)) {
+          if (edge.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") || !edge.driver.is_const()) {
             continue;
           }
-          const auto mask = hydrate_const(edge.driver);
+          const auto& mask = const_of(edge.driver);
           if (!mask.is_negative() && !mask.has_unknowns()) {
             const auto [mb, me] = mask.get_mask_range();
             if (mb == 0 && me > 0 && static_cast<uint32_t>(me) <= consumer.width) {
@@ -9562,7 +9565,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // invoked while its occurrence is inactive, so no second data-ABI guard
       // is needed here.
       if (const auto pipe_min = get_driver(find_sink_pin(node, "pipe_min"));
-          !pipe_min.is_invalid() && (!is_const_pin(pipe_min) || hydrate_const(pipe_min).to_just_i64() != 1)) {
+          !pipe_min.is_invalid() && (!pipe_min.is_const() || const_of(pipe_min).to_just_i64() != 1)) {
         return reject_state("pipeline");
       }
       if (op == Ntype_op::Flop) {
@@ -9684,7 +9687,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         auto occurrence_input = occurrence_inputs.begin();
         for (size_t input = 0; input < definition_inputs.size(); ++input, ++occurrence_input) {
-          if (is_const_pin(occurrence_input->driver) && !is_const_pin(definition_inputs[input].driver)) {
+          if (occurrence_input->driver.is_const() && !definition_inputs[input].driver.is_const()) {
             return false;  // occurrence-specific parameter: not part of the boundary ABI
           }
         }
@@ -10201,8 +10204,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               return reject("memory member has an invalid storage width");
             }
             const uint64_t memory_result_width = version.output_port == Ntype::Memory_readall_pid
-                                                            ? static_cast<uint64_t>(memory->bits) * memory->size
-                                                            : static_cast<uint64_t>(memory->bits);
+                                                     ? static_cast<uint64_t>(memory->bits) * memory->size
+                                                     : static_cast<uint64_t>(memory->bits);
             if (memory_result_width > std::numeric_limits<uint32_t>::max()) {
               return reject("memory member result is too wide for LLVM");
             }
@@ -10260,8 +10263,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             edges[input] = original_edges[edge_inputs[input]];
           }
           const auto constant_of = [&](const hhds::Occurrence_pin& pin) -> Cgen_llvm::Value {
-            if (is_const_pin(pin)) {
-              const auto constant = hydrate_const(pin);
+            if (pin.is_const()) {
+              const auto& constant = const_of(pin);
               if (!constant.is_integer()) {
                 return {};
               }
@@ -10300,7 +10303,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // metadata/timing fields), and marking every same-driver edge as
             // required creates fake ABI holes for those non-data inputs.
             for (const auto& definition_edge : node.inp_edges()) {
-              if (definition_edge.driver.is_invalid() || is_const_pin(definition_edge.driver)) {
+              if (definition_edge.driver.is_invalid() || definition_edge.driver.is_const()) {
                 continue;
               }
               const auto     sink       = definition_edge.sink.get_port_id();
@@ -10334,7 +10337,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (type_op_of(node) == Ntype_op::Get_mask && llvm_preextracted_get_masks.contains(member) && input == 1) {
               value = llvm_kernel.constant(1, 0, true);  // the boundary already applied this mask
             }
-            if (!is_const_pin(edge.driver)) {
+            if (!edge.driver.is_const()) {
               const auto  key               = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
               const auto* use_ptr           = select_internal_use(key, edge);
               bool        bound_to_internal = false;
@@ -10498,7 +10501,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                     reset     = llvm_kernel.reduce_or(reset, 1, true);
                     force     = reset;
                     auto init = memory->init.is_invalid() ? llvm_kernel.constant(whole_width, 0, memory->unsign)
-                                                                 : memory_operand(std::nullopt, "init");
+                                                          : memory_operand(std::nullopt, "init");
                     if (init.width == 0) {
                       return reject("whole-array memory update has no initial value");
                     }
@@ -10582,7 +10585,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("memory read callback has no address value");
               }
               const auto symbol = emit_llvm_memory_read_helper(color_plan_->sites()[version.base_site], *read_port, address.width);
-              result = llvm_kernel.external_read(symbol, address, result_width, result_unsign);
+              result            = llvm_kernel.external_read(symbol, address, result_width, result_unsign);
               break;
             }
             case Ntype_op::Flop:
@@ -10607,7 +10610,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               bool neg_enable = false;
               if (type_op_of(node) == Ntype_op::Latch) {
                 const auto polarity = get_driver(find_sink_pin(node, "posclk"));
-                neg_enable = !polarity.is_invalid() && is_const_pin(polarity) && hydrate_const(polarity).is_known_false();
+                neg_enable          = polarity.is_known_false();
               }
               if (neg_enable) {
                 enable = llvm_kernel.unary_not(enable, 1, true);
@@ -10618,13 +10621,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (reset.width != 0) {
                 reset                   = llvm_kernel.reduce_or(reset, 1, true);
                 const auto negreset_pin = get_driver(find_sink_pin(node, "negreset"));
-                if (!is_const_pin(get_driver(find_sink_pin(node, "reset_pin"))) && !negreset_pin.is_invalid()
-                    && is_const_pin(negreset_pin) && !hydrate_const(negreset_pin).is_known_false()) {
+                if (!get_driver(find_sink_pin(node, "reset_pin")).is_const() && negreset_pin.is_const()
+                    && !negreset_pin.is_known_false()) {
                   reset = llvm_kernel.unary_not(reset, 1, true);
                 }
                 auto initial = operand_at("initial");
                 initial      = initial.width == 0 ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                                         : llvm_kernel.resize(initial, result_width, result_unsign);
+                                                  : llvm_kernel.resize(initial, result_width, result_unsign);
                 result       = llvm_kernel.mux(reset, result, initial, result_width, result_unsign);
               }
               break;
@@ -10633,7 +10636,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               result = llvm_kernel.constant(result_width, 0, result_unsign);
               for (size_t i = 0; i < operands.size(); ++i) {
                 const auto operation = edges[i].sink.get_port_id() == 0 ? Cgen_llvm::Binary_op::add : Cgen_llvm::Binary_op::sub;
-                result = llvm_kernel.binary(operation, result, operands[i], result_width, result_unsign);
+                result               = llvm_kernel.binary(operation, result, operands[i], result_width, result_unsign);
               }
               break;
             }
@@ -10642,9 +10645,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::Rem:
               if (operands.size() < 2) {
                 result = operands.empty() ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                                 : llvm_kernel.resize(operands[0], result_width, result_unsign);
+                                          : llvm_kernel.resize(operands[0], result_width, result_unsign);
               } else {
-                const auto operation = type_op_of(node) == Ntype_op::Div ? Cgen_llvm::Binary_op::div : Cgen_llvm::Binary_op::rem;
+                const auto operation  = type_op_of(node) == Ntype_op::Div ? Cgen_llvm::Binary_op::div : Cgen_llvm::Binary_op::rem;
                 uint32_t   work_width = std::max({operands[0].width, operands[1].width, result_width});
                 if (!operands[0].unsign || !operands[1].unsign) {
                   ++work_width;
@@ -10680,8 +10683,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("comparison does not have two operands");
               }
               const auto operation = type_op_of(node) == Ntype_op::EQ   ? Cgen_llvm::Binary_op::eq
-                                            : type_op_of(node) == Ntype_op::LT ? Cgen_llvm::Binary_op::lt
-                                                                               : Cgen_llvm::Binary_op::gt;
+                                     : type_op_of(node) == Ntype_op::LT ? Cgen_llvm::Binary_op::lt
+                                                                        : Cgen_llvm::Binary_op::gt;
               result               = llvm_kernel.binary(operation, operands[0], operands[1], result_width, true);
               break;
             }
@@ -10691,8 +10694,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("shift does not have two operands");
               }
               const auto operation = type_op_of(node) == Ntype_op::SHL ? Cgen_llvm::Binary_op::shl
-                                            : operands[0].unsign              ? Cgen_llvm::Binary_op::lshr
-                                                                              : Cgen_llvm::Binary_op::ashr;
+                                     : operands[0].unsign              ? Cgen_llvm::Binary_op::lshr
+                                                                       : Cgen_llvm::Binary_op::ashr;
               result               = llvm_kernel.binary(operation, operands[0], operands[1], result_width, result_unsign);
               break;
             }
@@ -10713,10 +10716,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 result      = llvm_kernel.resize(packed, result_width, result_unsign);
                 break;
               }
-              if (operands.size() != 2 || !is_const_pin(edges[1].driver)) {
+              if (operands.size() != 2 || !edges[1].driver.is_const()) {
                 return reject("get-mask is not a constant slice");
               }
-              const auto mask = hydrate_const(edges[1].driver);
+              const auto& mask = const_of(edges[1].driver);
               if (mask.has_unknowns()) {
                 return reject("get-mask contains unknown bits");
               }
@@ -10743,10 +10746,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               break;
             }
             case Ntype_op::Set_mask: {
-              if (operands.size() != 3 || !is_const_pin(edges[1].driver)) {
+              if (operands.size() != 3 || !edges[1].driver.is_const()) {
                 return reject("set-mask is not a constant slice");
               }
-              const auto mask = hydrate_const(edges[1].driver);
+              const auto& mask = const_of(edges[1].driver);
               if (mask.has_unknowns() || mask.is_negative()) {
                 return reject("set-mask is not a positive contiguous slice");
               }
@@ -10784,9 +10787,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 if (lane_value.width == 0) {
                   return reject("concat lane has no LLVM value");
                 }
-                lane_value = llvm_kernel.resize(lane_value, static_cast<uint32_t>(lane.width), true);
+                lane_value        = llvm_kernel.resize(lane_value, static_cast<uint32_t>(lane.width), true);
                 const auto amount = llvm_kernel.constant(static_cast<uint32_t>(total), static_cast<uint64_t>(lane.width), true);
-                assembled = llvm_kernel.binary(Cgen_llvm::Binary_op::shl, assembled, amount, static_cast<uint32_t>(total), true);
+                assembled  = llvm_kernel.binary(Cgen_llvm::Binary_op::shl, assembled, amount, static_cast<uint32_t>(total), true);
                 lane_value = llvm_kernel.resize(lane_value, static_cast<uint32_t>(total), true);
                 assembled
                     = llvm_kernel.binary(Cgen_llvm::Binary_op::bit_or, assembled, lane_value, static_cast<uint32_t>(total), true);
@@ -10801,10 +10804,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
               uint32_t sign_bit = result_width - 1;
               if (operands.size() > 1) {
-                if (!is_const_pin(edges[1].driver)) {
+                if (!edges[1].driver.is_const()) {
                   return reject("sign-extension width is not constant");
                 }
-                const auto width = hydrate_const(edges[1].driver);
+                const auto& width = const_of(edges[1].driver);
                 if (!width.is_just_i64() || width.to_just_i64() <= 0 || static_cast<uint64_t>(width.to_just_i64()) > result_width) {
                   return reject("sign-extension width is outside its result");
                 }
@@ -10870,7 +10873,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::AttrSet:
             case Ntype_op::IO:
               result = operands.empty() ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                               : llvm_kernel.resize(operands[0], result_width, result_unsign);
+                                        : llvm_kernel.resize(operands[0], result_width, result_unsign);
               break;
             default: return reject("member operation is not implemented by cgen_llvm");
           }
@@ -11693,8 +11696,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!secondary_state && !reference_clock.empty()) {
           const auto input = node.get_graph()->get_input_pin(reference_clock);
           if (!input.is_invalid() && local_clocks_for(node.get_graph()).is_clock(input)) {
-            const bool clock_high = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
-                                    || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
+            const bool clock_high            = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
+                                               || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
             pin2var[input.get_class_index()] = absl::StrCat(slop_u_ && is_unsign(input) ? "Slop_u<1>" : "Slop<1>",
                                                             "::create_integer(",
                                                             clock_high ? "1" : "0",
@@ -11802,7 +11805,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
               }
             }
-            if (!is_const_pin(occurrence_input->driver) || is_const_pin(definition_inputs[input].driver)) {
+            if (!occurrence_input->driver.is_const() || definition_inputs[input].driver.is_const()) {
               continue;
             }
             const auto width = std::max<int32_t>(1, wbits_of(definition_inputs[input].driver));
@@ -11884,7 +11887,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 if (port.rd || port.addr.is_invalid() || port.din.is_invalid()) {
                   continue;
                 }
-                if (!port.enable.is_invalid() && is_const_pin(port.enable) && hydrate_const(port.enable).is_known_false()) {
+                if (port.enable.is_known_false()) {
                   continue;
                 }
                 fout->append(absl::StrCat("  ",
@@ -11925,8 +11928,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             const auto initp    = get_driver(find_sink_pin(node, "initial"));
             const auto enp      = get_driver(find_sink_pin(node, "enable"));
             bool       negreset = false;
-            if (const auto np = get_driver(find_sink_pin(node, "negreset")); !np.is_invalid() && is_const_pin(np)) {
-              negreset = !hydrate_const(np).is_known_false();
+            if (const auto np = get_driver(find_sink_pin(node, "negreset")); np.is_const()) {
+              negreset = !const_of(np).is_known_false();
             }
             const std::string rstval       = initp.is_invalid()
                                                  ? absl::StrCat(value_type(state_bits, state_unsign), "::create_integer(0)")
@@ -11934,8 +11937,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             bool              reset_always = false;
             std::string       rtest;
             if (!rstp.is_invalid()) {
-              if (is_const_pin(rstp)) {
-                reset_always = !hydrate_const(rstp).is_known_false();
+              if (rstp.is_const()) {
+                reset_always = !const_of(rstp).is_known_false();
               } else {
                 rtest = absl::StrCat(raw_operand(rstp, 1), negreset ? ".is_known_false()" : ".is_known_true()");
               }
@@ -11951,11 +11954,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
             }
             std::string etest;
-            if (!phase_window_latch && !enp.is_invalid() && !is_const_pin(enp)) {
+            if (!phase_window_latch && !enp.is_invalid() && !enp.is_const()) {
               etest = absl::StrCat(raw_operand(enp, 1),
                                    local_flop != nullptr && local_flop->neg_enable ? ".is_known_false()" : ".is_known_true()");
-            } else if (!phase_window_latch && !enp.is_invalid() && is_const_pin(enp) && local_flop != nullptr
-                       && local_flop->neg_enable && !hydrate_const(enp).is_known_false()) {
+            } else if (!phase_window_latch && enp.is_const() && local_flop != nullptr && local_flop->neg_enable
+                       && !const_of(enp).is_known_false()) {
               etest = "false";
             }
             const std::string din_expr = din.is_invalid() ? state : stored_value_operand(din, state_bits, state_unsign);
@@ -11969,9 +11972,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               return etest.empty() ? source : absl::StrCat("(", etest, " ? ", source, " : ", hold, ")");
             };
             int pipe_depth = 1;
-            if (const auto pipe_min = get_driver(find_sink_pin(node, "pipe_min"));
-                !pipe_min.is_invalid() && is_const_pin(pipe_min)) {
-              pipe_depth = std::max<int>(1, static_cast<int>(hydrate_const(pipe_min).to_just_i64()));
+            if (const auto pipe_min = get_driver(find_sink_pin(node, "pipe_min")); pipe_min.is_const()) {
+              pipe_depth = std::max<int>(1, static_cast<int>(const_of(pipe_min).to_just_i64()));
             }
             // Defer the next-value text until the exact structural event
             // predicate below is known.  A closed clock gate (or inactive
@@ -11992,7 +11994,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             }
             std::string commit_test;
             const auto  guard_expr = [&](const hhds::Pin_class& guard) {
-              if (is_const_pin(guard)) {
+              if (guard.is_const()) {
                 return operand(guard, 1);
               }
               const auto guard_root = livehd::latch_contract::control_root(guard);
@@ -12077,7 +12079,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 const auto resolved = resolved_input->driver;
                 if (conditional_occurrence(site.node)) {
                   const auto activation = occurrence_bool_expr(resolved, 0);
-                  commit_test           = absl::StrCat("(",
+                  commit_test = absl::StrCat("(",
                                              activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
                                              ").is_known_true()");
                   break;
@@ -12119,7 +12121,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                               && root.net.get_graph() == g && pin_name_of(root.net.base_pin()) == clock_input_of(g);
                 if (!plain_root_clock) {
                   const auto activation = occurrence_bool_expr(resolved, 0);
-                  commit_test           = absl::StrCat("(",
+                  commit_test = absl::StrCat("(",
                                              activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
                                              ").is_known_true()");
                 }
@@ -12260,7 +12262,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   if (port.rd || port.addr.is_invalid() || port.din.is_invalid() || port.wridx < staged || port.wridx >= upto) {
                     continue;
                   }
-                  if (!port.enable.is_invalid() && is_const_pin(port.enable) && hydrate_const(port.enable).is_known_false()) {
+                  if (port.enable.is_known_false()) {
                     continue;
                   }
                   fout->append(absl::StrCat("  ",
@@ -12427,10 +12429,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                  ? member_value
                                                  : stored_operand(source, std::max(wbits_of(source), 1));
             source_expr                    = range_extract_expr(source_value,
-                                             slot.width,
-                                             direct_slot_is_u[slot_index],
-                                             slot.producer_extract_lo,
-                                             slot.producer_extract_hi);
+                                                                slot.width,
+                                                                direct_slot_is_u[slot_index],
+                                                                slot.producer_extract_lo,
+                                                                slot.producer_extract_hi);
           } else if (op == Ntype_op::Sub) {
             const auto sio = node.get_subnode_io();
             I(sio != nullptr);
@@ -12763,9 +12765,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("    __rt.__color_state_changed |= __changed;\n");
       } else {
         int pipe_depth = 1;
-        if (const auto pipe_min = get_driver(find_sink_pin(site.node.base_node(), "pipe_min"));
-            !pipe_min.is_invalid() && is_const_pin(pipe_min)) {
-          pipe_depth = std::max<int>(1, static_cast<int>(hydrate_const(pipe_min).to_just_i64()));
+        if (const auto pipe_min = get_driver(find_sink_pin(site.node.base_node(), "pipe_min")); pipe_min.is_const()) {
+          pipe_depth = std::max<int>(1, static_cast<int>(const_of(pipe_min).to_just_i64()));
         }
         if (pipe_depth == 1) {
           // The dynamic commit flag is emitted only after proving D != Q, so a

@@ -113,7 +113,7 @@ bool node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory
 
 bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
 
-bool pin_is_const(const Node_pin& pin) { return livehd::graph_util::is_const_pin(pin); }
+bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
 livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
   auto edges = node.inp_edges();
@@ -137,9 +137,7 @@ uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(liveh
 
 uint32_t raw_node_width(const Node& node) { return raw_pin_width(node.create_driver_pin(0)); }
 
-Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::hydrate_const(pin); }
-
-Dlop node_const_value(const Node& node) { return livehd::graph_util::hydrate_const(node); }
+const Dlop& pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
 
 bool node_output_is_signed(const Node& node) {
   auto n    = node;
@@ -684,8 +682,6 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
   const auto w  = node_is_memory(node) ? memory_info_for(ctx, node).bits : node_width(ctx, node);
 
   switch (op) {
-    case Ntype_op::Nconst: return lit_const_at(ctx, node, node_const_value(node), w);
-
     case Ntype_op::IO: throw Emit_error("internal: emit_node_expr called on IO node");
 
     case Ntype_op::Sum: {
@@ -1145,7 +1141,6 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
   std::vector<uint32_t> deps;
 
   switch (op) {
-    case Ntype_op::Nconst: op_expr = "LGraphOp.Op_Const (" + int_of_const(ctx, node, node_const_value(node)) + ")"; break;
     case Ntype_op::Sum   : {
       std::vector<uint32_t> adds;
       std::vector<uint32_t> subs;

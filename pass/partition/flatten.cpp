@@ -240,7 +240,7 @@ void Flattener::create_nodes(Ictx* ctx) {
       continue;
     }
     auto op = gu::type_op_of(n);
-    if (op == Ntype_op::IO || op == Ntype_op::Invalid || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::IO || op == Ntype_op::Invalid) {
       continue;  // IO dissolves; constants are recreated per consuming edge
     }
     if (op == Ntype_op::Sub && ctx->child_ctx.contains(n)) {
@@ -349,8 +349,8 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
           }
         }
         if (auto eit = ctx->inst_drivers.find(pit->second); eit != ctx->inst_drivers.end()) {
-          if (gu::is_const_pin(eit->second)) {
-            res = gu::create_const(*flat_, gu::hydrate_const(eit->second));
+          if (eit->second.is_const()) {
+            res = gu::create_const(*flat_, gu::const_of(eit->second));
           } else {
             res = resolve_driver(ctx->parent, eit->second);
           }
@@ -393,8 +393,8 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
   }
   for (const auto& e : opin.inp_edges()) {
     hhds::Pin_class source;
-    if (gu::is_const_pin(e.driver)) {
-      source = gu::create_const(*flat_, gu::hydrate_const(e.driver));
+    if (e.driver.is_const()) {
+      source = gu::create_const(*flat_, gu::const_of(e.driver));
     } else {
       source = resolve_driver(cctx, e.driver);
     }
@@ -418,8 +418,8 @@ void Flattener::wire_edges(Ictx* ctx) {
     auto neo = it->second;
     for (const auto& e : n.inp_edges()) {
       auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (gu::is_const_pin(e.driver)) {
-        gu::create_const(*flat_, gu::hydrate_const(e.driver)).connect_sink(sp);
+      if (e.driver.is_const()) {
+        gu::create_const(*flat_, gu::const_of(e.driver)).connect_sink(sp);
       } else {
         auto dp = resolve_driver(ctx, e.driver);
         if (!dp.is_invalid()) {
@@ -442,8 +442,8 @@ void Flattener::wire_top_outputs(Ictx* top_ctx) {
     }
     for (const auto& e : opin.inp_edges()) {
       auto sink = flat_->get_output_pin(decl.name);
-      if (gu::is_const_pin(e.driver)) {
-        gu::create_const(*flat_, gu::hydrate_const(e.driver)).connect_sink(sink);
+      if (e.driver.is_const()) {
+        gu::create_const(*flat_, gu::const_of(e.driver)).connect_sink(sink);
       } else {
         auto dp = resolve_driver(top_ctx, e.driver);
         if (!dp.is_invalid()) {

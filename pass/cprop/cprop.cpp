@@ -23,12 +23,10 @@
 #include "perf_tracing.hpp"
 
 using livehd::graph_util::bits_of;
-using livehd::graph_util::const_value_of;
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::find_sink_pin;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::type_op_of;
@@ -70,7 +68,7 @@ std::vector<hhds::Node_class> stable_nodes(hhds::Graph* g) {
   return nodes;
 }
 
-using livehd::graph_util::hydrate_const;
+using livehd::graph_util::const_of;
 using livehd::graph_util::setup_sink_by_name;
 
 // A finite Get_mask is an EXPLICIT precision-changing operation: its value has
@@ -144,11 +142,11 @@ void enforce_lossless_carriers(hhds::Graph* g) {
         }
         int  input_bits   = bits_of(e.driver);
         bool non_negative = livehd::graph_util::is_unsign(e.driver);
-        if (is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           // ONE hydrate per edge: hydrating twice (once for the width, once for
           // the sign below) doubled the deserialization cost of the hottest
           // loop in this pass.
-          const auto value = hydrate_const(e.driver);
+          const auto& value = const_of(e.driver);
           non_negative     = !value.is_negative();
           // The graph hint is the literal unsigned PAYLOAD width, not
           // Dlop::get_bits()'s signed carrier -- shared with upass/tolg's merge
@@ -219,10 +217,10 @@ struct Bool_condition {
 }
 
 [[nodiscard]] std::optional<bool> const_truth(const hhds::Pin_class& p) {
-  if (p.is_invalid() || !is_const_pin(p)) {
+  if (p.is_invalid() || !p.is_const()) {
     return std::nullopt;
   }
-  auto c = hydrate_const(p);
+  const auto& c = const_of(p);
   if (c.has_unknowns()) {
     return std::nullopt;
   }
@@ -236,7 +234,7 @@ struct Bool_condition {
   if (p.is_invalid()) {
     return std::nullopt;
   }
-  if (depth >= 32 || is_const_pin(p) || is_graph_input_pin(p)) {
+  if (depth >= 32 || p.is_const() || is_graph_input_pin(p)) {
     return Bool_condition{p, true};
   }
   auto n = p.get_master_node();
@@ -294,7 +292,7 @@ struct Hold_mux_match {
     if (same_pin(p, q)) {
       return true;
     }
-    if (is_const_pin(p) || is_graph_input_pin(p)) {
+    if (p.is_const() || is_graph_input_pin(p)) {
       return false;
     }
     auto n  = p.get_master_node();
@@ -321,7 +319,7 @@ struct Hold_mux_match {
   while (!work.empty() && visited++ < 256) {
     auto p = work.back();
     work.pop_back();
-    if (p.is_invalid() || is_const_pin(p) || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
       continue;
     }
     auto n = p.get_master_node();
@@ -360,7 +358,7 @@ struct Hold_mux_match {
   while (!work.empty() && visited++ < 256) {
     auto p = work.back();
     work.pop_back();
-    if (p.is_invalid() || is_const_pin(p) || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
       continue;
     }
     if (same_pin(p, q)) {
@@ -389,7 +387,7 @@ struct Hold_mux_match {
   while (!work.empty() && visited++ < 256) {
     auto p = work.back();
     work.pop_back();
-    if (p.is_invalid() || is_const_pin(p) || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
       continue;
     }
     auto n = p.get_master_node();
@@ -422,7 +420,7 @@ struct Hold_mux_match {
 [[nodiscard]] std::optional<Bool_condition> latch_data_open_condition(const hhds::Node_class& latch, const hhds::Pin_class& q,
                                                                       const hhds::Pin_class& din, const hhds::Pin_class& enable) {
   auto open = decode_bool_condition(enable);
-  if (!open.has_value() || !open->true_when_base || open->base.is_invalid() || is_const_pin(open->base)
+  if (!open.has_value() || !open->true_when_base || open->base.is_invalid() || open->base.is_const()
       || is_graph_input_pin(open->base)) {
     return open;
   }
@@ -510,10 +508,10 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
 // The CONSTANT shift amount of a SHL, or <0 when not a bounded constant.
 [[nodiscard]] int const_shl_amount(const hhds::Node_class& m) {
   auto kd = drv_at(m, 1);
-  if (kd.is_invalid() || !is_const_pin(kd)) {
+  if (kd.is_invalid() || !kd.is_const()) {
     return -1;
   }
-  auto kc = hydrate_const(kd);
+  const auto& kc = const_of(kd);
   if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
     return -1;
   }
@@ -525,10 +523,10 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
 // Rejects the `-1` to-unsigned idiom and noncontiguous/negative masks.
 [[nodiscard]] std::pair<int, int> const_mask_range(const hhds::Node_class& m) {
   auto md = drv_at(m, 2);
-  if (md.is_invalid() || !is_const_pin(md)) {
+  if (md.is_invalid() || !md.is_const()) {
     return kFpBail;
   }
-  auto mc = hydrate_const(md);
+  const auto& mc = const_of(md);
   if (mc.has_unknowns() || !mc.is_positive()) {
     return kFpBail;  // includes mask == -1
   }
@@ -549,8 +547,8 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
   if (p.is_invalid() || depth > 16) {
     return kFpBail;
   }
-  if (is_const_pin(p)) {
-    auto c = hydrate_const(p);
+  if (p.is_const()) {
+    const auto& c = const_of(p);
     if (c.is_negative()) {
       return kFpBail;
     }
@@ -665,16 +663,16 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
     return false;
   }
   auto const01 = [](const hhds::Pin_class& c_pin) -> bool {
-    if (c_pin.is_invalid() || !is_const_pin(c_pin)) {
+    if (c_pin.is_invalid() || !c_pin.is_const()) {
       return false;
     }
-    auto c = hydrate_const(c_pin);
+    const auto& c = const_of(c_pin);
     if (c.has_unknowns()) {
       return false;
     }
     return c.is_known_zero() || (c.is_just_i64() && c.to_just_i64() == 1);
   };
-  if (is_const_pin(p)) {
+  if (p.is_const()) {
     return const01(p);
   }
   return livehd::graph_util::is_unsign(p) && bits_of(p) == 1;
@@ -695,8 +693,8 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
     if (total > 2) {
       return {};
     }
-    if (is_const_pin(e.driver)) {
-      auto c = hydrate_const(e.driver);
+    if (e.driver.is_const()) {
+      const auto& c = const_of(e.driver);
       if (c.is_just_i64() && !c.has_unknowns() && c.to_just_i64() == against) {
         ++matches;
         continue;
@@ -902,7 +900,7 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
     lanes.push_back(Pack_lane{v_pin, r.first, r.second});
     chain.push_back(cur);
 
-    if (is_const_pin(a_pin)) {
+    if (a_pin.is_const()) {
       base_pin = a_pin;
       break;
     }
@@ -932,7 +930,7 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   // negative constant, infinitely many -- and a Concat can only spell a finite
   // unsigned word. `is_unsign` is attribute ABSENCE, so an unstamped base still
   // passes; only an explicitly signed one is refused.
-  if (is_const_pin(base_pin) ? hydrate_const(base_pin).is_negative() : !livehd::graph_util::is_unsign(base_pin)) {
+  if (base_pin.is_const() ? const_of(base_pin).is_negative() : !livehd::graph_util::is_unsign(base_pin)) {
     return false;
   }
 
@@ -973,7 +971,7 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
     pos = lane.hi;
   }
 
-  const bool zero_based = is_const_pin(base_pin) && hydrate_const(base_pin).is_known_zero();
+  const bool zero_based = base_pin.is_known_false();
   if (!zero_based) {
     std::vector<std::pair<int, int>> gaps;
     pos = 0;
@@ -995,8 +993,8 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
     }
     for (const auto& [lo, hi] : gaps) {
       const auto mask = Dlop::get_mask_value(hi - 1, lo);
-      if (is_const_pin(base_pin)) {
-        auto value = hydrate_const(base_pin).get_mask_op(*mask);
+      if (base_pin.is_const()) {
+        auto value = const_of(base_pin).get_mask_op(*mask);
         lanes.push_back(Pack_lane{create_const(g, *value), lo, hi});
       } else {
         auto get = livehd::graph_util::create_typed_node(g, Ntype_op::Get_mask);
@@ -1041,8 +1039,8 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   if (p.is_invalid()) {
     return -1;
   }
-  if (is_const_pin(p)) {
-    auto c = hydrate_const(p);
+  if (p.is_const()) {
+    const auto& c = const_of(p);
     if (c.is_negative()) {
       return -1;
     }
@@ -1417,7 +1415,7 @@ bool Cprop::try_constant_prop(hhds::Node_class& node, livehd::graph_util::Edge_v
   int n_inputs          = 0;
   for (auto& e : inp_edges_ordered) {
     n_inputs++;
-    if (!is_const_pin(e.driver)) {
+    if (!e.driver.is_const()) {
       continue;
     }
     n_inputs_constant++;
@@ -1484,10 +1482,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
   auto op = type_op_of(node);
   if (op == Ntype_op::Mux) {
     auto& s_pin = inp_edges_ordered[0].driver;
-    if (!is_const_pin(s_pin)) {
+    if (!s_pin.is_const()) {
       return;
     }
-    auto s_const = hydrate_const(s_pin);
+    const auto& s_const = const_of(s_pin);
     if (s_const.has_unknowns()) {
       return;
     }
@@ -1519,10 +1517,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     // p(i+1)). A zero/multi-hot constant violates the unique-if assume; warn
     // and keep the cell (cgen's case default models the runtime error).
     auto& s_pin = inp_edges_ordered[0].driver;
-    if (!is_const_pin(s_pin)) {
+    if (!s_pin.is_const()) {
       return;
     }
-    auto s_const = hydrate_const(s_pin);
+    const auto& s_const = const_of(s_pin);
     if (s_const.has_unknowns() || !s_const.is_just_i64()) {
       return;
     }
@@ -1563,9 +1561,16 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     Dlop result;
     result = Dlop::create_integer(op == Ntype_op::And ? -1 : 0);
 
+    // A non-numeric constant operand (a String) turns every fold below into
+    // nil, which is not a value: bail BEFORE any constant edge is deleted.
+    for (const auto& i : inp_edges_ordered) {
+      if (i.driver.is_const() && !const_of(i.driver).is_numeric()) {
+        return;
+      }
+    }
     livehd::graph_util::Edge_vec edge_it2;
     for (auto& i : inp_edges_ordered) {
-      if (!is_const_pin(i.driver)) {
+      if (!i.driver.is_const()) {
         if (npending == 0) {
           edge_it2.push_back(i);
         }
@@ -1573,7 +1578,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
         continue;
       }
 
-      auto c = hydrate_const(i.driver);
+      const auto& c = const_of(i.driver);
 
       ++nconstants;
 
@@ -1667,16 +1672,23 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     Dlop result;
     result = Dlop::create_integer(1);  // multiplicative identity
 
+    // A non-numeric constant operand (a String) turns every fold below into
+    // nil, which is not a value: bail BEFORE any constant edge is deleted.
+    for (const auto& i : inp_edges_ordered) {
+      if (i.driver.is_const() && !const_of(i.driver).is_numeric()) {
+        return;
+      }
+    }
     livehd::graph_util::Edge_vec edge_it2;
     for (auto& i : inp_edges_ordered) {
-      if (!is_const_pin(i.driver)) {
+      if (!i.driver.is_const()) {
         if (npending == 0) {
           edge_it2.push_back(i);
         }
         npending++;
         continue;
       }
-      auto c = hydrate_const(i.driver);
+      const auto& c = const_of(i.driver);
       ++nconstants;
       result = result.mult_op(c);
       if (nconstants == 1) {
@@ -1715,13 +1727,13 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     }
   } else if (op == Ntype_op::SRA) {
     auto& amt_pin = inp_edges_ordered[1].driver;
-    if (is_const_pin(amt_pin) && hydrate_const(amt_pin).is_known_zero()) {
+    if (amt_pin.is_known_false()) {
       collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
     }
   } else if (op == Ntype_op::SHL) {
     if (inp_edges_ordered.size() == 2) {
       auto& amt_pin = inp_edges_ordered[1].driver;
-      if (is_const_pin(amt_pin) && hydrate_const(amt_pin).is_known_zero()) {
+      if (amt_pin.is_known_false()) {
         collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
       }
     }
@@ -1737,8 +1749,8 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (a_pin.is_invalid() || b_pin.is_invalid()) {
       return;
     }
-    Dlop val = hydrate_const(a_pin);
-    Dlop amt = hydrate_const(b_pin);
+    Dlop val = const_of(a_pin);
+    Dlop amt = const_of(b_pin);
 
     Dlop result;
     result = Dlop::create_integer(0);
@@ -1749,7 +1761,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(0);
     for (auto& i : inp_edges_ordered) {
-      auto c = hydrate_const(i.driver);
+      const auto& c = const_of(i.driver);
       result = result.ror_op(c);
     }
 
@@ -1762,11 +1774,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (a_pin.is_invalid()) {
       return;
     }
-    Dlop val = hydrate_const(a_pin);
+    Dlop val = const_of(a_pin);
 
     if (!mask_pin.is_invalid() && !value_pin.is_invalid()) {
-      auto mask  = hydrate_const(mask_pin);
-      auto value = hydrate_const(value_pin);
+      const auto& mask  = const_of(mask_pin);
+      const auto& value = const_of(value_pin);
       replace_node(node, val.set_mask_op(mask, value));
     } else {
       replace_node(node, val);
@@ -1775,7 +1787,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(0);  // additive identity (Invalid no longer folds as 0)
     for (auto& i : inp_edges_ordered) {
-      auto c = hydrate_const(i.driver);
+      const auto& c = const_of(i.driver);
       if (i.sink.get_port_id() == 0) {
         result = result.add_op(c);
       } else {
@@ -1788,7 +1800,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(0);  // or identity (Invalid no longer folds as 0)
     for (auto& e : inp_edges_ordered) {
-      auto c = hydrate_const(e.driver);
+      const auto& c = const_of(e.driver);
       result = result.or_op(c);
     }
 
@@ -1798,7 +1810,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(-1);
     for (auto& i : inp_edges_ordered) {
-      auto c = hydrate_const(i.driver);
+      const auto& c = const_of(i.driver);
       result = result.and_op(c);
     }
 
@@ -1822,11 +1834,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     // Leave the cell alone instead — the same three-valued discipline the
     // LT/GT fold below already follows. A DEFINITE mismatch still folds: it
     // decides the all-equal regardless of unknown bits elsewhere.
-    auto first   = hydrate_const(inp_edges_ordered[0].driver);
+    const auto& first   = const_of(inp_edges_ordered[0].driver);
     bool eq      = true;
     bool any_unk = false;
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
-      auto c = hydrate_const(inp_edges_ordered[i].driver);
+      const auto& c = const_of(inp_edges_ordered[i].driver);
       auto r = first.eq_op(c);
       if (r->is_known_false()) {
         eq = false;
@@ -1843,7 +1855,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
-    auto sel_const = hydrate_const(inp_edges_ordered[0].driver);
+    const auto& sel_const = const_of(inp_edges_ordered[0].driver);
     if (!sel_const.is_just_i64()) {
       return;  // unknown-bit selector (0sb? poison cond): keep the mux as-is
     }
@@ -1856,7 +1868,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
         continue;
       }
       if (e.sink.get_port_id() == static_cast<hhds::Port_id>(sel + 1)) {
-        result = hydrate_const(e.driver);
+        result = const_of(e.driver);
         break;
       }
     }
@@ -1873,7 +1885,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     // All-const Hotmux: the selector must be one-hot (bit i -> p(i+1)).
     // A zero/multi-hot constant violates the unique-if assume; keep the cell
     // so cgen's case default models the runtime error.
-    auto sel_const = hydrate_const(inp_edges_ordered[0].driver);
+    const auto& sel_const = const_of(inp_edges_ordered[0].driver);
     I(sel_const.is_just_i64());
 
     auto sel = sel_const.to_just_i64();
@@ -1889,7 +1901,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     for (auto& e : inp_edges_ordered) {
       if (e.sink.get_port_id() == static_cast<hhds::Port_id>(arm + 1)) {
-        result = hydrate_const(e.driver);
+        result = const_of(e.driver);
         break;
       }
     }
@@ -1905,23 +1917,23 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(1);
     for (auto& i : inp_edges_ordered) {
-      auto c = hydrate_const(i.driver);
+      const auto& c = const_of(i.driver);
       result = result.mult_op(c);
     }
 
     replace_node(node, result);
   } else if (op == Ntype_op::Div) {
     I(inp_edges_ordered.size() == 2);
-    Dlop a = hydrate_const(inp_edges_ordered[0].driver);
-    Dlop b = hydrate_const(inp_edges_ordered[1].driver);
+    Dlop a = const_of(inp_edges_ordered[0].driver);
+    Dlop b = const_of(inp_edges_ordered[1].driver);
 
     auto result = a.div_op(b);
 
     replace_node(node, result);
   } else if (op == Ntype_op::Rem) {
     I(inp_edges_ordered.size() == 2);
-    Dlop a = hydrate_const(inp_edges_ordered[0].driver);
-    Dlop b = hydrate_const(inp_edges_ordered[1].driver);
+    Dlop a = const_of(inp_edges_ordered[0].driver);
+    Dlop b = const_of(inp_edges_ordered[1].driver);
 
     auto result = a.rem_op(b);  // truncated remainder; invalid on rem-by-zero
 
@@ -1930,12 +1942,12 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (inp_edges_ordered.size() != 1) {
       return;
     }
-    replace_node(node, hydrate_const(inp_edges_ordered[0].driver).not_op());
+    replace_node(node, const_of(inp_edges_ordered[0].driver).not_op());
   } else if (op == Ntype_op::Xor) {
     Dlop result;
     result = Dlop::create_integer(0);
     for (auto& e : inp_edges_ordered) {
-      result = result.xor_op(hydrate_const(e.driver));
+      result = result.xor_op(const_of(e.driver));
     }
     replace_logic_node(node, result);
   } else if (op == Ntype_op::SRA) {
@@ -1944,12 +1956,12 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (a_pin.is_invalid() || b_pin.is_invalid()) {
       return;
     }
-    Dlop amt = hydrate_const(b_pin);
+    Dlop amt = const_of(b_pin);
     // is_just_i64 also rejects >62-bit amounts, whose sra_op yields nil.
     if (amt.has_unknowns() || amt.is_negative() || !amt.is_just_i64()) {
       return;
     }
-    replace_node(node, hydrate_const(a_pin).sra_op(amt));
+    replace_node(node, const_of(a_pin).sra_op(amt));
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     // as/bs are multi-driver reduce ports; fold only the plain 2-operand form.
     hhds::Pin_class a_pin, b_pin;
@@ -1963,8 +1975,8 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (a_pin.is_invalid() || b_pin.is_invalid()) {
       return;
     }
-    Dlop a   = hydrate_const(a_pin);
-    Dlop b   = hydrate_const(b_pin);
+    Dlop a   = const_of(a_pin);
+    Dlop b   = const_of(b_pin);
     auto cmp = op == Ntype_op::LT ? a.lt_op(b) : a.gt_op(b);
     if (cmp->has_unknowns()) {
       return;  // three-valued compare on ?-bits: keep the node
@@ -1978,8 +1990,8 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (a_pin.is_invalid() || mask_pin.is_invalid()) {
       return;
     }
-    Dlop a    = hydrate_const(a_pin);
-    Dlop mask = hydrate_const(mask_pin);
+    Dlop a    = const_of(a_pin);
+    Dlop mask = const_of(mask_pin);
     if (mask.is_negative()) {
       // The -1 to-positive idiom: identity on a non-negative value only.
       if (mask.is_just_i64() && mask.to_just_i64() == -1 && a.is_positive()) {
@@ -2017,11 +2029,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     // pointers into this storage, so it must not reallocate.
     std::vector<Dlop> values(lanes.size());
     for (size_t i = 0; i < lanes.size(); ++i) {
-      if (!is_const_pin(lanes[i].value)) {
+      if (!lanes[i].value.is_const()) {
         return;  // a width operand is always const, so "all inputs constant"
                  // does NOT imply every lane VALUE is one
       }
-      values[i]   = hydrate_const(lanes[i].value);
+      values[i]   = const_of(lanes[i].value);
       const int w = lanes[i].width;
       // Dlop::concat_op DEBUG-asserts that a lane fits its window -- an
       // over-wide lane is a caller bug there, even though
@@ -2054,6 +2066,13 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 }
 
 void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
+  if (result.is_invalid() || result.is_nil()) {
+    // The fold produced no value (x / 0, x % 0, a shift by an illegal amount,
+    // a String arm through adjust_bits): keep the node. Folding it to 0 was a
+    // silent miscompile, not an optimization, and the constant pool refuses
+    // Nil/Invalid as values.
+    return;
+  }
   auto dpin     = create_const(*current_graph, result);
   auto new_bits = bits_of(dpin);
 
@@ -2071,8 +2090,9 @@ void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
     // back as +255 -- and under unlimited-precision signed semantics that is
     // a different value (the Not/SRA folds and the Or annihilator produce
     // negatives by construction). Constants are width-free leaves; consumers
-    // read the exact value.
-    if (new_bits == out_bits || out_bits == 0 || result.is_negative()) {
+    // read the exact value. A NON-NUMERIC result (a String mux arm) has no
+    // width to adjust -- adjust_bits would yield nil, which is not a value.
+    if (new_bits == out_bits || out_bits == 0 || result.is_negative() || !result.is_numeric()) {
       dpin.connect_sink(out.sink);
     } else {
       mismatched.emplace_back(out.sink, out_bits);
@@ -2088,6 +2108,9 @@ void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
 }
 
 void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
+  if (result.is_invalid() || result.is_nil()) {
+    return;  // no value: keep the node (see replace_node)
+  }
   // Create the shared const up front (NOT lazily mid-walk: a create_const there
   // could realloc the node/pin tables and invalidate the live iterator), then
   // reconnect every consumer and delete the node in one shot — del_node drops
@@ -2250,7 +2273,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
       break;
     }
     const auto& sel = inp_edges_ordered[0].driver;
-    if (sel.is_invalid() || is_const_pin(sel)) {
+    if (sel.is_invalid() || sel.is_const()) {
       break;
     }
     auto m = sel.get_master_node();
@@ -2282,9 +2305,9 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   }
 
   // Constant 0/1 arms are a boolean materialization of the selector itself.
-  if (is_const_pin(inp_edges_ordered[1].driver) && is_const_pin(inp_edges_ordered[2].driver)) {
-    auto c0 = hydrate_const(inp_edges_ordered[1].driver);
-    auto c1 = hydrate_const(inp_edges_ordered[2].driver);
+  if (inp_edges_ordered[1].driver.is_const() && inp_edges_ordered[2].driver.is_const()) {
+    const auto& c0 = const_of(inp_edges_ordered[1].driver);
+    const auto& c1 = const_of(inp_edges_ordered[2].driver);
     if (!c0.has_unknowns() && !c1.has_unknowns()) {
       const bool  zero0 = c0.is_known_zero();
       const bool  one1  = c1.is_just_i64() && c1.to_just_i64() == 1;
@@ -2302,8 +2325,8 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   }
 
   bool false_path_zero = false;
-  if (is_const_pin(inp_edges_ordered[1].driver)) {
-    auto v          = hydrate_const(inp_edges_ordered[1].driver);
+  if (inp_edges_ordered[1].driver.is_const()) {
+    const auto& v   = const_of(inp_edges_ordered[1].driver);
     false_path_zero = v.is_known_zero() || v.is_string();
   }
 
@@ -2324,13 +2347,13 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
 
 void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   const auto& pos_dpin = inp_edges_ordered[1].driver;
-  if (!is_const_pin(pos_dpin)) {
+  if (!pos_dpin.is_const()) {
     return;
   }
 
   int64_t self_pos;
   {
-    auto v = hydrate_const(pos_dpin);
+    const auto& v = const_of(pos_dpin);
     if (!v.is_just_i64()) {
       return;
     }
@@ -2368,11 +2391,11 @@ void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& in
 
   // Sext(Sext(X,a),b) == Sext(X, min(a,b))
   auto parent_pos_dpin = livehd::graph_util::get_driver_of_sink_name(wire_master, "b");
-  if (!is_const_pin(parent_pos_dpin)) {
+  if (!parent_pos_dpin.is_const()) {
     return;
   }
 
-  auto parent_pos_const = hydrate_const(parent_pos_dpin);
+  const auto& parent_pos_const = const_of(parent_pos_dpin);
   if (!parent_pos_const.is_just_i64()) {
     return;
   }
@@ -2406,7 +2429,7 @@ bool Cprop::scalar_eq(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_
   }
 
   auto x_pin = eq_against_const(node, 0);
-  if (x_pin.is_invalid() || is_const_pin(x_pin)) {
+  if (x_pin.is_invalid() || x_pin.is_const()) {
     return false;
   }
   auto x_master = x_pin.get_master_node();
@@ -2441,7 +2464,7 @@ bool Cprop::scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& i
     return false;
   }
   auto x_pin = drv_at(node, 0);
-  if (x_pin.is_invalid() || is_const_pin(x_pin)) {
+  if (x_pin.is_invalid() || x_pin.is_const()) {
     return false;
   }
   auto inner_node = x_pin.get_master_node();
@@ -2538,7 +2561,7 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
   absl::InlinedVector<hhds::Pin_class, 2> candidates;
   {
     const auto& first = inp_edges_ordered[0].driver;
-    if (first.is_invalid() || is_const_pin(first)) {
+    if (first.is_invalid() || first.is_const()) {
       return false;
     }
     auto m = first.get_master_node();
@@ -2566,7 +2589,7 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
       int         k = -1;
       if (same_pin(d, x)) {
         k = 0;
-      } else if (!d.is_invalid() && !is_const_pin(d)) {
+      } else if (!d.is_invalid() && !d.is_const()) {
         auto m = d.get_master_node();
         if (!m.is_invalid() && type_op_of(m) == Ntype_op::SHL) {
           int a = const_shl_amount(m);
@@ -2580,9 +2603,9 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
           auto sel  = drv_at(m, 0);
           auto arm0 = drv_at(m, 1);
           auto arm1 = drv_at(m, 2);
-          if (same_pin(sel, x) && !arm0.is_invalid() && !arm1.is_invalid() && is_const_pin(arm0) && is_const_pin(arm1)) {
-            auto c0 = hydrate_const(arm0);
-            auto c1 = hydrate_const(arm1);
+          if (same_pin(sel, x) && !arm0.is_invalid() && !arm1.is_invalid() && arm0.is_const() && arm1.is_const()) {
+            const auto& c0 = const_of(arm0);
+            const auto& c1 = const_of(arm1);
             if (c0.is_known_zero() && !c1.has_unknowns() && !c1.is_negative()) {
               C = C->or_op(c1);
               continue;  // matched; the bit union came from C' directly
@@ -2649,14 +2672,14 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
     if (a_pin.is_invalid() || mask_pin.is_invalid()) {
       return {};
     }
-    if (!is_const_pin(mask_pin)) {
+    if (!mask_pin.is_const()) {
       return {};
     }
 
-    auto mask_const               = hydrate_const(mask_pin);
+    const auto& mask_const        = const_of(mask_pin);
     auto [range_begin, range_end] = mask_const.get_mask_range();
     if (pos >= range_end || pos < range_begin) {
-      if (is_const_pin(a_pin)) {
+      if (a_pin.is_const()) {
         // get_mask is Pyrope's default-ZEXT bit-select: a non-negative mask packs
         // the selected bits LSB-first as an UNSIGNED value. Dlop::get_mask_op has a
         // single-bit quirk that returns the signed 1-bit -1 for a lone set bit;
@@ -2664,7 +2687,7 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
         // match cgen's plain `a[N]` part-select — same fix as upass get_mask_zext
         // and pass/bitwidth's `gm`.
         const auto pos_mask = Dlop::get_mask_value(static_cast<int>(pos), static_cast<int>(pos));
-        auto       v        = hydrate_const(a_pin).get_mask_op(*pos_mask);
+        auto       v        = const_of(a_pin).get_mask_op(*pos_mask);
         if (!pos_mask->is_negative() && v->is_integer() && !v->has_unknowns() && v->is_negative()) {
           v = Dlop::create_integer(1);
         }
@@ -2737,7 +2760,7 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
     if (++walk_depth > kPackedSliceWalkLimit) {
       break;  // keep the original graph instead of charging an unbounded chain walk
     }
-    if (cur.is_invalid() || is_const_pin(cur)) {
+    if (cur.is_invalid() || cur.is_const()) {
       break;
     }
     if (!seen.insert({cur.get_class_index(), lo, hi}).second) {
@@ -2999,11 +3022,11 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     node.del_node();
     return true;
   }
-  if (!is_const_pin(mask_pin)) {
+  if (!mask_pin.is_const()) {
     return false;
   }
 
-  auto mask_const = hydrate_const(mask_pin);
+  const auto& mask_const = const_of(mask_pin);
 
   restamp_finite_get_mask(node, mask_const);
 
@@ -3024,7 +3047,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // mod_width. Any other reader of that Sum (a wider use, a compare, a graph
   // output) would silently observe the untruncated value.
   if (const int mod_width = low_mask_width(mask_const);
-      mod_width > 0 && !is_const_pin(a_pin) && !is_graph_input_pin(a_pin) && has_single_consumer(a_pin)) {
+      mod_width > 0 && !a_pin.is_const() && !is_graph_input_pin(a_pin) && has_single_consumer(a_pin)) {
     auto outer_sum = a_pin.get_master_node();
     if (!outer_sum.is_invalid() && type_op_of(outer_sum) == Ntype_op::Sum) {
       bool progress = true;
@@ -3032,7 +3055,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
         progress         = false;
         auto outer_edges = ordered_inp_edges(outer_sum);
         for (auto& edge : outer_edges) {
-          if (edge.sink.get_port_id() != 0 || is_const_pin(edge.driver) || is_graph_input_pin(edge.driver)) {
+          if (edge.sink.get_port_id() != 0 || edge.driver.is_const() || is_graph_input_pin(edge.driver)) {
             continue;
           }
           auto inner_mask = edge.driver.get_master_node();
@@ -3041,9 +3064,9 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
           }
           auto inner_mask_pin = drv_at(inner_mask, 2);
           auto inner_sum_pin  = drv_at(inner_mask, 0);
-          if (inner_mask_pin.is_invalid() || !is_const_pin(inner_mask_pin)
-              || low_mask_width(hydrate_const(inner_mask_pin)) != mod_width || inner_sum_pin.is_invalid()
-              || is_const_pin(inner_sum_pin) || is_graph_input_pin(inner_sum_pin) || !has_single_consumer(inner_sum_pin)) {
+          if (inner_mask_pin.is_invalid() || !inner_mask_pin.is_const() || low_mask_width(const_of(inner_mask_pin)) != mod_width
+              || inner_sum_pin.is_invalid() || inner_sum_pin.is_const() || is_graph_input_pin(inner_sum_pin)
+              || !has_single_consumer(inner_sum_pin)) {
             continue;
           }
           auto inner_sum = inner_sum_pin.get_master_node();
@@ -3088,8 +3111,8 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // LEC once the lgcheck BMC stage became sound).
   if (mask_const.is_just_i64() && mask_const.to_just_i64() == -1) {
     bool nonneg = false;
-    if (is_const_pin(a_pin)) {
-      auto v = hydrate_const(a_pin);
+    if (a_pin.is_const()) {
+      const auto& v = const_of(a_pin);
       // is_positive() is exact at any width (an is_just_i64 gate would treat
       // a >62-bit non-negative constant as "maybe negative"); an unknown sign
       // bit reads negative, which stays conservative for Rule 4.
@@ -3144,16 +3167,15 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // sole consumer -- any other reader may observe bits >= n.
   {
     const int m_w = low_mask_width(mask_const);
-    if (m_w > 0 && !is_const_pin(a_pin) && !is_graph_input_pin(a_pin)) {
+    if (m_w > 0 && !a_pin.is_const() && !is_graph_input_pin(a_pin)) {
       auto not_node = a_pin.get_master_node();
       if (!not_node.is_invalid() && type_op_of(not_node) == Ntype_op::Not) {
         auto w_pin = drv_at(not_node, 0);
-        if (has_single_consumer(a_pin) && !w_pin.is_invalid() && !is_const_pin(w_pin) && !is_graph_input_pin(w_pin)) {
+        if (has_single_consumer(a_pin) && !w_pin.is_invalid() && !w_pin.is_const() && !is_graph_input_pin(w_pin)) {
           auto inner = w_pin.get_master_node();
           if (!inner.is_invalid() && type_op_of(inner) == Ntype_op::Get_mask && inner.get_class_index() != node.get_class_index()) {
             auto inner_mask_pin = drv_at(inner, 2);
-            if (!inner_mask_pin.is_invalid() && is_const_pin(inner_mask_pin)
-                && low_mask_width(hydrate_const(inner_mask_pin)) >= m_w) {
+            if (inner_mask_pin.is_const() && low_mask_width(const_of(inner_mask_pin)) >= m_w) {
               auto y = drv_at(inner, 0);
               if (!y.is_invalid() && !same_pin(y, a_pin)) {  // a self-feeding Not must stay
                 auto not_sink = find_sink_pin(not_node, "a");
@@ -3213,19 +3235,18 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
   auto base_pin  = livehd::graph_util::get_driver_of_sink_name(node, "a");
   auto mask_pin  = livehd::graph_util::get_driver_of_sink_name(node, "mask");
   auto value_pin = livehd::graph_util::get_driver_of_sink_name(node, "value");
-  if (base_pin.is_invalid() || mask_pin.is_invalid() || value_pin.is_invalid() || !is_const_pin(base_pin)
-      || !is_const_pin(mask_pin)) {
+  if (base_pin.is_invalid() || mask_pin.is_invalid() || value_pin.is_invalid() || !base_pin.is_const() || !mask_pin.is_const()) {
     return false;
   }
 
-  const auto base = hydrate_const(base_pin);
-  const auto mask = hydrate_const(mask_pin);
+  const auto& base = const_of(base_pin);
+  const auto& mask = const_of(mask_pin);
   if (!base.is_known_zero() || mask.has_unknowns() || mask.is_negative()) {
     return false;
   }
 
   const auto [mb, me] = mask.get_mask_range();
-  if (mb != 0 || me <= 0 || !livehd::graph_util::is_unsign(value_pin) || is_const_pin(value_pin) || is_graph_input_pin(value_pin)) {
+  if (mb != 0 || me <= 0 || !livehd::graph_util::is_unsign(value_pin) || value_pin.is_const() || is_graph_input_pin(value_pin)) {
     return false;
   }
 
@@ -3272,7 +3293,7 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   }
   int const_idx = -1;
   for (int i = 0; i < 2; ++i) {
-    if (is_const_pin(edges[i].driver)) {
+    if (edges[i].driver.is_const()) {
       if (const_idx >= 0) {
         const_idx = -2;  // two constants: constant-fold territory, not ours
         break;
@@ -3284,14 +3305,14 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
     return;
   }
   auto      mask_pin = edges[const_idx].driver;
-  const int n        = low_mask_width(hydrate_const(mask_pin));
+  const int n        = low_mask_width(const_of(mask_pin));
   if (n <= 0) {
     return;
   }
   auto x_pin = edges[const_idx ^ 1].driver;
   // With literal width hints the And and Get_mask spellings agree for every
   // operand producer; there is no producer-specific sign-slot exception.
-  if (x_pin.is_invalid() || is_const_pin(x_pin)) {
+  if (x_pin.is_invalid() || x_pin.is_const()) {
     return;
   }
   edges[0].del_edge();
@@ -3418,7 +3439,7 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
         && op != Ntype_op::Get_mask && op != Ntype_op::Concat) {
       bool suspicious = false;
       for (const auto& e : node.inp_edges()) {
-        if (is_const_pin(e.driver) ? hydrate_const(e.driver).is_negative() : !livehd::graph_util::is_unsign(e.driver)) {
+        if (e.driver.is_const() ? const_of(e.driver).is_negative() : !livehd::graph_util::is_unsign(e.driver)) {
           suspicious = true;
           break;
         }
@@ -3761,11 +3782,8 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] boo
   // Debug self-check (Tier 1, -c dbg): every constant left in the graph must be
   // consistent with the bits/sign attributes on its pin. This is the front line
   // for catching front-end translation misses (a const stamped the wrong width/sign).
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (type_op_of(node) != Ntype_op::Nconst) {
-      continue;
-    }
-    livehd::graph_util::debug_check_const_pin(node.create_driver_pin(0));
+  for (const auto& dpin : g->get_constant_node().out_pins()) {
+    livehd::graph_util::debug_check_const_pin(dpin);
   }
 #endif
 }

@@ -41,7 +41,6 @@ using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::get_driver_of_sink_name;
 using livehd::graph_util::has_name;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::is_unsign;
@@ -105,13 +104,6 @@ static void mark_pin_sign_from_wire(const hhds::Pin_class& pin, const RTLIL::Wir
   explicit_pin_signs.insert(pin.get_class_index());
 }
 namespace {
-
-[[nodiscard]] Dlop hydrate_const_pin(const hhds::Pin_class& pin) {
-  // Delegate to the canonical decoder: small ints in [-16,15] are pid-encoded
-  // on CONST_NODE with no payload, so reading const_value_of(master) directly
-  // misreads them as 0 (e.g. dropping a const concat chunk as "known zero").
-  return livehd::graph_util::hydrate_const(pin);
-}
 
 [[nodiscard]] hhds::Node_class master_node(const hhds::Pin_class& pin) { return pin.get_master_node(); }
 
@@ -428,7 +420,7 @@ static hhds::Pin_class get_edge_pin(hhds::Graph* g, const RTLIL::Wire* wire, boo
       return dpin;
     }
 
-    if (is_const_pin(dpin) && !hydrate_const_pin(dpin).is_negative()) {
+    if (dpin.is_const() && !livehd::graph_util::const_of(dpin).is_negative()) {
       return dpin;
     }
 
@@ -491,17 +483,17 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
       w = bits_of(dpin, *gio, dpin.get_pin_name());
     }
   }
-  if (w == 0 && is_const_pin(dpin)) {
+  if (w == 0 && dpin.is_const()) {
     // Dlop reports zero significant bits for literal zero; an RTL realization
     // still needs the one-bit 0 container.
-    w = std::max<int32_t>(1, static_cast<int32_t>(hydrate_const_pin(dpin).get_bits()));
+    w = std::max<int32_t>(1, static_cast<int32_t>(livehd::graph_util::const_of(dpin).get_bits()));
   }
   return w;
 }
 
 static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, const hhds::Pin_class& dpin, int or_offset) {
-  if (or_node.has_inp_edges() && is_const_pin(dpin)) {
-    auto val = hydrate_const_pin(dpin);
+  if (or_node.has_inp_edges() && dpin.is_const()) {
+    const auto& val = livehd::graph_util::const_of(dpin);
     if (val.is_known_zero()) {
       return;
     }
@@ -657,7 +649,7 @@ static hhds::Pin_class get_unsigned_dpin(hhds::Graph* g, const RTLIL::Cell* cell
   if (type_op_of(node) == Ntype_op::Get_mask) {
     return dpin;
   }
-  if (is_const_pin(dpin) && !hydrate_const_pin(dpin).is_negative()) {
+  if (dpin.is_const() && !livehd::graph_util::const_of(dpin).is_negative()) {
     return dpin;
   }
 
@@ -686,7 +678,7 @@ static bool cell_port_is_signed(const RTLIL::Cell* cell, const RTLIL::IdString& 
 }
 
 static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_class& dpin) {
-  if (dpin.is_invalid() || is_const_pin(dpin)) {
+  if (dpin.is_invalid() || dpin.is_const()) {
     return dpin;
   }
 
@@ -696,7 +688,7 @@ static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_cla
   }
 
   auto mask = get_driver_of_sink_name(node, "mask");
-  if (mask.is_invalid() || !is_const_pin(mask)) {
+  if (mask.is_invalid() || !mask.is_const()) {
     return dpin;
   }
 
@@ -705,7 +697,7 @@ static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_cla
     return dpin;
   }
 
-  auto mask_v    = hydrate_const_pin(mask);
+  const auto& mask_v    = livehd::graph_util::const_of(mask);
   auto dpin_bits = bits_of(dpin);
   auto a_bits    = bits_of(a);
   bool all_ones  = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
@@ -1560,10 +1552,10 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
                                  const hhds::Pin_class& current_dpin) {
   I(type_op_of(or_node) == Ntype_op::Or);
 
-  // NOTE: is_const_pin, not Ntype_op::Nconst — consts are CONST_NODE pins now.
+  // NOTE: probe the PIN (consts are CONST_NODE pool pins, never body nodes).
   // A const falling through used to hit the bits_of()==0 padding branch below
   // and OR an all-'?' mask into the wire (x-leak on partially assigned bits).
-  if (is_const_pin(current_dpin)) {
+  if (current_dpin.is_const()) {
     append_to_or_node(g, or_node, current_dpin, or_offset);
   } else if (bits_of(current_dpin) > nbits) {
     auto and_node = create_typed_node(*g, Ntype_op::And, nbits);
@@ -2616,7 +2608,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         auto node = master_node(dpin_a_signed);
         if (type_op_of(node) == Ntype_op::Get_mask) {
           dpin_a = dpin_a_signed;
-        } else if (is_const_pin(dpin_a_signed) && !hydrate_const_pin(dpin_a_signed).is_negative()) {
+        } else if (dpin_a_signed.is_const() && !livehd::graph_util::const_of(dpin_a_signed).is_negative()) {
           dpin_a = dpin_a_signed;
         } else {
           auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask);
@@ -2945,7 +2937,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 static void finalize_module(hhds::Graph* g) {
   for (auto node : g->body().nodes()) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Invalid || Ntype::has_multiple_driver_pins(op) || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::Invalid || Ntype::has_multiple_driver_pins(op)) {
       // Invalid: untyped placeholder (no real driver). Sub/Memory: per-port
       // driver pins whose sign comes from the callee. Nconst: sign + width are
       // carried in the serialized const value, not the pin attr.
@@ -2953,7 +2945,7 @@ static void finalize_module(hhds::Graph* g) {
     }
 
     auto dpin = node.create_driver_pin(0);
-    if (dpin.is_invalid() || is_const_pin(dpin)) {
+    if (dpin.is_invalid() || dpin.is_const()) {
       continue;
     }
     if (is_graph_input_pin(dpin)) {

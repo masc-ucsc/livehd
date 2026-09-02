@@ -65,10 +65,10 @@ hhds::Occurrence_pin occurrence_driver_at(const hhds::Occurrence_node& node, hhd
 
 int occurrence_const_shl_amount(const hhds::Occurrence_node& node) {
   const auto amount = occurrence_driver_at(node, 1);
-  if (amount.is_invalid() || !gu::is_const_pin(amount)) {
+  if (amount.is_invalid() || !amount.is_const()) {
     return -1;
   }
-  const auto value = gu::hydrate_const(amount);
+  const auto& value = gu::const_of(amount);
   if (!value.is_just_i64() || value.has_unknowns() || value.to_just_i64() < 0 || value.to_just_i64() > (1 << 28)) {
     return -1;
   }
@@ -90,8 +90,8 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
   if (pin.is_invalid() || depth > 16 || --visits < 0) {
     return kPacked_footprint_bail;
   }
-  if (gu::is_const_pin(pin)) {
-    const auto value = gu::hydrate_const(pin);
+  if (pin.is_const()) {
+    const auto& value = gu::const_of(pin);
     if (value.is_negative()) {
       return kPacked_footprint_bail;
     }
@@ -120,8 +120,8 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
   }
   if (op == Ntype_op::Get_mask) {
     const auto mask = occurrence_driver_at(node, 2);
-    if (!mask.is_invalid() && gu::is_const_pin(mask)) {
-      const auto constant = gu::hydrate_const(mask);
+    if (mask.is_const()) {
+      const auto& constant = gu::const_of(mask);
       const auto [lo, hi]  = constant.get_mask_range();
       if (!constant.has_unknowns() && constant.is_positive() && lo >= 0 && hi > lo) {
         const auto inner = occurrence_packed_footprint(occurrence_driver_at(node, 0), depth + 1, &visits);
@@ -265,9 +265,7 @@ Execution_slot evaluation_slot(State_version version) {
   return Execution_slot::pre_rise_eval;
 }
 
-bool is_true_constant(const hhds::Occurrence_pin& pin) {
-  return !pin.is_invalid() && gu::is_const_pin(pin) && gu::hydrate_const(pin).is_known_true();
-}
+bool is_true_constant(const hhds::Occurrence_pin& pin) { return pin.is_known_true(); }
 
 std::optional<hhds::Port_id> valid_port(const hhds::Node_class& node) {
   auto io = node.get_subnode_io();
@@ -318,7 +316,7 @@ bool is_conditional_boundary(const hhds::Instance_site& site) {
       break;
     }
   }
-  if (guard.is_invalid() || (gu::is_const_pin(guard) && gu::hydrate_const(guard).is_known_true())) {
+  if (guard.is_invalid() || (guard.is_known_true())) {
     return false;
   }
   const auto root = lc::control_root(guard).net;
@@ -432,9 +430,9 @@ std::string node_shape(const hhds::Node_class& node) {
     uint64_t    source_kind = 2;
     uint64_t    source_op   = 0;
     std::string literal;
-    if (gu::is_const_pin(edge.driver)) {
+    if (edge.driver.is_const()) {
       source_kind = 0;
-      literal     = gu::hydrate_const(edge.driver).to_string();
+      literal     = gu::const_of(edge.driver).to_string();
     } else if (gu::is_graph_input_pin(edge.driver)) {
       source_kind = 1;
     } else {
@@ -541,8 +539,8 @@ std::string kernel_node_shape(const hhds::Node_class& node) {
   std::string              result = std::format("op:{}", Ntype::get_name(gu::type_op_of(node)));
   std::vector<std::string> inputs;
   for (const auto& edge : node.inp_edges()) {
-    const std::string source = gu::is_const_pin(edge.driver)
-                                   ? "const:" + gu::hydrate_const(edge.driver).to_string()
+    const std::string source = edge.driver.is_const()
+                                   ? "const:" + gu::const_of(edge.driver).to_string()
                                    : std::format("value:b{}:u{}", gu::bits_of(edge.driver), gu::is_unsign(edge.driver));
     inputs.push_back(std::format("{}<-{}", edge.sink.get_port_id(), source));
   }
@@ -720,9 +718,9 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
         fields[2]      = 1;
         fields[4]      = pin.is_invalid() ? 0 : pin.get_port_id();
         fields[5]      = 3;
-        if (!pin.is_invalid() && gu::is_const_pin(pin)) {
+        if (pin.is_const()) {
           fields[5]        = 0;
-          const auto value = stable_hash128(gu::hydrate_const(pin).to_string());
+          const auto value = stable_hash128(gu::const_of(pin).to_string());
           fields[9]        = value[0];
           fields[10]       = value[1];
         } else if (!pin.is_invalid() && gu::is_graph_input_pin(pin)) {
@@ -877,7 +875,7 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
       return std::nullopt;  // combinational arrays are data colors, not state actions
     }
     const auto posclk = lc::sink_driver_hier(node, "posclk");
-    if (!posclk.is_invalid() && gu::is_const_pin(posclk) && gu::hydrate_const(posclk).is_known_false()) {
+    if (posclk.is_known_false()) {
       // Today's emitter is rise-only for memories. Keep that behavior visible
       // as an incomplete edge-class decision instead of silently treating a
       // secondary/falling memory exactly like a flop.
@@ -887,7 +885,7 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
   }
   if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
     const auto posclk   = lc::sink_driver_hier(node, "posclk");
-    const bool positive = !(!posclk.is_invalid() && gu::is_const_pin(posclk) && gu::hydrate_const(posclk).is_known_false());
+    const bool positive = !posclk.is_known_false();
     const auto clock    = lc::sink_driver_hier(node, "clock_pin");
     if (!clock.is_invalid()) {
       if (const auto cone = lc::clock_op_of(clock.base_pin(), clocks)) {
@@ -911,13 +909,13 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
   }
 
   const auto enable = lc::sink_driver_hier(node, "enable");
-  if (enable.is_invalid() || (gu::is_const_pin(enable) && gu::hydrate_const(enable).is_known_true())) {
+  if (enable.is_invalid() || (enable.is_known_true())) {
     // An always-open latch is a combinational buffer, not a staged state
     // update. The future emitter must lower that role explicitly.
     versioning_complete = false;
     return std::nullopt;
   }
-  if (gu::is_const_pin(enable) && gu::hydrate_const(enable).is_known_false()) {
+  if (enable.is_known_false()) {
     return std::nullopt;  // permanently held state
   }
   const auto root = lc::control_root(enable);
@@ -1216,7 +1214,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       // duplicating the emitter's full ordering classifier.
       for (const auto& edge : plan.sites_[consumer].node.inp_edges()) {
         const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(edge.sink.get_port_id()));
-        if (name == "undef" && gu::is_const_pin(edge.driver) && !gu::hydrate_const(edge.driver).is_known_false()) {
+        if (name == "undef" && edge.driver.is_const() && !edge.driver.is_known_false()) {
           plan.summary_.runtime_random = true;
           break;
         }
@@ -1450,8 +1448,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     bool        output_boundary_unsign = gu::is_unsign(edge.driver);
     if (consumer_op == Ntype_op::Get_mask && edge.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
       for (const auto& input : consumer_base.node.inp_edges()) {
-        if (input.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") && gu::is_const_pin(input.driver)) {
-          std::tie(lo, hi) = gu::hydrate_const(input.driver).get_mask_range();
+        if (input.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") && input.driver.is_const()) {
+          std::tie(lo, hi) = gu::const_of(input.driver).get_mask_range();
           break;
         }
       }
@@ -1504,7 +1502,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         // LSB-aligned leaf, i.e. [k+2m, k+2m+w) of the word instead of
         // [k+m, k+m+w). The And spelling below guards the same way
         // (mask_lo == 0).
-        if (lo == 0 && hi > lo && !gu::is_const_pin(crossing)) {
+        if (lo == 0 && hi > lo && !crossing.is_const()) {
           const auto shift_node = crossing.get_master_node();
           if (shift_node.path() == consumer_base.node.path() && gu::type_op_of(shift_node) == Ntype_op::SRA) {
             hhds::Occurrence_pin value;
@@ -1516,8 +1514,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                 amount = input.driver;
               }
             }
-            if (!value.is_invalid() && !amount.is_invalid() && gu::is_const_pin(amount)) {
-              const auto shift = gu::hydrate_const(amount);
+            if (!value.is_invalid() && amount.is_const()) {
+              const auto& shift = gu::const_of(amount);
               // Bound the amount before narrowing to int: a to-positive mask
               // (-1) reports hi == INT_MAX/2, so an unbounded `hi += shift`
               // is signed overflow.
@@ -1530,19 +1528,19 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
             }
           }
         }
-      } else if (consumer_op == Ntype_op::And && !gu::is_const_pin(edge.driver)) {
+      } else if (consumer_op == Ntype_op::And && !edge.driver.is_const()) {
         int mask_width = -1;
         for (const auto& input : consumer_base.node.inp_edges()) {
-          if (!gu::is_const_pin(input.driver)) {
+          if (!input.driver.is_const()) {
             continue;
           }
-          const auto [mask_lo, mask_hi] = gu::hydrate_const(input.driver).get_mask_range();
+          const auto [mask_lo, mask_hi] = gu::const_of(input.driver).get_mask_range();
           if (mask_lo == 0 && mask_hi > 0) {
             mask_width = mask_hi;
             break;
           }
         }
-        for (int depth = 0; depth < 8 && !crossing.is_invalid() && !gu::is_const_pin(crossing); ++depth) {
+        for (int depth = 0; depth < 8 && !crossing.is_invalid() && !crossing.is_const(); ++depth) {
           const auto           wrapper = crossing.get_master_node();
           const auto           op      = gu::type_op_of(wrapper);
           hhds::Occurrence_pin value;
@@ -1557,8 +1555,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
               }
             }
             transparent |= mask.is_invalid();
-            if (!mask.is_invalid() && gu::is_const_pin(mask)) {
-              const auto constant  = gu::hydrate_const(mask);
+            if (mask.is_const()) {
+              const auto& constant  = gu::const_of(mask);
               transparent         |= constant.is_just_i64() && constant.to_just_i64() == -1;
             }
           }
@@ -1578,8 +1576,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
               amount = input.driver;
             }
           }
-          if (!value.is_invalid() && !amount.is_invalid() && gu::is_const_pin(amount)) {
-            const auto shift = gu::hydrate_const(amount);
+          if (!value.is_invalid() && amount.is_const()) {
+            const auto& shift = gu::const_of(amount);
             if (shift.is_just_i64() && shift.to_just_i64() >= 0) {
               lo                = static_cast<int>(shift.to_just_i64());
               hi                = lo + mask_width;
@@ -1602,13 +1600,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           for (const auto& input : crossing_node.inp_edges()) {
             if (input.sink.get_port_id() == 0) {
               value = input.driver;
-            } else if (input.sink.get_port_id() == 2 && gu::is_const_pin(input.driver)) {
+            } else if (input.sink.get_port_id() == 2 && input.driver.is_const()) {
               mask = input.driver;
             }
           }
           bool transparent = false;
           if (!value.is_invalid() && !mask.is_invalid()) {
-            const auto constant = gu::hydrate_const(mask);
+            const auto& constant = gu::const_of(mask);
             transparent         = constant.is_just_i64() && constant.to_just_i64() == -1;
             if (!transparent && gu::is_unsign(value)) {
               const auto [mask_lo, mask_hi] = constant.get_mask_range();
@@ -1643,7 +1641,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         // word so the unchanged callee Get_mask still sees the same bit
         // positions.
         bool rebased = false;
-        for (int depth = 0; depth < 16 && !crossing.is_invalid() && !gu::is_const_pin(crossing); ++depth) {
+        for (int depth = 0; depth < 16 && !crossing.is_invalid() && !crossing.is_const(); ++depth) {
           const auto packed    = crossing.get_master_node();
           const auto packed_op = gu::type_op_of(packed);
           if (packed_op == Ntype_op::Or) {
@@ -1691,10 +1689,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           if (packed_op == Ntype_op::Get_mask) {
             const auto value = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "a"));
             const auto mask  = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "mask"));
-            if (value.is_invalid() || mask.is_invalid() || !gu::is_const_pin(mask)) {
+            if (value.is_invalid() || mask.is_invalid() || !mask.is_const()) {
               break;
             }
-            const auto constant       = gu::hydrate_const(mask);
+            const auto& constant          = gu::const_of(mask);
             const auto [mask_lo, mask_hi] = constant.get_mask_range();
             if (constant.has_unknowns() || !constant.is_positive() || mask_lo < 0 || mask_hi <= mask_lo
                 || hi > mask_hi - mask_lo) {
@@ -1773,10 +1771,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
               default: break;
             }
           }
-          if (mask.is_invalid() || !gu::is_const_pin(mask)) {
+          if (mask.is_invalid() || !mask.is_const()) {
             break;
           }
-          const auto constant = gu::hydrate_const(mask);
+          const auto& constant = gu::const_of(mask);
           if (constant.has_unknowns() || constant.is_negative()) {
             break;
           }
@@ -1811,7 +1809,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         // `slice.lo == lo` rule the child-output arm below applies, restated in
         // the coordinates this walk left behind. surface_shift then belongs to
         // the absorbed SRA, not to the operand.
-        if (rebased && (position_in_whole || lo == 0) && !crossing.is_invalid() && !gu::is_const_pin(crossing)) {
+        if (rebased && (position_in_whole || lo == 0) && !crossing.is_invalid() && !crossing.is_const()) {
           const auto terminal = index.find(crossing.get_master_node().get_occurrence_index());
           const auto bind     = [&] {
             producer_port  = crossing.get_port_id();
@@ -1898,7 +1896,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                 // without a separate extract ABI it is safe only when the
                 // requested range starts at the leaf's LSB.
                 if (!contains || (!position_in_whole && slice.lo != static_cast<uint32_t>(lo)) || slice.leaf.is_invalid()
-                    || gu::is_const_pin(slice.leaf)) {
+                    || slice.leaf.is_const()) {
                   continue;
                 }
                 if (const auto leaf = find_body_site(child.get(), producer_path, slice.leaf.get_master_node());
@@ -1987,7 +1985,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
               }
               break;
             }
-          } else if (!gu::is_const_pin(output_edge.driver)) {
+          } else if (!output_edge.driver.is_const()) {
             const auto leaf = find_body_site(child.get(), sub_occurrence.path(), output_edge.driver.get_master_node());
             if (leaf && plan.sites_[*leaf].live) {
               producer_base = *leaf;
@@ -2321,8 +2319,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     for (const auto& decl : body_io->get_output_pin_decls()) {
       const auto output            = body.graph->get_output_pin(decl.name);
       const auto add_output_driver = [&](const auto& driver) {
-        if (gu::is_const_pin(driver)) {
-          const auto constant = gu::hydrate_const(driver);
+        if (driver.is_const()) {
+          const auto& constant = gu::const_of(driver);
           const auto literal  = constant.to_pyrope();
           if (constant.has_unknowns()) {
             if (std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr) {
@@ -2386,8 +2384,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                                                     decl.name));
               return;
             }
-            if (gu::is_const_pin(*resolved)) {
-              const auto constant = gu::hydrate_const(*resolved);
+            if (resolved->is_const()) {
+              const auto& constant = gu::const_of(*resolved);
               if (constant.has_unknowns()) {
                 plan.summary_.versioning_complete = false;
                 plan.errors_.emplace_back("a literal-only output contains runtime-unknown bits");
@@ -2516,12 +2514,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
       const auto producer_it = index.find(resolved->get_master_node().get_occurrence_index());
       const bool top_input   = producer_it == index.end() && gu::is_graph_input_pin(*resolved) && resolved->get_graph() == root;
-      const bool constant    = gu::is_const_pin(*resolved);
+      const bool constant    = resolved->is_const();
       if (!top_input && !constant && (producer_it == index.end() || !plan.sites_[producer_it->second].live)) {
         plan.observations_.push_back(Observation{prefix + decl.name, "unbound", true, decl.port_id});
         continue;
       }
-      const std::string literal = constant ? gu::hydrate_const(*resolved).to_pyrope() : std::string{};
+      const std::string literal = constant ? gu::const_of(*resolved).to_pyrope() : std::string{};
       for (const auto version : {State_version::pre_rise, State_version::post_fall}) {
         const size_t producer = (top_input || constant)
                                     ? Color_plan::invalid_index
@@ -2572,8 +2570,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         const int    raw  = static_cast<int>(edge.sink.get_port_id());
         const auto   name = Ntype::get_sink_name(Ntype_op::Memory, raw);
         const size_t port = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
-        if (name == "type" && gu::is_const_pin(edge.driver)) {
-          type = static_cast<int>(gu::hydrate_const(edge.driver).to_just_i64());
+        if (name == "type" && edge.driver.is_const()) {
+          type = static_cast<int>(gu::const_of(edge.driver).to_just_i64());
         } else if (name == "fwd") {
           fwd_matrix = edge.driver;
         } else if (name == "undef") {
@@ -2593,8 +2591,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           }
           if (name.ends_with("addr")) {
             ports[port].present = true;
-          } else if (name.ends_with("rdport") && gu::is_const_pin(edge.driver)) {
-            ports[port].rd = !gu::hydrate_const(edge.driver).is_known_false();
+          } else if (name.ends_with("rdport") && edge.driver.is_const()) {
+            ports[port].rd = !gu::const_of(edge.driver).is_known_false();
           }
         }
       }
@@ -2616,10 +2614,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         }
       }
       const auto row_prefix = [&](const hhds::Occurrence_pin& matrix, int row) {
-        if (matrix.is_invalid() || !gu::is_const_pin(matrix)) {
+        if (matrix.is_invalid() || !matrix.is_const()) {
           return 0;
         }
-        const auto value  = gu::hydrate_const(matrix);
+        const auto& value  = gu::const_of(matrix);
         int        prefix = 0;
         while (prefix < writes && value.bit_test(row * writes + prefix)) {
           ++prefix;

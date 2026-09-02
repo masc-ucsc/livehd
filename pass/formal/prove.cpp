@@ -62,7 +62,7 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     unsupported = true;
     return;
   }
-  if (gu::is_const_pin(pin)) {
+  if (pin.is_const()) {
     return;  // constants are leaves, resolved on demand
   }
   auto ci = pin.get_class_index();
@@ -84,7 +84,7 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     unsupported = true;  // memory reads not modeled yet -> Unknown
     return;
   }
-  if (op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Nconst) {
+  if (op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
     unsupported = true;
     return;
   }
@@ -106,8 +106,8 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     enc_unsupported_ = true;
     return std::nullopt;
   }
-  if (gu::is_const_pin(dpin)) {
-    Dlop c     = gu::hydrate_const(dpin);
+  if (dpin.is_const()) {
+    Dlop c     = gu::const_of(dpin);
     int  width = std::max(1, c.get_bits());
     bool sgn   = c.is_negative();
     Term t;
@@ -172,7 +172,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     enc_unsupported_ = true;
     return std::nullopt;
   }
-  if (op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Nconst) {
+  if (op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
     enc_unsupported_ = true;
     return std::nullopt;
   }
@@ -396,11 +396,11 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
           break;
         }
       }
-      if (pos_pin.is_invalid() || !gu::is_const_pin(pos_pin)) {
+      if (pos_pin.is_invalid() || !pos_pin.is_const()) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      Dlop posc = gu::hydrate_const(pos_pin);
+      Dlop posc = gu::const_of(pos_pin);
       if (!posc.is_just_i64()) {
         enc_unsupported_ = true;
         return std::nullopt;
@@ -428,11 +428,11 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       const Val&      a        = pid(0)[0];
       // mask is a single const driver; read it directly (no inp_edges scan).
       hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
-      if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
+      if (mask_pin.is_invalid() || !mask_pin.is_const()) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      Dlop mask = gu::hydrate_const(mask_pin);
+      Dlop mask = gu::const_of(mask_pin);
       if (mask.is_just_i64() && mask.to_just_i64() == -1) {
         result = lec::fit_to(tm_, Val{a.term, a.width, false}, W);
         break;
@@ -451,12 +451,12 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
     case Ntype_op::Set_mask: {
       // mask is a single const driver; read it directly (no inp_edges scan).
       hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
-      if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin) || pid(0).empty()) {
+      if (mask_pin.is_invalid() || !mask_pin.is_const() || pid(0).empty()) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
       const Val& a    = pid(0)[0];
-      Dlop       mask = gu::hydrate_const(mask_pin);
+      Dlop       mask = gu::const_of(mask_pin);
       if (mask.is_known_zero()) {
         result = lec::fit_to(tm_, a, W);
         break;

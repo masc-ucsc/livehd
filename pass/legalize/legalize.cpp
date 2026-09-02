@@ -157,8 +157,8 @@ void copy_body(hhds::Graph* src, hhds::Graph* dst, hhds::GraphLibrary* rebind, c
     if (p.is_invalid()) {
       return {};
     }
-    if (want_driver && gu::is_const_pin(p)) {
-      return gu::create_const(*dst, gu::hydrate_const(p));
+    if (want_driver && p.is_const()) {
+      return gu::create_const(*dst, gu::const_of(p));
     }
     auto owner = p.get_master_node();
     if (owner.is_invalid()) {

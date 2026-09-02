@@ -122,7 +122,7 @@ void Sub_inliner::create_nodes() {
       continue;
     }
     auto op = type_op_of(n);
-    if (op == Ntype_op::IO || op == Ntype_op::Invalid || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::IO || op == Ntype_op::Invalid) {
       continue;  // IO dissolves into the boundary; constants are recreated per consuming edge
     }
     auto neo = create_typed_node(*parent_, op);
@@ -177,8 +177,8 @@ hhds::Pin_class Sub_inliner::driver_feeding_inst_port(uint32_t pid) {
     if (static_cast<uint32_t>(e.sink.get_port_id()) != pid) {
       continue;
     }
-    if (is_const_pin(e.driver)) {
-      return create_const(*parent_, hydrate_const(e.driver));
+    if (e.driver.is_const()) {
+      return create_const(*parent_, const_of(e.driver));
     }
     return e.driver;  // already a parent pin -- single-level inline needs no hop
   }
@@ -230,8 +230,8 @@ hhds::Pin_class Sub_inliner::resolve_output_of(std::string_view oname) {
     return {};
   }
   for (const auto& e : opin.inp_edges()) {
-    if (is_const_pin(e.driver)) {
-      return create_const(*parent_, hydrate_const(e.driver));
+    if (e.driver.is_const()) {
+      return create_const(*parent_, const_of(e.driver));
     }
     return resolve_driver(e.driver);
   }
@@ -250,8 +250,8 @@ void Sub_inliner::wire_edges() {
     auto neo = it->second;
     for (const auto& e : n.inp_edges()) {
       auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (is_const_pin(e.driver)) {
-        create_const(*parent_, hydrate_const(e.driver)).connect_sink(sp);
+      if (e.driver.is_const()) {
+        create_const(*parent_, const_of(e.driver)).connect_sink(sp);
       } else if (auto dp = resolve_driver(e.driver); !dp.is_invalid()) {
         dp.connect_sink(sp);
       }

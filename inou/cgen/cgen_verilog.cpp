@@ -31,14 +31,11 @@
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::color_of;
-using livehd::graph_util::const_value_of;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::default_instance_name;
 using livehd::graph_util::has_color;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
-using livehd::graph_util::is_type_const;
 using livehd::graph_util::is_type_flop;
 using livehd::graph_util::is_type_register;
 using livehd::graph_util::is_type_sub;
@@ -50,7 +47,7 @@ using livehd::graph_util::wire_name;
 
 namespace {
 
-using livehd::graph_util::hydrate_const;
+using livehd::graph_util::const_of;
 
 // Emit a constant as Verilog. hlop's Dlop::to_verilog() formats a NEGATIVE
 // value as its bare magnitude ("{n}'sh{mag}", dropping the sign), so it
@@ -429,16 +426,16 @@ std::string Cgen_verilog::get_wire_or_const(const hhds::Pin_class& dpin) const {
     return var_it->second;
   }
 
-  if (is_const_pin(dpin)) {
-    return const_to_verilog(hydrate_const(dpin));
+  if (dpin.is_const()) {
+    return const_to_verilog(const_of(dpin));
   }
 
   return get_scaped_name(pin_wire_name(dpin));
 }
 
 std::string Cgen_verilog::get_wire_or_const(const hhds::Pin_class& dpin, int width, bool unsign) const {
-  if (is_const_pin(dpin)) {
-    return const_to_verilog(hydrate_const(dpin), width, unsign);
+  if (dpin.is_const()) {
+    return const_to_verilog(const_of(dpin), width, unsign);
   }
   return get_wire_or_const(dpin);
 }
@@ -506,7 +503,7 @@ int32_t Cgen_verilog::decl_bits_of(const hhds::Pin_class& dpin) {
   //     use a 1 here to mean "index-free, emit the bare name".
   // 0 means "no declared net" (a constant or an invalid pin): the caller must
   // fold instead of appending a select to the literal.
-  if (dpin.is_invalid() || is_const_pin(dpin)) {
+  if (dpin.is_invalid() || dpin.is_const()) {
     return 0;
   }
   return bits_of(dpin);
@@ -522,8 +519,8 @@ bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
   // unsigned context zero-extends it back to a positive number
   // (`3'sb101 << 0` came out 16'h0005 instead of 16'hfffd). A non-negative
   // constant zero- and sign-extend alike, so it needs no special handling.
-  if (is_const_pin(dpin)) {
-    auto c = hydrate_const(dpin);
+  if (dpin.is_const()) {
+    const auto& c = const_of(dpin);
     return !c.has_unknowns() && c.is_negative();
   }
   if (!is_unsign(dpin)) {
@@ -568,8 +565,8 @@ bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
   if (type_op_of(node) == Ntype_op::Or) {
     bool saw_signed = false;
     for (const auto& e : node.inp_edges()) {
-      if (is_const_pin(e.driver)) {
-        const auto c = hydrate_const(e.driver);
+      if (e.driver.is_const()) {
+        const auto& c = const_of(e.driver);
         if (c.has_unknowns() || !c.is_known_false()) {
           return false;  // a NON-zero constant operand: not a pad
         }
@@ -638,13 +635,13 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
   // pid encodings (driver vs sink counterpart) than the one create_module_io
   // registered. HHDS's get_pin_name resolves both to the declared name; fall
   // back to that so the emitted Verilog references the right wire.
-  if (is_const_pin(dpin)) {
+  if (dpin.is_const()) {
     // Parenthesize like the needs_parenthesis sub-expressions above: callers
     // (e.g. Get_mask/Sext) may append a bit-select suffix directly to this
     // string (`a[hi:lo]`), and a bare sized literal can't take one — Verilog
     // rejects `193'sb0????...?[191:64]` ("expected ';'"). `(193'sb0...)[191:64]`
     // is valid and identical in every other context this return value is used.
-    return absl::StrCat("(", const_to_verilog(hydrate_const(dpin)), ")");
+    return absl::StrCat("(", const_to_verilog(const_of(dpin)), ")");
   }
 
   // Single-use unnamed nodes are intentionally not declared in create_locals:
@@ -687,7 +684,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
 }
 
 bool Cgen_verilog::declared_unsigned_net(const hhds::Pin_class& dpin) const {
-  if (dpin.is_invalid() || is_const_pin(dpin)) {
+  if (dpin.is_invalid() || dpin.is_const()) {
     return false;
   }
   return pin2var.contains(dpin.get_class_index()) && pin2var_unsigned_.contains(dpin.get_class_index());
@@ -823,8 +820,8 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
 
   bool neg_en      = false;
   auto posclk_dpin = get_driver(find_sink_pin(node, "posclk"));
-  if (!posclk_dpin.is_invalid() && is_const_pin(posclk_dpin)) {
-    neg_en = hydrate_const(posclk_dpin).is_known_false();
+  if (posclk_dpin.is_const()) {
+    neg_en = const_of(posclk_dpin).is_known_false();
   }
 
   // A CONSTANT-TRUE enable is the always-transparent case spelled differently:
@@ -832,8 +829,8 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   // omits the pin entirely. Normalize to "no enable" so both spellings take the
   // combinational emission below. A constant-FALSE enable is left alone -- `if
   // (0)` is an honest rendering of a latch that never opens.
-  if (!enable.empty() && is_const_pin(en_dpin)) {
-    if (const auto c = hydrate_const(en_dpin); !c.has_unknowns()) {
+  if (!enable.empty() && en_dpin.is_const()) {
+    if (const auto& c = const_of(en_dpin); !c.has_unknowns()) {
       if (neg_en ? c.is_known_zero() : !c.is_known_zero()) {
         enable.clear();
       }
@@ -854,8 +851,8 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   std::string rst_val = "'h0";
   if (auto rst_dpin = get_driver(find_sink_pin(node, "reset_pin")); !rst_dpin.is_invalid()) {
     bool negreset = false;
-    if (auto np = get_driver(find_sink_pin(node, "negreset")); !np.is_invalid() && is_const_pin(np)) {
-      negreset = !hydrate_const(np).is_known_false();
+    if (auto np = get_driver(find_sink_pin(node, "negreset")); np.is_const()) {
+      negreset = !const_of(np).is_known_false();
     }
     rst_test = absl::StrCat(negreset ? "!" : "", get_expression(rst_dpin));
     if (auto init_dpin = get_driver(find_sink_pin(node, "initial")); !init_dpin.is_invalid()) {
@@ -995,16 +992,16 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
       s          += absl::StrCat("reg [BITS-1:0] ", read_value, ";\n");
       s          += absl::StrCat("genvar fwd_j", k, ";\n");
       s          += absl::StrCat("generate for(fwd_j",
-                        k,
-                        "=0;fwd_j",
-                        k,
-                        "<WENSIZE;fwd_j",
-                        k,
-                        "=fwd_j",
-                        k,
-                        "+1) begin:FWD_BLOCK_CALC_",
-                        k,
-                        "\n");
+                                 k,
+                                 "=0;fwd_j",
+                                 k,
+                                 "<WENSIZE;fwd_j",
+                                 k,
+                                 "=fwd_j",
+                                 k,
+                                 "+1) begin:FWD_BLOCK_CALC_",
+                                 k,
+                                 "\n");
       s          += absl::StrCat("  always_comb ", read_value, "[fwd_j", k, "*MASKSIZE +: MASKSIZE] =\n");
       // FWD is a per-(read,write) matrix: bit (k*n_wr + j) forwards write port j
       // to read port k. Later write ports override earlier ones so a same-address
@@ -1107,39 +1104,39 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
 
     if (pin_name == "bits") {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant for bits not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
         return;
       }
-      mem_bits = hydrate_const(e.driver).to_just_i64();
+      mem_bits = const_of(e.driver).to_just_i64();
     } else if (pin_name == "size") {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant for size not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
         return;
       }
-      mem_size = hydrate_const(e.driver).to_just_i64();
+      mem_size = const_of(e.driver).to_just_i64();
     } else if (pin_name == "type") {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant type not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
         return;
       }
-      mem_type = hydrate_const(e.driver).to_just_i64();
+      mem_type = const_of(e.driver).to_just_i64();
     } else if (pin_name == "wensize") {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant for wensize not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
         return;
       }
-      mem_wensize = hydrate_const(e.driver).to_just_i64();
+      mem_wensize = const_of(e.driver).to_just_i64();
     } else if (pin_name == "fwd") {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
@@ -1147,7 +1144,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       mem_fwd_dpin = e.driver;
     } else if (pin_name == "undef") {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant for undef not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
@@ -1175,14 +1172,14 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     } else if (str_tools::ends_with(pin_name, "din")) {
       port_vector[port_id].din = e.driver;
     } else if (str_tools::ends_with(pin_name, "rdport")) {
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
             .msg("memory {} should have a constant rdport not {}", debug_name(node), debug_name(e.driver.get_master_node()))
             .fatal();
         return;
       }
-      auto v                      = hydrate_const(e.driver);
-      bool rdport                 = !v.is_known_false();
+      const auto& v               = const_of(e.driver);
+      bool        rdport          = !v.is_known_false();
       port_vector[port_id].rdport = rdport;
       if (rdport) {
         ++n_rd_ports;
@@ -1238,13 +1235,13 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // that disagrees with the graph. (A whole-array `update` cell never gets a
     // real matrix: tolg leaves `fwd` at its provisional declare value there.)
     if (!has_update && (mem_type == 0 || mem_type == 1)) {
-      const bool collides = (!mem_fwd_dpin.is_invalid() && !hydrate_const(mem_fwd_dpin).is_known_zero())
-                            || (!mem_undef_dpin.is_invalid() && !hydrate_const(mem_undef_dpin).is_known_zero());
+      const bool collides = (!mem_fwd_dpin.is_invalid() && !const_of(mem_fwd_dpin).is_known_zero())
+                            || (!mem_undef_dpin.is_invalid() && !const_of(mem_undef_dpin).is_known_zero());
       if (collides) {
         // Name the two matrices: "non-zero" alone does not say WHICH ordering
         // the graph is asking for, and the two demand different fixes.
         const auto mat_txt = [&](const hhds::Pin_class& p) -> std::string {
-          return p.is_invalid() ? std::string("-") : std::string(hydrate_const(p).to_pyrope());
+          return p.is_invalid() ? std::string("-") : std::string(const_of(p).to_pyrope());
         };
         livehd::diag::err("inou.cgen", "mem-readall-collision", "unsupported")
             .msg(
@@ -1278,10 +1275,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     const bool registered         = !clock_dpin.is_invalid();
     const int  busw               = mem_size * mem_bits;
     const auto invalid_const_addr = [&](const hhds::Pin_class& addr) {
-      if (!is_const_pin(addr)) {
+      if (!addr.is_const()) {
         return false;
       }
-      const auto value = hydrate_const(addr);
+      const auto& value = const_of(addr);
       return value.has_unknowns() || value.is_negative() || !value.is_just_i64() || value.to_just_i64() >= mem_size;
     };
     const auto unknown_entry = [&]() { return absl::StrCat(mem_bits, "'b", std::string(static_cast<size_t>(mem_bits), '?')); };
@@ -1299,8 +1296,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // per-cycle default of the combinational always_comb. Sliced once here
     // because both consumers want the same per-entry constants.
     std::vector<std::string> init_entries;
-    if (!mem_init_dpin.is_invalid() && mem_reset_dpin.is_invalid() && is_const_pin(mem_init_dpin)) {
-      const auto init_value = hydrate_const(mem_init_dpin);
+    if (!mem_init_dpin.is_invalid() && mem_reset_dpin.is_invalid() && mem_init_dpin.is_const()) {
+      const auto& init_value = const_of(mem_init_dpin);
       init_entries.reserve(static_cast<size_t>(mem_size));
       for (int i = 0; i < mem_size; ++i) {
         const auto lane = init_value.get_mask_op(*Dlop::get_mask_value((i + 1) * mem_bits - 1, i * mem_bits));
@@ -1441,8 +1438,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       // IEEE array semantics make a read through an unknown/out-of-range
       // index unknown. Spell that result directly: a constant unknown
       // selector is diagnosed as an invalid element by slang before lowering.
-      const auto rhs       = invalid_const_addr(p.addr) ? unknown_entry()
-                                                        : absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]");
+      const auto rhs = invalid_const_addr(p.addr) ? unknown_entry()
+                                                  : absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]");
       drive(get_wire_or_const(dout_dpin), rhs);
     }
     if (wants_read_all) {  // packed data is already {data[size-1], ..., data[0]}
@@ -1486,10 +1483,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // many-ported register file) needs a new cgen_memory_<R>rd_<W>wr.v
     // variant.
     const bool have_wrapper        = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
-                                              || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
+                                                     || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
                                                   : (eff_rd == 1 && eff_wr == 1);
-    const bool no_collision_bypass = (mem_fwd_dpin.is_invalid() || hydrate_const(mem_fwd_dpin).is_known_zero())
-                                     && (mem_undef_dpin.is_invalid() || hydrate_const(mem_undef_dpin).is_known_zero());
+    const bool no_collision_bypass = (mem_fwd_dpin.is_invalid() || const_of(mem_fwd_dpin).is_known_zero())
+                                     && (mem_undef_dpin.is_invalid() || const_of(mem_undef_dpin).is_known_zero());
 
     std::string name;
     name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
@@ -1531,8 +1528,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       // bits) must go out as a sized literal, exactly like INIT.
       std::string fwd_txt = "0";
       if (!mem_fwd_dpin.is_invalid()) {
-        auto fv = hydrate_const(mem_fwd_dpin);
-        fwd_txt = fv.is_just_i64() ? std::to_string(fv.to_just_i64()) : const_to_verilog(fv);
+        const auto& fv = const_of(mem_fwd_dpin);
+        fwd_txt        = fv.is_just_i64() ? std::to_string(fv.to_just_i64()) : const_to_verilog(fv);
       }
       parameters = absl::StrCat(parameters, first_entry ? "" : " ,", ".FWD", "(", fwd_txt, ")");
     }
@@ -1540,7 +1537,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       // ordering="none": the same matrix shape saying "this collision reads x".
       // Emitted only when non-zero (tolg drives the pin only then), so every
       // netlist that predates the mode is byte-identical.
-      auto        uv        = hydrate_const(mem_undef_dpin);
+      const auto& uv        = const_of(mem_undef_dpin);
       std::string undef_txt = uv.is_just_i64() ? std::to_string(uv.to_just_i64()) : const_to_verilog(uv);
       parameters            = absl::StrCat(parameters, first_entry ? "" : " ,", ".UNDEF", "(", undef_txt, ")");
     }
@@ -1553,7 +1550,16 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .fatal();
         return;
       }
-      parameters = absl::StrCat(parameters, " ,.INIT_EN(1) ,.INIT(", const_to_verilog(hydrate_const(mem_init_dpin)), ")");
+      // The same pin is the RUNTIME reset-value bus when `reset` is driven
+      // (see the initbus above); a Verilog parameter can only take a literal,
+      // so say so instead of reading a wire as if it were a constant.
+      if (!mem_init_dpin.is_const()) {
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for init not {}", debug_name(node), debug_name(mem_init_dpin.get_master_node()))
+            .fatal();
+        return;
+      }
+      parameters = absl::StrCat(parameters, " ,.INIT_EN(1) ,.INIT(", const_to_verilog(const_of(mem_init_dpin)), ")");
     }
     fout->append(" #(", parameters, ") ");
 
@@ -1660,8 +1666,18 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     if (!mem_init_dpin.is_invalid()) {
       // Per-cycle default = the init contents (entry 0 in the low bits,
       // row-major); writes below override (forwarding semantics).
-      const auto init_val = hydrate_const(mem_init_dpin);
-      const auto mask     = Dlop::get_mask_value(mem_bits);
+      // With a `reset` condition the SAME pin is a runtime reset-value BUS
+      // instead, and this always_comb form has nowhere to put it: refuse
+      // explicitly rather than read the wire as a constant (which used to
+      // silently seed every entry with 0).
+      if (!mem_init_dpin.is_const()) {
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} array init must be a constant, not {}", debug_name(node), debug_name(mem_init_dpin.get_master_node()))
+            .fatal();
+        return;
+      }
+      const auto& init_val = const_of(mem_init_dpin);
+      const auto  mask     = Dlop::get_mask_value(mem_bits);
       for (int i = 0; i < mem_size; ++i) {
         auto entry = init_val.sra_op(*Dlop::create_integer(static_cast<int64_t>(i) * mem_bits))->and_op(*mask);
         fout->append(aname, "[", std::to_string(i), "] = ", const_to_verilog(*entry), ";\n");
@@ -1817,11 +1833,11 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     const bool  result_uns           = is_unsign(dpin);
     bool        saw_context_constant = false;
     auto        sum_expr             = [&](const hhds::Pin_class& operand_pin) {
-      if (!is_const_pin(operand_pin) || result_bits <= 0) {
+      if (!operand_pin.is_const() || result_bits <= 0) {
         return get_expression(operand_pin);
       }
       saw_context_constant = true;
-      const auto c         = hydrate_const(operand_pin);
+      const auto& c        = const_of(operand_pin);
       // A Sum is context-determined by its realized result width. Materialize
       // constants in that context instead of retaining Dlop's signed-magnitude
       // carrier width (1 became 2'sh1 and confused a later Verilog->LGraph
@@ -1894,8 +1910,8 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto a      = get_expression(a_dpin);
 
     auto mask_dpin = get_driver(find_sink_pin(node, "mask"));
-    I(is_const_pin(mask_dpin));
-    auto mask_v = hydrate_const(mask_dpin);
+    I(mask_dpin.is_const());
+    const auto& mask_v = const_of(mask_dpin);
     I(!mask_v.has_unknowns());
 
     if (mask_v.is_known_zero()) {
@@ -1978,14 +1994,14 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     }
   } else if (op == Ntype_op::Get_mask) {
     auto mask_dpin = get_driver(find_sink_pin(node, "mask"));
-    I(is_const_pin(mask_dpin));
-    auto mask_v = hydrate_const(mask_dpin);
+    I(mask_dpin.is_const());
+    const auto& mask_v = const_of(mask_dpin);
     I(!mask_v.has_unknowns());
 
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a_bits = bits_of(a_dpin);
     auto a      = get_expression(a_dpin);
-    if (is_const_pin(a_dpin)) {
+    if (a_dpin.is_const()) {
       // A bit-select of a CONSTANT operand: get_expression returns a parenthesized
       // literal `(N'sb1?...)`, and appending `[hi:lo]` produces invalid Verilog — a
       // part-select of a parenthesized constant, often out of range (slang rejects
@@ -1993,7 +2009,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // InvalidSelectExpression / "lhd lec ERROR" category). The select is fully
       // determined at generation time, so apply the mask to the constant directly
       // and emit the resulting literal (the value cprop would have folded to).
-      final_expr = const_to_verilog(*hydrate_const(a_dpin).get_mask_op(mask_v));
+      final_expr = const_to_verilog(*const_of(a_dpin).get_mask_op(mask_v));
     } else if (mask_v.is_just_i64() && mask_v.to_just_i64() == -1) {
       if (a_bits > 0 && !is_unsign(a_dpin)) {
         // To-positive of a signed driver: a plain copy sign-extends when the
@@ -2091,9 +2107,8 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto lhs      = get_expression(a_dpin);
     auto pos_dpin = get_driver(find_sink_pin(node, "b"));
-    auto pos_node = pos_dpin.is_invalid() ? hhds::Node_class{} : pos_dpin.get_master_node();
-    if (!pos_node.is_invalid() && is_type_const(pos_node)) {
-      auto lpos = hydrate_const(pos_dpin);
+    if (pos_dpin.is_const()) {
+      const auto& lpos = const_of(pos_dpin);
       if (lpos.is_just_i64()) {
         // Keep bits [pos-1:0] and let the assignment context sign-extend. The
         // select has to respect how the OPERAND was declared, not bits_of:
@@ -2110,12 +2125,12 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
         // A select that covers the whole declared width is a no-op either way.
         const auto keep = lpos.to_just_i64();
         const auto decl = decl_bits_of(a_dpin);
-        if (is_const_pin(a_dpin)) {
+        if (a_dpin.is_const()) {
           // The Sext CELL's `b` is the kept bit COUNT, while Dlop::sext_op takes
           // the sign-bit POSITION (see upass_tolg's lower_sext) -- hence keep-1.
           // The int overload is hlop-internal; the public one takes the position
           // as a Dlop (same idiom as upass/bitwidth/wrap_sat.hpp).
-          final_expr = const_to_verilog(*hydrate_const(a_dpin).sext_op(*Dlop::create_integer(static_cast<int>(keep) - 1)));
+          final_expr = const_to_verilog(*const_of(a_dpin).sext_op(*Dlop::create_integer(static_cast<int>(keep) - 1)));
         } else if (keep <= 0) {
           final_expr = lhs;
         } else if (decl > 0 && keep > decl) {
@@ -2147,16 +2162,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     std::vector<std::string> rhs;
     bool                     signed_compare = !is_unsign(dpin);
     auto                     cmp_expr       = [&](hhds::Pin_class cmp_dpin) {
-      if (signed_compare && !cmp_dpin.is_invalid() && !is_const_pin(cmp_dpin)) {
+      if (signed_compare && !cmp_dpin.is_invalid() && !cmp_dpin.is_const()) {
         auto cmp_node = cmp_dpin.get_master_node();
         if (type_op_of(cmp_node) == Ntype_op::Get_mask) {
           auto a_dpin    = get_driver(find_sink_pin(cmp_node, "a"));
           auto mask_dpin = get_driver(find_sink_pin(cmp_node, "mask"));
-          if (!a_dpin.is_invalid() && !mask_dpin.is_invalid() && is_const_pin(mask_dpin) && !is_unsign(a_dpin)) {
-            auto mask_v  = hydrate_const(mask_dpin);
-            auto out_w   = bits_of(cmp_dpin);
-            auto a_w     = bits_of(a_dpin);
-            bool all_one = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
+          if (!a_dpin.is_invalid() && mask_dpin.is_const() && !is_unsign(a_dpin)) {
+            const auto& mask_v  = const_of(mask_dpin);
+            auto        out_w   = bits_of(cmp_dpin);
+            auto        a_w     = bits_of(a_dpin);
+            bool        all_one = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
             if (!all_one && mask_v.is_just_i64() && out_w > 0 && out_w <= 62) {
               all_one = mask_v.to_just_i64() == ((int64_t{1} << out_w) - 1);
             }
@@ -2236,7 +2251,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // inlines as 10 bits, so 555 re-read as signed-10 is -469. Only take the
     // signed path when the operand is self-contained; an inlined expression keeps
     // the context-determined unsigned pad it has always had.
-    bool       operand_is_self_contained = is_const_pin(val_dpin) || pin2var.contains(val_dpin.get_class_index());
+    bool       operand_is_self_contained = val_dpin.is_const() || pin2var.contains(val_dpin.get_class_index());
     const bool dest_declared_signed
         = pin2var.contains(dpin.get_class_index()) && !pin2var_unsigned_.contains(dpin.get_class_index());
     if (!operand_is_self_contained && operand_reads_signed(val_dpin) && dest_declared_signed) {
@@ -2323,7 +2338,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // every lane above it. That is why each one is width-adjusted here instead
     // of being pasted in raw.
     auto lane_at_width = [&](const hhds::Pin_class& v, int32_t w) -> std::string {
-      if (is_const_pin(v)) {
+      if (v.is_const()) {
         // Fold to a literal at the window width: a sized literal cannot take a
         // part-select and an unsized one self-determines at its own width, so
         // neither of the adjust forms below is available for a constant.
@@ -2332,7 +2347,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
         // characters ARE the window, and a shorter value replicates its msb --
         // which is exactly `value mod 2^w` for a negative lane (-1 at w=3 is
         // 0b111).
-        auto bin = hydrate_const(v).to_binary();
+        auto bin = const_of(v).to_binary();
         if (bin.empty()) {
           bin = "0";
         }
@@ -2398,8 +2413,6 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       absl::StrAppend(&body, lane_at_width(l.value, l.width));
     }
     final_expr = absl::StrCat("{", body, "}");
-  } else if (op == Ntype_op::Nconst) {
-    return {};  // emitted as expr at create_locals time
   } else if (op == Ntype_op::AttrSet) {
     return {};  // drop
   } else {
@@ -3007,13 +3020,13 @@ void Cgen_verilog::create_clock_cells(std::shared_ptr<File_output> fout, hhds::G
 
     int64_t div = 1;
     if (auto d = get_driver(find_sink_pin(node, "div")); !d.is_invalid()) {
-      if (!is_const_pin(d) || !hydrate_const(d).is_just_i64()) {
+      if (!d.is_const() || !const_of(d).is_just_i64()) {
         livehd::diag::err("inou.cgen", "clock-cell-div", "unsupported")
             .msg("Clock_cell `{}` has a non-constant divider", debug_name(node))
             .fatal();
         return;
       }
-      div = hydrate_const(d).to_just_i64();
+      div = const_of(d).to_just_i64();
     }
     if (div != 1) {
       livehd::diag::err("inou.cgen", "clock-cell-div", "unsupported")
@@ -3024,13 +3037,13 @@ void Cgen_verilog::create_clock_cells(std::shared_ptr<File_output> fout, hhds::G
 
     bool invert = false;
     if (auto d = get_driver(find_sink_pin(node, "invert")); !d.is_invalid()) {
-      if (!is_const_pin(d)) {
+      if (!d.is_const()) {
         livehd::diag::err("inou.cgen", "clock-cell-invert", "unsupported")
             .msg("Clock_cell `{}` has a non-constant invert flavour", debug_name(node))
             .fatal();
         return;
       }
-      invert = !hydrate_const(d).is_known_false();
+      invert = !const_of(d).is_known_false();
     }
 
     const auto dpin = node.get_driver_pin(0);
@@ -3124,7 +3137,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
       return;
     }
     if (bits_of(node.get_driver_pin(0)) == 0) {
-      if (op != Ntype_op::Nconst && op != Ntype_op::AttrSet && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
+      if (op != Ntype_op::AttrSet && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
         // missing bits; was a hard error in the original — skip silent.
       }
     }
@@ -3209,11 +3222,11 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     std::string edge        = "posedge";
     auto        posclk_sink = find_sink_pin(node, "posclk");
     auto        posclk_dpin = get_driver(posclk_sink);
-    if (!posclk_dpin.is_invalid()) {
-      auto v = !hydrate_const(posclk_dpin).is_known_false();
-      if (!v) {
-        edge = "negedge";
-      }
+    // `posclk` is a comptime pin: probe it, never assume. A non-constant driver
+    // is not "false" -- reading it as one used to silently emit `negedge`, and
+    // const_of() on it is a hard abort.
+    if (posclk_dpin.is_known_false()) {
+      edge = "negedge";
     }
     auto        clock_sink = find_sink_pin(node, "clock_pin");
     // Use get_expression (not pin_wire_name directly): an internal/derived clock
@@ -3241,8 +3254,8 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     auto reset_sink = find_sink_pin(node, "reset_pin");
     auto reset_dpin = get_driver(reset_sink);
     if (!reset_dpin.is_invalid()) {
-      if (is_const_pin(reset_dpin)) {
-        auto reset_const = hydrate_const(reset_dpin);
+      if (reset_dpin.is_const()) {
+        const auto& reset_const = const_of(reset_dpin);
         if (!reset_const.is_known_false() && !reset_const.same_repr(*Dlop::from_string("false"))) {
           reset = const_to_verilog(reset_const);
         }
@@ -3259,16 +3272,14 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
           reset = absl::StrCat(reset, "[0]");
         }
 
+        // Both are comptime flavour pins: probe, never assume (see `posclk`).
         auto negreset_dpin = get_driver(find_sink_pin(node, "negreset"));
-        if (!negreset_dpin.is_invalid()) {
-          negreset = !hydrate_const(negreset_dpin).is_known_false();
+        if (negreset_dpin.is_const()) {
+          negreset = !const_of(negreset_dpin).is_known_false();
         }
         auto async_dpin = get_driver(find_sink_pin(node, "async"));
-        if (!async_dpin.is_invalid()) {
-          auto v = !hydrate_const(async_dpin).is_known_false();
-          if (v) {
-            reset_async = absl::StrCat(negreset ? " or negedge " : " or posedge ", reset);
-          }
+        if (async_dpin.is_const() && !const_of(async_dpin).is_known_false()) {
+          reset_async = absl::StrCat(negreset ? " or negedge " : " or posedge ", reset);
         }
       }
     }
@@ -3292,8 +3303,8 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     int64_t depth = 1;
     {
       auto pm_dpin = get_driver(find_sink_pin(node, "pipe_min"));
-      if (!pm_dpin.is_invalid() && is_const_pin(pm_dpin)) {
-        depth = hydrate_const(pm_dpin).to_just_i64();
+      if (pm_dpin.is_const()) {
+        depth = const_of(pm_dpin).to_just_i64();
       }
     }
 
@@ -3303,7 +3314,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     std::string enable;
     {
       auto enable_dpin = get_driver(find_sink_pin(node, "enable"));
-      if (!enable_dpin.is_invalid() && !is_const_pin(enable_dpin)) {
+      if (!enable_dpin.is_invalid() && !enable_dpin.is_const()) {
         // VALUE context: get_expression, not get_wire_or_const — the same fix
         // M1 had to make for the latch's din/enable and this block's clock_pin.
         // A COMPUTED, single-fanout enable driver is inlined into pin2expr and
@@ -3405,7 +3416,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
 
 void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds::Pin_class& dpin, std::string_view name,
                                   bool out_unsigned) {
-  if (is_const_pin(dpin)) {
+  if (dpin.is_const()) {
     return;
   }
 
@@ -3611,8 +3622,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // cgen_memory_* instance ports and must stay nets.
           bool is_array_mem = false;
           for (auto& e2 : node.inp_edges()) {
-            if (e2.sink.get_port_id() == 7 && is_const_pin(e2.driver)) {  // pid 7 = "type" (comptime x 1)
-              is_array_mem = hydrate_const(e2.driver).to_just_i64() == 2;
+            if (e2.sink.get_port_id() == 7 && e2.driver.is_const()) {  // pid 7 = "type" (comptime x 1)
+              is_array_mem = const_of(e2.driver).to_just_i64() == 2;
               break;
             }
           }
@@ -3650,14 +3661,14 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
                 int64_t mb = 0;
                 int64_t ms = 0;
                 for (const auto& e3 : node.inp_edges()) {
-                  if (!is_const_pin(e3.driver)) {
+                  if (!e3.driver.is_const()) {
                     continue;
                   }
                   auto nm = Ntype::get_sink_name(Ntype_op::Memory, e3.sink.get_port_id());
                   if (nm == "bits") {
-                    mb = hydrate_const(e3.driver).to_just_i64();
+                    mb = const_of(e3.driver).to_just_i64();
                   } else if (nm == "size") {
-                    ms = hydrate_const(e3.driver).to_just_i64();
+                    ms = const_of(e3.driver).to_just_i64();
                   }
                 }
                 if (mb > 0 && ms > 0) {
@@ -3777,7 +3788,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       // assign it from inside the always_comb.
     } else if (op == Ntype_op::Sext) {
       auto b_dpin = get_driver(find_sink_pin(node, "b"));
-      if (!b_dpin.is_invalid() && is_const_pin(b_dpin)) {
+      if (b_dpin.is_const()) {
         auto dpin2 = get_driver(find_sink_pin(node, "a"));
         if (!dpin2.is_invalid()) {
           std::string name2         = get_scaped_name(pin_wire_name(dpin2));
@@ -3799,8 +3810,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       // Forcing every partial-write accumulator signed made a narrowed u13
       // carrier sign-extend into a u16 output when bit 12 was set.
       add_to_pin2var(fout, dpin, name, out_unsigned);
-    } else if (op == Ntype_op::Nconst || is_const_pin(dpin)) {
-      auto final_expr = const_to_verilog(hydrate_const(dpin));
+    } else if (dpin.is_const()) {
+      auto final_expr = const_to_verilog(const_of(dpin));
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
       auto a_spin  = find_sink_pin(node, "a");
@@ -3816,8 +3827,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       }
     } else if (op == Ntype_op::AttrSet) {
       auto dpin_key = get_driver(find_sink_pin(node, "field"));
-      I(!dpin_key.is_invalid() && is_type_const(dpin_key.get_master_node()));
-      auto key = hydrate_const(dpin_key).to_field();
+      I(dpin_key.is_const());
+      auto key = const_of(dpin_key).to_field();
 
       bool dp_assign = str_tools::ends_with(key, "__dp_assign");
 
@@ -3895,7 +3906,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       continue;  // dead shift: no statement is emitted for it
     }
     auto amt_dpin = get_driver(find_sink_pin(node, "b"));
-    if (amt_dpin.is_invalid() || is_const_pin(amt_dpin) || pin2var.contains(amt_dpin.get_class_index())) {
+    if (amt_dpin.is_invalid() || amt_dpin.is_const() || pin2var.contains(amt_dpin.get_class_index())) {
       continue;
     }
     // A pin the first pass parked in pin2expr (AttrSet, an inlined const) has NO
@@ -3951,7 +3962,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
         continue;
       }
       auto ctl_dpin = e.driver;
-      if (ctl_dpin.is_invalid() || is_const_pin(ctl_dpin) || pin2var.contains(ctl_dpin.get_class_index())) {
+      if (ctl_dpin.is_invalid() || ctl_dpin.is_const() || pin2var.contains(ctl_dpin.get_class_index())) {
         continue;  // tied off, or already a declared net / module input
       }
       // Same hazard the second pass argues above: a pin parked in pin2expr has
@@ -3995,7 +4006,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     }
     for (const auto& lane : livehd::graph_util::concat_lanes(node)) {
       const auto& v = lane.value;
-      if (v.is_invalid() || is_const_pin(v) || pin2var.contains(v.get_class_index())) {
+      if (v.is_invalid() || v.is_const() || pin2var.contains(v.get_class_index())) {
         continue;  // folded to a literal, or already a declared net / module input
       }
       // Same hazard the second and third passes argue above: a pin parked in

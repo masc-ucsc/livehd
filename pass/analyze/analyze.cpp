@@ -99,7 +99,7 @@ namespace {
 // out of one pass over the graph.
 bool is_comb(const hhds::Node_class& n, bool strict) {
   const auto op = gu::type_op_of(n);
-  if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+  if (op == Ntype_op::IO) {
     return false;
   }
   // TRUE state cuts in BOTH models: a flop's q is last period's value.
@@ -141,7 +141,7 @@ void on_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_
   for (auto& n : comb_nodes) {
     for (auto e : n.inp_edges()) {
       auto d = e.driver;
-      if (d.is_invalid() || gu::is_const_pin(d)) {
+      if (d.is_invalid() || d.is_const()) {
         continue;
       }
       auto m = d.get_master_node();
@@ -273,7 +273,7 @@ int gate_chain_depth(const hhds::Pin_class& p, int budget = 16) {
   auto cur = p;
   int  d   = 0;
   for (int i = 0; i < budget && !cur.is_invalid(); ++i) {
-    if (gu::is_graph_input_pin(cur) || gu::is_const_pin(cur)) {
+    if (gu::is_graph_input_pin(cur) || cur.is_const()) {
       break;
     }
     auto n  = cur.get_master_node();
@@ -289,7 +289,7 @@ int gate_chain_depth(const hhds::Pin_class& p, int budget = 16) {
       hhds::Pin_class next;
       int             n_real = 0;
       for (const auto& e : n.inp_edges()) {
-        if (gu::is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           continue;
         }
         ++n_real;
@@ -305,7 +305,7 @@ int gate_chain_depth(const hhds::Pin_class& p, int budget = 16) {
       // Follow whichever operand leads further toward a clock; the deepest wins.
       int best = 0;
       for (const auto& e : n.inp_edges()) {
-        if (gu::is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           continue;
         }
         best = std::max(best, gate_chain_depth(e.driver, budget - 1));
@@ -512,7 +512,7 @@ void check_colors(hhds::Graph* g, std::string_view def_name, bool node_graph_cyc
       continue;
     }
     for (auto e : n.inp_edges()) {
-      if (e.driver.is_invalid() || gu::is_const_pin(e.driver)) {
+      if (e.driver.is_invalid() || e.driver.is_const()) {
         continue;
       }
       auto m = e.driver.get_master_node();
@@ -637,7 +637,7 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
       }
       auto def = n.get_subnode_graph();
       for (const auto& e : n.inp_edges()) {
-        if (e.driver.is_invalid() || gu::is_const_pin(e.driver) || gu::is_graph_input_pin(e.driver)) {
+        if (e.driver.is_invalid() || e.driver.is_const() || gu::is_graph_input_pin(e.driver)) {
           continue;
         }
         // The gate can reach the child either as an INLINE cone in this body or

@@ -39,11 +39,11 @@ namespace shift_detail {
         break;
       }
       const auto mask_pin = get_driver_of_sink_name(consumer, "mask");
-      if (!is_const_pin(mask_pin)) {
+      if (!mask_pin.is_const()) {
         saw_use = false;
         break;
       }
-      const auto mask = hydrate_const(mask_pin);
+      const auto& mask = const_of(mask_pin);
       if (mask.is_negative()) {
         saw_use = false;
         break;
@@ -113,7 +113,7 @@ namespace shift_detail {
     return 0;
   }
   const auto amount = get_driver_of_sink_name(node, "b");
-  if (amount.is_invalid() || is_const_pin(amount)) {
+  if (amount.is_invalid() || amount.is_const()) {
     return 0;
   }
   return shift_detail::mux_count(node, op, amount, mappable_ge_weight(node));
@@ -135,7 +135,7 @@ namespace shift_detail {
   if (amount.is_invalid()) {
     return full;
   }
-  if (is_const_pin(amount)) {
+  if (amount.is_const()) {
     return 1;  // mapper wires a constant shift directly; no barrel network
   }
 

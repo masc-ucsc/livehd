@@ -18,7 +18,6 @@ cc_library(
     name = "graph",
     srcs = [
         "cell.cpp",
-        "const_pin.cpp",
         "latch_contract.cpp",
         "graph_library_singleton.cpp",
         "inline_sub.cpp",
@@ -68,7 +67,7 @@ cc_library(
     "node_count_test",
     "ge_weight_smoke",
     "predict_abc_size_smoke",
-    "const_pin_test",
+    "const_pool_smoke",
     "latch_contract_test",
     "occurrence_materialize_test",
 ]]

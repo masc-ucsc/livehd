@@ -76,7 +76,7 @@ void comb_state_reach(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Cl
   while (!work.empty()) {
     auto p = work.back();
     work.pop_back();
-    if (p.is_invalid() || gu::is_const_pin(p) || gu::is_graph_input_pin(p)) {
+    if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
       continue;
     }
     if (!seen.insert(p.get_class_index()).second) {
@@ -162,7 +162,7 @@ Chain_refusal chain_refusal(hhds::Pin_class cell_out) {
       return Chain_refusal::None;  // an unconnected clk_ref: the `!e.icg` backstop below catches it
     }
     const auto cr = lc::control_root(cell_out, /*stop_at_clock_cell=*/true);
-    if (cr.net.is_invalid() || gu::is_graph_input_pin(cr.net) || gu::is_const_pin(cr.net)) {
+    if (cr.net.is_invalid() || gu::is_graph_input_pin(cr.net) || cr.net.is_const()) {
       return Chain_refusal::None;  // the chain ended on a real net
     }
     const auto cell = cr.net.get_master_node();
@@ -171,18 +171,17 @@ Chain_refusal chain_refusal(hhds::Pin_class cell_out) {
     }
     // A NON-CONSTANT `invert` counts too: the sample phase is then not even
     // decidable here, so fail closed rather than assume the positive flavour.
-    if (const auto inv = sink_driver(cell, "invert");
-        !inv.is_invalid() && (!gu::is_const_pin(inv) || !gu::hydrate_const(inv).is_known_false())) {
+    if (const auto inv = sink_driver(cell, "invert"); !inv.is_invalid() && (!inv.is_known_false())) {
       return Chain_refusal::Invert;
     }
     // Same fail-closed rule for `div`: `clock_cell_cone` only reads the pin when
     // it is CONST, so a non-constant divisor leaves `Icg_cone::div` at its 1
     // default and reads downstream as "no division at all".
     if (const auto d = sink_driver(cell, "div"); !d.is_invalid()) {
-      if (!gu::is_const_pin(d)) {
+      if (!d.is_const()) {
         return Chain_refusal::Div;
       }
-      const auto dv = gu::hydrate_const(d);
+      const auto& dv = gu::const_of(d);
       if (!dv.is_just_i64() || dv.to_just_i64() != 1) {
         return Chain_refusal::Div;
       }
@@ -228,7 +227,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     }
     const auto control            = sink_driver(n, op == Ntype_op::Latch ? "enable" : "clock_pin");
     const auto cr                 = lc::control_root(control, /*stop_at_clock_cell=*/true);
-    const bool through_clock_cell = !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !gu::is_const_pin(cr.net)
+    const bool through_clock_cell = !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !cr.net.is_const()
                                     && gu::type_op_of(cr.net.get_master_node()) == Ntype_op::Clock_cell;
     if (through_clock_cell) {
       // The positive gate flavour (`clk & en_latched`) can be retimed exactly
@@ -295,7 +294,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
         // the flop sees what the latch was passing THROUGH. Reading its Q
         // instead is the classic L1 error.
         for (auto& en : e.icg->enables) {
-          if (en.is_invalid() || gu::is_const_pin(en) || gu::is_graph_input_pin(en)) {
+          if (en.is_invalid() || en.is_const() || gu::is_graph_input_pin(en)) {
             continue;
           }
           auto dn = en.get_master_node();
@@ -489,7 +488,7 @@ bool check_rule4(const Plan& plan, bool quiet) {
 // (`neg_en` -> `if (!en)`), so the two agree by construction.
 bool latch_is_active_low(const hhds::Node_class& latch) {
   auto pc = sink_driver(latch, "posclk");
-  return !pc.is_invalid() && gu::is_const_pin(pc) && gu::hydrate_const(pc).is_known_false();
+  return pc.is_known_false();
 }
 
 // True when `din` carries tolg's hold mux (`cond ? d : q`), i.e. a Mux on din
@@ -499,7 +498,7 @@ bool latch_is_active_low(const hhds::Node_class& latch) {
 bool has_hold_mux(const hhds::Node_class& latch) {
   auto q   = latch.get_driver_pin(0);
   auto din = sink_driver(latch, "din");
-  if (q.is_invalid() || din.is_invalid() || gu::is_const_pin(din) || gu::is_graph_input_pin(din)) {
+  if (q.is_invalid() || din.is_invalid() || din.is_const() || gu::is_graph_input_pin(din)) {
     return false;
   }
   auto n = din.get_master_node();
@@ -1014,12 +1013,11 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         // carries no `async` attribute. Folding it in would gate the reset on
         // the slot predicate, and an async reset pulse that falls between two
         // normalized clock edges would be silently lost.
-        const bool is_async
-            = e.is_latch || (!asyncp.is_invalid() && gu::is_const_pin(asyncp) && !gu::hydrate_const(asyncp).is_known_false());
+        const bool is_async = e.is_latch || (asyncp.is_const() && !asyncp.is_known_false());
         if (!is_async) {
           auto negp = sink_driver(e.node, "negreset");
           auto test = rstp;
-          if (!negp.is_invalid() && gu::is_const_pin(negp) && !gu::hydrate_const(negp).is_known_false()) {
+          if (negp.is_const() && !negp.is_known_false()) {
             auto inv = gu::create_typed_node(*g, Ntype_op::Not);
             rstp.connect_sink(inv.create_sink_pin(0));
             test = inv.create_driver_pin(0);

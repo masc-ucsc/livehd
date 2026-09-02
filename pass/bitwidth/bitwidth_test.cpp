@@ -271,12 +271,11 @@ TEST(BitwidthInfer, SumAddWidens) {
   EXPECT_EQ(bits, 9) << "a+b of two 8-bit signed values needs 9 signed bits";
 }
 
-// A CONSTANT operand must not block inference. Constants created by
-// graph_util::create_const live as driver pins on the CONST_NODE singleton,
-// which no class traversal ever emits (hhds graph.hpp) -- so process_const
-// never runs on them and they never land in bwmap. process_get_mask already
-// falls back to hydrate_const for exactly this reason; process_sum and friends
-// did not, so `x + 1` was uninferable even with x fully bounded.
+// A CONSTANT operand must not block inference. Constants are driver pins on
+// the CONST_NODE singleton, which no class traversal ever emits (hhds
+// graph.hpp), so their range has to be seeded when they are met as an operand;
+// before that seed existed process_sum and friends bailed and `x + 1` was
+// uninferable even with x fully bounded.
 TEST(BitwidthInfer, SumWithConstantOperand) {
   auto g  = bounded_inputs("bw_sum_const", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);  // no bits

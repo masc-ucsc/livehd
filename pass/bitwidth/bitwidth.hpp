@@ -35,7 +35,6 @@ protected:
   void set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw);
   void adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw);
 
-  void process_const(hhds::Node_class& node);
   void process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_flop(hhds::Node_class& node);
   void process_memory(hhds::Node_class& node);

@@ -25,23 +25,19 @@
 static constexpr int32_t Bits_unknown = std::numeric_limits<int32_t>::max();
 
 using livehd::graph_util::bits_of;
-using livehd::graph_util::const_value_of;
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::find_sink_pin;
 using livehd::graph_util::get_driver_of_sink_name;
 using livehd::graph_util::inp_drivers_of;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::is_sink_connected;
-using livehd::graph_util::is_type_const;
 using livehd::graph_util::is_type_flop;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_sbits;
 using livehd::graph_util::set_sign;
-using livehd::graph_util::set_type_const_serialized;
 using livehd::graph_util::set_type_op;
 using livehd::graph_util::set_ubits;
 using livehd::graph_util::set_unsign;
@@ -61,7 +57,7 @@ void sort_inp(EdgeVec& edges) {
   });
 }
 
-using livehd::graph_util::hydrate_const;
+using livehd::graph_util::const_of;
 
 // These cells have a complete value-range rule below.  Their pin `bits`
 // attribute is an output cache/materialization hint, not a finite-width
@@ -107,13 +103,6 @@ void clear_sink(const hhds::Pin_class& spin) {
     return;
   }
   for (auto e : spin.inp_edges()) {
-    e.del_edge();
-  }
-}
-
-// Delete every edge incident to a node's inputs.
-void clear_all_sinks(const hhds::Node_class& node) {
-  for (auto e : node.inp_edges()) {
     e.del_edge();
   }
 }
@@ -219,8 +208,8 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
   // the sign bit, and re-signing it here would turn 8'hff from -1 into 255.
   if (auto master = dpin.get_master_node(); !master.is_invalid() && type_op_of(master) == Ntype_op::Get_mask) {
     auto mask = get_driver_of_sink_name(master, "mask");
-    if (!mask.is_invalid() && is_const_pin(mask)) {
-      const auto mv = hydrate_const(mask);
+    if (mask.is_const()) {
+      const auto& mv = const_of(mask);
       if (!mv.is_negative() && !mv.has_unknowns()) {
         const auto capacity = static_cast<int32_t>(mv.popcount());
         if (capacity > 0 && b > capacity) {
@@ -246,13 +235,28 @@ void Bitwidth::adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw) {
   // multi-driver type.
   auto master = dpin.get_master_node();
   auto op     = type_op_of(master);
-  if (!not_finished && !bw.is_overflow() && !Ntype::has_multiple_driver_pins(op)) {
+  // NOTE: this may DELETE dpin's master (the fold below); a caller that keeps
+  // using the node afterwards must re-check node.is_invalid().
+  if (!not_finished && !bw.is_overflow() && !Ntype::has_multiple_driver_pins(op) && !dpin.is_const()
+      && !livehd::graph_util::is_builtin_node(master)) {
     if (bw.get_min().same_repr(bw.get_max())) {
-      // Disconnect all inputs and retype to Nconst with the resolved value.
-      clear_all_sinks(master);
-      set_type_const_serialized(master, bw.get_min().serialize());
-      auto [it, inserted] = bwmap.insert_or_assign(dpin.get_class_index(), bw);
-      set_bits_sign(dpin, it->second);
+      // Range-proven constant: replace the whole cell by the CONST_NODE pin for
+      // that value (the only constant representation): reconnect every consumer
+      // to it and bulk-delete the node. The interned const pin is shared across
+      // the graph, so it gets no private bits/sign stamp -- its range is seeded
+      // into bwmap here (and again by the per-visit constant seeding) and
+      // consumers read the exact value. Callers that passed an INPUT driver
+      // (process_mux/hotmux selectors) keep a handle that is now invalid; every
+      // one of them already tolerates that.
+      auto cdpin = create_const(*current_graph, bw.get_min());
+      bwmap.insert_or_assign(cdpin.get_class_index(), bw);
+      bwmap.erase(dpin.get_class_index());
+      // Iterating the live out_edges while connecting is safe: connect_sink
+      // only grows cdpin/sink storage, never master's out-edge set.
+      for (const auto& e : master.out_edges()) {
+        cdpin.connect_sink(e.sink);
+      }
+      master.del_node();
       return;
     }
   }
@@ -264,16 +268,6 @@ void Bitwidth::adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw) {
   }
   it->second.set_wider_range(bw);
   set_bits_sign(dpin, it->second);
-}
-
-void Bitwidth::process_const(hhds::Node_class& node) {
-  auto dpin = node.create_driver_pin(0);
-  auto val  = hydrate_const(node);
-
-  auto [it, inserted] = bwmap.insert_or_assign(dpin.get_class_index(), Bitwidth_range(val));
-  if (inserted) {
-    set_bits_sign(dpin, it->second);
-  }
 }
 
 void Bitwidth::process_flop(hhds::Node_class& node) {
@@ -648,13 +642,13 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         discovered_some_backward_nodes_try_again = true;
       }
     } else if (n == "bits" || n == "size") {
-      auto val = hydrate_const(e.driver);
-      if (!is_const_pin(e.driver)) {
+      if (!e.driver.is_const()) {
         livehd::diag::err("pass.bitwidth", "mem-malformed", "internal")
             .msg("Memory node:{} has {} connected to a non-constant pin", debug_name(node), n)
             .fatal();
         return;
       }
+      const auto& val = const_of(e.driver);
       if (!val.is_just_i64()) {
         livehd::diag::err("pass.bitwidth", "mem-malformed", "internal")
             .msg("Memory node:{} has {} connected to a non-integer value", debug_name(node), n)
@@ -898,11 +892,11 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
     livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask can not have an undefined mask").fatal();
   }
 
-  if (!is_const_pin(mask_dpin)) {
+  if (!mask_dpin.is_const()) {
     not_finished = true;
     return;
   }
-  auto mask = hydrate_const(mask_dpin);
+  const auto& mask = const_of(mask_dpin);
 
   auto value_dpin = get_driver_of_sink_name(node, "value");
   if (value_dpin.is_invalid()) {
@@ -912,8 +906,8 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
   auto           it2 = bwmap.find(value_dpin.get_class_index());
   Bitwidth_range value_bw;
   if (it2 == bwmap.end()) {
-    if (is_const_pin(value_dpin)) {
-      value_bw.set_range(Dlop::create_integer(0), hydrate_const(value_dpin));
+    if (value_dpin.is_const()) {
+      value_bw.set_range(Dlop::create_integer(0), const_of(value_dpin));
     } else if (mask.is_negative()) {
       debug_unconstrained_msg(node, value_dpin);
       not_finished = true;
@@ -991,12 +985,12 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   auto it2 = bwmap.find(mask_dpin.get_class_index());
   Dlop mask_val;
   if (it2 == bwmap.end()) {
-    if (!is_const_pin(mask_dpin)) {
+    if (!mask_dpin.is_const()) {
       debug_unconstrained_msg(node, mask_dpin);
       not_finished = true;
       return;
     }
-    mask_val = hydrate_const(mask_dpin);
+    mask_val = const_of(mask_dpin);
   } else {
     mask_val = it2->second.get_max().or_op(it2->second.get_min());
   }
@@ -1144,8 +1138,8 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
   bool no_wire = !bwmap.contains(wire_dpin.get_class_index());
 
   auto sign_max = Bits_unknown;
-  if (is_const_pin(pos_dpin)) {
-    auto pos_const = hydrate_const(pos_dpin);
+  if (pos_dpin.is_const()) {
+    const auto& pos_const = const_of(pos_dpin);
     if (pos_const.is_just_i64()) {  // a wider position stays Bits_unknown
       sign_max = pos_const.to_just_i64();
     }
@@ -1160,6 +1154,9 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
   Bitwidth_range bw;
   bw.set_sbits_range(sign_max);
   adjust_bw(node.create_driver_pin(0), bw);
+  if (node.is_invalid()) {
+    return;  // adjust_bw folded the whole cell to a constant
+  }
 
   if (not_finished || no_wire) {
     return;
@@ -1202,17 +1199,16 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
         if (mask_e.size() != 2) {
           return;
         }
-        auto n0  = mask_e[0].driver.get_master_node();
-        auto n1  = mask_e[1].driver.get_master_node();
-        auto n0c = is_type_const(n0);
-        auto n1c = is_type_const(n1);
-        if (!n0c && !n1c) {
-          return;
-        }
-        if (n0c && hydrate_const(n0).is_mask()) {
-          grandpa_dpin = mask_e[1].driver;
-        } else if (n1c && hydrate_const(n1).is_mask()) {
-          grandpa_dpin = mask_e[0].driver;
+        // Sext(And(x, mask)) with a contiguous low mask at least sign_max
+        // wide (guaranteed by the range test above): the And cannot change
+        // any bit the Sext reads, so sign-extend x directly. Constants are
+        // CONST_NODE PINS, so probe the driver pins, not their master node.
+        const auto& m0 = mask_e[0].driver;
+        const auto& m1 = mask_e[1].driver;
+        if (m0.is_const() && const_of(m0).is_mask()) {
+          grandpa_dpin = m1;
+        } else if (m1.is_const() && const_of(m1).is_mask()) {
+          grandpa_dpin = m0;
         } else {
           return;
         }
@@ -1360,7 +1356,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
 
     if (it->second.is_always_positive()) {
       if (bw_sbits <= pos_min_sbits) {
-        if (is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           mask_pos = i;
           if (pos_min_sbits_pos < 0) {
             pos_min_sbits_pos = i;
@@ -1384,9 +1380,8 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
   }
 
   if (mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
-    auto v = Dlop::create_integer(1)
-                 ->shl_op(*Dlop::create_integer(pos_min_sbits - 1))
-                 ->sub_op(hydrate_const(inp_edges[mask_pos].driver));
+    auto v
+        = Dlop::create_integer(1)->shl_op(*Dlop::create_integer(pos_min_sbits - 1))->sub_op(const_of(inp_edges[mask_pos].driver));
     if (v->is_just_i64() && v->to_just_i64() == 1) {
       if (inp_edges.size() == 2) {
         int pos = mask_pos == 0 ? 1 : 0;
@@ -1421,6 +1416,9 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
   Bitwidth_range bw(min_val, max_val);
 
   adjust_bw(node.create_driver_pin(0), bw);
+  if (node.is_invalid()) {
+    return;  // adjust_bw folded the whole cell to a constant
+  }
 
   for (auto e : inp_edges) {
     auto bw_bits = bits_of(e.driver);
@@ -1511,8 +1509,8 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
     }
   }
 
-  I(is_const_pin(dpin_val));
-  auto val = hydrate_const(dpin_val);
+  I(dpin_val.is_const());
+  const auto& val = const_of(dpin_val);
   if ((attr == Attr::Set_ubits || attr == Attr::Set_sbits) && !val.is_just_i64()) {
     livehd::diag::err("pass.bitwidth", "bits-limit", "bitwidth")
         .msg("Attr bits value of node:{} exceeds the supported limit", debug_name(node_attr))
@@ -1591,7 +1589,7 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
 }
 
 void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits) {
-  I(absl::StrContains(hydrate_const(get_driver_of_sink_name(node_attr, "field")).to_field(), "__ubits"));
+  I(absl::StrContains(const_of(get_driver_of_sink_name(node_attr, "field")).to_field(), "__ubits"));
 
   auto name_dpin = get_driver_of_sink_name(node_attr, "parent");
   if (name_dpin.is_invalid()) {
@@ -1629,8 +1627,10 @@ void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits) {
         }
       }
       if (sink_type == Ntype_op::Get_mask) {
-        auto m = hydrate_const(get_driver_of_sink_name(sink_node, "mask"));
-        if (m.same_repr(*mask)) {
+        // The sibling's mask may be a live wire; only a constant equal to ours
+        // makes it the same selection. (Used to read a non-const mask as 0.)
+        const auto* m = get_driver_of_sink_name(sink_node, "mask").const_value();
+        if (m != nullptr && m->same_repr(*mask)) {
           continue;
         }
       }
@@ -1659,8 +1659,12 @@ void Bitwidth::process_attr_set(hhds::Node_class& node_attr) {
   I(is_sink_connected(node_attr, "field"));
 
   auto dpin_key = get_driver_of_sink_name(node_attr, "field");
-  auto key      = hydrate_const(dpin_key).to_field();
-  auto attr     = get_key_attr(key);
+  if (!dpin_key.is_const()) {
+    not_finished = true;
+    return;
+  }
+  auto key  = const_of(dpin_key).to_field();
+  auto attr = get_key_attr(key);
 
   if (attr == Attr::Set_other) {
     not_finished = true;
@@ -1669,10 +1673,6 @@ void Bitwidth::process_attr_set(hhds::Node_class& node_attr) {
   if (attr == Attr::Set_dp_assign) {
     process_attr_set_dp_assign(node_attr);
   } else {
-    if (!is_const_pin(dpin_key)) {
-      not_finished = true;
-      return;
-    }
     process_attr_set_bw(node_attr, attr);
   }
 }
@@ -1760,42 +1760,33 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       sort_inp(inp_edges);
       auto op = type_op_of(node);
 
-      if (inp_edges.empty() && op != Ntype_op::Nconst && op != Ntype_op::Sub && op != Ntype_op::LUT) {
+      if (inp_edges.empty() && op != Ntype_op::Sub && op != Ntype_op::LUT) {
         node.del_node();
         continue;
       }
 
-      // Seed the range of every CONSTANT operand.
-      //
-      // There are two constant representations and only one of them was ever
-      // seeded. An `Ntype_op::Nconst` NODE is emitted by forward_class and goes
-      // through process_const below; a constant built by
-      // graph_util::create_const is a driver pin on the CONST_NODE SINGLETON,
-      // which no class/flat/hier traversal ever emits (hhds graph.hpp), so
-      // process_const never saw it and it never reached bwmap. Every processor
-      // that looks its operands up -- process_sum, process_mult, process_mux,
-      // process_hotmux, ... -- then bailed with not_finished, so a cell as
-      // ordinary as `x + 1` was uninferable no matter how well bounded `x` was.
-      // (process_get_mask papered over its own case with a local hydrate_const
-      // fallback, which is why masks worked and arithmetic did not.)
+      // Seed the range of every CONSTANT operand. A constant is a driver pin
+      // on the CONST_NODE singleton, which no class/flat/hier traversal ever
+      // emits (hhds graph.hpp), so this operand walk is the only place it is
+      // seen. Without the seed every processor that looks its operands up --
+      // process_sum, process_mult, process_mux, ... -- bailed with
+      // not_finished, and a cell as ordinary as `x + 1` was uninferable no
+      // matter how well bounded `x` was.
       for (const auto& e : inp_edges) {
-        if (e.driver.is_invalid() || !is_const_pin(e.driver)) {
+        if (e.driver.is_invalid() || !e.driver.is_const()) {
           continue;
         }
         const auto ci = e.driver.get_class_index();
         if (bwmap.contains(ci)) {
           continue;
         }
-        auto val = hydrate_const(e.driver);
+        const auto& val = const_of(e.driver);
         if (val.is_numeric()) {
           bwmap.insert_or_assign(ci, Bitwidth_range(val));
         }
       }
 
-      if (op == Ntype_op::Nconst) {
-        process_const(node);
-        continue;
-      } else if (!infer_internal_range(op) && !Ntype::has_multiple_driver_pins(op)) {
+      if (!infer_internal_range(op) && !Ntype::has_multiple_driver_pins(op)) {
         // Unsupported/finite-width cells have no value-range rule in this
         // pass, so their existing annotation is the only available contract.
         //
@@ -1929,12 +1920,12 @@ void Bitwidth::report_unbounded(hhds::Graph* g) {
   std::vector<std::string> unbounded;
   for (auto node : g->body().nodes()) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::has_multiple_driver_pins(op)) {
+    if (op == Ntype_op::Invalid || Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
 
     auto dpin = node.create_driver_pin(0);
-    if (dpin.is_invalid() || is_const_pin(dpin)) {
+    if (dpin.is_invalid() || dpin.is_const()) {
       continue;
     }
 
@@ -1994,7 +1985,10 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
   Attr attr = Attr::Set_other;
   if (is_sink_connected(node, "field")) {
     auto key_dpin = get_driver_of_sink_name(node, "field");
-    attr          = get_key_attr(hydrate_const(key_dpin).to_field());
+    if (!key_dpin.is_const()) {
+      return;
+    }
+    attr = get_key_attr(const_of(key_dpin).to_field());
     if (attr == Attr::Set_other) {
       return;
     }

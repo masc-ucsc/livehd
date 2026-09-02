@@ -124,8 +124,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     if (depth > 8 || p.is_invalid()) {
       return kBail;
     }
-    if (gu::is_const_pin(p)) {
-      auto c = gu::hydrate_const(p);
+    if (p.is_const()) {
+      const auto& c = gu::const_of(p);
       if (c.is_negative()) {
         return kBail;
       }
@@ -145,10 +145,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     auto op = gu::type_op_of(m);
     if (op == Ntype_op::SHL) {
       auto kd = drv_at(m, 1);
-      if (kd.is_invalid() || !gu::is_const_pin(kd)) {
+      if (kd.is_invalid() || !kd.is_const()) {
         return kBail;
       }
-      auto kc = gu::hydrate_const(kd);
+      const auto& kc = gu::const_of(kd);
       if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
         return kBail;
       }
@@ -179,10 +179,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // valid-bit clamps the slang->prp regeneration emits.
       std::pair<int, int> best = kBail;
       for (auto e : m.inp_edges()) {
-        if (!gu::is_const_pin(e.driver)) {
+        if (!e.driver.is_const()) {
           continue;
         }
-        auto c = gu::hydrate_const(e.driver);
+        const auto& c = gu::const_of(e.driver);
         if (c.has_unknowns() || c.is_negative()) {
           continue;
         }
@@ -223,10 +223,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     if (op == Ntype_op::Get_mask) {
       auto md = drv_at(m, 2);
       if (!md.is_invalid()) {
-        if (!gu::is_const_pin(md)) {
+        if (!md.is_const()) {
           return kBail;
         }
-        auto mc = gu::hydrate_const(md);
+        const auto& mc = gu::const_of(md);
         if (mc.has_unknowns()) {
           return kBail;
         }
@@ -368,7 +368,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       gu::set_ubits(dp, w);
       return dp;
     };
-    if (gu::is_const_pin(v)) {
+    if (v.is_const()) {
       return slice_node(v);  // node_expr folds const operands at emission
     }
     std::tuple<hhds::Class_index, int, int> key{v.get_class_index(), lo, hi};
@@ -542,8 +542,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       }
     } else if (op == Ntype_op::SHL) {
       auto kd = drv_at(m, 1);
-      if (!kd.is_invalid() && gu::is_const_pin(kd)) {
-        auto kc = gu::hydrate_const(kd);
+      if (kd.is_const()) {
+        const auto& kc = gu::const_of(kd);
         if (!kc.has_unknowns() && !kc.is_negative() && kc.is_just_i64()) {
           int k = static_cast<int>(kc.to_just_i64());
           if (hi <= k) {
@@ -568,8 +568,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       }
     } else if (op == Ntype_op::SRA) {
       auto kd = drv_at(m, 1);
-      if (!kd.is_invalid() && gu::is_const_pin(kd)) {
-        auto kc = gu::hydrate_const(kd);
+      if (kd.is_const()) {
+        const auto& kc = gu::const_of(kd);
         if (!kc.has_unknowns() && !kc.is_negative() && kc.is_just_i64()) {
           // bits [lo,hi) of an arithmetic right shift are bits [lo+k,hi+k) of
           // the operand -- exact for ANY sign (Get_mask reads the conceptual
@@ -594,7 +594,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       auto            sel = drv_at(m, 0);
       hhds::Pin_class rsel;
       if (!sel.is_invalid()) {
-        if (gu::is_const_pin(sel) || !in_cycle.contains(sel.get_master_node())) {
+        if (sel.is_const() || !in_cycle.contains(sel.get_master_node())) {
           rsel = sel;
         } else if (gu::is_unsign(sel)) {
           int sb = gu::bits_of(sel);
@@ -644,7 +644,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             break;
           }
           auto d = e.driver;
-          if (!gu::is_const_pin(d) && in_cycle.contains(d.get_master_node())) {
+          if (!d.is_const() && in_cycle.contains(d.get_master_node())) {
             const int db      = gu::bits_of(d);
             int       whole_w = 0;
             if (gu::is_unsign(d) && db > 0) {
@@ -724,8 +724,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             res = self(self, drv_at(m, 0), lo, std::min(hi, sig), depth + 1);
           }
         }
-      } else if (gu::is_const_pin(md)) {
-        auto mc = gu::hydrate_const(md);
+      } else if (md.is_const()) {
+        const auto& mc = gu::const_of(md);
         if (!mc.has_unknowns()) {
           if (mc.is_just_i64() && mc.to_just_i64() == -1) {
             // to-unsigned keeps positions; above the sig width -> zeros
@@ -766,8 +766,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // have. Walking the slice down to the version that wrote its own lane is
       // what the per-leaf (flattened) form would have given for free.
       auto md = drv_at(m, 2);
-      if (!md.is_invalid() && gu::is_const_pin(md)) {
-        auto mc = gu::hydrate_const(md);
+      if (md.is_const()) {
+        const auto& mc = gu::const_of(md);
         if (!mc.has_unknowns() && mc.is_positive()) {
           auto [a, b] = mc.get_mask_range();  // {-1,-1} = noncontiguous
           if (a >= 0 && b > a) {
@@ -880,10 +880,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     auto rop     = gu::type_op_of(R);
     if (rop == Ntype_op::Get_mask) {
       auto md = drv_at(R, 2);
-      if (md.is_invalid() || !gu::is_const_pin(md)) {
+      if (md.is_invalid() || !md.is_const()) {
         continue;  // needs a constant slice mask
       }
-      auto mc = gu::hydrate_const(md);
+      const auto& mc = gu::const_of(md);
       if (mc.has_unknowns() || (mc.is_just_i64() && mc.to_just_i64() == -1)) {
         continue;  // a full read, not a bit-field slice
       }
@@ -892,7 +892,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         continue;  // noncontiguous / open slice
       }
       auto vd = drv_at(R, 0);
-      if (vd.is_invalid() || gu::is_const_pin(vd)) {
+      if (vd.is_invalid() || vd.is_const()) {
         continue;
       }
       auto res = resolve(resolve, vd, rlo, rhi, 0);
@@ -909,7 +909,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       bool            bad  = false;
       for (auto e : R.inp_edges()) {
         ++nins;
-        if (gu::is_const_pin(e.driver)) {
+        if (e.driver.is_const()) {
           if (cpin.is_invalid()) {
             cpin = e.driver;
           } else {
@@ -924,7 +924,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       if (bad || nins != 2 || cpin.is_invalid() || other.is_invalid()) {
         continue;
       }
-      auto cc = gu::hydrate_const(cpin);
+      const auto& cc = gu::const_of(cpin);
       if (cc.has_unknowns() || cc.is_negative()) {
         continue;
       }
@@ -939,10 +939,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       auto wd = other;  // direct `w & m` read of the packed word (no shift)
       if (gu::type_op_of(sm) == Ntype_op::SRA) {
         auto kd = drv_at(sm, 1);
-        if (kd.is_invalid() || !gu::is_const_pin(kd)) {
+        if (kd.is_invalid() || !kd.is_const()) {
           continue;
         }
-        auto kc = gu::hydrate_const(kd);
+        const auto& kc = gu::const_of(kd);
         if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
           continue;
         }
@@ -1159,7 +1159,7 @@ static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& ins
   while (!work.empty()) {
     auto d = work.back();
     work.pop_back();
-    if (d.is_invalid() || is_const_pin(d) || !seen.insert(d).second) {
+    if (d.is_invalid() || d.is_const() || !seen.insert(d).second) {
       continue;
     }
     if (is_graph_input_pin(d)) {
@@ -1194,7 +1194,7 @@ static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& ins
 }
 
 bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target) {
-  if (driver.is_invalid() || target.is_invalid() || is_const_pin(driver) || is_graph_input_pin(driver)) {
+  if (driver.is_invalid() || target.is_invalid() || driver.is_const() || is_graph_input_pin(driver)) {
     return false;
   }
   // A PIN worklist, not a node one: crossing a Sub depends on WHICH output pin
@@ -1205,7 +1205,7 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
   while (!work.empty()) {
     auto d = work.back();
     work.pop_back();
-    if (d.is_invalid() || is_const_pin(d) || is_graph_input_pin(d) || !seen.insert(d).second) {
+    if (d.is_invalid() || d.is_const() || is_graph_input_pin(d) || !seen.insert(d).second) {
       continue;
     }
     auto n = d.get_master_node();
@@ -1276,7 +1276,7 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
   namespace gu = livehd::graph_util;
   auto comb    = [strict](const hhds::Node_class& n) {
     const auto op = gu::type_op_of(n);
-    if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::IO) {
       return false;
     }
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
@@ -1299,7 +1299,7 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
   for (auto& n : nodes) {
     for (auto e : n.inp_edges()) {
       auto d = e.driver;
-      if (d.is_invalid() || gu::is_const_pin(d)) {
+      if (d.is_invalid() || d.is_const()) {
         continue;
       }
       auto m = d.get_master_node();
@@ -1357,7 +1357,7 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
   // else drives their outputs.
   const auto placeable = [](const hhds::Node_class& n) {
     const auto op = type_op_of(n);  // is_type_register covers Memory too
-    return op != Ntype_op::IO && op != Ntype_op::Nconst && op != Ntype_op::Clock_cell && !is_type_register(n);
+    return op != Ntype_op::IO && op != Ntype_op::Clock_cell && !is_type_register(n);
   };
 
   std::vector<hhds::Node_class>              nodes;
@@ -1377,7 +1377,7 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
   std::vector<std::vector<int>> succ(total);
   for (int i = 0; i < total; ++i) {
     for (const auto& e : nodes[i].inp_edges()) {
-      if (e.driver.is_invalid() || is_const_pin(e.driver)) {
+      if (e.driver.is_invalid() || e.driver.is_const()) {
         continue;
       }
       auto d = e.driver.get_master_node();
@@ -1501,7 +1501,7 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
     while (!stk.empty()) {
       auto d = stk.back();
       stk.pop_back();
-      if (d.is_invalid() || gu::is_const_pin(d)) {
+      if (d.is_invalid() || d.is_const()) {
         continue;
       }
       auto m = d.get_master_node();
@@ -1564,7 +1564,7 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
       absl::flat_hash_map<hhds::Node_class, hhds::Node_class> nmap;
       for (auto cn : cg->body().nodes()) {
         auto op = gu::type_op_of(cn);
-        if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+        if (op == Ntype_op::IO) {
           continue;
         }
         auto neo = gu::create_typed_node(*g, op);
@@ -1590,8 +1590,8 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
           auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));
           return it == sub_in_drv.end() ? hhds::Pin_class{} : it->second;
         }
-        if (gu::is_const_pin(cdrv)) {
-          return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
+        if (cdrv.is_const()) {
+          return gu::create_const(*g, gu::const_of(cdrv));  // recreate the const in g
         }
         auto mit = nmap.find(cdrv.get_master_node());
         if (mit == nmap.end()) {
@@ -1777,7 +1777,7 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
   // pays for the pin-accurate `sub_output_deps` walk instead.
   const auto                            is_comb = [&sub_cache](const hhds::Node_class& n) {
     const auto op = livehd::graph_util::type_op_of(n);
-    if (op == Ntype_op::IO || op == Ntype_op::Nconst || op == Ntype_op::Memory || livehd::graph_util::is_type_register(n)) {
+    if (op == Ntype_op::IO || op == Ntype_op::Memory || livehd::graph_util::is_type_register(n)) {
       return false;
     }
     if (op == Ntype_op::Sub) {
@@ -1797,7 +1797,7 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
       continue;
     }
     for (const auto& e : n.inp_edges()) {
-      if (e.driver.is_invalid() || livehd::graph_util::is_const_pin(e.driver) || livehd::graph_util::is_graph_input_pin(e.driver)) {
+      if (e.driver.is_invalid() || e.driver.is_const() || livehd::graph_util::is_graph_input_pin(e.driver)) {
         continue;
       }
       auto pred = e.driver.get_master_node();

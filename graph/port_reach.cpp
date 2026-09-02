@@ -41,7 +41,7 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
     if (p.is_invalid()) {
       return {};
     }
-    if (gu::is_graph_input_pin(p) || gu::is_const_pin(p)) {
+    if (gu::is_graph_input_pin(p) || p.is_const()) {
       leaves.push_back({off, 0, p});
       continue;
     }
@@ -62,10 +62,10 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
           amt = e.driver;
         }
       }
-      if (val.is_invalid() || amt.is_invalid() || !gu::is_const_pin(amt)) {
+      if (val.is_invalid() || amt.is_invalid() || !amt.is_const()) {
         return {};
       }
-      auto av = gu::hydrate_const(amt);
+      const auto& av = gu::const_of(amt);
       if (!av.is_just_i64() || av.to_just_i64() < 0) {
         return {};
       }
@@ -106,10 +106,10 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
           default: break;
         }
       }
-      if (msk.is_invalid() || val.is_invalid() || !gu::is_const_pin(msk)) {
+      if (msk.is_invalid() || val.is_invalid() || !msk.is_const()) {
         return {};
       }
-      auto mv = gu::hydrate_const(msk);
+      const auto& mv = gu::const_of(msk);
       if (mv.has_unknowns() || mv.is_negative()) {
         return {};
       }
@@ -118,7 +118,7 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
         return {};
       }
       leaves.push_back({static_cast<uint32_t>(mb), static_cast<uint32_t>(me - mb), val});
-      if (!base.is_invalid() && !gu::is_const_pin(base)) {
+      if (!base.is_invalid() && !base.is_const()) {
         work.emplace_back(0, base);  // keep unwinding the chain
       }
       continue;
@@ -198,7 +198,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       // below see the input itself.
       auto peel_ident = [&](hhds::Pin_class p) -> hhds::Pin_class {
         for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
-          if (gu::is_graph_input_pin(p) || gu::is_const_pin(p)) {
+          if (gu::is_graph_input_pin(p) || p.is_const()) {
             break;
           }
           auto       n  = p.get_master_node();
@@ -220,8 +220,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
               p = val;  // unary width adjust
               continue;
             }
-            if (gu::is_const_pin(msk)) {
-              auto mv = gu::hydrate_const(msk);
+            if (msk.is_const()) {
+              const auto& mv = gu::const_of(msk);
               if (mv.is_just_i64() && mv.to_just_i64() == -1) {
                 p = val;  // to-positive idiom
                 continue;
@@ -235,7 +235,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       };
       auto sra_of = [&](const hhds::Pin_class& p_in, uint32_t* pid, uint32_t* k) -> bool {
         auto p = peel_ident(p_in);
-        if (p.is_invalid() || gu::is_const_pin(p)) {
+        if (p.is_invalid() || p.is_const()) {
           return false;
         }
         if (gu::is_graph_input_pin(p)) {
@@ -256,10 +256,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           }
         }
         val = peel_ident(val);
-        if (val.is_invalid() || amt.is_invalid() || !gu::is_const_pin(amt) || !gu::is_graph_input_pin(val)) {
+        if (val.is_invalid() || amt.is_invalid() || !amt.is_const() || !gu::is_graph_input_pin(val)) {
           return false;
         }
-        auto av = gu::hydrate_const(amt);
+        const auto& av = gu::const_of(amt);
         if (!av.is_just_i64() || av.to_just_i64() < 0) {
           return false;
         }
@@ -267,7 +267,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         *k   = static_cast<uint32_t>(av.to_just_i64());
         return true;
       };
-      if (d.is_invalid() || gu::is_const_pin(d) || gu::is_graph_input_pin(d)) {
+      if (d.is_invalid() || d.is_const() || gu::is_graph_input_pin(d)) {
         return false;
       }
       auto       n  = d.get_master_node();
@@ -283,8 +283,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           }
         }
         val = peel_ident(val);
-        if (!val.is_invalid() && gu::is_graph_input_pin(val) && !msk.is_invalid() && gu::is_const_pin(msk)) {
-          auto mv = gu::hydrate_const(msk);
+        if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
+          const auto& mv = gu::const_of(msk);
           if (!mv.has_unknowns() && !mv.is_negative()) {
             auto [mb, me] = mv.get_mask_range();
             if (mb >= 0 && me > mb) {
@@ -315,7 +315,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         int             cnt = 0;
         for (const auto& e : n.inp_edges()) {
           ++cnt;
-          if (gu::is_const_pin(e.driver)) {
+          if (e.driver.is_const()) {
             msk = e.driver;
           } else {
             other = e.driver;
@@ -324,7 +324,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         if (cnt != 2 || msk.is_invalid() || other.is_invalid()) {
           return false;
         }
-        auto mv = gu::hydrate_const(msk);
+        const auto& mv = gu::const_of(msk);
         if (mv.has_unknowns() || mv.is_negative()) {
           return false;
         }
@@ -352,7 +352,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       while (!stk.empty()) {
         auto d = stk.back();
         stk.pop_back();
-        if (d.is_invalid() || gu::is_const_pin(d)) {
+        if (d.is_invalid() || d.is_const()) {
           continue;
         }
         if (gu::is_graph_input_pin(d)) {
@@ -383,8 +383,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
               msk = e.driver;
             }
           }
-          if (!val.is_invalid() && gu::is_graph_input_pin(val) && !msk.is_invalid() && gu::is_const_pin(msk)) {
-            auto mv = gu::hydrate_const(msk);
+          if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
+            const auto& mv = gu::const_of(msk);
             if (!mv.has_unknowns() && !mv.is_negative()) {
               auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
               if (mb >= 0 && me > mb) {
@@ -444,8 +444,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             const auto pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
             const auto idx = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
             if (pn == "fwd" || pn == "undef") {
-              if (gu::is_const_pin(e.driver)) {
-                auto c = gu::hydrate_const(e.driver);
+              if (e.driver.is_const()) {
+                const auto& c = gu::const_of(e.driver);
                 if (!(c.is_just_i64() && c.to_just_i64() == 0)) {
                   fwd_nonzero = true;
                 }
@@ -453,8 +453,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
                 fwd_nonzero = true;
               }
             } else if (pn == "type") {
-              if (gu::is_const_pin(e.driver)) {
-                mtype = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+              if (e.driver.is_const()) {
+                mtype = static_cast<int>(gu::const_of(e.driver).to_just_i64());
               }
             } else if (pn == "update") {
               update = e.driver;
@@ -473,7 +473,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
               } else if (pn.ends_with("din")) {
                 pv[idx].din = e.driver;
               } else if (pn.ends_with("rdport")) {
-                pv[idx].rd = gu::is_const_pin(e.driver) && !gu::hydrate_const(e.driver).is_known_false();
+                pv[idx].rd = e.driver.is_const() && !e.driver.is_known_false();
               }
             }
           }
@@ -572,8 +572,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       auto leaves = concat_leaves(drv);
-      if (leaves.size() == 1 && !leaves[0].pin.is_invalid() && !gu::is_graph_input_pin(leaves[0].pin)
-          && !gu::is_const_pin(leaves[0].pin)
+      if (leaves.size() == 1 && !leaves[0].pin.is_invalid() && !gu::is_graph_input_pin(leaves[0].pin) && !leaves[0].pin.is_const()
           && gu::type_op_of(leaves[0].pin.get_master_node()) == Ntype_op::Sub) {
         // PASS-THROUGH of a sliced callee output (minion's intpipe_top wraps
         // the CSR file's bundle): adopt the callee's slices, composing each

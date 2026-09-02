@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <format>
 #include <string>
@@ -83,48 +84,65 @@ inline constexpr uint32_t kFormalAssertAlways = 4;
 inline constexpr uint32_t kFormalAssumeHier   = 5;
 
 // ---------------------------------------------------------------------------
-// Constant pins (HHDS Graph::CONST_NODE singleton, scheme-A encoded).
+// Constant pins (HHDS Graph::CONST_NODE singleton + constant pool).
 // ---------------------------------------------------------------------------
 //
-// All LiveHD constants live as pins attached to CONST_NODE (nid 3). The
-// first 32 port_ids on CONST_NODE are reserved for small integers in the
-// range [-16, 15] (scheme A):
-//   pid 0..15  -> values 0..15
-//   pid 16..31 -> values -16..-1
-// Constants outside that range get fresh port_ids starting at 32, with the
-// serialized payload attached as `livehd::attrs::pin_const_value`. HHDS owns
-// the graph-local reverse index and append cursor, so the same Dlop value
-// resolves to the same pin without a parallel LiveHD registry.
+// Every LiveHD constant is a driver pin on CONST_NODE whose Dlop is held BY
+// VALUE in hhds's constant pool (`Graph::create_constant`, one slot per pin):
+// `pin.is_const()`, `pin.const_value()`, `pin.is_known_false()` and
+// `pin.is_known_true()` are hhds members that answer from a PinEntry load and
+// a pool index -- no attr lookup, no unserialize, no allocation. Only PINS
+// carry values; a node has none (port 0 is the node, and it is never a
+// constant), so probing a node does not compile.
 
-inline constexpr hhds::Port_id Const_small_pid_count = 32;
-
-[[nodiscard]] constexpr bool is_small_const_int(int64_t v) { return v >= -16 && v <= 15; }
-
-[[nodiscard]] constexpr hhds::Port_id encode_small_const(int64_t v) {
-  return v >= 0 ? static_cast<hhds::Port_id>(v) : static_cast<hhds::Port_id>(v + 32);
+// Create-or-find the canonical const pin for `value`. Canonicalized HERE,
+// once, so structural dedup and every consumer see one spelling:
+//  * Boolean -> Integer (`true` = -1, `false` = 0). `true`/`false` are a
+//    front-end type (tolg mints them via Dlop::from_pyrope) and every graph
+//    consumer reads the Integer -- exactly what the old pid encoding produced.
+//  * a known integer that fits 62 bits is re-built at its minimal (size-1)
+//    width, so a wide-operand fold and a literal dedup to ONE pin (Dlop::hash
+//    mixes size).
+//  * everything else (unknown planes, wider values, strings) verbatim.
+// Invalid / Nil are not values: hhds refuses them (std::invalid_argument) --
+// a producer that computed "no value" must keep its node, not mint a 0.
+[[nodiscard]] inline hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) {
+  if (value.is_numeric() && value.is_just_i64()) {
+    // Build the canonical form on the STACK: create_constant copies it into the
+    // pool anyway, so the spool_ptr round-trip Dlop::create_integer needs is
+    // pure overhead on the hottest constant-minting path.
+    Dlop canonical;
+    canonical.init_integer(value.to_just_i64());
+    return g.create_constant(canonical);
+  }
+  return g.create_constant(value);
 }
 
-[[nodiscard]] constexpr int64_t decode_small_const(hhds::Port_id pid) {
-  return pid < 16 ? static_cast<int64_t>(pid) : static_cast<int64_t>(pid) - 32;
+[[noreturn]] inline void not_a_constant(const hhds::Pin_class& pin) {
+  std::fprintf(stderr,
+               "livehd: const_of: pin %llu (%s) is not a constant\n",
+               static_cast<unsigned long long>(pin.get_debug_pid()),
+               pin.is_invalid() ? "invalid" : "driven by a cell");
+  std::abort();
 }
 
-[[nodiscard]] constexpr bool is_small_const_pid(hhds::Port_id pid) { return pid < Const_small_pid_count; }
-
-// Create-or-find the canonical const pin for `value`. Small ints in [-16, 15]
-// are pid-encoded directly on CONST_NODE (idempotent, no payload). Larger
-// values use HHDS Graph::intern_constant to reuse an existing pin if the same
-// serialized Dlop is already materialised; otherwise append a fresh pid
-// (>= 32) and attach the serialized payload.
-[[nodiscard]] hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value);
-
-// Decodes the Dlop a const pin represents. Handles both new CONST_NODE-pin
-// form (pid encoding for small ints, `pin_const_value` attribute otherwise)
-// and the legacy `Ntype_op::Nconst` regular-node form (with the per-node
-// `const_value` attribute) that the lgraph wrapper still produces.
-[[nodiscard]] Dlop        hydrate_const(const hhds::Pin_class& pin);
-[[nodiscard]] Dlop        hydrate_const(const hhds::Node_class& node);
-[[nodiscard]] inline Dlop hydrate_const(const hhds::Occurrence_pin& pin) { return hydrate_const(pin.base_pin()); }
-[[nodiscard]] inline Dlop hydrate_const(const hhds::Occurrence_node& node) { return hydrate_const(node.base_node()); }
+// The ONE full-value accessor: the constant a pin carries, by reference into
+// the graph's constant pool. The reference survives create_const on the same
+// graph (the pool never relocates) and dies with the body -- never hold it
+// across load/copy/clear of that graph. A NON-constant pin is a BUG at the
+// call site, never a 0: hard failure in every build mode. Where a pin may
+// legitimately be non-constant, probe `pin.is_const()` / `pin.const_value()`.
+[[nodiscard]] inline const Dlop& const_of(const hhds::Pin_class& pin) {
+  const Dlop* v = pin.const_value();
+  if (v == nullptr) [[unlikely]] {
+    not_a_constant(pin);
+  }
+  return *v;
+}
+[[nodiscard]] inline const Dlop& const_of(const hhds::Occurrence_pin& pin) { return const_of(pin.base_pin()); }
+// Nodes never carry a value: probing one is a compile error, not a silent 0.
+const Dlop&                      const_of(const hhds::Node_class&)      = delete;
+const Dlop&                      const_of(const hhds::Occurrence_node&) = delete;
 
 // LITERAL PAYLOAD WIDTH of a constant: the bits a graph pin has to carry to
 // hold it, which is NOT Dlop::get_bits().
@@ -184,12 +202,10 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 }
 [[nodiscard]] inline bool is_type_register(const hhds::Occurrence_node& node) { return is_type_register(node.base_node()); }
 
-[[nodiscard]] inline bool is_type_const(const hhds::Node_class& node) {
-  // Constants live on the CONST_NODE singleton. A driver pin attached to
-  // CONST_NODE is a constant pin (Graph::create_constant() returns one).
-  // get_debug_nid returns the raw Nid for this node handle.
-  return node.get_debug_nid() == hhds::Graph::CONST_NODE;
-}
+// Node-IDENTITY probe: is this the CONST_NODE singleton (the master of every
+// constant pin)? It says nothing about a value -- values live on PINS
+// (pin.is_const() / pin.const_value() / const_of(pin)); a node has none.
+[[nodiscard]] inline bool is_type_const(const hhds::Node_class& node) { return node.get_debug_nid() == hhds::Graph::CONST_NODE; }
 [[nodiscard]] inline bool is_type_const(const hhds::Occurrence_node& node) { return is_type_const(node.base_node()); }
 
 [[nodiscard]] inline bool is_type_sub(const hhds::Node_class& node) { return type_op_of(node) == Ntype_op::Sub; }
@@ -312,12 +328,6 @@ template <typename Node_like>
   return node_name_of(n).find('\x1f') != std::string_view::npos;
 }
 
-// Serialized const value (for Ntype_op::Nconst nodes). Empty if absent.
-[[nodiscard]] inline std::string_view const_value_of(const hhds::Node_class& node) {
-  auto a = node.attr(livehd::attrs::const_value);
-  return a.has() ? std::string_view{a.get()} : std::string_view{};
-}
-
 // True iff `node` is one of HHDS's singleton built-ins (INPUT_NODE,
 // OUTPUT_NODE, CONST_NODE). These have nid < 4 and cannot be deleted; passes
 // that walk-and-delete must skip them.
@@ -327,22 +337,6 @@ template <typename Node_like>
   }
   return node.get_debug_nid() < (static_cast<hhds::Nid>(4) << 2);
 }
-
-[[nodiscard]] inline bool is_const_pin(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return false;
-  }
-  auto master = pin.get_master_node();
-  if (master.get_debug_nid() == hhds::Graph::CONST_NODE) {
-    return true;
-  }
-  // LiveHD's Lgraph wrapper materialises constants as Ntype_op::Nconst
-  // regular nodes (with the value attached via livehd::attrs::const_value),
-  // distinct from HHDS's CONST_NODE singleton. Both are valid constant
-  // sources for cgen.
-  return type_op_of(master) == Ntype_op::Nconst;
-}
-[[nodiscard]] inline bool is_const_pin(const hhds::Occurrence_pin& pin) { return is_const_pin(pin.base_pin()); }
 
 // LiveHD's `default_instance_name`: a deterministic name derived from
 // `<type>_<nid>` if the node has no user-assigned name, otherwise the
@@ -406,7 +400,7 @@ template <typename Node_like>
 // signed so 4'hA reads as -6, or a value with a set bit above the declared
 // unsigned width -- the hint is a lie and downstream emit/LEC silently diverges.
 // `I(...)` is compiled out under NDEBUG (-c opt); the body is additionally
-// guarded so hydrate_const is not even built in a release compile.
+// guarded so none of it is built in a release compile.
 //
 // IMPORTANT: gated on bits>0 (an *explicit* declared width). Const pins with no
 // bits attr default to "unsigned" only by attribute absence, so an ungated sign
@@ -422,8 +416,8 @@ inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
     return;  // no explicit declared width -> nothing to violate
   }
   const bool is_uns = is_unsign(dpin);
-  if (is_const_pin(dpin)) {
-    const auto c = hydrate_const(dpin);
+  if (dpin.is_const()) {
+    const auto& c = const_of(dpin);
     if (c.has_unknowns() || c.is_nil()) {
       return;  // x/z/nil bits: no concrete value to range-check
     }
@@ -470,8 +464,8 @@ inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
           .c_str());
   } else if (op == Ntype_op::Get_mask) {
     auto mask = get_driver_of_sink_name(dpin.get_master_node(), "mask");
-    if (!mask.is_invalid() && is_const_pin(mask)) {
-      const auto mv = hydrate_const(mask);
+    if (mask.is_const()) {
+      const auto& mv = const_of(mask);
       if (!mv.is_negative() && !mv.has_unknowns()) {
         const auto capacity = static_cast<int32_t>(mv.popcount());
         I(capacity == 0 || nbits <= capacity,
@@ -496,7 +490,7 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
 #ifndef NDEBUG
   for (auto node : g.body().nodes(hhds::Node_order::forward)) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::has_multiple_driver_pins(op)) {
+    if (op == Ntype_op::Invalid || Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
     auto dpin = node.create_driver_pin(0);
@@ -504,7 +498,7 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
       continue;
     }
     debug_check_pin_hint(dpin);
-    if (is_const_pin(dpin)) {
+    if (dpin.is_const()) {
       continue;
     }
     if (bits_of(dpin) == 0) {
@@ -514,9 +508,9 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
           inputs += ", ";
         }
         inputs += std::format("p{}:{}b", edge.sink.get_port_id(), bits_of(edge.driver));
-        if (is_const_pin(edge.driver)) {
-          const auto value  = hydrate_const(edge.driver);
-          inputs           += std::format(":const({}b,{})", value.get_bits(), value.is_negative() ? "neg" : "nonneg");
+        if (edge.driver.is_const()) {
+          const auto& value  = const_of(edge.driver);
+          inputs            += std::format(":const({}b,{})", value.get_bits(), value.is_negative() ? "neg" : "nonneg");
         } else if (is_graph_input_pin(edge.driver)) {
           inputs += ":$" + std::string(edge.driver.get_pin_name());
         } else {
@@ -886,18 +880,6 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   node.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op)));
 }
 
-// Set this node to a constant node carrying the given serialized Dlop.
-// Migrated callers serialize with `Dlop::serialize()` before calling this
-// (we don't pull Dlop into node_util.hpp so it stays a leaf header).
-inline void set_type_const_serialized(const hhds::Node_class& node, std::string_view serialized) {
-  set_type_op(node, Ntype_op::Nconst);
-  if (serialized.empty()) {
-    node.attr(livehd::attrs::const_value).del();
-  } else {
-    node.attr(livehd::attrs::const_value).set(std::string{serialized});
-  }
-}
-
 // Create a new node of the given Ntype_op in `graph`. Returns the node;
 // callers may then create driver / sink pins on it as needed.
 [[nodiscard]] inline hhds::Node_class create_typed_node(hhds::Graph& graph, Ntype_op op) {
@@ -1181,7 +1163,7 @@ namespace ge_detail {
   }
   seen.clear();  // driver and sink port ids live in separate spaces
   for (const auto& e : node.inp_edges()) {
-    if (is_const_pin(e.driver)) {
+    if (e.driver.is_const()) {
       continue;
     }
     once(static_cast<uint32_t>(e.sink.get_port_id()), e.driver);  // a sink's width is its driver's
@@ -1251,10 +1233,10 @@ struct Concat_lane {
   for (size_t i = 0; i < n_lanes; ++i) {
     auto vit = by_pid.find(static_cast<hhds::Port_id>(2 * i));
     auto wit = by_pid.find(static_cast<hhds::Port_id>(2 * i + 1));
-    if (vit == by_pid.end() || wit == by_pid.end() || !is_const_pin(wit->second)) {
+    if (vit == by_pid.end() || wit == by_pid.end() || !wit->second.is_const()) {
       return {};
     }
-    const auto wv = hydrate_const(wit->second);
+    const auto& wv = const_of(wit->second);
     if (!wv.is_just_i64()) {
       return {};
     }

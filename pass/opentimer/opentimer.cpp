@@ -39,13 +39,12 @@
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::color_of;
+using livehd::graph_util::const_of;
 using livehd::graph_util::create_const;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::default_instance_name;
 using livehd::graph_util::get_driver_of_sink_name;
 using livehd::graph_util::has_color;
-using livehd::graph_util::hydrate_const;
-using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::set_color;
@@ -830,14 +829,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     return {};
   };
 
-  auto is_resolved_const = [&](const auto& dpin) {
-    if (is_const_pin(dpin)) {
-      return true;
-    }
-    // HHDS singleton constants carry a valid pin but an intentionally invalid
-    // regular Node_class; test the reserved nid before type_op_of().
-    return dpin.get_master_node().get_debug_nid() == hhds::Graph::CONST_NODE;
-  };
+  auto is_resolved_const = [&](const auto& dpin) { return dpin.is_const(); };
   auto operand_bits_of = [&](const hhds::Occurrence_node& owner, std::string_view sname, const auto& dpin) -> int32_t {
     if (const auto bits = tracked_bits_of(dpin); bits > 0) {
       return bits;
@@ -986,16 +978,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       // consumer at a net nothing drives (a PO pin is not an rct root), leaving
       // the cut PI dangling and the whole cone behind it unscored. As with a
       // flop that drives a PO, the PO itself simply carries no arrival.
-      const bool driver_is_boundary = !is_const_pin(driver_dpin) && !driver_dpin.get_master_node().is_invalid()
+      const bool driver_is_boundary = !driver_dpin.is_const() && !driver_dpin.get_master_node().is_invalid()
                                       && driver_dpin.get_master_node().attr(livehd::attrs::native_comb_boundary).has();
-      if (!is_graph_input_pin(driver_dpin) && !is_const_pin(driver_dpin) && !driver_is_boundary) {
+      if (!is_graph_input_pin(driver_dpin) && !driver_dpin.is_const() && !driver_is_boundary) {
         set_overwrite(net_of(driver_dpin, hier_mode_), driver_dpin, driver_name);
       }
     }
   }
 
   auto tracker_ready = [&](const auto& dpin) {
-    if (is_const_pin(dpin) || is_graph_input_pin(dpin)) {
+    if (dpin.is_const() || is_graph_input_pin(dpin)) {
       return true;
     }
     const auto master = dpin.get_master_node();
@@ -1099,7 +1091,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     bool                               net_progress = false;
     for (auto& node : pending_nodes) {
       auto op = type_op_of(node);
-      if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
+      if (op == Ntype_op::AttrSet) {
         continue;
       }
 
@@ -1132,13 +1124,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             deferred_nodes.push_back(node);
             continue;
           }
-          if (!is_const_pin(mask_dpin)) {
+          if (!mask_dpin.is_const()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          auto       mask_const = hydrate_const(mask_dpin);
+          const auto& mask_const = const_of(mask_dpin);
           const auto a_bits     = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           seed_operand(value_dpin, static_cast<int32_t>(mask_const.get_bits()));
@@ -1156,13 +1148,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             deferred_nodes.push_back(node);
             continue;
           }
-          if (!is_const_pin(mask_dpin)) {
+          if (!mask_dpin.is_const()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          auto       mask_const = hydrate_const(mask_dpin);
+          const auto& mask_const = const_of(mask_dpin);
           const auto a_bits     = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           pin_tracker.add_get_mask(wname, trk_id(a_dpin), a_bits, mask_const);
@@ -1179,13 +1171,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             deferred_nodes.push_back(node);
             continue;
           }
-          if (!is_const_pin(b_dpin)) {
+          if (!b_dpin.is_const()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant SRA on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          auto b_const = hydrate_const(b_dpin);
+          const auto& b_const = const_of(b_dpin);
           auto a_bits  = operand_bits_of(node, "a", a_dpin);
           if (a_bits <= 0 && is_resolved_const(a_dpin) && b_const.is_just_i64()) {
             const auto shift = b_const.to_just_i64();
@@ -1223,13 +1215,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             deferred_nodes.push_back(node);
             continue;
           }
-          if (!is_const_pin(b_dpin)) {
+          if (!b_dpin.is_const()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant Sext on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          auto       b_const = hydrate_const(b_dpin);
+          const auto& b_const = const_of(b_dpin);
           const auto a_bits  = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           pin_tracker.add_sext(wname, trk_id(a_dpin), a_bits, b_const);
@@ -1247,13 +1239,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           // SHL b is single-driver (the one-hot multi-shift form was removed).
           auto b_dpin = hier_driver_of(node, "b");
-          if (!is_const_pin(b_dpin)) {
+          if (!b_dpin.is_const()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          auto       b_const = hydrate_const(b_dpin);
+          const auto& b_const = const_of(b_dpin);
           const auto a_bits  = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           pin_tracker.add_shl(wname, trk_id(a_dpin), a_bits, b_const);
@@ -1365,8 +1357,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             continue;
           }
           for (auto e : inps) {
-            if (is_const_pin(e.driver)) {
-              a_mask = a_mask.and_op(hydrate_const(e.driver));
+            if (e.driver.is_const()) {
+              a_mask = a_mask.and_op(const_of(e.driver));
             } else {
               if (!a_dpin.is_invalid()) {
                 livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
@@ -1570,9 +1562,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // instance land in the single ot::Timer under their hier-unique names.
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op)
-        || node.base_node().attr(livehd::attrs::native_comb_boundary).has() || op == Ntype_op::Flop || op == Ntype_op::Latch
-        || op == Ntype_op::Memory || op == Ntype_op::Div || op == Ntype_op::Rem) {
+    if (op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op) || node.base_node().attr(livehd::attrs::native_comb_boundary).has()
+        || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory || op == Ntype_op::Div || op == Ntype_op::Rem) {
       continue;
     }
     if (op != Ntype_op::Sub) {
@@ -1681,12 +1672,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     for (auto& e : node.inp_edges()) {
       I(!(is_graph_input_pin(e.driver) && bits_of(e.driver) > 2));
 
-      // A hierarchy-flattened literal can arrive as HHDS's reserved singleton
-      // CONST_NODE: it is a valid occurrence pin whose regular Node_class is
-      // intentionally invalid, so is_const_pin alone does not recognize it.
       // Constants have zero arrival and all share the real driverless zero net.
-      const bool singleton_const = e.driver.get_master_node().get_debug_nid() == hhds::Graph::CONST_NODE;
-      auto       wire     = (is_const_pin(e.driver) || singleton_const) ? std::string{kZeroNet} : get_driver_net_name(e.driver);
+      auto       wire     = e.driver.is_const() ? std::string{kZeroNet} : get_driver_net_name(e.driver);
       auto       pin_name = absl::StrCat(instance_name, ":", sink_pin_name_of(node, e.sink));
       timer.connect_pin(pin_name, wire);
     }

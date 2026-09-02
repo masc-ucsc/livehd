@@ -255,8 +255,8 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
   std::vector<std::string> fed;
   for (const auto& s : subs) {
     for (const auto& e : s.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
-        fed.push_back(gu::hydrate_const(e.driver).serialize());
+      if (e.driver.is_const()) {
+        fed.push_back(gu::const_of(e.driver).serialize());
       }
     }
   }
@@ -273,7 +273,7 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
       continue;
     }
     for (const auto& e : n.inp_edges()) {
-      EXPECT_FALSE(gu::is_const_pin(e.driver)) << "the divergent const must live at the call sites";
+      EXPECT_FALSE(e.driver.is_const()) << "the divergent const must live at the call sites";
     }
   }
 }
@@ -355,7 +355,7 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
   ASSERT_EQ(3u, subs.size());
   for (const auto& s : subs) {
     for (const auto& e : s.inp_edges()) {
-      EXPECT_FALSE(gu::is_const_pin(e.driver)) << "an agreed const is body-internal";
+      EXPECT_FALSE(e.driver.is_const()) << "an agreed const is body-internal";
     }
   }
   auto body = subs[0].get_subnode_graph();
@@ -366,7 +366,7 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
       continue;
     }
     for (const auto& e : n.inp_edges()) {
-      body_has_const = body_has_const || gu::is_const_pin(e.driver);
+      body_has_const = body_has_const || e.driver.is_const();
     }
   }
   EXPECT_TRUE(body_has_const);
