@@ -62,8 +62,8 @@ void Slang_context::note_write(const slang::ast::Symbol& sym, bool nonblocking, 
   if (proc_kind_ == Proc_kind::none) {
     return;
   }
-  auto [it, inserted] = proc_assign_style_.try_emplace(&sym, Assign_style{nonblocking, loc});
-  if (!inserted && it->second.nonblocking != nonblocking) {
+  auto [it, inserted] = proc_assign_style_.try_emplace(&sym, nonblocking);
+  if (!inserted && it->second != nonblocking) {
     // yosys-slang's per-variable per-process style rule (procedural.cc).
     emit_error(slang::SourceRange(loc, loc),
                nonblocking ? "nonblocking-after-blocking" : "blocking-after-nonblocking",

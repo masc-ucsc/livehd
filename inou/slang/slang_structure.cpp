@@ -938,6 +938,64 @@ bool seed_const_net(const slang::ast::ValueSymbol& sym, slang::ast::EvalContext&
   return ok;
 }
 
+// POS/NEG edge triggers in an `always` / `always_ff` event control; 0 for any
+// other procedural kind and for a block with no `@(...)` at all. `> 0` is
+// exactly "edge-sensitive"; the async-reset rung peel needs the count itself,
+// one if/else rung per trigger beyond the clock.
+int edge_trigger_count(const slang::ast::ProceduralBlockSymbol& pbs) {
+  if (pbs.procedureKind != slang::ast::ProceduralBlockKind::Always
+      && pbs.procedureKind != slang::ast::ProceduralBlockKind::AlwaysFF) {
+    return 0;
+  }
+  const auto& stmt = pbs.getBody();
+  if (stmt.kind != StatementKind::Timed) {
+    return 0;
+  }
+  int  n    = 0;
+  auto scan = [&n](const slang::ast::TimingControl& tc) {
+    if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
+      const auto edge = tc.as<slang::ast::SignalEventControl>().edge;
+      if (edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge) {
+        ++n;
+      }
+    }
+  };
+  const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
+  if (timing.kind == slang::ast::TimingControlKind::EventList) {
+    for (const auto* ev : timing.as<slang::ast::EventListControl>().events) {
+      scan(*ev);
+    }
+  } else {
+    scan(timing);
+  }
+  return n;
+}
+
+// The generate-scope half of every member walk in this file: recurse `fn` into an
+// INSTANTIATED GenerateBlock, or into every entry of a GenerateBlockArray (an
+// uninstantiated array simply has no entries). Returns true when `member` WAS a
+// generate scope, i.e. the caller is done with it and should `continue`.
+// collect_struct_pattern_assigns and hoist_muts deliberately do NOT use this: the
+// first chains the two cases into an else-if ladder, the second maintains
+// genblk_prefix_ around each entry.
+template <typename Fn>
+bool visit_generate_scope(const slang::ast::Symbol& member, Fn&& fn) {
+  if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
+    const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+    if (!gen.isUninstantiated) {
+      fn(gen);
+    }
+    return true;
+  }
+  if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
+    for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+      fn(*entry);
+    }
+    return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 // Fold a constant expression, chasing constant net/var drivers. firtool factors
@@ -1099,7 +1157,7 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
           // A bundle output stays OUT of output_info_ — the whole-port X-poison
           // loop keys on it, and a bundle port gets per-FIELD poison instead.
           if (!is_bundle) {
-            output_info_.emplace(internal, std::pair<int, bool>{io_bits, io_signed});
+            output_info_.insert(internal);
           }
         } else {
           input_syms_.insert(internal);
@@ -1318,17 +1376,7 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
         note_cont_lhs(asg.as<slang::ast::AssignmentExpression>().left());
       }
     }
-    if (member.kind == SymbolKind::GenerateBlock) {
-      const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-      if (!gen.isUninstantiated) {
-        collect_state_vars(gen);
-      }
-      continue;
-    }
-    if (member.kind == SymbolKind::GenerateBlockArray) {
-      for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-        collect_state_vars(*entry);
-      }
+    if (visit_generate_scope(member, [this](const slang::ast::Scope& s) { collect_state_vars(s); })) {
       continue;
     }
     if (member.kind != SymbolKind::ProceduralBlock) {
@@ -1336,27 +1384,7 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     }
     const auto& pbs = member.as<slang::ast::ProceduralBlockSymbol>();
 
-    bool is_edge = false;
-    if (pbs.procedureKind == slang::ast::ProceduralBlockKind::Always
-        || pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysFF) {
-      const auto& stmt = pbs.getBody();
-      if (stmt.kind == StatementKind::Timed) {
-        const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
-        auto        scan   = [&](const slang::ast::TimingControl& tc) {
-          if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
-            auto edge  = tc.as<slang::ast::SignalEventControl>().edge;
-            is_edge   |= edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge;
-          }
-        };
-        if (timing.kind == slang::ast::TimingControlKind::EventList) {
-          for (const auto* ev : timing.as<slang::ast::EventListControl>().events) {
-            scan(*ev);
-          }
-        } else {
-          scan(timing);
-        }
-      }
-    }
+    const bool is_edge        = edge_trigger_count(pbs) > 0;
     // Latch state: an `always_latch`, or a level-sensitive (non-edge) `always`
     // whose body uses nonblocking `<=` (the inferred-latch idiom, e.g.
     // prim_clk_gate's `always @(clk_i or ...) if (!clk_i) en_latch <= ...`).
@@ -1430,17 +1458,7 @@ void Slang_context::collect_blocking_ff_state(const slang::ast::Scope& body) {
 
   std::function<void(const slang::ast::Scope&)> walk = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
-      if (member.kind == SymbolKind::GenerateBlock) {
-        const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-        if (!gen.isUninstantiated) {
-          walk(gen);
-        }
-        continue;
-      }
-      if (member.kind == SymbolKind::GenerateBlockArray) {
-        for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-          walk(*entry);
-        }
+      if (visit_generate_scope(member, walk)) {
         continue;
       }
       if (member.kind == SymbolKind::ProceduralBlock) {
@@ -1448,30 +1466,11 @@ void Slang_context::collect_blocking_ff_state(const slang::ast::Scope& body) {
         Named_value_collector nv;
         pbs.getBody().visit(nv);
         reads.emplace_back(&pbs, std::move(nv.syms));
-        Ff_blocking_collector wc;
-        pbs.getBody().visit(wc);
-        bool is_edge = false;
-        if (pbs.procedureKind == slang::ast::ProceduralBlockKind::Always
-            || pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysFF) {
-          const auto& stmt = pbs.getBody();
-          if (stmt.kind == StatementKind::Timed) {
-            const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
-            auto        scan   = [&](const slang::ast::TimingControl& tc) {
-              if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
-                auto edge  = tc.as<slang::ast::SignalEventControl>().edge;
-                is_edge   |= edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge;
-              }
-            };
-            if (timing.kind == slang::ast::TimingControlKind::EventList) {
-              for (const auto* ev : timing.as<slang::ast::EventListControl>().events) {
-                scan(*ev);
-              }
-            } else {
-              scan(timing);
-            }
-          }
-        }
-        if (is_edge) {
+        if (edge_trigger_count(pbs) > 0) {
+          // Only an EDGE block's blocking writes can own a symbol, so a
+          // level-sensitive block never needs this walk at all.
+          Ff_blocking_collector wc;
+          pbs.getBody().visit(wc);
           for (const auto* sym : wc.blocking) {
             if (auto [it, ins] = owner.try_emplace(sym, &pbs); !ins && it->second != &pbs) {
               multi.insert(sym);
@@ -1542,7 +1541,15 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // Fresh per-module state; the enclosing module's (a submodule definition
   // lowers recursively from its first instantiation site) comes back on every
   // exit path.
-  const Module_state_scope module_scope(this);
+  const Module_state_scope                       module_scope(this);
+  // Unpacked arrays indexed by a NON-constant selector somewhere in the module.
+  // A comb plain-vector array that is NEVER runtime-indexed is safe to flatten
+  // to a packed bus (constant element offsets, set_mask composition); a
+  // runtime-indexed one must stay a memory (dynamic-shift flattening mismatches
+  // — see the `tuplish` regression). A pre-pass below fills it and the array
+  // pre-declare is its only reader, both before lower_members, so it is a plain
+  // local rather than per-module state.
+  absl::flat_hash_set<const slang::ast::Symbol*> runtime_indexed_arrays;
   // A loop can lower before any driver/process re-arms the budget (a localparam
   // initializer calling a function with a loop), so start every module full.
   unroll_budget_ = options_.unroll_limit;
@@ -1632,17 +1639,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     // reaches the initializer spelling.
     std::function<void(const slang::ast::Scope&)> seed_net_init_arrays = [&](const slang::ast::Scope& sc) {
       for (const auto& member : sc.members()) {
-        if (member.kind == SymbolKind::GenerateBlock) {
-          const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-          if (!gen.isUninstantiated) {
-            seed_net_init_arrays(gen);
-          }
-          continue;
-        }
-        if (member.kind == SymbolKind::GenerateBlockArray) {
-          for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-            seed_net_init_arrays(*entry);
-          }
+        if (visit_generate_scope(member, seed_net_init_arrays)) {
           continue;
         }
         if (member.kind != SymbolKind::Net) {
@@ -1707,17 +1704,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // init loop with `generate if (INIT_EN)`.
   std::function<void(const slang::ast::Scope&)> harvest_initial_values = [&](const slang::ast::Scope& scope) {
     for (const auto& member : scope.members()) {
-      if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
-        const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-        if (!gen.isUninstantiated) {
-          harvest_initial_values(gen);
-        }
-        continue;
-      }
-      if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
-        for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-          harvest_initial_values(*entry);
-        }
+      if (visit_generate_scope(member, harvest_initial_values)) {
         continue;
       }
       if (member.kind == slang::ast::SymbolKind::Variable) {
@@ -1761,7 +1748,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     };
     for (const auto& [sym, sel] : array_indices.selects) {
       if (is_runtime_sel(sel)) {
-        runtime_indexed_arrays_.insert(sym);
+        runtime_indexed_arrays.insert(sym);
       }
     }
     // A PACKED 2-D reg `[N][W]` (W>1) is an ARRAY: declare it as `reg x:[N]uW`
@@ -1792,17 +1779,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       std::vector<const slang::ast::Statement*>     reset_arms;
       std::function<void(const slang::ast::Scope&)> harvest_reset_arms = [&](const slang::ast::Scope& scope) {
         for (const auto& member : scope.members()) {
-          if (member.kind == SymbolKind::GenerateBlock) {
-            const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-            if (!gen.isUninstantiated) {
-              harvest_reset_arms(gen);
-            }
-            continue;
-          }
-          if (member.kind == SymbolKind::GenerateBlockArray) {
-            for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-              harvest_reset_arms(*entry);
-            }
+          if (visit_generate_scope(member, harvest_reset_arms)) {
             continue;
           }
           if (member.kind != SymbolKind::ProceduralBlock) {
@@ -1817,26 +1794,11 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
           if (stmt.kind != StatementKind::Timed) {
             continue;
           }
-          const auto& timed  = stmt.as<slang::ast::TimedStatement>();
-          int         nedges = 0;
-          auto        count  = [&](const slang::ast::TimingControl& tc) {
-            if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
-              const auto edge = tc.as<slang::ast::SignalEventControl>().edge;
-              if (edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge) {
-                ++nedges;
-              }
-            }
-          };
-          if (timed.timing.kind == slang::ast::TimingControlKind::EventList) {
-            for (const auto* ev : timed.timing.as<slang::ast::EventListControl>().events) {
-              count(*ev);
-            }
-          } else {
-            count(timed.timing);
-          }
+          const auto&                  timed  = stmt.as<slang::ast::TimedStatement>();
+          const int                    nedges = edge_trigger_count(pbs);
           // Peel the same if/else rungs the reset extraction peels: one per
           // extra edge trigger, each rung's THEN arm holding its reset values.
-          const slang::ast::Statement* b = &timed.stmt;
+          const slang::ast::Statement* b      = &timed.stmt;
           for (int rung = nedges - 1; rung > 0; --rung) {
             while (b->kind == StatementKind::Block) {
               b = &b->as<slang::ast::BlockStatement>().body;
@@ -1882,8 +1844,22 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // reset today with no diagnostic at all. Such arrays stay a flat flop bus,
       // which does reset correctly, until the memory lowering grows a reset for
       // the per-port shape.
+      // EVERY array a reset arm writes — whole or per entry — needs the update
+      // bus, not just the ones with a splittable constant pattern: a uniform
+      // `if (rst) arr <= '0` loses its reset the same way.
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> reset_arrays;
+      for (const auto* sym : wsc.touched) {
+        int64_t n = 0, lo = 0;
+        int     w  = 0;
+        bool    sg = false;
+        if (is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
+          reset_arrays.insert(sym);
+        }
+      }
+      // Those arrays are the ONLY consumer of datapath_whole_written, so with
+      // none of them the second whole-body walk has nothing to answer.
       absl::flat_hash_set<const slang::ast::ValueSymbol*> datapath_whole_written;
-      if (!wsc.touched.empty()) {  // no reset arm wrote anything: the whole-body walk has no consumer
+      if (!reset_arrays.empty()) {
         absl::flat_hash_set<const slang::ast::Expression*> reset_rhs;
         for (const auto& [sym, rhs] : wsc.stores) {
           reset_rhs.insert(rhs);
@@ -1896,14 +1872,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
           }
         }
       }
-      // EVERY array a reset arm writes — whole or per entry — needs the update
-      // bus, not just the ones with a splittable constant pattern: a uniform
-      // `if (rst) arr <= '0` loses its reset the same way.
-      for (const auto* sym : wsc.touched) {
-        int64_t n = 0, lo = 0;
-        int     w  = 0;
-        bool    sg = false;
-        if (is_packed_2d_array(sym->getType(), n, w, sg, lo) && !datapath_whole_written.contains(sym)) {
+      for (const auto* sym : reset_arrays) {
+        if (!datapath_whole_written.contains(sym)) {
           array_pattern_loaded.insert(sym);
         }
       }
@@ -2020,12 +1990,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     if (output_syms_.contains(sym) && !options_.struct_port_bundles && struct_port_bundle_ok(ty)) {
       continue;  // the flat struct-output bridge in declare_reg already owns this symbol
     }
-    std::string base   = lname_of(vs);
-    std::string shadow = absl::StrCat(base, "___q");
-    for (int n = 0; used_names_.contains(shadow); ++n) {
-      shadow = absl::StrCat(base, "___q", n);
-    }
-    used_names_.insert(shadow);
+    std::string shadow = unique_suffixed(lname_of(vs), "___q");
     partial_reg_shadow_.emplace(sym, shadow);
     // A memory has one write port per element store and no combinational
     // element at all, so the split's composite has nowhere to live there.
@@ -2059,17 +2024,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // where they were tuned.
   std::function<void(const slang::ast::Scope&, bool)> predeclare_arrays = [&](const slang::ast::Scope& scope, bool top) {
     for (const auto& member : scope.members()) {
-      if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
-        const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-        if (!gen.isUninstantiated) {
-          predeclare_arrays(gen, /*top=*/false);
-        }
-        continue;
-      }
-      if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
-        for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-          predeclare_arrays(*entry, /*top=*/false);
-        }
+      if (visit_generate_scope(member, [&](const slang::ast::Scope& s) { predeclare_arrays(s, /*top=*/false); })) {
         continue;
       }
       if (member.kind != slang::ast::SymbolKind::Variable) {
@@ -2109,7 +2064,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         continue;
       }
       const bool aggregate     = elem.isStruct() || elem.isPackedUnion();
-      const bool const_indexed = !runtime_indexed_arrays_.contains(&vsym);
+      const bool const_indexed = !runtime_indexed_arrays.contains(&vsym);
       // A MULTI-dimensional array is pre-declared whatever its selectors are: it
       // never takes the flatten branch, so declare_unpacked gives it a linearized
       // array plus the whole-array poison seed its first element store splices
@@ -2619,13 +2574,8 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   std::string                bridge_port;
   bool                       flat_bridge = false;
   auto                       mint_shadow = [&]() {
-    bridge_port        = lname_of(sym);
-    std::string shadow = absl::StrCat(bridge_port, "_q");
-    for (int n = 0; used_names_.contains(shadow); ++n) {
-      shadow = absl::StrCat(bridge_port, "_q", n);
-    }
-    used_names_.insert(shadow);
-    sym_lname_[&sym] = shadow;
+    bridge_port      = lname_of(sym);
+    sym_lname_[&sym] = unique_suffixed(bridge_port, "_q");
   };
   auto plain_name = [&]() {
     if (sym.name.empty() || std::isdigit(static_cast<unsigned char>(sym.name.front())) != 0) {
@@ -2886,9 +2836,6 @@ bool Slang_context::struct_is_all_scalar(const slang::ast::ValueSymbol& sym) con
 }
 
 bool Slang_context::whole_copied_selfref_pattern(const slang::ast::ValueSymbol& sym) const {
-  if (auto it = selfref_pattern_cache_.find(&sym); it != selfref_pattern_cache_.end()) {
-    return it->second;
-  }
   bool ok = false;
   if (const auto* drv = whole_net_driver(sym)) {
     const auto* r = drv;
@@ -2919,7 +2866,6 @@ bool Slang_context::whole_copied_selfref_pattern(const slang::ast::ValueSymbol& 
       }
     }
   }
-  selfref_pattern_cache_.emplace(&sym, ok);
   return ok;
 }
 
@@ -3216,22 +3162,14 @@ void Slang_context::collect_struct_pattern_assigns(const slang::ast::Scope& scop
 void Slang_context::declare_struct_leaves(const slang::ast::ValueSymbol& sym) {
   const auto& st = sym.getType().getCanonicalType().as<slang::ast::PackedStructType>();
   Struct_info si;
-  si.is_wire      = wire_syms_.contains(&sym);
-  // A REAL tuple only when cyclic (wire) AND every field is scalar: upass.detuple
-  // cannot split a NESTED struct field (it defers the whole bundle), so a struct
-  // with a struct-typed field keeps the flat-leaf form (the field accesses then
-  // bit-slice the nested leaf, as before).
-  bool all_scalar = true;
-  for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
-    if (f.getType().getCanonicalType().isStruct()) {
-      all_scalar = false;
-      break;
-    }
-  }
-  // A real tuple only when it is cyclic (wire), all-scalar, AND per-field driven
-  // (a `'{...}` pattern assignment) — so detuple can split it. An instance-output
-  // net or a whole-expression-driven struct is not pattern-assigned and stays flat.
-  si.is_tuple = si.is_wire && all_scalar && struct_use_of(sym).pattern_assigned;
+  si.is_wire  = wire_syms_.contains(&sym);
+  // A REAL tuple only when it is cyclic (wire), ALL-SCALAR — upass.detuple cannot
+  // split a NESTED struct field (it defers the whole bundle), so a struct with a
+  // struct-typed field keeps the flat-leaf form and its field accesses bit-slice
+  // the nested leaf — AND per-field driven (a `'{...}` pattern assignment), so
+  // detuple can split it. An instance-output net or a whole-expression-driven
+  // struct is not pattern-assigned and stays flat.
+  si.is_tuple = si.is_wire && struct_is_all_scalar(sym) && struct_use_of(sym).pattern_assigned;
   auto  base  = lname_of(sym);
   auto& ln    = *builder_.lnast;
   set_pending_loc(sym.location);
@@ -3568,27 +3506,7 @@ static void collect_state_outputs(const slang::ast::InstanceSymbol&             
       continue;
     }
     const auto& pbs           = member.as<slang::ast::ProceduralBlockSymbol>();
-    bool        is_state_proc = pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysLatch;
-    if (pbs.procedureKind == slang::ast::ProceduralBlockKind::Always
-        || pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysFF) {
-      const auto& stmt = pbs.getBody();
-      if (stmt.kind == StatementKind::Timed) {
-        const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
-        auto        scan   = [&](const slang::ast::TimingControl& tc) {
-          if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
-            auto edge      = tc.as<slang::ast::SignalEventControl>().edge;
-            is_state_proc |= edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge;
-          }
-        };
-        if (timing.kind == slang::ast::TimingControlKind::EventList) {
-          for (const auto* ev : timing.as<slang::ast::EventListControl>().events) {
-            scan(*ev);
-          }
-        } else {
-          scan(timing);
-        }
-      }
-    }
+    const bool  is_state_proc = pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysLatch || edge_trigger_count(pbs) > 0;
     if (!is_state_proc) {
       continue;
     }
@@ -4131,10 +4049,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       }
       // Only a MODULE-LEVEL net can be a wire; a procedural-block-local var has
       // no stable cut driver and keeps its `mut` poison-init.
-      const auto* sc = net->getParentScope();
-      const bool  module_level
-          = sc != nullptr && (&sc->asSymbol() == body_ || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-      if (!module_level) {
+      if (!is_module_level(*net)) {
         continue;
       }
       size_t wpos = SIZE_MAX;
@@ -4290,17 +4205,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   {
     std::function<void(const slang::ast::Scope&)> scan_edges = [&](const slang::ast::Scope& sc) {
       for (const auto& member : sc.members()) {
-        if (member.kind == SymbolKind::GenerateBlock) {
-          const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-          if (!gen.isUninstantiated) {
-            scan_edges(gen);
-          }
-          continue;
-        }
-        if (member.kind == SymbolKind::GenerateBlockArray) {
-          for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-            scan_edges(*entry);
-          }
+        if (visit_generate_scope(member, scan_edges)) {
           continue;
         }
         if (member.kind != SymbolKind::ProceduralBlock) {
@@ -4333,10 +4238,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           if (!is_plain_scalar_net(sym)) {
             return;  // plain scalar nets only (an edge source is 1-bit in practice)
           }
-          const auto* psc = sym.getParentScope();
-          const bool  module_level
-              = psc != nullptr && (&psc->asSymbol() == body_ || psc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-          if (module_level) {
+          if (is_module_level(sym)) {
             wire_syms_.insert(&sym);
           }
         };
@@ -4438,10 +4340,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         if (scit == store_counts.end() || scit->second != 1 || reg_syms_.contains(sym) || input_syms_.contains(sym)) {
           continue;
         }
-        const auto* psc = sym->getParentScope();
-        const bool  module_level
-            = psc != nullptr && (&psc->asSymbol() == body_ || psc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-        if (module_level && is_plain_scalar_net(*sym)) {
+        if (is_module_level(*sym) && is_plain_scalar_net(*sym)) {
           wire_syms_.insert(sym);
         }
       }
@@ -4484,11 +4383,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       // (lname_of inserts before quote_if_needed), so uniquing on the quoted
       // form would neither see a real collision nor be visible to a later
       // lname_of. Quote only the name that actually goes out as an LNAST ref.
-      std::string raw = absl::StrCat(stem, "__wtmp");
-      for (int n = 0; used_names_.contains(raw); ++n) {
-        raw = absl::StrCat(stem, "__wtmp", n);
-      }
-      used_names_.insert(raw);
+      std::string raw       = unique_suffixed(stem, "__wtmp");
       wire_split_tmp_[wsym] = ref_name_of_raw(raw);
     }
     // FLATTENED-AGGREGATE split: a wire-classified local whose representation
@@ -4521,11 +4416,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       }
       // Unique against the RAW spelling (see the __wtmp note above): quoting
       // before the collision check hides real collisions from lname_of.
-      std::string wnet = absl::StrCat(stem, "__wnet");
-      for (int n = 0; used_names_.contains(wnet); ++n) {
-        wnet = absl::StrCat(stem, "__wnet", n);
-      }
-      used_names_.insert(wnet);
+      std::string wnet      = unique_suffixed(stem, "__wnet");
       wire_split_tmp_[wsym] = std::move(orig);  // accumulator = the pre-declared mut
       wire_split_flat_.insert(wsym);
       sym_lname_[wsym] = ref_name_of_raw(wnet);  // readers resolve through the wire
@@ -4783,11 +4674,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       if (!stem.empty() && stem.front() == '`') {
         stem = stem.substr(1, stem.size() - 2);
       }
-      std::string shadow = absl::StrCat(stem, "__bpo");
-      for (int n = 0; used_names_.contains(shadow); ++n) {
-        shadow = absl::StrCat(stem, "__bpo", n);
-      }
-      used_names_.insert(shadow);
+      std::string shadow = unique_suffixed(stem, "__bpo");
       set_pending_loc(sym->location);
       for (const auto& f : fields) {
         auto leaf = absl::StrCat(shadow, ".", f.name);
@@ -5249,13 +5136,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     body->visit(body_reads);
     absl::flat_hash_set<const slang::ast::ValueSymbol*> read_set(body_reads.syms.begin(), body_reads.syms.end());
 
-    auto is_readable = [&](const slang::ast::ValueSymbol* sym) {
-      if (input_syms_.contains(sym)) {
-        return true;
-      }
-      const auto* rsc = sym->getParentScope();
-      return rsc != nullptr && (&rsc->asSymbol() == body_ || rsc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-    };
+    auto is_readable = [&](const slang::ast::ValueSymbol* sym) { return input_syms_.contains(sym) || is_module_level(*sym); };
     for (size_t idx : demote) {
       const auto* sym = &edges[idx]->expr.as<slang::ast::NamedValueExpression>().symbol;
       if (!is_readable(sym) || !read_set.contains(sym)) {
@@ -5409,10 +5290,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     // wires it to reset_pin). A local/block-scoped signal still has no stable
     // cut driver -> reject.
     if (!input_syms_.contains(rst_sym)) {
-      const auto* rsc = rst_sym->getParentScope();
-      const bool  module_level
-          = rsc != nullptr && (&rsc->asSymbol() == body_ || rsc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-      if (!module_level) {
+      if (!is_module_level(*rst_sym)) {
         if (demote_reset_edges()) {
           break;
         }

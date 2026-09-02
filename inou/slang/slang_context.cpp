@@ -388,6 +388,15 @@ std::string Slang_context::fresh_local(std::string_view stem) {
   return name;
 }
 
+std::string Slang_context::unique_suffixed(std::string_view base, std::string_view suffix) {
+  std::string name = absl::StrCat(base, suffix);
+  for (int n = 0; used_names_.contains(name); ++n) {
+    name = absl::StrCat(base, suffix, n);
+  }
+  used_names_.insert(name);
+  return name;
+}
+
 std::string Slang_context::to_int_value(const std::string& v) {
   if (!is_bool_value(v)) {
     return v;

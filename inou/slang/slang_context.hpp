@@ -68,15 +68,17 @@ struct Slang_module_state {
   absl::flat_hash_set<std::string>                            used_names_;
   absl::flat_hash_set<const slang::ast::Symbol*>              input_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              output_syms_;
-  absl::flat_hash_map<const slang::ast::Symbol*, std::pair<int, bool>>
-      output_info_;  // {flat bits, is_signed} per output, for the body-top X-default poison-init of non-reg outputs
-  absl::flat_hash_set<const slang::ast::Symbol*> reg_syms_;  // clocked state vars
+  // Non-bundle OUTPUT ports: the ones the body-top X-default poison-init loop
+  // covers (a bundle output gets per-FIELD poison instead). The poison store is
+  // the width-taking `0sb?` wildcard, so no width/signedness is kept here.
+  absl::flat_hash_set<const slang::ast::Symbol*>              output_info_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;  // clocked state vars
   // Symbols that ALSO have a continuous-assign driver. A packed array whose
   // element 0 is `assign`ed while [1..N] are flops (the cvfpu pipeline idiom,
   // `assign q[0] = in; FFL(q[i+1], q[i], …)`) is only PARTLY register, so its
   // async-reset slices can never cover the whole symbol -- see
   // finalize_pending_async_resets.
-  absl::flat_hash_set<const slang::ast::Symbol*> cont_assign_syms_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              cont_assign_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>
       wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   // A `wire` net that is MULTIPLY written (a case/priority-if or bit-slice
@@ -137,15 +139,14 @@ struct Slang_module_state {
 
   // ── per-process state ──────────────────────────────────────────────────────
   enum class Proc_kind : uint8_t { none, comb, seq };
-  struct Assign_style {
-    bool                  nonblocking = false;
-    slang::SourceLocation loc;
-  };
-  Proc_kind                                                    proc_kind_ = Proc_kind::none;
-  absl::flat_hash_map<const slang::ast::Symbol*, Assign_style> proc_assign_style_;
-  absl::flat_hash_set<const slang::ast::Symbol*>               proc_blocking_written_;
+  Proc_kind                                            proc_kind_ = Proc_kind::none;
+  // First assignment style seen for a var in the CURRENT process (true =
+  // nonblocking). The mixing diagnostic points at the OFFENDING write's own
+  // location, so the first write's location is not kept.
+  absl::flat_hash_map<const slang::ast::Symbol*, bool> proc_assign_style_;
+  absl::flat_hash_set<const slang::ast::Symbol*>       proc_blocking_written_;
   // loop-unroll budget shared across the nested loops of one process/ctx
-  int                                                          unroll_budget_ = 0;
+  int                                                  unroll_budget_ = 0;
 
   // An elaborated generate commonly spells one packed register as several
   // always_ff processes, each asynchronously resetting a disjoint constant
@@ -230,12 +231,6 @@ struct Slang_module_state {
   // here carry their range in mem_info_ but route through bit-slice get/set
   // instead of store/tuple_get.
   absl::flat_hash_set<const slang::ast::Symbol*>                             flat_port_syms_;
-  // Unpacked arrays indexed by a NON-constant selector somewhere in the module.
-  // A comb plain-vector array that is NEVER runtime-indexed is safe to flatten
-  // to a packed bus (constant element offsets, set_mask composition); a
-  // runtime-indexed one must stay a memory (dynamic-shift flattening mismatches
-  // — see the `tuplish` regression). Populated by a pre-pass in lower_module.
-  absl::flat_hash_set<const slang::ast::Symbol*>                             runtime_indexed_arrays_;
   // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
   // somewhere — a firtool-style register file. These memory-ize (one `__memory`
   // node) instead of flattening to a single N*W-bit flop, so they LEC against an
@@ -308,10 +303,12 @@ struct Slang_module_state {
     bool deep_written     = false;
   };
   absl::flat_hash_map<const slang::ast::ValueSymbol*, Struct_use>   struct_use_;
-  // Memos of the two per-symbol struct predicates. Both are answered from the
-  // pre-scan record above plus the port/reg sets, all of which are final
-  // before the first body expression lowers.
-  mutable absl::flat_hash_map<const slang::ast::ValueSymbol*, bool> selfref_pattern_cache_;
+  // Memo of is_scalar_struct_var, the one per-symbol struct predicate with more
+  // than one call site. It is answered from the pre-scan record above plus the
+  // port/reg sets, all of which are final before the first body expression
+  // lowers. (whole_copied_selfref_pattern needs no memo of its own: its only
+  // caller is classify_scalar_struct_var, which this memo already runs at most
+  // once per symbol.)
   mutable absl::flat_hash_map<const slang::ast::ValueSymbol*, bool> scalar_struct_var_cache_;
 
   // ── packed-struct PORTS as tuple bundles (M7) ─────────────────────────────
@@ -546,8 +543,8 @@ private:
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
   // clocked regs, and arrays — those keep their existing lowering). Memoized;
   // classify_scalar_struct_var holds the rule.
-  bool                      is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
-  bool                      classify_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  bool is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  bool classify_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
   // A PLAIN SCALAR NET: a packed integral value with no fields and no
   // representation of its own — not a struct/union (bundle or flat bus), not a
   // memory-ized array (mem_syms_ also holds the memory-ized PACKED 2-D regs,
@@ -555,11 +552,21 @@ private:
   // classification, the split-wire device and the lazy-declare hoists all key
   // on exactly this class; site-specific extras (module level, port/reg
   // exclusions, bundle ports) stay at the site.
-  bool                      is_plain_scalar_net(const slang::ast::ValueSymbol& sym) const;
+  bool is_plain_scalar_net(const slang::ast::ValueSymbol& sym) const;
+  // Declared directly in the module body, or in an INSTANTIATED generate block
+  // under it — i.e. a symbol with a stable module-level driver. A
+  // procedural-block-local (or otherwise nested) symbol has none, so the wire
+  // classification, the split-wire device and the async-reset source check all
+  // refuse it.
+  bool is_module_level(const slang::ast::Symbol& sym) const {
+    const auto* sc = sym.getParentScope();
+    return sc != nullptr && (&sc->asSymbol() == body_ || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+  }
   // Whole-copied struct whose single whole-net driver is a SELF-REFERENCING
   // '{...}' pattern with one element per top field (CIRCT's `_out_output`
   // idiom): the flat bus would be a false combinational loop, so it stays a
-  // bundle (per-field leaves) instead. Pure over the AST — cached by symbol.
+  // bundle (per-field leaves) instead. Pure over the AST; called only from
+  // classify_scalar_struct_var, i.e. once per symbol behind that memo.
   bool                      whole_copied_selfref_pattern(const slang::ast::ValueSymbol& sym) const;
   const Struct_info::Field* find_struct_field(const Struct_info& si, std::string_view name) const;
   // Declare the per-field leaf nets (called from declare_value_symbol).
@@ -760,6 +767,9 @@ private:
   // A unique non-`___` local (the `___` namespace is single-write SSA; a
   // multi-written mux temp must not use it).
   std::string fresh_local(std::string_view stem);
+  // `<base><suffix>`, made unique against used_names_ (`<base><suffix>0`,
+  // `<base><suffix>1`, … on collision) and reserved there.
+  std::string unique_suffixed(std::string_view base, std::string_view suffix);
 
   // In-flight assignment target value for compound assigns (`a += b` lowers
   // the RHS with LValueReference reading this) - CIRCT's lvalue stack, depth 1.
