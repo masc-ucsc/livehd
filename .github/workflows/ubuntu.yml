@@ -1,4 +1,4 @@
-name: Ubuntu
+name: macOS 26
 
 on:
   push:
@@ -7,52 +7,63 @@ on:
 jobs:
   test-opt:
     name: Build everything
-    runs-on: ubuntu-24.04
+    runs-on: macos-26
     env:
-      CC: gcc-14
-      CXX: g++-14
+      CC: clang
+      CXX: clang++
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
 
-
-      - name: Mount bazel cache
-        uses: actions/cache@v6.1.0
+      - name: Restore Bazel cache
+        id: bazel-cache
+        uses: actions/cache/restore@v6.1.0
         with:
-          path: "~/.cache/bazel"
-          key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          path: |
+            ~/Library/Caches/bazel
+          key: bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-gcc-${{ runner.os }}-
-            bazel-gcc-
+            bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-
+            bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-
 
       - name: Show compiler selection
         run: |
           "$CC" --version
           "$CXX" --version
 
-      - run: bazel test -c dbg -s //...
+      - run: bazel test -c dbg --test_output=errors //...
+
+      # A full build is expensive and failures tend to happen late. Keep
+      # successfully produced Bazel outputs for the next run either way.
+      - name: Save Bazel cache
+        if: always()
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/bazel
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
   coverage:
     name: Gather coverage metrics
-    runs-on: ubuntu-24.04
+    runs-on: macos-26
     env:
-      CC: gcc-14
-      CXX: g++-14
-      GCOV: gcov-14  # must match CC, or gcov rejects the .gcda/.gcno data (version 'B42*', prefer 'B33*')
+      CC: clang
+      CXX: clang++
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
 
-
-      - name: Mount bazel cache
-        uses: actions/cache@v6.1.0
+      - name: Restore Bazel cache
+        id: bazel-cache
+        uses: actions/cache/restore@v6.1.0
         with:
-          path: "~/.cache/bazel"
-          key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          path: |
+            ~/Library/Caches/bazel
+          key: bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-coverage-${{ runner.os }}-
-            bazel-coverage-
+            bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-
+            bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-
 
       - name: Print the list of targets
         run: bazel query --output label_kind //...
@@ -80,3 +91,11 @@ jobs:
       - name: Propagate test failures
         if: steps.coverage.outcome == 'failure'
         run: exit 1
+
+      - name: Save Bazel cache
+        if: always()
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/bazel
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
