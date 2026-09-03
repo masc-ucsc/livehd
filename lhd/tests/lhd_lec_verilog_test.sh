@@ -412,6 +412,54 @@ echo "$out" | grep -q 'REFUTED' \
   || fail "deeper lgyosys BMC did not classify the delayed mismatch as REFUTED: $out"
 echo "PASS: bounded no-CEX stays inconclusive; a deeper BMC counterexample refutes"
 
+# The definitive lgcheck BMC initializes every surviving flop to zero. Its
+# per-side preparation must preserve don't-care startup state until then:
+# ordinary `opt` turns GOLD's resetless `if (en) q <= 1` DFFE into constant 1,
+# while the same machine behind mapped DFF instances survives as zero-initialized
+# state on GATE. That manufactured the br_amba_axil_msi netlist refutation even
+# though the next-state functions are equal. Exercise the reduced reproducer
+# directly and pin the production BMC to the same DC-preserving preparation.
+cat >"$W/keepdc_gold.v" <<'V'
+module keepdc(input clk, input en, input [31:0] data, output [3:0] o);
+  reg [35:0] q;
+  always @(posedge clk)
+    if (en)
+      q <= {data, 4'b1111};
+  assign o = q[3:0];
+endmodule
+V
+cat >"$W/keepdc_gate.v" <<'V'
+module keepdc_dff(input D, input CLK, output Q);
+  reg state;
+  always @(posedge CLK)
+    state <= D;
+  assign Q = state;
+endmodule
+module keepdc(input clk, input en, input [31:0] data, output [3:0] o);
+  wire [3:0] d = en ? 4'b1111 : o;
+  keepdc_dff q0(.D(d[0]), .CLK(clk), .Q(o[0]));
+  keepdc_dff q1(.D(d[1]), .CLK(clk), .Q(o[1]));
+  keepdc_dff q2(.D(d[2]), .CLK(clk), .Q(o[2]));
+  keepdc_dff q3(.D(d[3]), .CLK(clk), .Q(o[3]));
+endmodule
+V
+"$YOSYS" -p "
+  read_verilog -sv $W/keepdc_gold.v; hierarchy -top keepdc; proc; bmuxmap; memory; opt -keepdc; flatten;
+  rename -top gold; prep -top gold; design -stash gold;
+  read_verilog -sv $W/keepdc_gate.v; hierarchy -top keepdc; proc; bmuxmap; memory; opt -keepdc; flatten;
+  rename -top gate; prep -top gate; design -stash gate;
+  design -copy-from gold -as gold gold; design -copy-from gate -as gate gate;
+  miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter;
+  async2sync; dffunmap; proc; opt_clean; hierarchy -top miter;
+  sat -ignore_unknown_cells -seq 1 -set-at 1 trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter
+" >"$W/keepdc.log" 2>&1 \
+  || { cat "$W/keepdc.log"; fail "DC-preserving bounded miter setup failed"; }
+grep -q 'SAT proof finished - no model found: SUCCESS' "$W/keepdc.log" \
+  || { cat "$W/keepdc.log"; fail "DC-preserving bounded miter manufactured a startup mismatch"; }
+grep -Fq 'proc; bmuxmap; memory; opt -keepdc; flatten' "$LG" \
+  || fail "lgcheck BMC no longer uses the tested DC-preserving side preparation"
+echo "PASS: lgyosys BMC preserves don't-care startup state before zero initialization"
+
 # 3. Bare .v paths on BOTH sides: the verilog kind is inferred from the
 #    extension; an identical netlist is trivially PROVEN (in-process cvc5).
 "$LHD" lec --impl "$INV" --ref "$INV" --top inv --workdir "$W/c3" -q --result-json "$W/r3.json" \

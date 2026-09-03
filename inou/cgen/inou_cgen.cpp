@@ -232,6 +232,15 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
         return;
       }
     }
+    // The color planner treats each operation occurrence as one word-valued
+    // item. Packed records can therefore appear cyclic even when every field's
+    // real bit-level cone is acyclic, especially when different pure-comb
+    // children consume and produce disjoint fields. This is the simulator's
+    // private library, so expose those cones and split only the residual reads
+    // here without disturbing synthesis hierarchy or formal cutpoints.
+    for (const auto& g : sim_graphs) {
+      livehd::graph_util::repair_simulator_packed_cycles(g.get());
+    }
   }
 
   // The replacement scheduler starts with a read-only occurrence-wide plan.

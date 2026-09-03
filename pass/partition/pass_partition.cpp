@@ -16,6 +16,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
 #include "cell.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
@@ -163,48 +164,84 @@ uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_clas
   return node;
 }
 
-// Forward (CONSUMER-side) analogue of cone_sig (Proposal 2, bidirectional
-// canonical labeling): hashes how a driver's signal is USED downstream, so two
-// boundary inputs with identical PRODUCER cones but different consumer roles --
-// e.g. two replay-queue lanes that write DIFFERENT bit ranges of one packed
-// conflict-matrix flop -- get distinct signatures. cone_sig alone (producer only)
-// ties them, which is a FALSE tie: they are distinct external nets, so a by-name
-// reuse that swaps them transposes the state (LEC-refuted on
-// minion_dcache_replay_queue). Anchors on graph outputs (by name), named
-// nodes/state (by name), and folds each consumer's op + CONSTANT operands (the
-// Get_mask/Set_mask bit ranges that pick the lane) + sink port. Reproducible
-// (nid-free) and symmetric to cone_sig, so old/new recompiles agree.
-uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::Pin_class, uint64_t>& memo,
-                      absl::flat_hash_set<hhds::Node_class>& on_path, int depth, bool& truncated) {
-  if (auto it = memo.find(driver); it != memo.end()) {
-    return it->second;
+template <typename Fn>
+void each_fwd_child(const hhds::Node_class& consumer, Fn&& fn) {
+  // Most cells have one output. Keep the common case entirely on the stack;
+  // the old per-visit flat_hash_set was visible in allocation profiles on
+  // large partitioned designs.
+  absl::InlinedVector<int, 4> seen;
+  for (const auto& oe : consumer.out_edges()) {
+    const int port = static_cast<int>(oe.driver.get_port_id());
+    if (std::find(seen.begin(), seen.end(), port) == seen.end()) {
+      seen.push_back(port);
+      fn(oe.driver);
+    }
   }
-  constexpr uint64_t kSeed = 0x84222325cbf29ce4ULL;
-  if (depth <= 0) {
-    truncated = true;
-    return sig_mix(kSeed, 0x5a17U);  // depth cap: coarse, path-dependent, not memoized
-  }
-  bool                  cut = false;  // see cone_sig: only a pure value is memoized
-  std::vector<uint64_t> uses;
+}
+
+uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
+  constexpr uint64_t               kSeed = 0x84222325cbf29ce4ULL;
+  absl::InlinedVector<uint64_t, 4> uses;
   for (const auto& e : driver.out_edges()) {
     const auto& snk = e.sink;
     uint64_t    u;
-    if (gu::is_graph_output_pin(snk)) {  // declared IO consumer: name is its identity
+    if (gu::is_graph_output_pin(snk)) {
       u = sig_str(sig_mix(kSeed, 1), gu::pin_name_of(snk));
     } else {
       auto cm = snk.get_master_node();
-      if (gu::has_name(cm)) {  // named consumer (register/wire/state): a stable anchor
+      if (gu::has_name(cm)) {
         u = sig_mix(sig_str(sig_mix(kSeed, 2), gu::node_name_of(cm)), static_cast<uint64_t>(snk.get_port_id()));
-      } else if (on_path.contains(cm)) {  // cycle: coarse op anchor
-        cut = true;
-        u   = sig_mix(sig_mix(kSeed, 3), static_cast<uint64_t>(type_op_of(cm)));
       } else {
-        on_path.insert(cm);
-        // consumer op + which sink port we feed + its CONSTANT operands (the
-        // masks that select the lane) + a fold of where its outputs go.
+        u = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
+        u = sig_mix(u, static_cast<uint64_t>(snk.get_port_id()));
+        absl::InlinedVector<uint64_t, 4> cin;
+        for (const auto& ie : cm.inp_edges()) {
+          if (ie.driver.is_const()) {
+            cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
+                                  static_cast<uint64_t>(ie.sink.get_port_id())));
+          }
+        }
+        std::sort(cin.begin(), cin.end());
+        for (uint64_t c : cin) {
+          u = sig_mix(u, c);
+        }
+        // This is deliberately a local, coarse anchor: it is used only for a
+        // cyclic tail. Port ids retain useful discrimination without walking
+        // back around the cycle.
+        absl::InlinedVector<uint64_t, 4> outs;
+        each_fwd_child(cm, [&](const auto& child) { outs.push_back(static_cast<uint64_t>(child.get_port_id())); });
+        std::sort(outs.begin(), outs.end());
+        for (uint64_t out : outs) {
+          u = sig_mix(u, out);
+        }
+      }
+    }
+    uses.push_back(u);
+  }
+  std::sort(uses.begin(), uses.end());
+  uint64_t h = sig_mix(kSeed, uses.size());
+  for (uint64_t u : uses) {
+    h = sig_mix(h, u);
+  }
+  return h;
+}
+
+uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_map<hhds::Pin_class, uint64_t>& resolved) {
+  constexpr uint64_t               kSeed = 0x84222325cbf29ce4ULL;
+  absl::InlinedVector<uint64_t, 4> uses;
+  for (const auto& e : driver.out_edges()) {
+    const auto& snk = e.sink;
+    uint64_t    u;
+    if (gu::is_graph_output_pin(snk)) {
+      u = sig_str(sig_mix(kSeed, 1), gu::pin_name_of(snk));
+    } else {
+      auto cm = snk.get_master_node();
+      if (gu::has_name(cm)) {
+        u = sig_mix(sig_str(sig_mix(kSeed, 2), gu::node_name_of(cm)), static_cast<uint64_t>(snk.get_port_id()));
+      } else {
         uint64_t cnode = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
         cnode          = sig_mix(cnode, static_cast<uint64_t>(snk.get_port_id()));
-        std::vector<uint64_t> cin;
+        absl::InlinedVector<uint64_t, 4> cin;
         for (const auto& ie : cm.inp_edges()) {
           if (ie.driver.is_const()) {
             cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
@@ -215,34 +252,106 @@ uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::P
         for (uint64_t c : cin) {
           cnode = sig_mix(cnode, c);
         }
-        std::vector<uint64_t>    outs;
-        absl::flat_hash_set<int> seen;
-        for (const auto& oe : cm.out_edges()) {
-          if (seen.insert(static_cast<int>(oe.driver.get_port_id())).second) {
-            outs.push_back(fwd_cone_sig(oe.driver, memo, on_path, depth - 1, cut));
-          }
-        }
+        absl::InlinedVector<uint64_t, 4> outs;
+        each_fwd_child(cm, [&](const auto& child) {
+          auto it = resolved.find(child);
+          I(it != resolved.end());
+          outs.push_back(it->second);
+        });
         std::sort(outs.begin(), outs.end());
         for (uint64_t o : outs) {
           cnode = sig_mix(cnode, o);
         }
-        on_path.erase(cm);
         u = cnode;
       }
     }
     uses.push_back(u);
   }
-  std::sort(uses.begin(), uses.end());  // commutative over the fanout set
+  std::sort(uses.begin(), uses.end());
   uint64_t h = sig_mix(kSeed, uses.size());
   for (uint64_t u : uses) {
     h = sig_mix(h, u);
   }
-  if (cut) {
-    truncated = true;
-  } else {
-    memo[driver] = h;
-  }
   return h;
+}
+
+// Compute the complete forward signatures in one graph walk. Kahn's order
+// identifies the part that cannot drain (every cycle plus its downstream
+// tails); those pins become conservative local anchors. Walking the drained
+// DAG in reverse then resolves every other pin exactly once. This avoids both
+// recursion failure modes of the old implementation: a cycle and a path beyond
+// the depth cap each propagated `truncated` to every ancestor and disabled all
+// memoization, producing an exponential walk on the CDC designs.
+absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::vector<hhds::Pin_class>& roots) {
+  absl::flat_hash_map<hhds::Pin_class, uint32_t> indegree;
+  std::vector<hhds::Pin_class>                   reachable;
+  reachable.reserve(roots.size());
+  for (const auto& root : roots) {
+    if (indegree.try_emplace(root, 0).second) {
+      reachable.push_back(root);
+    }
+  }
+  for (size_t i = 0; i < reachable.size(); ++i) {
+    const auto driver = reachable[i];
+    for (const auto& e : driver.out_edges()) {
+      const auto& snk = e.sink;
+      if (gu::is_graph_output_pin(snk)) {
+        continue;
+      }
+      auto cm = snk.get_master_node();
+      if (gu::has_name(cm)) {
+        continue;
+      }
+      each_fwd_child(cm, [&](const auto& child) {
+        auto [it, inserted] = indegree.try_emplace(child, 0);
+        ++it->second;
+        if (inserted) {
+          reachable.push_back(child);
+        }
+      });
+    }
+  }
+
+  std::vector<hhds::Pin_class> ready;
+  ready.reserve(reachable.size());
+  for (const auto& pin : reachable) {
+    if (indegree.find(pin)->second == 0) {
+      ready.push_back(pin);
+    }
+  }
+  for (size_t i = 0; i < ready.size(); ++i) {
+    const auto driver = ready[i];
+    for (const auto& e : driver.out_edges()) {
+      const auto& snk = e.sink;
+      if (gu::is_graph_output_pin(snk)) {
+        continue;
+      }
+      auto cm = snk.get_master_node();
+      if (gu::has_name(cm)) {
+        continue;
+      }
+      each_fwd_child(cm, [&](const auto& child) {
+        auto it = indegree.find(child);
+        I(it != indegree.end());
+        I(it->second > 0);
+        if (--it->second == 0) {
+          ready.push_back(child);
+        }
+      });
+    }
+  }
+
+  absl::flat_hash_map<hhds::Pin_class, uint64_t> resolved;
+  resolved.reserve(indegree.size());
+  for (const auto& [pin, degree] : indegree) {
+    if (degree != 0) {
+      resolved.emplace(pin, fwd_local_sig(pin));
+    }
+  }
+  for (auto it = ready.rbegin(); it != ready.rend(); ++it) {
+    resolved[*it] = fwd_resolved_sig(*it, resolved);
+  }
+  return resolved;
 }
 
 struct SinkRef {
@@ -617,7 +726,18 @@ void Partitioner::name_ports() {
   // of once per region. On xs_renametable (464 regions on one def) the forward
   // walk alone was ~15 s of a 20 s all-cache-hit `pass.abc`.
   absl::flat_hash_map<hhds::Pin_class, uint64_t> sig_memo;
-  absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_memo;
+  std::vector<hhds::Pin_class>                   fwd_roots;
+  size_t                                         fwd_root_count = 0;
+  for (const auto& ports : module_inputs_) {
+    fwd_root_count += ports.size();
+  }
+  fwd_roots.reserve(fwd_root_count);
+  for (const auto& ports : module_inputs_) {
+    for (const auto& port : ports) {
+      fwd_roots.push_back(port.driver);
+    }
+  }
+  const auto fwd_memo = fwd_cone_signatures(fwd_roots);
 
   // A boundary port becomes a wire in the region module; it must not collide
   // with a recreated internal node's name. The classic failure is a flop whose
@@ -687,9 +807,9 @@ void Partitioner::name_ports() {
     // the consumer side separates them, so a distinguishable lane gets a distinct,
     // reproducible name instead of an arbitrary-tiebreak _k suffix.
     auto fwd_sig_of = [&](const hhds::Pin_class& drv) {
-      absl::flat_hash_set<hhds::Node_class> on_path;
-      bool                                  truncated = false;
-      return fwd_cone_sig(drv, fwd_memo, on_path, 256, truncated);
+      auto it = fwd_memo.find(drv);
+      I(it != fwd_memo.end());
+      return it->second;
     };
 
     {

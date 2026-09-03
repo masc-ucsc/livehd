@@ -544,62 +544,54 @@ std::string Encoder::flop_key(std::string_view hier) const {
 // Concrete reset/initial value of a flop's `initial` pin (the reset value), as a
 // `width`-bit BV. Returns nullopt for a reset-less flop (no constant initial) —
 // its power-on value is arbitrary, so the BMC caller seeds a fresh shared symbol
-// instead. Unknown bits in the initial are masked to 0 (a defined reset), UNLESS
-// `x_as_undefined` (formal.lec.gold_x=ignore): a partially-unknown initial is a
-// DON'T-CARE power-on, so it behaves like no initial at all — both designs then
-// seed the same fresh shared symbol, i.e. the reference's X-init is bound to
-// whatever the implementation starts with (any impl choice is a legal
-// resolution). Concretizing it instead (the old behavior) split the two sides
-// at cycle 0 when only ONE side carries the ?-constant (BypassNetwork:
-// ref init `0sb1<64x?>` -> 2^64 vs the recompiled impl's 0-init).
-std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined) {
+// instead. Unknown bits in the initial are masked to 0 in the value plane.
+// Under `x_as_undefined` (formal.lec.gold_x=ignore), ONLY those literal unknown
+// bits are marked in the undef plane. The known bits remain reset constraints:
+// treating one partially-unknown word as wholly unconstrained can mask a real
+// mismatch on its known lanes (notably a packed source flop against synthesized
+// bit flops).
+template <typename Node>
+std::optional<Val> flop_initial_impl(cvc5::TermManager& tm, const Node& node, int width, bool x_as_undefined) {
   auto init_d = gu::get_driver_of_sink_name(node, "initial");
   if (init_d.is_invalid() || !init_d.is_const()) {
     return std::nullopt;
   }
   Dlop c = gu::const_of(init_d);
-  if (x_as_undefined && c.has_unknowns()) {
-    return std::nullopt;
-  }
   if (c.is_just_i64()) {
     return Val{bv_const(tm, width, static_cast<uint64_t>(c.to_just_i64())), width, c.is_negative()};
   }
-  auto bin = c.to_binary();
+  auto        bin = c.to_binary();
+  std::string ubin;
+  ubin.reserve(bin.size());
+  bool any_unknown = false;
   for (auto& ch : bin) {
     if (ch != '0' && ch != '1') {
-      ch = '0';
+      ch           = '0';
+      any_unknown  = true;
+      ubin        += '1';
+    } else {
+      ubin += '0';
     }
   }
   if (bin.empty()) {
-    bin = "0";
+    bin  = "0";
+    ubin = "0";
   }
   Val v{tm.mkBitVector(static_cast<uint32_t>(bin.size()), bin, 2), static_cast<int>(bin.size()), c.is_negative()};
-  return Val{fit_to(tm, v, width), width, c.is_negative()};
+  if (x_as_undefined && any_unknown) {
+    v.x_mask = tm.mkBitVector(static_cast<uint32_t>(ubin.size()), ubin, 2);
+  }
+  Val out{fit_to(tm, v, width), width, c.is_negative()};
+  out.x_mask = fit_x_mask_to(tm, v, width);
+  return out;
+}
+
+std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined) {
+  return flop_initial_impl(tm, node, width, x_as_undefined);
 }
 
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_node& node, int width, bool x_as_undefined) {
-  auto init_d = gu::get_driver_of_sink_name(node, "initial");
-  if (init_d.is_invalid() || !init_d.is_const()) {
-    return std::nullopt;
-  }
-  Dlop c = gu::const_of(init_d);
-  if (x_as_undefined && c.has_unknowns()) {
-    return std::nullopt;
-  }
-  if (c.is_just_i64()) {
-    return Val{bv_const(tm, width, static_cast<uint64_t>(c.to_just_i64())), width, c.is_negative()};
-  }
-  auto bin = c.to_binary();
-  for (auto& ch : bin) {
-    if (ch != '0' && ch != '1') {
-      ch = '0';
-    }
-  }
-  if (bin.empty()) {
-    bin = "0";
-  }
-  Val v{tm.mkBitVector(static_cast<uint32_t>(bin.size()), bin, 2), static_cast<int>(bin.size()), c.is_negative()};
-  return Val{fit_to(tm, v, width), width, c.is_negative()};
+  return flop_initial_impl(tm, node, width, x_as_undefined);
 }
 
 // Pipeline depth of a flop: the comptime `pipe_min` pin makes one Flop cell
@@ -2870,8 +2862,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               }
               arms.push_back(it->second.front());
             }
-            if (!sel.x_mask.isNull() || arms.empty()) {
-              out_val.x_mask = ones_w;  // unknown selector: everything may be X
+            if (arms.empty()) {
+              out_val.x_mask = ones_w;
             } else {
               auto arm_xm = [&](const Val& a) -> Term {
                 Val aw   = a;
@@ -2886,6 +2878,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                   return fail_unsupported("Hotmux arm index past the selector width");
                 }
                 u = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
+              }
+              // A non-null selector plane is not necessarily asserted: it can
+              // be a data-dependent ITE which is zero on this path. Smearing
+              // the output merely because the term exists turns a conditional
+              // X into an unconditional don't-care and can vacuously prove a
+              // bad circuit. Conservatively smear only while a selector bit is
+              // dynamically unknown; otherwise keep the selected arm's plane.
+              if (!sel.x_mask.isNull()) {
+                // sel.x_mask is already at sel's own width (fit_x_mask_to would
+                // be the identity here), so compare it against a zero of that
+                // same width -- clamped like the conservative arm below.
+                auto zero_sel    = tm_.mkBitVector(static_cast<uint32_t>(sel.width < 1 ? 1 : sel.width), 0);
+                Term sel_unknown = tm_.mkTerm(Kind::DISTINCT, {sel.x_mask, zero_sel});
+                u                = tm_.mkTerm(Kind::ITE, {sel_unknown, ones_w, u});
               }
               out_val.x_mask = u;
             }
@@ -2950,6 +2956,34 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             }
             // Any over-wide unsigned pin stamp is known zero above the concat.
             out_val.x_mask = xacc.isNull() ? zero_w : fit(Val{xacc, xw, false}, W);
+          } else if (op == Ntype_op::Not && !all.empty()) {
+            // Bitwise NOT preserves the unknown positions exactly.
+            out_val.x_mask = fit_x_mask_to(tm_, all.front(), W);
+          } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
+            // Exact per-lane four-state propagation. XOR is unknown wherever
+            // any operand is unknown. AND/OR additionally honor their
+            // controlling values (0 & X == 0, 1 | X == 1); the previous
+            // whole-word smear discarded those known results and let real LEC
+            // mismatches hide behind an unrelated X lane.
+            Term any_x      = zero_w;
+            Term controlled = zero_w;
+            for (const auto& v : all) {
+              Term vx = fit_x_mask_to(tm_, v, W);
+              if (vx.isNull()) {
+                vx = zero_w;
+              }
+              any_x = tm_.mkTerm(Kind::BITVECTOR_OR, {any_x, vx});
+              if (op != Ntype_op::Xor) {
+                Term known = tm_.mkTerm(Kind::BITVECTOR_NOT, {vx});
+                Term value = fit(v, W);
+                Term ctrl = op == Ntype_op::And ? tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {value}), known})
+                                                : tm_.mkTerm(Kind::BITVECTOR_AND, {value, known});
+                controlled = tm_.mkTerm(Kind::BITVECTOR_OR, {controlled, ctrl});
+              }
+            }
+            out_val.x_mask = op == Ntype_op::Xor
+                                 ? any_x
+                                 : tm_.mkTerm(Kind::BITVECTOR_AND, {any_x, tm_.mkTerm(Kind::BITVECTOR_NOT, {controlled})});
           } else {
             // any operand dynamically unknown anywhere -> whole result unknown
             Term any;

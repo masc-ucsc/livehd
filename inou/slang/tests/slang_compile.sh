@@ -6,8 +6,11 @@
 # Ladder mode (the bazel slang_compile-* targets):
 #   slang_compile.sh <tier> <file.v>
 # with tier one of:
-#   lec     - compile --reader slang to verilog AND lhd lec --set formal.solver=lgyosys (LEC) it against
-#             the source itself. The strongest tier.
+#   lec      - compile --reader slang to verilog AND lhd lec --set formal.solver=lgyosys (LEC) it against
+#              the source itself. The strongest general tier.
+#   lec_no_x - the lec tier plus a check that the generated Verilog has no X/Z
+#              literal. Use for fully-defined sources whose regression was a
+#              silently introduced unknown value.
 #   verilog - compile to verilog must succeed (a known LEC gap is tracked in
 #             slang_ladder.bzl next to the entry).
 #   lnast   - compile to ln:/lnast-dump + `lhd compile ln:` reload round-trip
@@ -92,8 +95,13 @@ run_one() { # <tier> <file>
     verilog)
       run_verilog_tier "$f" "$base" "$wd" || return 1
       ;;
-    lec)
+    lec | lec_no_x)
       run_verilog_tier "$f" "$base" "$wd" || return 1
+      if [ "$tier" = lec_no_x ] && grep -Eq "[0-9]+'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_]*[xXzZ?]" "$wd"/all.v; then
+        echo "FAIL(${base}): generated Verilog contains an X/Z literal"
+        grep -En "[0-9]+'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_]*[xXzZ?]" "$wd"/all.v
+        return 1
+      fi
       ${LHD} lec --set formal.solver=lgyosys --impl verilog:"$wd"/all.v --ref verilog:"$f" --top "$base" \
         --workdir "$wd"/wc -q >"$wd"/check.log 2>&1 || {
         echo "FAIL(${base}): LEC mismatch vs source"

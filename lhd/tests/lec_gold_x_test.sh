@@ -14,6 +14,8 @@
 #         non-X bits — must still REFUTE.
 # Case 3 (legacy): --set formal.lec.gold_x=zero restores the old concretize-to-0
 #         behavior, so case 1 REFUTES again.
+# Case 4 (soundness): a controlling Boolean value must keep its output known
+#         (0 & X == 0); an unrelated X cannot mask a real output mismatch.
 
 set -u
 LHD=lhd/lhd
@@ -60,4 +62,16 @@ $out"
 echo "$out" | grep -q "REFUTED" || fail "case 3: no REFUTED in output:
 $out"
 
-echo "PASS: formal.lec.gold_x=ignore accepts X refinements, refutes real bugs, zero mode preserved"
+cat > "$W/ref_control.v" <<'EOF'
+module top(input sel, output q);
+  assign q = (sel ? 1'b0 : 1'bx) & 1'b0;
+endmodule
+EOF
+sed "s/assign q.*/assign q = 1'b1;/" "$W/ref_control.v" > "$W/impl_control_bad.v"
+out=$("$LHD" lec --ref "verilog:$W/ref_control.v" --impl "verilog:$W/impl_control_bad.v" --top top 2>&1) \
+  && fail "case 4 (X under controlling zero) did not refute:
+$out"
+echo "$out" | grep -q "REFUTED" || fail "case 4: no REFUTED in output:
+$out"
+
+echo "PASS: formal.lec.gold_x=ignore accepts X refinements, preserves controlling values, refutes real bugs, zero mode preserved"

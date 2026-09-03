@@ -3959,7 +3959,22 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         std::string sg = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL order
         if (!shape_collapse_ok(sg)) {
-          continue;  // ambiguous bucket semdiff flagged as diverged: leave every memory of this shape uncollapsed
+          // A one-sided Memory bucket is not a correspondence claim at all:
+          // give each source Memory its own array so the exact name-directed
+          // Memory<->ABC-flop-bank bridge below can relate it to the mapped
+          // storage cells.  This is still conservative when no complete bank
+          // exists -- the array remains private to that side and an observable
+          // uninitialized read can only refute.  Suppress only the genuinely
+          // ambiguous case where BOTH designs still contain memories of this
+          // shape; minting the same positional key there would assert the very
+          // pairing that shape_collapse_ok rejected.
+          const auto rit      = ref_mem_shapes.find(sg);
+          const auto iit      = impl_mem_shapes.find(sg);
+          const bool ref_has  = rit != ref_mem_shapes.end() && !rit->second.empty();
+          const bool impl_has = iit != impl_mem_shapes.end() && !iit->second.empty();
+          if (ref_has && impl_has) {
+            continue;
+          }
         }
         std::string key = mem_state_key(sig, occ[sg]++);
         if (sm.count(key)) {

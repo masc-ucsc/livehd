@@ -258,6 +258,31 @@ TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
   EXPECT_EQ(lec::canon_flop_name("csrMod\\_Mhpmevent10_0"), lec::canon_flop_name("csrMod_Mhpmevent10_0"));
 }
 
+TEST(LecState, PartialUnknownInitialPreservesKnownBits) {
+  hhds::GraphLibrary lib;
+  auto               gio = lib.create_io("top");
+  gio->add_output("q", 0);
+  gio->set_bits("q", 4);
+  gio->set_unsign("q", true);
+  auto g    = gio->create_graph();
+  auto flop = graph_util::create_typed_node(*g, Ntype_op::Flop);
+  graph_util::create_const(*g, *Dlop::from_binary("10?1", /*unsigned_result=*/true))
+      .connect_sink(graph_util::setup_sink_by_name(flop, "initial"));
+
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  auto              init = lec::flop_initial(tm, flop, 4, /*x_as_undefined=*/true);
+  ASSERT_TRUE(init.has_value());
+  EXPECT_EQ(init->width, 4);
+  EXPECT_EQ(solver.simplify(init->term), tm.mkBitVector(4, "1001", 2));
+  EXPECT_EQ(solver.simplify(init->x_mask), tm.mkBitVector(4, "0010", 2));
+
+  auto concrete = lec::flop_initial(tm, flop, 4, /*x_as_undefined=*/false);
+  ASSERT_TRUE(concrete.has_value());
+  EXPECT_EQ(solver.simplify(concrete->term), tm.mkBitVector(4, "1001", 2));
+  EXPECT_TRUE(concrete->x_mask.isNull());
+}
+
 TEST(CombEquiv, AndCommutativeProven) {
   hhds::GraphLibrary lib;
   auto               ref  = build_binop(lib, "ref", Ntype_op::And, 4, false);

@@ -31,6 +31,7 @@ LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
 QLIB=inou/prp/tests/abc/test_qn.lib
 SRC=lhd/tests/lec_membank.sv
+MULTI_SRC=lhd/tests/lec_membank_multi.sv
 W="${TEST_TMPDIR:-/tmp/lhd_lec_membank_$$}"
 mkdir -p "$W"
 
@@ -41,6 +42,7 @@ fail() {
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 [ -f "$QLIB" ] || fail "missing liberty $QLIB"
 [ -f "$SRC" ] || fail "missing fixture $SRC"
+[ -f "$MULTI_SRC" ] || fail "missing fixture $MULTI_SRC"
 
 # compile_design <dir> <slang -G...>: slang -> lg:<dir>/lg (the LEC reference).
 compile_design() {
@@ -141,5 +143,27 @@ rc=$(lec_cvc5 "$BAD" "$GOOD" "$BAD/lec.json")
 grep -q '"verdict":"refuted"' "$BAD/lec.json" || fail "bad: expected REFUTED for the corrupted write address, got $(verdict "$BAD/lec.json")"
 grep -q '"class":"equiv_fail"' "$BAD/lec.json" || fail "bad: refutation is not an equiv_fail: $(cat "$BAD/lec.json")"
 echo "PASS: a netlist with a corrupted write address in the same bank shape is REFUTED (the tie hides nothing)"
+
+# ---------------------------------------------------------------------------
+# 5. two same-shaped source memories, each lowered to its named DFF bank
+# ---------------------------------------------------------------------------
+M="$W/multi"
+mkdir -p "$M"
+mrun() { "$LHD" "$@" -q --result-json "$M/r.json" || fail "$* -> $(cat "$M/r.json" 2>/dev/null)"; }
+mrun compile "$MULTI_SRC" --reader slang --top membank_multi --recipe O1 \
+    --emit-dir lg:"$M/lg" --workdir "$M/w1"
+mrun pass color synth --top membank_multi.membank_multi lg:"$M/lg" --workdir "$M/w2"
+mrun pass abc --top membank_multi.membank_multi lg:"$M/lg" --emit-dir lg:"$M/net" \
+    --set abc.library="$LIB" --workdir "$M/w3"
+mrun pass liberty gensim "$LIB" --emit-dir lg:"$M/models" --workdir "$M/w4"
+"$LHD" lec --impl lg:"$M/net" --ref lg:"$M/lg" --lib lg:"$M/models" \
+    --top membank_multi.membank_multi --set formal.solver=cvc5 --workdir "$M/wlec" \
+    -q --result-json "$M/lec.json" > "$M/lec.log" 2>&1 \
+  || fail "multi: cvc5 LEC failed: $(cat "$M/lec.json" 2>/dev/null)"
+grep -q '"verdict":"proven"' "$M/lec.json" \
+  || fail "multi: two same-shaped Memory/DFF-bank pairs did not prove: $(verdict "$M/lec.json")"
+grep -q '"bounded":false' "$M/lec.json" \
+  || fail "multi: proof is only bounded: $(verdict "$M/lec.json")"
+echo "PASS: two same-shaped source memories prove against their exact named DFF banks"
 
 echo "PASS: pass/lec memory <-> storage-flop bank bridge (Q cells, QN cells, native flops, negative control)"

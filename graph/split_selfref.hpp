@@ -50,6 +50,15 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
 // that scheduler. Returns the number of instances inlined.
 int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees = nullptr);
 
+// Repair packed word-level cycles in a simulator-private graph. This may
+// inline pure-combinational instances that participate in a multi-instance
+// ring, then resolves only the bit slices still on the recomputed residual
+// cycle. It must not run on the shared synthesis/formal library because the
+// inlining intentionally removes hierarchy cutpoints.
+//
+// Returns the number of inlined instances plus rewired packed reads.
+int repair_simulator_packed_cycles(hhds::Graph* g);
+
 // The comb nodes of `g` that sit on a WORD-LEVEL cycle, non-mutating.
 //
 // `strict` picks the scheduling model. FALSE cuts a `Sub` call and a `Memory`

@@ -24,6 +24,26 @@ using slang::ast::BinaryOperator;
 using slang::ast::ExpressionKind;
 using slang::ast::UnaryOperator;
 
+namespace {
+// A user-function call is eligible for Slang's compile-time evaluator only
+// when every referenced value is inherently static (parameter/enum/genvar) or
+// a loop variable currently bound as an EvalContext local. Slang evaluates an
+// ordinary runtime variable with no known value as X; a function whose final
+// fallback return is concrete can then appear spuriously constant.
+struct Static_call_arg_scan : public slang::ast::ASTVisitor<Static_call_arg_scan, slang::ast::VisitFlags::AllGood> {
+  slang::ast::EvalContext* ctx        = nullptr;
+  bool                     all_static = true;
+
+  void handle(const slang::ast::ValueExpressionBase& e) {
+    const auto kind = e.symbol.kind;
+    if (kind != slang::ast::SymbolKind::Parameter && kind != slang::ast::SymbolKind::EnumValue
+        && kind != slang::ast::SymbolKind::Genvar && (ctx == nullptr || ctx->findLocal(&e.symbol) == nullptr)) {
+      all_static = false;
+    }
+  }
+};
+}  // namespace
+
 const slang::ast::PackageSymbol* Slang_context::owning_package(const slang::ast::Symbol& sym) {
   // Walk out to the owning PACKAGE (a package localparam/parameter/enum member).
   // A module-local symbol has no stable package home, so callers keep folding it.
@@ -303,7 +323,30 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
   }
   // Tier 1: compile-time constant (parameters, localparams, genvars, unrolled
   // loop variables, sized literals, $clog2/$bits/... system calls).
-  if (expr.kind != ExpressionKind::Assignment && expr.kind != ExpressionKind::LValueReference) {
+  bool may_fold = expr.kind != ExpressionKind::Assignment && expr.kind != ExpressionKind::LValueReference;
+  if (may_fold && expr.kind == ExpressionKind::Call) {
+    const auto& call = expr.as<slang::ast::CallExpression>();
+    if (!call.isSystemCall()) {
+      // Slang can produce a KNOWN result for a user function whose runtime
+      // argument is X: every `if (X)` is untaken, so a trailing fallback
+      // return wins. That is simulation evaluation, not a proof that the call
+      // is constant. Minion's unreset scp_entry_q therefore folded
+      // get_way_from_scp_dest(scp_entry_q) to 1. Only accept a user-call fold
+      // when every actual is itself a fully known compile-time value; runtime
+      // calls take the synthesizable inliner below.
+      for (const auto* arg : call.arguments()) {
+        Static_call_arg_scan scan;
+        scan.ctx = &*eval_ctx_;
+        arg->visit(scan);
+        auto av = try_eval(*arg);
+        if (!scan.all_static || !av || !av->isInteger() || av->integer().hasUnknown()) {
+          may_fold = false;
+          break;
+        }
+      }
+    }
+  }
+  if (may_fold) {
     if (auto cv = try_eval(expr); cv && cv->isInteger()) {
       // Provenance: a CONST composite containing a package-param leaf (e.g.
       // `PKG_A + PKG_B`, `{5'b0, $unsigned(PKG_P)}`) skips the fold and lowers
@@ -1624,7 +1667,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // because cgen's truncation cancelled it. Keeping `shamt` at its own
   // signedness lets `sext(b) + bias` stay signed and land in 0..bi.bits.
   auto      shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)),
-                                                builder_.create_plus_stmts(shamt, std::to_string(bias)));
+                                           builder_.create_plus_stmts(shamt, std::to_string(bias)));
   auto      r       = trunc_to(shifted, sel_bits);
   return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
 }
@@ -1725,18 +1768,23 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   const auto& rv = *sub.returnValVar;
   declare_value_symbol(rv, /*force_reg=*/false);
 
-  // Lower the body with a function-return context active (Return assigns `rv`).
-  // Returns that are terminal per branch merge correctly through the existing
-  // branch machinery; mid-block early returns are not modeled.
-  bool        saved_in  = in_function_call_;
-  const auto* saved_ret = func_ret_sym_;
-  in_function_call_     = true;
-  func_ret_sym_         = &rv;
+  // Lower the body with a function-return context active (Return assigns `rv`
+  // and raises a per-call flag; statement lists guard everything after a
+  // possible return). The flag is a normal mutable local so branch merging
+  // preserves SystemVerilog early-return control flow.
+  bool        saved_in       = in_function_call_;
+  const auto* saved_ret      = func_ret_sym_;
+  auto        saved_returned = std::move(func_returned_flag_);
+  in_function_call_          = true;
+  func_ret_sym_              = &rv;
+  func_returned_flag_        = fresh_local("function_returned");
+  builder_.create_assign_stmts(func_returned_flag_, "0");
   ++inline_depth_;
   lower_statement(sub.getBody());
   --inline_depth_;
-  in_function_call_ = saved_in;
-  func_ret_sym_     = saved_ret;
+  in_function_call_   = saved_in;
+  func_ret_sym_       = saved_ret;
+  func_returned_flag_ = std::move(saved_returned);
 
   // The SubroutineSymbol (including its formal and return symbols) is shared by
   // every call site.  Returning the mutable return variable by name aliases two

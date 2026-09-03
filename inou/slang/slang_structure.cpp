@@ -3958,14 +3958,40 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // slang does not mark those as `in_generate_loop`, but their collected
         // prefix is the same as the stage's generated continuous writer.
         if (!i_writes_r && !drivers[i].prefix.empty()) {
-          bool same_generate_writer = false;
+          std::vector<size_t> same_generate_writers;
           for (size_t w : it->second) {
             if (w != i && drivers[w].prefix == drivers[i].prefix) {
-              same_generate_writer = true;
-              break;
+              same_generate_writers.push_back(w);
             }
           }
-          if (same_generate_writer) {
+          if (!same_generate_writers.empty()) {
+            // A same-generate helper can either feed that iteration's writer
+            // (`stage_in = stages[s]`; then `stages[s+1] = f(stage_in)`) or
+            // read the value produced by a sibling assignment in the SAME
+            // iteration (`next[i][j] = ... state[i][j]`; then
+            // `state[i][j] = reg[i][j]`). Symbol-only dependencies used to
+            // classify both as the first shape and made the latter read the
+            // preceding iteration's partially-written accumulator (X for its
+            // own lane). If a same-prefix writer consumes anything THIS
+            // driver writes, it is the pipeline/helper shape and must remain
+            // after this driver. Otherwise it is an independent producer of
+            // the value being read, so order it first.
+            bool feeds_same_prefix_writer = false;
+            for (size_t w : same_generate_writers) {
+              for (const auto* produced : drivers[i].writes) {
+                if (drivers[w].reads.contains(produced)) {
+                  feeds_same_prefix_writer = true;
+                  break;
+                }
+              }
+              if (feeds_same_prefix_writer) {
+                break;
+              }
+            }
+            if (!feeds_same_prefix_writer) {
+              deps[i].insert(same_generate_writers.begin(), same_generate_writers.end());
+              continue;
+            }
             if (prior_writer != SIZE_MAX) {
               deps[i].insert(prior_writer);
             }

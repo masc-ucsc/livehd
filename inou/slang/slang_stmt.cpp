@@ -23,6 +23,7 @@ namespace {
 // statement-list lowering needs it. (Two anonymous namespaces in one TU are
 // the same namespace, so this is a plain forward declaration.)
 bool subtree_has_break(const slang::ast::Statement& stmt);
+bool subtree_has_return(const slang::ast::Statement& stmt);
 }  // namespace
 
 void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
@@ -50,14 +51,25 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       for (size_t i = 0; i < list.size(); ++i) {
         lower_statement(*list[i]);
         const auto* flag = own_brk_flag();
-        if (flag == nullptr || i + 1 >= list.size() || !subtree_has_break(*list[i])) {
-          continue;
+        if (flag != nullptr && i + 1 < list.size() && subtree_has_break(*list[i])) {
+          auto guard = builder_.create_eq_stmts(*flag, "0");
+          auto if_id = builder_.create_if_stmt(false);
+          builder_.add_if_cond(if_id, guard);
+          builder_.push_stmts(builder_.add_if_stmts(if_id));
+          ++arms;
         }
-        auto guard = builder_.create_eq_stmts(*flag, "0");
-        auto if_id = builder_.create_if_stmt(false);
-        builder_.add_if_cond(if_id, guard);
-        builder_.push_stmts(builder_.add_if_stmts(if_id));
-        ++arms;
+        // A SystemVerilog `return` ends the inlined function, not merely its
+        // current branch. Keep the remainder of every enclosing sequential
+        // list behind the per-call returned flag. This models the common
+        // package-helper shape `if (...) return A; ...; return Z;`; previously
+        // the final return always overwrote the earlier one.
+        if (in_function_call_ && !func_returned_flag_.empty() && i + 1 < list.size() && subtree_has_return(*list[i])) {
+          auto guard = builder_.create_eq_stmts(func_returned_flag_, "0");
+          auto if_id = builder_.create_if_stmt(false);
+          builder_.add_if_cond(if_id, guard);
+          builder_.push_stmts(builder_.add_if_stmts(if_id));
+          ++arms;
+        }
       }
       while (arms-- > 0) {
         builder_.pop_stmts();
@@ -178,6 +190,9 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           }
           current_assign_nonblocking_ = saved_nb;
           clear_pending_loc();
+        }
+        if (!func_returned_flag_.empty()) {
+          builder_.create_assign_stmts(func_returned_flag_, "1");
         }
         return;
       }
@@ -650,6 +665,16 @@ bool subtree_has_break(const slang::ast::Statement& stmt) {
       [&](auto&, const slang::ast::WhileLoopStatement&) {},
       [&](auto&, const slang::ast::RepeatLoopStatement&) {},
       [&](auto&, const slang::ast::ForeachLoopStatement&) {});
+  stmt.visit(v);
+  return found;
+}
+
+bool subtree_has_return(const slang::ast::Statement& stmt) {
+  bool found = false;
+  auto v     = slang::ast::makeVisitor([&](auto& visitor, const slang::ast::ReturnStatement&) {
+    found = true;
+    (void)visitor;
+  });
   stmt.visit(v);
   return found;
 }

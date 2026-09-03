@@ -1453,7 +1453,8 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
   }
 }
 
-int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees) {
+static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>* inlined_callees,
+                                        bool include_multiinstance_cycles) {
   // A replicated Sub is never a false-loop target: dissolving one keeps a
   // single body copy and drops count-1 replicas (see graph/replica_desc.hpp).
   // Physical backends materialize it only in their private output state.
@@ -1527,7 +1528,10 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
   // until no on-false-loop comb-closure Sub remains (bounded).
   int flattened = 0;
   for (int round = 0; round < 8; ++round) {
-    std::vector<hhds::Node_class> targets;
+    // Collect the eligible instances FIRST: a body with no ordinary Sub can
+    // never have a target, and the strict cycle walk below is a full-graph
+    // topological sort that would otherwise run once per round per definition.
+    std::vector<hhds::Node_class> candidates;
     for (auto node : g->body().nodes()) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
@@ -1535,7 +1539,19 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
       if (node.is_loop_subnode()) {
         continue;  // count occurrences, not one — inlining here drops count-1 replicas
       }
-      if (!sub_closure_is_comb(node.get_subnode_graph(), sub_cache) || !on_false_loop(node)) {
+      candidates.push_back(node);
+    }
+    if (candidates.empty()) {
+      break;
+    }
+    absl::flat_hash_set<hhds::Node_class> strict_cycle;
+    if (include_multiinstance_cycles) {
+      word_level_cycle_nodes(g, /*strict=*/true, strict_cycle);
+    }
+    std::vector<hhds::Node_class> targets;
+    for (const auto& node : candidates) {
+      const bool selected = include_multiinstance_cycles ? strict_cycle.contains(node) : on_false_loop(node);
+      if (!sub_closure_is_comb(node.get_subnode_graph(), sub_cache) || !selected) {
         continue;
       }
       targets.push_back(node);
@@ -1543,14 +1559,14 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
     if (targets.empty()) {
       break;
     }
-    flattened += static_cast<int>(targets.size());
 
     for (auto& sub : targets) {
       auto cg  = sub.get_subnode_graph();
       auto sio = sub.get_subnode_io();
       if (!cg || !sio) {
-        continue;
+        continue;  // malformed instance: nothing was inlined, so it does not count
       }
+      ++flattened;
       if (inlined_callees != nullptr) {
         inlined_callees->emplace_back(sio->get_name());
       }
@@ -1664,6 +1680,10 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
   return flattened;
 }
 
+int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees) {
+  return flatten_false_loop_subs_body(g, inlined_callees, /*include_multiinstance_cycles=*/false);
+}
+
 // The pass walks packed bit-slices RECURSIVELY, one frame per nesting level, at
 // roughly kSplitFrameBytes a frame. A stack that only reaches ~1000 frames is
 // not deep enough for XiangShan's packed structs, and the residual "word-level
@@ -1744,6 +1764,64 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_h
   return true;
 }
 }  // namespace
+
+int repair_simulator_packed_cycles(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+
+  // One probe for the whole repair. The non-strict walk below scores an INDUCED
+  // subgraph of this one (Memory/Sub and their edges are simply dropped), so an
+  // empty strict cycle means there is nothing for either stage to do -- and this
+  // runs over every definition of the library on every `inou.cgen.sim`.
+  {
+    absl::flat_hash_set<hhds::Node_class> any_cycle;
+    word_level_cycle_nodes(g, /*strict=*/true, any_cycle);
+    if (any_cycle.empty()) {
+      return 0;
+    }
+  }
+
+  // The caller owns a simulator-private library, so hierarchy is expendable
+  // here. Expose a cross-instance false loop as ordinary logic first; stateful
+  // callees remain boundaries because their closure fails the comb predicate.
+  int repaired = flatten_false_loop_subs_body(g, nullptr, /*include_multiinstance_cycles=*/true);
+
+  // One splitter round at a time, always against a freshly computed residual
+  // cycle. A blind whole-graph fixpoint keeps producing identity slices after
+  // the scheduling obstruction has disappeared.
+  for (int round = 0; round < 16; ++round) {
+    absl::flat_hash_set<hhds::Node_class> cycle;
+    word_level_cycle_nodes(g, /*strict=*/false, cycle);
+    if (cycle.empty()) {
+      break;
+    }
+
+    auto result  = split_packed_selfref_wires_body(g,
+                                                  kSplitInlineDepth,
+                                                  &cycle,
+                                                  /*scoped_buffer=*/nullptr,
+                                                  /*scoped_driver=*/nullptr,
+                                                  /*max_rounds=*/1);
+    repaired    += result.total;
+
+    if ((result.stop_reasons & kStopDepth) != 0) {
+      cycle.clear();
+      word_level_cycle_nodes(g, /*strict=*/false, cycle);
+      if (!cycle.empty()) {
+        Split_result deep;
+        if (run_deep_on_big_stack(g, deep, &cycle, nullptr, nullptr, /*max_rounds=*/1)) {
+          repaired     += deep.total;
+          result.total += deep.total;
+        }
+      }
+    }
+    if (result.total == 0) {
+      break;
+    }
+  }
+  return repaired;
+}
 
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
                               const std::vector<hhds::Node_class>& early_readers) {

@@ -10,6 +10,7 @@
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
+#include "split_selfref.hpp"
 
 namespace {
 
@@ -243,7 +244,7 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
   gu::set_unsign(graph->get_input_pin("low"));
 
   auto packed_or = gu::create_typed_node(*graph, Ntype_op::Or);
-  auto packed = packed_or.create_driver_pin(0);
+  auto packed    = packed_or.create_driver_pin(0);
   gu::set_bits(packed, 16);
   gu::set_unsign(packed);
 
@@ -289,6 +290,111 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
   gu::set_unsign(feedback_packed);
   feedback_packed.connect_sink(packed_or.create_sink_pin(0));
   return graph;
+}
+
+std::shared_ptr<hhds::Graph> make_cross_child_packed_feedback(std::string_view tag) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
+
+  // One pure-comb child forwards the entire packed record. A second consumes
+  // only bit 8 and produces only the low byte. Treating either call as one
+  // word-valued node invents a loop; the real cones are high -> bit8 -> low.
+  auto select_io = lib.create_io(std::string(tag) + "_select");
+  select_io->add_input("record", 0);
+  select_io->add_input("alternate", 1);
+  select_io->add_input("choice", 2);
+  select_io->add_output("selected", 3);
+  select_io->set_bits("record", 16);
+  select_io->set_bits("alternate", 16);
+  select_io->set_bits("choice", 1);
+  select_io->set_bits("selected", 16);
+  auto select = select_io->create_graph();
+  auto mux    = gu::create_typed_node(*select, Ntype_op::Mux);
+  select->get_input_pin("choice").connect_sink(mux.create_sink_pin(0));
+  select->get_input_pin("record").connect_sink(mux.create_sink_pin(1));
+  select->get_input_pin("alternate").connect_sink(mux.create_sink_pin(2));
+  auto mux_value = mux.create_driver_pin(0);
+  gu::set_bits(mux_value, 16);
+  gu::set_unsign(mux_value);
+  auto masked = gu::create_typed_node(*select, Ntype_op::And);
+  mux_value.connect_sink(masked.create_sink_pin(0));
+  gu::create_const(*select, *Dlop::create_integer(0xffff)).connect_sink(masked.create_sink_pin(0));
+  auto masked_value = masked.create_driver_pin(0);
+  gu::set_bits(masked_value, 16);
+  gu::set_unsign(masked_value);
+  auto merge = gu::create_typed_node(*select, Ntype_op::Or);
+  masked_value.connect_sink(merge.create_sink_pin(0));
+  gu::create_const(*select, *Dlop::create_integer(0)).connect_sink(merge.create_sink_pin(0));
+  auto selected = merge.create_driver_pin(0);
+  gu::set_bits(selected, 16);
+  gu::set_unsign(selected);
+  selected.connect_sink(select->get_output_pin("selected"));
+
+  auto low_io = lib.create_io(std::string(tag) + "_low");
+  low_io->add_input("shift", 0);
+  low_io->add_input("data", 1);
+  low_io->add_output("low", 2);
+  low_io->set_bits("shift", 1);
+  low_io->set_bits("data", 8);
+  low_io->set_bits("low", 8);
+  auto low     = low_io->create_graph();
+  auto low_xor = gu::create_typed_node(*low, Ntype_op::Xor);
+  low->get_input_pin("shift").connect_sink(low_xor.create_sink_pin(0));
+  low->get_input_pin("data").connect_sink(low_xor.create_sink_pin(0));
+  auto low_value = low_xor.create_driver_pin(0);
+  gu::set_bits(low_value, 8);
+  gu::set_unsign(low_value);
+  low_value.connect_sink(low->get_output_pin("low"));
+
+  auto parent_io = lib.create_io(std::string(tag) + "_parent");
+  parent_io->add_input("high", 0);
+  parent_io->add_input("data", 1);
+  parent_io->add_input("choice", 2);
+  parent_io->add_output("record", 3);
+  parent_io->set_bits("high", 1);
+  parent_io->set_bits("data", 8);
+  parent_io->set_bits("choice", 1);
+  parent_io->set_bits("record", 16);
+  auto parent = parent_io->create_graph();
+
+  auto packed_or = gu::create_typed_node(*parent, Ntype_op::Or);
+  auto packed    = packed_or.create_driver_pin(0);
+  gu::set_bits(packed, 16);
+  gu::set_unsign(packed);
+
+  auto select_call = gu::create_typed_node(*parent, Ntype_op::Sub);
+  select_call.set_subnode(select_io);
+  packed.connect_sink(select_call.create_sink_pin(0));
+  parent->get_input_pin("choice").connect_sink(select_call.create_sink_pin(2));
+  auto selected_record = select_call.create_driver_pin(3);
+  gu::set_bits(selected_record, 16);
+  gu::set_unsign(selected_record);
+
+  auto high_read = gu::create_typed_node(*parent, Ntype_op::Get_mask);
+  selected_record.connect_sink(gu::setup_sink_by_name(high_read, "a"));
+  gu::create_const(*parent, *Dlop::create_integer(0x100)).connect_sink(gu::setup_sink_by_name(high_read, "mask"));
+  auto shift = high_read.create_driver_pin(0);
+  gu::set_bits(shift, 1);
+  gu::set_unsign(shift);
+
+  auto low_call = gu::create_typed_node(*parent, Ntype_op::Sub);
+  low_call.set_subnode(low_io);
+  shift.connect_sink(low_call.create_sink_pin(0));
+  parent->get_input_pin("data").connect_sink(low_call.create_sink_pin(1));
+  auto computed_low = low_call.create_driver_pin(2);
+  gu::set_bits(computed_low, 8);
+  gu::set_unsign(computed_low);
+  computed_low.connect_sink(packed_or.create_sink_pin(0));
+
+  auto high_shift = gu::create_typed_node(*parent, Ntype_op::SHL);
+  parent->get_input_pin("high").connect_sink(high_shift.create_sink_pin(0));
+  gu::create_const(*parent, *Dlop::create_integer(8)).connect_sink(high_shift.create_sink_pin(1));
+  auto shifted_high = high_shift.create_driver_pin(0);
+  gu::set_bits(shifted_high, 16);
+  gu::set_unsign(shifted_high);
+  shifted_high.connect_sink(packed_or.create_sink_pin(0));
+  shifted_high.connect_sink(select_call.create_sink_pin(1));
+  packed.connect_sink(parent->get_output_pin("record"));
+  return parent;
 }
 
 std::shared_ptr<hhds::Graph> make_memory_with_late_port_clock(std::string_view tag) {
@@ -417,6 +523,22 @@ TEST(SimColorPlan, CompactLoopDiscoveryIsConstantSizeAndCutsCarry) {
   EXPECT_EQ(text.find("nid"), std::string::npos);
   EXPECT_NE(text.find("kind=loop-control"), std::string::npos);
   EXPECT_NE(text.find("kind=loop-carry cut=true"), std::string::npos);
+}
+
+TEST(SimColorPlan, PrivateRepairSplitsPackedFeedbackAcrossPureCombChildren) {
+  auto                                  graph = make_cross_child_packed_feedback("cross_child_packed_feedback");
+  absl::flat_hash_set<hhds::Node_class> before;
+  gu::word_level_cycle_nodes(graph.get(), /*strict=*/true, before);
+  EXPECT_FALSE(before.empty());
+
+  EXPECT_GT(gu::repair_simulator_packed_cycles(graph.get()), 0);
+  auto after = livehd::sim::Color_plan::discover(graph.get());
+  EXPECT_TRUE(after.complete()) << (after.errors().empty() ? "" : after.errors().front());
+  EXPECT_TRUE(after.validate_retained_handles());
+
+  absl::flat_hash_set<hhds::Node_class> residual;
+  gu::word_level_cycle_nodes(graph.get(), /*strict=*/false, residual);
+  EXPECT_TRUE(residual.empty());
 }
 
 TEST(SimColorPlan, MemoryClockOnLaterPortCreatesStateUpdate) {

@@ -694,8 +694,8 @@ else
   RESET_STMT=""
 fi
 
-run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-              $(gate_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+              $(gate_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
@@ -761,8 +761,16 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
   # be empty and the greps below would vacuously "pass" any pair of designs.
-  run_equiv_yosys -p "$(gold_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-               $(gate_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+  # Preserve don't-care state until both sides are in the miter.  Plain `opt`
+  # may replace a resetless DFFE whose written value is constant with that
+  # constant, including at time zero.  The structurally different mapped side
+  # can retain the flop until after flattening; the later `-set-init-zero` then
+  # compares constant-one GOLD against zero-initialized GATE and manufactures
+  # a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
+  # two equivalent machines intact before the shared initialization policy is
+  # applied by SAT.
+  run_equiv_yosys -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+               $(gate_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter

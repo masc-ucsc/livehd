@@ -130,6 +130,26 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The occurrence-wide color planner may refine a child packed-input read to one
+# lane of its caller's concat. A constant lane is not a bindable Value_use, so
+# its slice coordinates must stay absolute on the original packed carrier.
+sh_test(
+    name = "lhd_sim_packed_child_input_test",
+    size = "large",
+    srcs = ["lhd_sim_packed_child_input_test.sh"],
+    data = ["//lhd"],
+)
+
+# C++ keeps class tags and ordinary member identifiers in overlapping lookup
+# scopes.  Two child occurrences, where the first instance is named exactly
+# like its module, must therefore still host-compile and simulate.
+sh_test(
+    name = "lhd_sim_sub_type_shadow_test",
+    size = "large",
+    srcs = ["lhd_sim_sub_type_shadow_test.sh"],
+    data = ["//lhd"],
+)
+
 # Incremental regeneration of the sim tree: a no-op re-setup and a comment-only
 # Pyrope edit must rewrite NO generated C++, and a body-only edit must rewrite
 # the module's .cpp but NOT its .hpp (else every parent's object is needlessly
@@ -1396,6 +1416,7 @@ sh_test(
     srcs = ["lhd_lec_membank_test.sh"],
     data = _FLOW_DATA + [
         "lec_membank.sv",
+        "lec_membank_multi.sv",
         "//inou/prp:abc_tests",
     ],
 )

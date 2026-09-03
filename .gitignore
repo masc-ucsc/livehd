@@ -58,3 +58,7 @@ difftest_*/
 #current_opt_loop_incr.html
 #current_opt_loop_synth.html
 /color_stats.json
+
+# ABC writes its interactive command history into the CWD whenever pass.abc runs
+# a script through the embedded shell.
+/abc.history

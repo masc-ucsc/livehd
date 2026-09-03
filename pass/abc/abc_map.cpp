@@ -28,6 +28,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -5094,7 +5095,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   // pass 3b: wire each rebuilt blackbox node's combinational inputs from the
   // captured PO drivers (multi-bit reassembled with one Concat).
-  absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> reassembled_bbox_input;
+  // The same source can feed more than one native boundary through different
+  // explicit width windows (two Concat lanes are the common case).  Width and
+  // signedness are part of the cast, so caching only by source can reconnect a
+  // previously assembled 6-bit value to a later 5-bit lane and leave an
+  // invalid over-wide Concat in the mapped graph.
+  using Bbox_input_key = std::tuple<hhds::Pin_class, int, bool>;
+  absl::flat_hash_map<Bbox_input_key, hhds::Pin_class> reassembled_bbox_input;
   for (size_t bx = 0; bx < bboxes.size(); ++bx) {
     auto& bb = bboxes[bx];
     auto& br = bbox_recon[bx];
@@ -5102,7 +5109,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       int   w    = bb.ins[ii].bits;
       auto  sink = br.node.create_sink_pin(bb.ins[ii].port_id);
       auto& dbit = br.in_bit[ii];
-      if (auto it = reassembled_bbox_input.find(bb.ins[ii].drv); it != reassembled_bbox_input.end()) {
+      const Bbox_input_key cache_key{bb.ins[ii].drv, w, bb.ins[ii].sign};
+      if (auto it = reassembled_bbox_input.find(cache_key); it != reassembled_bbox_input.end()) {
         it->second.connect_sink(sink);
         continue;
       }
@@ -5113,12 +5121,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       if (w == 1 && !bb.ins[ii].sign) {
         dbit[0].connect_sink(sink);  // unsigned 1-bit: drive the sink directly
-        reassembled_bbox_input.emplace(bb.ins[ii].drv, dbit[0]);
+        reassembled_bbox_input.emplace(cache_key, dbit[0]);
         continue;
       }
       auto acc = assemble_bits(dbit, bb.ins[ii].sign);
       acc.connect_sink(sink);
-      reassembled_bbox_input.emplace(bb.ins[ii].drv, acc);
+      reassembled_bbox_input.emplace(cache_key, acc);
     }
   }
 

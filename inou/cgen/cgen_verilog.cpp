@@ -2396,20 +2396,18 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
 
     // The emitted `{...}` is ALWAYS sum(w) bits wide. The driver pin's stamped
     // bits is not consulted: the interleaved const sinks carry the INTENDED bit
-    // spacing, and LGraph passes are free to narrow a lane driver's real width
-    // without that changing where any lane sits. This used to clip to
-    // `min(bits_of(dpin), total)` and DROP whole MSB lanes, which silently
-    // changed the value of every design where anything narrowed the pin.
-    const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes);
-    I(lane_bad.empty(), lane_bad.c_str());
+    // spacing. A narrower driver extends and an over-wide driver is explicitly
+    // sliced by lane_at_width, matching the Concat cell's
+    // `(value mod 2^window)` semantics. This used to clip the WHOLE concat to
+    // `min(bits_of(dpin), total)` and drop MSB lanes; per-lane casts do not.
 
     std::string body;
     for (const auto& l : lanes) {
       if (!body.empty()) {
         absl::StrAppend(&body, ",");
       }
-      // Exactly its declared window: a narrower driver sign-extends up to it
-      // (lane_at_width), a wider one cannot reach here.
+      // Exactly its declared window: lane_at_width extends a narrower driver
+      // and truncates an over-wide one before the surrounding concat is built.
       absl::StrAppend(&body, lane_at_width(l.value, l.width));
     }
     final_expr = absl::StrCat("{", body, "}");

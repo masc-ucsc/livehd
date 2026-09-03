@@ -488,18 +488,18 @@ private:
   void        lower_members(const slang::ast::Scope& scope);
   void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
   void        lower_comb_process(const slang::ast::Statement& body);
-  void lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
-                        std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
-  void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
-                            bool edge_pos);
-  void finalize_pending_async_resets();
-  void lower_instance(const slang::ast::InstanceSymbol& inst);
+  void        lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
+                               std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
+  void        emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
+                                   bool edge_pos);
+  void        finalize_pending_async_resets();
+  void        lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
   // no definition, so port directions come from the collect-pass inference
   // (`conn_is_out`, aligned with getPortConnections()). Lowered as a func_call
   // to the definition name; the callee is recorded as an external module on
   // the unit's Lnast so the pyrope emission writes its `import` + call.
-  void lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
+  void        lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
   // Unknown-module definition names already diagnosed (one warning per name,
   // not per instance — XS-scale designs instantiate one SRAM macro x100s).
   absl::flat_hash_set<std::string> unknown_warned_;
@@ -752,6 +752,10 @@ private:
   // function-inlining context (consumed by the Return statement handler)
   bool        in_function_call_                   = false;
   const slang::ast::VariableSymbol* func_ret_sym_ = nullptr;
+  // Runtime flag for an inlined function's early-return control flow. A return
+  // raises it and statement-list lowering guards the remaining statements.
+  // This is saved/restored across nested function calls, like func_ret_sym_.
+  std::string                       func_returned_flag_;
   int                               inline_depth_ = 0;
   std::string                       read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range);
   std::string                       booleanize(std::string v);

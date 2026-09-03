@@ -653,7 +653,31 @@ bool Lnast_prp_writer::is_bundle_field(std::string_view name) const {
   if (it == bundle_fields_.end()) {
     return false;
   }
-  return it->second.count(std::string(unquote(name.substr(dot + 1)))) != 0;
+  const auto tail = name.substr(dot + 1);
+  if (it->second.count(std::string(unquote(tail))) != 0) {
+    return true;
+  }
+
+  // A nested keyword leaf is escaped component-wise by quote_kw_path:
+  // `io.toS1.`sat``. The whole-tail unquote above deliberately cannot peel
+  // that spelling because the backticks surround only `sat`; canonicalize
+  // those component quotes before probing the bare bundle-field index. Without
+  // this fallback decl_prefix mistakes the output leaf for a new scalar and
+  // emits the illegal `const io.toS1.`sat` = ...` tuple-path declaration.
+  std::string bare_tail;
+  bare_tail.reserve(tail.size());
+  bool in_quote = false;
+  for (size_t i = 0; i < tail.size(); ++i) {
+    const char c = tail[i];
+    if (c == '\\' && in_quote && i + 1 < tail.size()) {
+      bare_tail.push_back(tail[++i]);
+    } else if (c == '`') {
+      in_quote = !in_quote;
+    } else {
+      bare_tail.push_back(c);
+    }
+  }
+  return !in_quote && it->second.count(bare_tail) != 0;
 }
 
 std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {

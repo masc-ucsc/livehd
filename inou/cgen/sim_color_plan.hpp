@@ -134,6 +134,7 @@ public:
     bool          unsign              = false;
     bool          top_input           = false;
     bool          preextracted        = false;  // consumer Get_mask is the identity on this lane
+    std::string   literal;                      // fixed packed lane selected at an occurrence boundary
   };
 
   struct Boundary_consumer {
@@ -164,7 +165,7 @@ public:
     hhds::Port_id                  public_port         = 0;
     uint32_t                       width               = 1;
     bool                           unsign              = false;
-    std::string                    literal;  // non-empty only for an observation alias driven by a constant
+    std::string                    literal;  // non-empty for a constant source (observation or packed lane)
     std::vector<Boundary_consumer> consumers;
   };
 

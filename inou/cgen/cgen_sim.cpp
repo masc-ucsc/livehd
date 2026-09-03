@@ -1346,9 +1346,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
             .fatal();
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
-      const int  total    = livehd::graph_util::concat_total_width(lanes);  // already decoded above
-      const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes);
-      I(lane_bad.empty(), lane_bad.c_str());
+      const int total = livehd::graph_util::concat_total_width(lanes);  // already decoded above
       // Each lane is materialized as a canonical unsigned Slop_u<w>: the ctor's
       // one zext_to<w> is what turns an over-wide or NEGATIVE lane into its
       // two's-complement window (-1 at w=3 becomes 0b111), and it is exactly the
@@ -2988,9 +2986,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
         auto        cone = livehd::latch_contract::clock_op_of(d, design_clocks);
         std::string dbg  = absl::StrCat("[clkdbg] flop ",
-                                        debug_name(node),
-                                        " clock_op_of=",
-                                        cone ? (cone->clock_inverted ? "INVERTED" : (cone->div != 1 ? "DIV" : "cone")) : "nullopt");
+                                       debug_name(node),
+                                       " clock_op_of=",
+                                       cone ? (cone->clock_inverted ? "INVERTED" : (cone->div != 1 ? "DIV" : "cone")) : "nullopt");
         if (cone) {
           absl::StrAppend(&dbg,
                           " clock=",
@@ -4492,6 +4490,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     const auto  it     = layout.member.find(site.node.get_class_index());
     return it == layout.member.end() ? std::string{} : occurrence_prefix(site.node) + it->second;
   };
+  const auto occurrence_sub_member = [&](const livehd::sim::Color_plan::Site& site) {
+    // An ordinary Sub occurrence's path already includes that Sub step.  State
+    // sites live *inside* the path and need occurrence_member() to append their
+    // own field, but appending a Sub's local field repeats the instance name
+    // (`u.u`).  A root compact-loop control has no path step, so it keeps the
+    // local-layout spelling.
+    std::string member = occurrence_prefix(site.node);
+    if (!member.empty()) {
+      member.pop_back();  // trailing '.'
+      return member;
+    }
+    return occurrence_member(site);
+  };
   const auto llvm_memory_gate_method_name = [&](const livehd::sim::Color_plan::Site& site) {
     std::string name = absl::StrCat("__llvm_memory_gate_", site.storage_id);
     for (char& c : name) {
@@ -4665,9 +4676,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // The direct rung consumes the plan's execution slots over the complete
   // ordinary occurrence tree. Unsupported state protocols fail closed here;
   // no state class is silently approximated by the retired module scheduler.
-  const bool staged_flat            = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
-                                      && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
-  bool       direct_color_supported = color_root;
+  const bool staged_flat = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
+                           && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
+  bool direct_color_supported = color_root;
   if (direct_color_supported) {
     const bool  color_debug      = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
     const auto& hierarchy_clocks = hierarchy_clocks_for_root();
@@ -4677,15 +4688,42 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto& site    = color_plan_->sites()[version.base_site];
         const auto  op      = type_op_of(site.node.base_node());
         if (op == Ntype_op::Sub) {
-          const bool supported = site.kind == livehd::sim::Color_plan::Site_kind::loop_control
-                                 && site.node.base_node().is_loop_subnode() && site.node.get_graph() == g
-                                 && !occurrence_member(site).empty();
+          bool supported = !occurrence_sub_member(site).empty();
+          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+            supported &= site.node.base_node().is_loop_subnode() && site.node.get_graph() == g;
+          } else if (site.kind == livehd::sim::Color_plan::Site_kind::instance) {
+            bool has_output = false;
+            if (const auto sio = site.node.base_node().get_subnode_io()) {
+              has_output = std::ranges::any_of(sio->get_output_pin_decls(),
+                                               [&](const auto& decl) { return decl.port_id == version.output_port; });
+            }
+            supported &= version.role == livehd::sim::Color_plan::Version_role::data && has_output;
+          } else {
+            supported = false;
+          }
           if (color_debug && !supported) {
+            const std::string graph_name = site.node.get_graph() == nullptr ? "?" : std::string(site.node.get_graph()->get_name());
+            const std::string instance_name = livehd::graph_util::has_name(site.node.base_node())
+                                                  ? std::string(livehd::graph_util::node_name_of(site.node.base_node()))
+                                                  : "?";
+            std::string       output_name{"?"};
+            if (const auto sio = site.node.base_node().get_subnode_io()) {
+              for (const auto& decl : sio->get_output_pin_decls()) {
+                if (decl.port_id == version.output_port) {
+                  output_name = decl.name;
+                  break;
+                }
+              }
+            }
             std::fprintf(stderr,
-                         "[color-direct] unsupported sub version role=%u depth=%zu loop=%s\n",
+                         "[color-direct] unsupported sub version role=%u depth=%zu loop=%s graph=%s instance=%s output=p%u:%s\n",
                          static_cast<unsigned>(version.role),
                          site.node.path().steps().size(),
-                         site.node.base_node().is_loop_subnode() ? "yes" : "no");
+                         site.node.base_node().is_loop_subnode() ? "yes" : "no",
+                         graph_name.c_str(),
+                         instance_name.c_str(),
+                         static_cast<unsigned>(version.output_port),
+                         output_name.c_str());
           }
           direct_color_supported &= supported;
           continue;
@@ -5182,7 +5220,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   for (const auto& s : subs) {
-    hout->append(absl::StrCat("  ",
+    // Use an elaborated type specifier.  A legal RTL instance may have the
+    // same name as its module (`foo foo`); after that member declaration the
+    // ordinary identifier `foo` hides the class name for later declarations
+    // in the same C++ scope.  `struct foo` keeps looking in the tag namespace,
+    // so a second specialized occurrence still compiles.
+    hout->append(absl::StrCat("  struct ",
                               s.loop ? s.loop_struct : s.callee_struct,
                               " ",
                               s.inst,
@@ -7420,8 +7463,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // unconditional evaluation (transparency semantics), and VCD builds keep
       // the eager form (an X-window dump reads dins the gate would skip).
       const bool  lazy_guard = !f.is_latch && !latch_low && !latch_high && vcd_file.empty()
-                               && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
-                               && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
+                              && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
+                              && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
       std::string gcond;
       if (lazy_guard) {
         if (with_cen) {
@@ -8941,7 +8984,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       return {};
     };
-    const auto occurrence_guard_expr = [&](const hhds::Occurrence_pin&             pin,
+    const auto occurrence_guard_expr       = [&](const hhds::Occurrence_pin&             pin,
                                            const hhds::Pin_class&                  clock_root,
                                            livehd::sim::Color_plan::Execution_slot target_slot,
                                            int depth) { return occurrence_guard_value(pin, clock_root, target_slot, depth).text; };
@@ -9203,6 +9246,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       return absl::StrCat("Slop<", width + 1, ">::get_mask_op_opt(", value, ", ", lo, ", ", hi, ")");
     };
     const auto direct_read_expr = [&](const livehd::sim::Color_plan::Boundary_slot& slot, size_t slot_index) {
+      if (!slot.literal.empty()) {
+        auto literal = slot.literal;
+        if (unknown_zero_) {
+          std::replace(literal.begin(), literal.end(), '?', '0');
+        }
+        return sim_const_expr(literal, std::to_string(slot.width));
+      }
       if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
         return direct_slot_read[slot_index];
       }
@@ -11696,8 +11746,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!secondary_state && !reference_clock.empty()) {
           const auto input = node.get_graph()->get_input_pin(reference_clock);
           if (!input.is_invalid() && local_clocks_for(node.get_graph()).is_clock(input)) {
-            const bool clock_high            = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
-                                               || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
+            const bool clock_high = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
+                                    || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
             pin2var[input.get_class_index()] = absl::StrCat(slop_u_ && is_unsign(input) ? "Slop_u<1>" : "Slop<1>",
                                                             "::create_integer(",
                                                             clock_high ? "1" : "0",
@@ -11707,68 +11757,69 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
         }
         if (op == Ntype_op::Sub) {
-          I(site.kind == livehd::sim::Color_plan::Site_kind::loop_control);
-          const auto loop = node.subnode_loop();
-          const auto sio  = node.get_subnode_io();
-          I(loop.has_value() && sio != nullptr);
-          const auto loop_layout = direct_layout(node.get_graph()).member.find(node.get_class_index());
-          I(loop_layout != direct_layout(node.get_graph()).member.end());
-          const auto& loop_member = loop_layout->second;
-          for (const auto& decl : sio->get_input_pin_decls()) {
-            if (loop->index_input && decl.port_id == *loop->index_input) {
-              continue;  // supplied as first + ordinal*step by the native wrapper
-            }
-            const auto sink = find_sink_pin(node, decl.name);
-            if (sink.is_invalid()) {
-              continue;
-            }
-            hhds::Pin_class driver;
-            for (const auto& edge : sink.inp_edges()) {
-              if (edge.driver.get_master_node() != node) {
-                driver = edge.driver;
-                break;
+          const auto sio = node.get_subnode_io();
+          I(sio != nullptr);
+          const auto sub_member = occurrence_sub_member(site);
+          I(!sub_member.empty());
+          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+            const auto loop = node.subnode_loop();
+            I(loop.has_value());
+            for (const auto& decl : sio->get_input_pin_decls()) {
+              if (loop->index_input && decl.port_id == *loop->index_input) {
+                continue;  // supplied as first + ordinal*step by the native wrapper
               }
-            }
-            if (driver.is_invalid()) {
-              continue;  // descriptor-only carry/activation input
-            }
-            const int width = decl.bits > 0 ? static_cast<int>(decl.bits) : 1;
-            fout->append(absl::StrCat("  ",
-                                      loop_member,
-                                      ".__gen += slop_update(",
-                                      loop_member,
-                                      ".__in.",
-                                      cpp_port_path(decl.name),
-                                      ", ",
-                                      operand(driver, width),
-                                      ");\n"));
-            if (const auto child = node.get_subnode_graph();
-                child && clock_guard_ports(child, port_cache).contains(static_cast<uint32_t>(decl.port_id))) {
-              const auto root_pin = livehd::latch_contract::control_root(driver).net;
-              I(!root_pin.is_invalid() && livehd::graph_util::is_graph_input_pin(root_pin));
-              const auto field = input_field(root_pin.get_port_id());
-              I(!field.empty());
+              const auto sink = find_sink_pin(node, decl.name);
+              if (sink.is_invalid()) {
+                continue;
+              }
+              hhds::Pin_class driver;
+              for (const auto& edge : sink.inp_edges()) {
+                if (edge.driver.get_master_node() != node) {
+                  driver = edge.driver;
+                  break;
+                }
+              }
+              if (driver.is_invalid()) {
+                continue;  // descriptor-only carry/activation input
+              }
+              const int width = decl.bits > 0 ? static_cast<int>(decl.bits) : 1;
               fout->append(absl::StrCat("  ",
-                                        loop_member,
+                                        sub_member,
                                         ".__gen += slop_update(",
-                                        loop_member,
+                                        sub_member,
                                         ".__in.",
                                         cpp_port_path(decl.name),
-                                        "__tick, __in.",
-                                        field,
-                                        "__tick);\n"));
+                                        ", ",
+                                        operand(driver, width),
+                                        ");\n"));
+              if (const auto child = node.get_subnode_graph();
+                  child && clock_guard_ports(child, port_cache).contains(static_cast<uint32_t>(decl.port_id))) {
+                const auto root_pin = livehd::latch_contract::control_root(driver).net;
+                I(!root_pin.is_invalid() && livehd::graph_util::is_graph_input_pin(root_pin));
+                const auto field = input_field(root_pin.get_port_id());
+                I(!field.empty());
+                fout->append(absl::StrCat("  ",
+                                          sub_member,
+                                          ".__gen += slop_update(",
+                                          sub_member,
+                                          ".__in.",
+                                          cpp_port_path(decl.name),
+                                          "__tick, __in.",
+                                          field,
+                                          "__tick);\n"));
+              }
             }
-          }
-          if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
-            fout->append("  ", loop_member, ".__compact_advance();  // compact-loop control: one native ordinal walk\n");
-          } else {
-            fout->append("  ", loop_member, ".__compact_publish();  // compact-loop post-edge version: one native ordinal walk\n");
+            if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
+              fout->append("  ", sub_member, ".__compact_advance();  // compact-loop control: one native ordinal walk\n");
+            } else {
+              fout->append("  ", sub_member, ".__compact_publish();  // compact-loop post-edge version: one native ordinal walk\n");
+            }
           }
           const char* surface = version.version == livehd::sim::Color_plan::State_version::pre_rise ? ".__last_out." : ".__out.";
           for (const auto& decl : sio->get_output_pin_decls()) {
             const auto output = find_driver_pin(node, decl.name);
             if (!output.is_invalid()) {
-              const auto value                  = loop_member + surface + cpp_port_path(decl.name);
+              const auto value                  = sub_member + surface + cpp_port_path(decl.name);
               pin2var[output.get_class_index()] = value;
               canonical_.insert(output.get_class_index());
               if (decl.unsign) {
@@ -12079,7 +12130,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 const auto resolved = resolved_input->driver;
                 if (conditional_occurrence(site.node)) {
                   const auto activation = occurrence_bool_expr(resolved, 0);
-                  commit_test = absl::StrCat("(",
+                  commit_test           = absl::StrCat("(",
                                              activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
                                              ").is_known_true()");
                   break;
@@ -12121,7 +12172,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                               && root.net.get_graph() == g && pin_name_of(root.net.base_pin()) == clock_input_of(g);
                 if (!plain_root_clock) {
                   const auto activation = occurrence_bool_expr(resolved, 0);
-                  commit_test = absl::StrCat("(",
+                  commit_test           = absl::StrCat("(",
                                              activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
                                              ").is_known_true()");
                 }
@@ -12429,20 +12480,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                  ? member_value
                                                  : stored_operand(source, std::max(wbits_of(source), 1));
             source_expr                    = range_extract_expr(source_value,
-                                                                slot.width,
-                                                                direct_slot_is_u[slot_index],
-                                                                slot.producer_extract_lo,
-                                                                slot.producer_extract_hi);
+                                             slot.width,
+                                             direct_slot_is_u[slot_index],
+                                             slot.producer_extract_lo,
+                                             slot.producer_extract_hi);
           } else if (op == Ntype_op::Sub) {
             const auto sio = node.get_subnode_io();
             I(sio != nullptr);
-            const auto loop_layout = direct_layout(node.get_graph()).member.find(node.get_class_index());
-            I(loop_layout != direct_layout(node.get_graph()).member.end());
+            const auto sub_member = occurrence_sub_member(site);
+            I(!sub_member.empty());
             for (const auto& decl : sio->get_output_pin_decls()) {
               if (decl.port_id == slot.producer_port) {
                 const char* surface
                     = version.version == livehd::sim::Color_plan::State_version::pre_rise ? ".__last_out." : ".__out.";
-                source_expr = loop_layout->second + surface + cpp_port_path(decl.name);
+                source_expr = sub_member + surface + cpp_port_path(decl.name);
                 break;
               }
             }
@@ -12946,6 +12997,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         "  __color_runtime->owner = this;\n"
         "  auto runtime = __color_runtime;\n"
         "  [[maybe_unused]] auto& __rt = *runtime;\n");
+    // A constant packed lane owns a color_value slot with NO producer version,
+    // so nothing in the per-version writer loop ever assigns its storage. The
+    // inline reader short-circuits on `slot.literal`, but a shared/LLVM kernel
+    // binds the STORAGE address (see the binding loop below) and would read a
+    // default-constructed zero instead of the constant. Seed it once here: the
+    // value never changes, and the runtime object is rebuilt whenever the owner
+    // does.
+    for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
+      const auto& slot = color_plan_->boundary_slots()[slot_index];
+      if (slot.kind != livehd::sim::Color_plan::Boundary_kind::color_value || slot.literal.empty()) {
+        continue;
+      }
+      auto literal = slot.literal;
+      if (unknown_zero_) {
+        std::replace(literal.begin(), literal.end(), '?', '0');
+      }
+      fout->append(absl::StrCat("  ",
+                                direct_slot_storage[slot_index],
+                                " = ",
+                                sim_const_expr(literal, std::to_string(slot.width)),
+                                ";  // fixed packed lane\n"));
+    }
     for (size_t color_index = 0; color_index < direct_kernel.size(); ++color_index) {
       const auto* kernel = direct_kernel[color_index];
       if (kernel == nullptr) {

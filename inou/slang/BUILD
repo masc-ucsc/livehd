@@ -150,6 +150,41 @@ sh_test(
     ],
 )
 
+# An inlined SystemVerilog function can return from a conditional and continue
+# with a fallback return. The fallback must not overwrite a previously selected
+# result (Minion's get_way_from_scp_dest uses this exact shape).
+sh_test(
+    name = "slang_function_early_return",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/function_early_return.v)",
+    ],
+    data = [
+        "tests/sv/function_early_return.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# Component-wise escaping of a Pyrope keyword inside a nested output bundle
+# must remain a field assignment, not become an illegal tuple-path declaration.
+sh_test(
+    name = "slang_nested_keyword_output",
+    size = "large",
+    srcs = ["tests/nested_keyword_output_roundtrip.sh"],
+    data = [
+        "tests/sv/nested_keyword_output.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
 # CVA6 forms whose constants become visible only after function/config binding:
 # preserve `2 ** cfg.field` as a shift and a canonical cfg-bounded loop as an
 # LNAST range loop. Also pins zero-fill assignment patterns and whole-array
@@ -219,6 +254,27 @@ sh_test(
     ],
     data = [
         "tests/sv/generated_packed_stage_chain.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# A generated continuous assignment may read a packed lane driven by a sibling
+# assignment later in the same generate instance. Continuous assignments are
+# concurrent: the read must see that lane, not the previous iteration's partial
+# accumulator (which leaves a silent X in the emitted circuit).
+sh_test(
+    name = "slang_generated_sibling_forward_read",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec_no_x",
+        "$(location tests/sv/generated_sibling_forward_read.v)",
+    ],
+    data = [
+        "tests/sv/generated_sibling_forward_read.v",
         "//lhd",
     ],
     deps = [
