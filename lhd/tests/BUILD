@@ -1616,6 +1616,14 @@ sh_test(
     ],
 )
 
+# Single-use equal-width Set_mask chains share one emitted procedural
+# accumulator. This avoids quadratic full-width copies in downstream Yosys.
+sh_test(
+    name = "lhd_setmask_chain_emit_test",
+    srcs = ["lhd_setmask_chain_emit_test.sh"],
+    data = _FLOW_DATA + ["setmask_chain_emit.prp"],
+)
+
 # pass.cprop must collapse a constant SRA + low mask into one nonzero contiguous
 # Get_mask range, which cgen then lowers through HLOP's direct range extraction.
 # An unrelated runtime source shift remains, proving the check is selective.

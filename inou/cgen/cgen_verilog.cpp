@@ -2285,29 +2285,45 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
   } else if (op == Ntype_op::SRA) {
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto val_expr = get_expression(a_dpin);
-    auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));  // declared: see create_locals
-    // `>>>` is an *arithmetic* (sign-filling) shift only when its left operand
-    // is signed IN THE EVALUATION CONTEXT. Verilog makes the whole enclosing
-    // expression unsigned if ANY operand is unsigned (e.g. the deliberate SHL
-    // zero-extend idiom `({N{1'b0}} | a)`), and that unsigned context
-    // propagates DOWN into a context-determined `a >>> amt`, silently turning
-    // it into a logical (zero-fill) shift — wrong for negative `a`. A bare
-    // `$signed(a) >>> amt` does NOT survive: the shift's left operand is still
-    // context-determined, so the enclosing unsigned context wins (verified with
-    // iverilog). The fix is to isolate the whole shift in its own SELF-
-    // determined signed context — the argument of `$signed(...)` is self-
-    // determined — so the sign fill happens at the operand's natural width
-    // regardless of how the result is later used. The inner `$signed(val)`
-    // forces the left operand signed even when `val`'s text would otherwise read
-    // unsigned. Only do this for a genuinely signed operand: `$signed`-wrapping
-    // an unsigned value would sign-extend a value that should zero-fill.
-    if (!operand_reads_signed(a_dpin)) {
-      final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
-    } else {
-      // A nested SRA's operand also takes this branch (its inner shift already
-      // emitted self-contained signed text), so the outer `>>>` is isolated too
-      // and the enclosing unsigned context cannot demote it to a logical shift.
-      final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
+    auto amt_dpin = get_driver(find_sink_pin(node, "b"));
+    auto amt_expr = get_expression(amt_dpin);  // declared: see create_locals
+    // ABC represents a demanded bit of a wide native boundary as a one-bit
+    // SRA with a constant amount. Emitting `wide >>> bit` makes Verilog/Yosys
+    // evaluate a W-bit shifter before truncating to one bit; thousands of such
+    // selectors consumed gigabytes. A named W-bit operand shifted by an
+    // in-range constant and landed in one bit is exactly its bit-select,
+    // independent of signedness.
+    if (bits_of(dpin) == 1 && !a_dpin.is_const() && pin2var.contains(a_dpin.get_class_index()) && amt_dpin.is_const()
+        && const_of(amt_dpin).is_just_i64()) {
+      const auto amount = const_of(amt_dpin).to_just_i64();
+      if (amount >= 0 && amount < bits_of(a_dpin)) {
+        final_expr = bits_of(a_dpin) == 1 ? val_expr : absl::StrCat(val_expr, "[", amount, "]");
+      }
+    }
+    if (final_expr.empty()) {
+      // `>>>` is an *arithmetic* (sign-filling) shift only when its left operand
+      // is signed IN THE EVALUATION CONTEXT. Verilog makes the whole enclosing
+      // expression unsigned if ANY operand is unsigned (e.g. the deliberate SHL
+      // zero-extend idiom `({N{1'b0}} | a)`), and that unsigned context
+      // propagates DOWN into a context-determined `a >>> amt`, silently turning
+      // it into a logical (zero-fill) shift — wrong for negative `a`. A bare
+      // `$signed(a) >>> amt` does NOT survive: the shift's left operand is still
+      // context-determined, so the enclosing unsigned context wins (verified with
+      // iverilog). The fix is to isolate the whole shift in its own SELF-
+      // determined signed context — the argument of `$signed(...)` is self-
+      // determined — so the sign fill happens at the operand's natural width
+      // regardless of how the result is later used. The inner `$signed(val)`
+      // forces the left operand signed even when `val`'s text would otherwise read
+      // unsigned. Only do this for a genuinely signed operand: `$signed`-wrapping
+      // an unsigned value would sign-extend a value that should zero-fill.
+      if (!operand_reads_signed(a_dpin)) {
+        final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
+      } else {
+        // A nested SRA's operand also takes this branch (its inner shift already
+        // emitted self-contained signed text), so the outer `>>>` is isolated too
+        // and the enclosing unsigned context cannot demote it to a logical shift.
+        final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
+      }
     }
   } else if (op == Ntype_op::Concat) {
     // MSB-first `{lane0, lane1, ...}`. The lane table comes from concat_lanes(),
@@ -3479,6 +3495,67 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
 }
 
 void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
+  // A packed update is represented as a linear Set_mask chain.  Giving every
+  // link its own full-width reg makes the emitted RTL quadratic in the packed
+  // width: Yosys expands each `next = previous` copy bit by bit.  A link whose
+  // only reader is the equal-width `a` input of the next Set_mask has no
+  // observable intermediate value, so the whole chain can safely update one
+  // procedural accumulator in topological order. Unsigned chains may also
+  // grow: assigning the original base directly into the final-width carrier
+  // performs the same zero extension that each intermediate assignment did.
+  absl::flat_hash_map<pin_key_t, hhds::Pin_class> setmask_next;
+  for (auto node : graph->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Set_mask || !node.has_out_edges()) {
+      continue;
+    }
+    const auto      dpin = node.get_driver_pin(0);
+    hhds::Pin_class only_sink;
+    int             fanout = 0;
+    for (const auto& e : dpin.out_edges()) {
+      only_sink = e.sink;
+      if (++fanout > 1) {
+        break;
+      }
+    }
+    if (fanout != 1) {
+      continue;
+    }
+    const auto next_node = only_sink.get_master_node();
+    if (type_op_of(next_node) != Ntype_op::Set_mask || only_sink.get_port_id() != find_sink_pin(next_node, "a").get_port_id()) {
+      continue;
+    }
+    const auto next_dpin  = next_node.get_driver_pin(0);
+    const auto width      = bits_of(dpin);
+    const auto next_width = bits_of(next_dpin);
+    if (width == next_width || (width < next_width && is_unsign(dpin) && is_unsign(next_dpin))) {
+      setmask_next.emplace(dpin.get_class_index(), next_dpin);
+    }
+  }
+
+  absl::flat_hash_map<pin_key_t, hhds::Pin_class> setmask_terminal;
+  for (auto node : graph->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Set_mask) {
+      continue;
+    }
+    auto                         pin = node.get_driver_pin(0);
+    std::vector<hhds::Pin_class> path;
+    while (true) {
+      if (auto done = setmask_terminal.find(pin.get_class_index()); done != setmask_terminal.end()) {
+        pin = done->second;
+        break;
+      }
+      path.emplace_back(pin);
+      auto next = setmask_next.find(pin.get_class_index());
+      if (next == setmask_next.end()) {
+        break;
+      }
+      pin = next->second;
+    }
+    for (const auto& member : path) {
+      setmask_terminal.insert_or_assign(member.get_class_index(), pin);
+    }
+  }
+
   // Clock nets must be claimed before the ordinary traversal: a downstream
   // state/control consumer can otherwise name the Clock_cell output first and
   // add_to_pin2var declares it as a procedural reg, leaving no private enable
@@ -3807,7 +3884,17 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       // Set_mask preserves the realization hint computed from its base/value.
       // Forcing every partial-write accumulator signed made a narrowed u13
       // carrier sign-extend into a u16 output when bit 12 was set.
-      add_to_pin2var(fout, dpin, name, out_unsigned);
+      const auto terminal = setmask_terminal.at(dpin.get_class_index());
+      add_to_pin2var(fout, terminal, get_scaped_name(pin_wire_name(terminal)), is_unsign(terminal));
+      if (dpin.get_class_index() != terminal.get_class_index()) {
+        // Copy before inserting: insertion can rehash pin2var and invalidate a
+        // reference to the terminal string used as the mapped-value argument.
+        const auto terminal_name = pin2var.at(terminal.get_class_index());
+        pin2var.insert_or_assign(dpin.get_class_index(), terminal_name);
+        if (pin2var_unsigned_.contains(terminal.get_class_index())) {
+          pin2var_unsigned_.insert(dpin.get_class_index());
+        }
+      }
     } else if (dpin.is_const()) {
       auto final_expr = const_to_verilog(const_of(dpin));
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));

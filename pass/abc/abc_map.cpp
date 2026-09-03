@@ -223,14 +223,6 @@ std::string subst(std::string s, std::string_view tok, std::string_view val) {
   return s;
 }
 
-// One-hot mask value (only bit `b` set) for the flop-din Set_mask reassembly,
-// valid for ANY bit position (`int64_t{1} << b` is UB for b >= 63, so it cannot
-// build masks for buses wider than 64 bits). from_binary builds MSB->LSB, so bit
-// b is a leading '1' followed by b zeros.
-spool_ptr<Dlop> bit_mask(int b) {
-  return Dlop::from_binary(std::string("1") + std::string(static_cast<size_t>(b), '0'), /*unsigned_result=*/true);
-}
-
 // Adapter exposing the per-region ABC gate constructors as the arith::Ops
 // bit-algebra (Bit = Abc_Obj_t*), so the templated adder/comparator builders in
 // abc_arith.hpp drive ABC without any ABC dependency of their own (2i-abc_arith).
@@ -1129,6 +1121,85 @@ void rewrite_trivial_rems(hhds::Graph* g) {
       e.sink.connect_driver(newd);
     }
     n.del_node();
+  }
+}
+
+// ABC uses compact one-bit SRA selectors at native wide boundaries. When the
+// boundary is a Set_mask chain, those selectors make every intermediate packed
+// value observable and force cgen/Yosys to retain a quadratic chain of wide
+// copies. Resolve each demanded bit through the constant masks to the actual
+// base/value driver. This is the same bit identity used by abc_bit() while
+// mapping, applied to the reconstructed body after every connection exists.
+void bypass_setmask_bit_reads(hhds::Graph* g) {
+  struct Rewrite {
+    hhds::Node_class node;
+    hhds::Pin_class  source;
+    int64_t          bit;
+  };
+  std::vector<Rewrite> rewrites;
+
+  for (auto node : g->body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::SRA || gu::bits_of(node.get_driver_pin(0)) != 1) {
+      continue;
+    }
+    auto source = gu::get_driver_of_sink_name(node, "a");
+    auto amount = gu::get_driver_of_sink_name(node, "b");
+    if (source.is_invalid() || amount.is_invalid() || !amount.is_const() || !gu::const_of(amount).is_just_i64()) {
+      continue;
+    }
+    int64_t bit = gu::const_of(amount).to_just_i64();
+    if (bit < 0 || source.is_const() || gu::type_op_of(source.get_master_node()) != Ntype_op::Set_mask) {
+      continue;
+    }
+
+    absl::flat_hash_set<hhds::Class_index> visited;
+    bool                                   resolved = false;
+    while (!source.is_const() && gu::type_op_of(source.get_master_node()) == Ntype_op::Set_mask) {
+      auto writer = source.get_master_node();
+      if (!visited.insert(writer.get_class_index()).second) {
+        resolved = false;
+        break;
+      }
+      auto mask  = gu::get_driver_of_sink_name(writer, "mask");
+      auto base  = gu::get_driver_of_sink_name(writer, "a");
+      auto value = gu::get_driver_of_sink_name(writer, "value");
+      if (mask.is_invalid() || base.is_invalid() || value.is_invalid() || !mask.is_const()) {
+        resolved = false;
+        break;
+      }
+      const auto& mv    = gu::const_of(mask);
+      auto [begin, end] = mv.get_mask_range();
+      if (mv.has_unknowns() || begin < 0 || end <= begin) {
+        resolved = false;
+        break;
+      }
+      resolved = true;
+      if (bit >= begin && bit < end) {
+        source  = value;
+        bit    -= begin;
+        break;
+      }
+      source = base;
+    }
+    if (resolved && !source.is_invalid()) {
+      rewrites.push_back({node, source, bit});
+    }
+  }
+
+  for (const auto& rewrite : rewrites) {
+    hhds::Pin_class replacement = rewrite.source;
+    if (rewrite.bit != 0 || gu::bits_of(replacement) != 1) {
+      auto select = gu::create_typed_node(*g, Ntype_op::SRA);
+      replacement.connect_sink(gu::setup_sink_by_name(select, "a"));
+      gu::create_const(*g, *Dlop::create_integer(rewrite.bit)).connect_sink(gu::setup_sink_by_name(select, "b"));
+      replacement = select.create_driver_pin(0);
+      gu::set_bits(replacement, 1);
+      gu::set_unsign(replacement);
+    }
+    for (const auto& edge : rewrite.node.out_edges()) {
+      edge.sink.connect_driver(replacement);
+    }
+    rewrite.node.del_node();
   }
 }
 }  // namespace
@@ -4699,7 +4770,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       return base;
     };
     // Rebuild one native flop covering the latches `idx` (bit 0 first): Q bits
-    // feed the mapped logic via net2drv, din is Set_mask-reassembled in pass
+    // feed the mapped logic via net2drv, din is Concat-reassembled in pass
     // 2b, and a POWER-ON init is recovered from the source snapshot (or, in
     // the reshaped fallback, the latch init values). A synchronous reset is
     // already in the D cone, so the rebuilt flop carries neither a reset_pin
@@ -4942,9 +5013,60 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
+  // Reassemble a vector of LSB-first one-bit drivers as one canonical Concat
+  // (whose lanes are MSB-first). A Set_mask chain creates W full-width
+  // intermediate values; downstream Verilog tools then expand W*W bits.
+  hhds::Pin_class concat_width_one;
+  auto            assemble_bits = [&](std::vector<hhds::Pin_class>& dbit, bool sign, hhds::SourceId sid = hhds::SourceId_invalid) {
+    I(!dbit.empty());
+    const auto      w = static_cast<int>(dbit.size());
+    hhds::Pin_class out;
+    if (w == 1) {
+      out = dbit.front();
+    } else {
+      if (concat_width_one.is_invalid()) {
+        concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
+      }
+      auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
+      if (sid != hhds::SourceId_invalid) {
+        concat.attr(hhds::attrs::srcid).set(sid);
+      }
+      // Port IDs still encode MSB-first lanes, but create them in descending
+      // order. HHDS's per-node pin list is sorted; ascending creation rescans
+      // the growing list for every pin and makes a W-bit Concat O(W^2).
+      for (size_t b = 0; b < dbit.size(); ++b) {
+        auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
+        concat_width_one.connect_sink(concat.create_sink_pin(data_pid + 1));
+        dbit[b].connect_sink(concat.create_sink_pin(data_pid));
+      }
+      out = concat.create_driver_pin(0);
+      gu::set_bits(out, w);
+      // A Concat driver is UNSIGNED by construction and every consumer relies
+      // on it: each lane masks into its own window, so the value is in
+      // [0, 2^sum(w)).
+      gu::set_unsign(out);
+    }
+    if (!sign) {
+      return out;
+    }
+    // Preserve the operand's signedness on the reassembled value. For a Div
+    // the LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs
+    // zero-extend), so a signed operand narrower than the divider's width must
+    // stay signed or ref/impl diverge.
+    auto sx = gu::create_typed_node(*body, Ntype_op::Sext);
+    if (sid != hhds::SourceId_invalid) {
+      sx.attr(hhds::attrs::srcid).set(sid);
+    }
+    out.connect_sink(gu::setup_sink_by_name(sx, "a"));
+    gu::create_const(*body, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_by_name(sx, "b"));
+    auto sout = sx.create_driver_pin(0);
+    gu::set_bits(sout, w);
+    gu::set_sign(sout);
+    return sout;
+  };
+
   // pass 2b (seq): wire each reconstructed flop's din from the body driver that
-  // feeds its latch D net (now resolvable: PIs in 1a, gates in 1b/2). Multi-bit
-  // din is reassembled with a Set_mask concat, mirroring the PO reassembly.
+  // feeds its latch D net (now resolvable: PIs in 1a, gates in 1b/2).
   for (auto& rf : recon) {
     int                          k = rf.bits;
     std::vector<hhds::Pin_class> dbits(k);
@@ -4952,23 +5074,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto driver = get_net_driver(rf.dnet[b]);
       dbits[b]    = !driver.is_invalid() ? driver : const0_pin();
     }
-    auto din_sink = gu::setup_sink_by_name(rf.node, "din");
-    if (k == 1) {
-      dbits[0].connect_sink(din_sink);
-      continue;
-    }
-    hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
-    for (int b = 0; b < k; ++b) {
-      auto sm = gu::create_typed_node(*body, Ntype_op::Set_mask);
-      acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
-      gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
-      dbits[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
-      acc = sm.create_driver_pin(0);
-      gu::set_bits(acc, b + 1);
-      gu::set_unsign(acc);
-    }
-    gu::set_bits(acc, k);
-    acc.connect_sink(din_sink);
+    assemble_bits(dbits, false).connect_sink(gu::setup_sink_by_name(rf.node, "din"));
   }
 
   // pass 2b (register=true): wire each mapped DFF Sub's D pin from its latch's
@@ -5053,68 +5159,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
   }
-
-  // Reassemble a vector of LSB-first one-bit drivers as one canonical Concat
-  // (whose lanes are MSB-first). The old Set_mask chain created W nodes and W
-  // progressively wider mask constants for a W-bit boundary, turning a wide
-  // region interface into quadratic graph-construction work.
-  hhds::Pin_class concat_width_one;
-  auto            assemble_bits = [&](std::vector<hhds::Pin_class>& dbit, bool sign, hhds::SourceId sid = hhds::SourceId_invalid) {
-    I(!dbit.empty());
-    const auto      w = static_cast<int>(dbit.size());
-    hhds::Pin_class out;
-    if (w == 1) {
-      out = dbit.front();
-    } else {
-      if (concat_width_one.is_invalid()) {
-        concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
-      }
-      auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
-      if (sid != hhds::SourceId_invalid) {
-        concat.attr(hhds::attrs::srcid).set(sid);
-      }
-      // Port IDs still encode MSB-first lanes, but create them in descending
-      // order. HHDS's per-node pin list is sorted; ascending creation rescans the
-      // growing list for every pin and makes a W-bit Concat O(W^2).
-      for (size_t b = 0; b < dbit.size(); ++b) {
-        auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
-        concat_width_one.connect_sink(concat.create_sink_pin(data_pid + 1));
-        dbit[b].connect_sink(concat.create_sink_pin(data_pid));
-      }
-      out = concat.create_driver_pin(0);
-      gu::set_bits(out, w);
-      // A Concat driver is UNSIGNED by construction and every consumer relies on
-      // it: each lane masks into its own window, so the value is in
-      // [0, 2^sum(w)). cgen_verilog forces the declaration unsigned regardless of
-      // the stamp, and graph_util::debug_check_pin_hint aborts a -c dbg build on
-      // a signed one. The old Set_mask reassembly this replaced could carry the
-      // sign on its accumulator; a Concat cannot, so it rides a Sext below.
-      gu::set_unsign(out);
-    }
-    if (!sign) {
-      return out;
-    }
-    // Preserve the operand's signedness on the reassembled value. For a Div the
-    // LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs zero-extend),
-    // so a signed operand narrower than the divider's width must stay signed or
-    // ref/impl diverge. Harmless for Sub/Memory/Latch (their LEC compare never
-    // extends an input up to a larger width).
-    //
-    // Sext(x, w) at the SAME width w is exactly that reinterpretation and nothing
-    // else -- it keeps bits [w-1:0] and stamps the result signed (the shape the
-    // yosys reader's create_pick_operator already mints for a signed pick), so no
-    // bit changes and only the extension rule downstream does.
-    auto sx = gu::create_typed_node(*body, Ntype_op::Sext);
-    if (sid != hhds::SourceId_invalid) {
-      sx.attr(hhds::attrs::srcid).set(sid);
-    }
-    out.connect_sink(gu::setup_sink_by_name(sx, "a"));
-    gu::create_const(*body, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_by_name(sx, "b"));
-    auto sout = sx.create_driver_pin(0);
-    gu::set_bits(sout, w);
-    gu::set_sign(sout);
-    return sout;
-  };
 
   // pass 3b: wire each rebuilt blackbox node's combinational inputs from the
   // captured PO drivers (multi-bit reassembled with one Concat).
@@ -5270,6 +5314,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
   trace_stage("readback-srcmap");
+
+  bypass_setmask_bit_reads(body);
+  trace_stage("readback-packed-bits");
 
   trace_stage("readback-complete");
 

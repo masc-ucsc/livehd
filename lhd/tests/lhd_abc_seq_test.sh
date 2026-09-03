@@ -315,6 +315,7 @@ echo "PASS: synchronous reset composes with the QN cell's D-side inversion (buil
 run_abc_lec abc_seq abc_seq.abc_seq false false
 has "$NETV" "posedge" || fail "abc_seq register=false: no native flop survived (flops lost?)"
 ! has "$NETV" "DFFx1 " || fail "abc_seq register=false: unexpected DFF cell (flop should stay native)"
+! has "$NETV" "set_mask_" || fail "abc_seq register=false: native flop D was rebuilt as a quadratic Set_mask chain"
 echo "PASS: register=false keeps flops native (abc_seq)"
 
 # An oversized sequential region takes the same native boundary path without
