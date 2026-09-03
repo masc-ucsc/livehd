@@ -61,6 +61,10 @@ private:
   // its Slop<W+1> carrier. Mixed HLOP operations accept these objects directly;
   // operand() only unwraps them when a concrete Slop carrier is required.
   absl::flat_hash_set<pin_key_t>              slop_u_values_;
+  // Occurrence-local color temporaries can be rebound through cloned pins whose
+  // width/sign metadata is stale. Track their emitted C++ type by expression so
+  // raw_operand can still account for Slop_u<W>'s W+1-bit physical carrier.
+  absl::flat_hash_map<std::string, int>        slop_u_binding_width_;
   // Get_mask nodes whose occurrence input was already narrowed to their exact
   // constant lane by the color ABI. For that occurrence the cell is an
   // identity; the set is rebuilt per emitted member because Class_index is

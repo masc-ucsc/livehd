@@ -807,6 +807,10 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
     }
     return absl::StrCat("Slop<", fw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");
   }
+  const auto binding_width = slop_u_binding_width_.find(it->second);
+  if (binding_width != slop_u_binding_width_.end() && binding_width->second + 1 > fallback_bits) {
+    return absl::StrCat("(", it->second, ").zext_to<", fallback_bits, ">()");
+  }
   if (!canonical_.contains(dpin.get_class_index()) || (is_unsign(dpin) && !slop_u_values_.contains(dpin.get_class_index()))) {
     // A boundary value (module input, memory read, sub output) may hold a
     // non-canonical word for its declared width, so it still needs the
@@ -2716,6 +2720,7 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2var.clear();
   slop_u_values_.clear();
+  slop_u_binding_width_.clear();
   preextracted_get_masks_.clear();
   tmp_cnt           = 0;
   cycle_unresolved_ = false;
@@ -6092,6 +6097,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       pin2var.clear();
       canonical_.clear();
       slop_u_values_.clear();
+      slop_u_binding_width_.clear();
       preextracted_get_masks_.clear();
       seq_volatile_.clear();
       fout->append("void ",
@@ -11055,6 +11061,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       pin2var.clear();
       canonical_.clear();
       slop_u_values_.clear();
+      slop_u_binding_width_.clear();
       preextracted_get_masks_.clear();
       seq_volatile_.clear();
       for (size_t i = 0; i < abi.reads.size(); ++i) {
@@ -11423,6 +11430,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       pin2var.clear();
       canonical_.clear();
       slop_u_values_.clear();
+      slop_u_binding_width_.clear();
       preextracted_get_masks_.clear();
       seq_volatile_.clear();
 
@@ -12451,6 +12459,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
               if (use_u) {
                 slop_u_values_.insert(output.get_class_index());
+                slop_u_binding_width_.insert_or_assign(temp_name, width);
               }
               pin2var[output.get_class_index()] = temp_name;
               canonical_.insert(output.get_class_index());
