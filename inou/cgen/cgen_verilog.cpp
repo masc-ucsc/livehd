@@ -3503,8 +3503,20 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
   // procedural accumulator in topological order. Unsigned chains may also
   // grow: assigning the original base directly into the final-width carrier
   // performs the same zero extension that each intermediate assignment did.
+  // The alias is deliberately limited to an acyclic body.  A body with a
+  // word-level cycle is emitted as several always_comb processes, split at
+  // instances (create_combinational).  Reusing one accumulator across such a
+  // split would give that variable multiple procedural drivers and, worse,
+  // lose the old-value copy that carries the already-written packed lanes
+  // between processes.
+  absl::flat_hash_set<hhds::Node_class> comb_cycle;
+  livehd::graph_util::word_level_cycle_nodes(graph, /*strict=*/true, comb_cycle);
+
   absl::flat_hash_map<pin_key_t, hhds::Pin_class> setmask_next;
   for (auto node : graph->body().nodes()) {
+    if (!comb_cycle.empty()) {
+      break;
+    }
     if (type_op_of(node) != Ntype_op::Set_mask || !node.has_out_edges()) {
       continue;
     }

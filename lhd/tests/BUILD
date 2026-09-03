@@ -1621,7 +1621,10 @@ sh_test(
 sh_test(
     name = "lhd_setmask_chain_emit_test",
     srcs = ["lhd_setmask_chain_emit_test.sh"],
-    data = _FLOW_DATA + ["setmask_chain_emit.prp"],
+    data = _FLOW_DATA + [
+        "setmask_chain_cycle.sv",
+        "setmask_chain_emit.prp",
+    ],
 )
 
 # pass.cprop must collapse a constant SRA + low mask into one nonzero contiguous
