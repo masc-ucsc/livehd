@@ -13,13 +13,14 @@ build --action_env=BAZEL_CXXOPTS="-std=c++23"
 build --per_file_copt=external/gmp[+~].*@-O2,-g0
 # build --action_env=PATH
 
-# Set minimum macOS version to support C++23 features (requires 13.3+)
+# Set minimum macOS version to support the C++23 library features used by LiveHD
+# (floating-point std::from_chars requires macOS 26.0+ with current libc++).
 # Only applies to macOS builds, ignored on other platforms
-build:macos --linkopt="-mmacosx-version-min=13.3"
-build:macos --copt="-mmacosx-version-min=13.3"
-build:macos --cxxopt="-mmacosx-version-min=13.3"
-build:macos --host_linkopt="-mmacosx-version-min=13.3"
-build:macos --host_copt="-mmacosx-version-min=13.3"
+build:macos --linkopt="-mmacosx-version-min=26.0"
+build:macos --copt="-mmacosx-version-min=26.0"
+build:macos --cxxopt="-mmacosx-version-min=26.0"
+build:macos --host_linkopt="-mmacosx-version-min=26.0"
+build:macos --host_copt="-mmacosx-version-min=26.0"
 
 # Auto-detect and apply macOS config when building on Darwin
 build --enable_platform_specific_config
