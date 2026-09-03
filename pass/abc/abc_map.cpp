@@ -1615,6 +1615,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   std::vector<std::pair<size_t, int>>          pi_order;
   std::vector<Pi_origin>                       all_pi_order;
   absl::flat_hash_map<hhds::Pin_class, size_t> region_input_index;
+  // Native boundary outputs follow the same demand-driven rule as region
+  // inputs.  Wide packed-wiring boundaries can expose tens of thousands of
+  // bits while the mapped cone reads only a handful; eagerly creating every PI
+  // made those unused bits survive through ABC readback as an equally large
+  // selector forest.  The origin table is populated by the boundary scan below
+  // before any combinational node is bit-blasted.
+  using Bbox_output_origin = std::pair<int, int>;  // (bbox index, output index)
+  absl::flat_hash_map<hhds::Pin_class, Bbox_output_origin> bbox_output_index;
+  std::vector<std::tuple<int, int, int>>                   bbox_pi;  // demanded PI -> (bbox, output, bit)
   for (size_t pi = 0; pi < rb.inputs.size(); ++pi) {
     region_input_index.emplace(rb.inputs[pi].src_driver, pi);
   }
@@ -1638,9 +1647,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       return it->second;
     }
     if (drv.is_const()) {
-      const auto& val  = gu::const_of(drv);
-      auto* net  = abc_const_bit(val.bit_test(eff));
-      slots[eff] = net;
+      const auto& val = gu::const_of(drv);
+      auto*       net = abc_const_bit(val.bit_test(eff));
+      slots[eff]      = net;
       return net;
     }
     if (auto it = region_input_index.find(drv); it != region_input_index.end()) {
@@ -1653,6 +1662,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       slots[eff] = net;
       all_pi_order.push_back({Pi_kind::region_input, pi_order.size()});
       pi_order.emplace_back(pi, eff);
+      return net;
+    }
+    if (auto it = bbox_output_index.find(drv); it != bbox_output_index.end()) {
+      auto* obj = Abc_NtkCreatePi(manNtk);
+      auto* net = Abc_NtkCreateNet(manNtk);
+      Abc_ObjAddFanin(net, obj);
+      slots[eff] = net;
+      all_pi_order.push_back({Pi_kind::bbox_output, bbox_pi.size()});
+      bbox_pi.emplace_back(it->second.first, it->second.second, eff);
       return net;
     }
     auto master = drv.get_master_node();
@@ -2432,8 +2450,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     rewrite_trivial_rems(rb.src);
   }
 
-  std::vector<Bbox>                      bboxes;
-  std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
+  std::vector<Bbox> bboxes;
   for (const auto& n : rb.nodes) {
     auto op = gu::type_op_of(n);
     // A materialized PROPERTY marker (`fproperty` from a user assert/assume,
@@ -2550,15 +2567,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (!needs_abc) {
         continue;  // boundary-to-boundary bus reconnects natively on read-back
       }
-      auto& slots = bitnet[op_pin];
-      for (int b = 0; b < w; ++b) {
-        auto* obj = Abc_NtkCreatePi(manNtk);
-        auto* net = Abc_NtkCreateNet(manNtk);
-        Abc_ObjAddFanin(net, obj);
-        slots[b] = net;
-        all_pi_order.push_back({Pi_kind::bbox_output, bbox_pi.size()});
-        bbox_pi.emplace_back(bb_idx, oi, b);
-      }
+      bbox_output_index.emplace(op_pin, Bbox_output_origin{bb_idx, oi});
     }
     // inputs: const-driven recreated directly; comb-driven cut as POs. Any pin
     // driven straight by a region input is reconnected natively instead: there
@@ -4181,6 +4190,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::vector<std::vector<hhds::Pin_class>> out_bit;  // [out idx][bit] -> body driver
     std::vector<std::vector<hhds::Pin_class>> in_bit;   // [in idx][bit] -> body driver (filled pass 3)
   };
+  // Only these boundary bits became ABC PIs.  Recreate selectors for exactly
+  // that set; extracting every bit of the full bus here would merely move the
+  // eager explosion from translation to readback.
+  std::vector<std::vector<std::vector<int>>> bbox_demand(bboxes.size());
+  for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+    bbox_demand[bi].resize(bboxes[bi].outs.size());
+  }
+  for (const auto& [bx, oi, bit] : bbox_pi) {
+    I(bx >= 0 && static_cast<size_t>(bx) < bbox_demand.size());
+    I(oi >= 0 && static_cast<size_t>(oi) < bbox_demand[static_cast<size_t>(bx)].size());
+    bbox_demand[static_cast<size_t>(bx)][static_cast<size_t>(oi)].push_back(bit);
+  }
   std::vector<Bbox_recon> bbox_recon(bboxes.size());
   for (size_t bi = 0; bi < bboxes.size(); ++bi) {
     auto& bb = bboxes[bi];
@@ -4237,13 +4258,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         dp.attr(livehd::attrs::pin_offset).set(off.get());
       }
       br.out_bit[oi].resize(o.bits);
-      if (!o.abc_bits) {
+      const auto& demand = bbox_demand[bi][oi];
+      if (!o.abc_bits || demand.empty()) {
         continue;
       }
       if (o.bits == 1) {
         br.out_bit[oi][0] = dp;
       } else {
-        for (int b = 0; b < o.bits; ++b) {
+        for (int b : demand) {
+          I(b >= 0 && b < o.bits);
           br.out_bit[oi][b] = extract_body_bit(dp, b);
         }
       }

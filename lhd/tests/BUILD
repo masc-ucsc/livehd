@@ -1431,6 +1431,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# Wide native wiring boundaries are demand-driven through ABC: a sparse read
+# cannot expand a 4k-bit bus into thousands of PI/readback selector nodes.
+sh_test(
+    name = "lhd_abc_sparse_boundary_test",
+    size = "medium",
+    srcs = ["lhd_abc_sparse_boundary_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_sparse_boundary.prp",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2c-color: every coloring algorithm (acyclic|cgen|synth|path|mincut|flat) +
 # continuous + clear run through the lhd CLI on a real design.
 sh_test(
