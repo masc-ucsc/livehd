@@ -4,10 +4,6 @@
 plugin -i {{slang_plugin_path}}
 {{/use_slang}}
 
-{{#liberty_tmap}}
-read_liberty {{liberty_file}}
-{{/liberty_tmap}}
-
 verilog_defines -DSYNTHESIS=1
 
 {{#use_verilog}}
@@ -72,10 +68,6 @@ techmap -map techmap.v
 {{#techmap_full}}
 techmap
 {{/techmap_full}}
-#{{#liberty_tmap}}
-#techmap -D ALU_RIPPLE
-#abc -liberty {{liberty_file}}
-#{{/liberty_tmap}}
 #opt
 
 {{#abc_in_yosys}}

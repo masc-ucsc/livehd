@@ -19,7 +19,7 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$SRC" --reader slang --top concat_sext --recipe O1 \
+"$LHD" compile "$SRC" --reader slang --top concat_sext \
   --emit-dir pyrope:"$W/prp" --emit verilog:"$W/out.v" --workdir "$W/work" -q 2>/dev/null \
   || fail "concat_sext compile failed"
 

@@ -42,17 +42,17 @@ metric() {
   grep -o "\"${name}\":[0-9.]*" "$file" | head -1 | cut -d: -f2
 }
 
-run compile "$SRC" --reader slang --top br_mux_onehot --recipe O1 \
+run compile "$SRC" --reader slang --top br_mux_onehot \
   --emit-dir lg:"$W/lg" --workdir "$W/compile"
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/color"
 
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/default" \
-  --set abc.library="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
   --workdir "$W/default_work"
 cp "$W/result.json" "$W/default.json"
 
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/no_fanout" \
-  --set abc.library="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
   --set abc.max_fanout=0 --workdir "$W/no_fanout_work"
 cp "$W/result.json" "$W/no_fanout.json"
 
@@ -60,7 +60,7 @@ cp "$W/result.json" "$W/no_fanout.json"
 # speed-grade sweep; removing upsize altogether would trade away timing on every
 # genuinely failing region.
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/tight" \
-  --set abc.library="$LIB" --set abc.delay=1 --set abc.register=false \
+  --set synth.liberty="$LIB" --set abc.delay=1 --set abc.register=false \
   --workdir "$W/tight_work"
 cp "$W/result.json" "$W/tight.json"
 
@@ -73,7 +73,7 @@ cp "$W/result.json" "$W/tight.json"
 # almost no area/delay curve to trade along. The measured effect is in
 # //pass/abc:abc_incr_test's policy tests and the ../lhdtrack sweep.)
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/norelax" \
-  --set abc.library="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
   --set abc.area_relax=0 --workdir "$W/norelax_work"
 cp "$W/result.json" "$W/norelax.json"
 
@@ -82,7 +82,7 @@ cp "$W/result.json" "$W/norelax.json"
 # so the default can never be larger than this run, and its region row must
 # say which mapping it kept.
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/nocand" \
-  --set abc.library="$LIB" --set abc.delay=1000 --set abc.register=false \
+  --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
   --set abc.area_flow=none --workdir "$W/nocand_work"
 cp "$W/result.json" "$W/nocand.json"
 

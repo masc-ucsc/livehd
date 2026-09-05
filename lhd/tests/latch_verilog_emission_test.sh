@@ -63,7 +63,7 @@ end
 endmodule
 EOF
 
-"$LHD" compile "$W/raw.v" --reader yosys-verilog --top raw --recipe O1 \
+"$LHD" compile "$W/raw.v" --reader yosys-verilog --top raw \
   --emit verilog:"$W/raw_out.v" --workdir "$W/w_raw" -q >"$W/raw.log" 2>&1 \
   || { tail -5 "$W/raw.log"; fail "yosys-importer latch round-trip failed to compile"; }
 [ -s "$W/raw_out.v" ] || fail "yosys-importer round-trip emitted no verilog"

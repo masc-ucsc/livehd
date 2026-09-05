@@ -7,7 +7,7 @@
 # prove every region equivalent to the original logic with `lhd lec` (the
 # graph-native cvc5 engine).
 #
-#   prp -> lg (O1) -> pass color acyclic   (colors EVERY op, incl mult/div, into
+#   prp -> lg -> pass color acyclic   (colors EVERY op, incl mult/div, into
 #                                            regions; synth deliberately excludes
 #                                            mult/div as region seeds)
 #   pass partition --emit-dir lg:re         (the original-logic twin)
@@ -40,7 +40,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
 # Shared: compile + color (acyclic so mult/div land in regions), original twin, models.
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 run pass color acyclic --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
@@ -51,7 +51,7 @@ REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
 # pass abc: the divider regions must warn (and stay native), the rest map. Run
 # WITHOUT -q so the div-blackbox diagnostic is written to stderr (quiet mode
 # suppresses the per-diagnostic stream, leaving only a count in the result JSON).
-"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set pass.abc.library="$LIB" \
+"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" \
   --workdir "$W/w3" --result-json "$W/r.json" 2>"$W/abc.err" || fail "pass abc -> $(cat "$W/r.json" 2>/dev/null)"
 grep -q '"code":"div-blackbox"' "$W/abc.err" || fail "expected a div-blackbox warning (a/b and c/e are divisions): $(cat "$W/abc.err")"
 ls "$W/net"/graph_* >/dev/null 2>&1 || fail "no mapped netlist emitted"
@@ -76,7 +76,7 @@ grep -q '"verdict":"proven"' "$W/r.json" \
 # A non-default adder still proves equivalent (the multiplier's partial-product
 # additions use pass.abc.adder).
 rm -rf "$W/net_cska"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set pass.abc.library="$LIB" --set adder=cska \
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
   --workdir "$W/w6"
 for r in $REGIONS; do
   run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$r" --workdir "$W/wlec_cska"

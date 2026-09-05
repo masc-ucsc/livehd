@@ -7,7 +7,7 @@
 # no __c<color> region modules — and that single flat module must stay
 # LEC-equivalent to the original hierarchical logic.
 #
-#   prp -> lg (O1)                            hier_seq: 3-level pipeline
+#   prp -> lg                            hier_seq: 3-level pipeline
 #   pass color flat                           (one color across the hierarchy)
 #   pass abc                                  (flatten=auto fires on the flat coloring)
 #   pass partition                            (flatten=auto twin: original logic, flat)
@@ -46,11 +46,11 @@ live_defs() {
   grep -E "^graph_io " "$1/library.txt" | awk '{print $3}' | grep -v "^_const" | grep -v "x1$" | sort
 }
 
-run compile "$FIX" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run compile "$FIX" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
 run pass color flat --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
 
 # pass.abc: flatten=auto must fire on the flat coloring -> one netlist module.
-run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set abc.library="$LIB" --workdir "$D/w3"
+run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --workdir "$D/w3"
 NET_DEFS=$(live_defs "$D/net")
 [ "$NET_DEFS" = "$TOP" ] || fail "flat abc netlist must hold exactly '$TOP', got: $(echo $NET_DEFS)"
 echo "PASS: pass.abc + flat coloring emits a single flat netlist module"
@@ -62,9 +62,9 @@ RE_DEFS=$(live_defs "$D/re")
 echo "PASS: pass.partition + flat coloring emits a single flat twin module"
 
 run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/w5"
-run compile lg:"$D/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$D/netv" --workdir "$D/w6"
-run compile lg:"$D/models" --recipe O0 --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
-run compile lg:"$D/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$D/rev" --workdir "$D/w8"
+run compile lg:"$D/net" --top "$TOP" --emit-dir verilog:"$D/netv" --workdir "$D/w6"
+run compile lg:"$D/models" --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
+run compile lg:"$D/re" --top "$TOP" --emit-dir verilog:"$D/rev" --workdir "$D/w8"
 
 # One emitted netlist .v, real standard cells, flops mapped, hierarchy gone.
 NV=$(ls "$D/netv/"*.v | wc -l | tr -d ' ')
@@ -101,12 +101,12 @@ TOP2=abc_flat_names.top
 [ -f "$FIX2" ] || fail "missing fixture $FIX2"
 D2="$W/flatnames"
 mkdir -p "$D2"
-run compile "$FIX2" --top "$TOP2" --recipe O1 --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
+run compile "$FIX2" --top "$TOP2" --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
 run pass color flat --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
-run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set abc.library="$LIB" --workdir "$D2/w3"
+run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --workdir "$D2/w3"
 run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
-run compile lg:"$D2/net" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
-run compile lg:"$D2/re" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
+run compile lg:"$D2/net" --top "$TOP2" --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
+run compile lg:"$D2/re" --top "$TOP2" --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
 # `a`/`b` are the INSTANCE names (the LHS variable of each `holder(...)` call),
 # so the preserved hierarchical flop is `a.r` / `b.r`. These registers carry NO
 # `initial` value in the IR, so pass.abc maps them to per-bit DFF cells — the
@@ -163,12 +163,12 @@ EOF
 TOP3=abc_flat_const_port.top
 D3="$W/flatconst"
 mkdir -p "$D3"
-run compile "$FIX3" --top "$TOP3" --recipe O1 --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
+run compile "$FIX3" --top "$TOP3" --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
 run pass color flat --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
-run pass abc --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set abc.library="$LIB" --workdir "$D3/w3"
+run pass abc --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --workdir "$D3/w3"
 run pass partition --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
-run compile lg:"$D3/net" --top "$TOP3" --recipe O0 --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
-run compile lg:"$D3/re" --top "$TOP3" --recipe O0 --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
+run compile lg:"$D3/net" --top "$TOP3" --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
+run compile lg:"$D3/re" --top "$TOP3" --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
 cat "$D3/netv/"*.v "$D/modelsv/"*.v > "$D3/impl.v"
 cat "$D3/rev/"*.v > "$D3/ref.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$D3/impl.v" --ref verilog:"$D3/ref.v" --top "$TOP3" \
@@ -178,7 +178,7 @@ echo "PASS: a constant instance-port actual survives the whole-design flatten (L
 # Escape hatch: flatten=false keeps the per-def hierarchy instead of collapsing
 # it into one flat module. Each def is one region here, so it is emitted under
 # its own name (delayer, stage_unit, top) -- no pointless __c wrapper.
-run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set abc.library="$LIB" \
+run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set synth.liberty="$LIB" \
     --set pass.abc.flatten=false --workdir "$D/w9"
 HIER_DEFS=$(live_defs "$D/net_hier")
 echo "$HIER_DEFS" | grep -q "stage_unit" || fail "flatten=false must keep the per-def hierarchy (child defs), got: $(echo $HIER_DEFS)"

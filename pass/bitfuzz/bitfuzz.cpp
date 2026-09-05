@@ -29,9 +29,9 @@ constexpr int32_t kSentinelBits = 32768;
 // not confuse the two.
 [[nodiscard]] bool has_no_inference_rule(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Div:
-    case Ntype_op::Rem:
-    case Ntype_op::LUT:
+    case Ntype_op::Div       :
+    case Ntype_op::Rem       :
+    case Ntype_op::LUT       :
     case Ntype_op::Clock_cell: return true;
     default                  : return false;
   }
@@ -182,7 +182,9 @@ void restore(const Snap& s) {
 }
 
 void infer(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
-  Bitwidth bw(opts.max_iterations);
+  // Audit the mathematical range, including bits discarded at graph outputs.
+  // Normal compilation may realize only the demanded output bits.
+  Bitwidth bw(opts.max_iterations, false);
   bw.do_trans(g);
 }
 

@@ -1,4 +1,4 @@
-// Cell-type mix for the --recipe O2 (pass.bitwidth) regression: sum, mult,
+// Cell-type mix for the standard compile pipeline (pass.bitwidth) regression: sum, mult,
 // bitwise ops, comparators, shifts (logic + arithmetic), mux and a flop.
 module bw_mix(input clk, input [7:0] a, input [7:0] b, input sel,
               output reg [15:0] q, output [7:0] y, output z);

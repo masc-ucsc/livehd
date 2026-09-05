@@ -11,7 +11,7 @@
 #      already-computed leaf expansion even when the call has no unnamed
 #      actual (the re-emit gate was `becomes_sub && any_unnamed`), and the
 #      same re-emit fires for a COMB callee kept as a Sub under the default
-#      inline:false (slang-generated Pyrope declares everything `pub comb`,
+#      explicit inline:false (slang-generated Pyrope declares everything `pub comb`,
 #      so comb-Sub calls are the hierarchy-recompile path).
 #  (2) upass.tolg: a dot-form read of a multi-output instance result
 #      (`r.rsp.sum` — a flat all-const tuple_get index chain) joins the
@@ -37,6 +37,7 @@ EOF
 
 lec_proven() { # <name> <prp>
   "$LHD" lec --impl "$2" --ref "$W/gold.v" --top parent --set formal.solver=cvc5 \
+    --set compile.upass.inline=false \
     --workdir "$W/lec_$1" -q --result-json "$W/lec_$1.json" \
     || fail "$1: lec run failed: $(cat "$W/lec_$1.json" 2>/dev/null)"
   grep -q '"status":"pass"' "$W/lec_$1.json" || fail "$1: lec not PROVEN: $(cat "$W/lec_$1.json")"
@@ -60,7 +61,7 @@ EOF
 lec_proven mod_named "$W/mod_named.prp"
 echo "PASS: mod callee + named tuple actual (req=t) compiles and is cvc5-PROVEN"
 
-# ── (b) COMB callee (default inline:false → Sub): named AND positional ────────
+# ── (b) COMB callee (explicit inline:false → Sub): named AND positional ───────
 cat >"$W/comb_named.prp" <<'EOF'
 pub comb leaf(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)) {
   rsp.sum = req.a + req.b
@@ -73,7 +74,7 @@ pub comb parent(x:u4, y:u8) -> (out:u9, out2:u4) {
   out2 = r["rsp.lo"]
 }
 EOF
-"$LHD" compile "$W/comb_named.prp" --top parent --workdir "$W/wb1" -q \
+"$LHD" compile "$W/comb_named.prp" --top parent --set compile.upass.inline=false --workdir "$W/wb1" -q \
   || fail "comb + NAMED tuple actual did not compile"
 lec_proven comb_named "$W/comb_named.prp"
 cat >"$W/comb_pos.prp" <<'EOF'
@@ -88,7 +89,7 @@ pub comb parent(x:u4, y:u8) -> (out:u9, out2:u4) {
   out2 = r["rsp.lo"]
 }
 EOF
-"$LHD" compile "$W/comb_pos.prp" --top parent --workdir "$W/wb2" -q \
+"$LHD" compile "$W/comb_pos.prp" --top parent --set compile.upass.inline=false --workdir "$W/wb2" -q \
   || fail "comb + POSITIONAL tuple actual did not compile"
 lec_proven comb_pos "$W/comb_pos.prp"
 echo "PASS: comb callee kept as a Sub takes named and positional tuple actuals (cvc5-PROVEN)"
@@ -179,7 +180,7 @@ grep -q '"status":"pass"' "$W/lec_local2.json" || fail "local-const-fields lec n
 echo "PASS: tuple literal with local-computed field values expands (comb callee, cvc5-PROVEN)"
 
 # ── (d) cgen: dotted instance-connection port names are escaped ───────────────
-"$LHD" compile "$W/comb_named.prp" --top parent --emit-dir verilog:"$W/ev" --workdir "$W/wd" -q \
+"$LHD" compile "$W/comb_named.prp" --top parent --set compile.upass.inline=false --emit-dir verilog:"$W/ev" --workdir "$W/wd" -q \
   || fail "verilog emit of the comb hierarchy failed"
 PARENT_V=$(grep -l "^module" "$W/ev"/*.v | xargs grep -l '\.\\req\.a ' | head -1)
 [ -n "$PARENT_V" ] || fail "no emitted .v carries an escaped instance connection .\\req.a : $(ls "$W/ev")"

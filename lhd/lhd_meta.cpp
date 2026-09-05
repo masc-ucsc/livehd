@@ -18,14 +18,13 @@ namespace {
 
 constexpr std::string_view kSteps
     = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
-constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds
     = R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","report","diagnostics"])json";
 constexpr std::string_view kErrorClasses
     = R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
 
 constexpr std::string_view kJsonSynthCommand
-    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> pass.color reduce (synth.reduce=true; shares repeated one/two-node combinational cones) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on — other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
+    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> pass.color reduce (synth.reduce=true; shares repeated one/two-node combinational cones) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on — other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -217,7 +216,7 @@ int list_command(const Options& opts) {
 
   if (pattern.empty()) {
     print_json_line(
-        R"json({"schema_version":1,"patterns":[{"name":"steps","scope":"global"},{"name":"recipes","scope":"global"},{"name":"emit-kinds","scope":"global"},{"name":"error-classes","scope":"global"},{"name":"options","scope":"global"},{"name":"log-channels","scope":"global"}]})json");
+        R"json({"schema_version":1,"patterns":[{"name":"steps","scope":"global"},{"name":"emit-kinds","scope":"global"},{"name":"error-classes","scope":"global"},{"name":"options","scope":"global"},{"name":"log-channels","scope":"global"}]})json");
     return 0;
   }
   if (pattern == "options") {
@@ -230,10 +229,6 @@ int list_command(const Options& opts) {
     print_json_line(std::format(R"json({{"schema_version":1,"pattern":"steps","items":{}}})json", kSteps));
     return 0;
   }
-  if (pattern == "recipes") {
-    print_json_line(std::format(R"json({{"schema_version":1,"pattern":"recipes","items":{}}})json", kRecipes));
-    return 0;
-  }
   if (pattern == "emit-kinds") {
     print_json_line(std::format(R"json({{"schema_version":1,"pattern":"emit-kinds","items":{}}})json", kEmitKinds));
     return 0;
@@ -243,7 +238,7 @@ int list_command(const Options& opts) {
     return 0;
   }
   std::print(stderr,
-             "lhd list: unknown pattern '{}' (try: steps, recipes, emit-kinds, error-classes, options [REGEX], log-channels)\n",
+             "lhd list: unknown pattern '{}' (try: steps, emit-kinds, error-classes, options [REGEX], log-channels)\n",
              pattern);
   return 1;
 }
@@ -329,9 +324,9 @@ std::string render_help_json(const Help_doc& doc) {
       }
       first  = false;
       out   += std::format(R"json({{"name":"{}","type":"{}","help":"{}")json",
-                         json_escape(arg.name),
-                         json_escape(arg.type),
-                         json_escape(arg.help));
+                           json_escape(arg.name),
+                           json_escape(arg.type),
+                           json_escape(arg.help));
       if (arg.positional) {
         out += R"json(,"positional":true)json";
       }
@@ -531,7 +526,7 @@ int describe_tool(std::string_view name) {
 
 int describe_command(const Options& opts) {
   if (opts.files.empty()) {
-    std::print(stderr, "lhd describe: requires a name (a command, recipe:NAME, or an emit kind)\n");
+    std::print(stderr, "lhd describe: requires a name (a command or an emit kind)\n");
     return 1;
   }
   const std::string& name = opts.files.front();
@@ -574,22 +569,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
     print_json_line(
-        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"unused-inputs","type":"path (declared source files absent from the compiled closure, e.g. dropped by --top; one cwd-relative path per line — Bazel unused_inputs_list)"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/|isabelle:DIR/|lean:DIR/|sim:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump","isabelle","lean","sim"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/","lhd compile lg:top_lgs/ --emit-dir isabelle:top_thy/ --emit-dir lean:top_lean/","lhd compile x.prp --emit-dir sim:x_sim/"]})json");
-    return 0;
-  }
-  if (name == "recipe:O0" || name == "O0") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"recipe:O0","steps":[],"description":"No graph optimization; frontend lowering only (ln: inputs still run pass.upass + tolg)"})json");
-    return 0;
-  }
-  if (name == "recipe:O1" || name == "O1") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"recipe:O1","steps":["pass.cprop"],"description":"Constant/copy propagation"})json");
-    return 0;
-  }
-  if (name == "recipe:O2" || name == "O2") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"recipe:O2","steps":["pass.cprop","pass.bitwidth"],"description":"cprop + bitwidth inference"})json");
+        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"unused-inputs","type":"path (declared source files absent from the compiled closure, e.g. dropped by --top; one cwd-relative path per line — Bazel unused_inputs_list)"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/|isabelle:DIR/|lean:DIR/|sim:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump","isabelle","lean","sim"],"examples":["lhd compile foo.v --top foo --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/","lhd compile lg:top_lgs/ --emit-dir isabelle:top_thy/ --emit-dir lean:top_lean/","lhd compile x.prp --emit-dir sim:x_sim/"]})json");
     return 0;
   }
   if (name == "lg" || name == "design" || name == "lgraph") {
@@ -643,12 +623,12 @@ int describe_command(const Options& opts) {
   }
   if (name == "dump") {
     print_json_line(
-        R"json({"schema_version":1,"name":"dump","description":"--dump parse|lnast|lg (repeatable, comma-separable): print a debug observable to stderr. parse = the LNAST right after the front-end parse (inou.prp/inou.slang + lnastfmt; needs sources), lnast = the LNAST right after pass.upass, lg = a textual node/edge dump of the LGraphs (post-recipe). A dump forces the pipeline stage that produces it (e.g. `--dump lnast` runs pass.upass). The screen twin of --emit-dir lnast-dump:DIR/; stdout stays protocol-clean","examples":["lhd compile x.prp --dump parse,lnast","lhd compile x.prp --recipe O0 --dump lg"]})json");
+        R"json({"schema_version":1,"name":"dump","description":"--dump parse|lnast|lg (repeatable, comma-separable): print a debug observable to stderr. parse = the LNAST right after the front-end parse (inou.prp/inou.slang + lnastfmt; needs sources), lnast = the LNAST right after pass.upass, lg = a textual node/edge dump of the LGraphs (after constant propagation and bitwidth inference). A dump forces the pipeline stage that produces it (e.g. `--dump lnast` runs pass.upass). The screen twin of --emit-dir lnast-dump:DIR/; stdout stays protocol-clean","examples":["lhd compile x.prp --dump parse,lnast","lhd compile x.prp --dump lg"]})json");
     return 0;
   }
   if (name == "config") {
     print_json_line(
-        R"json({"schema_version":1,"name":"config","description":"--config lhd.toml: pass-flag defaults as a declared input file. Strict TOML subset: # comments, [pass] tables (upass|cprop|bitwidth|cgen, see `lhd list options`), key = value with quoted strings / true|false / integers; top level takes only `recipe`. Explicit --set/--recipe always win","example":"recipe = \"O2\"\n[upass]\nconstprop = true\nverifier = false"})json");
+        R"json({"schema_version":1,"name":"config","description":"--config lhd.toml: pass-flag defaults as a declared input file. Strict TOML subset: # comments, [pass] tables (upass|cprop|bitwidth|cgen, see `lhd list options`), key = value with quoted strings / true|false / integers; all settings belong to pass tables. Explicit --set values always win","example":"[upass]\nconstprop = true\nverifier = false"})json");
     return 0;
   }
 
@@ -745,7 +725,7 @@ void print_general_help() {
       "commands:\n"
       "  compile    sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)\n"
       "               lhd compile x.prp --emit verilog:net.v\n"
-      "               lhd compile foo.v --top foo --recipe O2 --emit net.v\n"
+      "               lhd compile foo.v --top foo --emit net.v\n"
       "               lhd compile x.prp --emit-dir ln:x_lns/      # pre-elaborate for importers\n"
       "               lhd compile ln:x_lns/ --emit verilog:net.v  # synth from IR\n"
       "               lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
@@ -775,9 +755,9 @@ void print_general_help() {
       "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | opentimer | liberty gensim | semdiff\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
       "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
-      "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
+      "  list       steps | emit-kinds | error-classes | options [REGEX]\n"
       "               lhd list options 'compile\\..*'   # the --set/--config pass.flag vocabulary\n"
-      "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>  (the JSON form)\n"
+      "  describe   <command | emit-kind | pass.flag | dump | config>  (the JSON form)\n"
       "               lhd describe compile.cgen.srcmap   # one option, full help text\n"
       "  version | help [command]\n"
       "\n"
@@ -792,7 +772,7 @@ void print_general_help() {
       "  (one file per module). --emit also infers the kind from a bare .v/.sv/.prp path\n"
       "\n"
       "shared flags:\n"
-      "  --top T   --reader slang|yosys-slang|yosys-verilog   --recipe O0|O1|O2\n"
+      "  --top T   --reader slang|yosys-slang|yosys-verilog\n"
       "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
       "  --workdir DIR   --result-json PATH\n"
       "  --diag-fmt auto|json|pretty    result + diagnostic rendering (auto: pretty on a\n"
@@ -995,7 +975,7 @@ int help_pass(const std::string& sub) {
   }
   if (sub == "abc") {
     std::print(
-        "lhd pass abc — combinational ABC tech-map (bit-blast -> AIG -> sky130 blackboxes)\n"
+        "lhd pass abc — combinational ABC tech-map (bit-blast -> AIG -> Liberty blackboxes)\n"
         "\n"
         "usage: lhd pass abc --top M lg:DIR --emit-dir lg:OUT/\n"
         "  --emit-dir lg: (must differ from the input) receives the mapped netlist.\n"
@@ -1021,21 +1001,28 @@ int help_pass(const std::string& sub) {
         "  --top M                  select the module to map\n"
         "  --emit-dir lg:OUT/       output library (must differ from the input)\n"
         "  --stats                  add one QoR row per (definition, color); resynth=1|0\n"
+        "  --set synth.liberty=PATH   THE Liberty to map to (empty => the\n"
+        "                             $HAGENT_TECH_DIR default). One spelling, shared with\n"
+        "                             pass.opentimer and `lhd synth`; `pass.abc.library`\n"
+        "                             is refused so no two readers can disagree.\n"
         "  --set pass.abc.flag=value  pass options (listed below)\n"
         "\n"
         "examples:\n"
-        "  lhd pass abc --top m lg:dir --emit-dir lg:net\n");
+        "  lhd pass abc --top m lg:dir --emit-dir lg:net\n"
+        "  lhd pass abc --top m lg:dir --emit-dir lg:net --set synth.liberty=asap7.lib\n");
     return print_options_section({"pass.abc."});
   }
   if (sub == "opentimer") {
     std::print(
         "lhd pass opentimer — OpenTimer STA on a pass.abc tech-mapped module\n"
         "\n"
-        "usage: lhd pass opentimer --top M lg:DIR <cells.lib> [file.sdc file.spef]\n"
+        "usage: lhd pass opentimer --top M lg:DIR [cells.lib] [file.sdc file.spef]\n"
         "  Reports the critical path of ONE tech-mapped module machine-readably (the\n"
         "  accurate frequency oracle of the 2opt-freq loop). Timing files are POSITIONAL\n"
         "  (like `pass liberty gensim`): 1-2 Liberty files (.lib; a 2nd = min corner) plus\n"
-        "  optional .sdc / .spef — not a --set option.\n"
+        "  optional .sdc / .spef. With NO .lib positional it times with THE Liberty\n"
+        "  (`--set synth.liberty`, else the $HAGENT_TECH_DIR default) — the same one\n"
+        "  pass.abc mapped to.\n"
         "\n"
         "  One OpenTimer design per run: --top picks the def out of the netlist library.\n"
         "  Time a region module (<mod>__c<N>), a flat map, or a hierarchical top: by default\n"
@@ -1069,10 +1056,12 @@ int help_pass(const std::string& sub) {
   }
   if (sub == "liberty") {
     std::print(
-        "lhd pass liberty gensim <file.lib> — Liberty cells -> LGraph simulation models\n"
+        "lhd pass liberty gensim [file.lib] — Liberty cells -> LGraph simulation models\n"
         "\n"
-        "usage: lhd pass liberty gensim <file.lib> --emit-dir lg:OUT/\n"
+        "usage: lhd pass liberty gensim [file.lib] --emit-dir lg:OUT/\n"
         "  Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library.\n"
+        "  With no file it reads THE Liberty (`--set synth.liberty`, else the\n"
+        "  $HAGENT_TECH_DIR default).\n"
         "\n"
         "flags:\n"
         "  --emit-dir lg:OUT/              output model library\n"
@@ -1145,7 +1134,7 @@ int help_pass(const std::string& sub) {
 // `lhd help X` / `lhd X --help` honor --diag-fmt just like `list`/`describe`:
 // pretty prints the human page (the functions above), jsonl prints a JSON
 // record. For a topic that `lhd describe` already covers (compile/lec/formal/
-// scan/tool/pass/pass semdiff/pyrope fmt|lsp, and the recipes/pass.flags/
+// scan/tool/pass/pass semdiff/pyrope fmt|lsp, and the pass.flags/
 // emit-kinds describe knows) the record IS the describe record — one source of
 // truth, no drift. The topics describe has no entry for get their own records
 // here: the general overview, the pyrope/pass sub-command pages, the `sim`
@@ -1156,7 +1145,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion);
 }
 
@@ -1179,22 +1168,22 @@ constexpr std::string_view kJsonPassSingleEdge
     = R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.single_edge.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
 
 constexpr std::string_view kJsonPassAbc
-    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
+    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> Liberty blackboxes. The cells come from THE one Liberty knob (--set synth.liberty, else $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib); pass.abc.library is refused. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"synth.liberty=PATH | pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
 
 constexpr std::string_view kJsonPassOpentimer
     = R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run). With a --workdir and lhd.incremental (default true) the STA result cache at <workdir>/sta_cache replays the stored report for an unchanged netlist+environment instead of re-timing; counters ride the envelope's incremental.sta","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats"]})json";
 
 constexpr std::string_view kJsonPassLiberty
-    = R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
+    = R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input; omit it to read --set synth.liberty); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true}],"optional":[{"name":"file","type":"path (.lib; omit => --set synth.liberty)","positional":true},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
 
 constexpr std::string_view kJsonSimCommand
     = R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
 
 constexpr std::string_view kJsonList
-    = R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","recipes","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list recipes","lhd list log-channels"]})json";
+    = R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list log-channels"]})json";
 
 constexpr std::string_view kJsonDescribe
-    = R"json({"schema_version":1,"name":"describe","description":"One item's full record as JSON (the machine face of help; pretty prose for a pass.flag option). Accepts a command, recipe:NAME, emit-kind, pass.flag, dump, or config","args":{"required":[{"name":"name","type":"command | recipe:NAME | emit-kind | pass.flag | dump | config","positional":true}]},"examples":["lhd describe compile.cgen.srcmap","lhd describe lec"]})json";
+    = R"json({"schema_version":1,"name":"describe","description":"One item's full record as JSON (the machine face of help; pretty prose for a pass.flag option). Accepts a command, emit-kind, pass.flag, dump, or config","args":{"required":[{"name":"name","type":"command | emit-kind | pass.flag | dump | config","positional":true}]},"examples":["lhd describe compile.cgen.srcmap","lhd describe lec"]})json";
 
 // Route a `--diag-fmt json` help page to its JSON record. `topic`/`sub` are the
 // normalized help words (formal lec already folded to lec by the caller).
@@ -1308,7 +1297,7 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     return 1;
   }
   // compile / lec / scan, plus every non-command describe topic
-  // (recipe:NAME, emit-kind, pass.flag, dump, config): describe renders the JSON.
+  // (emit-kind, pass.flag, dump, config): describe renders the JSON.
   return describe_as(topic);
 }
 
@@ -1350,11 +1339,10 @@ int help_command(const Options& opts) {
         "  the front-end + pass.upass; positional ln:DIR supplies pre-elaborated imports and\n"
         "  lg:DIR pre-compiled libraries. With no sources, ln:/lg: inputs aggregate, optimize,\n"
         "  or link (ln: + lg:). Verilog goes through a --reader (yosys-* -> lg:; slang -> the\n"
-        "  direct SV->LNAST front-end). The graph recipe (default O1) and codegen then run.\n"
+        "  direct SV->LNAST front-end). Constant propagation, bitwidth inference, and codegen then run.\n"
         "\n"
         "flags:\n"
         "  --top T              --reader R   slang | yosys-slang | yosys-verilog (default slang)\n"
-        "  --recipe O0|O1|O2    (default O1; `lhd list recipes`)\n"
         "  --emit verilog:PATH | pyrope:PATH   (or a bare .v/.sv/.prp — kind inferred)\n"
         "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump: | isabelle: | lean: | sim:\n"
         "                       (sim: = executable C++ simulation; `cd DIR && bazel build //:sim`)\n"
@@ -1367,10 +1355,10 @@ int help_command(const Options& opts) {
         "debug dumps (printed to stderr; a dump forces the stage that produces it):\n"
         "  --dump parse|lnast|lg   post-parse LNAST | post-upass LNAST | textual LGraph\n"
         "               lhd compile x.prp --dump parse,lnast\n"
-        "               lhd compile x.prp --recipe O0 --dump lg\n"
+        "               lhd compile x.prp --dump lg\n"
         "\n"
         "examples:\n"
-        "  lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
+        "  lhd compile foo.v --top foo --emit verilog:net.v\n"
         "  lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/\n"
         "  lhd compile x.prp --emit-dir ln:x_lns/        # pre-elaborate for importers\n"
         "  lhd compile ln:x_lns/ --emit verilog:net.v    # synth from IR\n"
@@ -1684,7 +1672,7 @@ int help_command(const Options& opts) {
                "  --emit-dir report:DIR/     copy qor.json + timing.json into DIR (handy without --workdir)\n"
                "  --emit verilog:FILE        the mapped netlist as Verilog (also --emit-dir verilog:DIR/)\n"
                "  --stats                    the per-color rows (see report:)\n"
-               "  --reader / --recipe        the `lhd compile` front-end knobs (slang by default; O1)\n"
+               "  --reader                   the Verilog front end (slang by default)\n"
                "  --set synth.flag=value     the flow knobs (below); pass tuning rides the pass namespaces:\n"
                "                             --set abc.adder=cla  --set color.absorb=false  --set opentimer.hier=false\n"
                "  --set lhd.incremental=false  cold run (no compile-cache / abc_cache reuse)\n"
@@ -1702,7 +1690,7 @@ int help_command(const Options& opts) {
         "lhd list — enumerate the CLI vocabulary (one JSON line; --diag-fmt pretty for options)\n"
         "\n"
         "usage: lhd list <pattern>\n"
-        "  steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels\n"
+        "  steps | emit-kinds | error-classes | options [REGEX] | log-channels\n"
         "  `options` lists every --set/--config pass.flag (filter with a REGEX over the names).\n"
         "  `log-channels` lists the developer-logging channels (`--set <channel>.log=<level>`).\n"
         "\n"
@@ -1712,14 +1700,14 @@ int help_command(const Options& opts) {
         "examples:\n"
         "  lhd list options 'cgen\\..*'\n"
         "  lhd list log-channels\n"
-        "  lhd list recipes\n");
+        "  lhd list steps\n");
     return 0;
   }
   if (topic == "describe") {
     std::print(
         "lhd describe — one item's full record as JSON (pretty prose for pass.flag options)\n"
         "\n"
-        "usage: lhd describe <command | recipe:NAME | emit-kind | pass.flag | dump | config>\n"
+        "usage: lhd describe <command | emit-kind | pass.flag | dump | config>\n"
         "  For readable per-command help use `lhd help <command>` / `lhd <command> --help`.\n"
         "\n"
         "flags:\n"
@@ -1745,7 +1733,7 @@ int help_command(const Options& opts) {
     return 0;
   }
 
-  // Non-command topics (recipe:NAME, emit-kind, pass.flag, dump, config) stay
+  // Non-command topics (emit-kind, pass.flag, dump, config) stay
   // on the describe path (JSON, or pretty prose for an option name).
   return describe_command(opts);
 }

@@ -39,14 +39,14 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$PRP" ] || fail "missing fixture $PRP"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 
 # ---------------------------------------------------------------------------
 # 1. an unsatisfiable budget must refuse
 # ---------------------------------------------------------------------------
 if "$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
-    --set abc.library="$LIB" --set abc.memory_budget_mb=1 \
+    --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 \
     --emit diagnostics:"$W/refused.jsonl" \
     --workdir "$W/w3" -q --result-json "$W/refused.json" 2>"$W/refused.err"; then
   fail "pass.abc accepted a 1 MiB memory budget (the guard did not fire)"
@@ -73,7 +73,7 @@ fi
 # 3. allow_oversize must override the guard (the documented escape hatch)
 # ---------------------------------------------------------------------------
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
-  --set abc.library="$LIB" --set abc.memory_budget_mb=1 --set abc.allow_oversize=true \
+  --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 --set abc.allow_oversize=true \
   --workdir "$W/w4"
 [ -n "$(ls -A "$W/net_forced" 2>/dev/null)" ] || fail "allow_oversize=true produced no netlist"
 
@@ -81,14 +81,14 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
 # 4. a generous budget must NOT false-positive on a design that plainly fits
 # ---------------------------------------------------------------------------
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
-  --set abc.library="$LIB" --set abc.memory_budget_mb=65536 --workdir "$W/w5"
+  --set synth.liberty="$LIB" --set abc.memory_budget_mb=65536 --workdir "$W/w5"
 [ -n "$(ls -A "$W/net_ok" 2>/dev/null)" ] || fail "a 64 GiB budget produced no netlist"
 
 # ---------------------------------------------------------------------------
 # 5. a malformed budget is an error, not a silent fallback to "unlimited"
 # ---------------------------------------------------------------------------
 if "$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" \
-    --set abc.library="$LIB" --set abc.memory_budget_mb=lots \
+    --set synth.liberty="$LIB" --set abc.memory_budget_mb=lots \
     --workdir "$W/w6" -q --result-json "$W/bad.json" 2>/dev/null; then
   fail "pass.abc accepted memory_budget_mb=lots"
 fi

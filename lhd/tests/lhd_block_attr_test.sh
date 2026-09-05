@@ -45,15 +45,15 @@ sed 's/{::\[.*\]/{/' "$PRP" > "$W/plain.prp"
 run lec --impl "$PRP" --ref "$W/plain.prp" --top "$TOP" --workdir "$W/wl"
 
 # 2. compile + abc WITHOUT pass.color: the block is its own region
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set abc.library="$LIB" --workdir "$W/w2"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --workdir "$W/w2"
 grep -q "\"module\":\"${TOP}__c2\",\"color\":2" "$W/w2/qor.json" || fail "block region __c2 missing from qor.json"
 grep -q "color 2 options override applied (coloring_info)" "$W/w2/logs/"*.log \
   || fail "block abc= flow override was not applied from coloring_info"
 
 # 3. seeded precedence: pass.color must keep the block region + still override
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w3"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net2" --set abc.library="$LIB" --workdir "$W/w4"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net2" --set synth.liberty="$LIB" --workdir "$W/w4"
 grep -q "\"module\":\"${TOP}__c2\",\"color\":2" "$W/w4/qor.json" || fail "block region lost after pass color synth"
 grep -q "color 2 options override applied (coloring_info)" "$W/w4/logs/"*.log \
   || fail "block abc= flow override lost after pass color synth"
@@ -61,23 +61,23 @@ grep -q "color 2 options override applied (coloring_info)" "$W/w4/logs/"*.log \
 # 4. the mapped netlist (post-color run) LECs against its partition twin
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w5"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w6"
-run compile lg:"$W/net2" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/netv" --workdir "$W/w7"
-run compile lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir "$W/w8"
-run compile lg:"$W/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/rev" --workdir "$W/w9"
+run compile lg:"$W/net2" --top "$TOP" --emit-dir verilog:"$W/netv" --workdir "$W/w7"
+run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w8"
+run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w9"
 cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
 # 5a. negative control: unknown scope attribute must fail the compile
 sed "s/abc='[^']*'/colour=3/" "$PRP" > "$W/bad_key.prp"
-if "$LHD" compile "$W/bad_key.prp" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lgbad" --workdir "$W/wn1" \
+if "$LHD" compile "$W/bad_key.prp" --top "$TOP" --emit-dir lg:"$W/lgbad" --workdir "$W/wn1" \
     -q --result-json "$W/rn1.json" 2>/dev/null; then
   fail "unknown scope attribute compiled clean; expected a hard error"
 fi
 
 # 5b. negative control: double-quoted abc= flow with `{` (interpolation trap)
 sed "s/abc='\([^']*\)'/abc=\"\1\"/" "$PRP" > "$W/bad_quote.prp"
-if "$LHD" compile "$W/bad_quote.prp" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lgbad2" --workdir "$W/wn2" \
+if "$LHD" compile "$W/bad_quote.prp" --top "$TOP" --emit-dir lg:"$W/lgbad2" --workdir "$W/wn2" \
     -q --result-json "$W/rn2.json" 2>/dev/null; then
   fail "double-quoted abc= flow with {D} compiled clean; expected a hard error"
 fi

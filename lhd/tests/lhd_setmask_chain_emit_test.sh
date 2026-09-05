@@ -14,7 +14,7 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$FIX" --top "$TOP" --recipe O0 --emit verilog:"$W/out.v" --workdir "$W/compile" -q \
+"$LHD" compile "$FIX" --top "$TOP" --emit verilog:"$W/out.v" --workdir "$W/compile" -q \
   || fail "could not emit the Set_mask chain"
 
 # Sixteen single-use packed updates must share one procedural accumulator.  In
@@ -32,11 +32,14 @@ echo "PASS: single-use Set_mask chain shares one wide accumulator"
 # procedural variable cannot legally be written by several always_comb blocks.
 CYCLE_FIX=lhd/tests/setmask_chain_cycle.sv
 CYCLE=setmask_chain_cycle
-"$LHD" compile "$CYCLE_FIX" --reader slang --top "$CYCLE" --recipe O0 --emit verilog:"$W/cycle.v" \
+"$LHD" compile "$CYCLE_FIX" --reader slang --top "$CYCLE" --emit verilog:"$W/cycle.v" \
   --workdir "$W/cycle_compile" -q \
   || fail "could not emit the instance-split Set_mask chain"
 
-if [ "$(grep -Ec '^reg .*set_mask_' "$W/cycle.v" || true)" -lt 2 ]; then
+MASKS=$(grep -Ec '^reg .*set_mask_' "$W/cycle.v" || true)
+# Inference can replace the complete chain by a concat of independent lanes.
+# If a procedural chain remains, its instance-split carriers must stay separate.
+if [ "$MASKS" -gt 0 ] && [ "$MASKS" -lt 2 ]; then
   fail "instance-split Set_mask chain incorrectly shares one procedural accumulator: $(cat "$W/cycle.v")"
 fi
 

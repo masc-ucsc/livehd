@@ -160,7 +160,7 @@ Typed_path parse_emit_arg(std::string_view flag, std::string_view arg) {
 // A strict TOML *subset*: `#` comments, `[pass]` tables, and `key = value`
 // where value is a quoted string, a boolean, or an integer. Each table entry
 // becomes a `--set pass.flag=value` default (prepended, so an explicit CLI
-// --set always wins); the only top-level key is `recipe` (CLI --recipe wins).
+// --set always wins). All keys belong to pass tables.
 // Anything outside the subset is a config error — reject rather than misread.
 
 std::string_view trim(std::string_view s) {
@@ -216,9 +216,8 @@ std::string toml_value(const std::string& file, int lineno, std::string_view raw
   if (!digits.empty() && digits.front() == '-') {
     digits.remove_prefix(1);
   }
-  if (!digits.empty() && std::all_of(digits.begin(), digits.end(), [](char c) {
-        return std::isdigit(static_cast<unsigned char>(c));
-      })) {
+  if (!digits.empty()
+      && std::all_of(digits.begin(), digits.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })) {
     return std::string{raw};
   }
   throw Lhd_error{"config",
@@ -226,7 +225,7 @@ std::string toml_value(const std::string& file, int lineno, std::string_view raw
                   "config values are \"quoted strings\", true/false, or integers"};
 }
 
-// Read `opts.config` and fold it into opts (sets/recipe). Strict subset; see
+// Read `opts.config` and fold it into opts.sets. Strict subset; see
 // the comment block above. Runs before run_id hashing, so a config file and
 // the equivalent explicit flags produce the same run_id.
 void load_config(Options& opts) {
@@ -239,7 +238,6 @@ void load_config(Options& opts) {
   }
 
   std::vector<std::pair<std::string, std::string>> file_sets;
-  std::string                                      file_recipe;
   std::string                                      table;  // current [pass] table ("" = top level)
   std::string                                      line;
   int                                              lineno = 0;
@@ -283,13 +281,9 @@ void load_config(Options& opts) {
     }
     auto value = toml_value(opts.config, lineno, trim(t.substr(eq + 1)));
     if (table.empty()) {
-      if (key != "recipe") {
-        throw Lhd_error{"config",
-                        std::format("{}:{}: unknown top-level key '{}'", opts.config, lineno, key),
-                        "top level takes only `recipe`; pass flags go under [upass]/[cprop]/[bitwidth]/[cgen]"};
-      }
-      file_recipe = value;
-      continue;
+      throw Lhd_error{"config",
+                      std::format("{}:{}: unknown top-level key '{}'", opts.config, lineno, key),
+                      "pass flags go under [upass]/[cprop]/[bitwidth]/[cgen]; the compile pipeline is fixed"};
     }
     // Canonicalize against the `compile` context: a config table is portable
     // across commands, so a bare compile-pass table ([cprop]/[upass]/[cgen]…)
@@ -301,14 +295,8 @@ void load_config(Options& opts) {
   }
 
   // File entries are defaults: prepend so later (CLI) --set entries overwrite
-  // them in merge_sets; --recipe wins over the file's recipe. And unlike an
-  // explicit --recipe, a default that the command has no slot for is simply
-  // ignored (one lhd.toml can serve every step of a flow), so only the
-  // recipe-consuming commands pick it up.
+  // them in merge_sets.
   opts.sets.insert(opts.sets.begin(), file_sets.begin(), file_sets.end());
-  if (opts.recipe.empty() && (opts.command == "compile" || opts.command == "synth")) {
-    opts.recipe = file_recipe;
-  }
 }
 
 }  // namespace
@@ -332,8 +320,8 @@ Options parse_args(int argc, char** argv) {
   // may come before or after it (`lhd --diag-fmt json list options` ==
   // `lhd list options --diag-fmt json`). Value-taking flags consume their
   // value wherever they sit (`lhd --top foo synth ...` keeps foo with --top).
-  bool raw_mode  = false;
-  bool want_help = false;
+  bool        raw_mode  = false;
+  bool        want_help = false;
   // The command-path established by the command words seen so far, dotted
   // (2h-set_path): "" before the command word, the command after it, and
   // "pass.<sub>" once a `pass` sub-command is read. Each --set key to its
@@ -342,7 +330,7 @@ Options parse_args(int argc, char** argv) {
   // Count the logical tokens the user typed (one per loop turn; a value-flag's
   // value is consumed via ++i, so it is not counted separately). A command word
   // is one token, so `n_user_tokens == 1` means the command was typed bare.
-  int n_user_tokens = 0;
+  int         n_user_tokens = 0;
   for (int i = 1; i < argc; ++i) {
     std::string_view a{argv[i]};
     ++n_user_tokens;
@@ -460,8 +448,6 @@ Options parse_args(int argc, char** argv) {
       // diagnosing a run that still has to pass.
     } else if (a == "--stats") {
       opts.stats = true;
-    } else if (a == "--recipe") {
-      opts.recipe = need_value(a, i, argc, argv);
     } else if (a == "--set") {
       auto kv  = std::string{need_value(a, i, argc, argv)};
       auto pos = kv.find('=');
@@ -552,7 +538,8 @@ Options parse_args(int argc, char** argv) {
       auto v  = std::string{need_value(a, i, argc, argv)};
       auto eq = v.find('=');
       if (eq == std::string::npos || eq == 0) {
-        throw Lhd_error{"usage", std::format("--arg expects key=value, got '{}'", v),
+        throw Lhd_error{"usage",
+                        std::format("--arg expects key=value, got '{}'", v),
                         "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
       }
       opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
@@ -733,7 +720,7 @@ Options parse_args(int argc, char** argv) {
     return opts;
   }
 
-  // Fold --config file defaults into sets/recipe BEFORE anything hashes or
+  // Fold --config file defaults into sets BEFORE anything hashes or
   // consumes the resolved config (a config file and the equivalent explicit
   // flags must be indistinguishable downstream).
   load_config(opts);
@@ -745,7 +732,7 @@ Options parse_args(int argc, char** argv) {
     bool any_v   = false;
     for (const auto& f : opts.files) {
       any_prp |= ends_with(f, ".prp");
-      any_v |= ends_with(f, ".v") || ends_with(f, ".sv");
+      any_v   |= ends_with(f, ".v") || ends_with(f, ".sv");
     }
     if (any_prp && any_v) {
       throw Lhd_error{"usage", "cannot mix pyrope and verilog sources in one invocation", "split into two elaborates"};

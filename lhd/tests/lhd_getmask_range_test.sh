@@ -13,7 +13,7 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$SRC" --reader slang --top getmask_range --recipe O1 \
+"$LHD" compile "$SRC" --reader slang --top getmask_range \
   --emit-dir sim:"$W/sim" --workdir "$W/work" -q 2>/dev/null \
   || fail "range-extraction simulator generation failed"
 

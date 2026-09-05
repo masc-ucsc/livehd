@@ -38,7 +38,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$PRP" ] || fail "missing fixture $PRP"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 
 # ---------------------------------------------------------------------------
 # 1. pass.color: a WARNING, not a failure -- coloring is fine at any size.
@@ -57,7 +57,7 @@ run pass color flat --top "$TOP" lg:"$W/lg" --workdir "$W/w2b"  # (re-color for 
 # 2. pass.abc whole-design flatten: a hard REFUSAL.
 # ---------------------------------------------------------------------------
 if LIVEHD_LARGE_DESIGN_NODES=1 "$LHD" pass abc --top "$TOP" lg:"$W/lg" \
-    --emit-dir lg:"$W/abc_refused" --set abc.library="$LIB" --set abc.flatten=true \
+    --emit-dir lg:"$W/abc_refused" --set synth.liberty="$LIB" --set abc.flatten=true \
     --emit diagnostics:"$W/abc.jsonl" --workdir "$W/w3" -q --result-json "$W/abc.json" 2>/dev/null; then
   fail "pass.abc accepted an over-threshold whole-design flatten"
 fi
@@ -70,14 +70,14 @@ grep -q '"code":"large-design"' "$W/abc.jsonl" \
 # 3. allow_oversize overrides the abc refusal.
 # ---------------------------------------------------------------------------
 LIVEHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_forced" \
-  --set abc.library="$LIB" --set abc.flatten=true --set abc.allow_oversize=true --workdir "$W/w4"
+  --set synth.liberty="$LIB" --set abc.flatten=true --set abc.allow_oversize=true --workdir "$W/w4"
 [ -n "$(ls -A "$W/abc_forced" 2>/dev/null)" ] || fail "abc.allow_oversize=true produced no netlist"
 
 # ---------------------------------------------------------------------------
 # 4. per-def abc (flatten=false) must NOT fire: no single whole-design unit.
 # ---------------------------------------------------------------------------
 LIVEHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_perdef" \
-  --set abc.library="$LIB" --set abc.flatten=false --workdir "$W/w5"
+  --set synth.liberty="$LIB" --set abc.flatten=false --workdir "$W/w5"
 [ -n "$(ls -A "$W/abc_perdef" 2>/dev/null)" ] || fail "per-def abc was wrongly refused by the size gate"
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ LIVEHD_LARGE_DESIGN_NODES=1 run lec --impl "$PRP" --ref "$PRP" \
 # 7. the default (~1M) threshold must not false-positive on this tiny design.
 # ---------------------------------------------------------------------------
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_default" \
-  --set abc.library="$LIB" --set abc.flatten=true --workdir "$W/w8"
+  --set synth.liberty="$LIB" --set abc.flatten=true --workdir "$W/w8"
 [ -n "$(ls -A "$W/abc_default" 2>/dev/null)" ] || fail "the default threshold false-refused a tiny abc run"
 
 echo "PASS: design-size gate (color warns; abc/lec refuse + override; per-def and default do not fire)"

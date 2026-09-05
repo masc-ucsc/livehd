@@ -175,12 +175,12 @@ class PrpRunner:
         # the --emit diagnostics: slot itself.
         #
         # Optional `:tolg: 1` header tag (task 1r): extend the pipeline with
-        # the LNAST->LGraph lowering (recipe O0 + lg: emit) so errors that
+        # the LNAST->LGraph compilation (lg: emit) so errors that
         # only fire at tolg (e.g. a func_call with no hardware lowering) are
         # exercisable as error tests.
         cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
         if test.params.get('tolg'):
-            cmd += ['--recipe', 'O0', '--emit-dir',
+            cmd += ['--emit-dir',
                     'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
         return cmd
 
@@ -194,22 +194,20 @@ class PrpRunner:
 
     def lhd_lgraph(self, test, mode):
         # LNAST->LGraph: the lg: emit gates the kernel's standalone tolg
-        # lowering (the CLI-level tolg:1); --recipe O0 keeps the graph passes
-        # out, matching the old `pass.upass ... tolg:1` pipeline tail.
+        # lowering followed by the standard graph optimization passes
+        # (tolg + pass.cprop + pass.bitwidth). With the optimization-level
+        # selection gone there is only ONE lowering command, so the two mode
+        # names below resolve to it rather than drifting apart.
         cmd = self.lhd_upass(test, mode)
-        cmd += ['--recipe', 'O0', '--emit-dir',
+        cmd += ['--emit-dir',
                 'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
         return cmd
 
     def lhd_lg_compile(self, test, mode):
-        # tolg + pass.cprop + pass.bitwidth == recipe O2 over the lg: emit.
-        cmd = self.lhd_upass(test, mode)
-        cmd += ['--recipe', 'O2', '--emit-dir',
-                'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
-        return cmd
+        return self.lhd_lgraph(test, mode)
 
     def lhd_equiv(self, test, odir):
-        # Equivalence test: lower to LGraph (tolg, no graph passes) and emit
+        # Equivalence test: compile to optimized LGraph and emit
         # per-module Verilog into `odir`. run_equiv() then LECs the generated
         # Verilog against the sibling golden `.v` via inou/yosys/lgcheck.
         #
@@ -219,7 +217,7 @@ class PrpRunner:
         cmd = self.lhd_upass(test, 'equiv')
         if 'reset_style' in test.params:
             cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
-        cmd += ['--recipe', 'O0', '--emit-dir', 'verilog:{}/'.format(odir)]
+        cmd += ['--emit-dir', 'verilog:{}/'.format(odir)]
         return cmd
 
     def gen_lhd_cmd(self, test, mode):
@@ -682,8 +680,7 @@ class PrpRunner:
 
         # implementation: golden .v read by the native slang reader -> Verilog
         impl_odir = os.path.join(tmp_dir, 'tmp_eqs_impl_' + safe)
-        impl_cmd = [self.lhd, 'compile', '--reader', 'slang', vfile, '--recipe', 'O0',
-                    '--emit-dir', 'verilog:{}/'.format(impl_odir),
+        impl_cmd = [self.lhd, 'compile', '--reader', 'slang', vfile, '--emit-dir', 'verilog:{}/'.format(impl_odir),
                     '--workdir', self._scratch(test, 'equiv_slang')]
         impl, ilog = self._emit_combined_verilog(tmp_dir, impl_cmd, impl_odir, safe, 'impl')
         if impl is None:

@@ -1,0 +1,32 @@
+/*
+:name: output_width_landing
+:type: simulation
+:set: compile.upass.inline=false
+*/
+// Port demand caps the arithmetic cell, but its Slop expression may overflow
+// that unsigned window. A caller must receive the truncated magnitude, not a
+// non-canonical signed carrier through Slop_u::from_proven.
+pub comb narrowed(a:u8, b:u8) -> (sum:u8, product:u8, shifted:u8) {
+  sum = a + b
+  product = a * b
+  shifted = a << 1
+}
+
+pub mod top(a:u8, b:u8) -> (sum:u16@[], product:u16@[], shifted:u16@[]) {
+  mut n = narrowed::[name=n](a=a, b=b)
+  sum = n.sum
+  product = n.product
+  shifted = n.shifted
+}
+
+test top.unsigned_landing {
+  mut acc = top
+  tick 2 {
+    acc.a = 255
+    acc.b = 255
+    step
+    assert(acc.sum == 254)
+    assert(acc.product == 1)
+    assert(acc.shifted == 254)
+  }
+}

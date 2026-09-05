@@ -879,6 +879,30 @@ bool Cgen_sim::proven_canonical_unsigned_result(const hhds::Node_class& node, co
   const bool needs_nonnegative_inputs = op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::Sum
                                         || op == Ntype_op::Mult || op == Ntype_op::SHL || op == Ntype_op::Mux
                                         || op == Ntype_op::Hotmux;
+  if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::SHL) {
+    for (const auto& edge : output.out_edges()) {
+      if (livehd::graph_util::is_graph_output_pin(edge.sink) || type_op_of(edge.sink.get_master_node()) == Ntype_op::Sub) {
+        // A module-port demand may cap this arithmetic result below its
+        // mathematical range. Unsigned metadata then describes the landing,
+        // not a proof that the unmasked expression is already canonical.
+        return false;
+      }
+    }
+  }
+  if (needs_nonnegative_inputs || op == Ntype_op::SRA) {
+    for (const auto& edge : node.inp_edges()) {
+      if ((op == Ntype_op::Mux || op == Ntype_op::Hotmux) && edge.sink.get_port_id() == 0) {
+        continue;
+      }
+      if ((op == Ntype_op::SHL || op == Ntype_op::SRA) && edge.sink.get_port_id() != 0) {
+        continue;
+      }
+      const auto width = edge.driver.is_const() ? const_of(edge.driver).get_bits() : wbits_of(edge.driver);
+      if (width > wbits_of(output)) {
+        return false;  // a narrowed carrier still needs its unsigned landing mask
+      }
+    }
+  }
   if (!needs_nonnegative_inputs) {
     return true;
   }
@@ -949,6 +973,16 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     return is_unsign(pin) ? bits + 1 : bits;
   };
   const auto operation_operand = [&](const hhds::Pin_class& pin) { return raw_operand(pin, operation_width(pin)); };
+  int        operation_bits    = wbits;
+  for (const auto& edge : e) {
+    operation_bits = std::max(operation_bits, operation_width(edge.driver));
+  }
+  const auto otw            = std::to_string(operation_bits);
+  // Inference can prove a narrow range, or cap an output-only result. HLOP's
+  // operation carrier must still accept every operand; truncate at the landing.
+  const auto land_operation = [&](std::string expression) {
+    return operation_bits == wbits ? expression : absl::StrCat("Slop<", tw, ">{", expression, "}");
+  };
 
   // 1-to-1 fold: `Slop<W>::op(a, b, ...)` over operands read at their OWN widths.
   // Arithmetic stays left-associated to match the previous member-chain result
@@ -977,18 +1011,18 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           if (i + 1 == layer.size()) {
             next.push_back(std::move(layer[i]));
           } else {
-            next.push_back(absl::StrCat("Slop<", tw, ">::", method, "(", layer[i], ", ", layer[i + 1], ")"));
+            next.push_back(absl::StrCat("Slop<", otw, ">::", method, "(", layer[i], ", ", layer[i + 1], ")"));
           }
         }
         layer = std::move(next);
       }
-      return std::move(layer.front());
+      return land_operation(std::move(layer.front()));
     }
     std::string s = operation_operand(e[0].driver);
     for (size_t i = 1; i < e.size(); ++i) {
-      s = absl::StrCat("Slop<", tw, ">::", method, "(", s, ", ", operation_operand(e[i].driver), ")");
+      s = absl::StrCat("Slop<", otw, ">::", method, "(", s, ", ", operation_operand(e[i].driver), ")");
     }
-    return s;
+    return land_operation(std::move(s));
   };
 
   switch (op) {
@@ -996,7 +1030,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       std::string result = absl::StrCat("Slop<", tw, ">::create_integer(0)");
       for (const auto& ed : e) {
         result = absl::StrCat("Slop<",
-                              tw,
+                              otw,
                               ">::",
                               ed.sink.get_port_id() == 0 ? "add_op" : "sub_op",
                               "(",
@@ -1005,7 +1039,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                               operation_operand(ed.driver),
                               ")");
       }
-      return result;
+      return land_operation(std::move(result));
     }
     case Ntype_op::And : return fold("and_op", true);
     case Ntype_op::Or  : return fold("or_op", true);
@@ -1059,7 +1093,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     }
     case Ntype_op::Not:
       return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
-                       : absl::StrCat("Slop<", tw, ">::not_op(", operation_operand(e[0].driver), ")");
+                       : land_operation(absl::StrCat("Slop<", otw, ">::not_op(", operation_operand(e[0].driver), ")"));
     case Ntype_op::LT:
     case Ntype_op::GT:
     case Ntype_op::EQ: {
@@ -1114,30 +1148,26 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (e[1].driver.is_const()) {
         const auto& amt = const_of(e[1].driver);
         if (amt.is_integer() && amt.is_just_i64() && amt.to_just_i64() >= 0) {
-          return absl::StrCat("Slop<",
-                              tw,
-                              ">::",
-                              is_shl ? "shl_op" : "sra_op",
-                              "(",
-                              operation_operand(e[0].driver),
-                              ", ",
-                              amt.to_just_i64(),
-                              ")");
+          return land_operation(absl::StrCat("Slop<",
+                                             otw,
+                                             ">::",
+                                             is_shl ? "shl_op" : "sra_op",
+                                             "(",
+                                             operation_operand(e[0].driver),
+                                             ", ",
+                                             amt.to_just_i64(),
+                                             ")"));
         }
       }
       // Runtime amount width is independent of the datapath width. SRA is
       // arithmetic for signed inputs and logical for unsigned inputs, just as
       // cgen.verilog selects $signed only for a signed driver.
       if (is_shl) {
-        return absl::StrCat("Slop<", tw, ">::shl_op(", operation_operand(e[0].driver), ", ", operation_operand(e[1].driver), ")");
+        return land_operation(
+            absl::StrCat("Slop<", otw, ">::shl_op(", operation_operand(e[0].driver), ", ", operation_operand(e[1].driver), ")"));
       }
-      return absl::StrCat("Slop<",
-                          tw,
-                          ">::sra_op(",
-                          operand(e[0].driver, wbits, value_sign_mode),
-                          ", ",
-                          operation_operand(e[1].driver),
-                          ")");
+      return land_operation(
+          absl::StrCat("Slop<", otw, ">::sra_op(", operation_operand(e[0].driver), ", ", operation_operand(e[1].driver), ")"));
     }
     case Ntype_op::Get_mask: {
       // The direct color ABI can carry an exact constant lane instead of the
@@ -1303,20 +1333,23 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits, -1);
       }
 
-      // A positive contiguous CONSTANT mask is the packed-field-write shape.
+      // A contiguous CONSTANT mask is the packed-field-write shape.
       // Emit its literal half-open bounds instead of materializing a mask and
       // asking set_mask_op() to rediscover the range on every execution. This
       // works for wide masks too: no from_pyrope constant, get_bits, ctz/clz,
       // or contiguity scan remains in the generated program.
       if (e[1].driver.is_const()) {
         const auto& mv = const_of(e[1].driver);
-        if (!mv.has_unknowns() && !mv.is_negative()) {
-          const auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
+        if (!mv.has_unknowns()) {
+          auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
+          if (me > wbits) {
+            me = wbits;
+          }
           if (mb >= 0 && me > mb && me <= wbits) {
             if (mb == 0 && me == wbits) {
               return operand(e[2].driver, wbits);  // every result bit is replaced
             }
-            const auto base = operand(e[0].driver, wbits, -1);
+            const auto base = operand(e[0].driver, wbits);
             if (e[2].driver.is_known_false()) {
               return absl::StrCat(base, ".clear_mask_op_opt(", mb, ", ", me, ")");
             }
@@ -1455,7 +1488,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       int sw = std::max({wbits, frombit + 1, wbits_of(e[0].driver)});
       return absl::StrCat("Slop<", tw, ">{", operand(e[0].driver, sw, /*signed=*/1), ".sext_op(", std::to_string(frombit), ")}");
     }
-    case Ntype_op::Mux:
+    case Ntype_op::Mux   :
     case Ntype_op::Hotmux: {
       if (e.size() < 3) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
@@ -1478,42 +1511,15 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // evaluates BOTH arms eagerly — with single-use forestation the
         // arms are whole inlined expression trees, so lazy arm evaluation
         // is the point, exactly like cgen_verilog's `sel ? a : b`. Each arm is
-        // read at its own carrier width, then losslessly promoted
-        // to the result width in the selected branch. Cgen checks those known
-        // widths before emitting the ternary; the generic HLOP mux/hotmux APIs
-        // independently keep the same consteval contract for their callers.
+        // read at the result width in the selected branch. This landing may
+        // truncate: bitwidth can cap a mux used only by a declared output.
+        // The generic HLOP mux/hotmux APIs require lossless carriers, so the
+        // explicit branch-local operand conversion is important here.
         //
         // Returned BEFORE the arm list / selector below are built: with
         // forestation each arm is a whole inlined tree, and the call form's
         // `vals` + result-width `sel` would be built and thrown away for every
         // one of the 2-arm muxes that dominate a real design.
-        // A CONST_NODE pin is not a finite carrier. Its bits attribute may have
-        // been widened for another consumer (the singleton zero pin commonly
-        // carries a declared u8 hint), but this mux can materialize the literal
-        // directly at the result width. Compare against the literal's own
-        // representation; non-constant arms still require their full carrier.
-        // The literal is materialized at the result width, so the requirement
-        // is its PAYLOAD, which is what upass/tolg stamped the merge with --
-        // hence the shared literal_payload_bits rather than a private copy of
-        // the signed-carrier arithmetic (an unknown-carrying `0ub?` arm used to
-        // demand the carrier here and fatal on a graph tolg had sized right).
-        const auto arm_width = [](const hhds::Pin_class& pin) {
-          if (!pin.is_const()) {
-            return std::max(wbits_of(pin), 1);
-          }
-          return std::max(1, static_cast<int>(livehd::graph_util::literal_payload_bits(const_of(pin))));
-        };
-        const int false_w = arm_width(e[1].driver);
-        const int true_w  = arm_width(e[2].driver);
-        if (wbits < false_w || wbits < true_w) {
-          livehd::diag::err("inou.cgen.sim", "mux-width-loss", "internal")
-              .msg("Mux '{}' result carrier {} is narrower than data arms {} and {}; code generation would lose precision",
-                   debug_name(node),
-                   wbits,
-                   false_w,
-                   true_w)
-              .fatal();
-        }
         return absl::StrCat("((",
                             raw_operand(e[0].driver, std::max(wbits_of(e[0].driver), 1)),
                             ").is_known_true() ? ",

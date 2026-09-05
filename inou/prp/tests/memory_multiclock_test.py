@@ -25,8 +25,6 @@ def main():
                 lhd,
                 "compile",
                 args.input,
-                "--recipe",
-                "O0",
                 "--emit-dir",
                 "verilog:" + out_dir + "/",
                 "--workdir",

@@ -100,7 +100,7 @@ compile_lg neg   neg8
 
 # ---- 1h: the SYNTHESIS path is untouched ------------------------------------
 # `lhd compile` runs the shared graph pipeline. If edge normalization ever crept
-# into it (recipe_graph_passes, or graph_pipeline_and_emits), the latch would
+# into it (compile_graph_passes, or graph_pipeline_and_emits), the latch would
 # come out as a flop and the negedge as a posedge — silently, and only visible
 # in the emitted netlist.
 emit_v "$W/lg_lat" lat8 "$W/v_lat"

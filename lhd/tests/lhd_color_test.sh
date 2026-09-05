@@ -25,7 +25,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 for ALG in acyclic cgen synth path mincut flat; do
   D="$W/$ALG"
   mkdir -p "$D"
-  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --emit-dir lg:"$D/lg" --workdir "$D/w1"
   run pass color "$ALG" --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
   echo "PASS: color $ALG ran"
   # continuous mode (per-region split) must also run
@@ -42,7 +42,7 @@ echo "PASS: all pass.color algorithms run through the lhd CLI"
 for SALG in pipe synth cones; do
   D="$W/synth_$SALG"
   mkdir -p "$D"
-  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --emit-dir lg:"$D/lg" --workdir "$D/w1"
   run pass color synth --top "$TOP" --set color.synth_alg="$SALG" lg:"$D/lg" --workdir "$D/w2"
   echo "PASS: color synth synth_alg=$SALG ran"
 done
@@ -51,7 +51,7 @@ done
 # equivalent) -- both the top and every sub-def, even with continuous requested.
 FD="$W/flat_one"
 mkdir -p "$FD"
-run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
+run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
 run pass color flat --top "$TOP" --set color.continuous=true lg:"$FD/lg" --workdir "$FD/w2"
 NCOL=$("$LHD" tool --diag-fmt pretty cat --top "$TOP" lg:"$FD/lg" 2>/dev/null | grep -o 'color=[0-9]*' | sort -u | wc -l | tr -d ' ')
 [ "$NCOL" = "1" ] || fail "flat must leave a single color across the hierarchy, got $NCOL distinct"

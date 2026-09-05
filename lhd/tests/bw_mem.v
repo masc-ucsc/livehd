@@ -1,4 +1,4 @@
-// Synchronous RAM for the O2 bitwidth memory path (Bitwidth::process_memory).
+// Synchronous RAM for the bitwidth memory path (Bitwidth::process_memory).
 module bw_mem(input clk, input we, input [3:0] waddr, input [3:0] raddr,
               input [7:0] din, output reg [7:0] dout);
   reg [7:0] m [15:0];

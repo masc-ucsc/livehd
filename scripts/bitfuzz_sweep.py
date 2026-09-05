@@ -71,7 +71,7 @@ def one(vfile, mode, workroot, timeout):
     os.makedirs(wd, exist_ok=True)
     res = {"name": name, "verdict": "?", "stats": {}, "detail": ""}
 
-    base = [LHD, "compile", vfile, "--recipe", "O2", "--workdir"]
+    base = [LHD, "compile", vfile, "--workdir"]
     rc, out = run(base + [f"{wd}/wref", "--emit-dir", f"verilog:{wd}/ref/"], wd, timeout)
     if rc != 0:
         res["verdict"] = "BASE_COMPILE_FAIL"

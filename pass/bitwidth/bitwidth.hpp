@@ -16,6 +16,7 @@ private:
 
 protected:
   int  max_iterations;
+  bool constrain_outputs;
   bool discovered_some_backward_nodes_try_again;
 
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
@@ -71,6 +72,6 @@ protected:
   void bw_pass(hhds::Graph* g);
 
 public:
-  explicit Bitwidth(int max_iterations);
+  explicit Bitwidth(int max_iterations, bool constrain_outputs = true);
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
 };

@@ -119,6 +119,51 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
   sink.clear();
 }
 
+TEST(BitwidthInfer, SignedProductKeepsCrossZeroRange) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio    = lib.create_io("bw_signed_product");
+  gio->add_input("a", 1);
+  gio->add_input("b", 2);
+  for (auto name : {"a", "b"}) {
+    gio->set_bits(name, 4);
+    gio->set_unsign(name, false);
+  }
+  gio->add_output("o", 3);
+  auto g       = gio->create_graph();
+  auto product = gu::create_typed_node(*g, Ntype_op::Mult);
+  g->get_input_pin("a").connect_sink(product.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(product.create_sink_pin(0));
+  product.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  Bitwidth(10).do_trans(g);
+  EXPECT_FALSE(gu::is_unsign(product.get_driver_pin(0)));
+  EXPECT_EQ(gu::bits_of(product.get_driver_pin(0)), 8);  // [-56,64], not [49,64]
+}
+
+TEST(BitwidthInfer, MaskDoesNotFoldNonmonotoneInterval) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio    = lib.create_io("bw_nonmonotone_mask");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 1);
+  gio->set_unsign("a", true);
+  gio->add_output("o", 2);
+  gio->set_bits("o", 1);
+  auto g   = gio->create_graph();
+  auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
+  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
+  auto one = gu::create_const(*g, *Dlop::create_integer(1));
+  one.connect_sink(sum.create_sink_pin(0));
+  auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
+  sum.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(mask, "a"));
+  one.connect_sink(gu::setup_sink_by_name(mask, "mask"));
+  mask.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  Bitwidth(10).do_trans(g);
+  EXPECT_FALSE(mask.is_invalid());
+  EXPECT_EQ(gu::bits_of(mask.get_driver_pin(0)), 1);
+  EXPECT_TRUE(gu::is_unsign(mask.get_driver_pin(0)));
+}
+
 TEST(BitwidthMemory, ExplicitSizeAcceptsWideDynamicAddress) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_mem_explicit_size");
@@ -150,7 +195,7 @@ TEST(BitwidthMemory, ExplicitSizeAcceptsWideDynamicAddress) {
 }
 
 // State is a finite-width assignment boundary.  Its D expression may need an
-// extra carry bit, but rerunning bitwidth (as O2 does) must retain the already
+// extra carry bit, but rerunning bitwidth must retain the already
 // materialized Q width instead of silently widening the register.
 TEST(BitwidthState, PrestampedFlopKeepsDeclaredWidth) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
@@ -190,6 +235,150 @@ TEST(BitwidthState, UnsizedFlopInfersFromDin) {
   Bitwidth bw(/*max_iterations=*/10);
   bw.do_trans(g);
   EXPECT_EQ(livehd::graph_util::bits_of(flop.create_driver_pin(0)), 4) << "an unsized flop still inherits its D width";
+}
+
+struct Output_shift {
+  std::shared_ptr<hhds::Graph> graph;
+  hhds::Node_class             shift;
+};
+
+Output_shift output_shift(const char* name, int output_bits, bool data_unsigned = true, int data_bits = 1024) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io(name);
+  gio->add_input("data", 1);
+  gio->set_bits("data", data_bits);
+  gio->set_unsign("data", data_unsigned);
+  gio->add_input("sel", 2);
+  gio->set_bits("sel", 4);
+  gio->set_unsign("sel", true);
+  gio->add_output("o", 3);
+  gio->set_bits("o", output_bits);
+  gio->set_unsign("o", true);
+  auto g   = gio->create_graph();
+  auto sra = livehd::graph_util::create_typed_node(*g, Ntype_op::SRA);
+  g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_by_name(sra, "a"));
+  g->get_input_pin("sel").connect_sink(livehd::graph_util::setup_sink_by_name(sra, "b"));
+  sra.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  return {g, sra};
+}
+
+TEST(BitwidthOutputs, NarrowUnsignedShiftAndKeepFullInput) {
+  auto [g, sra] = output_shift("bw_output_shift_unsigned", 64);
+  auto result   = sra.create_driver_pin(0);
+  // Start with a stale signed hint to ensure width and sign are set together.
+  livehd::graph_util::set_sbits(result, 1024);
+  Bitwidth bw(10);
+  for (int i = 0; i < 2; ++i) {
+    bw.do_trans(g);
+    EXPECT_EQ(livehd::graph_util::bits_of(result), 64);
+    EXPECT_TRUE(livehd::graph_util::is_unsign(result));
+    EXPECT_EQ(g->get_io()->get_bits("data"), 1024);
+    EXPECT_TRUE(g->get_io()->is_unsign("data"));
+    EXPECT_EQ(g->get_io()->get_bits("o"), 64);
+  }
+}
+
+TEST(BitwidthOutputs, NarrowSignedShiftWithoutChangingItsSign) {
+  auto [g, sra] = output_shift("bw_output_shift_signed", 4, false, 16);
+  auto result   = sra.create_driver_pin(0);
+  livehd::graph_util::set_ubits(result, 16);
+  Bitwidth bw(10);
+  bw.do_trans(g);
+  EXPECT_EQ(livehd::graph_util::bits_of(result), 4);
+  EXPECT_FALSE(livehd::graph_util::is_unsign(result));
+  EXPECT_TRUE(g->get_io()->is_unsign("o")) << "the output declaration is independent of the producer sign";
+}
+
+TEST(BitwidthOutputs, WidestOutputWinsRegardlessOfConnectionOrder) {
+  for (bool wide_first : {false, true}) {
+    auto [g, sra] = output_shift(wide_first ? "bw_output_wide_first" : "bw_output_narrow_first", wide_first ? 128 : 64);
+    g->get_io()->add_output("other", 4);
+    g->get_io()->set_bits("other", wide_first ? 64 : 128);
+    auto result = sra.create_driver_pin(0);
+    result.connect_sink(g->get_output_pin("other"));
+    Bitwidth bw(10);
+    bw.do_trans(g);
+    EXPECT_EQ(livehd::graph_util::bits_of(result), 128);
+    EXPECT_TRUE(livehd::graph_util::is_unsign(result));
+  }
+}
+
+TEST(BitwidthOutputs, InternalConsumerKeepsHighBits) {
+  auto [g, sra] = output_shift("bw_output_internal_consumer", 8, true, 32);
+  g->get_io()->add_output("high", 4);
+  g->get_io()->set_bits("high", 8);
+  auto high   = livehd::graph_util::create_typed_node(*g, Ntype_op::SRA);
+  auto result = sra.create_driver_pin(0);
+  result.connect_sink(livehd::graph_util::setup_sink_by_name(high, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(24)).connect_sink(livehd::graph_util::setup_sink_by_name(high, "b"));
+  high.create_driver_pin(0).connect_sink(g->get_output_pin("high"));
+  Bitwidth bw(10);
+  bw.do_trans(g);
+  EXPECT_EQ(livehd::graph_util::bits_of(result), 32) << "high consumes bits that the narrow output does not observe";
+  EXPECT_EQ(livehd::graph_util::bits_of(high.create_driver_pin(0)), 8);
+}
+
+TEST(BitwidthOutputs, UnsizedOutputDoesNotConstrainProducer) {
+  auto [g, sra] = output_shift("bw_output_unsized", 8, true, 32);
+  g->get_io()->add_output("unsized", 4);
+  auto result = sra.create_driver_pin(0);
+  result.connect_sink(g->get_output_pin("unsized"));
+  Bitwidth bw(10);
+  bw.do_trans(g);
+  EXPECT_EQ(livehd::graph_util::bits_of(result), 32);
+}
+
+TEST(BitwidthOutputs, OutputLimitDoesNotWidenSmallRange) {
+  auto [g, sra] = output_shift("bw_output_small_range", 64, true, 8);
+  Bitwidth bw(10);
+  bw.do_trans(g);
+  auto result = sra.create_driver_pin(0);
+  EXPECT_EQ(livehd::graph_util::bits_of(result), 8);
+  EXPECT_TRUE(livehd::graph_util::is_unsign(result));
+}
+
+TEST(BitwidthInfer, GetMaskClearsStaleSignedHint) {
+  auto [g, unused_shift] = output_shift("bw_signed_mask_landing", 16, true, 16);
+  unused_shift.del_node();
+  auto mask = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_by_name(mask, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(255))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(mask, "mask"));
+  auto result = mask.create_driver_pin(0);
+  livehd::graph_util::set_sbits(result, 8);
+  result.connect_sink(g->get_output_pin("o"));
+  Bitwidth bw(10);
+  for (int i = 0; i < 2; ++i) {
+    bw.do_trans(g);
+    EXPECT_EQ(livehd::graph_util::bits_of(result), 8);
+    EXPECT_TRUE(livehd::graph_util::is_unsign(result));
+  }
+}
+
+TEST(BitwidthInfer, SextReinterpretsUnsignedMask) {
+  auto [g, unused_shift] = output_shift("bw_mask_then_sext", 16, true, 16);
+  unused_shift.del_node();
+  auto mask = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_by_name(mask, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(255))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(mask, "mask"));
+  auto pattern = mask.create_driver_pin(0);
+  livehd::graph_util::set_ubits(pattern, 8);
+  auto sext = livehd::graph_util::create_typed_node(*g, Ntype_op::Sext);
+  pattern.connect_sink(livehd::graph_util::setup_sink_by_name(sext, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(8)).connect_sink(livehd::graph_util::setup_sink_by_name(sext, "b"));
+  auto result = sext.create_driver_pin(0);
+  livehd::graph_util::set_sbits(result, 8);
+  result.connect_sink(g->get_output_pin("o"));
+  Bitwidth bw(10);
+  for (int i = 0; i < 2; ++i) {
+    bw.do_trans(g);
+    EXPECT_EQ(livehd::graph_util::bits_of(pattern), 8);
+    EXPECT_TRUE(livehd::graph_util::is_unsign(pattern));
+    EXPECT_EQ(livehd::graph_util::bits_of(result), 8);
+    EXPECT_FALSE(livehd::graph_util::is_unsign(result));
+    EXPECT_FALSE(sext.is_invalid());
+  }
 }
 
 // Exercise the per-op value-range processors directly. Frontends may stamp

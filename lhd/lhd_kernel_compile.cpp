@@ -1166,12 +1166,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       {"constprop",    "1"},
       { "verifier", "true"}
   };
-  // comb inlining is OFF by default (a directly-named, fully-defined comb is
-  // emitted as a Sub module instance, preserving the comb boundary for
-  // debug/optimization); only the O2 recipe flattens by inlining. Bare `compile`
-  // and O0/O1 keep the boundary. A user `--set compile.upass.inline=…` overrides
-  // (merge_sets below runs after this).
-  up["inline"] = (opts.recipe == "O2") ? "true" : "false";
+  // Inline comb calls by default; an explicit compile.upass.inline setting
+  // can preserve module boundaries (merge_sets below runs after this).
+  up["inline"] = "true";
   // Derived toln gate (the dual of the emit-derived tolg gate): when neither
   // the lnast.tolg stage below (need_graphs) nor any post-upass LNAST emit
   // (ln:/pyrope:/lnast-dump:) consumes the rewritten tree, skip materializing
@@ -1301,8 +1298,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
               .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
               .hint     = std::format("an import cycle or a missing unit; {} unit{} available (use --diag-fmt "
                                       "json for the full list)",
-                                  available_count,
-                                  available_count == 1 ? " is" : "s are"),
+                                      available_count,
+                                      available_count == 1 ? " is" : "s are"),
               .attrs    = {{"available_unit_count", std::to_string(available_count)}, {"available_units", units_avail}}
           });
         }
@@ -1412,7 +1409,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     active = &fresh;
   }
   if (!already_final) {
-    for (const auto& [set_name, method] : recipe_graph_passes(opts, "O1")) {
+    for (const auto& [set_name, method] : compile_graph_passes(opts)) {
       if (active->graphs.empty()) {
         break;  // nothing to optimize (validated below if an emit needs graphs)
       }
@@ -1442,8 +1439,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       if (auto it = formal_labels.find("assume_check"); it != formal_labels.end()) {
         labels["assume_check"] = it->second;
       }
-      const std::string recipe = opts.recipe.empty() ? "O1" : opts.recipe;
-      const std::string mode   = labels.count("mode") ? labels["mode"] : (recipe == "O0" ? "none" : "fast");
+      const std::string mode = labels.count("mode") ? labels["mode"] : "fast";
       if (mode != "none" && mode != "fast" && mode != "normal") {
         throw Lhd_error{"usage", std::format("--set compile.formal.mode must be none|fast|normal, got '{}'", mode), ""};
       }
@@ -1474,8 +1470,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
 
     // pass.legalize -- the one sanctioned structural transform between the
     // optimization passes and every consumer, and the point the design is
-    // FROZEN. NOT a recipe step on purpose: `recipe:O0` has no steps, so a
-    // recipe-gated legalize would skip exactly the level that needs it most.
+    // FROZEN. Legalization runs independently of optimization settings.
     //
     // It runs LAST, after pass.formal, so that every pass that may still
     // reshape the graph has run before the structure is recorded; formal itself
@@ -1741,14 +1736,14 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     res.compile_cache.present = user_workdir;
     res.compile_cache.enabled = user_workdir && compile_cache_enabled(opts);
     setup_diag(opts, "compile.pyrope");
-    const auto* lg_out             = find_slot(opts.emit_dirs, "lg");
-    const auto* ln_out             = find_slot(opts.emit_dirs, "ln");
-    std::string lib_path           = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-    const bool  need_graphs        = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
-    const bool  defer_cache_lnasts = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                    && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
-    auto n_imports            = pyrope_parse(opts, res, var, ir.ln_dirs, defer_cache_lnasts);
-    auto materialize_deferred = [&] {
+    const auto* lg_out               = find_slot(opts.emit_dirs, "lg");
+    const auto* ln_out               = find_slot(opts.emit_dirs, "ln");
+    std::string lib_path             = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+    const bool  need_graphs          = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
+    const bool  defer_cache_lnasts   = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
+                                       && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
+    auto        n_imports            = pyrope_parse(opts, res, var, ir.ln_dirs, defer_cache_lnasts);
+    auto        materialize_deferred = [&] {
       if (!defer_cache_lnasts) {
         return;
       }
@@ -1791,7 +1786,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // window is closed by graph_pipeline_and_emits, before the emits.
     res.compile_cache_diag_mark = livehd::diag::sink().records().size();
     const bool graph_cache_hit  = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                 && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
+                                  && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
     if (!graph_cache_hit) {

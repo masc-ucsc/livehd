@@ -219,17 +219,17 @@ std::string_view illegal_clock_op(hhds::Pin_class d) {
     const auto op = livehd::graph_util::type_op_of(n);
     switch (op) {
       // Data merged into a clock, or arithmetic on one: never a clock operator.
-      case Ntype_op::Or:
-      case Ntype_op::Xor:
-      case Ntype_op::Ror:
-      case Ntype_op::Sum:
-      case Ntype_op::Mult:
-      case Ntype_op::Div:
-      case Ntype_op::SHL:
-      case Ntype_op::SRA:
-      case Ntype_op::LT:
-      case Ntype_op::GT:
-      case Ntype_op::LUT:
+      case Ntype_op::Or      :
+      case Ntype_op::Xor     :
+      case Ntype_op::Ror     :
+      case Ntype_op::Sum     :
+      case Ntype_op::Mult    :
+      case Ntype_op::Div     :
+      case Ntype_op::SHL     :
+      case Ntype_op::SRA     :
+      case Ntype_op::LT      :
+      case Ntype_op::GT      :
+      case Ntype_op::LUT     :
       case Ntype_op::Hotmux  : return Ntype::get_name(op);
       // Identity / shaping wrappers a typed 1-bit read picks up: keep walking.
       case Ntype_op::Get_mask:
@@ -1089,17 +1089,20 @@ private:
 
     // A TYPED wire narrows its driver with a real precision-changing cell.
     if (narrow_typed && info.decl_mw > 0) {
-      auto gm = make_node(Ntype_op::Get_mask);
-      setup_sink_by_name(gm, "a").connect_driver(din);
-      setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
-      auto gm_out = gm.create_driver_pin(0);
+      // Get_mask always returns an unsigned pattern. A signed wire instead
+      // uses Sext, whose bit-count operand explicitly selects the sign bit.
+      auto narrow = make_node(info.is_signed ? Ntype_op::Sext : Ntype_op::Get_mask);
+      setup_sink_by_name(narrow, "a").connect_driver(din);
+      auto out = narrow.create_driver_pin(0);
       if (info.is_signed) {
-        set_sbits(gm_out, info.decl_mw);
+        setup_sink_by_name(narrow, "b").connect_driver(create_const(*g_, *Dlop::create_integer(info.decl_mw)));
+        set_sbits(out, info.decl_mw);
       } else {
-        set_ubits(gm_out, info.decl_mw);
+        setup_sink_by_name(narrow, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
+        set_ubits(out, info.decl_mw);
       }
-      din         = gm_out;
-      info.narrow = gm;
+      din         = out;
+      info.narrow = narrow;
     }
 
     setup_sink_by_name(info.buf, "as").connect_driver(din);
@@ -7903,7 +7906,7 @@ private:
   // finalize_wires() handles only still-unbound/undriven declarations.
   struct Wire_info {
     hhds::Node_class              buf;             // the passthrough Or (cgen `out = a`)
-    hhds::Node_class              narrow;          // typed-wire Get_mask of the CURRENT bind (dropped on rebind)
+    hhds::Node_class              narrow;          // typed-wire Get_mask/Sext of the CURRENT bind (dropped on rebind)
     Pin                           out;             // the buffer output (what reads bind to)
     Lnast_nid                     decl_nid;        // diag anchor (the `wire x` site)
     int32_t                       decl_color = 0;  // block region at the declare (2opt-freq B)
@@ -9912,8 +9915,8 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
 
 #ifndef NDEBUG
   // tolg output invariant (-c dbg): every value-producing cell must be sized.
-  // Self-check here (not only at cprop entry) so the guarantee holds even under
-  // --recipe O0, where no graph pass runs after tolg.
+  // Self-check here (not only at cprop entry) so the guarantee holds for every
+  // direct caller of tolg as well as the standard compile pipeline.
   livehd::graph_util::debug_assert_cells_sized(*g_shared, "upass.tolg");
 #endif
 

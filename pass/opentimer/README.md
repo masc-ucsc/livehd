@@ -9,8 +9,8 @@ read-back is the cheap per-region phase-1 estimate.
 ## Usage
 
 ```
-lhd compile design.prp --top m --recipe O1 --emit-dir lg:g
-lhd pass abc --top m lg:g --emit-dir lg:net --set abc.library=cells.lib
+lhd compile design.prp --top m --emit-dir lg:g
+lhd pass abc --top m lg:g --emit-dir lg:net --set synth.liberty=cells.lib
 lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 ```
 

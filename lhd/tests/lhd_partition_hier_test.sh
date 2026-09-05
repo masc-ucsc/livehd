@@ -6,7 +6,7 @@
 # lhd_partition_test.sh (a single flat Verilog module), this drives two
 # multi-module Pyrope fixtures so the passes must descend the hierarchy:
 #
-#   prp -> lg (O1)
+#   prp -> lg
 #   lhd pass color <alg>                  (colors EVERY def: top + sub-defs)
 #   lhd pass partition --emit-dir lg:dir2 (partitions every def + re-links Subs)
 #   lg:dir2 -> verilog
@@ -46,9 +46,9 @@ for entry in "${DESIGNS[@]}"; do
     D="$W/$FIX/$ALG"
     mkdir -p "$D"
     # 1. compile the hierarchical design to an lg library (all defs)
-    run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+    run compile "$PRP" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
     # 2. reference Verilog (pre-color; coloring only adds attrs, but keep it clean)
-    run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+    run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
     # 3. color every def in the hierarchy.
     #    absorb=false: this test is about pass.partition RE-LINKING a hierarchy,
     #    so the hierarchy has to still be there. `synth`'s default min=1000 GE
@@ -60,7 +60,7 @@ for entry in "${DESIGNS[@]}"; do
     # 4. partition every def + re-link Sub instances into a fresh library
     run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w4"
     # 5. emit Verilog from the partitioned library (verbatim, no re-opt)
-    run compile lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w5"
+    run compile lg:"$D/lg2" --top "$TOP" --emit verilog:"$D/part.v" --workdir "$D/w5"
     # hierarchy preserved: the child def survives as its own module (partition
     # re-links the Sub instances to it).
     grep -q "^module ${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"
@@ -83,7 +83,7 @@ done
 # stats-only mode on a hierarchical input must succeed (per-def region stats).
 SD="$W/stats"
 mkdir -p "$SD"
-run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --recipe O1 --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
+run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
 run pass color synth --top hier_comb.top --set color.absorb=false lg:"$SD/lg" --workdir "$SD/w2"
 run pass partition --top hier_comb.top lg:"$SD/lg" --workdir "$SD/w3"
 echo "PASS: hierarchical partition stats-only mode"

@@ -218,6 +218,37 @@ echo "$simhelp" | grep -q '^  sim.checkpoint=true ' || fail "sim --help: a regis
 "$LHD" sim "$PRP" --set sim.bogus=1 --workdir "$W/w11" -q >"$W/r11.json" 2>/dev/null && fail "--set sim.bogus must fail"
 grep -q "unknown sim flag 'sim.bogus'" "$W/r11.json" || fail "unknown sim-flag message missing: $(cat "$W/r11.json")"
 
+# 11b. ONE Liberty knob for the whole CLI: `synth.liberty`. Regression: pass.abc
+# had its own `library` spelling, so `lhd pass abc --set synth.liberty=asap7.lib`
+# named a real option that pass.abc never read -- it tech-mapped against the
+# DEFAULT sky130 library and still reported success. pass.abc now resolves
+# synth.liberty, and the duplicate spellings are refused with directed hints.
+# the only Liberty-FILE option left is synth.liberty (pass.liberty.* are the
+# gensim pass's own out/verbose flags, not a Liberty path)
+"$LHD" list options --diag-fmt pretty | grep -qE '^pass\.abc\.library=' && fail "pass.abc.library must be gone (synth.liberty is the one spelling)"
+"$LHD" list options --diag-fmt pretty | grep -qE '^compile\.yosys\.liberty=' && fail "compile.yosys.liberty must be gone (it was dead code)"
+"$LHD" list options --diag-fmt pretty | grep -qE '^synth\.liberty=' || fail "synth.liberty must be listed"
+# both spellings of the removed knob error with the DIRECTED replacement hint
+"$LHD" compile "$PRP" --set pass.abc.library=x.lib --workdir "$W/w11g" -q >"$W/r11g.json" 2>/dev/null \
+  && fail "--set pass.abc.library must fail"
+grep -q "use --set synth.liberty=x.lib instead" "$W/r11g.json" \
+  || fail "pass.abc.library must name synth.liberty: $(cat "$W/r11g.json")"
+# the abbreviation resolves to the same canonical key, so it errors the same way
+"$LHD" pass abc --top top lg:"$W/no_such_lg" --set abc.library=x.lib -q >"$W/r11h.json" 2>/dev/null \
+  && fail "--set abc.library must fail"
+grep -q "use --set synth.liberty=x.lib instead" "$W/r11h.json" \
+  || fail "abc.library must name synth.liberty: $(cat "$W/r11h.json")"
+"$LHD" compile "$PRP" --set yosys.liberty=x.lib --workdir "$W/w11i" -q >"$W/r11i.json" 2>/dev/null \
+  && fail "--set compile.yosys.liberty must fail (removed dead knob)"
+grep -q "synth.liberty=x.lib" "$W/r11i.json" \
+  || fail "compile.yosys.liberty must name synth.liberty: $(cat "$W/r11i.json")"
+# synth.liberty is readable from ANY command, so `lhd pass abc` picks up a
+# missing one as a directed missing_file (not a silent fall back to the default)
+"$LHD" pass abc --top top lg:"$W/no_such_lg" --set synth.liberty="$W/no_such.lib" -q >"$W/r11j.json" 2>/dev/null \
+  && fail "pass abc must reject a missing synth.liberty"
+grep -q '"class":"missing_file"' "$W/r11j.json" \
+  || fail "pass abc must resolve synth.liberty (missing_file expected): $(cat "$W/r11j.json")"
+
 # 12. Typo suggestions: an unknown option whose LEAF matches real options lists
 # them ("maybe you meant"), e.g. potato.vcd -> sim.vcd.
 "$LHD" compile "$PRP" --set potato.vcd=1 --workdir "$W/w12" -q >"$W/r12.json" 2>/dev/null && fail "--set potato.vcd must fail"

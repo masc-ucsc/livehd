@@ -113,15 +113,20 @@ pub mod Top::[timecheck=false](clock:u1, a:u8, sel:u1) -> (y:u8@[]) {
   y = q
 }
 EOF
-$LHD compile "$W/Top.prp" --top Top --recipe O0 --emit-dir verilog:"$W/hrv" --workdir "$W/hrw" -q \
+$LHD compile "$W/Top.prp" --top Top --emit-dir verilog:"$W/hrv" --workdir "$W/hrw" -q \
   || fail "late stateful-callee hierarchy did not emit Verilog"
 TOP_V="$W/hrv/Top.Top.v"
 producer_line=$(grep -nE '= state_o[0-9]+;' "$TOP_V" | head -1 | cut -d: -f1)
 consumer_line=$(grep -nE 'mux_[0-9]+ = q;' "$TOP_V" | head -1 | cut -d: -f1)
-[ -n "$producer_line" ] && [ -n "$consumer_line" ] \
-  || fail "stateful hierarchy fixture lost its producer/consumer shape: $(sed -n '1,120p' "$TOP_V")"
-[ "$producer_line" -lt "$consumer_line" ] \
-  || fail "stateful Sub stayed combinational: cgen emitted q's consumer on line $consumer_line before its producer on line $producer_line"
+if [ -n "$consumer_line" ]; then
+  [ -n "$producer_line" ] && [ "$producer_line" -lt "$consumer_line" ] \
+    || fail "stateful Sub stayed combinational: q's consumer precedes its producer"
+else
+  # Bitwidth may eliminate the assignment-only q alias. A direct read of the
+  # stateful instance output is already a wire and needs no procedural order.
+  grep -qE 'mux_[0-9]+ = state_o[0-9]+;' "$TOP_V" \
+    || fail "stateful hierarchy lost the feedback connection: $(sed -n '1,120p' "$TOP_V")"
+fi
 $LHD compile "$W/hrv/State.State.v" "$TOP_V" --top Top --workdir "$W/hrr" -q \
   || fail "stateful hierarchy's generated Verilog did not read back"
 echo "PASS: late stateful callee is refreshed as a loop break before Verilog emission"
@@ -160,7 +165,7 @@ grep -q '"status":"pass"' "$W/alec.json" || fail "output-alias lec not pass: $(c
 # emits the two generated temporaries after their consumers inside one
 # always_comb. Reading that RTL with slang must recover the simultaneous
 # combinational equations, not freeze the first-pass X values.
-$LHD compile "$W/av"/*.prp --top output_alias.output_alias --recipe O0 \
+$LHD compile "$W/av"/*.prp --top output_alias.output_alias \
   --emit verilog:"$W/output_alias_all.v" --workdir "$W/acgen" -q \
   || fail "output-alias Pyrope did not regenerate Verilog"
 $LHD lec --impl verilog:"$W/output_alias_all.v" --impl-top output_alias \
@@ -193,10 +198,10 @@ module const_cond_tmp(
   always_ff @(posedge clk) if (en) q <= d;
 endmodule
 EOF
-$LHD compile "$W/const_cond_tmp.sv" --top const_cond_tmp --recipe O0 \
+$LHD compile "$W/const_cond_tmp.sv" --top const_cond_tmp \
   --emit-dir pyrope:"$W/cpv" --workdir "$W/cpw" >"$W/cp.log" 2>&1 \
   || { tail -20 "$W/cp.log"; fail "constant-conditional temporary did not emit Pyrope"; }
-$LHD compile "$W/cpv"/*.prp --top const_cond_tmp.const_cond_tmp --recipe O0 \
+$LHD compile "$W/cpv"/*.prp --top const_cond_tmp.const_cond_tmp \
   --emit-dir lg:"$W/cplg" --workdir "$W/cpr" >"$W/cpr.log" 2>&1 \
   || { tail -20 "$W/cpr.log"; fail "constant-conditional temporary became unresolved on Pyrope re-read"; }
 if grep -q 'unresolved ref' "$W/cp.log" "$W/cpr.log"; then

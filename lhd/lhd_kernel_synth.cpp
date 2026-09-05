@@ -54,18 +54,6 @@ namespace lhd {
 
 namespace {
 
-// `--set synth.<flag>` value, else `def` (kSynthSetOptions validated the name).
-std::string synth_set(const Options& opts, std::string_view flag, std::string_view def) {
-  std::string v{def};
-  const auto  key = std::format("synth.{}", flag);
-  for (const auto& [k, val] : opts.sets) {
-    if (k == key) {
-      v = val;
-    }
-  }
-  return v;
-}
-
 bool truthy(std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; }
 
 // One JSON value from a sidecar file ("" when absent/empty), trailing
@@ -88,9 +76,26 @@ std::string canon(const std::string& p) {
   return ec ? p : c.lexically_normal().string();
 }
 
-// Resolve the one Liberty for the flow: synth.liberty, else the sky130 default
-// under $HAGENT_TECH_DIR. A missing library is a directed missing_file error —
-// the two passes must never each fall back to a different file.
+}  // namespace
+
+// `--set synth.<flag>` value, else `def` (kSynthSetOptions validated the name).
+std::string synth_set(const Options& opts, std::string_view flag, std::string_view def) {
+  std::string v{def};
+  const auto  key = std::format("synth.{}", flag);
+  for (const auto& [k, val] : opts.sets) {
+    if (k == key) {
+      v = val;
+    }
+  }
+  return v;
+}
+
+// Resolve THE Liberty: synth.liberty, else the sky130 default under
+// $HAGENT_TECH_DIR. `synth.liberty` is the ONE spelling every Liberty reader
+// shares -- `lhd synth` (pass.abc + pass.opentimer) and the standalone
+// `lhd pass abc` / `lhd pass opentimer` all resolve through here, so no two
+// of them can ever fall back to a different file. A missing library is a
+// directed missing_file error.
 std::string resolve_liberty(const Options& opts) {
   std::string lib = synth_set(opts, "liberty", "");
   if (lib.empty()) {
@@ -100,7 +105,7 @@ std::string resolve_liberty(const Options& opts) {
   }
   if (lib.empty()) {
     throw Lhd_error{"missing_file",
-                    "synth needs a Liberty cell library and neither --set synth.liberty nor $HAGENT_TECH_DIR is set",
+                    "no Liberty cell library: neither --set synth.liberty nor $HAGENT_TECH_DIR is set",
                     "pass --set synth.liberty=cells.lib, or point HAGENT_TECH_DIR at a sky130 PDK (install one with `ciel`)"};
   }
   if (!fs::is_regular_file(lib)) {
@@ -110,8 +115,6 @@ std::string resolve_liberty(const Options& opts) {
   }
   return lib;
 }
-
-}  // namespace
 
 void synth_command(Options& opts, Result& res) {
   setup_diag(opts, "synth");
@@ -125,13 +128,8 @@ void synth_command(Options& opts, Result& res) {
   }
 
   // ---- the synth.* knobs --------------------------------------------------
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "pass.abc.library") {
-      throw Lhd_error{"usage",
-                      "synth takes ONE Liberty for pass.abc and pass.opentimer: --set synth.liberty=PATH",
-                      std::format("replace `--set pass.abc.library={0}` with `--set synth.liberty={0}`", v)};
-    }
-  }
+  // (`pass.abc.library` is refused for every command by check_known_set_passes:
+  // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
   const std::string liberty    = resolve_liberty(opts);
   const bool        run_sta    = truthy(synth_set(opts, "opentimer", "true"));
   const bool        run_reduce = truthy(synth_set(opts, "reduce", "true"));
@@ -288,7 +286,7 @@ void synth_command(Options& opts, Result& res) {
     labels["out"] = net_dir;
     labels["qor"] = qor_path;
     merge_sets(opts, "pass.abc", labels);
-    labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library refused above)
+    labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
     if (opts.stats) {
       labels["stats"] = "true";
     }

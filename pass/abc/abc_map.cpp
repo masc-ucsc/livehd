@@ -71,11 +71,14 @@ namespace livehd::abc {
 
 namespace {
 
-// Built-in combinational flow (task default). {D}/{L}/{F} substituted from opts.
-//
-// `&fraig -x; &put; dc2` ahead of the `&dch -f; &nf` map is worth its runtime:
-// measured on dino it takes 54,564 gates to 52,185 (-4.4%) and whole-design STA
-// 51.1 -> 44.4 ns, for ~1.3x the ABC time.
+// Built-in timing flow: ABC9 flow2 with 6-input LUT restructuring, followed
+// by standard-cell mapping. The mux encoding sweep selected this for delay;
+// the former baseline below remains the area objective. LUT delays are unit
+// levels, NOT picoseconds: do not pass {D} to &if. The SCL tail and budget
+// ladder enforce the physical target after &nf maps to Liberty cells.
+// &scorr is deliberately omitted: it is a no-op for combinational inputs but
+// may merge registers in sequential regions. All built-in transformations
+// must preserve the latch correspondence (including the QN encoding).
 //
 // The `{F}` tail is the fanout fix. Without it ABC leaves nets far past the
 // Liberty's characterized load -- dino had 283 nets over 32 sinks and a mapped
@@ -97,7 +100,14 @@ namespace {
 // It cannot fix everything: a net driven by a NATIVE (unblasted) node -- a wide
 // SRA, packed wiring, a region boundary -- never reaches ABC, so its fanout
 // survives. Those are the residual over-limit nets.
-constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o";
+constexpr std::string_view kCombFlow
+    = "strash; &get -n; &sweep; "
+      "&synch2 -K 6 -C 500; &if -m -K 6; &mfs; &save; "
+      "&dch -C 500; &if -m -K 6; &mfs; &save; "
+      "&load; &st; &sopb -R 10 -C 4; "
+      "&synch2 -K 6 -C 500; &if -m -K 6; &mfs; &save; "
+      "&dch -C 500; &if -m -K 6; &mfs; &save; "
+      "&load; &st; &nf {D}; &put -o";
 
 // Appended to a BUILT-IN flow when max_fanout != 0. Not part of the constants
 // above so that max_fanout=0 yields a clean unbuffered string rather than a
@@ -108,21 +118,11 @@ constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; dc2; s
 // slack up to the budget instead of preserving the delay it started from.
 constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize {B}";
 
-// The AREA candidate. Same pre-mapping optimization as kCombFlow, then `dch -f;
-// amap` (a choice-aware area-oriented mapper in the plain network space; amap
-// keeps latches and, like `&nf`, ignores the GENLIB's delays) and a sizing tail
-// that first UPSIZES to the budget -- amap's min-size cells rarely meet a tight
-// target on their own -- and then down-sizes back to it. map_region runs it
-// only for a region whose delay flow already met its budget, and keeps it only
-// when it ALSO meets the budget with less SCL area; the delay flow's netlist
-// wins every tie. Measured over 15 lhdtrack designs against the delay flow
-// alone (geomean area vs yosys): sky130 1.22 -> 1.07 with every design inside
-// its 20 ns budget (br_enc_countones 903 -> 741 um^2, br_counter_incr 472 ->
-// 414, mul 1738 -> 1615); on ASAP7 it wins alu (15.0 -> 13.9 um^2 at 299 of a
-// 300 ps period), barrel_shifter and br_enc_countones. It costs one more full
-// ABC run per qualifying region (~+200 ms on br_amba_axi2axil, the largest of
-// the 15; ~15% of pass.abc wall).
-constexpr std::string_view kAreaFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; dch -f; amap";
+// The AREA objective is the former baseline: it won area on the biased mux.
+// Without a delay it runs once, with kBufferTail. With a delay it is a second
+// candidate, sized to the budget with kAreaTail and accepted only if it meets
+// that budget with less SCL area. The timing result wins every tie.
+constexpr std::string_view kAreaFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o";
 constexpr std::string_view kAreaTail = "; buffer -N {F}; upsize {B}; dnsize {B}";
 
 // The MAPPER step of both built-in flows, spelled once so map_region's
@@ -159,7 +159,7 @@ constexpr std::string_view kPutCmd = "&put -o";
 // forbids. Opt in explicitly per run or per region when that is understood:
 // `--set pass.abc.flow="strash; &get -n; &dc4; dretime; &dch -f; &nf {D};
 // &put"` (the read-back stays robust to reshaped latches).
-constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o";
+constexpr std::string_view kSeqFlow = kCombFlow;
 
 // The remap in map_region assumes both built-in flows END with the mapper step
 // followed by kPutCmd, because `&undo` reverses exactly one GIA transformation.
@@ -310,9 +310,7 @@ bool lib_has_nldm_timing(const SC_Lib* lib) {
 // uTruth for every gate it reads and 0xAA.. is "output = input 0" -- the very
 // test Mio_LibraryDetectSpecialGates uses to pick the library buffer -- so this
 // is independent of which drive strength `dnsize`/`upsize` landed on. ...
-bool is_identity_gate(Mio_Gate_t* g) {
-  return Mio_GateReadPinNum(g) == 1 && Mio_GateReadTruth(g) == 0xAAAAAAAAAAAAAAAAULL;
-}
+bool is_identity_gate(Mio_Gate_t* g) { return Mio_GateReadPinNum(g) == 1 && Mio_GateReadTruth(g) == 0xAAAAAAAAAAAAAAAAULL; }
 
 // ... and its output net feeds nothing but COs (a PO or a latch input: the two
 // object kinds Abc_ObjIsCo names). A MakeSimpleCos buffer feeds exactly its
@@ -355,9 +353,18 @@ std::string Mapper::subst_flow(std::string f) const {
   return subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
 }
 
-std::string Mapper::comb_flow() const { return subst_flow(opts_.flow.empty() ? resolve_flow(kCombFlow) : opts_.flow); }
+std::string Mapper::comb_flow() const {
+  if (!opts_.flow.empty()) {
+    return subst_flow(opts_.flow);
+  }
+  if (opts_.delay.empty()) {
+    // `none` disables the timed second candidate, not untimed synthesis.
+    return opts_.area_flow == "none" ? subst_flow(resolve_flow(kAreaFlow)) : area_flow();
+  }
+  return subst_flow(resolve_flow(kCombFlow));
+}
 
-std::string Mapper::seq_flow() const { return subst_flow(opts_.flow.empty() ? resolve_flow(kSeqFlow) : opts_.flow); }
+std::string Mapper::seq_flow() const { return comb_flow(); }
 
 std::string Mapper::area_flow() const {
   if (opts_.area_flow == "none") {
@@ -368,7 +375,7 @@ std::string Mapper::area_flow() const {
   }
   std::string f = std::string{kAreaFlow};
   if (opts_.max_fanout != 0) {
-    f += kAreaTail;  // one unit with the fanout cap, exactly like kBufferTail
+    f += opts_.delay.empty() ? kBufferTail : kAreaTail;
   }
   return subst_flow(std::move(f));
 }
@@ -443,17 +450,18 @@ std::string Mapper::resolve_recipe() const {
   // run), and the register margin decides that budget (already spelled into
   // the tails' `-D` for this region; repeated here so a margin change under a
   // flop-less region still reads as a different recipe).
-  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}|genlib=unit|area={}|margin={}|"
-                     "objective=budget",
-                     comb_flow(),
-                     seq_flow(),
-                     static_cast<int>(opts_.adder),
-                     opts_.block_size,
-                     static_cast<int>(opts_.multiplier),
-                     nldm_requested() ? 1 : 0,
-                     opts_.area_relax_pct,
-                     opts_.area_flow == "none" ? std::string{"none"} : area_flow(),
-                     reg_margin_ps());
+  return std::format(
+      "native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}|genlib=unit|area={}|margin={}|"
+      "objective=budget",
+      comb_flow(),
+      seq_flow(),
+      static_cast<int>(opts_.adder),
+      opts_.block_size,
+      static_cast<int>(opts_.multiplier),
+      nldm_requested() ? 1 : 0,
+      opts_.area_relax_pct,
+      opts_.area_flow == "none" ? std::string{"none"} : area_flow(),
+      reg_margin_ps());
 }
 
 void Mapper::ensure_dff_cells() {
@@ -577,19 +585,20 @@ bool Mapper::start() {
       for (const auto& c : dff_ladder_) {
         rungs += std::format("{}{} ({:.4f})", rungs.empty() ? "" : ", ", c.name, c.area);
       }
-      std::print("[pass.abc] register cell: {} (d={}, clk={}, {}={}{}); drive ladder: {}; overhead clk->Q {:.1f} + setup {:.1f} ps "
-                 "(reg_margin={} -> {:.1f} ps)\n",
-                 dff_->name,
-                 dff_->d_pin,
-                 dff_->clk_pin,
-                 dff_->q_inverted ? "qn" : "q",
-                 dff_->q_pin,
-                 dff_->q_inverted ? ", output inverted" : "",
-                 rungs,
-                 dff_->clk_to_q_ps,
-                 dff_->setup_ps,
-                 startup_opts_.reg_margin,
-                 reg_margin_ps());
+      std::print(
+          "[pass.abc] register cell: {} (d={}, clk={}, {}={}{}); drive ladder: {}; overhead clk->Q {:.1f} + setup {:.1f} ps "
+          "(reg_margin={} -> {:.1f} ps)\n",
+          dff_->name,
+          dff_->d_pin,
+          dff_->clk_pin,
+          dff_->q_inverted ? "qn" : "q",
+          dff_->q_pin,
+          dff_->q_inverted ? ", output inverted" : "",
+          rungs,
+          dff_->clk_to_q_ps,
+          dff_->setup_ps,
+          startup_opts_.reg_margin,
+          reg_margin_ps());
     }
     if (!dff_.has_value()) {
       livehd::diag::warn("pass.abc", "no-dff-cell", "unsupported")
@@ -1054,7 +1063,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-                     "(was {} MiB, color added {} MiB){}, {}{}",
+      "(was {} MiB, color added {} MiB){}, {}{}",
       region,
       blasted,
       total,
@@ -1308,11 +1317,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (opts_.map_register && opts_.register_max_bits != 0 && register_bits > opts_.register_max_bits) {
     opts_.map_register = false;
     livehd::diag::info("pass.abc", "register-kept-native", "unsupported")
-        .msg("pass.abc region '{}': keeping {} register bits native (above register_max_bits={}); the data cones are still "
-             "mapped",
-             rb.module_name,
-             register_bits,
-             opts_.register_max_bits)
+        .msg(
+            "pass.abc region '{}': keeping {} register bits native (above register_max_bits={}); the data cones are still "
+            "mapped",
+            rb.module_name,
+            register_bits,
+            opts_.register_max_bits)
         .emit();
   }
 
@@ -1363,15 +1373,19 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
   ensure_dff_cells();  // the auto margin needs the DFF pick (start() is lazy, below the cache lookup)
-  const float budget = delay_target > 0.0f ? std::floor(region_budget(delay_target, register_bits > 0)) : -1.0f;
-  budget_flag_       = budget > 0.0f ? std::format("-D {}", static_cast<int>(budget)) : std::string{};
+  const float budget      = delay_target > 0.0f ? std::floor(region_budget(delay_target, register_bits > 0)) : -1.0f;
+  budget_flag_            = budget > 0.0f ? std::format("-D {}", static_cast<int>(budget)) : std::string{};
   // Is the ABC command list this region runs the BUILT-IN one (kSeqFlow /
   // kCombFlow + tail)? Stricter than `tool_owned_flow`, which stays true under
   // a size-tier `small_flow`/`large_flow` -- a user-authored command list that
   // may retime (`dretime`) or sequentially sweep (`scorr`/`lcorr`). The QN
   // AIG-side encoding (Seq_flop::d_inverted) is exact only under combinational
   // transformations, so it is gated on THIS flag, not on flow ownership.
-  const bool builtin_flow = opts_.flow.empty();
+  const bool custom_area  = opts_.flow.empty() && opts_.delay.empty() && !opts_.area_flow.empty() && opts_.area_flow != "none";
+  const bool builtin_flow = opts_.flow.empty() && !custom_area;
+  if (custom_area) {
+    tool_owned_flow = false;
+  }
   if (opts_.verbose) {
     uint64_t input_bits  = 0;
     uint64_t output_bits = 0;
@@ -1587,12 +1601,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   constexpr size_t kMaxRefusals = 10;
   size_t           refusals     = 0;
   const auto       refuse       = [&](const hhds::Node_class& bad,
-                          std::string_view        code,
-                          std::string_view        category,
-                          std::string_view        what,
-                          std::string_view        hint     = {},
-                          const hhds::Pin_class&  note_pin = {},
-                          std::string_view        note_msg = {}) {
+                                      std::string_view        code,
+                                      std::string_view        category,
+                                      std::string_view        what,
+                                      std::string_view        hint     = {},
+                                      const hhds::Pin_class&  note_pin = {},
+                                      std::string_view        note_msg = {}) {
     unsupported = true;
     if (refusals++ >= kMaxRefusals) {
       return;  // counted; the post-loop summary reports the total
@@ -1761,11 +1775,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         auto mask_driver = gu::get_driver_of_sink_name(master, "mask");
         if (mask_driver.is_const()) {
           const auto& mask     = gu::const_of(mask_driver);
-          const bool negative = mask.is_negative();
-          const int  prefix   = std::max(0, static_cast<int>(mask.get_bits()) - (negative ? 1 : 0));
-          const int  limit    = w == 0 ? prefix : std::min(prefix, w);
-          int        run_lo   = -1;
-          int        selected = 0;
+          const bool  negative = mask.is_negative();
+          const int   prefix   = std::max(0, static_cast<int>(mask.get_bits()) - (negative ? 1 : 0));
+          const int   limit    = w == 0 ? prefix : std::min(prefix, w);
+          int         run_lo   = -1;
+          int         selected = 0;
           for (int bit = 0; bit < limit; ++bit) {
             const bool take = negative ? !mask.bit_test(bit) : mask.bit_test(bit);
             if (take && run_lo < 0) {
@@ -2115,10 +2129,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
         f.neg_reset = gu::const_of(nr).bit_test(0);
       }
-      bool has_rval = f.rval_drv.is_const();
-      auto rval     = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
-      f.has_init    = has_rval;
-      f.init_val    = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
+      bool has_rval            = f.rval_drv.is_const();
+      auto rval                = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
+      f.has_init               = has_rval;
+      f.init_val               = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
       // A resetless init is a TRUE power-on value: that bit is rebuilt native
       // on read-back and must keep the honest encoding (its latch init would
       // be complemented too). With a reset the init is the reset value, folded
@@ -2963,10 +2977,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                "mask driven here");
       } else {
         const auto& mask   = gu::const_of(m_drv);
-        bool neg    = mask.is_negative();
-        int  mb     = mask.get_bits();
-        int  pmb    = neg ? mb - 1 : mb;
-        int  a_bits = gu::bits_of(a_drv);
+        bool        neg    = mask.is_negative();
+        int         mb     = mask.get_bits();
+        int         pmb    = neg ? mb - 1 : mb;
+        int         a_bits = gu::bits_of(a_drv);
         if (a_bits == 0 && a_drv.is_const()) {
           // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
           // eff_width above — create_const stamps only the value, never a width).
@@ -3672,21 +3686,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
   auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
+  if (opts_.verbose) {
+    std::print("[pass.abc] region '{}': resolved flow: {}\n", rb.module_name, flow);
+  }
   // Which mapping OBJECTIVE steps may run on this region. The budget ladder
   // (below) needs the built-in or a size-tier flow (`tool_owned_flow`: a user
   // command list is run verbatim and never re-sized), a Liberty the SCL steps
   // can walk, and a delay target. The area CANDIDATE is stricter: it belongs to
   // the BUILT-IN objective only (a size tier is a deliberately cheap or
-  // deliberately direct mapper -- re-running `dch -f; amap` on it would defeat
-  // it), it is bounded by `large_ge` even when the large tier is off (`amap`
+  // deliberately direct mapper -- re-running the area baseline would defeat
+  // it), it is bounded by `large_ge` even when the large tier is off (a second map
   // on a 123k-node mem_lower tile would double the ABC time of the one region
   // that already dominates), it is switched off by `area_flow=none`, and it
   // skips the dummy-PO sentinel (nothing to compare on a region with no real
   // outputs).
-  const bool  ladder_on      = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
-  const std::string area_cmd = area_flow();
-  const bool  candidate_on   = ladder_on && builtin_flow && !area_cmd.empty() && !has_dummy_po
-                            && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
+  const bool        ladder_on = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
+  const std::string area_cmd  = area_flow();
+  const bool        candidate_on
+      = ladder_on && builtin_flow && !area_cmd.empty() && !has_dummy_po && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
   // The area candidate re-maps from the SAME pre-flow logic network, so keep a
   // copy of it before the frame takes ownership of `pLogic`: every
   // Abc_FrameReplaceCurrentNetwork below DELETES the network it replaces. The
@@ -3802,15 +3819,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // the same budget-directed sizing step 2 uses.
   //
   // Then the AREA CANDIDATE (kAreaFlow): a region that met its budget is
-  // re-mapped from the pre-flow copy with `dch -f; amap` + `buffer; upsize -D;
+  // re-mapped from the pre-flow copy with the former baseline + `buffer; upsize -D;
   // dnsize -D`, timed by the same SCL timer, and the netlist with the smaller
   // SCL area AMONG THOSE THAT MEET THE BUDGET is kept (the delay flow wins a
   // tie). Both networks are complete mapped logic networks, so the read-back
-  // below is indifferent to which one won: the identity-buffer bypass works on
-  // amap's decoupling buffers (Amap_ManProduceNetwork calls
-  // Abc_NtkLogicMakeSimpleCos with fDuplicate=0, so they are buffers, not
-  // duplicated gates), and the latches -- including the QN encoding's ~f --
-  // pass through amap untouched (it maps the combinational logic between them).
+  // below is indifferent to which one won. Both use &put -o's decoupling
+  // buffers and preserve the latches, including the QN encoding's ~f.
   //
   // Custom flows remain fully caller-owned: none of this touches them.
   const auto scl_qor = [&](Abc_Ntk_t* mapped) -> std::optional<std::pair<float, double>> {
@@ -3843,7 +3857,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (d1 && d1->first > budget) {
       if (Cmd_CommandExecute(frame, size_to_budget.c_str()) != 0) {
         livehd::diag::err("pass.abc", "abc-flow", "internal")
-            .msg("ABC budget sizing failed for region '{}' after missing delay budget {} ps: {}", rb.module_name, budget, size_to_budget)
+            .msg("ABC budget sizing failed for region '{}' after missing delay budget {} ps: {}",
+                 rb.module_name,
+                 budget,
+                 size_to_budget)
             .fatal();
         return;
       }
@@ -4562,8 +4579,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
   }
-  auto* const  mio_inv  = static_cast<Mio_Gate_t*>(Mio_LibraryReadInv(static_cast<Mio_Library_t*>(Abc_FrameReadLibGen())));
-  const double inv_area = mio_inv != nullptr ? Mio_GateReadArea(mio_inv) : 0.0;
+  auto* const  mio_inv     = static_cast<Mio_Gate_t*>(Mio_LibraryReadInv(static_cast<Mio_Library_t*>(Abc_FrameReadLibGen())));
+  const double inv_area    = mio_inv != nullptr ? Mio_GateReadArea(mio_inv) : 0.0;
   auto         is_inverter = [](Mio_Gate_t* g) {
     return Mio_GateReadPinNum(g) == 1 && static_cast<uint64_t>(Mio_GateReadTruth(g)) == ~UINT64_C(0xAAAAAAAAAAAAAAAA);
   };
@@ -4686,10 +4703,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // din is wired in pass 2b, like a native flop's). `dff_` is set only when the
   // Liberty had a plain posedge D-flop; otherwise the native path below runs.
   struct Recon_dff {
-    hhds::Node_class          sub;
-    Abc_Obj_t*                dnet;
-    const liberty::Dff_cell*  cell;   // the ladder rung this Sub instantiates (pass 2b wires its d_pin)
-    bool                      d_inv;  // QN cell whose D-cone root could not absorb the inversion: add an inverter on D
+    hhds::Node_class         sub;
+    Abc_Obj_t*               dnet;
+    const liberty::Dff_cell* cell;   // the ladder rung this Sub instantiates (pass 2b wires its d_pin)
+    bool                     d_inv;  // QN cell whose D-cone root could not absorb the inversion: add an inverter on D
   };
   std::vector<Recon_dff> dff_recon;
   bool                   init_dropped = false;  // a concrete power-on init lost to a plain DFF cell
@@ -4839,12 +4856,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // path -- every other flow takes the read-back absorption.
       if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.d_inverted; })) {
         livehd::diag::err("pass.abc", "abc-readback", "internal")
-            .msg("pass.abc region '{}': the latch set was reshaped ({} latches for {} register bits) under the QN-only DFF "
-                 "cell '{}' -- the D-side inversion cannot be attributed; the built-in flow never retimes",
-                 rb.module_name,
-                 m,
-                 crossed_bits,
-                 dff_->name)
+            .msg(
+                "pass.abc region '{}': the latch set was reshaped ({} latches for {} register bits) under the QN-only DFF "
+                "cell '{}' -- the D-side inversion cannot be attributed; the built-in flow never retimes",
+                rb.module_name,
+                m,
+                crossed_bits,
+                dff_->name)
             .fatal();
         Abc_NtkDelete(mapped);
         return;
@@ -5173,9 +5191,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     auto& bb = bboxes[bx];
     auto& br = bbox_recon[bx];
     for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
-      int   w    = bb.ins[ii].bits;
-      auto  sink = br.node.create_sink_pin(bb.ins[ii].port_id);
-      auto& dbit = br.in_bit[ii];
+      int                  w    = bb.ins[ii].bits;
+      auto                 sink = br.node.create_sink_pin(bb.ins[ii].port_id);
+      auto&                dbit = br.in_bit[ii];
       const Bbox_input_key cache_key{bb.ins[ii].drv, w, bb.ins[ii].sign};
       if (auto it = reassembled_bbox_input.find(cache_key); it != reassembled_bbox_input.end()) {
         it->second.connect_sink(sink);

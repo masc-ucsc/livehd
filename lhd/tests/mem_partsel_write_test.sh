@@ -160,7 +160,7 @@ pub mod unknown_addr(inp:u80) -> (r:u10@[0]) {
 }
 EOF
 
-"$LHD" compile "$W/unknown_addr.prp" --top unknown_addr --recipe O0 \
+"$LHD" compile "$W/unknown_addr.prp" --top unknown_addr \
   --emit verilog:"$W/unknown_addr.v" --workdir "$W/w_unknown_gen" >"$W/unknown_gen.log" 2>&1 \
   || { tail -5 "$W/unknown_gen.log"; fail "case 3: unknown-address memory emission failed"; }
 grep -Eq "assign arr_dout_[0-9]+ = 10'b\?{10};" "$W/unknown_addr.v" \
@@ -200,7 +200,7 @@ EOF
 "$LHD" compile "$W/dotted_mem.sv" --reader slang --top dotted_mem \
   --emit-dir "pyrope:$W/dotted_prp" --workdir "$W/w_dotted_gen" >"$W/dotted_gen.log" 2>&1 \
   || { tail -5 "$W/dotted_gen.log"; fail "case 4: dotted memory did not generate Pyrope"; }
-"$LHD" compile "$W/dotted_prp/dotted_mem.prp" --top dotted_mem --recipe O0 \
+"$LHD" compile "$W/dotted_prp/dotted_mem.prp" --top dotted_mem \
   --emit verilog:"$W/dotted_impl.v" --workdir "$W/w_dotted_impl" >"$W/dotted_impl.log" 2>&1 \
   || { tail -5 "$W/dotted_impl.log"; fail "case 4: dotted memory Pyrope did not emit Verilog"; }
 if grep -Eq '^cgen_memory_[^[:space:]]+[[:space:]]+\\[^[:space:]]+ ' "$W/dotted_impl.v"; then

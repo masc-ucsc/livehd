@@ -7,7 +7,7 @@
 # `pass liberty gensim` supplies a behavioral model per cell so the LEC stays
 # self-contained (no PDK Verilog).
 #
-#   prp -> lg (O1)
+#   prp -> lg
 #   pass color synth          (the abc driver coloring)
 #   pass abc   --emit-dir lg:net   (partition + ABC tech-map per region)
 #   pass partition --emit-dir lg:re  (same module structure, original logic)
@@ -39,13 +39,13 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
 # 1. compile the flat combinational design to an lg library
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 # 2. color every node (synth boundaries = the abc driver)
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 # 3. ABC technology-map each colored region -> standard-cell netlist. Every
 # completed color must produce one compact, flushed heartbeat with a monotonic
 # completion count; long synthesis wrappers rely on this stable prefix.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set abc.library="$LIB" --workdir "$W/w3" \
+"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --workdir "$W/w3" \
     --diag-fmt pretty --result-json "$W/r.json" >"$W/abc_stdout.log" 2>"$W/abc_progress.log" \
   || fail "pass abc -> $(cat "$W/r.json" 2>/dev/null)"
 awk '
@@ -70,9 +70,9 @@ run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
 
 # 6. emit Verilog: impl = netlist modules + cell models ; ref = original logic
-run compile lg:"$W/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/netv" --workdir "$W/w6"
-run compile lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir "$W/w7"
-run compile lg:"$W/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/rev" --workdir "$W/w8"
+run compile lg:"$W/net" --top "$TOP" --emit-dir verilog:"$W/netv" --workdir "$W/w6"
+run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w7"
+run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w8"
 
 # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/netv/"*.v || fail "no standard cells in the ABC netlist"
@@ -103,12 +103,18 @@ echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative contr
 # (qor.json says which mapping each region kept).
 T="$W/timing"
 mkdir -p "$T"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/unit" --set abc.library="$TIMING_LIB" \
-    --set abc.max_fanout=0 --workdir "$T/w_unit"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/unit" --set synth.liberty="$TIMING_LIB" \
+    --set abc.max_fanout=0 --set abc.verbose=true --workdir "$T/w_unit"
 unit_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/timed" --set abc.library="$TIMING_LIB" \
-    --set abc.delay=1000 --workdir "$T/w_timed"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/timed" --set synth.liberty="$TIMING_LIB" \
+    --set abc.delay=1000 --set abc.verbose=true --workdir "$T/w_timed"
 timed_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
+grep -q 'resolved flow: .*&synch2 -K 6 -C 500' "$T/w_timed/logs/"*_lhd_pass_abc.log \
+  || fail "delay did not select the flow2/K6 timing default"
+grep -q 'resolved flow: .*&fraig -x; &put; dc2;' "$T/w_unit/logs/"*_lhd_pass_abc.log \
+  || fail "untimed mapping did not retain the area baseline"
+grep 'resolved flow:' "$T/w_timed/logs/"*_lhd_pass_abc.log | grep -q '&scorr' \
+  && fail "the built-in timing flow must not perform sequential correlation"
 awk -v unit="$unit_delay" -v timed="$timed_delay" 'BEGIN { exit !(unit > 0 && unit < 10 && timed > 10) }' \
   || fail "delay target did not activate NLDM timing (unit=$unit_delay timed=$timed_delay)"
 grep -q "Derived GENLIB" "$T/w_timed/logs/"*_lhd_pass_abc.log \
@@ -120,12 +126,22 @@ grep -q '"candidate":"\(area\|delay\)"' "$T/w_timed/qor.json" || fail "timed qor
 grep -q '"delay_flow":{"delay":[0-9.]*,"area":[0-9.]*}' "$T/w_timed/qor.json" || fail "timed qor.json lacks the delay-flow SCL pair"
 grep -q '"area_flow":{"delay":[0-9.]*,"area":[0-9.]*}' "$T/w_timed/qor.json" || fail "timed qor.json lacks the area-flow SCL pair"
 grep -q '"budget"' "$T/w_unit/qor.json" && fail "untimed qor.json must not carry a budget"
-run compile lg:"$T/timed" --top "$TOP" --recipe O0 --emit-dir verilog:"$T/netv" --workdir "$T/w_emit"
+run compile lg:"$T/timed" --top "$TOP" --emit-dir verilog:"$T/netv" --workdir "$T/w_emit"
 run pass liberty gensim "$TIMING_LIB" --emit-dir lg:"$T/models" --workdir "$T/w_models"
-run compile lg:"$T/models" --recipe O0 --emit-dir verilog:"$T/modelsv" --workdir "$T/w_modelsv"
+run compile lg:"$T/models" --emit-dir verilog:"$T/modelsv" --workdir "$T/w_modelsv"
 cat "$T/netv/"*.v "$T/modelsv/"*.v > "$T/impl.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$T/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$T/w_lec"
 echo "PASS: pass.abc delay target uses physical NLDM delays (unit=$unit_delay ps, timed=$timed_delay ps)"
+
+# Custom area flows own the untimed command list; an explicit flow still wins.
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/custom_area" --set synth.liberty="$LIB" \
+    --set 'abc.area_flow=echo CUSTOM_AREA_SELECTED; strash; dc2; map' --workdir "$T/w_custom_area"
+grep -q 'CUSTOM_AREA_SELECTED' "$T/w_custom_area/logs/"*_lhd_pass_abc.log || fail "untimed custom area_flow was ignored"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/custom_flow" --set synth.liberty="$LIB" \
+    --set 'abc.area_flow=echo CUSTOM_AREA_SELECTED; strash; dc2; map' \
+    --set 'abc.flow=echo CUSTOM_FLOW_SELECTED; strash; dc2; map' --workdir "$T/w_custom_flow"
+grep -q 'CUSTOM_FLOW_SELECTED' "$T/w_custom_flow/logs/"*_lhd_pass_abc.log || fail "explicit flow was ignored"
+grep -q 'CUSTOM_AREA_SELECTED' "$T/w_custom_flow/logs/"*_lhd_pass_abc.log && fail "area_flow overrode explicit flow"
 
 # ---------------------------------------------------------------------------
 # No prior coloring: `pass abc` must run WITHOUT `pass color` first. Color 0 (an
@@ -135,17 +151,17 @@ echo "PASS: pass.abc delay target uses physical NLDM delays (unit=$unit_delay ps
 # ---------------------------------------------------------------------------
 N="$W/nocolor"
 mkdir -p "$N"
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$N/lg" --workdir "$N/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$N/lg" --workdir "$N/w1"
 # abc directly on the uncolored design (NO pass color) — must succeed + warn once
-"$LHD" pass abc --top "$TOP" lg:"$N/lg" --emit-dir lg:"$N/net" --set abc.library="$LIB" \
+"$LHD" pass abc --top "$TOP" lg:"$N/lg" --emit-dir lg:"$N/net" --set synth.liberty="$LIB" \
     -q --result-json "$N/r.json" --workdir "$N/w2" || fail "pass abc without color failed -> $(cat "$N/r.json" 2>/dev/null)"
 grep -q '"diagnostics_count":{"errors":0,"warnings":1}' "$N/r.json" \
   || fail "expected one uncolored-node warning, got $(grep -o '"diagnostics_count":{[^}]*}' "$N/r.json")"
 # behavioral cell models + original-design reference, then emit + LEC
 run pass liberty gensim "$LIB" --emit-dir lg:"$N/models" --workdir "$N/w3"
-run compile lg:"$N/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/netv" --workdir "$N/w4"
-run compile lg:"$N/models" --recipe O0 --emit-dir verilog:"$N/modelsv" --workdir "$N/w5"
-run compile lg:"$N/lg" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/origv" --workdir "$N/w6"
+run compile lg:"$N/net" --top "$TOP" --emit-dir verilog:"$N/netv" --workdir "$N/w4"
+run compile lg:"$N/models" --emit-dir verilog:"$N/modelsv" --workdir "$N/w5"
+run compile lg:"$N/lg" --top "$TOP" --emit-dir verilog:"$N/origv" --workdir "$N/w6"
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$N/netv/"*.v || fail "no standard cells in the uncolored ABC netlist"
 cat "$N/netv/"*.v "$N/modelsv/"*.v > "$N/impl.v"
 cat "$N/origv/"*.v > "$N/orig.v"
@@ -160,9 +176,9 @@ echo "PASS: pass.abc runs WITHOUT a prior color pass (color-0 region, LEC-equiva
 # ---------------------------------------------------------------------------
 A="$W/alias"
 mkdir -p "$A"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$A/net" --set abc.library="$LIB" \
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$A/net" --set synth.liberty="$LIB" \
     --set abc.flow="strash; resyn2; &get -n; &dch -f; &nf {D}; &put" --workdir "$A/w1"
-run compile lg:"$A/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$A/netv" --workdir "$A/w2"
+run compile lg:"$A/net" --top "$TOP" --emit-dir verilog:"$A/netv" --workdir "$A/w2"
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/"*.v || fail "no standard cells in the resyn2-mapped netlist (alias did not resolve?)"
 cat "$A/netv/"*.v "$W/modelsv/"*.v > "$A/impl.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
@@ -176,11 +192,11 @@ echo "PASS: pass.abc resolves abc.rc script aliases in flow (resyn2, LEC-equival
 # ---------------------------------------------------------------------------
 G="$W/large"
 mkdir -p "$G"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$G/net" --set abc.library="$LIB" \
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$G/net" --set synth.liberty="$LIB" \
     --set abc.large_ge=1 --set abc.verbose=true --workdir "$G/w1"
 grep -q "large_flow selected" "$G/w1/logs/"*_lhd_pass_abc.log \
   || fail "large-region tier was not selected at large_ge=1"
-run compile lg:"$G/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$G/netv" --workdir "$G/w2"
+run compile lg:"$G/net" --top "$TOP" --emit-dir verilog:"$G/netv" --workdir "$G/w2"
 cat "$G/netv/"*.v "$W/modelsv/"*.v > "$G/impl.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$G/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$G/c"
 echo "PASS: pass.abc large-region direct flow is selected and LEC-equivalent"
@@ -200,9 +216,9 @@ pub mod wide_wiring(value:u4096, tag:u8) -> (out_value:u4096@[0], out_tag:u8@[])
   out_tag = packed#[0..=7]
 }
 EOF
-run compile "$P/wide_wiring.prp" --top wide_wiring --recipe O1 --emit-dir lg:"$P/lg" --workdir "$P/w1"
+run compile "$P/wide_wiring.prp" --top wide_wiring --emit-dir lg:"$P/lg" --workdir "$P/w1"
 run pass color synth --top wide_wiring.wide_wiring lg:"$P/lg" --workdir "$P/w2"
-"$LHD" pass abc --top wide_wiring.wide_wiring lg:"$P/lg" --emit-dir lg:"$P/net" --set abc.library="$LIB" \
+"$LHD" pass abc --top wide_wiring.wide_wiring lg:"$P/lg" --emit-dir lg:"$P/net" --set synth.liberty="$LIB" \
     --stats -q --result-json "$P/r.json" --workdir "$P/w3" \
   || fail "pass abc rejected wide native wiring -> $(cat "$P/r.json" 2>/dev/null)"
 if grep -Eq '"gates":[1-9][0-9]*' "$P/r.json"; then
@@ -219,14 +235,14 @@ echo "PASS: wide constant pack/unpack remains exact native zero-delay wiring"
 # ---------------------------------------------------------------------------
 C="$W/comb_loop"
 mkdir -p "$C"
-run compile inou/prp/tests/pyrope/abc_comb_loop.prp --top abc_comb_loop --recipe O1 --emit-dir lg:"$C/lg" --workdir "$C/w1"
+run compile inou/prp/tests/pyrope/abc_comb_loop.prp --top abc_comb_loop --emit-dir lg:"$C/lg" --workdir "$C/w1"
 run pass color synth --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --workdir "$C/w2"
-"$LHD" pass abc --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --emit-dir lg:"$C/net" --set abc.library="$LIB" \
+"$LHD" pass abc --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --emit-dir lg:"$C/net" --set synth.liberty="$LIB" \
     --diag-fmt jsonl --result-json "$C/r.json" --workdir "$C/w3" 2>"$C/diag.jsonl" \
   || fail "pass abc rejected a preserved combinational SCC -> $(cat "$C/r.json" 2>/dev/null)"
 grep -q '"code":"comb-loop-native"' "$C/diag.jsonl" \
   || fail "pass abc did not report the native combinational SCC boundary"
-run compile lg:"$C/net" --top abc_comb_loop.abc_comb_loop --recipe O0 --emit-dir verilog:"$C/netv" --workdir "$C/w4"
+run compile lg:"$C/net" --top abc_comb_loop.abc_comb_loop --emit-dir verilog:"$C/netv" --workdir "$C/w4"
 grep -q ' = (a & ' "$C/netv/"*.v || fail "mapped output dropped the native feedback expression"
 "$LHD" pass opentimer --top abc_comb_loop.abc_comb_loop lg:"$C/net" "$LIB" --workdir "$C/w5" \
     --diag-fmt jsonl --result-json "$C/rt.json" 2>"$C/ot.jsonl" \
@@ -260,16 +276,16 @@ pub mod abc_feedthrough(clk:u1, din:u4, din2:u4, a:u1, b:u1) -> (out:u4@[0], out
   out4 = a ^ b
 }
 EOF
-run compile "$FT/abc_feedthrough.prp" --top abc_feedthrough --recipe O1 --emit-dir lg:"$FT/lg" --workdir "$FT/w1"
+run compile "$FT/abc_feedthrough.prp" --top abc_feedthrough --emit-dir lg:"$FT/lg" --workdir "$FT/w1"
 run pass color synth --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --workdir "$FT/w2"
 run pass partition --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --emit-dir lg:"$FT/re" --workdir "$FT/w3"
-"$LHD" pass abc --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --emit-dir lg:"$FT/net" --set abc.library="$LIB" \
+"$LHD" pass abc --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --emit-dir lg:"$FT/net" --set synth.liberty="$LIB" \
     -q --result-json "$FT/r.json" --workdir "$FT/w4" \
   || fail "pass abc on the feed-through design -> $(cat "$FT/r.json" 2>/dev/null)"
 ft_total=$(grep -o '"total":{[^}]*}' "$FT/r.json" | head -1)
 echo "$ft_total" | grep -q '"gates":1,' || fail "feed-through design must map to exactly one real gate: $ft_total"
 echo "$ft_total" | grep -q '"bypassed":9' || fail "expected 9 bypassed identity buffers (8 CI->CO + 1 gate->2nd CO): $ft_total"
-run compile lg:"$FT/net" --top abc_feedthrough.abc_feedthrough --recipe O0 --emit-dir verilog:"$FT/netv" --workdir "$FT/w5"
+run compile lg:"$FT/net" --top abc_feedthrough.abc_feedthrough --emit-dir verilog:"$FT/netv" --workdir "$FT/w5"
 ! grep -hq "^BUFx1 " "$FT/netv/"*.v || fail "a feed-through wire became a BUFx1 buffer cell"
 ft_cells=$(grep -hc "^\(NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1\) " "$FT/netv/"*.v | tr -d ' ')
 [ "$ft_cells" = "1" ] || fail "feed-through netlist must hold exactly one comb cell (gates == logic-only count), got $ft_cells"

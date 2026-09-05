@@ -220,6 +220,12 @@ std::string_view  set_pass_method(std::string_view set_name);
 bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
+// The `synth.*` command namespace, readable from any command: `synth.liberty`
+// is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass
+// opentimer` all resolve through resolve_liberty), so no two Liberty readers
+// in one flow can end up on different files.
+std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
+std::string       resolve_liberty(const Options& opts);
 bool              lnastfmt_enabled(const Options& opts);
 // `compile.verify_frozen`: freeze every legalized def and re-check it after the
 // emits (pass/legalize). A full structural digest per graph twice, so on by
@@ -229,7 +235,7 @@ bool              compile_unroll_requested(const Options& opts);  // compile.unr
 bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);
-std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Options& opts, std::string_view def);
+std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts);
 
 void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<Lnast>>& units, const std::string& dir);
 std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir);

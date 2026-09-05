@@ -34,7 +34,7 @@ json_ok() {  # $1 = candidate JSON text
 # help surface — the subject of the three guarantees. Deliberately excluded:
 #   * lsp / semdiff — retired top-level spellings (`lhd lsp`/`lhd semdiff` error
 #     with a migration hint); kept only as `lhd help` aliases (tested in §8).
-#   * emit-kinds (verilog/ln/lg/...), recipes (O0/O1/O2), dump, config — these
+#   * emit-kinds (verilog/ln/lg/...), dump, config — these
 #     are `lhd describe` items (JSON records by design, no pretty page); reaching
 #     them via `lhd help X` is a describe courtesy, not a command help page.
 CMDS=("" compile lec formal scan tool pyrope pass sim synth list describe version \

@@ -2,19 +2,17 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # compile.upass.inline (pass.upass `inline` label). Inlining a fully-defined
-# `comb` is OFF by default: a directly-named comb whose call has runtime
-# arguments is emitted as a Sub module INSTANCE, preserving the comb boundary
-# for debug/optimization (its standalone module is compiled either way). The O2
-# recipe — or an explicit `--set compile.upass.inline=true` — flattens by
-# inlining. A comb call with all-COMPTIME-CONSTANT arguments still inlines (so it
+# `comb` is ON by default. Explicit inline=false emits a directly-named comb
+# with runtime arguments as a Sub module instance. Its standalone module is
+# compiled either way. A comb call with all-COMPTIME-CONSTANT arguments still inlines (so it
 # folds to a value) regardless of the flag.
 #
 # Asserts:
-#   (1) default (inline off) INSTANTIATES: `top` instantiates the comb (twice),
+#   (1) explicit inline=false INSTANTIATES: `top` instantiates the comb (twice),
 #       and a comb-calling-comb body instantiates the inner comb too;
-#   (2) `--recipe O2` and `--set compile.upass.inline=true` both FLATTEN: `top`
+#   (2) default and explicit inline=true both FLATTEN: `top`
 #       has no instance of the comb;
-#   (3) the default and flattened builds are PROVEN equivalent (logic is the
+#   (3) the instanced and flattened builds are PROVEN equivalent (logic is the
 #       same; instancing is a pure structural change);
 #   (4) a const-argument comb call still FOLDS at the default (comptime
 #       evaluation / casserts keep working — no runtime instance to preserve);
@@ -49,22 +47,22 @@ pub comb top(x:u8, y:u8) -> (o:u8) {
 }
 EOF
 
-# ── (1) default (inline OFF): the comb becomes a module instance ──────────────
-"$LHD" compile "$W/dut.prp" --top top \
+# ── (1) explicit inline=false: the comb becomes a module instance ────────────
+"$LHD" compile "$W/dut.prp" --top top --set compile.upass.inline=false \
   --emit-dir "lg:$W/off/" --emit-dir "verilog:$W/voff/" --workdir "$W/woff" -q >/dev/null 2>&1 \
-  || fail "default compile failed"
-has_inst "$W/voff/dut.top.v" 'addone' || fail "default: top.v does not instantiate addone"
-has_inst "$W/voff/dut.top.v" 'twice'  || fail "default: top.v does not instantiate twice"
+  || fail "inline=false compile failed"
+has_inst "$W/voff/dut.top.v" 'addone' || fail "inline=false: top.v does not instantiate addone"
+has_inst "$W/voff/dut.top.v" 'twice'  || fail "inline=false: top.v does not instantiate twice"
 # the comb-calling-comb body instantiates the inner addone TWICE.
 n=$(grep -Ec '^addone[[:space:]]+\\?[A-Za-z_]' "$W/voff/dut.twice.v")
-[ "$n" -eq 2 ] || fail "default: twice.v should instantiate addone twice, found $n"
-echo "PASS(1): default instantiates the comb (incl. comb-in-comb)"
+[ "$n" -eq 2 ] || fail "inline=false: twice.v should instantiate addone twice, found $n"
+echo "PASS(1): inline=false instantiates the comb (incl. comb-in-comb)"
 
-# ── (2) O2 and explicit inline=true both flatten ──────────────────────────────
-"$LHD" compile "$W/dut.prp" --top top --recipe O2 \
-  --emit-dir "verilog:$W/vo2/" --workdir "$W/wo2" -q >/dev/null 2>&1 || fail "O2 compile failed"
-if has_inst "$W/vo2/dut.top.v" '(addone|twice)'; then
-  fail "O2: top.v instantiates the comb (expected flattened)"
+# ── (2) default and explicit inline=true both flatten ────────────────────────
+"$LHD" compile "$W/dut.prp" --top top \
+  --emit-dir "verilog:$W/vdefault/" --workdir "$W/wdefault" -q >/dev/null 2>&1 || fail "compile failed"
+if has_inst "$W/vdefault/dut.top.v" '(addone|twice)'; then
+  fail "default: top.v instantiates the comb (expected flattened)"
 fi
 "$LHD" compile "$W/dut.prp" --top top --set compile.upass.inline=true \
   --emit-dir "lg:$W/on/" --emit-dir "verilog:$W/von/" --workdir "$W/won" -q >/dev/null 2>&1 \
@@ -72,9 +70,9 @@ fi
 if has_inst "$W/von/dut.top.v" '(addone|twice)'; then
   fail "inline=true: top.v instantiates the comb (expected flattened)"
 fi
-echo "PASS(2): --recipe O2 and inline=true flatten the comb into top"
+echo "PASS(2): default and inline=true flatten the comb into top"
 
-# ── (3) default (instanced) and flattened builds are PROVEN equivalent ────────
+# ── (3) instanced and flattened builds are PROVEN equivalent ────────────────
 # Instancing is a pure structural change. Use the lgyosys (Yosys SAT) engine: it
 # is the reliable oracle for a purely-combinational design (matching the
 # prp-equiv harness) and, unlike the cvc5 BMC engine, correctly handles a comb
@@ -96,7 +94,7 @@ pub comb simple_top(x:u8) -> (o:u8) { o = addone(x) }
 EOF
 "$LHD" compile "$W/simple.prp" --top simple_top --set compile.upass.inline=true \
   --emit-dir "lg:$W/son/" --workdir "$W/sonw" -q >/dev/null 2>&1 || fail "simple inline=true compile failed"
-"$LHD" compile "$W/simple.prp" --top simple_top \
+"$LHD" compile "$W/simple.prp" --top simple_top --set compile.upass.inline=false \
   --emit-dir "lg:$W/soff/" --workdir "$W/soffw" -q >/dev/null 2>&1 || fail "simple default compile failed"
 "$LHD" lec --ref "lg:$W/son/" --impl "lg:$W/soff/" \
   --ref-top simple.simple_top --impl-top simple.simple_top \
@@ -117,7 +115,7 @@ pub comb mix(x:u8) -> (o:u8) {
   o = addone(x) + addone(3)
 }
 EOF
-"$LHD" compile "$W/mix.prp" --top mix \
+"$LHD" compile "$W/mix.prp" --top mix --set compile.upass.inline=false \
   --emit-dir "verilog:$W/mixv/" --workdir "$W/mixw" -q >/dev/null 2>&1 || fail "mix compile failed"
 m=$(grep -Ec '^addone[[:space:]]+\\?[A-Za-z_]' "$W/mixv/mix.mix.v")
 [ "$m" -eq 1 ] || fail "default: expected 1 addone instance (runtime call only), found $m — const-arg call did not fold"
@@ -162,4 +160,4 @@ grep -q "only .mod. bodies may instantiate" "$W/negd.jsonl" \
   || fail "wrong/absent diagnostic for comb-calls-mod: $(cat "$W/negd.jsonl" 2>/dev/null)"
 echo "PASS(6): comb-calls-mod still rejected"
 
-echo "ALL PASS: compile.upass.inline (default instance, O2 flatten, const-fold, cvc5/lgyosys-equiv)"
+echo "ALL PASS: compile.upass.inline (explicit instance, default flatten, const-fold, cvc5/lgyosys-equiv)"

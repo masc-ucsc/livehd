@@ -552,7 +552,7 @@ module guarded_inc(input logic [4:0] a, input logic [3:0] m, output logic [3:0] 
   end
 endmodule
 EOF
-${LHD} compile "$W/guarded_inc.prp" --top guarded_inc --recipe O1 \
+${LHD} compile "$W/guarded_inc.prp" --top guarded_inc \
   --emit verilog:"$W/guarded_inc_out.v" --workdir "$W/guarded_inc_w" -q \
   || fail "guarded increment Pyrope did not emit Verilog"
 ${LHD} lec --impl verilog:"$W/guarded_inc_out.v" --ref verilog:"$W/guarded_inc.sv" \

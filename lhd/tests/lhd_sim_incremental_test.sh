@@ -72,7 +72,7 @@ test top.hello(cycles:u20 = 4) {
 EOF
 
 setup() {
-  "$LHD" sim "$W/tb.prp" --setup-only --workdir "$W/wd" >"$W/setup.log" 2>&1 \
+  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$W/wd" >"$W/setup.log" 2>&1 \
     || { cat "$W/setup.log" >&2; fail "lhd sim --setup-only failed"; }
 }
 

@@ -510,7 +510,7 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
     //   * a CHECKED `assume` needs the `proven` stamp pass.formal put on it
     //     (a selected-top IO assume, or every assume under assume_check=false).
     //     One that was never discharged — a `lg:` library fed straight to
-    //     `lhd lec`, or a side built at O0 where pass.formal does not run —
+    //     `lhd lec`, or a side built with compile.formal.mode=none —
     //     carries no attribute, is not a hypothesis, and must not be disclosed
     //     as one either.
     //   * a `proven` of kind kFormalAssumeHier was discharged by the HIERARCHY

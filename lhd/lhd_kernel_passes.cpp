@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Standalone graph-pass command plumbing, including semdiff.
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -16,6 +17,7 @@
 #include "pass.hpp"
 #include "rapidjson/document.h"
 #include "semdiff.hpp"
+#include "str_tools.hpp"
 
 namespace lhd {
 
@@ -642,12 +644,12 @@ void pass_command(Options& opts, Result& res) {
   if (sub == "liberty") {
     std::string subsub = opts.files.size() > 1 ? opts.files[1] : std::string{};
     if (subsub != "gensim") {
-      throw Lhd_error{"usage", "pass liberty supports: gensim <file.lib> --emit-dir lg:DIR", ""};
+      throw Lhd_error{"usage", "pass liberty supports: gensim [file.lib] --emit-dir lg:DIR", ""};
     }
-    if (opts.files.size() < 3) {
-      throw Lhd_error{"usage", "pass liberty gensim needs a Liberty .lib file argument", ""};
-    }
-    const std::string lib_file = opts.files[2];
+    // The .lib positional is optional: with none, gensim reads THE Liberty
+    // (`--set synth.liberty`, else the $HAGENT_TECH_DIR default) like every
+    // other Liberty reader, so one spelling serves the whole flow.
+    const std::string lib_file = opts.files.size() > 2 ? opts.files[2] : resolve_liberty(opts);
     check_inputs_exist({lib_file});
     const auto* lg_out = find_slot(opts.emit_dirs, "lg");
     if (lg_out == nullptr) {
@@ -798,6 +800,13 @@ void pass_command(Options& opts, Result& res) {
       labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "qor.json").string() : ephemeral_qor;
     }
     merge_sets(opts, "pass.abc", labels);
+    // THE Liberty (synth.liberty, else the $HAGENT_TECH_DIR default): the one
+    // spelling every Liberty reader shares, so `lhd pass abc` and a later
+    // `lhd pass opentimer` on the same netlist can never be handed different
+    // cells. Set AFTER merge_sets because `pass.abc.library` is not a user knob
+    // (check_known_set_passes refuses it and names synth.liberty).
+    labels["library"] = resolve_liberty(opts);
+    res.inputs.push_back(labels["library"]);
     if (opts.stats) {
       labels["stats"] = "true";
     }
@@ -833,10 +842,18 @@ void pass_command(Options& opts, Result& res) {
                       "opentimer reports timing (see --workdir/timing.json), it does not transform the graph"};
     }
     std::vector<std::string> tfiles(opts.files.begin() + 1, opts.files.end());
-    if (tfiles.empty()) {
-      throw Lhd_error{"usage",
-                      "pass opentimer needs a Liberty .lib file argument (+ optional .sdc/.spef)",
-                      "e.g. `lhd pass opentimer --top 'mod__c0' lg:net cells.lib`"};
+    // No positional .lib: fall back to THE Liberty (synth.liberty, else the
+    // $HAGENT_TECH_DIR default) -- the same file `lhd pass abc` mapped with, so
+    // one `--set synth.liberty=cells.lib` carries a hand-driven map -> STA flow
+    // exactly as it carries `lhd synth`.
+    // Use the SAME predicate pass.opentimer classifies the positionals with
+    // (pass_opentimer.cpp), so a name this kernel accepted as "a Liberty was
+    // given" can never be one the pass then ignores -- which would leave it
+    // timing with no library at all.
+    const bool               has_lib
+        = std::any_of(tfiles.begin(), tfiles.end(), [](const std::string& f) { return str_tools::ends_with(f, ".lib"); });
+    if (!has_lib) {
+      tfiles.insert(tfiles.begin(), resolve_liberty(opts));
     }
     check_inputs_exist(tfiles);
     Eprp_var var;

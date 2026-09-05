@@ -48,7 +48,7 @@ fail() {
 compile_design() {
   local d="$1" gparam="$2"
   mkdir -p "$d"
-  "$LHD" compile "$SRC" --reader slang --top membank --recipe O1 --emit-dir lg:"$d/lg" --workdir "$d/w1" \
+  "$LHD" compile "$SRC" --reader slang --top membank --emit-dir lg:"$d/lg" --workdir "$d/w1" \
       -q --result-json "$d/r.json" -- "$gparam" || fail "compile $gparam -> $(cat "$d/r.json" 2>/dev/null)"
 }
 # map_design <dir> <lib> [extra pass.abc --set ...]: color + pass.abc (memory=true
@@ -59,11 +59,11 @@ map_design() {
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   run pass color synth --top membank.membank lg:"$d/lg" --workdir "$d/w2"
-  run pass abc --top membank.membank lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$lib" \
+  run pass abc --top membank.membank lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$lib" \
       --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" "$@"
   ! grep -q '"code":"memory-unlowered"' "$d/diag.jsonl" || fail "$d: memory was NOT bit-blasted: $(grep memory-unlowered "$d/diag.jsonl")"
   run pass liberty gensim "$lib" --emit-dir lg:"$d/models" --workdir "$d/w5"
-  run compile lg:"$d/net" --top membank.membank --recipe O0 --emit-dir verilog:"$d/netv" --workdir "$d/w6"
+  run compile lg:"$d/net" --top membank.membank --emit-dir verilog:"$d/netv" --workdir "$d/w6"
 }
 # lec_cvc5 <netlist dir> <ref dir> <out json>: netlist as IMPL (the direction
 # mem_lower's refinements are sound in), compiled design as REF, cell models.
@@ -94,8 +94,8 @@ echo "PASS: 8x8 resetless register file as 64 DFFx1 cells is PROVEN (unbounded) 
 
 # lgyosys on the Verilog (the lhdtrack lec_netlist cross-check): must not refute
 run() { "$LHD" "$@" -q --result-json "$D/r.json" || fail "$* -> $(cat "$D/r.json" 2>/dev/null)"; }
-run compile lg:"$D/models" --recipe O0 --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
-run compile lg:"$GOOD/lg" --top membank.membank --recipe O0 --emit-dir verilog:"$D/refv" --workdir "$D/w8"
+run compile lg:"$D/models" --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
+run compile lg:"$GOOD/lg" --top membank.membank --emit-dir verilog:"$D/refv" --workdir "$D/w8"
 cat "$D/netv/"*.v "$D/modelsv/"*.v > "$D/impl.v"
 cat "$D/refv/"*.v > "$D/ref.v"
 "$LHD" lec --set formal.solver=lgyosys --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
@@ -150,11 +150,11 @@ echo "PASS: a netlist with a corrupted write address in the same bank shape is R
 M="$W/multi"
 mkdir -p "$M"
 mrun() { "$LHD" "$@" -q --result-json "$M/r.json" || fail "$* -> $(cat "$M/r.json" 2>/dev/null)"; }
-mrun compile "$MULTI_SRC" --reader slang --top membank_multi --recipe O1 \
+mrun compile "$MULTI_SRC" --reader slang --top membank_multi \
     --emit-dir lg:"$M/lg" --workdir "$M/w1"
 mrun pass color synth --top membank_multi.membank_multi lg:"$M/lg" --workdir "$M/w2"
 mrun pass abc --top membank_multi.membank_multi lg:"$M/lg" --emit-dir lg:"$M/net" \
-    --set abc.library="$LIB" --workdir "$M/w3"
+    --set synth.liberty="$LIB" --workdir "$M/w3"
 mrun pass liberty gensim "$LIB" --emit-dir lg:"$M/models" --workdir "$M/w4"
 "$LHD" lec --impl lg:"$M/net" --ref lg:"$M/lg" --lib lg:"$M/models" \
     --top membank_multi.membank_multi --set formal.solver=cvc5 --workdir "$M/wlec" \

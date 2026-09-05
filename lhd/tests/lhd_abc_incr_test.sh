@@ -66,7 +66,7 @@ expect_resynth() {
 cp "$FIX" "$W/dut.prp"
 
 compile_and_color() {  # $1 = lg dir tag
-  run compile "$W/dut.prp" --top "$TOP" --recipe O1 --emit-dir lg:"$W/$1" --workdir "$W/w_c$1"
+  run compile "$W/dut.prp" --top "$TOP" --emit-dir lg:"$W/$1" --workdir "$W/w_c$1"
   # absorb=false: the tiny fixture defs would otherwise inline away and the
   # per-def region reuse this test pins would have nothing to bite on.
   run pass color synth --top "$TOP" --set color.absorb=false lg:"$W/$1" --workdir "$W/w_k$1"
@@ -75,18 +75,18 @@ compile_and_color() {  # $1 = lg dir tag
 abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
   # (<workdir>/abc_cache), on by default (lhd.incremental).
-  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set abc.library="$LIB" \
+  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" \
       --workdir "$W/wabc" --stats
 }
 
 # LEC gate: netlist modules + behavioral cell models vs the original logic
 # re-emitted through pass.partition (same module structure, original logic).
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w_m"
-run compile lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir "$W/w_mv"
+run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w_mv"
 lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
   run pass partition --top "$TOP" lg:"$W/$2" --emit-dir lg:"$W/re$1" --workdir "$W/w_p$1"
-  run compile lg:"$W/$1" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/${1}v" --workdir "$W/w_nv$1"
-  run compile lg:"$W/re$1" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/re${1}v" --workdir "$W/w_rv$1"
+  run compile lg:"$W/$1" --top "$TOP" --emit-dir verilog:"$W/${1}v" --workdir "$W/w_nv$1"
+  run compile lg:"$W/re$1" --top "$TOP" --emit-dir verilog:"$W/re${1}v" --workdir "$W/w_rv$1"
   cat "$W/${1}v/"*.v "$W/modelsv/"*.v > "$W/impl$1.v"
   cat "$W/re${1}v/"*.v > "$W/ref$1.v"
   run lec --set formal.solver=lgyosys --impl verilog:"$W/impl$1.v" --ref verilog:"$W/ref$1.v" --top "$TOP" --workdir "$W/w_l$1"
@@ -107,13 +107,13 @@ abc_incr lg0 net1
 expect_incr 3 0 "NoChange re-run"
 expect_resynth 3 0 "NoChange re-run"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit run still started ABC/read Liberty"
-run compile lg:"$W/net1" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/net1v" --workdir "$W/w_nv1"
+run compile lg:"$W/net1" --top "$TOP" --emit-dir verilog:"$W/net1v" --workdir "$W/w_nv1"
 diff -r "$W/net0v" "$W/net1v" >/dev/null || fail "warm clone differs from the cold mapping"
 echo "PASS: NoChange run is all hits and byte-identical Verilog"
 
 # Pretty rendering is one physical line per color and carries the same
 # resynthesis decision as the JSON rows. This additional all-hit run is cheap.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set abc.library="$LIB" \
+"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" \
     --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
     || fail "pretty stats run failed"
 [ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 3 ] \
@@ -140,13 +140,13 @@ expect_resynth 3 0 "NoChange after the edit"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
 # lhd.incremental=false: no cache is touched and the envelope carries no counters.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set abc.library="$LIB" \
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" \
     --set lhd.incremental=false --workdir "$W/wabc" --stats
 [ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
 expect_resynth 3 3 "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set abc.library="$LIB" --stats
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
 expect_resynth 3 3 "no-workdir full run"
 echo "PASS: lhd.incremental=false and no-workdir both disable cleanly"

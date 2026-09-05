@@ -92,14 +92,9 @@ void restamp_finite_get_mask(hhds::Node_class& node, const Dlop& mask) {
   // A preceding range pass may prove that fewer carrier bits suffice. Keep
   // that stronger fact; this repair is only for a stale enclosing/source width
   // that exceeds the explicit selection's capacity.
-  if (current == 0 || current > capacity) {
-    livehd::graph_util::set_bits(out, capacity);
-  }
-  // Do not rewrite signedness here. Get_mask is also the real finite-width
-  // landing for a typed signed wire: tolg deliberately stamps that result
-  // signed so its selected top bit is the sign bit. Ordinary slice results are
-  // already stamped unsigned by their producer. Turning every finite mask
-  // unsigned here changed a signed field value such as 8'hff from -1 to 255.
+  livehd::graph_util::set_ubits(out, current == 0 ? capacity : std::min(current, capacity));
+  // Sign reinterpretation belongs to an explicit Sext, never to Get_mask's
+  // result annotation.
 }
 
 // Copy propagation can replace a narrow operand with a wider equivalent
@@ -147,11 +142,11 @@ void enforce_lossless_carriers(hhds::Graph* g) {
           // the sign below) doubled the deserialization cost of the hottest
           // loop in this pass.
           const auto& value = const_of(e.driver);
-          non_negative     = !value.is_negative();
+          non_negative      = !value.is_negative();
           // The graph hint is the literal unsigned PAYLOAD width, not
           // Dlop::get_bits()'s signed carrier -- shared with upass/tolg's merge
           // sizing and cgen_sim's mux-arm check so the three cannot drift.
-          input_bits       = std::max(input_bits, static_cast<int>(livehd::graph_util::literal_payload_bits(value)));
+          input_bits        = std::max(input_bits, static_cast<int>(livehd::graph_util::literal_payload_bits(value)));
         }
         // Literal uW needs W+1 bits when an unlimited-precision operation
         // lands in a signed carrier. This matters after copy propagation
@@ -863,8 +858,7 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
 
   // This is intrinsic construction metadata, not graph-wide width repair: a
   // Concat's literal carrier is exactly sum(w_i). Written here rather than left
-  // to pass/bitwidth because the DEFAULT recipe (O1) is cprop with no bitwidth
-  // after it (see recipe_graph_passes), so this stamp is the one that ships.
+  // to pass/bitwidth because subsequent cprop rules already read this width.
   // Narrowing a head that was stamped wider is sound in the same breath: the
   // tiling proves the value is below 2^total.
   auto out = node.create_driver_pin(0);
@@ -1762,7 +1756,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     result = Dlop::create_integer(0);
     for (auto& i : inp_edges_ordered) {
       const auto& c = const_of(i.driver);
-      result = result.ror_op(c);
+      result        = result.ror_op(c);
     }
 
     replace_node(node, result);
@@ -1801,7 +1795,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     result = Dlop::create_integer(0);  // or identity (Invalid no longer folds as 0)
     for (auto& e : inp_edges_ordered) {
       const auto& c = const_of(e.driver);
-      result = result.or_op(c);
+      result        = result.or_op(c);
     }
 
     replace_logic_node(node, result);
@@ -1811,7 +1805,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     result = Dlop::create_integer(-1);
     for (auto& i : inp_edges_ordered) {
       const auto& c = const_of(i.driver);
-      result = result.and_op(c);
+      result        = result.and_op(c);
     }
 
     replace_node(node, result);
@@ -1835,11 +1829,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     // LT/GT fold below already follows. A DEFINITE mismatch still folds: it
     // decides the all-equal regardless of unknown bits elsewhere.
     const auto& first   = const_of(inp_edges_ordered[0].driver);
-    bool eq      = true;
-    bool any_unk = false;
+    bool        eq      = true;
+    bool        any_unk = false;
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       const auto& c = const_of(inp_edges_ordered[i].driver);
-      auto r = first.eq_op(c);
+      auto        r = first.eq_op(c);
       if (r->is_known_false()) {
         eq = false;
         break;
@@ -1918,7 +1912,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     result = Dlop::create_integer(1);
     for (auto& i : inp_edges_ordered) {
       const auto& c = const_of(i.driver);
-      result = result.mult_op(c);
+      result        = result.mult_op(c);
     }
 
     replace_node(node, result);
@@ -3116,7 +3110,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
       // is_positive() is exact at any width (an is_just_i64 gate would treat
       // a >62-bit non-negative constant as "maybe negative"); an unknown sign
       // bit reads negative, which stays conservative for Rule 4.
-      nonneg = v.is_positive();
+      nonneg        = v.is_positive();
     } else if (is_graph_input_pin(a_pin)) {
       // `unsign` is a value-range guarantee in LGraph. The physical W-bit port
       // representation is a backend boundary concern, not an IR Get_mask.
@@ -3281,9 +3275,8 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   // Only an UNSIGNED-stamped And may become a Get_mask. A signed-stamped
   // And-mask (lgyosys_tolg's shift lowering) is emitted as a WRAPPING
   // masked value whose downstream companion Get_mask is the to-positive
-  // fixer -- the pair is a unit, and a signed Get_mask means something else
-  // entirely (re-sign at the selected top bit). Retyping the And flipped
-  // srasll's `s0 >> s1` cone from +0xFFFF to -1.
+  // fixer -- the pair is a unit. Retyping must preserve that pair's unsigned
+  // result, never reinterpret the selected top bit as a sign bit.
   if (!livehd::graph_util::is_unsign(node.create_driver_pin(0))) {
     return;
   }
@@ -3672,8 +3665,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] boo
   // at cprop ENTRY (i.e. as produced by tolg / upass generation). Checking at
   // this boundary covers BOTH
   // front-ends' tolg output (upass/tolg and inou/yosys/lgyosys_tolg). The lnast
-  // tolg additionally self-checks at its own output (covers O0, where no graph
-  // pass runs) -- see uPass_tolg::run.
+  // tolg additionally self-checks at its own output -- see uPass_tolg::run.
   if (check_input_sized) {
     livehd::graph_util::debug_assert_cells_sized(*g, "tolg/upass (seen at cprop entry)");
   }

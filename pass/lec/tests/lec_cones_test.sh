@@ -37,7 +37,7 @@ netlist() {
   "$LHD" compile "$src" --emit-dir lg:"$WORK/$name.lg" > "$WORK/$name.build" 2>&1 \
     && "$LHD" pass color flat --top "$TOP" lg:"$WORK/$name.lg" >> "$WORK/$name.build" 2>&1 \
     && "$LHD" pass abc --top "$TOP" --workdir "$WORK/$name.wd" lg:"$WORK/$name.lg" \
-              --emit-dir lg:"$WORK/$name.net" --set abc.library="$LIB" --set abc.register=false \
+              --emit-dir lg:"$WORK/$name.net" --set synth.liberty="$LIB" --set abc.register=false \
               >> "$WORK/$name.build" 2>&1
 }
 
@@ -163,7 +163,7 @@ if [ -f "$MSRC" ]; then
     "$LHD" compile "$2" --emit-dir lg:"$WORK/$1.lg" > "$WORK/$1.build" 2>&1 \
       && "$LHD" pass color flat --top "$MTOP" lg:"$WORK/$1.lg" >> "$WORK/$1.build" 2>&1 \
       && "$LHD" pass abc --top "$MTOP" --workdir "$WORK/$1.wd" lg:"$WORK/$1.lg" \
-                --emit-dir lg:"$WORK/$1.net" --set abc.library="$LIB" --set abc.register=false \
+                --emit-dir lg:"$WORK/$1.net" --set synth.liberty="$LIB" --set abc.register=false \
                 --set "abc.memory=${3:-false}" \
                 >> "$WORK/$1.build" 2>&1
   }

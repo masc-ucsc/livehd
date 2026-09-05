@@ -19,7 +19,6 @@ lhd_verilog(
     name = "trivial_net",
     srcs = ["trivial.v"],
     out = "trivial.gen.v",
-    recipe = "O1",
     top = "trivial",
 )
 
@@ -1592,19 +1591,19 @@ sh_test(
     data = ["//lhd"],
 )
 
-# --recipe O2 (pass.cprop + pass.bitwidth): cell-type mix LEC'd against the
+# Standard compilation (pass.cprop + pass.bitwidth): cell-type mix LEC'd against the
 # source, recipe provenance in --result-json, and the memory sizing path.
 sh_test(
-    name = "lhd_bitwidth_o2_test",
+    name = "lhd_bitwidth_test",
     size = "large",
-    srcs = ["lhd_bitwidth_o2_test.sh"],
+    srcs = ["lhd_bitwidth_test.sh"],
     data = _FLOW_DATA + [
         "bw_mem.v",
         "bw_mix.v",
     ],
 )
 
-# --recipe O1 (pass.cprop): a runtime Set_mask write chain plus single-bit
+# A runtime Set_mask write chain plus single-bit
 # reads must fold through Cprop::try_find_single_driver_pin (the recursive
 # single-driver resolver) so y0->a and y2->c in the generated Verilog.
 sh_test(

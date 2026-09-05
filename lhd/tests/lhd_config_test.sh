@@ -4,8 +4,7 @@
 # --config lhd.toml: pass-flag defaults as a declared input file.
 #  - [pass] table entries reach the pass (upass log shows the resolved order)
 #  - an explicit CLI --set overrides the file entry
-#  - the top-level `recipe` key drives compile's graph passes (a no-op when no
-#    graphs are produced, e.g. a bare --emit-dir ln: lowering)
+#  - graph compilation always runs constant propagation and bitwidth inference
 #  - junk (unknown top-level key / typo'd pass table) errors, never no-ops
 
 set -u
@@ -20,7 +19,7 @@ fail() {
   exit 1
 }
 
-printf 'recipe = "O2"  # comment survives\n[upass]\norder = "noop"\nverifier = false\n' > "$W/lhd.toml"
+printf '# comment survives\n[upass]\norder = "noop"\nverifier = false\n' > "$W/lhd.toml"
 
 # The [upass] table reaches pass.upass (compile lowers, so upass runs).
 # order=noop guts the pipeline, so tolg may legitimately fail afterwards —
@@ -35,14 +34,24 @@ grep -q "resolved order: noop" "$W/w1/logs/"*upass*.log || fail "config [upass] 
 # override resolves to the full chain ending in constprop — not the file's noop.
 grep -q "resolved order: attributes typecheck constprop" "$W/w2/logs/"*upass*.log || fail "--set must override the config file entry"
 
-# recipe = "O2" from the file drives the graph passes when graphs are produced.
-printf 'recipe = "O2"\n[upass]\nverifier = false\n' > "$W/sane.toml"
+# Graph optimization is standard, including when a config supplies pass flags.
+printf '[upass]\nverifier = false\n' > "$W/sane.toml"
 "$LHD" compile "$PRP" --config "$W/sane.toml" --emit verilog:"$W/v3.v" --workdir "$W/w3" -q --result-json "$W/r3.json" \
   || fail "compile with a sane config exited non-zero: $(cat "$W/r3.json" 2>/dev/null)"
-grep -q 'pass.bitwidth' "$W/r3.json" || fail "config recipe=O2 did not run pass.bitwidth: $(cat "$W/r3.json")"
-# A bare ln: emit produces no graphs, so the recipe is a no-op (must still pass).
+grep -q 'pass.cprop' "$W/r3.json" || fail "compile did not run pass.cprop"
+grep -q 'pass.bitwidth' "$W/r3.json" || fail "compile did not run pass.bitwidth"
+# A bare ln: emit produces no graphs and must still pass.
 "$LHD" compile "$PRP" --config "$W/sane.toml" --emit-dir ln:"$W/lns/" --workdir "$W/w4" -q --result-json "$W/r4.json" \
-  || fail "compile --emit-dir ln: with a recipe config exited non-zero: $(cat "$W/r4.json" 2>/dev/null)"
+  || fail "compile --emit-dir ln: with a config exited non-zero: $(cat "$W/r4.json" 2>/dev/null)"
+
+# Optimization-level selection has been removed from both CLI and config.
+out=$("$LHD" compile "$PRP" --recipe O2 -q 2>/dev/null)
+[ $? -ne 0 ] || fail "removed --recipe flag must error"
+grep -q 'recipe' <<<"$out" || fail "removed flag diagnostic must name recipe: $out"
+printf 'recipe = "O2"\n' > "$W/recipe.toml"
+out=$("$LHD" compile "$PRP" --config "$W/recipe.toml" -q 2>/dev/null)
+[ $? -ne 0 ] || fail "removed recipe config key must error"
+grep -q '"class":"config"' <<<"$out" || fail "removed key must be a config error: $out"
 
 # Junk must error (config class), never silently no-op. Config-load errors
 # fire in argv parsing, before --result-json exists -> JSON lands on stdout.
@@ -62,4 +71,4 @@ out=$("$LHD" compile "$PRP" --config "$W/nope.toml" --emit verilog:"$W/x.v" -q 2
 [ $? -ne 0 ] || fail "missing config file must error"
 grep -q '"class":"missing_file"' <<<"$out" || fail "expected error.class=missing_file: $out"
 
-echo "PASS: --config lhd.toml defaults, CLI precedence, recipe pickup, and strict junk rejection"
+echo "PASS: --config defaults, CLI precedence, fixed compile pipeline, and strict junk rejection"

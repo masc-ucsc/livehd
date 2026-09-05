@@ -90,13 +90,13 @@ map_design() {
   # is slang's, so lhd's own -q/--result-json must come BEFORE it.
   local gargs=()
   [ -z "$gparam" ] || gargs=(-- "$gparam")
-  "$LHD" compile "$src" --reader slang --top "$top" --recipe O1 --emit-dir lg:"$d/lg" --workdir "$d/w1" \
-      -q --result-json "$r" "${gargs[@]}" || fail "compile $src $gparam -> $(cat "$r" 2>/dev/null)"
+  "$LHD" compile "$src" --reader slang --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1" \
+      -q --result-json "$r" ${gargs[@]+"${gargs[@]}"} || fail "compile $src $gparam -> $(cat "$r" 2>/dev/null)"
   run pass color synth --top "$top.$top" lg:"$d/lg" --workdir "$d/w2"
-  run pass abc --top "$top.$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$LIB" \
+  run pass abc --top "$top.$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
       --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" "$@"
   cp "$r" "$d/abc.json"
-  run compile lg:"$d/net" --top "$top.$top" --recipe O0 --emit-dir verilog:"$d/netv" --workdir "$d/w6"
+  run compile lg:"$d/net" --top "$top.$top" --emit-dir verilog:"$d/netv" --workdir "$d/w6"
 }
 
 # lec_both <dir> <top> [cvc5 bound]: the original-logic twin (pass partition) +
@@ -111,13 +111,13 @@ lec_both() {
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   run pass partition --top "$top.$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
   run pass liberty gensim "$LIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
-  run compile lg:"$d/models" --recipe O0 --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
-  run compile lg:"$d/re" --top "$top.$top" --recipe O0 --emit-dir verilog:"$d/rev" --workdir "$d/w8"
+  run compile lg:"$d/models" --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
+  run compile lg:"$d/re" --top "$top.$top" --emit-dir verilog:"$d/rev" --workdir "$d/w8"
   cat "$d/netv/"*.v "$d/modelsv/"*.v > "$d/impl.v"
   cat "$d/rev/"*.v > "$d/ref.v"
   # cvc5: graph-level, netlist as IMPL (the direction mem_lower's refinements are sound in)
   "$LHD" lec --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top.$top" \
-      --set formal.solver=cvc5 "${bset[@]}" --workdir "$d/wc5" -q --result-json "$d/lec_cvc5.json" \
+      --set formal.solver=cvc5 ${bset[@]+"${bset[@]}"} --workdir "$d/wc5" -q --result-json "$d/lec_cvc5.json" \
     || fail "$top: cvc5 lec failed: $(cat "$d/lec_cvc5.json" 2>/dev/null)"
   grep -q '"verdict":"proven"' "$d/lec_cvc5.json" \
     || fail "$top: cvc5 lec did not PROVE the bit-blasted memory: $(grep -o '"lec":{[^}]*}' "$d/lec_cvc5.json")"
@@ -189,7 +189,7 @@ grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory_max_bits=255: 256-bit memor
 D="$W/tile32_max0"
 map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory_max_bits=0
 ! grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory_max_bits=0 must disable the guard"
-if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net" --set abc.library="$LIB" \
+if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net" --set synth.liberty="$LIB" \
     --set pass.abc.memory_max_bits=lots --workdir "$W/bad_w" -q --result-json "$W/bad.json" 2>/dev/null; then
   fail "pass.abc accepted memory_max_bits=lots"
 fi

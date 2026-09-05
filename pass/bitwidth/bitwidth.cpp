@@ -72,26 +72,26 @@ using livehd::graph_util::const_of;
 // reduce precision, and Clock_cell is timing metadata rather than arithmetic.
 constexpr bool infer_internal_range(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Sum:
-    case Ntype_op::Mult:
-    case Ntype_op::And:
-    case Ntype_op::Or:
-    case Ntype_op::Xor:
-    case Ntype_op::Ror:
-    case Ntype_op::Not:
+    case Ntype_op::Sum     :
+    case Ntype_op::Mult    :
+    case Ntype_op::And     :
+    case Ntype_op::Or      :
+    case Ntype_op::Xor     :
+    case Ntype_op::Ror     :
+    case Ntype_op::Not     :
     case Ntype_op::Get_mask:
     case Ntype_op::Set_mask:
-    case Ntype_op::Concat:
-    case Ntype_op::Sext:
-    case Ntype_op::LT:
-    case Ntype_op::GT:
-    case Ntype_op::EQ:
-    case Ntype_op::SHL:
-    case Ntype_op::SRA:
-    case Ntype_op::Mux:
-    case Ntype_op::Hotmux:
-    case Ntype_op::Memory:
-    case Ntype_op::Sub:
+    case Ntype_op::Concat  :
+    case Ntype_op::Sext    :
+    case Ntype_op::LT      :
+    case Ntype_op::GT      :
+    case Ntype_op::EQ      :
+    case Ntype_op::SHL     :
+    case Ntype_op::SRA     :
+    case Ntype_op::Mux     :
+    case Ntype_op::Hotmux  :
+    case Ntype_op::Memory  :
+    case Ntype_op::Sub     :
     case Ntype_op::AttrSet : return true;
     default                : return false;
   }
@@ -109,7 +109,8 @@ void clear_sink(const hhds::Pin_class& spin) {
 
 }  // namespace
 
-Bitwidth::Bitwidth(int _max_iterations) : max_iterations(_max_iterations) {}
+Bitwidth::Bitwidth(int _max_iterations, bool _constrain_outputs)
+    : max_iterations(_max_iterations), constrain_outputs(_constrain_outputs) {}
 
 void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   if (!g) {
@@ -142,6 +143,20 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   }
 #endif
 
+  // A sized to-positive boundary captures a finite bus, not the future
+  // significant width of its producer. Make that window explicit before
+  // inference can narrow a signed producer (e.g. a 4-bit mux of 0 and -1).
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    if (type_op_of(node) != Ntype_op::Get_mask) {
+      continue;
+    }
+    const auto output = node.get_driver_pin(0);
+    const auto mask   = get_driver_of_sink_name(node, "mask");
+    if (bits_of(output) > 0 && mask.is_const() && const_of(mask).is_just_i64() && const_of(mask).to_just_i64() == -1) {
+      clear_sink(find_sink_pin(node, "mask"));
+      setup_sink_by_name(node, "mask").connect_driver(create_const(*g, *Dlop::get_mask_value(bits_of(output))));
+    }
+  }
   bw_pass(g.get());
 }
 
@@ -203,9 +218,8 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
   // Q range onto every din driver, and a memory does the same for its dout
   // drivers). Stamping past it mints a pin node_util's debug_check_pin_hint
   // rejects on the next load ("selects 64 bits but is hinted at 75"), which
-  // aborts a dbg `lhd sim` on the saved lg:. Only the WIDTH is clamped: a typed
-  // signed wire's Get_mask is deliberately signed so its selected top bit is
-  // the sign bit, and re-signing it here would turn 8'hff from -1 into 255.
+  // aborts a dbg `lhd sim` on the saved lg:. Get_mask always returns unsigned;
+  // a consumer's signed range must not reinterpret the selected top bit.
   if (auto master = dpin.get_master_node(); !master.is_invalid() && type_op_of(master) == Ntype_op::Get_mask) {
     auto mask = get_driver_of_sink_name(master, "mask");
     if (mask.is_const()) {
@@ -218,7 +232,43 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
       }
     }
   }
-  if (positive) {
+  // A computed value used only by declared module ports is observed modulo
+  // their widest bus. Keep its full mathematical range in bwmap, but do not
+  // materialize unobservable high bits (e.g. a 1024-bit SRA driving out:u64).
+  // An internal consumer or an unsized output still needs the inferred range.
+  // Concat's width describes its lane layout; unlike an arithmetic result it
+  // cannot be narrowed without rewriting the lanes themselves. State and
+  // multi-output cells likewise retain their own realization contracts.
+  // Guarded like the Get_mask ceiling above: a driver pin's master can be the
+  // IO / CONST singleton (or invalid), whose stored type is not a cell op.
+  const auto master = dpin.get_master_node();
+  const auto op     = master.is_invalid() ? Ntype_op::Invalid : type_op_of(master);
+  if (constrain_outputs && current_graph && infer_internal_range(op) && op != Ntype_op::Concat
+      && !Ntype::has_multiple_driver_pins(op)) {
+    const auto gio         = current_graph->get_io();
+    int32_t    output_bits = 0;
+    for (const auto& e : dpin.out_edges()) {
+      int32_t declared = 0;
+      if (gio && is_graph_output_pin(e.sink)) {
+        declared = gio->get_bits(livehd::graph_util::pin_name_of(e.sink));
+      } else if (const auto sink = e.sink.get_master_node(); type_op_of(sink) == Ntype_op::Sub && !sink.is_loop_subnode()) {
+        // An instance input is the same finite assignment boundary, including
+        // Liberty's one-bit inputs fed by ABC's compact shift selectors.
+        if (const auto child_io = sink.get_subnode_io()) {
+          declared = child_io->get_bits(e.sink.get_pin_name());
+        }
+      }
+      if (declared == 0) {
+        output_bits = 0;
+        break;
+      }
+      output_bits = std::max(output_bits, static_cast<int32_t>(declared));
+    }
+    if (output_bits > 0) {
+      b = std::min(b, output_bits);
+    }
+  }
+  if (positive || op == Ntype_op::Get_mask) {
     set_ubits(dpin, b);
   } else {
     set_sbits(dpin, b);
@@ -542,6 +592,29 @@ void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   }
   auto n_bw = n_it->second;
 
+  if (n_bw.get_min().is_negative()) {
+    // A possibly negative count is not an identity. Frontends can use this
+    // for out-of-range part selects; preserve the carrier, never propagate a
+    // constant operand's singleton range through the unresolved shift.
+    auto       output = node.create_driver_pin(0);
+    const auto bits   = bits_of(output);
+    if (bits <= 0) {
+      // No carrier to preserve (an unstamped cell, or one pass.bitfuzz just
+      // stripped). `bits_of` is the attribute THIS pass writes, so waiting for
+      // it here never converges -- fall back to the operand's own range, the
+      // bound an unresolved shift cannot exceed in magnitude.
+      adjust_bw(output, a_bw);
+      return;
+    }
+    Bitwidth_range fallback;
+    if (livehd::graph_util::is_unsign(output)) {
+      fallback.set_ubits_range(bits);
+    } else {
+      fallback.set_sbits_range(bits);
+    }
+    adjust_bw(output, fallback);
+    return;
+  }
   if (n_bw.get_min().is_positive() && n_bw.get_min().is_just_i64() && n_bw.get_max().is_just_i64()) {
     // Take the FOUR-CORNER envelope, the way process_shl does.
     //
@@ -696,27 +769,17 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     }
   }
 
-  if (mem_bits && mem_din_bits) {
-    // A memory write is an explicit finite-width boundary. A WIDER din is legal
-    // and is truncated to the declared element width by every backend; it does
-    // not require widening the memory or repairing the producer. So only a
-    // strictly NARROWER din narrows the declared width below.
-    if (!mem_din_bits_missing && mem_bits > mem_din_bits) {
-      Pass::info("memory {} requests {} bits, but only {} needed (optimizing)", debug_name(node), mem_bits, mem_din_bits);
-      mem_bits = mem_din_bits;
-
-      clear_sink(find_sink_pin(node, "bits"));
-      auto cdpin = create_const(*current_graph, *Dlop::create_integer(mem_bits));
-      setup_sink_by_name(node, "bits").connect_driver(cdpin);
-    }
-  } else if (mem_din_bits && !mem_din_bits_missing) {
-    I(mem_bits == 0);
+  // Declared geometry is part of the state/layout contract (including init,
+  // update and read_all). Write-data ranges alone cannot shrink an element.
+  if (mem_bits == 0 && mem_din_bits && !mem_din_bits_missing) {
     mem_bits   = mem_din_bits;
     auto cdpin = create_const(*current_graph, *Dlop::create_integer(mem_bits));
     setup_sink_by_name(node, "bits").connect_driver(cdpin);
   }
 
-  {
+  // Declared depth is part of that same contract: only an UNSIZED memory has
+  // its depth derived from the address range.
+  if (mem_size == 0) {
     int64_t new_mem_size = 0;
     if (!mem_addr_bits_missing) {
       for (const auto& dpin : addr_drivers) {
@@ -724,57 +787,50 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         if (it == bwmap.end()) {
           continue;
         }
-        if (!it->second.get_range().is_just_i64()) {
-          // A dynamic or very wide address prevents deriving a tighter memory
-          // size from its value range, but it does not invalidate an explicit
-          // size already carried by the Memory cell. Keep that declared bound;
-          // the memory implementation owns out-of-range-address semantics.
-          if (mem_size > 0) {
-            continue;
-          }
+        if (!it->second.get_max().is_just_i64()) {
+          // A dynamic or very wide address prevents deriving a size from its
+          // value range, and there is no declared bound to fall back on here
+          // (an explicitly sized cell never enters this block).
           livehd::diag::err("pass.bitwidth", "mem-size-limit", "bitwidth")
               .msg("memory {} size exceeds limit", debug_name(node))
               .fatal();
           return;
         }
-        auto sz      = it->second.get_range().to_just_i64();
+        auto sz      = it->second.get_max().to_just_i64() + 1;
         new_mem_size = std::max(sz, new_mem_size);
       }
     }
-    if (new_mem_size == 0 && mem_size == 0) {
+    if (new_mem_size == 0) {
       not_finished = true;
       Pass::info("memory {} could not infer memory size (trying again)", debug_name(node));
-    }
-
-    if (new_mem_size && (mem_size == 0 || mem_size > new_mem_size)) {
-      if (mem_size) {
-        clear_sink(find_sink_pin(node, "size"));
-        Pass::info("memory {} size requested {} but only {} needed (optimizing)", debug_name(node), mem_size, new_mem_size);
-      } else {
-        Pass::info("memory {} inferring size of {}", debug_name(node), new_mem_size);
-      }
+    } else {
+      Pass::info("memory {} inferring size of {}", debug_name(node), new_mem_size);
       mem_size   = new_mem_size;
       auto cdpin = create_const(*current_graph, *Dlop::create_integer(mem_size));
       setup_sink_by_name(node, "size").connect_driver(cdpin);
     }
+  }
 
-    if (mem_size && mem_addr_bits_missing) {
-      Bitwidth_range addr_bw(-mem_size / 2, mem_size / 2 - 1);
-      for (auto& dpin : addr_drivers) {
-        auto it = bwmap.find(dpin.get_class_index());
-        if (it == bwmap.end()) {
-          bwmap.insert_or_assign(dpin.get_class_index(), addr_bw);
-          discovered_some_backward_nodes_try_again = true;
-        }
-        // else: the address driver already has a derived range. It may
-        // legitimately be WIDER than the freshly inferred signed address width
-        // — a normal unsigned address `raddr:uN` carries an extra sign bit
-        // (get_sbits() == N+1), one more than the ceil(log2(entries)) the
-        // memory needs. Keep the existing range. (The removed
-        // `I(get_sbits() <= addr_sbits)` here wrongly aborted on that common
-        // unsigned-address case; e.g. a 2-entry mem with a u1 address, and
-        // several ware/rtl barrel-shifter / BTB designs.)
+  // Backward seeding of an address expression this pass has not reached yet.
+  // It applies to a DECLARED depth exactly as much as to an inferred one --
+  // without it, an explicitly sized memory whose address driver is still
+  // unranged leaves that driver unsized forever (no retry is even scheduled).
+  if (mem_size && mem_addr_bits_missing) {
+    Bitwidth_range addr_bw(-mem_size / 2, mem_size / 2 - 1);
+    for (auto& dpin : addr_drivers) {
+      auto it = bwmap.find(dpin.get_class_index());
+      if (it == bwmap.end()) {
+        bwmap.insert_or_assign(dpin.get_class_index(), addr_bw);
+        discovered_some_backward_nodes_try_again = true;
       }
+      // else: the address driver already has a derived range. It may
+      // legitimately be WIDER than the freshly inferred signed address width
+      // — a normal unsigned address `raddr:uN` carries an extra sign bit
+      // (get_sbits() == N+1), one more than the ceil(log2(entries)) the
+      // memory needs. Keep the existing range. (The removed
+      // `I(get_sbits() <= addr_sbits)` here wrongly aborted on that common
+      // unsigned-address case; e.g. a 2-entry mem with a u1 address, and
+      // several ware/rtl barrel-shifter / BTB designs.)
     }
   }
 
@@ -813,7 +869,9 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   // adjust_bw then stamps onto every dout. Consult din only when there is no
   // sized output at all (a write-only memory with no observable read).
   for (const auto& e : node.out_edges()) {  // read-only vote; adjust_bw runs below
-    vote_sign(e.driver);
+    if (e.driver.get_port_id() != Ntype::Memory_readall_pid) {
+      vote_sign(e.driver);
+    }
   }
   if (!saw_sized_value) {
     for (const auto& dpin : din_drivers) {
@@ -840,8 +898,21 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   // Out-connected pins: walk out_edges, collect unique driver pins.
   absl::flat_hash_set<hhds::Class_index> seen;
   for (const auto& e : node.out_edges()) {  // read-only: adjust_bw sets a bitwidth attr
-    if (seen.insert(e.driver.get_class_index()).second) {
+    if (!seen.insert(e.driver.get_class_index()).second) {
+      continue;
+    }
+    if (e.driver.get_port_id() != Ntype::Memory_readall_pid) {
       adjust_bw(e.driver, bw_din);
+      continue;
+    }
+    // The packed read-all port is mem_bits * mem_size wide -- but ONLY once the
+    // depth is resolved. With mem_size still 0, `mem_bits * 0` would stamp it
+    // at ZERO bits (an unsized cell every emit rejects); the depth is being
+    // retried (not_finished is already set), so leave the port alone.
+    if (mem_size > 0) {
+      Bitwidth_range packed_bw;
+      packed_bw.set_ubits_range(static_cast<int32_t>(mem_bits * mem_size));
+      adjust_bw(e.driver, packed_bw);
     }
   }
 }
@@ -856,12 +927,20 @@ void Bitwidth::process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
     if (it != bwmap.end()) {
-      max_val = max_val.mult_op(it->second.get_max());
-      min_val = min_val.mult_op(it->second.get_min());
-      if (max_val.lt_op(min_val)->is_known_true()) {
-        auto tmp = max_val;
-        max_val  = min_val;
-        min_val  = tmp;
+      // All four interval corners matter when either operand crosses zero.
+      const Dlop products[] = {*min_val.mult_op(it->second.get_min()),
+                               *min_val.mult_op(it->second.get_max()),
+                               *max_val.mult_op(it->second.get_min()),
+                               *max_val.mult_op(it->second.get_max())};
+      min_val               = products[0];
+      max_val               = products[0];
+      for (const auto& product : products) {
+        if (product.lt_op(min_val)->is_known_true()) {
+          min_val = product;
+        }
+        if (product.gt_op(max_val)->is_known_true()) {
+          max_val = product;
+        }
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
@@ -930,38 +1009,31 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
     return;
   }
 
-  auto max_val = value_bw.get_max();
-  auto min_val = value_bw.get_min();
-  {
-    auto mask_bits = mask.get_bits();
-    if (!mask.is_negative()) {
-      if (mask_bits < max_val.get_bits()) {
-        max_val = max_val.sra_op(*Dlop::create_integer(max_val.get_bits() - mask_bits));
-      }
-      if (mask_bits < min_val.get_bits()) {
-        min_val = min_val.sra_op(*Dlop::create_integer(min_val.get_bits() - mask_bits));
-      }
-    }
-  }
-  {
-    size_t n_zeroes_in_mask;
-    if (mask.is_negative()) {
-      auto not_mask = mask.not_op();
-      I(!not_mask->is_negative());
-      n_zeroes_in_mask = not_mask->popcount();
+  if (!mask.is_negative()) {
+    // A finite insertion scatters the value's low bits into the mask window;
+    // a negative value sign-fills THAT window, not the result above it. Bounds
+    // on the shifted signed value would mis-sign and undersize the assembly.
+    Bitwidth_range result;
+    if (bw.is_always_positive()) {
+      result.set_ubits_range(std::max(bw.get_ubits(), static_cast<int32_t>(mask.get_bits() - 1)));
     } else {
-      n_zeroes_in_mask = mask.get_trailing_zeroes();
+      result.set_sbits_range(std::max(bw.get_sbits(), static_cast<int32_t>(mask.get_bits())));
     }
-    max_val = max_val.shl_op(*Dlop::create_integer(n_zeroes_in_mask));
-    min_val = min_val.shl_op(*Dlop::create_integer(n_zeroes_in_mask));
+    adjust_bw(node.create_driver_pin(0), result);
+    return;
   }
 
-  if (mask.is_negative()) {
-    adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
+  // A negative mask overwrites the infinite high tail, so the result's sign
+  // follows the inserted value. The finite prefix can still contain base bits;
+  // even inserting constant zero does not make the whole result constant zero.
+  const int32_t  prefix = mask.get_bits() - 1;
+  Bitwidth_range result;
+  if (value_bw.is_always_positive()) {
+    result.set_ubits_range(prefix + value_bw.get_ubits());
   } else {
-    bw.set_wider_range(min_val, max_val);
-    adjust_bw(node.create_driver_pin(0), bw);
+    result.set_sbits_range(prefix + value_bw.get_sbits());
   }
+  adjust_bw(node.create_driver_pin(0), result);
 }
 
 void Bitwidth::process_get_mask(hhds::Node_class& node) {
@@ -1018,7 +1090,9 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     res_max = gm(*a_max.get_mask_value(), mask_val);
   }
 
-  Dlop res_min = res_max;
+  // Bit extraction is not monotone: [1,2] masked by 1 contains both 0 and 1,
+  // even though the lower endpoint and the upper bit-envelope both select 1.
+  Dlop res_min = a_max.same_repr(a_min) ? res_max : *Dlop::create_integer(0);
 
   if (a_min.is_negative()) {
     // Probe the worst case: the operand with EVERY bit set.
@@ -1794,7 +1868,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         // finite-width truncation boundary: once a front end (or a previous
         // bitwidth pass) materializes Q as uN/sN, a later optimization pass
         // must not widen Q from the range of D.  Doing so changed a Pyrope
-        // `reg p:u3` into a four-bit register after O2; the spare bit then
+        // `reg p:u3` into a four-bit register after inference; the spare bit then
         // leaked across an adjacent three-bit field in an aggregate pack.
         // An UNSIZED register has bits==0, falls through, and is still inferred
         // by process_flop below.

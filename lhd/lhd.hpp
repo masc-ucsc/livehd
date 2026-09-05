@@ -74,8 +74,7 @@ struct Options {
   // cwd(exec-root)-relative path per line, empty when everything was read; the
   // format Bazel's unused_inputs_list consumes for input pruning.
   std::string unused_inputs;
-  std::string recipe;  // resolved per-command default in the kernel
-  std::string config;  // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)
+  std::string config;  // --config lhd.toml: pass-flag defaults (CLI --set wins)
 
   std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
 
@@ -417,34 +416,34 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
     {           "compile_only",
      "false",      Sim_set_option::Kind::boolean,
      "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "
-     "builds an existing <workdir>/sim incrementally without regenerating its sources"                         },
+     "builds an existing <workdir>/sim incrementally without regenerating its sources"                            },
     {                "backend",
      "slop",      Sim_set_option::Kind::backend,
      "slop|llvm — simulator color-kernel backend. llvm is experimental and emits native object files directly; "
-     "unsupported colors fall back to the reference Slop C++ lowering"                                     },
+     "unsupported colors fall back to the reference Slop C++ lowering"                                            },
     {                    "vcd",
      "false", Sim_set_option::Kind::bool_or_file,
      "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
      "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
-     "FILE bakes that explicit path, false bakes none"                                                     },
+     "FILE bakes that explicit path, false bakes none"                                                            },
     {         "vcd_fake_delay",
      "true",      Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
-     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"                           },
+     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"                                  },
     {               "hlop_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
      "auto: the bazel runfiles, else the sibling ../hlop of a source checkout. Set it to build the driver against "
-     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"},
+     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"       },
     {            "iassert_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
-     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"     },
+     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"            },
     {                "flatten",
      "0",  Sim_set_option::Kind::non_neg_num,
      "N — structurally inline a sub-instance into its parent before occurrence-wide color planning when the "
      "callee body has <= N nodes. 0 keeps hierarchy intact. Inlining may reduce storage-path depth but duplicates "
-     "the body per instantiation, so use it only for measured experiments"                                 },
+     "the body per instantiation, so use it only for measured experiments"                                        },
     {                  "ninja",
      "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
@@ -456,26 +455,26 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "0",  Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
-     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"      },
+     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"             },
     {                 "slop_u",
      "true",      Sim_set_option::Kind::boolean,
      "materialize LGraph-proven unsigned combinational values as the CANONICAL-unsigned Slop_u<n> instead of a "
      "lazily-masked Slop<n+1>. Slop makes no promise about storage above bit n-1, so every READ of a stored value "
      "re-masks; Slop_u pays ONE mask at the write and none at the reads. Reset-free state and other unknown-capable "
-     "boundaries remain Slop. Set false only for lowering comparisons"                                     },
+     "boundaries remain Slop. Set false only for lowering comparisons"                                            },
     {            "color_dirty",
      "true",      Sim_set_option::Kind::boolean,
      "cross-cycle color activation cache. false executes every color once in its existing static phase order and "
      "emits direct boundary assignments instead of change comparisons and dirty propagation; intended for measured "
-     "scheduler-overhead comparisons"                                                                      },
+     "scheduler-overhead comparisons"                                                                             },
     {                  "debug",
      "false",      Sim_set_option::Kind::boolean,
      "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "
-     "and emits only compile-time width checks, avoiding masks in production generated code"               },
+     "and emits only compile-time width checks, avoiding masks in production generated code"                      },
     {              "init_zero",
      "false",      Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
-     "Explicit initial values and runtime reset values are unchanged"                                      },
+     "Explicit initial values and runtime reset values are unchanged"                                             },
     {           "unknown_zero",
      "false",      Sim_set_option::Kind::boolean,
      "fill every unknown (`?`) literal bit with 0 instead of a random 0/1. Slop carries no runtime X, so a `?` must "
@@ -483,22 +482,22 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "run.seed + rng_draws) so an unspecified bit cannot be silently relied on, and the draw is once per literal "
      "per run — the value is stable across cycles. true restores the deterministic-zero fill, which also lets the "
      "literal fold at C++ compile time. Orthogonal to sim.init_zero, which covers the power-on value of state "
-     "having neither an initializer nor a reset"                                                           },
+     "having neither an initializer nor a reset"                                                                  },
     {             "checkpoint",
      "true",      Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)" },
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)"        },
     {    "checkpoint_min_secs",
      "10",  Sim_set_option::Kind::non_neg_num,
-     "wall-clock floor in seconds between checkpoints (a short run writes none)"                           },
+     "wall-clock floor in seconds between checkpoints (a short run writes none)"                                  },
     {         "checkpoint_max",
      "10",  Sim_set_option::Kind::non_neg_num,
-     "max checkpoints kept per test, evenly spaced (older ones are pruned)"                                },
+     "max checkpoints kept per test, evenly spaced (older ones are pruned)"                                       },
     {"checkpoint_max_overhead",
      "0.10",  Sim_set_option::Kind::non_neg_num,
-     "target checkpoint cost as a fraction of run time (caps how often they are taken)"                    },
+     "target checkpoint cost as a fraction of run time (caps how often they are taken)"                           },
     {       "checkpoint_every",
      "0",  Sim_set_option::Kind::non_neg_num,
-     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                      },
+     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                             },
 };
 
 // The `synth.*` command-namespace options (consumed by synth_command -- the
@@ -517,15 +516,17 @@ struct Synth_set_option {
 };
 
 // The Liberty file `synth.liberty` resolves to under $HAGENT_TECH_DIR when the
-// knob is empty (the same default pass.abc uses on its own).
+// knob is empty. ONE default, reached through resolve_liberty by every Liberty
+// reader (`lhd synth`, `lhd pass abc`, `lhd pass opentimer`).
 inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
     {  "liberty",
      "",    Synth_set_option::Kind::file,
-     "PATH -- the ONE Liberty .lib for the whole flow: pass.abc maps to its cells and pass.opentimer times with "
-     "it. Empty = $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). A "
-     "`pass.abc.library` --set is refused under synth so the two stages can never disagree"                                },
+     "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
+     "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
+     "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                      },
     {"opentimer",
      "true", Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "

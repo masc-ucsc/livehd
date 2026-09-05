@@ -272,7 +272,7 @@ module unknown_parent(input [15:0] a, input [15:0] b, input [15:0] c, output o);
 endmodule
 EOF
 for side in a b; do
-  "$LHD" compile "$W/unknown_$side.v" --top unknown_parent --recipe O0 \
+  "$LHD" compile "$W/unknown_$side.v" --top unknown_parent \
     --emit-dir "lg:$W/unknown_$side" --workdir "$W/cunknown_$side" >/dev/null 2>&1 \
     || { echo "FAIL: case 8 compile of unknown_$side.v failed"; fail=1; }
 done

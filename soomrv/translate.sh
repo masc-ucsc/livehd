@@ -85,7 +85,7 @@ fi
 if [ "$LECSL" = PROVEN ]; then
   cp -r "$W/impllg" "$W/abcin"
   timeout 120 $LHD pass color acyclic lg:"$W/abcin" > "$W/color.log" 2>&1
-  timeout 200 $LHD pass abc lg:"$W/abcin" --set pass.abc.library="$ABCLIB" --emit-dir lg:"$W/abc" > "$W/abc.log" 2>&1
+  timeout 200 $LHD pass abc lg:"$W/abcin" --set synth.liberty="$ABCLIB" --emit-dir lg:"$W/abc" > "$W/abc.log" 2>&1
   [ "$(ngraphs $W/abc)" -ge 1 ] && ABC=PASS || { ABC=FAIL; MSG=$(emsg "$W/abc.log"); }
 fi
 

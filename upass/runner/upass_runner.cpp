@@ -4665,7 +4665,14 @@ bool uPass_runner::try_inline_func_call() {
   // all-constant call still inlines so it folds to a comptime value (casserts /
   // comptime evaluation keep working — there is no runtime instance to keep).
   auto sub_instance_eligible = [&](const std::shared_ptr<Lnast>& c) {
-    return !inlining_enabled_ && c && !via_param_binding
+    // The splice ABI currently materializes one level of output fields.
+    // Nested runtime aggregates must retain their real module port binding;
+    // splicing them would leave dotted placeholder variables undriven.
+    const bool nested_output = c && std::any_of(c->io_meta().outputs.begin(), c->io_meta().outputs.end(), [](const auto& output) {
+                                 const auto dot = output.name.find('.');
+                                 return dot != std::string::npos && output.name.find('.', dot + 1) != std::string::npos;
+                               });
+    return (!inlining_enabled_ || nested_output) && c && !via_param_binding
            && reg().sub_convertible_combs.contains(std::string(c->get_top_module_name()));
   };
   bool consider_sub_instance = sub_instance_eligible(callee);
@@ -5280,7 +5287,9 @@ bool uPass_runner::try_inline_func_call() {
     }
     const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
     const auto gbit  = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
-    if (e.bits > 0) {
+    if (e.kind == Io_kind::boolean) {
+      emit_inline_typespec_bool(pname);
+    } else if (e.bits > 0) {
       emit_inline_typespec(pname, e.bits, e.is_signed);
     } else if (gbit != gbinds.end() && gbit->second.type_name.empty() && gbit->second.kind == Io_kind::boolean) {
       // `a:T` with T bound to `bool` — must precede the (max||min) branch since
@@ -5398,7 +5407,11 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
     }
-    emit_inline_typespec(oname, o.bits, o.is_signed);
+    if (o.kind == Io_kind::boolean) {
+      emit_inline_typespec_bool(oname);
+    } else {
+      emit_inline_typespec(oname, o.bits, o.is_signed);
+    }
     // Declare the output in the inlined top scope (mirrors a real body's io
     // `assign res = nil : T`). Without this, an output assigned inside a
     // branch block (`if c { res = … }`) anchors to that block's scope and is
@@ -5552,9 +5565,16 @@ bool uPass_runner::try_inline_func_call() {
     }
     logical[lname].emplace_back(std::move(sub), output_ref(o));
   }
+  absl::flat_hash_set<std::string> consumed_fields;
+  bool                             whole_result_used = false;
+  collect_return_consumption(saved, dst_name, consumed_fields, whole_result_used);
+  const bool named_result
+      = (logical_order.size() == 1 && std::any_of(consumed_fields.begin(), consumed_fields.end(), [&](const std::string& field) {
+           return field == logical_order.front() || field.starts_with(logical_order.front() + ".");
+         }));
   if (logical_order.empty()) {
     // Void comb (e.g. `top()` called for its casserts) — nothing to bind back.
-  } else if (logical_order.size() == 1) {
+  } else if (logical_order.size() == 1 && !named_result) {
     auto& leaves = logical[logical_order[0]];
     if (leaves.size() == 1 && leaves[0].first.empty()) {
       emit_inline_binding(dst_name, leaves[0].second);  // single scalar output
@@ -5565,7 +5585,9 @@ bool uPass_runner::try_inline_func_call() {
     // >1 logical outputs: splat as a bundle for a destructure to field-pick, and
     // record the result tmp so a WHOLE bind to a single user var is rejected
     // (`const inner = two_output_f()` — see the store handler).
-    multi_output_results_.insert(dst_name);
+    if (logical_order.size() > 1 && call_inst_name.empty()) {
+      multi_output_results_.insert(dst_name);
+    }
     std::vector<std::pair<std::string, Lnast_node>>  fields;
     std::vector<std::pair<std::string, std::string>> scalar_slot_refs;  // recorded AFTER emit
     fields.reserve(logical_order.size());
@@ -6954,9 +6976,9 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   const bool constant_arithmetic = std::ranges::all_of(out.invariants, known_before_loop)
                                    && std::ranges::all_of(out.carries, known_before_loop) && !subtree_has_call(ln, body_stmts);
 
-  // Boundary types. These io declarations are the ONLY width carrier in the
-  // default O1 recipe (pass.bitwidth is O2-only and set_subgraph_boundary_bw
-  // re-reads outputs), so a name with no declared type cannot roll.
+  // Boundary types. These io declarations establish the loop's width contract
+  // before graph bitwidth inference (set_subgraph_boundary_bw re-reads outputs),
+  // so a name with no declared type cannot roll.
   const auto& encl_io    = lm->get_lnast()->io_meta();
   const auto  encl_input = [&](const std::string& nm) -> const Lnast_io_entry* {
     for (const auto& ce : encl_io.inputs) {
@@ -8683,9 +8705,11 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
   // dst as a child marks a whole-value use.
   const auto here = lm->save_cursor();
   lm->restore_cursor(fcall_cursor);  // cursor on the func_call node
+  absl::flat_hash_set<std::string> result_aliases{std::string(dst_name)};
   while (lm->move_to_sibling()) {
-    const bool is_tget = Lnast_ntype::is_tuple_get(lm->get_raw_ntype());
-    const auto node    = lm->save_cursor();
+    const bool is_tget  = Lnast_ntype::is_tuple_get(lm->get_raw_ntype());
+    const bool is_alias = Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->current_num_children() == 2;
+    const auto node     = lm->save_cursor();
     if (!lm->move_to_child()) {
       lm->restore_cursor(node);
       continue;
@@ -8694,8 +8718,12 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
     std::size_t idx        = 0;
     bool        names_dst  = false;  // dst_name appears as a non-leading child
     std::size_t dst_at_idx = std::string::npos;
+    // Only an alias store can extend the set, so only it needs the dst COPIED
+    // (the cursor has moved on by the time it is inserted below).
+    const std::string destination = is_alias ? std::string(lm->current_text()) : std::string{};
     do {
-      if (idx > 0 && Lnast_ntype::is_ref(lm->get_raw_ntype()) && lm->current_text() == dst_name) {
+      // Heterogeneous lookup: no std::string per child, per sibling.
+      if (idx > 0 && Lnast_ntype::is_ref(lm->get_raw_ntype()) && result_aliases.contains(lm->current_text())) {
         names_dst  = true;
         dst_at_idx = idx;
       }
@@ -8713,6 +8741,9 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
       }
     } else if (names_dst) {
       whole_used = true;
+      if (is_alias) {
+        result_aliases.insert(destination);
+      }
     }
     lm->restore_cursor(node);
   }

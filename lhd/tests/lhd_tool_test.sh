@@ -20,7 +20,7 @@ fail() {
 }
 
 # Build an LGraph library, plus a pristine copy for the diff.
-"$LHD" compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 \
+"$LHD" compile verilog "$V0" --top "$TOP" --reader yosys-verilog \
   --emit-dir lg:"$W/lg" --workdir "$W/w" -q --result-json "$W/r.json" 2>/dev/null \
   || fail "compile -> lg failed: $(cat "$W/r.json")"
 cp -r "$W/lg" "$W/lg2"
@@ -100,7 +100,7 @@ grep -qE "^$TOP  \[[0-9]+ nodes\]" "$W/tree.out" || fail "tree must print the to
 #     instance hierarchy. The yosys-verilog path flattens, so this uses a
 #     hierarchical Pyrope design — `regs` (flops) and `ram` (a memory) each
 #     instanced under the top.
-"$LHD" compile lhd/tests/tree_hier.prp --top top --recipe O1 \
+"$LHD" compile lhd/tests/tree_hier.prp --top top \
   --emit-dir lg:"$W/hlg" --workdir "$W/hw" -q --result-json "$W/hr.json" 2>/dev/null \
   || fail "compile tree_hier.prp -> lg failed: $(cat "$W/hr.json")"
 HTOP=tree_hier.top

@@ -25,7 +25,7 @@
 // warning kept as a runtime check, never a build failure. `--set
 // compile.formal.on_refute=warn` downgrades EVERY refutation to a warning (the
 // escape hatch for a design checked without enough top context).
-// `lhd compile` defaults to fast, none under -O0/--recipe O0; standalone
+// `lhd compile` defaults to fast; compile.formal.mode=none disables it; standalone
 // `lhd pass formal` defaults to normal. Set with --set compile.formal.mode=...
 // (or `lhd pass formal --set mode=...`). budget_k/cone_max are mode-independent
 // (0 = built-in default). The first built-in obligation is Hotmux selector

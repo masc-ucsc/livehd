@@ -7,7 +7,7 @@
 # adder architecture, and prove every one equivalent to the original logic with
 # `lhd lec` (the graph-native cvc5 engine).
 #
-#   prp -> lg (O1) -> pass color synth
+#   prp -> lg -> pass color synth
 #   pass partition --emit-dir lg:re   (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models   (cell behavioural models)
 #   for adder in rca, cska, cla (+ a non-default block_size):
@@ -39,7 +39,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
 # Shared once: compile + color, the original-logic twin, the cell models.
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
@@ -64,7 +64,7 @@ map_and_lec() {
   local adder="$1" bstag="$2"; shift 2
   local tag="${adder}_${bstag}"
   rm -rf "$W/net_$tag"
-  run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_$tag" --set pass.abc.library="$LIB" "$@" --workdir "$W/wa_$tag"
+  run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_$tag" --set synth.liberty="$LIB" "$@" --workdir "$W/wa_$tag"
   # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
   ls "$W/net_$tag"/graph_* >/dev/null 2>&1 || fail "$tag: no mapped netlist emitted"
   lec_regions "$W/net_$tag" "$tag"
@@ -111,9 +111,9 @@ CTOP=abc_constmul.abc_constmul
 C="$W/constmul"
 mkdir -p "$C"
 [ -f "$CPRP" ] || fail "missing fixture $CPRP"
-run compile "$CPRP" --top "$CTOP" --recipe O1 --emit-dir lg:"$C/lg" --workdir "$C/w1"
+run compile "$CPRP" --top "$CTOP" --emit-dir lg:"$C/lg" --workdir "$C/w1"
 # uncolored pass abc warns once (color-0 region) — tolerated by run()'s exit check
-run pass abc --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/net" --set pass.abc.library="$LIB" --workdir "$C/w2"
+run pass abc --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/net" --set synth.liberty="$LIB" --workdir "$C/w2"
 run pass partition --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/re" --workdir "$C/w3"
 CREGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$C/re/library.txt" | awk '{print $3}' | sort -u)
 [ -n "$CREGIONS" ] || fail "no region modules in the constmul partition twin: $(cat "$C/re/library.txt")"

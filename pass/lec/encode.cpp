@@ -2297,7 +2297,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             for (const auto& v : all) {
               every &= v.is_signed;
             }
-            out_signed |= every;
+            out_signed |= every && gu::bits_of(dpin) == 0;
           }
           for (const auto& v : all) {
             Term t = fit(v, W);
@@ -2359,7 +2359,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               }
               every &= v.is_signed;
             }
-            out_signed |= every;
+            // A sized result carries bitwidth's inferred sign. Signed inputs
+            // can produce a non-negative result (e.g. signed(bool) + 2);
+            // re-signing its narrowed u2 carrier would turn 2 into -2.
+            out_signed |= every && gu::bits_of(dpin) == 0;
           }
           Term add_acc;
           for (const auto& v : pid(0)) {  // "a" pins: added
@@ -2530,7 +2533,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // zero-extended into the 16-bit output where iverilog says 65532 -- on
           // the BASELINE side of the miter, so an equivalent pair refuted once
           // pass.bitfuzz gave the other side the accurate sign.
-          out_signed |= pid(0)[0].is_signed;
+          out_signed  |= pid(0)[0].is_signed && gu::bits_of(dpin) == 0;
           break;
         }
         case Ntype_op::SRA: {
@@ -2561,7 +2564,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // own emitted Verilog say 158 -- and the side lec got wrong was the
           // hand-written GOLDEN, on all 1024 input pairs of which the two designs
           // agree.
-          out_signed     |= a.is_signed;
+          out_signed      |= a.is_signed && gu::bits_of(dpin) == 0;
           break;
         }
         case Ntype_op::Sext: {
@@ -4191,7 +4194,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         if (mc.wensize > 1 && mc.sig.bits % mc.wensize == 0) {
           const int  lane_bits = mc.sig.bits / mc.wensize;
-          const Term lanes     = fit_to(tm_, Val{ev.term, ev.width, false}, mc.wensize);
+          // A narrowed signed mask (e.g. 0/-1) sign-fills the declared lanes;
+          // forcing unsigned would enable only lane zero after bitwidth.
+          const Term lanes     = fit_to(tm_, ev, mc.wensize);
           Term       mask;
           for (int lane = mc.wensize - 1; lane >= 0; --lane) {
             const Term bit = bv_extract(tm_, lanes, lane, lane);

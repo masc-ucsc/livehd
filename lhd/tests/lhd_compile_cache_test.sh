@@ -358,7 +358,7 @@ fi
 # scope still hits. Each flow owns its own namespace and may replace the
 # sentinel inside that namespace; none may damage incr/scopes/compile/top.
 "$LHD" pass abc --top top.top "lg:$W/lg" --emit-dir "lg:$W/shared_net" \
-  --set abc.library=inou/prp/tests/abc/test.lib --workdir "$W/w" -q \
+  --set synth.liberty=inou/prp/tests/abc/test.lib --workdir "$W/w" -q \
   --result-json "$W/shared_abc.json" || fail "shared-workdir abc failed"
 
 cat > "$W/src/shared_formal.prp" <<'EOF'
@@ -426,7 +426,7 @@ EOF
 icom() {  # RESULT OUTPUT WORKDIR [extra]
   local result=$1 out=$2 work=$3
   shift 3
-  "$LHD" compile "$IW/src/top.prp" --top top --emit-dir "lg:$out" --workdir "$work" \
+  "$LHD" compile "$IW/src/top.prp" --top top --set compile.upass.inline=false --emit-dir "lg:$out" --workdir "$work" \
     -q --result-json "$result" "$@" || fail "inlined-dependency compile failed: $(cat "$result" 2>/dev/null)"
 }
 icom "$IW/cold.json" "$IW/lg" "$IW/w"

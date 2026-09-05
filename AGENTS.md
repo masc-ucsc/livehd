@@ -56,11 +56,16 @@ One stateless invocation per flow; pass flags ride `--set pass.flag=value`
 (or a `--config lhd.toml`), outputs are typed `--emit`/`--emit-dir` slots,
 per-step logs land under `--workdir`. Examples:
 ```
-lhd compile foo.v --reader yosys-verilog --top foo --recipe O1 --emit verilog:out.v
+lhd compile foo.v --reader yosys-verilog --top foo --emit verilog:out.v
 lhd compile foo.prp --emit-dir lg:foo_lgs/ --emit-dir lnast-dump:dumps/
 lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo --set lec.solver=lgyosys
 lhd synth foo.prp --top foo --workdir W --stats   # compile -> color synth -> abc -> opentimer, one shot
 ```
+Graph compilation always runs constant propagation followed by bitwidth
+inference. There is no optimization-level or `--recipe` selection. Comb
+inlining defaults on; use `--set compile.upass.inline=false` when preserving
+comb module boundaries is part of the flow.
+
 `lhd synth` is the fused synthesis flow (reports in `W/synth/`; `--emit-dir
 lg:` / `verilog:` for the mapped netlist, `report:` for the sidecars); the
 individual `lhd pass color|abc|opentimer` steps remain for any other
@@ -143,7 +148,7 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 
 ### Inspecting intermediates
 - **Yosys RTLIL dump**: After running tolg, check `pp.il` for what Yosys produced (cell types, port connections, parameters).
-- **LGraph dump**: `./bazel-bin/lhd/lhd compile <file> --reader yosys-verilog --top <top> --recipe O1 --emit-dir verilog:out/ --workdir w` then read the per-step logs in `w/logs/` and grep the cgen output in `out/*.v` for cell types (e.g., `grep -i mem`). (The REPL-only `lgraph.dump` text dump has no lhd emit yet.)
+- **LGraph dump**: `./bazel-bin/lhd/lhd compile <file> --reader yosys-verilog --top <top> --emit-dir verilog:out/ --workdir w` then read the per-step logs in `w/logs/` and grep the cgen output in `out/*.v` for cell types (e.g., `grep -i mem`). (The REPL-only `lgraph.dump` text dump has no lhd emit yet.)
 - **Generated Verilog**: Check the `--emit-dir verilog:` per-module output; `tmp_yosys_mix/all_<top>.v` is the concatenated file used by LEC in `yosys_compile.sh`.
 
 ### Yosys memory pass

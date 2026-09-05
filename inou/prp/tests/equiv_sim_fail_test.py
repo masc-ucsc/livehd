@@ -176,7 +176,9 @@ def compare_dirs(a, b):
 
 def compile_sim(src, top, out, reader=None):
     srcs = [str(s) for s in src] if isinstance(src, (list, tuple)) else [str(src)]
-    cmd = [str(LHD), "compile", *srcs]
+    # This check compares name-keyed internal state as well as outputs, so
+    # preserve matching module boundaries on both sides of the round trip.
+    cmd = [str(LHD), "compile", *srcs, "--set", "compile.upass.inline=false"]
     if reader:
         cmd += ["--reader", reader]
     cmd += ["--top", top, "--emit-dir", f"sim:{out}", "--workdir", str(out.parent / ("w_" + out.name))]

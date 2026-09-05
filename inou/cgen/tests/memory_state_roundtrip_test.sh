@@ -11,11 +11,11 @@ mkdir -p "$W"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-"$LHD" compile verilog "$SRC" --top "$TOP" --recipe O1 \
+"$LHD" compile verilog "$SRC" --top "$TOP" \
   --emit-dir pyrope:"$W/gen" --emit-dir lg:"$W/ref_lg" --workdir "$W/w_gen" -q \
   || fail "source Verilog to Pyrope/LGraph"
 
-"$LHD" compile "$W/gen/$TOP.prp" --top "$TOP" --recipe O0 \
+"$LHD" compile "$W/gen/$TOP.prp" --top "$TOP" \
   --emit-dir verilog:"$W/impl_v" --workdir "$W/w_impl" -q \
   || fail "generated Pyrope to Verilog"
 
@@ -47,7 +47,7 @@ WHOLE_PRP=inou/cgen/tests/memory_whole_state_roundtrip.prp
 WHOLE_SV=inou/cgen/tests/memory_whole_state_roundtrip.sv
 WHOLE_TOP=memory_whole_state_roundtrip
 
-"$LHD" compile "$WHOLE_PRP" --top "$WHOLE_TOP" --recipe O0 \
+"$LHD" compile "$WHOLE_PRP" --top "$WHOLE_TOP" \
   --emit-dir lg:"$W/whole_ref_lg" --emit-dir verilog:"$W/whole_impl_v" \
   --workdir "$W/w_whole_impl" -q \
   || fail "whole-array Pyrope to LGraph/Verilog"

@@ -55,10 +55,10 @@ for name in $DESIGNS; do
   d="$W/$name"
   mkdir -p "$d"
 
-  "$LHD" compile "$src" --recipe O2 --workdir "$d/wref" --emit-dir "verilog:$d/ref/" \
+  "$LHD" compile "$src" --workdir "$d/wref" --emit-dir "verilog:$d/ref/" \
     >"$d/ref.log" 2>&1 || fail "$name: baseline compile failed (see $d/ref.log)"
 
-  "$LHD" compile "$src" --recipe O2 --workdir "$d/wbf" --emit-dir "verilog:$d/bf/" \
+  "$LHD" compile "$src" --workdir "$d/wbf" --emit-dir "verilog:$d/bf/" \
     --set compile.bitfuzz.mode=wires >"$d/bf.log" 2>&1 \
     || fail "$name: bitfuzz compile failed (see $d/bf.log)"
 

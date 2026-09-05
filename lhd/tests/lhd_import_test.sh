@@ -175,7 +175,7 @@ mod top(x:u8) -> (y:u9@[1]) {
   y = lib.scale(a=x)
 }
 EOF
-"$LHD" compile "$W/modcons.prp" "$W/modlib.prp" --top modcons.top --recipe O0 \
+"$LHD" compile "$W/modcons.prp" "$W/modlib.prp" --top modcons.top \
   --emit verilog:"$W/modc.v" --workdir "$W/w9" -q --result-json "$W/r9.json" \
   || fail "mod-via-import lowering failed: $(cat "$W/r9.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r9.json" || fail "mod-via-import result not pass: $(cat "$W/r9.json")"

@@ -567,19 +567,13 @@ void write_pretty(const Options& opts, const Result& res) {
 
 std::string compute_run_id(const Options& opts) {
   std::string buf;
-  buf                += "lhd-";
-  buf                += kVersion;
-  buf                += '|';
-  buf                += opts.command;
-  buf                += ' ';
-  buf                += opts.language;
-  // Hash the RESOLVED config: the implicit default recipe must hash the same
-  // as the equivalent explicit --recipe.
-  std::string recipe  = opts.recipe;
-  if (recipe.empty() && (opts.command == "compile" || opts.command == "synth")) {
-    recipe = "O1";
-  }
-  buf += std::format("|top={}|reader={}|recipe={}", opts.top, opts.reader, recipe);
+  buf += "lhd-";
+  buf += kVersion;
+  buf += '|';
+  buf += opts.command;
+  buf += ' ';
+  buf += opts.language;
+  buf += std::format("|top={}|reader={}|pipeline=cprop,bitwidth", opts.top, opts.reader);
 
   auto sets = opts.sets;
   std::sort(sets.begin(), sets.end());

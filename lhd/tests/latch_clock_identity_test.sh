@@ -131,9 +131,9 @@ pub mod abclatch(en:bool, a:u8, b:u8) -> (q:u8@[0]) {
 }
 EOF
 
-"$LHD" compile "$W/abc.prp" --top abclatch --recipe O1 --emit-dir lg:"$W/abc_lg" --workdir "$W/w_ac1" -q \
+"$LHD" compile "$W/abc.prp" --top abclatch --emit-dir lg:"$W/abc_lg" --workdir "$W/w_ac1" -q \
   >"$W/ac1.log" 2>&1 || { tail -3 "$W/ac1.log"; fail "abc fixture does not compile"; }
-"$LHD" pass abc --top abclatch lg:"$W/abc_lg" --emit-dir lg:"$W/abc_net" --set pass.abc.library="$LIB" \
+"$LHD" pass abc --top abclatch lg:"$W/abc_lg" --emit-dir lg:"$W/abc_net" --set synth.liberty="$LIB" \
   --workdir "$W/w_ac2" -q >"$W/ac2.log" 2>&1 \
   || { tail -3 "$W/ac2.log"; fail "pass abc REJECTS a region containing a latch (M2 boundary regression)"; }
 ls "$W/abc_net"/graph_* >/dev/null 2>&1 || fail "pass abc emitted no mapped netlist for the latch region"
@@ -161,11 +161,11 @@ module abc_yosys(input logic en, input logic [7:0] a, b, output logic [7:0] q);
   assign q = state_bus | a;
 endmodule
 EOF
-"$LHD" compile "$W/abc_yosys.v" --reader yosys-verilog --top abc_yosys --recipe O1 \
+"$LHD" compile "$W/abc_yosys.v" --reader yosys-verilog --top abc_yosys \
   --emit-dir lg:"$W/abc_y_lg" --workdir "$W/w_acy1" -q >"$W/acy1.log" 2>&1 \
   || { tail -3 "$W/acy1.log"; fail "yosys latch bus fixture does not compile"; }
 "$LHD" pass abc --top abc_yosys lg:"$W/abc_y_lg" --emit-dir lg:"$W/abc_y_net" \
-  --set pass.abc.library="$LIB" --workdir "$W/w_acy2" -q >"$W/acy2.log" 2>&1 \
+  --set synth.liberty="$LIB" --workdir "$W/w_acy2" -q >"$W/acy2.log" 2>&1 \
   || { tail -3 "$W/acy2.log"; fail "pass abc rejects the yosys latch bus fixture"; }
 "$LHD" compile lg:"$W/abc_y_net" --top abc_yosys --emit verilog:"$W/abc_y_net.v" \
   --workdir "$W/w_acy3" -q >"$W/acy3.log" 2>&1 \
@@ -181,7 +181,7 @@ echo "ok: a yosys latch Q maps back to its original 8-bit bus name after abc"
 # methodology (not the latch handling) is sound.
 
 # ---- 4: color + partition + compile emits elaborable Verilog -----------------
-"$LHD" compile "$W/ok.prp" --top enlow --recipe O1 --emit-dir lg:"$W/p_lg" --workdir "$W/w_p1" -q \
+"$LHD" compile "$W/ok.prp" --top enlow --emit-dir lg:"$W/p_lg" --workdir "$W/w_p1" -q \
   >"$W/p1.log" 2>&1 || { tail -3 "$W/p1.log"; fail "partition fixture does not compile"; }
 "$LHD" pass color synth --top enlow lg:"$W/p_lg" --workdir "$W/w_p2" -q >"$W/p2.log" 2>&1 \
   || { tail -3 "$W/p2.log"; fail "pass color synth failed on a latch design"; }

@@ -26,7 +26,7 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$SRC" --reader slang --top "$TOP" --recipe O1 \
+"$LHD" compile "$SRC" --reader slang --top "$TOP" \
   --emit-dir pyrope:"$W/prp" --emit verilog:"$W/out.v" --workdir "$W/work" -q 2>/dev/null \
   || fail "compile failed"
 

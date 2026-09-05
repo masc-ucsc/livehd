@@ -37,10 +37,15 @@ void Pass_abc::setup() {
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
-  m.add_label_optional("library", "Liberty .lib for read_lib (default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib)", "");
+  m.add_label_optional("library",
+                       "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
+                       "(empty => $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib), so pass.abc, pass.opentimer and `lhd "
+                       "synth` all read ONE Liberty. There is no `pass.abc.library` --set",
+                       "");
   m.add_label_optional(
       "flow",
-      "ABC command string, run verbatim (empty => the built-in comb/seq default). "
+      "ABC command string, run verbatim (empty => ABC9 flow2/K6 restructuring plus Liberty mapping when delay is set; "
+      "otherwise area_flow's baseline). Built-ins preserve registers, without sequential correlation or retiming. "
       "Commands run in order, ';'-separated; {D}/{L} are substituted from the delay/load options, {F} is the bare "
       "max_fanout number and {B} the region's delay BUDGET as `-D <ps>` (delay minus reg_margin when the region holds "
       "flops; empty without a delay) for the SCL sizing commands. "
@@ -87,17 +92,17 @@ void Pass_abc::setup() {
                        "mapper's own logic depth on the unit-delay GENLIB), bounded by both this cap and the real slack, "
                        "then re-sizes to the budget. 0 disables it. Requires `delay` and an NLDM Liberty",
                        "200");
-  // The mapping objective's second half (S5): a region whose delay flow met its
-  // budget is mapped once more for area and the smaller netlist that still
-  // meets the budget is kept. Measured over 15 lhdtrack designs: sky130 area
-  // 1.22 -> 1.07x yosys with every design inside its 20 ns period.
-  m.add_label_optional("area_flow",
-                       "ABC command string for the AREA candidate mapped after a region's delay flow met its budget "
-                       "(empty => the built-in `strash; &get -n; &fraig -x; &put; dc2; strash; dch -f; amap` + "
-                       "`buffer -N {F}; upsize {B}; dnsize {B}`; `none` disables the candidate; anything else runs "
-                       "verbatim with {D}/{L}/{F}/{B} substituted). The candidate is kept only when it also meets the "
-                       "budget with less SCL area. Requires `delay` and an NLDM Liberty",
-                       "");
+  // With no target this is the primary objective; with a target it is a
+  // second candidate, accepted only when smaller and still inside the budget.
+  m.add_label_optional(
+      "area_flow",
+      "ABC AREA command string, used without delay or as a second candidate after meeting the delay budget "
+      "(empty => the former baseline: `strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o` "
+      "+ `buffer -N {F}; dnsize {B}`, with `upsize {B}` before dnsize for a timed candidate; "
+      "`none` disables only the second candidate; anything else runs "
+      "verbatim with {D}/{L}/{F}/{B} substituted). The candidate is kept only when it also meets the "
+      "budget with less SCL area. The timed comparison requires an NLDM Liberty",
+      "");
   // ABC's SCL timer sees one region's combinational cone; the period OpenSTA
   // checks also pays the launch flop's clk->Q and the capture flop's setup (69
   // ps of a 400 ps ASAP7 period on br_arb_rr), so a region sized to the full
@@ -195,7 +200,8 @@ void Pass_abc::setup() {
 
 namespace {
 
-// Default Liberty path for dev/test when --set pass.abc.library is unset.
+// Default Liberty path for a direct EPRP call that passes no `library` label
+// (the lhd CLI always resolves `synth.liberty` and plumbs it in).
 std::string default_library() {
   const char* tech = std::getenv("HAGENT_TECH_DIR");
   if (tech == nullptr || tech[0] == '\0') {
@@ -381,11 +387,11 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     for (size_t i = 0; i < dff_sel.ladder.size(); ++i) {
       j += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(dff_sel.ladder[i].name));
     }
-    j += "],\"cells\":{";
-    bool first = true;
+    j          += "],\"cells\":{";
+    bool first  = true;
     for (const auto& [name, n] : dff_count) {
-      j    += std::format("{}\"{}\":{}", first ? "" : ",", jesc(name), n);
-      first = false;
+      j     += std::format("{}\"{}\":{}", first ? "" : ",", jesc(name), n);
+      first  = false;
     }
     j += "}},";
   }
@@ -886,7 +892,7 @@ void Pass_abc::work(Eprp_var& var) {
   }
   if (library.empty()) {
     livehd::diag::err("pass.abc", "no-library", "unsupported")
-        .msg("pass.abc needs a Liberty file: set --set pass.abc.library=<file.lib> (or export HAGENT_TECH_DIR)")
+        .msg("pass.abc needs a Liberty file: set --set synth.liberty=<file.lib> (or export HAGENT_TECH_DIR)")
         .fatal();
     return;
   }
@@ -920,7 +926,7 @@ void Pass_abc::work(Eprp_var& var) {
   // the cache salt below needs the resolved pick (not the raw, usually empty,
   // `dff_cell` option) before any region is digested, and abc.json reports it
   // even on an all-hit run that never starts ABC. The mapper takes it as-is.
-  livehd::liberty::Dff_selection dff_sel;
+  livehd::liberty::Dff_selection           dff_sel;
   if (map_register) {
     dff_sel = livehd::liberty::resolve_dff_cells(opts.library, opts.dff_cell);
   }

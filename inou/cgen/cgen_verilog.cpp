@@ -653,18 +653,18 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
     auto node = dpin.get_master_node();
     if (!node.is_invalid()) {
       switch (type_op_of(node)) {
-        case Ntype_op::Sum:
-        case Ntype_op::Ror:
-        case Ntype_op::Div:
-        case Ntype_op::Rem:
-        case Ntype_op::Not:
-        case Ntype_op::LT:
-        case Ntype_op::GT:
-        case Ntype_op::SHL:
-        case Ntype_op::SRA:
+        case Ntype_op::Sum :
+        case Ntype_op::Ror :
+        case Ntype_op::Div :
+        case Ntype_op::Rem :
+        case Ntype_op::Not :
+        case Ntype_op::LT  :
+        case Ntype_op::GT  :
+        case Ntype_op::SHL :
+        case Ntype_op::SRA :
         case Ntype_op::Mult:
-        case Ntype_op::And:
-        case Ntype_op::Or:
+        case Ntype_op::And :
+        case Ntype_op::Or  :
         case Ntype_op::Xor:
         // A concatenation is SELF-DELIMITING (`{a,b,c}` carries its own braces
         // and its own width), so it inlines as safely as the operators above --
@@ -1828,23 +1828,33 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // now carry their declared sign (they used to be a blanket `input signed`
     // compensated by a to_positive Get_mask), so read the unsigned ones as the
     // non-negative signed values they are.
-    const bool  mixed_signs          = mixes_operand_signs(node);
-    const int   result_bits          = bits_of(dpin);
-    const bool  result_uns           = is_unsign(dpin);
-    bool        saw_context_constant = false;
-    auto        sum_expr             = [&](const hhds::Pin_class& operand_pin) {
+    const bool  mixed_signs       = mixes_operand_signs(node);
+    const int   result_bits       = bits_of(dpin);
+    const bool  result_uns        = is_unsign(dpin);
+    bool        signed_arithmetic = false;
+    for (const auto& e : node.inp_edges()) {
+      signed_arithmetic |= operand_reads_signed(e.driver);
+    }
+    bool saw_context_constant = false;
+    auto sum_expr             = [&](const hhds::Pin_class& operand_pin) {
       if (!operand_pin.is_const() || result_bits <= 0) {
         return get_expression(operand_pin);
       }
-      saw_context_constant = true;
-      const auto& c        = const_of(operand_pin);
+      saw_context_constant      = true;
+      const auto& c             = const_of(operand_pin);
       // A Sum is context-determined by its realized result width. Materialize
       // constants in that context instead of retaining Dlop's signed-magnitude
       // carrier width (1 became 2'sh1 and confused a later Verilog->LGraph
       // round trip beside a u1 predicate). A negative operand stays signed so
       // its two's-complement extension remains arithmetic; a non-negative
       // operand follows the result's declared signedness.
-      return absl::StrCat("(", const_to_verilog(c, result_bits, result_uns && !c.is_negative()), ")");
+      // Range inference may prove the RESULT non-negative even though an
+      // operand is negative (signed(bool) + 2). An unsigned constant would
+      // zero-extend that operand before adding. Keep the arithmetic signed
+      // and give a positive constant its leading zero bit; cast the result
+      // unsigned only after evaluating the sum.
+      const int   constant_bits = signed_arithmetic ? std::max(result_bits, static_cast<int>(c.get_bits())) : result_bits;
+      return absl::StrCat("(", const_to_verilog(c, constant_bits, result_uns && !signed_arithmetic && !c.is_negative()), ")");
     };
     for (auto e : node.inp_edges()) {
       const auto raw     = sum_expr(e.driver);
@@ -1919,7 +1929,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     } else {
       auto [range_begin, range_end] = mask_v.get_mask_range();
       if (range_end > static_cast<int>(bits_of(dpin))) {
-        range_end = bits_of(dpin) + range_begin;
+        range_end = bits_of(dpin);
       }
 
       auto a_bits = bits_of(a_dpin);
@@ -2848,7 +2858,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
             using Kind = hhds::Input_binding_kind;
             switch (binding.kind()) {
               case Kind::invariant_external:
-              case Kind::carry_initial:
+              case Kind::carry_initial     :
               case Kind::external_activation:
                 if (!binding.stored_edges().empty()) {
                   direct = get_wire_or_const(binding.stored_edges().front().driver,

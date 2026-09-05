@@ -19,7 +19,7 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # A fresh, colorable lg (cprop-optimized) to copy before each coloring run.
-"$LHD" compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 \
+"$LHD" compile verilog "$V0" --top "$TOP" --reader yosys-verilog \
   --emit-dir lg:"$W/lg0" --workdir "$W/wc" -q --result-json "$W/rc.json" \
   || fail "compile setup: $(cat "$W/rc.json" 2>/dev/null)"
 

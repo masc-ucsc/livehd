@@ -6,7 +6,7 @@
 # to a chain of LiveHD Set_mask nodes that upass cannot comptime-fold. Reading
 # a single bit back (y0=r#[0], y2=r#[2]) makes cprop's scalar_get_mask walk the
 # chain via try_find_single_driver_pin (the recursive single-driver resolver)
-# to land on the writing value pin. At --recipe O1 (cprop on) the reads must
+# to land on the writing value pin. At (cprop on) the reads must
 # fold: y0 -> a, y2 -> c. If the resolver regresses the reads stay as get_mask
 # expressions and these greps fail.
 
@@ -23,10 +23,10 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$PRP" --recipe O1 \
+"$LHD" compile "$PRP" \
   --emit verilog:"$W/bitread.gen.v" --workdir "$W/w" --result-json "$W/r.json" -q 2>/dev/null \
-  || fail "O1 compile of setmask_bitread.prp failed"
-[ -s "$W/bitread.gen.v" ] || fail "O1 compile produced empty netlist"
+  || fail "compile of setmask_bitread.prp failed"
+[ -s "$W/bitread.gen.v" ] || fail "compile produced empty netlist"
 
 # The recipe must actually have run pass.cprop (not silently a cprop-less one).
 grep -q 'pass.cprop' "$W/r.json" || fail "recipe did not run pass.cprop: $(cat "$W/r.json")"
@@ -54,15 +54,15 @@ folds_to y2 c || fail "bit-2 read did not fold to c (Set_mask chain resolver reg
 # plus a zero sign bit). Writing it into low mask [0,95) over zero cannot alter
 # it. Cprop must remove that Set_mask instead of leaving a 95-bit mask/splice in
 # either generated Verilog or the simulator C++.
-"$LHD" compile "$IDENTITY_PRP" --recipe O1 \
+"$LHD" compile "$IDENTITY_PRP" \
   --emit verilog:"$W/identity.gen.v" --workdir "$W/identity-w" --result-json "$W/identity.json" -q 2>/dev/null \
-  || fail "O1 compile of setmask_identity.prp failed"
+  || fail "compile of setmask_identity.prp failed"
 [ -s "$W/identity.gen.v" ] || fail "identity compile produced empty netlist"
 grep -q 'pass.cprop' "$W/identity.json" || fail "identity recipe did not run pass.cprop"
 grep -Eqi "95'h0?7f+|0*7fffffffffffffffffffffff" "$W/identity.gen.v" \
   && fail "identity Set_mask survived cprop: $(cat "$W/identity.gen.v")"
 
-"$LHD" compile "$IDENTITY_PRP" --recipe O1 --emit-dir sim:"$W/identity-sim" \
+"$LHD" compile "$IDENTITY_PRP" --emit-dir sim:"$W/identity-sim" \
   --workdir "$W/identity-sim-w" -q 2>/dev/null || fail "sim cgen of setmask_identity.prp failed"
 grep -Rq 'set_mask_op_opt(64, 96,' "$W/identity-sim" \
   || fail "contiguous dynamic write did not use set_mask_op_opt"

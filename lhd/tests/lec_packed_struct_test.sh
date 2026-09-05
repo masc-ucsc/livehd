@@ -161,7 +161,7 @@ module packed_sub_boundary(input logic a, output logic z);
   packed_leaf u_leaf(.fb(fb), .a(a), .o(child_o));
 endmodule
 EOF
-"$LHD" compile "$W/packed_sub_boundary.sv" --reader slang --top packed_sub_boundary --recipe O1 \
+"$LHD" compile "$W/packed_sub_boundary.sv" --reader slang --top packed_sub_boundary \
   --emit "verilog:$W/packed_sub_boundary.gen.v" --workdir "$W/packed_sub_boundary_cw" -q \
   || fail "hierarchical packed-slice design did not compile"
 grep -Fq ".fb(1'h0)" "$W/packed_sub_boundary.gen.v" \

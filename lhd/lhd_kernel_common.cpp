@@ -783,6 +783,29 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    if (pass == "pass.abc" && flag == "library") {
+      // ONE Liberty spelling for the whole CLI: `synth.liberty`. Two knobs for
+      // the same file is how `lhd pass abc --set synth.liberty=asap7.lib`
+      // tech-mapped against the DEFAULT sky130 library and still reported
+      // success -- the typed flag named a real option, just not the one
+      // pass.abc read. pass.abc now resolves synth.liberty like everyone else.
+      throw Lhd_error{"usage",
+                      "--set/--config 'pass.abc.library' was removed",
+                      std::format("use --set synth.liberty={0} instead (the one Liberty every reader shares: pass.abc, "
+                                  "pass.opentimer and `lhd synth`)",
+                                  value)};
+    }
+    if (pass == "compile.yosys" && flag == "liberty") {
+      // The yosys front-end's Liberty tech-map knob was dead code (the label was
+      // read into a commented-out variable, so setting it changed nothing) and a
+      // second `*.liberty` spelling on top of that. Deleted: synth.liberty is
+      // the one Liberty knob, and pass.abc is what maps to cells.
+      throw Lhd_error{"usage",
+                      "--set/--config 'compile.yosys.liberty' was removed",
+                      std::format("it never reached yosys; tech-map with `lhd pass abc` / `lhd synth` and pick the cells "
+                                  "with --set synth.liberty={}",
+                                  value)};
+    }
     if (pass == "compile" && flag == "cache") {
       // The per-tier switch was folded into the one kernel knob: a directed
       // answer, not the generic unknown-flag guess.
@@ -1098,10 +1121,8 @@ void apply_lhd_settings(Options& opts) {
   }
 }
 
-// Recipe name -> ordered (set-name, EPRP method) graph passes.
-std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Options& opts, std::string_view def) {
-  std::string r = opts.recipe.empty() ? std::string{def} : opts.recipe;
-
+// The standard compile pipeline, in (set-name, EPRP method) order.
+std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts) {
   // pass.bitfuzz is a VERIFICATION CANARY, not an optimization: it strips the
   // per-pin width/sign annotations and makes bitwidth reconstruct them, so any
   // stage that gave those attributes semantic meaning shows up as a width
@@ -1118,42 +1139,12 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
     }
   }
 
-  if (r == "O0") {
-    return {};
-  }
-  if (r == "O1") {
-    // Under O1 there is no bitwidth step to recover the widths, so bitfuzz
-    // brings its own (it runs the inference in-process) and the graph still
-    // leaves the recipe fully sized.
-    //
-    // pass.bitwidth deliberately does NOT run here. It re-derives every width
-    // from RANGES, and a range-derived width contradicts the CELL CONTRACTS
-    // that tolg and cprop stamp: MEASURED on this tree, appending it to O1
-    // refuted //inou/prp:prp-equiv-rt_typecast and rt_bool_cast and
-    // //lhd/tests:lec_packed_struct_test (signed arm), aborted
-    // //inou/prp:prp-sim-packed_bus_bit_ring on a Concat lane-window
-    // violation, and drifted //lhd/tests:lhd_tool_test's Sum stamp from 8 to
-    // 9. cprop owns O1's widths (restamp_finite_get_mask +
-    // enforce_lossless_carriers); reinstate this only together with a
-    // reconciliation of those two width models.
-    std::vector<std::pair<std::string, std::string>> steps{
-        {"compile.cprop", "pass.cprop"}
-    };
-    steps.insert(steps.end(), fuzz.begin(), fuzz.end());
-    return steps;
-  }
-  if (r == "O2") {
-    // pass.formal is NOT a recipe pass: it runs as a dedicated none|fast|normal
-    // mode step in graph_pipeline_and_emits (default fast, none under O0), so it
-    // is independent of the O-level optimization recipe below.
-    std::vector<std::pair<std::string, std::string>> steps{
-        {"compile.cprop", "pass.cprop"}
-    };
-    steps.insert(steps.end(), fuzz.begin(), fuzz.end());
-    steps.emplace_back("compile.bitwidth", "pass.bitwidth");
-    return steps;
-  }
-  throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
+  std::vector<std::pair<std::string, std::string>> steps{
+      {"compile.cprop", "pass.cprop"}
+  };
+  steps.insert(steps.end(), fuzz.begin(), fuzz.end());
+  steps.emplace_back("compile.bitwidth", "pass.bitwidth");
+  return steps;
 }
 
 uint64_t hash_bytes(const std::string& bytes) { return lh::woothash64(bytes.data(), bytes.size(), 1021); }

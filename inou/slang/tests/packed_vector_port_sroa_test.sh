@@ -13,7 +13,7 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$SRC" --reader slang --top packed_vector_port_sroa --recipe O1 \
+"$LHD" compile "$SRC" --reader slang --top packed_vector_port_sroa \
   --emit-dir pyrope:"$W/prp" --workdir "$W/work" -q 2>/dev/null \
   || fail "packed-vector port compile failed"
 

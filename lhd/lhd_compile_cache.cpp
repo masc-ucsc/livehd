@@ -840,7 +840,7 @@ std::string scope_name(const Options& opts, const std::vector<std::string>& seed
 }
 
 std::string context_descriptor(const Options& opts) {
-  std::string text = std::format("top={}|recipe={}", opts.top, opts.recipe.empty() ? "O1" : opts.recipe);
+  std::string text = std::format("top={}|pipeline=cprop,bitwidth", opts.top);
   // Seed identity: scope_name alone is a stem/--top, so two different designs
   // in one workdir would otherwise alias one scope and inherit each other's
   // prior_units — which ghost pruning may then delete from a shared lg: dir.
@@ -2086,7 +2086,7 @@ void store_cache(Options& opts, Result& res, const std::string& scope, const std
       try {
         const auto&     unit = units[index];
         std::error_code unit_ec;
-        const auto      old = prior.units.find(unit.name);
+        const auto      old     = prior.units.find(unit.name);
         const auto old_snapshot = old == prior.units.end() ? fs::path{} : fs::path(scope) / "pyrope" / old->second.snapshot_file;
         const auto new_snapshot = py_new / unit.snapshot_file;
         if (unit.exact_snapshot_match && old != prior.units.end() && fs::is_regular_file(old_snapshot, unit_ec) && !unit_ec) {
@@ -2232,12 +2232,12 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
         const bool digest_hit
             = row != prior.units.end()
               && (row->second.semantic_hash == unit.semantic_hash || row->second.interface_hash == unit.interface_hash);
-        auto ln                = digest_hit ? load_prior_unit(unit.name, row->second) : std::shared_ptr<Lnast>{};
+        auto ln                    = digest_hit ? load_prior_unit(unit.name, row->second) : std::shared_ptr<Lnast>{};
         // The digest only proposes a comment-only semantic hit. The exact,
         // ordered type/name traversal decides, so a digest collision can only
         // cause this comparison -- never stale graph restoration.
-        unit.exact_prior_match = row != prior.units.end() && ln && row->second.semantic_hash == unit.semantic_hash
-                                 && semantic_identical(*unit.lnast, *ln);
+        unit.exact_prior_match     = row != prior.units.end() && ln && row->second.semantic_hash == unit.semantic_hash
+                                     && semantic_identical(*unit.lnast, *ln);
         unit.exact_interface_match = row != prior.units.end() && ln && row->second.interface_hash == unit.interface_hash
                                      && interface_identical(*unit.lnast, *ln);
       }

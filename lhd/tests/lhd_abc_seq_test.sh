@@ -24,7 +24,7 @@
 # Each mode's mapped netlist must be sequentially LEC-equivalent (yosys miter +
 # BMC/induction, via `lhd lec --set formal.solver=lgyosys`) to its `partition` twin.
 #
-#   prp -> lg (O1)
+#   prp -> lg
 #   pass color synth                       (the abc driver coloring)
 #   pass abc --set pass.abc.seq=true        (partition + ABC seq tech-map)
 #   pass partition                          (same module structure, original logic)
@@ -77,18 +77,18 @@ run_abc_lec() {
   [ "$mem" = "default" ] || memset=(--set "pass.abc.memory=$mem")
 
   [ -f "$prp" ] || fail "missing fixture $prp"
-  run compile "$prp" --top "$top" --recipe O1 --emit-dir lg:"$d/lg" --workdir "$d/w1"
+  run compile "$prp" --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1"
   run pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
-  run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$LIB" \
+  run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
       --set pass.abc.register="$reg" --set pass.abc.register_max_bits="$reg_max" \
-      "${memset[@]}" --workdir "$d/w3"
+      ${memset[@]+"${memset[@]}"} --workdir "$d/w3"
   # the original-logic twin (same module structure)
   run pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
   run pass liberty gensim "$LIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
 
-  run compile lg:"$d/net" --top "$top" --recipe O0 --emit-dir verilog:"$d/netv" --workdir "$d/w6"
-  run compile lg:"$d/models" --recipe O0 --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
-  run compile lg:"$d/re" --top "$top" --recipe O0 --emit-dir verilog:"$d/rev" --workdir "$d/w8"
+  run compile lg:"$d/net" --top "$top" --emit-dir verilog:"$d/netv" --workdir "$d/w6"
+  run compile lg:"$d/models" --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
+  run compile lg:"$d/re" --top "$top" --emit-dir verilog:"$d/rev" --workdir "$d/w8"
 
   # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
   grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$d/netv/"*.v \
@@ -141,16 +141,16 @@ RSD="$W/abc_resetless_sync"
 mkdir -p "$RSD"
 RSR="$RSD/r.json"
 rsrun() { "$LHD" "$@" -q --result-json "$RSR" || fail "$* -> $(cat "$RSR" 2>/dev/null)"; }
-rsrun compile lhd/tests/abc_resetless_sync.prp --top abc_resetless_sync --recipe O1 \
+rsrun compile lhd/tests/abc_resetless_sync.prp --top abc_resetless_sync \
   --emit-dir lg:"$RSD/lg" --workdir "$RSD/w1"
 rsrun pass color synth --top abc_resetless_sync lg:"$RSD/lg" --workdir "$RSD/w2"
 rsrun pass partition --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/re" --workdir "$RSD/w3"
-rsrun pass abc --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --set abc.library="$LIB" \
+rsrun pass abc --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --set synth.liberty="$LIB" \
   --workdir "$RSD/w4"
 rsrun pass liberty gensim "$LIB" --emit-dir lg:"$RSD/models" --workdir "$RSD/w5"
 rsrun lec --impl lg:"$RSD/net" --ref lg:"$RSD/re" --lib lg:"$RSD/models" --top abc_resetless_sync \
   --set formal.solver=cvc5 --workdir "$RSD/wlec"
-rsrun compile lg:"$RSD/net" --top abc_resetless_sync --recipe O0 --emit-dir verilog:"$RSD/netv" --workdir "$RSD/w6"
+rsrun compile lg:"$RSD/net" --top abc_resetless_sync --emit-dir verilog:"$RSD/netv" --workdir "$RSD/w6"
 has "$RSD/netv" "DFFx1 " || fail "abc_resetless_sync: init-less flop was not mapped to DFF cells"
 ! has "$RSD/netv" "posedge" || fail "abc_resetless_sync: fake ABC init kept the flop native"
 echo "PASS: ABC's internal don't-care init does not become a netlist power-on value"
@@ -172,7 +172,7 @@ echo "PASS: ABC's internal don't-care init does not become a netlist power-on va
 # registers stay on DFFNx1.
 QLIB=inou/prp/tests/abc/test_qn.lib
 [ -f "$QLIB" ] || fail "missing liberty $QLIB"
-count() { grep -h "$2" "$1/"*.v | wc -l; }
+count() { grep -h "$2" "$1/"*.v | wc -l | tr -d '[:space:]'; }
 # run_qn <tag> <fixture> <top> [extra --set ...]: map <fixture> under test_qn.lib,
 # prove it with cvc5 through the gensim models, leave netv in QNV / models in QNM.
 QNV=""
@@ -184,16 +184,16 @@ run_qn() {
   mkdir -p "$d"
   local r="$d/r.json"
   qrun() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
-  qrun compile "lhd/tests/${fix}.prp" --top "$top" --recipe O1 --emit-dir lg:"$d/lg" --workdir "$d/w1"
+  qrun compile "lhd/tests/${fix}.prp" --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1"
   qrun pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
   qrun pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w3"
-  qrun pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$QLIB" --set abc.qor="$d/abc.json" \
+  qrun pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$QLIB" --set abc.qor="$d/abc.json" \
     "$@" --workdir "$d/w4"
   qrun pass liberty gensim "$QLIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
   qrun lec --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top" --set formal.solver=cvc5 \
     --workdir "$d/wlec"
-  qrun compile lg:"$d/net" --top "$top" --recipe O0 --emit-dir verilog:"$d/netv" --workdir "$d/w6"
-  qrun compile lg:"$d/models" --recipe O0 --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
+  qrun compile lg:"$d/net" --top "$top" --emit-dir verilog:"$d/netv" --workdir "$d/w6"
+  qrun compile lg:"$d/models" --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
   QNV="$d/netv"
   QNM="$d/modelsv"
   grep -q '"dff":{"cell":"DFFNx1","q_inverted":true,"ladder":\["DFFNx1","DFFNx2"\]' "$d/abc.json" \
@@ -227,6 +227,9 @@ has "$QNV" "\.QN(" || fail "qn user flow: DFFNx1's QN pin is not wired"
 [ "$(count "$QNV" "^INVx1 [a-z_0-9]*__dinv(")" -le 4 ] \
   || fail "qn user flow: more read-back inverters than DFFNx1 cells: $(count "$QNV" "__dinv(")"
 echo "PASS: QN-only DFF cell under a user flow absorbs the inversion on read-back, LEC proven"
+run_qn timing abc_resetless_sync abc_resetless_sync --set pass.abc.delay=1000
+has "$QNV" "DFFNx1 " || fail "qn timing flow: DFFNx1 not mapped"
+echo "PASS: timing flow preserves QN register semantics, LEC proven"
 
 # Twin swap: a NAND2 next state. Built-in flow: ABC maps ~f = AND2 itself;
 # user flow: the read-back swaps the mapped NAND2 root for AND2x1 (3.5 < 3 + 1).
@@ -234,7 +237,7 @@ echo "PASS: QN-only DFF cell under a user flow absorbs the inversion on read-bac
 for qflow in builtin user; do
   extra=()
   [ "$qflow" = user ] && extra=(--set 'pass.abc.flow=strash; dc2; map')
-  run_qn "twin_$qflow" abc_qn_twin abc_qn_twin "${extra[@]}"
+  run_qn "twin_$qflow" abc_qn_twin abc_qn_twin ${extra[@]+"${extra[@]}"}
   [ "$(count "$QNV" "^AND2x1 ")" = 1 ] || fail "qn twin ($qflow): expected one AND2x1, got $(count "$QNV" "^AND2x1 ")"
   ! has "$QNV" "NAND2x1 " || fail "qn twin ($qflow): NAND2 root survived next to a QN cell"
   ! has "$QNV" "INVx1 " || fail "qn twin ($qflow): an inverter was minted where the AND2x1 twin absorbs the inversion"
@@ -263,16 +266,16 @@ ARD="$W/abc_async_reset"
 mkdir -p "$ARD"
 ARR="$ARD/r.json"
 arrun() { "$LHD" "$@" -q --result-json "$ARR" || fail "$* -> $(cat "$ARR" 2>/dev/null)"; }
-arrun compile lhd/tests/abc_async_reset.prp --top abc_async_reset --recipe O1 \
+arrun compile lhd/tests/abc_async_reset.prp --top abc_async_reset \
   --emit-dir lg:"$ARD/lg" --workdir "$ARD/w1"
 arrun pass color synth --top abc_async_reset lg:"$ARD/lg" --workdir "$ARD/w2"
 arrun pass partition --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/re" --workdir "$ARD/w3"
-arrun pass abc --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/net" --set abc.library="$LIB" \
+arrun pass abc --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/net" --set synth.liberty="$LIB" \
   --workdir "$ARD/w4"
 arrun pass liberty gensim "$LIB" --emit-dir lg:"$ARD/models" --workdir "$ARD/w5"
-arrun compile lg:"$ARD/net" --top abc_async_reset --recipe O0 --emit-dir verilog:"$ARD/netv" --workdir "$ARD/w6"
-arrun compile lg:"$ARD/models" --recipe O0 --emit-dir verilog:"$ARD/modelsv" --workdir "$ARD/w7"
-arrun compile lg:"$ARD/re" --top abc_async_reset --recipe O0 --emit-dir verilog:"$ARD/rev" --workdir "$ARD/w8"
+arrun compile lg:"$ARD/net" --top abc_async_reset --emit-dir verilog:"$ARD/netv" --workdir "$ARD/w6"
+arrun compile lg:"$ARD/models" --emit-dir verilog:"$ARD/modelsv" --workdir "$ARD/w7"
+arrun compile lg:"$ARD/re" --top abc_async_reset --emit-dir verilog:"$ARD/rev" --workdir "$ARD/w8"
 cat "$ARD/netv/"*.v "$ARD/modelsv/"*.v > "$ARD/impl.v"
 cat "$ARD/rev/"*.v > "$ARD/ref.v"
 arrun lec --set formal.solver=lgyosys --impl verilog:"$ARD/impl.v" --ref verilog:"$ARD/ref.v" \

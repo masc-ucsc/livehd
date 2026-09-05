@@ -6,7 +6,7 @@
 # pass.partition and pass.abc through the real CLI, and what comes out the far
 # end still computes the same function.
 #
-#   prp -> lg (O1, hierarchy intact)
+#   prp -> lg (inline=false, hierarchy intact)
 #   reference Verilog from the untouched library
 #   lhd pass color synth --set color.synth_alg=cones --set color.max_gate=<small>
 #   lhd pass partition   (one <def>__c<id> module per color id)
@@ -48,8 +48,8 @@ for entry in "${DESIGNS[@]}"; do
   D="$W/$FIX"
   mkdir -p "$D"
 
-  run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
-  run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+  run compile "$PRP" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
 
   run pass color synth --top "$TOP" --stats \
       --set color.synth_alg=cones --set color.max_gate=40 \
@@ -69,7 +69,7 @@ for entry in "${DESIGNS[@]}"; do
   info_has '"packed":true' || fail "$FIX: cones must record packed=true unconditionally"
 
   run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/part" --workdir "$D/w4"
-  run compile lg:"$D/part" --top "$TOP" --recipe O0 --emit verilog:"$D/post.v" --workdir "$D/w5"
+  run compile lg:"$D/part" --top "$TOP" --emit verilog:"$D/post.v" --workdir "$D/w5"
 
   # One module per color id, and none of the per-cloud `_r<k>` splits that a
   # missing "packed" flag would produce.
@@ -88,13 +88,13 @@ done
 for MODE in pair all; do
   D="$W/fwd_$MODE"
   mkdir -p "$D"
-  run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
-  run compile lg:"$D/lg" --top hier_seq.top --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+  run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile lg:"$D/lg" --top hier_seq.top --emit verilog:"$D/ref.v" --workdir "$D/w2"
   run pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate=40 \
       --set color.forward="$MODE" lg:"$D/lg" --workdir "$D/w3"
   LC_ALL=C grep -raq -- "\"forward\":\"$MODE\"" "$D/lg" || fail "forward=$MODE not recorded in coloring_info"
   run pass partition --top hier_seq.top lg:"$D/lg" --emit-dir lg:"$D/part" --workdir "$D/w4"
-  run compile lg:"$D/part" --top hier_seq.top --recipe O0 --emit verilog:"$D/post.v" --workdir "$D/w5"
+  run compile lg:"$D/part" --top hier_seq.top --emit verilog:"$D/post.v" --workdir "$D/w5"
   run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top hier_seq.top --workdir "$D/c"
   echo "PASS: cones forward=$MODE -> partition -> LEC-equivalent"
 done
@@ -111,7 +111,7 @@ echo "PASS: unknown forward mode is refused"
 # and the one a user reaches for when debugging a partition.
 D="$W/raw"
 mkdir -p "$D"
-run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
 cp -R "$D/lg" "$D/lg_capped"
 run pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate=0 \
     lg:"$D/lg" --workdir "$D/w2"

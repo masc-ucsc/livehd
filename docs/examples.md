@@ -9,6 +9,19 @@ export HPDCACHE_DIR=$CVA6_REPO_DIR/core/cache_subsystem/hpdcache/
 ./bazel-bin/lhd/lhd compile --reader yosys-slang --diag-fmt pretty --top cva6 --emit-dir lg:cva_lg1 -- --ignore-unknown-modules --allow-use-before-declare $CVA6_REPO_DIR/core/include/cv64a6_imafdc_sv39_wb_config_pkg.sv -F $CVA6_REPO_DIR/core/Flist.cva6 -DSYNTHESIZE
 ```
 
+## Run logikbench
+```
+cd ../logikbench/
+
+uv run lb syn --tool lhd --target asap7 -g basic --publish
+
+uv run dashboard/build_db.py --flat --results results/syn/asic --out build/dashboard-db --config default
+uv run dashboard/generate.py --db build/dashboard-db/asic --out build/dashboard --title "ASIC Synthesis"
+
+#uv run python -m http.server 8000 --directory build/dashboard
+```
+
+
 ## To read Dino Dual issue
 
 ```
@@ -60,11 +73,11 @@ to look at an intermediate.
 The frequency-optimization loop primitives on `xs_core_prp/Alu.prp` (imports
 resolve from sibling files in the same directory). `pass abc` uses
 `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` by default; add
-`--set abc.library=FILE` for another Liberty.
+`--set synth.liberty=FILE` for another Liberty.
 
 ```
 # compile (the whole Alu hierarchy: AluDataModule, SubModule, AddModule, ...)
-./bazel-bin/lhd/lhd compile xs_core_prp/Alu.prp --top Alu.Alu --recipe O1 --emit-dir lg:alu_lg --workdir alu_w
+./bazel-bin/lhd/lhd compile xs_core_prp/Alu.prp --top Alu.Alu --emit-dir lg:alu_lg --workdir alu_w
 
 # tech-map: one region module per (module, color); QoR lands in alu_w/qor.json
 # AND the --result-json envelope's "qor" member (per-region gates/area/critical
@@ -82,7 +95,7 @@ directly — imports resolve from sibling files — but the loop pre-compiles to
 lg: anyway so the abc/QoR steps reuse the same compiled tree:
 
 ```
-./bazel-bin/lhd/lhd compile xs_core_prp/Alu.prp --top Alu.Alu --recipe O1 --emit-dir lg:alu_lg_edited --workdir alu_w2
+./bazel-bin/lhd/lhd compile xs_core_prp/Alu.prp --top Alu.Alu --emit-dir lg:alu_lg_edited --workdir alu_w2
 ./bazel-bin/lhd/lhd lec --impl lg:alu_lg_edited --ref lg:alu_lg --top Alu.Alu --workdir alu_w
 # exit 0 + PROVEN -> accept the edit; equiv_fail -> reject (alu_w/lecfail.json has the witness)
 ```

@@ -145,14 +145,14 @@ EOF
   D="${TMP}/abc"
   mkdir -p "${D}"
   ok=1
-  "${LHD}" compile "${TMP}/w.prp" --top w.w --recipe O1 --emit-dir "lg:${D}/lg" --workdir "${D}/w1" -q >/dev/null 2>&1 || ok=0
+  "${LHD}" compile "${TMP}/w.prp" --top w.w --emit-dir "lg:${D}/lg" --workdir "${D}/w1" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass color synth --top w.w "lg:${D}/lg" --workdir "${D}/w2" -q >/dev/null 2>&1 || ok=0
-  "${LHD}" pass abc --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/net" --set abc.library="${LIB}" \
+  "${LHD}" pass abc --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/net" --set synth.liberty="${LIB}" \
       --set pass.abc.memory=true --workdir "${D}/w3" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass partition --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/re" --workdir "${D}/w4" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass liberty gensim "${LIB}" --emit-dir "lg:${D}/models" --workdir "${D}/w5" -q >/dev/null 2>&1 || ok=0
   for x in net models re; do
-    "${LHD}" compile "lg:${D}/${x}" --recipe O0 --emit-dir "verilog:${D}/${x}v" --workdir "${D}/w_${x}" -q >/dev/null 2>&1 || ok=0
+    "${LHD}" compile "lg:${D}/${x}" --emit-dir "verilog:${D}/${x}v" --workdir "${D}/w_${x}" -q >/dev/null 2>&1 || ok=0
   done
   cat "${D}"/netv/*.v "${D}"/modelsv/*.v >"${D}/impl.v" 2>/dev/null
   cat "${D}"/rev/*.v >"${D}/ref.v" 2>/dev/null

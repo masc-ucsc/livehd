@@ -4,7 +4,7 @@
 # End-to-end test for `lhd pass opentimer` (2opt-freq D): OpenTimer STA on a
 # pass.abc tech-mapped module, emitting the machine-readable timing report.
 #
-#   prp -> lg (O1)
+#   prp -> lg
 #   pass color synth ; pass abc --emit-dir lg:net      (comb regions)
 #   pass opentimer --top <region> lg:net test.lib      (this pass)
 #     -> <workdir>/timing.json {kind:"sta", max_delay, critical_pin,
@@ -37,9 +37,9 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
 # 1. combinational: compile + color + abc tech-map
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set abc.library="$LIB" --workdir "$W/w3"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" --workdir "$W/w3"
 
 # 2. STA on one mapped region: timing.json under --workdir + envelope "qor"
 run pass opentimer --top "${TOP}" lg:"$W/net" "$LIB" --workdir "$W/wt"
@@ -56,8 +56,8 @@ grep -q '"qor":{"schema_version":1,"kind":"sta"' "$W/r.json" || fail "envelope m
 SPRP=inou/prp/tests/pyrope/abc_seq.prp
 STOP=abc_seq.abc_seq
 [ -f "$SPRP" ] || fail "missing fixture $SPRP"
-run compile "$SPRP" --top "$STOP" --recipe O1 --emit-dir lg:"$W/slg" --workdir "$W/w4"
-run pass abc --top "$STOP" lg:"$W/slg" --emit-dir lg:"$W/snet" --set abc.library="$LIB" --workdir "$W/w5"
+run compile "$SPRP" --top "$STOP" --emit-dir lg:"$W/slg" --workdir "$W/w4"
+run pass abc --top "$STOP" lg:"$W/slg" --emit-dir lg:"$W/snet" --set synth.liberty="$LIB" --workdir "$W/w5"
 "$LHD" pass opentimer --top "${STOP}" lg:"$W/snet" "$LIB" --workdir "$W/wts" \
     -q --result-json "$W/rs.json" 2> "$W/ot_seq.err" || fail "seq opentimer -> $(cat "$W/rs.json")"
 grep -q '"max_delay":' "$W/wts/timing.json" || fail "seq timing.json missing max_delay"
@@ -80,8 +80,8 @@ pub mod ot_latch(en:bool, a:u8, b:u8) -> (q:u8@[0]) {
 }
 EOF
 LTOP=ot_latch.ot_latch
-run compile "$LPRP" --top ot_latch --recipe O1 --emit-dir lg:"$W/llg" --workdir "$W/wl1"
-run pass abc --top "$LTOP" lg:"$W/llg" --emit-dir lg:"$W/lnet" --set abc.library="$LIB" --workdir "$W/wl2"
+run compile "$LPRP" --top ot_latch --emit-dir lg:"$W/llg" --workdir "$W/wl1"
+run pass abc --top "$LTOP" lg:"$W/llg" --emit-dir lg:"$W/lnet" --set synth.liberty="$LIB" --workdir "$W/wl2"
 run compile lg:"$W/lnet" --top "$LTOP" --emit verilog:"$W/latch_net.v" --workdir "$W/wl3"
 grep -Eq 'reg( signed)? \[7:0\] held;' "$W/latch_net.v" \
   || fail "ABC latch read-back lost the original 8-bit Q bus name"
@@ -127,7 +127,7 @@ EOF
 XTOP=ot_cross_region.ot_cross_region
 run compile "$XPRP" --top ot_cross_region --emit-dir lg:"$W/xlg" --workdir "$W/xw1"
 run pass color synth --top "$XTOP" lg:"$W/xlg" --set color.max_ge=1 --set color.min_ge=0 --workdir "$W/xw2"
-run pass abc --top "$XTOP" lg:"$W/xlg" --emit-dir lg:"$W/xnet" --set abc.library="$LIB" --workdir "$W/xw3"
+run pass abc --top "$XTOP" lg:"$W/xlg" --emit-dir lg:"$W/xnet" --set synth.liberty="$LIB" --workdir "$W/xw3"
 grep -q '"regions":2' "$W/r.json" || fail "cross-region fixture did not split into two mapped regions"
 "$LHD" pass opentimer --top "$XTOP" lg:"$W/xnet" "$LIB" --workdir "$W/xwt" \
     -q --result-json "$W/xr.json" 2> "$W/ot_cross.err" || fail "cross-region opentimer -> $(cat "$W/xr.json")"
@@ -199,7 +199,7 @@ grep -q '"kind":"sta"' "$W/cfw/synth/timing.json" || fail "Concat-lane width-bou
 #     (never silent garbage). A single-region def is emitted directly with no
 #     wrapper, so force a multi-region split (tiny max_ge) to get one.
 run pass color synth --top "$TOP" --set color.max_ge=1 --set color.min_ge=0 lg:"$W/lg" --workdir "$W/wsplit"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split" --set abc.library="$LIB" --workdir "$W/wa_split"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split" --set synth.liberty="$LIB" --workdir "$W/wa_split"
 
 # 4b. --stats keeps the whole-design critical path above and adds exactly one
 # structured row per mapped color. The cold ABC run rebuilt every row, and the
@@ -219,7 +219,7 @@ cold_colors=$(grep -o '"resynth":1' "$W/rstats_cold.json" | wc -l | tr -d ' ')
 
 # Rebuild the same colored input through the same ABC workdir: every color is a
 # cache hit, but OpenTimer must still report every one and carry resynth=0.
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split_hit" --set abc.library="$LIB" \
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split_hit" --set synth.liberty="$LIB" \
     --workdir "$W/wa_split" --stats
 "$LHD" pass opentimer --top "$TOP" lg:"$W/net_split_hit" "$LIB" --workdir "$W/wstats_hit" \
     --stats -q --result-json "$W/rstats_hit.json" 2>"$W/ot_stats_hit.err" \
@@ -250,9 +250,9 @@ mod marker_sta(a:u8, b:u8, sel:u3) -> (o:u8@[1]) {
 }
 EOF
 MTOP=marker_sta.marker_sta
-run compile "$MARK" --top marker_sta --recipe O1 --emit-dir lg:"$W/mlg" --workdir "$W/mw1"
+run compile "$MARK" --top marker_sta --emit-dir lg:"$W/mlg" --workdir "$W/mw1"
 run pass color synth --top "$MTOP" lg:"$W/mlg" --workdir "$W/mw2"
-run pass abc --top "$MTOP" lg:"$W/mlg" --emit-dir lg:"$W/mnet" --set abc.library="$LIB" --workdir "$W/mw3"
+run pass abc --top "$MTOP" lg:"$W/mlg" --emit-dir lg:"$W/mnet" --set synth.liberty="$LIB" --workdir "$W/mw3"
 run pass opentimer --top "$MTOP" lg:"$W/mnet" "$LIB" --workdir "$W/mw4"
 grep -q '"kind":"sta"' "$W/mw4/timing.json" \
   || fail "a design with a runtime bit-range select produced no STA report: $(cat "$W/mw4/timing.json" 2>/dev/null)"

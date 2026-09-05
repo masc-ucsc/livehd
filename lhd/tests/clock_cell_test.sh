@@ -262,7 +262,7 @@ echo "ok: a nested ICG latch consumes the inner Clock_cell as timing, not data"
 # Cgen normalizes a generated clock's polarity with Boolean Eq/Xor nodes before
 # wiring it to clock_pin. Re-read that Verilog so this test pins the exact path
 # seen in Minion's generated intpipe_csr_file, not only the simpler source graph.
-"$LHD" compile "lg:$W/lg_icg_nested" --top dut --recipe O0 \
+"$LHD" compile "lg:$W/lg_icg_nested" --top dut \
   --emit "verilog:$W/icg_nested_cgen.v" --workdir "$W/cw_icg_nested_cgen" \
   >"$W/c_icg_nested_cgen.log" 2>&1 \
   || { tail -5 "$W/c_icg_nested_cgen.log"; fail "cgen round trip of nested gate failed"; }

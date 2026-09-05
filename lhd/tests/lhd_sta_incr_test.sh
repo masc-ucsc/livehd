@@ -87,9 +87,9 @@ cp "$FIX" "$PRP"
 
 # --- the netlist to time ----------------------------------------------------
 map_netlist() {  # OUT_TAG
-  run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg_$1" --workdir "$W/wc_$1"
+  run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg_$1" --workdir "$W/wc_$1"
   run pass color synth --top "$TOP" lg:"$W/lg_$1" --workdir "$W/wk_$1"
-  run pass abc --top "$TOP" lg:"$W/lg_$1" --emit-dir lg:"$W/$1" --set abc.library="$LIB" --workdir "$W/wa_$1"
+  run pass abc --top "$TOP" lg:"$W/lg_$1" --emit-dir lg:"$W/$1" --set synth.liberty="$LIB" --workdir "$W/wa_$1"
 }
 map_netlist net
 

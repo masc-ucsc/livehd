@@ -48,20 +48,23 @@ Per region (`Region_body` from the partition seam):
 
    Width note: `mult`/`sra` size their result at the LEC's literal
    `real_width`; unsigned widths contain no hidden sign slot.
-2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb and seq default
-   `strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o`,
-   plus the `buffer -N {F}; dnsize {B}` fanout/sizing tail, `abc_map.cpp`
-   `kCombFlow`/`kSeqFlow`) against the `read_lib -s` Liberty — its **unit-delay
+2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow`. With `delay` set, the
+   built-in timing flow uses ABC9 flow2's 6-input LUT restructuring, then
+   `&st; &nf {D}; &put -o` for standard-cell mapping. Without a delay, the
+   area default is the former baseline:
+   `strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o`.
+   Both append `buffer -N {F}; dnsize {B}`. The LUT mapper uses unit levels,
+   not ps, so it does not receive the physical `{D}` target. `&scorr` is omitted
+   to preserve register correspondence (it was a no-op in the combinational
+   mux sweep). Mapping uses the `read_lib -s` Liberty — its **unit-delay
    GENLIB**: `&nf` minimizes logic depth on the smallest cells and every
    physical decision belongs to the SCL sizing steps and the budget ladder
-   below ("A budget is a budget in BOTH directions"). `&fraig -x; &put; dc2`
-   ahead of the `&dch -f; &nf` map is worth its runtime (dino: −4.4% gates,
-   STA 51.1 → 44.4 ns); the final `&put -o` hands the mapped network back with
+   below ("A budget is a budget in BOTH directions"). The final `&put -o` hands the mapped network back with
    a gate that drives several outputs decoupled by a *buffer* instead of a
    *duplicate* of the gate (see the identity-buffer note under step 3); an
    explicit `flow` replaces the whole default. With a `delay` target a region
    whose delay flow met its budget is mapped a second time for area
-   (`kAreaFlow`: `… dc2; strash; dch -f; amap` + `buffer -N {F}; upsize {B};
+   (`kAreaFlow`: the former baseline + `buffer -N {F}; upsize {B};
    dnsize {B}`) and the smaller netlist that still meets the budget is kept. `-s` skips multi-output cells — fa/ha
    supergates cannot be read back and previously collapsed their cone to
    const0 silently; the read-back now also hard-errors on any unreadable
@@ -284,7 +287,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
 | `delay` / `load` | the timing BUDGET in ps / the load: `{D}` / `{L}` expand to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC. `delay` is also the target the built-in objective sizes to and judges the area candidate against (see below); `{B}` is the per-region budget (`delay` minus `reg_margin` when the region holds flops) as `-D <ps>` | empty |
 | `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `200` |
-| `area_flow` | the AREA candidate's ABC command string: empty = the built-in `strash; &get -n; &fraig -x; &put; dc2; strash; dch -f; amap` + `buffer -N {F}; upsize {B}; dnsize {B}`; `none` disables the candidate; anything else runs verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended) — see below | empty |
+| `area_flow` | AREA command string: empty = the former baseline (`&fraig`/`dc2`/`&dch`/`&nf`); used without delay or as a second candidate after meeting a delay budget. Built-ins append `buffer -N {F}; dnsize {B}`, adding `upsize {B}` before `dnsize` for a timed candidate. `none` disables only the second candidate. Custom strings run verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended); explicit `flow` takes precedence | empty |
 | `reg_margin` | register overhead subtracted from `delay` to form a flop-bearing region's budget: `auto` = the mapped DFF cell's clk→Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 83.9 ps, sky130 dfxtp_1 528 ps), a number = that many ps, `0` = no margin — see below | `auto` |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
 | `flatten` | whole-design flatten: `auto`/`true`/`false` — see below | `auto` |
@@ -302,8 +305,8 @@ physical decision. `pass.abc` used to replace that GENLIB with one derived
 from the NLDM at ABC's gain-100 operating point whenever a delay was set; it
 made `&nf` chase a delay it had no budget for, and measured over the 15
 lhdtrack designs below it cost 1.50× yosys's area on ASAP7 (unit delay +
-sizing: 1.07×) and 1.04× on sky130 (0.96×). `amap`, the area candidate's
-mapper, ignores GENLIB delays altogether (bit-identical netlists either way).
+sizing: 1.07×) and 1.04× on sky130 (0.96×). These measurements predate the
+current flow2 timing default and retained baseline area flow.
 Libraries containing only scalar delays keep the unbuffered, unsized
 logic-depth mapping and produce a note.
 
@@ -363,20 +366,20 @@ slack came from the SCL timer, so a miss after the remap is repaired with step
 
 **The area candidate.** A region that met its budget is then mapped a second
 time from the same pre-flow logic network (`Abc_NtkDup` before the frame took
-it) with `area_flow` — `dch -f; amap` + `buffer -N; upsize -D; dnsize -D`
-(`amap` maps for area with structural choices; its min-size cells rarely meet
-a tight target on their own, hence the `upsize` first) — timed by the same SCL
+it) with `area_flow` — the former baseline + `buffer -N; upsize -D; dnsize -D`
+(size to the budget before recovering area) — timed by the same SCL
 timer, and the netlist with the smaller SCL area **among those that meet the
 budget** is kept; the delay flow wins a tie and every region where the
 candidate could not qualify (no target, a custom or size-tier `flow`, the
 dummy-PO sentinel, `area_flow=none`, `input_ge` over `large_ge`). Both are
-complete mapped logic networks with the latches untouched (amap maps the logic
+complete mapped logic networks with the latches untouched (both map the logic
 between them; the QN encoding's `~f` and the identity-buffer bypass work
 unchanged — flop counts and LEC verified), so the read-back does not care
 which one won. The QoR row records the decision (`budget`, `candidate`,
 `delay_flow`/`area_flow` SCL pairs).
 
-Measured over 15 ../lhdtrack designs plus `br_amba_axi_demux` (geomean vs
+Historical measurements below are from the previous timing/amap objective,
+not the new flow2/baseline defaults. Measured over 15 ../lhdtrack designs plus `br_amba_axi_demux` (geomean vs
 yosys+abc, area / OpenSTA delay, designs meeting their period), the tree
 before this objective vs after:
 

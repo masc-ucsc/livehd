@@ -32,7 +32,7 @@ grep -q '^//---- lg twog.xorit' "$W/dump.err" || fail "--dump lg stderr is missi
   || fail "--dump lg graphs are not sorted by name"
 
 # 2. --verbose mirrors the per-step logs to stderr (yosys chatter included).
-"$LHD" compile "$MIX" --reader yosys-verilog --top bw_mix --recipe O1 \
+"$LHD" compile "$MIX" --reader yosys-verilog --top bw_mix \
   --emit verilog:"$W/mix.gen.v" --verbose --workdir "$W/w_verb" 2>"$W/verb.err" \
   >/dev/null || fail "--verbose compile failed"
 [ -s "$W/verb.err" ] || fail "--verbose produced no stderr mirror"

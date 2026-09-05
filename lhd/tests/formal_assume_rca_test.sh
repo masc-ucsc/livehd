@@ -18,16 +18,19 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat >"$W/rca_assumed.prp" <<'EOF'
 comb full_adder(a:bool, b:bool, carry_in:bool) -> (result:u2) {
-  const sum = a ^ b ^ carry_in
-  const carry_out = (a & b) | (a & carry_in) | (b & carry_in)
+  const ai = u1(a)
+  const bi = u1(b)
+  const ci = u1(carry_in)
+  const sum = ai ^ bi ^ ci
+  const carry_out = (ai & bi) | (ai & ci) | (bi & ci)
   result = sum | (carry_out << 1)
 }
 
 comb rca(a:u4, b:u4, carry_in:bool) -> (sum:u5) {
-  const lane0 = full_adder(a=a#[0], b=b#[0], carry_in=carry_in)
-  const lane1 = full_adder(a=a#[1], b=b#[1], carry_in=(lane0 & 2) != 0)
-  const lane2 = full_adder(a=a#[2], b=b#[2], carry_in=(lane1 & 2) != 0)
-  const lane3 = full_adder(a=a#[3], b=b#[3], carry_in=(lane2 & 2) != 0)
+  const lane0 = full_adder(a=bool(a#[0]), b=bool(b#[0]), carry_in=carry_in)
+  const lane1 = full_adder(a=bool(a#[1]), b=bool(b#[1]), carry_in=(lane0 & 2) != 0)
+  const lane2 = full_adder(a=bool(a#[2]), b=bool(b#[2]), carry_in=(lane1 & 2) != 0)
+  const lane3 = full_adder(a=bool(a#[3]), b=bool(b#[3]), carry_in=(lane2 & 2) != 0)
 
   sum = (lane0 & 1)
       | ((lane1 & 1) << 1)

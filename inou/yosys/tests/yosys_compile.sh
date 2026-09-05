@@ -85,7 +85,7 @@ do
 
   # verilog -> lg -> cprop -> verilog, one stateless action. The per-step
   # logs (yosys chatter included) land under the --workdir.
-  ${LHD} compile ${full_input} --reader yosys-verilog --top ${base} --recipe O1 \
+  ${LHD} compile ${full_input} --reader yosys-verilog --top ${base} \
     --emit verilog:tmp_yosys_mix/all_${base}.v \
     --workdir tmp_yosys/${base} -q --result-json tmp_yosys/${input}.result.json \
     >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err

@@ -21,7 +21,6 @@ Example:
         name   = "foo_net",
         top    = "foo",
         srcs   = ["foo.v", "bar.v"],
-        recipe = "O2",
         out    = "foo.gen.v",   # also writes foo.gen.v.result.json
     )
 """
@@ -31,7 +30,7 @@ _LHD = "//lhd"
 def _src_locations(srcs):
     return " ".join(["$(locations %s)" % s for s in srcs])
 
-def lhd_verilog(name, top, srcs, out, recipe = "O1", reader = "yosys-verilog", visibility = None):
+def lhd_verilog(name, top, srcs, out, reader = "yosys-verilog", visibility = None):
     """Compile Verilog sources to optimized Verilog through the lhd kernel."""
     result = out + ".result.json"
     native.genrule(
@@ -41,10 +40,9 @@ def lhd_verilog(name, top, srcs, out, recipe = "O1", reader = "yosys-verilog", v
         cmd = (
             "$(location {lhd}) compile verilog ".format(lhd = _LHD) +
             _src_locations(srcs) +
-            " --top {top} --reader {reader} --recipe {recipe}".format(
+            " --top {top} --reader {reader}".format(
                 top = top,
                 reader = reader,
-                recipe = recipe,
             ) +
             " --workdir $(RULEDIR)/{name}.lhd_work".format(name = name) +
             " --emit verilog:$(location {out})".format(out = out) +

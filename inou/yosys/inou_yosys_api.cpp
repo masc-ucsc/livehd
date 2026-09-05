@@ -290,7 +290,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   const auto frontend{var.get("frontend")};
   const auto setundef{var.get("setundef")};
   const auto memory_mode{var.get("memory_mode")};
-  // const auto lib{var.get("liberty")};
 
   mustache::data vars;
   vars.set("path", path);
@@ -450,7 +449,7 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   } else if (abc == "false" || abc == "0") {
     // Nothing to do
   } else {
-    livehd::diag::err("inou.yosys", "bad-option", "io").msg("unrecognized abc {} option. Either true or false", techmap).fatal();
+    livehd::diag::err("inou.yosys", "bad-option", "io").msg("unrecognized abc {} option. Either true or false", abc).fatal();
   }
 
   auto& lib = livehd::Hhds_graph_library::instance(path);
@@ -497,8 +496,7 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("slang_flags", "comma- (or \\x1f-) separated flags for read_slang command", "");
   m1.add_label_optional("setundef", "replace undef/don't-care values before graph import: zero|true", "");
   m1.add_label_optional("memory_mode", "memory lowering mode before graph import: default|nomap|collect|preserve", "");
-  m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
-  m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
+  m1.add_label_optional("techmap", "yosys techmap before graph import: full|alumacc (empty = none)", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
   m1.add_label_required("top", "define top module for synthesis, will call yosys hierarchy pass (-auto-top allowed)");

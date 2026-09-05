@@ -7,10 +7,9 @@
 # design with the failing check kept as a runtime check (never elided, never
 # used to optimize). The diagnostic carries the counterexample and a hint that a
 # different top-level instantiation may change the result. pass.formal runs as a
-# none|fast|normal mode step in `lhd compile` (default fast; none under -O0): fast
+# none|fast|normal mode step in `lhd compile` (default fast): fast
 # = induction (catches combinational refutations, defers stateful ones to runtime);
-# normal = BMC-intent (also trusts stateful refutations). Cases 1-4 use --recipe
-# O2 (which also runs cprop/bitwidth); cases 5-7 pin the mode behavior.
+# normal = BMC-intent (also trusts stateful refutations). Cases 1-4 exercise compilation; cases 5-7 pin the mode behavior.
 
 set -u
 
@@ -23,19 +22,19 @@ fail() {
   exit 1
 }
 
-# compile_o2 <name> : compile $W/<name>.prp through O2 + emit verilog/diag.
+# compile_graph <name> : compile $W/<name>.prp through the standard pipeline + emit verilog/diag.
 # Sets globals: RC, DIAG (jsonl path), VOUT (verilog path).
-compile_o2() {
+compile_graph() {
   local n="$1"
   DIAG="$W/$n.jsonl"
   VOUT="$W/$n.v"
-  "$LHD" compile "$W/$n.prp" --recipe O2 --workdir "$W/$n" \
+  "$LHD" compile "$W/$n.prp" --workdir "$W/$n" \
     --emit "verilog:$VOUT" --emit "diagnostics:$DIAG" >/dev/null 2>&1
   RC=$?
 }
 
 # compile_case <prp> <tag> <extra args...> : compile $W/<prp>.prp tagged <tag>
-# (no --recipe, so the default fast formal mode runs unless overridden).
+# (the default fast formal mode runs unless overridden).
 # Sets globals: RC, DIAG, VOUT.
 compile_case() {
   local prp="$1" tag="$2"
@@ -57,7 +56,7 @@ comb chk(a:u8, b:u8) -> (x:u8) {
   x = a + b
 }
 EOF
-compile_o2 assert_fail
+compile_graph assert_fail
 [ "$RC" -ne 0 ] || fail "refuted assert must fail the build (got rc=0)"
 grep -q '"code":"assert-refuted"' "$DIAG" || fail "missing assert-refuted diagnostic: $(cat "$DIAG")"
 grep -q 'counterexample:' "$DIAG" || fail "assert-refuted must include a counterexample: $(cat "$DIAG")"
@@ -85,7 +84,7 @@ comb assume_fail(a:u8) -> (x:u8) {
   x = assume_fail_sub.chk(a=0, b=0).x
 }
 EOF
-compile_o2 assume_fail
+compile_graph assume_fail
 [ "$RC" -ne 0 ] || fail "a parent binding that refutes its child assume must fail the build (got rc=0)"
 grep -q '"code":"assume-refuted"' "$DIAG" || fail "missing assume-refuted diagnostic: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "compile must CONTINUE and still emit the netlist on a refuted assume"
@@ -101,7 +100,7 @@ comb chk(p:bool, q:bool) -> (y:u8) {
   unique if p { y = 1 } elif q { y = 2 }
 }
 EOF
-compile_o2 hotmux_fail
+compile_graph hotmux_fail
 [ "$RC" -ne 0 ] || fail "refuted Hotmux one-hotness must fail the build (got rc=0)"
 grep -q '"code":"onehot-violated"' "$DIAG" || fail "missing onehot-violated diagnostic: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "compile must CONTINUE (not fatal-abort) and still emit on a refuted Hotmux"
@@ -117,13 +116,13 @@ comb chk(x:u2, a:u8, b:u8) -> (y:u8) {
   unique if x == 0 { y = a } elif x == 1 { y = b }
 }
 EOF
-compile_o2 onehot_ok
+compile_graph onehot_ok
 [ "$RC" -eq 0 ] || fail "a provably one-hot unique-if must compile clean (got rc=$RC): $(cat "$DIAG")"
 grep -q '"severity":"error"' "$DIAG" && fail "proven one-hot must emit no error: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "proven one-hot must still emit the netlist"
 
 # ---------------------------------------------------------------------------
-# 5. DEFAULT `lhd compile` (no --recipe) runs formal in `fast` mode: a purely
+# 5. DEFAULT `lhd compile` (default settings) runs formal in `fast` mode: a purely
 #    COMBINATIONAL refuted assert is caught (induction is exact for comb logic).
 # ---------------------------------------------------------------------------
 cat >"$W/comb_ref.prp" <<'EOF'

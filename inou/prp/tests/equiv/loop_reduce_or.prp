@@ -1,0 +1,34 @@
+/*
+:name: loop_reduce_or
+:type: equiv
+:verilog_top: loop_reduce_or.top
+:pyrope_top: top
+*/
+
+// A `for` loop whose body is an OR-REDUCTION, with the loop index in the slice
+// bounds: r[i] = |a[4i+3 .. 4i]. Two lowerings meet here that the standalone
+// fixtures cover only apart -- `reduce_or` has the `#|` cell with no loop, and
+// the `loop_roll_*` group has the loop with no reduce.
+//
+// The index is the load-bearing part. The loop lowers ROLLED by default (one
+// `__loop0` Sub replicated four times with `i` as a RUNTIME port), so the slice
+// `(i*4)..=((i*4)+3)` becomes a dynamic Get_mask rather than four constant
+// ones, and the bound analysis emits a `descending bit-range select (hi < lo)`
+// warning it cannot discharge for a runtime `i`. That warning is the reason
+// this pair exists: the emitted hardware must still be right, and only the
+// golden can say so. `loop_reduce_or_1.prp` is the same source UNROLLED, which
+// pins rolled == unrolled on the Pyrope-vs-Pyrope axis.
+//
+// It is also the fixture for the `#|` SYNTHESIS gap: `pass.abc` has no
+// combinational bit-blast for the `ror` cell ("cell 'ror' has no combinational
+// bit-blast yet"), so this design proves but does not yet map. When it does,
+// its netlist is comparable against this golden.
+
+pub mod top(a:u16) -> (r:u4@[0], any:u1@[0]) {
+  mut acc:u4 = 0
+  for i in 0..<4 {
+    acc#[i] = unsigned(a#|[(i * 4)..=((i * 4) + 3)])
+  }
+  r   = acc
+  any = unsigned(acc#|[0..=3])
+}

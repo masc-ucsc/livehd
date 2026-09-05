@@ -167,7 +167,7 @@ EOF
   echo "== $top: synth LGraph back to Verilog =="
   "$LHD" synth lg:"$lg" \
     --top "$top" \
-    --recipe O0 \
+    \
     --workdir "$synth_work" \
     --result-json "$logs/lhd_synth_result.json" \
     --emit verilog:"$gate_v" \
