@@ -93,6 +93,10 @@ SLANG_LADDER = {
     "multiassign": "lec",  # ordinary concurrent slice assigns are resolved together; only generated-loop cross-iteration drivers are refused
     "mux": "lec",
     "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
+    # Per-BIT dependency tracking through an unpacked array of packed wires: a
+    # word-granular reader sees each generate level depend on itself and reports
+    # a false combinational loop (a hard error, not a wrong answer).
+    "packed_wire_tree": "lec",
     "mux2": "lec",
     # async-reset-as-sync demotion soundness gates (each is a confirmed silent
     # miscompile the reader must instead hard-error; see slang_structure.cpp

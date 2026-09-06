@@ -1847,10 +1847,3 @@ sh_test(
     srcs = ["lhd_parameter_array_test.sh"],
     data = _FLOW_DATA,
 )
-
-sh_test(
-    name = "lhd_yosys_packed_wire_test",
-    size = "large",
-    srcs = ["lhd_yosys_packed_wire_test.sh"],
-    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
