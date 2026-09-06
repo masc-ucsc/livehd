@@ -8,6 +8,6 @@
 // error, but for `!=` the suggested conversion is `== 0` (so the rewritten
 // comparison stays equivalent).
 const x    = 0xA
-const flag = x#|[0..=3]   // or-reduction → bool
+const flag = x != 0   // comparison → bool
 const bit  = x#[2]        // bit-select   → int(min=0, max=1)
 const r = flag != bit     // bool != int  → error, hint: `bit == 0`

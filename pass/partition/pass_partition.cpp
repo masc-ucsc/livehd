@@ -9,6 +9,7 @@
 #include <format>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <print>
 #include <string>
 #include <utility>
@@ -96,72 +97,120 @@ uint64_t sig_str(uint64_t h, std::string_view s) {
   return h;
 }
 
-// `truncated` reports that this value was cut short by the depth cap or the
-// cycle guard, i.e. it depends on the PATH that reached `pin`, not on `pin`
-// alone. Only an untruncated value is memoized, which makes the memo a pure
-// function of the graph -- and therefore shareable across regions (name_ports
-// keeps one memo for the whole def; a per-region memo re-walked the same cones
-// once per region, O(regions x def) on a heavily partitioned design).
-uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_class, uint64_t>& memo,
-                  absl::flat_hash_set<hhds::Node_class>& on_path, int depth, bool& truncated) {
-  if (auto it = memo.find(pin); it != memo.end()) {
-    return it->second;
-  }
+std::optional<uint64_t> producer_anchor(const hhds::Pin_class& pin) {
   constexpr uint64_t kSeed = 0xcbf29ce484222325ULL;
-  if (pin.is_const()) {  // constant: its value is its identity
-    uint64_t h = sig_str(sig_mix(kSeed, 1), gu::const_of(pin).serialize());
-    memo[pin]  = h;
-    return h;
+  if (pin.is_const()) {
+    return sig_str(sig_mix(kSeed, 1), gu::const_of(pin).serialize());
   }
-  if (gu::is_graph_input_pin(pin)) {  // declared IO: its name is its identity
-    uint64_t h = sig_str(sig_mix(kSeed, 2), gu::pin_name_of(pin));
-    memo[pin]  = h;
-    return h;
+  if (gu::is_graph_input_pin(pin)) {
+    return sig_str(sig_mix(kSeed, 2), gu::pin_name_of(pin));
   }
-  if (auto pn = gu::pin_name_of(pin); !pn.empty()) {  // named wire: stop here
-    uint64_t h = sig_str(sig_mix(kSeed, 3), pn);
-    memo[pin]  = h;
-    return h;
+  if (auto pn = gu::pin_name_of(pin); !pn.empty()) {
+    return sig_str(sig_mix(kSeed, 3), pn);
   }
   auto master = pin.get_master_node();
-  if (gu::has_name(master)) {  // named node (register/wire): a stable anchor
-    uint64_t h = sig_mix(sig_str(sig_mix(kSeed, 4), gu::node_name_of(master)), static_cast<uint64_t>(pin.get_port_id()));
-    memo[pin]  = h;
-    return h;
+  if (gu::has_name(master)) {
+    return sig_mix(sig_str(sig_mix(kSeed, 4), gu::node_name_of(master)), static_cast<uint64_t>(pin.get_port_id()));
   }
-  // Anonymous internal node: op + width/sign + a commutative-safe fold of the
-  // input-driver cones (each child mixed with its sink port_id, then sorted, so
-  // operand order is irrelevant for commutative ops but preserved for the rest).
-  uint64_t node = sig_mix(sig_mix(kSeed, 6), static_cast<uint64_t>(type_op_of(master)));
-  node          = sig_mix(
+  return std::nullopt;
+}
+
+uint64_t producer_shape(const hhds::Pin_class& pin) {
+  constexpr uint64_t kSeed = 0xcbf29ce484222325ULL;
+  uint64_t           node  = sig_mix(sig_mix(kSeed, 6), static_cast<uint64_t>(type_op_of(pin.get_master_node())));
+  return sig_mix(
       node,
       (static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(pin))) << 1U) | static_cast<uint64_t>(gu::is_unsign(pin) ? 0U : 1U));
-  // A cycle or depth cap terminates at this coarse op/shape anchor (not
-  // memoized, since it is path-dependent); regions that hit it stay reuse-safe
-  // via a conservative miss, never a wrong reuse.
-  if (depth <= 0 || on_path.contains(master)) {
-    truncated = true;
-    return sig_mix(node, 0x9e37U);
+}
+
+// Resolve producer cones without recursion or a depth cutoff. The former
+// depth-512 cutoff disabled memoization for every ancestor of a deep cone,
+// making reconvergent DAGs exponential (EPFL hyp spent minutes naming ports).
+// As in the forward walk below, the cyclic residue uses local shape anchors;
+// indistinguishable boundary inputs still refuse reuse in name_ports().
+//
+// `coarse` (optional) collects every pin whose value is, or transitively folds
+// in, that residue. Unlike the old recursive walk -- which coarsened only the
+// single pin where the cycle was hit -- a Kahn pass cannot drain any pin whose
+// consumers sit in an SCC, so the residue reaches acyclic pins too. A residue
+// value is op+width+sign ONLY: it is NOT a content signature, so two unrelated
+// ports can tie on it and the "tied outputs are interchangeable" premise in
+// name_ports stops holding. name_ports refuses region reuse on any such port.
+absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::vector<hhds::Pin_class>& roots,
+                                                                   absl::flat_hash_set<hhds::Pin_class>* coarse = nullptr) {
+  absl::flat_hash_map<hhds::Pin_class, uint32_t> indegree;
+  absl::flat_hash_map<hhds::Pin_class, uint64_t> resolved;
+  std::vector<hhds::Pin_class>                   reachable;
+  auto                                           add = [&](const hhds::Pin_class& pin) {
+    auto [it, inserted] = indegree.try_emplace(pin, 0);
+    if (inserted) {
+      reachable.push_back(pin);
+      if (auto anchor = producer_anchor(pin)) {
+        resolved.emplace(pin, *anchor);
+      }
+    }
+    return it;
+  };
+  for (const auto& root : roots) {
+    add(root);
   }
-  on_path.insert(master);
-  std::vector<uint64_t> ops;
-  bool                  cut = false;
-  for (const auto& e : master.inp_edges()) {
-    uint64_t child = cone_sig(e.driver, memo, on_path, depth - 1, cut);
-    ops.push_back(sig_mix(child, static_cast<uint64_t>(e.sink.get_port_id())));
+  for (size_t i = 0; i < reachable.size(); ++i) {
+    const auto pin = reachable[i];
+    if (resolved.contains(pin)) {
+      continue;
+    }
+    for (const auto& e : pin.get_master_node().inp_edges()) {
+      ++add(e.driver)->second;
+    }
   }
-  std::sort(ops.begin(), ops.end());
-  for (uint64_t o : ops) {
-    node = sig_mix(node, o);
+  std::vector<hhds::Pin_class> ready;
+  for (const auto& pin : reachable) {
+    if (indegree.at(pin) == 0) {
+      ready.push_back(pin);
+    }
   }
-  node = sig_mix(node, static_cast<uint64_t>(pin.get_port_id()));  // which output pin of the node
-  on_path.erase(master);
-  if (cut) {
-    truncated = true;  // a truncated child makes THIS value path-dependent too
-  } else {
-    memo[pin] = node;
+  for (size_t i = 0; i < ready.size(); ++i) {
+    const auto pin = ready[i];
+    if (resolved.contains(pin)) {
+      continue;
+    }
+    for (const auto& e : pin.get_master_node().inp_edges()) {
+      auto it = indegree.find(e.driver);
+      I(it != indegree.end() && it->second > 0);
+      if (--it->second == 0) {
+        ready.push_back(e.driver);
+      }
+    }
   }
-  return node;
+  for (const auto& [pin, degree] : indegree) {
+    if (degree != 0 && !resolved.contains(pin)) {
+      resolved.emplace(pin, sig_mix(producer_shape(pin), 0x9e37U));
+      if (coarse != nullptr) {
+        coarse->insert(pin);
+      }
+    }
+  }
+  for (auto it = ready.rbegin(); it != ready.rend(); ++it) {
+    if (resolved.contains(*it)) {
+      continue;
+    }
+    std::vector<uint64_t> operands;
+    bool                  tainted = false;
+    for (const auto& e : it->get_master_node().inp_edges()) {
+      operands.push_back(sig_mix(resolved.at(e.driver), static_cast<uint64_t>(e.sink.get_port_id())));
+      tainted = tainted || (coarse != nullptr && coarse->contains(e.driver));
+    }
+    std::sort(operands.begin(), operands.end());
+    uint64_t node = producer_shape(*it);
+    for (uint64_t operand : operands) {
+      node = sig_mix(node, operand);
+    }
+    resolved.emplace(*it, sig_mix(node, static_cast<uint64_t>(it->get_port_id())));
+    if (tainted) {
+      coarse->insert(*it);
+    }
+  }
+  return resolved;
 }
 
 template <typename Fn>
@@ -500,17 +549,17 @@ private:
                         const std::vector<IntEdge>& redges, const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
   // Rebuild region r's original logic into `dst_lib` under `name` (decl-only
   // Subs); returns the committed body. The abc cache's stable compare artifact.
-  hhds::Graph*                        build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
-                                                          const std::vector<hhds::Node_class>& rnodes);
+  hhds::Graph* build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
+                                   const std::vector<hhds::Node_class>& rnodes);
   // As above but for the single-region "as top" shape (primary IO names,
   // top_outputs_ instead of region ports) -- shared by build_module_as_top's
   // classic body and its incremental pre-body.
-  void                                emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
-                                                              const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
-                                                              const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
-  void                                emit_top_passthrough_outputs(hhds::Graph* body);  // primary/const-driven outputs (no region)
-  hhds::Graph*                        build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
-                                                            const std::vector<hhds::Node_class>& rnodes);
+  void         emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
+                                       const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
+                                       const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
+  void         emit_top_passthrough_outputs(hhds::Graph* body);  // primary/const-driven outputs (no region)
+  hhds::Graph* build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
+                                     const std::vector<hhds::Node_class>& rnodes);
   // Regions in a reproducible order: by color, then by the smallest member node
   // id (invariant to which member the union-find picked as representative).
   // Region indices are already deterministic; this order is what fixes the
@@ -718,16 +767,10 @@ void Partitioner::name_ports() {
   out_index_.clear();  // rebuilt below after the sort settles indices
   region_reuse_ok_.assign(region_nodes_.size(), 1);
 
-  // Stable, nid-free content signatures for the boundary drivers, memoized for
-  // the WHOLE def rather than per region. Both walks read only `g_`, and the
-  // memos now hold only path-independent values (see cone_sig's `truncated`),
-  // so the value a pin gets does not depend on which region asked first --
-  // recompile stability is unchanged while a shared cone is walked ONCE instead
-  // of once per region. On xs_renametable (464 regions on one def) the forward
-  // walk alone was ~15 s of a 20 s all-cache-hit `pass.abc`.
-  absl::flat_hash_map<hhds::Pin_class, uint64_t> sig_memo;
-  std::vector<hhds::Pin_class>                   fwd_roots;
-  size_t                                         fwd_root_count = 0;
+  // Both directions are resolved once for the whole definition. Their values
+  // depend on graph structure, never on the region or traversal order.
+  std::vector<hhds::Pin_class> fwd_roots;
+  size_t                       fwd_root_count = 0;
   for (const auto& ports : module_inputs_) {
     fwd_root_count += ports.size();
   }
@@ -737,7 +780,15 @@ void Partitioner::name_ports() {
       fwd_roots.push_back(port.driver);
     }
   }
-  const auto fwd_memo = fwd_cone_signatures(fwd_roots);
+  const auto fwd_memo       = fwd_cone_signatures(fwd_roots);
+  auto       producer_roots = fwd_roots;
+  for (const auto& ports : module_outputs_) {
+    for (const auto& port : ports) {
+      producer_roots.push_back(port.driver);
+    }
+  }
+  absl::flat_hash_set<hhds::Pin_class> sig_coarse;  // signature is only op/width/sign (cyclic residue)
+  const auto                           sig_memo = producer_signatures(producer_roots, &sig_coarse);
 
   // A boundary port becomes a wire in the region module; it must not collide
   // with a recreated internal node's name. The classic failure is a flop whose
@@ -795,11 +846,7 @@ void Partitioner::name_ports() {
     //
     // The cached body is stitched into a freshly rebuilt wrapper BY PORT NAME,
     // so the name must be reproducible across recompiles (not `<op>_<nid>`).
-    auto sig_of = [&](const hhds::Pin_class& drv) {
-      absl::flat_hash_set<hhds::Node_class> on_path;
-      bool                                  truncated = false;
-      return cone_sig(drv, sig_memo, on_path, 512, truncated);
-    };
+    auto sig_of     = [&](const hhds::Pin_class& drv) { return sig_memo.at(drv); };
     // Proposal 2: a boundary INPUT is identified by BOTH its producer cone
     // (sig_of, backward) AND its consumer cone (fwd_sig_of, forward). Producer
     // alone is a coarse tie -- two lanes fed by identical logic but used
@@ -842,9 +889,13 @@ void Partitioner::name_ports() {
       // downstream, e.g. minion_dcache_replay_queue) so they become eligible and
       // soundly reusable; only the genuinely-symmetric residue is refused. Tied
       // OUTPUTS stay eligible (interchangeable: whichever net reads them gets the
-      // same value).
-      for (size_t i = 1; i < ports.size(); ++i) {
-        if (psig[ports[i].driver] == psig[ports[i - 1].driver]) {
+      // same value) -- but only while the signature is EXACT. A port whose
+      // signature is the cyclic residue (op/width/sign only, see
+      // producer_signatures) carries no content at all, so two unrelated ports
+      // can tie on it and the tiebreak that orders them is this-run arbitrary.
+      // Refuse reuse for those, inputs and outputs alike.
+      for (size_t i = 0; i < ports.size(); ++i) {
+        if (sig_coarse.contains(ports[i].driver) || (i > 0 && psig[ports[i].driver] == psig[ports[i - 1].driver])) {
           region_reuse_ok_[r] = 0;
           break;
         }
@@ -884,6 +935,17 @@ void Partitioner::name_ports() {
         }
         return a.driver.get_port_id() < b.driver.get_port_id();
       });
+      // An output whose signature is only the cyclic residue is NOT a content
+      // hash, so the "tied outputs are interchangeable" premise above does not
+      // cover it: two unrelated outputs can tie and the port_id tiebreak that
+      // orders them is this-run arbitrary, which would let a cached body be
+      // stitched back by name onto swapped ports.
+      for (const auto& p : ports) {
+        if (sig_coarse.contains(p.driver)) {
+          region_reuse_ok_[r] = 0;
+          break;
+        }
+      }
       for (size_t i = 0; i < ports.size(); ++i) {
         std::string base;
         if (auto pn = gu::pin_name_of(ports[i].driver); !pn.empty()) {
@@ -1860,6 +1922,13 @@ void Pass_partition::partition(Eprp_var& var) {
             .msg("could not copy '{}' into partition's private physical library", graph->get_name())
             .emit();
         return;
+      }
+      // Opaque callees have no body and are absent from definitions().graphs().
+      // Keep their declarations in the same scratch library as the instances.
+      for (const auto node : graph->body().nodes()) {
+        if (gu::type_op_of(node) == Ntype_op::Sub && node.get_subnode_io() && !node.get_subnode_graph()) {
+          livehd::partition::resolve_or_clone_subdef(&occurrence_library, node);
+        }
       }
     }
   }

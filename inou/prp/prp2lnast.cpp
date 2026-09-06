@@ -4449,6 +4449,26 @@ std::vector<Prp2lnast::Generic_call_arg> Prp2lnast::collect_generic_args(TSNode 
   auto lower_one = [&](TSNode ty) -> Lnast_node {
     std::string_view tt(ts_node_type(ty));
     if (tt == "expression_type" || tt == "dot_expression_type") {
+      // A COMPOUND value expression (`f<N=(SIZE >> 1)>`, `f<N=(lvl + 1)>`)
+      // reaches here as an `expression_type` wrapping a parenthesized `tuple`
+      // (the generic rvalue is parsed with the TYPE grammar, so an expression
+      // must be parenthesized: a bare `>` would close the generic list). Its
+      // source text is not an identifier, so passing it through as a ref
+      // spelled `(SIZE >> 1)` builds a malformed ref that pass.lnastfmt
+      // rejects. Lower it through the ordinary expression path instead: the
+      // statements land ahead of the fcall and the tmp folds to the comptime
+      // constant the generic binds (resolve_generic_binds folds the ref).
+      TSNode inner = ts_node_named_child_count(ty) == 1 ? ts_node_named_child(ty, 0) : TSNode{};
+      if (!ts_node_is_null(inner)) {
+        std::string_view it(ts_node_type(inner));
+        // prpparse's parse_type() reaches a non-identifier type expression
+        // through parse_paren / parse_constant / parse_if_expression /
+        // parse_match_expression, so the parenthesized form lands as either
+        // `paren_group` or `tuple` depending on whether a suffix followed.
+        if (it == "paren_group" || it == "tuple" || it == "if_expression" || it == "match_expression") {
+          return expr_to_node(inner);
+        }
+      }
       auto       txt = trim(get_text(ty));
       // A CONSTANT-valued generic (`f<3>`, `f<true>`, `f<'s'>`) rides as a
       // const, not a ref — a ref named `3` is malformed (lnastfmt) and the
@@ -5351,14 +5371,17 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // (per [[tree_sitter_pyrope_hidden_tokens]]), so ts_node_named_child
           // returns nothing — extract the width from the node's TEXT instead.
           // `u6` → strip leading `u` → "6"; `s12` → strip `s` → "12".
-          if (tt == "uint_type" || tt == "sint_type") {
+          const auto alias_text = trim(get_text(t));
+          const bool signed_alias = tt == "expression_type" && alias_text.size() >= 2 && alias_text.front() == 'i'
+                                    && is_prim_type_token(alias_text);
+          if (tt == "uint_type" || tt == "sint_type" || signed_alias) {
             auto txt = trim(get_text(t));
             // A `constraint` tuple (`u6(max=3)`) extends the node text past
             // the keyword; keep only the width token.
             if (auto paren = txt.find('('); paren != std::string_view::npos) {
               txt = trim(txt.substr(0, paren));
             }
-            if (txt.size() >= 2 && (txt.front() == 'u' || txt.front() == 's')) {
+            if (txt.size() >= 2 && (txt.front() == 'u' || txt.front() == 's' || txt.front() == 'i')) {
               auto digits = txt.substr(1);
               try {
                 size_t  pos = 0;
@@ -7450,6 +7473,13 @@ void Prp2lnast::record_type_name_read(const TSNode& type_node) {
 
 void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   std::string_view t(ts_node_type(type_node));
+  // prpparse can classify the signed-width alias iN as a named type. It is
+  // reserved by the scalar type vocabulary, so lower it with the same bounds
+  // as sN instead of leaving an unresolved type reference on a module port.
+  const auto type_text = trim(get_text(type_node));
+  if (t == "expression_type" && type_text.size() >= 2 && type_text.front() == 'i' && is_prim_type_token(type_text)) {
+    t = "sint_type";
+  }
   if (t == "uint_type" || t == "sint_type") {
     // Emit the canonical `prim_type_int(max, min)`. The width sugar
     // `uN`/`sN`/`iN` computes its bounds; the unsized spellings (`uint`,

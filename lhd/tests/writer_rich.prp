@@ -16,8 +16,8 @@ pub comb rich(x:u8, y:u8) -> (z:u16) {
 
 const A = 0ub00000000 + 0xb5
 cassert(signed(A#&[..]) == 0)
-cassert(signed(A#|[..]) == -1)   // OR-reduction is bool true; signed(true) == -1 (2f-string_cast)
-cassert(signed(A#^[..]) == -1)   // XOR-reduction is bool true; signed(true) == -1
+cassert(signed(A#|[..]) == -1)   // u1(1) reinterpreted as s1 is -1
+cassert(signed(A#^[..]) == -1)   // XOR also returns u1
 cassert(A#+[..] == 5)
 
 mut j = 0

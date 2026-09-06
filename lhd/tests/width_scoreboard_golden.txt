@@ -1,0 +1,18 @@
+# Emitted-width scoreboard: <design> <total declared bits> <declaration count>.
+# Regenerate with UPDATE_GOLDEN=1; see width_scoreboard_test.sh for what a
+# change in either direction means.
+trivial_if 23 6
+bitrange_dyn 43 5
+bitrange_dyn_narrow 40 5
+codeblock_expr 32 3
+arr2d_dyn_sel 88 9
+arr_comb_tmp 139 9
+array_bitview_runtime 303 16
+bit_sel_sext 55 7
+bitsel_dyn 43 6
+bitset_reg 288 31
+async_reset_enable 55 13
+comb_array_const_index_read 143 28
+assign_pattern 52 28
+packed_assign 29 5
+match_no_else 54 11

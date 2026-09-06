@@ -44,6 +44,7 @@ protected:
   void process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_div(hhds::Node_class& node);
   void process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_get_mask(hhds::Node_class& node);
   void process_set_mask(hhds::Node_class& node);
@@ -68,6 +69,7 @@ protected:
   // After the iteration budget is spent, warn (via diag) for every driver pin
   // whose bits/sign could not be bounded.
   void report_unbounded(hhds::Graph* g);
+  void remove_mask_identities(hhds::Graph* g);
 
   void bw_pass(hhds::Graph* g);
 

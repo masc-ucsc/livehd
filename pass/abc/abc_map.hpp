@@ -167,6 +167,7 @@ struct Region_qor {
   // netlist. Diagnostic only -- a cache hit reports 0 (the row is not
   // persisted with it; its gates/area are already net of the bypass).
   int         bypassed    = 0;
+  int         logic_depth = -1;     // mapped ABC gate levels between region/state boundaries, before read-back buffer bypass
   float       delay       = -1.0f;  // critical arrival (unit-delay depth, or ps with an NLDM GENLIB); <0 => unavailable
   std::string crit_output;          // region output port with the worst arrival
   std::string crit_src;             // "file:line" of that output's original driver (may be empty)

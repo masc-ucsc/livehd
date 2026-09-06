@@ -272,7 +272,7 @@ void Inou_yosys_api::tolg(Eprp_var& var) {
 void Inou_yosys_api::do_tolg(Eprp_var& var) {
   const auto filelist_file{var.get("filelist_file")};
 
-  const bool has_files = !files.empty() && files != "/INVALID";
+  const bool has_files              = !files.empty() && files != "/INVALID";
   // Sources can also ride in slang_flags (e.g. `lhd ... --reader yosys-slang --
   // -F filelist.f`, where lhd forwards the raw `--` args as slang_flags into
   // read_slang). Accept that as a valid source spec too.
@@ -293,6 +293,30 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 
   mustache::data vars;
   vars.set("path", path);
+
+  // Hard macros are declarations for elaboration, never mapping candidates.
+  // Quote each path independently so spaces cannot become Yosys arguments.
+  for (const auto* key : {"macrolib", "blackbox"}) {
+    mustache::data declarations{mustache::data::type::list};
+    const auto     paths = var.get(key);
+    const char     sep   = paths.find('\x1f') != std::string_view::npos ? '\x1f' : ',';
+    for (const auto path : absl::StrSplit(paths, sep, absl::SkipEmpty())) {
+      // Yosys has NO escape inside a quoted argument: next_token() (kernel/io.cc)
+      // returns the token WITH its quotes and rewrite_filename() (kernel/yosys.cc)
+      // only strips the outer pair -- a `\"` would be opened as a literal part of
+      // the path, and a bare `"` would end the token early. Quoting is therefore
+      // only safe for spaces; reject the characters it cannot express.
+      if (path.find_first_of("\r\n\"\\") != std::string_view::npos) {
+        livehd::diag::err("inou.yosys", "bad-option", "io")
+            .msg("{} path contains a newline, quote or backslash, which yosys cannot quote: {}", key, path)
+            .hint("rename the file (or symlink it) so the path has none of \\r \\n \" \\")
+            .fatal();
+        return;
+      }
+      declarations << mustache::data{"input", absl::StrCat("\"", path, "\"")};
+    }
+    vars.set(key, declarations);
+  }
 
   // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
   auto        exe_path = livehd::file_utils::get_exe_path();
@@ -496,6 +520,8 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("slang_flags", "comma- (or \\x1f-) separated flags for read_slang command", "");
   m1.add_label_optional("setundef", "replace undef/don't-care values before graph import: zero|true", "");
   m1.add_label_optional("memory_mode", "memory lowering mode before graph import: default|nomap|collect|preserve", "");
+  m1.add_label_optional("macrolib", "comma-separated Liberty files read as hard-macro declarations before elaboration", "");
+  m1.add_label_optional("blackbox", "comma-separated Verilog files read as blackbox declarations before elaboration", "");
   m1.add_label_optional("techmap", "yosys techmap before graph import: full|alumacc (empty = none)", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");

@@ -6750,6 +6750,29 @@ bool nested_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, 
       if (Lnast_ntype::is_for(t) && any_read_tainted(stmt, /*skip_first=*/true)) {
         return true;
       }
+      // Same rule for an explicit generic bind (`add_n<N=(SIZE >> (lvl+1))>`):
+      // a generic is a COMPTIME parameter, so its actual must be a constant
+      // where the call sits. Inside the lifted body the index / a carry / an
+      // invariant is a runtime port, so a tainted bind cannot fold -- the callee
+      // then reaches tolg with an undriven `inl<n>_<G>`. prp2lnast rides each
+      // bind in a `store(__generic_arg, value)` child of the func_call, one
+      // level below the statement, so `any_read_tainted` (direct children only)
+      // does not see it.
+      if (Lnast_ntype::is_func_call(t)) {
+        for (auto arg : ln.children(stmt)) {
+          if (!Lnast_ntype::is_store(ln.get_type(arg))) {
+            continue;
+          }
+          auto key = ln.get_first_child(arg);
+          if (key.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(key)) || ln.get_name(key) != call_generic_arg_marker) {
+            continue;
+          }
+          auto val = ln.get_sibling_next(key);
+          if (!val.is_invalid() && Lnast_ntype::is_ref(ln.get_type(val)) && tainted.contains(std::string(ln.get_name(val)))) {
+            return true;
+          }
+        }
+      }
       // Compound statements (if / for / while …): their nested stmts blocks
       // are walked with the same taint set; their own condition refs are
       // ordinary reads.
@@ -6963,8 +6986,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     runtime_in_body.insert(runtime_in_body.end(), out.invariants.begin(), out.invariants.end());
     if (nested_loop_domain_reads_any(ln, body_stmts, runtime_in_body)) {
       return refuse(
-          "a loop nested in the body has a domain that reads the index, a carry or a loop invariant (all runtime inside the "
-          "lifted body)");
+          "a nested loop domain or a generic `<...>` bind in the body reads the index, a carry or a loop invariant (all "
+          "runtime inside the lifted body, and both need a comptime value)");
     }
   }
 
@@ -7300,7 +7323,15 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   if (const auto id = src->get_srcid(body_stmts); id != hhds::SourceId_invalid) {
     body->set_srcid(root, body->source_locator().import_from(src->source_locator(), id));
   }
-  body->set_lambda_kind("mod");  // may hold state and may instantiate other mods
+  // A loop lifted out of a `comb` must itself be a `comb`. tolg lets ANY body
+  // instantiate a comb callee (it is latency-0 and stateless), but only a `mod`
+  // may instantiate a mod -- so lifting unconditionally as a mod made every
+  // rolled loop inside a comb a hard error ("'x' (a comb) calls the mod
+  // 'x.__loop0' -- only `mod` bodies may instantiate pipe/mod"), i.e. every
+  // typed-carry `for` in a comb failed under the default compile.unroll=false.
+  // The slice is stateless by construction: the same tolg gate already forbids
+  // a reg or a mod instance anywhere in the enclosing comb's body.
+  body->set_lambda_kind(src->get_lambda_kind() == "comb" ? "comb" : "mod");
   body->set_template(false);
 
   // One io port declaration: store(ref(name), const(nil), <type>) [+ stages].
@@ -7799,6 +7830,38 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       Generic_bind gb;
       gb.from      = std::move(from);
       gb.func_name = s;
+      return gb;
+    }
+    // A generic bound to a comptime VALUE rather than a literal: a named
+    // constant (`f<N=SIZE>`), a loop index bound by the unroller
+    // (`f<N=lvl>`), or the tmp prp2lnast lowered a parenthesized expression
+    // into (`f<N=(SIZE >> 1)>`). All three arrive as a ref, and without this
+    // they fell through to bind_of_type_name and became a named TYPE bind:
+    // nothing then emitted a value binding for the generic, so the callee's
+    // body read of it reached tolg as an undriven `inl<n>_<G>`. A type name
+    // never folds (only a trivial known scalar does), so a real `f<u8>` /
+    // `f<Byte>` still takes the type path below.
+    if (auto fv = try_fold_ref(s);
+        fv && !fv->is_invalid() && !fv->has_unknowns() && (fv->is_string() || fv->is_bool() || fv->is_integer())) {
+      Generic_bind gb;
+      gb.from       = std::move(from);
+      gb.const_text = std::string(fv->to_pyrope());
+      if (fv->is_string()) {
+        gb.kind = Io_kind::string;
+        return gb;
+      }
+      if (fv->is_bool()) {
+        // Mirror the literal `f<true>` branch above: a bool binds the boolean
+        // kind with a 0..1 envelope, NOT an integer pinned to its own value --
+        // `Io_kind::integer` here would make a `:B` slot a 1-valued int type.
+        gb.kind = Io_kind::boolean;
+        gb.max  = *Dlop::from_pyrope("1");
+        gb.min  = *Dlop::from_pyrope("0");
+        return gb;
+      }
+      gb.kind = Io_kind::integer;
+      gb.max  = *fv;  // a constant pins its own value as the type envelope (D)
+      gb.min  = *fv;
       return gb;
     }
     return bind_of_type_name(s, std::move(from));

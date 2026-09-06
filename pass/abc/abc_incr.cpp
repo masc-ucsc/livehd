@@ -169,6 +169,9 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
     if (auto m = v.FindMember("delay"); m != v.MemberEnd() && m->value.IsNumber()) {
       row.delay = static_cast<float>(m->value.GetDouble());
     }
+    if (auto m = v.FindMember("logic_depth"); m != v.MemberEnd() && m->value.IsInt()) {
+      row.logic_depth = m->value.GetInt();
+    }
     row.crit_output = gets("crit_output");
     row.crit_src    = gets("crit_src");
     if (auto m = v.FindMember("div_blackbox"); m != v.MemberEnd() && m->value.IsInt()) {
@@ -443,6 +446,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.gates        = q.gates;
   row.area         = q.area;
   row.delay        = q.delay;
+  row.logic_depth  = q.logic_depth;
   row.crit_output  = q.crit_output;
   row.crit_src     = q.crit_src;
   row.div_blackbox = q.div_blackbox;
@@ -590,10 +594,10 @@ void Incr_cache::save() {
     }
     first  = false;
     out   += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
-                       json_util::escape(*k),
-                       json_util::escape(r.module),
-                       json_util::escape(r.pre),
-                       json_util::escape(r.recipe));
+                         json_util::escape(*k),
+                         json_util::escape(r.module),
+                         json_util::escape(r.pre),
+                         json_util::escape(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.in[i]));
     }
@@ -602,11 +606,13 @@ void Incr_cache::save() {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.out[i]));
     }
     out += std::format(
-        "],\"gates\":{},\"area\":{},\"delay\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{},\"digest\":\"{:"
+        "],\"gates\":{},\"area\":{},\"delay\":{},\"logic_depth\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{},"
+        "\"digest\":\"{:"
         "016x}{:016x}\"}}",
         r.gates,
         r.area,
         r.delay,
+        r.logic_depth,
         json_util::escape(r.crit_output),
         json_util::escape(r.crit_src),
         r.div_blackbox,

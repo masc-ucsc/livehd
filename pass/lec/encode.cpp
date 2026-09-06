@@ -2268,7 +2268,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
       switch (op) {
         case Ntype_op::And:
-        case Ntype_op::Or:
+        case Ntype_op::Or :
         case Ntype_op::Xor: {
           Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
           // A bitwise op is a width-preserving pass-through of its operands'
@@ -2388,11 +2388,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // that is always 0, so W is ~1 bit; `fit(100, 1)` would truncate the
           // divisor to 0 => UDIV-by-zero => all-ones garbage. Compute the quotient
           // at a width that holds both operands, then narrow to the output width.
-          int  dw = std::max({pid(0)[0].width, pid(1)[0].width, W});
-          Term a  = fit(pid(0)[0], dw);
-          Term b  = fit(pid(1)[0], dw);
-          Term q  = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
-          result  = fit(Val{q, dw, out_signed}, W);
+          const auto& av          = pid(0)[0];
+          const auto& bv          = pid(1)[0];
+          const bool  signed_math = av.is_signed || bv.is_signed;
+          // Signed arithmetic needs a zero guard on each unsigned operand.
+          // The quotient's inferred sign does not select the operation: two
+          // negative operands can produce a proven non-negative quotient.
+          int         dw = std::max({W, av.width + (signed_math && !av.is_signed), bv.width + (signed_math && !bv.is_signed)});
+          Term        a  = fit(av, dw);
+          Term        b  = fit(bv, dw);
+          Term        q  = tm_.mkTerm(signed_math ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
+          result         = fit(Val{q, dw, signed_math}, W);
           break;
         }
         case Ntype_op::Rem: {
@@ -2411,11 +2417,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // and because BOTH sides of the miter would use the same wrong kind,
           // lec would still report "equivalent". One kind, no sign switch: every
           // value here is signed and unsigned is just the non-negative subset.
-          int  dw = std::max({pid(0)[0].width, pid(1)[0].width, W});
-          Term a  = fit(pid(0)[0], dw);
-          Term b  = fit(pid(1)[0], dw);
-          Term r  = tm_.mkTerm(Kind::BITVECTOR_SREM, {a, b});
-          result  = fit(Val{r, dw, true}, W);
+          const auto& av = pid(0)[0];
+          const auto& bv = pid(1)[0];
+          int         dw = std::max({W, av.width + !av.is_signed, bv.width + !bv.is_signed});
+          Term        a  = fit(av, dw);
+          Term        b  = fit(bv, dw);
+          Term        r  = tm_.mkTerm(Kind::BITVECTOR_SREM, {a, b});
+          result         = fit(Val{r, dw, true}, W);
           break;
         }
         case Ntype_op::Not: {
@@ -2533,7 +2541,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // zero-extended into the 16-bit output where iverilog says 65532 -- on
           // the BASELINE side of the miter, so an equivalent pair refuted once
           // pass.bitfuzz gave the other side the accurate sign.
-          out_signed  |= pid(0)[0].is_signed && gu::bits_of(dpin) == 0;
+          out_signed |= pid(0)[0].is_signed && gu::bits_of(dpin) == 0;
           break;
         }
         case Ntype_op::SRA: {
@@ -2564,7 +2572,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // own emitted Verilog say 158 -- and the side lec got wrong was the
           // hand-written GOLDEN, on all 1024 input pairs of which the two designs
           // agree.
-          out_signed      |= a.is_signed && gu::bits_of(dpin) == 0;
+          out_signed     |= a.is_signed && gu::bits_of(dpin) == 0;
           break;
         }
         case Ntype_op::Sext: {
@@ -2789,7 +2797,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           result = fit(pid(0)[0], W);
           break;
         }
-        case Ntype_op::Mux:
+        case Ntype_op::Mux   :
         case Ntype_op::Hotmux: {
           // pid0 = selector; values on pid 1..N.
           if (pid(0).empty()) {

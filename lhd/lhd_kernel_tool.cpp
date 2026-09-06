@@ -224,6 +224,9 @@ bool tool_match_all(const Tool_record& r, const std::vector<Tool_filter>& filter
 
 std::string tool_endpoint_name(const hhds::Pin_class& pin) {
   namespace gu = livehd::graph_util;
+  if (pin.is_const()) {
+    return gu::const_of(pin).to_pyrope();
+  }
   if (gu::is_graph_input_pin(pin) || gu::is_graph_output_pin(pin)) {
     return std::format("${}", pin.get_pin_name());
   }

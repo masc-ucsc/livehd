@@ -595,9 +595,9 @@ upass::Vote uPass_bitwidth::process_bit_not(std::string_view dst_name, Bundle& d
 upass::Vote uPass_bitwidth::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
+upass::Vote uPass_bitwidth::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
+upass::Vote uPass_bitwidth::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
 upass::Vote uPass_bitwidth::process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }

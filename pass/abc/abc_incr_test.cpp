@@ -152,9 +152,10 @@ TEST(AbcIncr, StructuralEqualReuse) {
 
   Incr_cache c1("lgdb_p2_cache", 7);
   Region_qor q;
-  q.gates = 5;
-  q.area  = 2.0;
-  q.delay = 1.5;
+  q.gates       = 5;
+  q.area        = 2.0;
+  q.delay       = 1.5;
+  q.logic_depth = 3;
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, q, "R", &out1));
   c1.save();
 
@@ -167,6 +168,8 @@ TEST(AbcIncr, StructuralEqualReuse) {
   Incr_cache c2("lgdb_p2_cache", 7);  // reloads the saved cache
   auto       res = c2.lookup_compare(f2.rb, pre2, "R");
   ASSERT_TRUE(res.hit) << "identical region under new nids must reuse";
+  ASSERT_NE(res.row, nullptr);
+  EXPECT_EQ(res.row->logic_depth, 3);
   EXPECT_EQ(c2.hits(), 0);
   ASSERT_TRUE(c2.reuse_hit(f2.rb, res, &out2));
   EXPECT_EQ(c2.hits(), 1);

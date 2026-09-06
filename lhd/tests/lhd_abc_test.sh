@@ -64,6 +64,25 @@ awk '
   }
   END { exit seen == 0 || bad }
 ' "$W/abc_progress.log" || fail "pass abc completion heartbeat missing or inconsistent: $(cat "$W/abc_progress.log")"
+# Verilog-only emission must trigger mapping without an explicit lg: output.
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir verilog:"$W/directv" \
+    --set synth.liberty="$LIB" --workdir "$W/w_directv"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/directv/"*.v || fail "Verilog-only ABC emit did not map"
+run pass abc --top "$TOP" lg:"$W/lg" --emit verilog:"$W/direct.v" \
+    --set synth.liberty="$LIB" --workdir "$W/w_direct"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/direct.v" || fail "single-file ABC emit did not map"
+for kind in pyrope ln lnast-dump sim isabelle lean; do
+  if "$LHD" pass abc lg:"$W/lg" --emit-dir "$kind:$W/rejected_$kind" \
+      --set synth.liberty="$LIB" -q --result-json "$W/rejected_$kind.json" 2>/dev/null; then
+    fail "ABC silently accepted unsupported $kind output"
+  fi
+  # Per-kind json: a shared file would let iteration N match iteration N-1's
+  # diagnostic when the failing invocation never rewrote it.
+  [ -f "$W/rejected_$kind.json" ] || fail "unsupported $kind output produced no result json"
+  grep -q '"class":"usage"' "$W/rejected_$kind.json" || fail "unsupported $kind output lacked a usage diagnostic"
+  [ ! -e "$W/rejected_$kind" ] || fail "unsupported output was touched before rejection"
+done
+
 # 4. partition the SAME regions, keeping the original logic (the LEC twin)
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 # 5. behavioral model per combinational cell so the netlist Subs resolve for LEC
@@ -73,6 +92,11 @@ run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
 run compile lg:"$W/net" --top "$TOP" --emit-dir verilog:"$W/netv" --workdir "$W/w6"
 run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w7"
 run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w8"
+
+# Direct pass emission and a separate compile of the mapped library agree.
+for f in "$W/netv/"*.v; do
+  cmp -s "$f" "$W/directv/$(basename "$f")" || fail "direct Verilog output differs from the mapped library"
+done
 
 # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/netv/"*.v || fail "no standard cells in the ABC netlist"
@@ -117,6 +141,16 @@ grep 'resolved flow:' "$T/w_timed/logs/"*_lhd_pass_abc.log | grep -q '&scorr' \
   && fail "the built-in timing flow must not perform sequential correlation"
 awk -v unit="$unit_delay" -v timed="$timed_delay" 'BEGIN { exit !(unit > 0 && unit < 10 && timed > 10) }' \
   || fail "delay target did not activate NLDM timing (unit=$unit_delay timed=$timed_delay)"
+# Gate depth stays a count even when delay changes to physical picoseconds.
+python3 - "$T/w_unit/qor.json" "$T/w_timed/qor.json" <<'PY' || fail "invalid mapped logic depth"
+import json
+import sys
+for path in sys.argv[1:]:
+    q = json.load(open(path))
+    depths = [r["logic_depth"] for r in q["regions"] if r["instances"] > 0]
+    assert depths and all(type(d) is int and d > 0 for d in depths), q
+    assert q["total"]["max_region_depth"] == max(depths), q
+PY
 grep -q "Derived GENLIB" "$T/w_timed/logs/"*_lhd_pass_abc.log \
   && fail "timed mapping re-derived a gain GENLIB: the mapper must stay on read_lib's unit-delay GENLIB"
 # The objective ran: a 1000 ps budget (no flops here, so no register margin)
@@ -295,3 +329,19 @@ run pass liberty gensim "$LIB" --emit-dir lg:"$FT/models" --workdir "$FT/w6"
 run lec --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc_feedthrough.abc_feedthrough \
     --set formal.solver=cvc5 --workdir "$FT/w7"
 echo "PASS: feed-through wires map to no buffer cell (identity-buffer bypass) and the netlist stays LEC-equivalent"
+
+# Reduce-OR survives lowering in loop predicates and bit selections. Test
+# both a wide unsigned input and a signed input, including its sign bit.
+RO="$W/reduce_or"
+mkdir -p "$RO"
+cat >"$RO/reduce_or.prp" <<'PRP'
+comb reduce_or(a:u65, b:s9) -> (y:u3) {
+  y = a#|[..] + 2 * b#|[0..=8]
+}
+PRP
+run compile "$RO/reduce_or.prp" --emit-dir lg:"$RO/lg" --workdir "$RO/w1"
+run synth lg:"$RO/lg" --top reduce_or.reduce_or --emit-dir lg:"$RO/net" \
+    --set synth.liberty="$LIB" --set synth.opentimer=false --workdir "$RO/w2"
+run lec --impl lg:"$RO/net" --ref lg:"$RO/lg" --lib lg:"$W/models" --top reduce_or.reduce_or \
+    --set formal.solver=cvc5 --workdir "$RO/w3"
+echo "PASS: wide and signed reduce-OR map and remain equivalent"

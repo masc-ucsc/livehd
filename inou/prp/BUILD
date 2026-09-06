@@ -217,30 +217,20 @@ sh_test(
 ]
 
 # TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
-# NOT-yet-implemented Pyrope feature (marked "TBD" in the docs / 15-tbd.md). Most
-# are `:type: compile` (the feature has no lowering, so the compile FAILS by
-# design); `testbench_step` is `:type: simulation` (the instance/`step`/field-poke
-# model runs, but the string-path `peek("a/b")`/`poke("a/b",v)` accessors are
-# still unimplemented). Each flips green once the feature lands — at which point
-# drop the `fixme` tag and move the file into the
-# normal glob above. Tagged `fixme` so `.bazelrc` (`-fixme`) keeps `bazel test
-# //...` green; run one with the tag filter cleared to see the failure:
-#   bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=
-# Covered: temporal library (past[n]), standard library (import("prp")),
-# verification extras (requires/ensures), testbench extras (step/peek/poke),
-# and the finish-generics gaps from todo/livehd/3g.html (generic_* = body
-# references of a generic name / declaration defaults <T, N=4> / named <T=…>
-# bindings / generic-valued input default, input_default = input defaults with
-# no generics involved; each header records today's exact diagnostic; the
-# `T(a)` constructor form is tracked by the prp-equiv-gen_type_cast pair
-# below instead, which also LEC-checks the lowering once it lands).
-# (The `lg` attribute used to be on this list but is now implemented — its TBD
-# markers were removed from the docs.) The `macro=` memory-compiler binding is
-# also still TBD but is silently accepted-and-ignored — it compiles clean today
-# (no diagnostic), so it needs an emitted-Verilog grep harness, not a compile
-# test, and is tracked in todo/pyrope/3f-macro.html instead.
-# One entry (wire_field_const_store) is a known-BUG tracker rather than a TBD
-# feature: valid code that miscompile-errors today (see its fixture header).
+# NOT-yet-implemented Pyrope feature, or a known BUG on valid code. The compile
+# FAILS by design, so each is tagged `fixme` and `.bazelrc` (`-fixme`) keeps
+# `bazel test //...` green; run one with the tag filter cleared to see it:
+#   bazel test //inou/prp:prp-tbd-vector_io_ports --test_tag_filters=
+# When one flips green, drop it from this list and move the file into the
+# normal glob above (tests/pyrope/, or tests/sim/ for `:type: simulation`).
+#
+# PROMOTED 2026-09-06 (docs<->impl consistency audit, see fixes_pyrope.md):
+# temporal_past, testbench_step, input_default and the six generic_* trackers
+# all pass, so the 15-tbd.md rows claiming generics / input defaults are TBD
+# were stale. The three 2f-latch verify twins (latch_verify_{hold,low},
+# flop_verify_posneg) had already lost their `fixme` tag at M8 and moved too.
+# testbench_step was additionally rewritten for the sigref removal: reads are
+# bare dotted access, `regref` is the one way to DRIVE a cell.
 [
     sh_test(
         name = "prp-tbd-%s" % base,
@@ -251,77 +241,28 @@ sh_test(
         ],
         data = [
             "//inou/prp:tests/prplib.py",
-            "//inou/prp:tests/prpsim.py",  # testbench_step is :type: simulation
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/fixme/%s.prp" % base,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        # testbench_step + temporal_past now lower/run, as do the
-        # 3g subtask-A body-binding trackers (generic_{body_type,const_value,
-        # lambda_param} — a generic name is now visible+substituted in the body);
-        # the rest are still TBD. (temporal_past: `past[N](x)` lowers to a depth-N
-        # `stage` shift register — see prp2lnast function_call_expr_to_node.)
-        # verif_requires is GONE: requires/ensures were removed from the language
-        # (user ruling, 2026-07-25) — write assume for a pre, assert for a post.
-        tags = [] if base in (
-            # 2f-latch M8 (edge normalization): the two latch twins and the
-            # posedge/negedge twin all carry REAL verdicts now — the encoder no
-            # longer sees a Latch or a same-clock edge difference, because
-            # pass.single_edge rewrote them away before it ran. Promoted out of
-            # the fixme arm 2026-07-24.
-            "latch_verify_hold",
-            "latch_verify_low",
-            "flop_verify_posneg",
-            "testbench_step",
-            "temporal_past",
-            "generic_body_type",
-            "generic_const_value",
-            "generic_lambda_param",
-            "generic_default_arg",
-            "input_default",
-            # B/C land via the prpparse grammar (generic decl-defaults + named
-            # binds); they need the @prpparse local override / re-pinned commit.
-            "generic_decl_default",
-            "generic_named_bind",
-        ) else ["fixme"],
+        tags = ["fixme"],
     )
     for base in [
-        "temporal_past",
+        # Standard library `import("prp")` — the 13-stdlib.md wish-list chapter.
         "stdlib_import",
-        "testbench_step",
-        "generic_body_type",
-        "generic_const_value",
-        "generic_lambda_param",
-        "generic_decl_default",
-        "generic_named_bind",
-        "generic_default_arg",
-        "input_default",
         # A VECTOR port (unnamed/positional tuple, or an array) has no lowering
         # in either direction. Counterpart of tests/sim/tuple_io_ports.prp,
         # which covers the NAMED tuple and passes: a named tuple's field order
         # is not guaranteed so its leaves may only be addressed by name, while
         # an unnamed entry is the one aggregate with a defined order and so the
-        # only one that could be indexed/packed as a vector.
+        # only one that could be indexed/packed as a vector. NOT listed in
+        # 15-tbd.md — add a row (fixes_pyrope_future.md F3).
         "vector_io_ports",
         # Known BUG tracker (not TBD): const store to a wire-BUNDLE field is
         # folded+dropped (detupled dotted declare loses its wire mode), then
         # tolg errors "wire 'io.a' is never driven" on valid code. See the
         # fixture header for the root-cause chain and fix direction.
         "wire_field_const_store",
-        # todo/livehd/2f-latch BMC twins (:type: verify) of the sim trackers
-        # above — the SAME self-checking properties as design-body asserts for
-        # `lhd formal verify` (stated twice because test-block asserts are
-        # invisible to verify and body asserts are not executed by sim; see
-        # each header for the dual-fixture conventions). GREEN since M8
-        # (untagged above): pass.single_edge retypes the Latch into a
-        # flop-with-enable and slots a negedge flop into its own sub-step, so
-        # the ordinary Flop encoding decides all three. They stay in tests/fixme/
-        # only because moving them would renumber every prp-tbd-* target; the
-        # `fixme` TAG is what mattered and it is gone.
-        "latch_verify_hold",
-        "latch_verify_low",
-        "flop_verify_posneg",
     ]
 ]
 

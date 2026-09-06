@@ -1,0 +1,12 @@
+/*
+:name: reduction_integer_arithmetic
+:type: equiv
+:verilog_top: reduction_integer_arithmetic.foo
+:pyrope_top: foo
+:lec_top: foo
+*/
+pub comb foo(a:i32, b:u3) -> (r_or:i34, r_and:i34, r_xor:i34) {
+  r_or = a + b#|[1..]
+  r_and = a + b#&[1..]
+  r_xor = a + b#^[1..]
+}

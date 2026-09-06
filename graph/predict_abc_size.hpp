@@ -91,10 +91,10 @@ struct Ctrl_pids {
 
 [[nodiscard]] inline Ctrl_pids ctrl_pids(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Flop:
-    case Ntype_op::Latch : return {4, 7};
-    case Ntype_op::Fflop : return {livehd::Port_invalid, 7};
-    default              : return {};
+    case Ntype_op::Flop :
+    case Ntype_op::Latch: return {4, 7};
+    case Ntype_op::Fflop: return {livehd::Port_invalid, 7};
+    default             : return {};
   }
 }
 
@@ -142,7 +142,7 @@ struct Ctrl_pids {
 }
 
 // `a % 2^k` is rewritten to an And before ABC ever sees it, so charge it as one.
-// Any other remainder is a blackbox here (see the Div arm).
+// Any other remainder is unsupported by the mapper.
 [[nodiscard]] inline bool rem_is_power_of_two_mask(const hhds::Node_class& node) {
   const auto b = get_driver_of_sink_name(node, "b");
   if (b.is_invalid() || !b.is_const()) {
@@ -181,28 +181,28 @@ struct Ctrl_pids {
   switch (op) {
     // ---- pure wiring / constants: an AIG spends nothing on these -------------
     case Ntype_op::Invalid:
-    case Ntype_op::IO:
-    case Ntype_op::Nconst:
-    case Ntype_op::Concat:
+    case Ntype_op::IO     :
+    case Ntype_op::Nconst :
+    case Ntype_op::Concat :
     case Ntype_op::Sext:
     // A Not is a complement EDGE in an AIG, never a node.
     case Ntype_op::Not: return 0;
 
     // ---- blackboxes: not blasted here ---------------------------------------
-    // Memory (default memory=false stays a hard macro), Div, a stateful or
+    // Memory (default memory=false stays a hard macro), a stateful or
     // combinational Sub, a Clock_cell, a LUT and an AttrSet all leave this def's
     // region without contributing gates to it. memory=true lowers memories AFTER
     // coloring and stamps the result with the memory's color -- that color is
     // then under-predicted, the same limitation synthesis_ge_weight has.
-    case Ntype_op::Memory:
-    case Ntype_op::Div:
-    case Ntype_op::Sub:
+    case Ntype_op::Memory    :
+    case Ntype_op::Sub       :
     case Ntype_op::Clock_cell:
-    case Ntype_op::LUT:
-    case Ntype_op::AttrSet: return 0;
+    case Ntype_op::LUT       :
+    case Ntype_op::AttrSet   : return 0;
 
-    case Ntype_op::Rem:
-      return rem_is_power_of_two_mask(node) ? atleast1(ge_detail::out_width(node)) : 0;
+    case Ntype_op::Div: return division_aig_count(node);
+
+    case Ntype_op::Rem: return rem_is_power_of_two_mask(node) ? atleast1(ge_detail::out_width(node)) : 0;
 
     // ---- masks: constant mask is a bit rename, a runtime mask is real logic --
     case Ntype_op::Get_mask:
@@ -220,7 +220,7 @@ struct Ctrl_pids {
 
     // ---- bitwise ------------------------------------------------------------
     case Ntype_op::And:
-    case Ntype_op::Or: {
+    case Ntype_op::Or : {
       const auto sh = fanin_shape(node, op);
       return sat_mul(atleast1(ge_detail::out_width(node)), sh.terms == 0 ? 0 : sh.terms - 1);
     }
@@ -277,11 +277,16 @@ struct Ctrl_pids {
     // folds `reset ? rval : (enable ? din : Q)` into its D (abc_map.cpp,
     // "wire each latch's data-in (D) to the folded next-state"). The storage
     // element is still 0 AIG; the two folded muxes are ~3 AIG nodes per bit each.
-    case Ntype_op::Flop:
+    case Ntype_op::Flop :
     case Ntype_op::Fflop: {
-      const auto     sh   = fanin_shape(node, op);
-      const uint64_t bits = atleast1(ge_detail::out_width(node));
-      uint64_t       s    = 0;
+      const auto sh   = fanin_shape(node, op);
+      uint64_t   bits = atleast1(ge_detail::out_width(node));
+      if (op == Ntype_op::Flop) {
+        if (auto pm = get_driver_of_sink_name(node, "pipe_min"); pm.is_const()) {
+          bits = sat_mul(bits, static_cast<uint64_t>(std::max<int64_t>(1, const_of(pm).to_just_i64())));
+        }
+      }
+      uint64_t s = 0;
       if (sh.has_enable) {
         s = sat_add(s, sat_mul(3, bits));
       }

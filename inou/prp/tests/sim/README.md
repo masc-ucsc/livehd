@@ -26,7 +26,7 @@ Each file pairs a synthesizable design with one or more `test` blocks:
   mirrors the design's next-state so the final `assert` is self-checking.
 
 These fixtures use only bare dotted DUT access, which is sugar for an anonymous
-`sigref`/`regref` (the binding is hoisted out of the loop either way). The
+`regref` (the binding is hoisted out of the loop either way). The
 explicit spelling is exercised by `../fixme/testbench_step.prp`, which also
 covers the `"unit/field"` string form. `peek`/`poke` are **removed** — every read
 through them copied a value out of a freshly recomputed snapshot of the whole

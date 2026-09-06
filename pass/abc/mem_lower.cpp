@@ -24,20 +24,23 @@ namespace {
 // raw_pid = port*16 + field. Field offsets within a block:
 constexpr int kMemStride = 16;
 enum Mem_off {
-  kAddr    = 0,
-  kBits    = 1,
-  kClk     = 2,
-  kDin     = 3,
-  kEnable  = 4,
-  kFwd     = 5,
-  kPosclk  = 6,
-  kType    = 7,
-  kWensize = 8,
-  kSize    = 9,
-  kRdport  = 10,
-  kInit    = 11,
-  kUndef   = 15
-};  // 12/13/14 = whole-array update/enable/reset (unsupported here)
+  kAddr         = 0,
+  kBits         = 1,
+  kClk          = 2,
+  kDin          = 3,
+  kEnable       = 4,
+  kFwd          = 5,
+  kPosclk       = 6,
+  kType         = 7,
+  kWensize      = 8,
+  kSize         = 9,
+  kRdport       = 10,
+  kInit         = 11,
+  kUpdate       = 12,
+  kUpdateEnable = 13,
+  kReset        = 14,
+  kUndef        = 15
+};
 
 // A one-hot mask constant with only bit `b` set (MSB-first binary string).
 spool_ptr<Dlop> bit_mask(int b) {
@@ -184,12 +187,13 @@ std::optional<int64_t> const_addr(const hhds::Pin_class& a) {
 }
 
 // Lower one Memory node into flops + comb. Returns false (node left intact) for
-// shapes not handled here (whole-array cells, negedge, type==2 arrays) and for
+// shapes not handled here (async reset, negedge, writable type==2 arrays) and for
 // a memory above `max_bits` storage bits (0 = no limit).
 bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   int                 bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
   spool_ptr<Dlop>     fwd;  // per-(read,write) matrix; arbitrary precision
   hhds::Pin_class     init_drv;
+  hhds::Pin_class     update_drv, update_enable_drv, reset_drv;
   bool                whole_array   = false;
   bool                undef_refined = false;  // ordering="none" matrix dropped by the bit-blast
   std::map<int, Port> ports;
@@ -225,11 +229,14 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
           fwd = Dlop::clone(gu::const_of(drv));
         }
         break;
-      case kPosclk : posclk = const_i(drv, posclk); break;
-      case kType   : mtype = const_i(drv, mtype); break;
-      case kWensize: wensize = const_i(drv, wensize); break;
-      case kSize   : size = const_i(drv, size); break;
-      case kInit   : init_drv = drv; break;
+      case kPosclk      : posclk = const_i(drv, posclk); break;
+      case kType        : mtype = const_i(drv, mtype); break;
+      case kWensize     : wensize = const_i(drv, wensize); break;
+      case kSize        : size = const_i(drv, size); break;
+      case kInit        : init_drv = drv; break;
+      case kUpdate      : update_drv = drv; break;
+      case kUpdateEnable: update_enable_drv = drv; break;
+      case kReset       : reset_drv = drv; break;
       case kUndef:
         // ordering="none" (undefined read-during-write). Bit-blasting cannot
         // carry an x, so the netlist REFINES it to the committed value -- which
@@ -244,7 +251,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
           undef_refined = true;
         }
         break;
-      default: whole_array = true; break;  // update/update_enable/reset bus
+      default: whole_array = true; break;
     }
   }
 
@@ -266,10 +273,16 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
     return bail("missing bits/size");
   }
   if (whole_array) {
-    return bail("whole-array (update/reset) memory");
+    return bail("unrecognized memory field");
   }
-  if (mtype == 2) {
-    return bail("type==2 array memory");
+  if (!reset_drv.is_invalid()) {
+    if (auto a = mem.attr(livehd::attrs::memory_async_reset); a.has() && a.get() != 0) {
+      return bail("asynchronous whole-array reset");
+    }
+  }
+  if ((!update_drv.is_invalid() || !reset_drv.is_invalid())
+      && std::none_of(ports.begin(), ports.end(), [](const auto& p) { return !p.second.clk.is_invalid(); })) {
+    return bail("whole-array update/reset without a clock");
   }
   if (posclk == 0) {
     return bail("negedge clock");
@@ -286,14 +299,15 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   // was to raise the limit deliberately.
   if (max_bits > 0 && static_cast<uint64_t>(bits) * static_cast<uint64_t>(size) > max_bits) {
     livehd::diag::info("pass.abc", "memory-max-bits", "unsupported")
-        .msg("pass.abc memory=true: memory '{}' in '{}' ({} x {} = {} bits) is above memory_max_bits={} — kept as a native "
-             "instance",
-             base,
-             std::string{g.get_name()},
-             size,
-             bits,
-             static_cast<uint64_t>(bits) * static_cast<uint64_t>(size),
-             max_bits)
+        .msg(
+            "pass.abc memory=true: memory '{}' in '{}' ({} x {} = {} bits) is above memory_max_bits={} — kept as a native "
+            "instance",
+            base,
+            std::string{g.get_name()},
+            size,
+            bits,
+            static_cast<uint64_t>(bits) * static_cast<uint64_t>(size),
+            max_bits)
         .emit();
     return false;
   }
@@ -303,6 +317,9 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
     p.block  = pidx;
     int role = p.role;
     if (role < 0) {  // infer when the rdport const is absent: a din pin => write
+      if (p.addr.is_invalid() && p.din.is_invalid() && (!update_drv.is_invalid() || !reset_drv.is_invalid())) {
+        continue;  // Shared clock only; the array may be read through read_all.
+      }
       role = p.din.is_invalid() ? 1 : 0;
     }
     if (p.addr.is_invalid() || (role != 1 && p.din.is_invalid())) {
@@ -310,8 +327,12 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
     }
     (role == 1 ? rd : wr).push_back(p);
   }
-  int n_wr = static_cast<int>(wr.size());
-  int n_rd = static_cast<int>(rd.size());
+  int        n_wr = static_cast<int>(wr.size());
+  int        n_rd = static_cast<int>(rd.size());
+  const bool rom  = wr.empty() && init_drv.is_const() && update_drv.is_invalid() && reset_drv.is_invalid();
+  if (mtype == 2 && !rom) {
+    return bail("writable or uninitialized type==2 array memory");
+  }
   // `fwd` is a per-(read,write) matrix (graph/cell.cpp): bit r*n_wr + w says
   // read port r forwards write port w. Dlop::bit_test is arbitrary precision,
   // so wide (many-port) shapes do not truncate.
@@ -320,8 +341,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   // Which outputs are consumed: read port r drives pid n_wr + r (cgen), the
   // whole-array read drives the reserved Memory_readall_pid. Decided BEFORE
   // any node is built so an unmodelable output bails with nothing dangling.
-  const int                ra_pid = static_cast<int>(Ntype::Memory_readall_pid);
-  std::set<int>            out_pids;
+  const int     ra_pid = static_cast<int>(Ntype::Memory_readall_pid);
+  std::set<int> out_pids;
   for (const auto& out : mem.out_edges()) {
     int pid = static_cast<int>(out.driver.get_port_id());
     if (pid != ra_pid && (pid < n_wr || pid >= n_wr + n_rd)) {
@@ -348,19 +369,10 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   bool    has_color = gu::has_color(mem);
   Builder B{g, color, has_color};
 
-  // storage: one bits-wide flop per entry, power-on init from the `init` pin.
-  bool has_init = init_drv.is_const();
-  Dlop init_val = has_init ? gu::const_of(init_drv) : Dlop{};
-  // A read-only memory (a ROM: no write ports) with init contents cannot be
-  // bit-blasted soundly: cgen emits a flop's init only under a reset (the init IS
-  // the reset value), so a resetless storage flop would power on as X and the
-  // reads — which see nothing but the init, no write ever overwrites it — would
-  // diverge from the source ROM. Keep it native; its cgen_memory boundary models
-  // the init exactly. (A WRITABLE memory's power-on state is a reachability
-  // don't-care that writes establish, so those still bit-blast.)
-  if (has_init && wr.empty()) {
-    return bail("read-only memory with init contents (ROM) — bit-blasting would drop the ROM data");
-  }
+  // A ROM's entries are constants. Writable storage uses one bits-wide flop
+  // per entry with the power-on contents from the `init` pin.
+  bool            has_init = init_drv.is_const() && reset_drv.is_invalid();
+  Dlop            init_val = has_init ? gu::const_of(init_drv) : Dlop{};
   // The Memory carries a single shared clock on port 0 (pid 2); per-port clock
   // pins may be absent on read ports (only the yosys frontend wires RD_CLK). Fall
   // back to that shared clock everywhere, mirroring cgen's base_clock_dpin.
@@ -376,6 +388,19 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   std::vector<hhds::Pin_class>  data_q(size);
   std::vector<hhds::Node_class> data_flop(size);
   for (int en = 0; en < size; ++en) {
+    hhds::Pin_class initial;
+    if (has_init) {
+      std::string s(static_cast<size_t>(bits), '0');  // MSB-first
+      for (int b = 0; b < bits; ++b) {
+        const auto offset = static_cast<size_t>(en) * bits + b;
+        s[bits - 1 - b]   = init_val.unknown_bit_test(offset) ? '?' : init_val.bit_test(offset) ? '1' : '0';
+      }
+      initial = gu::create_const(g, *Dlop::from_binary(s, /*unsigned_result=*/true));
+    }
+    if (rom) {
+      data_q[en] = initial;
+      continue;
+    }
     auto F = B.mk(Ntype_op::Flop);
     F.attr(hhds::attrs::name).set(std::format("{}__mem{}", base, en));
     data_q[en]    = B.dw(F, bits);
@@ -384,13 +409,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
       wclk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
     }
     if (has_init) {
-      std::string s(static_cast<size_t>(bits), '0');  // MSB-first
-      for (int b = 0; b < bits; ++b) {
-        if (init_val.bit_test(static_cast<size_t>(en) * bits + b)) {
-          s[bits - 1 - b] = '1';
-        }
-      }
-      gu::create_const(g, *Dlop::from_binary(s, /*unsigned_result=*/true)).connect_sink(gu::setup_sink_by_name(F, "initial"));
+      initial.connect_sink(gu::setup_sink_by_name(F, "initial"));
     }
   }
 
@@ -459,10 +478,15 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
   // it (no EQ, no mux) — and is skipped entirely when the address is out of
   // range. The order of the fold is the priority, so ports are skipped, never
   // reordered.
-  for (int en = 0; en < size; ++en) {
+  for (int en = 0; !rom && en < size; ++en) {
+    auto base_value = data_q[en];
+    if (!update_drv.is_invalid()) {
+      auto updated = B.getlane(update_drv, en, bits, size * bits);
+      base_value   = update_enable_drv.is_invalid() ? updated : B.mux(update_enable_drv, base_value, updated, bits);
+    }
     std::vector<hhds::Pin_class> lane(wensize);
     for (int l = 0; l < wensize; ++l) {
-      lane[l] = B.getlane(data_q[en], l, masksize, bits);  // hold
+      lane[l] = B.getlane(base_value, l, masksize, bits);
     }
     bool touched = false;
     for (int ji = 0; ji < n_wr; ++ji) {
@@ -478,8 +502,12 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
         fold_lane(lane[l], and_opt(wr_en_bit[ji][l], match), wr_din_lane[ji][l]);
       }
     }
-    // An entry no port can ever write holds its power-on value: din = Q.
-    auto nb = touched ? B.pack(lane, masksize) : data_q[en];
+    // An entry without a per-port write keeps the bulk update or its old Q.
+    auto nb = touched ? B.pack(lane, masksize) : base_value;
+    if (!reset_drv.is_invalid()) {
+      auto reset_value = init_drv.is_invalid() ? B.konst_i(0) : B.getlane(init_drv, en, bits, size * bits);
+      nb               = B.mux(reset_drv, nb, reset_value, bits);
+    }
     nb.connect_sink(gu::setup_sink_by_name(data_flop[en], "din"));
   }
 

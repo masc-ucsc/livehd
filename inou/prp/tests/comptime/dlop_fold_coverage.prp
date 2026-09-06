@@ -54,14 +54,14 @@ const sx = v#sext[0..=3]       // sext: low nibble 1100, bit 3 is sign -> -4
 const zx = v#zext[4..=7]       // zext: high nibble, no sign -> 10
 cassert(sx == -4 and zx == 10)
 
-// ---- reductions over the 8 bits of v (boolean / count) ----
-const orr  = v#|[..]           // reduce-or  -> true
-const andr = v#&[..]           // reduce-and -> false
-const xorr = v#^[..]           // reduce-xor (parity, 4 ones) -> false
+// ---- reductions over the 8 bits of v (unsigned bit / count) ----
+const orr  = v#|[..]           // reduce-or  -> 1
+const andr = v#&[..]           // reduce-and -> 0
+const xorr = v#^[..]           // reduce-xor (parity, 4 ones) -> 0
 const pc   = v#+[..]           // popcount -> 4
-cassert(orr == true)
-cassert(andr == false)
-cassert(xorr == false)
+cassert(orr == 1)
+cassert(andr == 0)
+cassert(xorr == 0)
 cassert(pc == 4)
 
 // ---- get_mask / sra on NEGATIVE operands (the get_mask sign-gate path) ----

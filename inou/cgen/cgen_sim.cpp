@@ -5341,7 +5341,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // The POST-FALL outputs of the CURRENT committed state: what the design drives
   // once this period's color schedule has completed. A testbench read after
   // `step` observes this post-edge value -- exactly what the
-  // old peek(__in) returned, but as a plain member a `sigref` can bind ONCE and
+  // old peek(__in) returned, but as a plain member a testbench ref can bind ONCE and
   // hold for the whole run instead of an O(total design state) snapshot/restore
   // per read. Also DERIVED: out of dump_state/load_state/design_hash for the
   // same reason as __last_out (reset_cycle() re-settles it after a load).
@@ -5527,7 +5527,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // that settle ring. Acyclic children pass false and avoid computing the same
   // post-edge outputs once privately and then again in the root walk.
   //
-  // The trailing settle is what makes a `sigref` possible, and it must NOT be
+  // The trailing settle is what makes a testbench cell read possible, and it must NOT be
   // hoisted to the front of the next cycle(): committing a next-state that was
   // settled against the PREVIOUS period's `__in` would make every driven input
   // land one cycle late (`acc.reset = clock < 2` would reset cycles 1-2, not
@@ -5961,7 +5961,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   // The three emissions of one clock period. Rise and Fall are the two halves of
   // the tick; Settle is the trailing comb refresh that keeps `__out` (and any
-  // `sigref` bound to it) current. A module with no negedge state emits no Fall
+  // a testbench ref bound to it) current. A module with no negedge state emits no Fall
   // at all, so dino stays exactly one pass per tick.
   enum class Pass { Rise, Fall, Settle };
   absl::flat_hash_set<hhds::Class_index> settle_cone;
@@ -7747,7 +7747,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // Outputs from the state this pass reads. In the CYCLE pass that is the
     // PRE-edge state, and the result is the returned `o`/`__last_out` (what the
     // output drove during the period). In the SETTLE pass it is the committed
-    // state, and the result lands directly in the `__out` member a `sigref` binds.
+    // state, and the result lands directly in the `__out` member a testbench read binds.
     // (The FALL pass drives no outputs: `__last_out` is the during-period value
     // the rise recorded, and `__out` is refreshed by the trailing settle.)
     // `__o` (not `o`): every other identifier this emitter mints is `__`-prefixed

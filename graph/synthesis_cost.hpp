@@ -13,6 +13,65 @@
 
 namespace livehd::graph_util {
 
+// A finite Get_mask needs only the prefix through its highest selected bit.
+// One intervening Not preserves bit positions. Other consumers, including a
+// region boundary, require the full value. The predicate lets mapping restrict
+// this proof to consumers in its region; coloring estimates the intact cone.
+template <typename Allows>
+[[nodiscard]] inline uint64_t masked_output_width(const hhds::Node_class& node, Allows allows) {
+  const uint64_t full  = ge_detail::out_width(node);
+  uint64_t       high  = 0;
+  bool           used  = false;
+  auto           slice = [&](const auto& edge) -> bool {
+    const auto consumer = edge.sink.get_master_node();
+    if (!allows(consumer) || type_op_of(consumer) != Ntype_op::Get_mask || edge.sink.get_port_id() != 0) {
+      return false;
+    }
+    const auto pin = get_driver_of_sink_name(consumer, "mask");
+    if (!pin.is_const()) {
+      return false;
+    }
+    const auto& mask = const_of(pin);
+    if (mask.is_negative() || mask.has_unknowns()) {
+      return false;
+    }
+    int wanted = real_width(consumer.create_driver_pin(0));
+    if (wanted <= 0) {
+      return false;
+    }
+    for (int bit = 0; bit < static_cast<int>(mask.get_bits()) && wanted > 0; ++bit) {
+      if (mask.bit_test(bit)) {
+        high = std::max(high, static_cast<uint64_t>(bit + 1));
+        --wanted;
+      }
+    }
+    used = true;
+    return true;
+  };
+  for (const auto& edge : node.out_edges()) {
+    const auto consumer = edge.sink.get_master_node();
+    if (allows(consumer) && type_op_of(consumer) == Ntype_op::Not) {
+      bool has_reader = false;
+      for (const auto& reader : consumer.out_edges()) {
+        has_reader = true;
+        if (!slice(reader)) {
+          return full;
+        }
+      }
+      if (!has_reader) {
+        return full;
+      }
+    } else if (!slice(edge)) {
+      return full;
+    }
+  }
+  return used && high > 0 ? std::min(full, high) : full;
+}
+
+[[nodiscard]] inline uint64_t masked_output_width(const hhds::Node_class& node) {
+  return masked_output_width(node, [](const auto&) { return true; });
+}
+
 namespace shift_detail {
 
 // The replay itself, given what the callers have ALREADY resolved. Both entry
@@ -90,9 +149,9 @@ namespace shift_detail {
   } else {
     // build_shl (abc_arith.hpp) makes its data vector out_w wide and ZERO-EXTENDS
     // `a` into it, emitting exactly out_w muxes per stage -- a left shift costs
-    // the RESULT width, not the operand width, and is never demand-sliced. Only
+    // the consumed RESULT prefix, not the operand width. Only
     // the right shift is built at cw = max(operand, result).
-    muxes = full * stages;
+    muxes = std::min(full, masked_output_width(node)) * stages;
   }
   return muxes;
 }
@@ -119,6 +178,18 @@ namespace shift_detail {
   return shift_detail::mux_count(node, op, amount, mappable_ge_weight(node));
 }
 
+// Restoring division has W subtract/select rows of W+1 bits, plus sign
+// conversion. Charge operand width even when the quotient is only one bit.
+[[nodiscard]] inline uint64_t division_aig_count(const hhds::Node_class& node) {
+  uint64_t width       = std::max<uint64_t>(1, ge_detail::out_width(node));
+  width                = std::max(width, ge_detail::widest_operand(node));
+  constexpr auto limit = std::numeric_limits<uint64_t>::max();
+  if (width > limit / 16 / (width + 1)) {
+    return limit;
+  }
+  return 16 * width * (width + 1);
+}
+
 // mappable_ge_weight already accounts for bit width and important type effects
 // (for example Mult is width squared and Sub instances are black boxes).
 // Runtime shifts need one more dimension: ABC expands one mux level per shift-
@@ -127,6 +198,12 @@ namespace shift_detail {
 [[nodiscard]] inline uint64_t synthesis_ge_weight(const hhds::Node_class& node) {
   const uint64_t full = mappable_ge_weight(node);
   const auto     op   = type_op_of(node);
+  if (op == Ntype_op::Not) {
+    return std::min(full, masked_output_width(node));
+  }
+  if (op == Ntype_op::Div) {
+    return division_aig_count(node);
+  }
   if (op != Ntype_op::SRA && op != Ntype_op::SHL) {
     return full;
   }

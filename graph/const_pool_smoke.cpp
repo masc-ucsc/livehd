@@ -23,8 +23,8 @@ TEST(ConstPin, CanonicalizesAtMint) {
   auto  gio = lib.create_io("canon");
   auto  g   = gio->create_graph();
 
-  // Boolean literals are the Integer -1 / 0 every consumer reads.
-  EXPECT_EQ(gu::create_const(*g, *Dlop::create_bool(true)), gu::create_const(*g, integer(-1)));
+  // Boolean literals lower to unsigned 1 / 0, including mux selectors.
+  EXPECT_EQ(gu::create_const(*g, *Dlop::create_bool(true)), gu::create_const(*g, integer(1)));
   EXPECT_EQ(gu::create_const(*g, *Dlop::create_bool(false)), gu::create_const(*g, integer(0)));
   EXPECT_TRUE(gu::const_of(gu::create_const(*g, *Dlop::create_bool(true))).is_integer());
 

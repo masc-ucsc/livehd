@@ -1,0 +1,10 @@
+/*
+:name: signed_inline_arithmetic
+:type: equiv
+:verilog_top: signed_inline_arithmetic.foo
+:pyrope_top: foo
+*/
+pub comb foo(a:s8, b:u8, c:u8) -> (product:s18, total:s18) {
+  product = a + b * c
+  total = a + (b + c) * 3
+}

@@ -327,6 +327,51 @@ TEST(ColorSize, WideSraUsesNarrowSliceDemand) {
   EXPECT_EQ(synthesis_ge_weight(sra), 61440u);
 }
 
+// A complemented shift mask must stay together until its finite slice.
+TEST(ColorSize, WideShlAndNotKeepTheirNarrowMask) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cs_shl_mask");
+  auto  io  = lib.create_io("shl_mask");
+  io->add_input("amount", 0);
+  io->add_output("y", 1);
+  io->add_output("full", 2);
+  auto g      = io->create_graph();
+  auto amount = g->get_input_pin("amount");
+  livehd::graph_util::set_ubits(amount, 16);
+  auto shift = create_typed_node(*g, Ntype_op::SHL);
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(255)).connect_sink(shift.create_sink_pin(0));
+  amount.connect_sink(shift.create_sink_pin(1));
+  auto shifted = shift.create_driver_pin(0);
+  livehd::graph_util::set_ubits(shifted, 65543);
+  auto invert = create_typed_node(*g, Ntype_op::Not);
+  shifted.connect_sink(invert.create_sink_pin(0));
+  auto inverted = invert.create_driver_pin(0);
+  livehd::graph_util::set_sbits(inverted, 65544);
+  auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+  inverted.connect_sink(slice.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(255)).connect_sink(slice.create_sink_pin(2));
+  auto y = slice.create_driver_pin(0);
+  livehd::graph_util::set_ubits(y, 8);
+  y.connect_sink(g->get_output_pin("y"));
+
+  EXPECT_EQ(synthesis_ge_weight(shift), 8u * 16 * 6);
+  EXPECT_EQ(synthesis_ge_weight(invert), 8u);
+  Node2Id m{
+      { shift, 1},
+      {invert, 1},
+      { slice, 1}
+  };
+  Size_window_stats stats;
+  const auto        grouped = apply_size_window(g.get(), m, 1000, 25000, &stats);
+  EXPECT_EQ(grouped.at(shift), grouped.at(slice));
+  EXPECT_EQ(grouped.at(invert), grouped.at(slice));
+  EXPECT_EQ(stats.splits, 0u);
+
+  // Crossing a region boundary invalidates the narrow-demand assumption.
+  EXPECT_EQ(livehd::graph_util::masked_output_width(shift, [&](const auto& n) { return n != invert; }), 65543u);
+  shifted.connect_sink(g->get_output_pin("full"));
+  EXPECT_EQ(synthesis_ge_weight(shift), 65543u * 16 * 6);
+}
+
 // Isolated leftovers are BIN-PACKED. Two clouds that share no node-node edge
 // (both hang off the primary input, which is an adjacency hole) can never
 // merge_small into each other; the packer must still fold them into one

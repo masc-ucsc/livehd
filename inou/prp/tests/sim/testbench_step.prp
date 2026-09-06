@@ -1,0 +1,41 @@
+/*
+:name: testbench_step
+:type: simulation
+*/
+// Testbench cell access. Reading needs no builtin at all: a bare dotted
+// `dut.field` reads any storage cell (register, memory word, module input or
+// output) through a binding the emitter hoists out of the loop, so it costs a
+// load rather than a re-evaluation of the design. That is why the old read-only
+// `sigref` was removed -- it was exactly a bare dotted read (2026-09-06 ruling).
+//
+// `regref` survives as the one way to DRIVE a cell by an explicit binding. Two
+// spellings resolve to the same cell: dotted `regref(cnt.c)` and the string path
+// `regref("cnt/c")` ("unit/field", where unit is an instance variable or a
+// module name). A ref is bound ONCE, outside any loop, and stays valid for the
+// whole run -- that is the point of the construct, so this fixture binds before
+// the first `step` and reads the same names on both sides of two edges.
+//
+// `regref` on a REGISTER writes its `q`, which the design's own logic then sees
+// THIS cycle (the pre-commit settle reads it) before the edge overwrites q with
+// the computed `din` -- i.e. a one-shot next-state override. That is why `c = 42`
+// followed by one `step` reads back 43 and not 42: the increment ran on the
+// forced value.
+mod cnt(en:bool) -> (v:u8@[0]) {
+  reg c:u8 = 0
+  v = c
+  if en { wrap c += 1 }
+}
+test peek_poke_path {
+  mut dut = cnt
+  mut c   = regref("cnt/c")      // writable window on the register, bound once
+  dut.en = true
+  step
+  assert(c == 1)
+  assert(dut.v == 1)             // bare dotted read of the settled output
+  assert(dut.c == 1)             // bare dotted read of the register
+  c = 42                         // drives q; the design increments it this cycle
+  step
+  assert(c == 43)
+  assert(dut.v == 43)
+  assert(dut.c == 43)
+}

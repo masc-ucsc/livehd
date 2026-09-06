@@ -929,7 +929,7 @@ public:
         o << "  else " << var << ".__vcd_path.clear();\n";
       }
     }
-    // Hoisted `sigref`/`regref` bindings land here, after every instance exists
+    // Hoisted `regref` bindings land here, after every instance exists
     // and before anything that could use one. Filled in at the end of this
     // function (see the splice below kRefMark).
     o << kRefMark;
@@ -1193,7 +1193,7 @@ private:
 
   // Bind `storage` to a hoisted reference and return the reference's name --
   // this is what makes bare dotted access cost the same as an explicit
-  // `sigref`/`regref` bound outside the loop, which is the whole point of the
+  // `regref` bound outside the loop, which is the whole point of the
   // ref model: resolve the hierarchy ONCE, then read or write the cell directly
   // for the rest of the run.
   //
@@ -1225,7 +1225,7 @@ private:
     return nm;
   }
 
-  // `mut pc = sigref(acc.io_imem_address)` binds a test local as an ALIAS of a
+  // `mut pc = regref(acc.io_imem_address)` binds a test local as an ALIAS of a
   // storage cell: name -> (hoisted C++ ref, declared width). Such a name is not
   // a driver local (no `Slop<W> pc{}` is emitted for it) -- every read goes to
   // the design, and, for a `regref`, every write does too.
@@ -1237,7 +1237,7 @@ private:
   std::map<std::string, Ref_alias> ref_alias_;
   std::set<std::string>            ref_writable_;  // bound with regref
 
-  // Is this rvalue a `sigref(...)` / `regref(...)` call?
+  // Is this rvalue a `regref(...)` call?
   bool is_ref_call(TSNode n) const {
     if (ts_node_is_null(n) || ntype(n) != "function_call_expression") {
       return false;
@@ -1246,26 +1246,27 @@ private:
     if (ts_node_is_null(fn)) {
       return false;
     }
-    const auto nm = text_of(src_, fn);
-    return nm == "sigref" || nm == "regref";
+    return text_of(src_, fn) == "regref";
   }
 
-  // Resolve the operand of a `sigref`/`regref` call to a hoisted reference.
+  // Resolve the operand of a `regref` call to a hoisted, WRITABLE reference.
   // Two spellings are accepted, and they mean the same cell:
-  //   sigref(acc.io_imem_address)    dotted -- names exactly one cell, and a
+  //   regref(acc.io_imem_address)    dotted -- names exactly one cell, and a
   //                                  typo is a setup error against the manifest
-  //   sigref("acc/io_imem_address")  string path -- "unit/field", where unit is
+  //   regref("acc/io_imem_address")  string path -- "unit/field", where unit is
   //                                  an instance variable or a module name
+  // Reading needs no call at all: a bare dotted `acc.field` already reads any
+  // cell, which is why the old read-only `sigref` was removed -- it was
+  // exactly a bare dotted read.
   // (The spec's multi-match string `regref` that resolves to zero-or-many cells
   // is the SYNTHESIZABLE construct and is still TBD; a testbench ref is one
   // cell, because a C++ reference is one cell.)
   std::string ref_call_target(TSNode call, int* w_out = nullptr, bool* signed_out = nullptr) {
-    TSNode     fn       = field(call, "function");
-    const bool writable = !ts_node_is_null(fn) && text_of(src_, fn) == "regref";
-    TSNode     args     = field(call, "argument");
+    TSNode args = field(call, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
-      fail(std::string(writable ? "regref" : "sigref") + " needs a signal: a dotted `acc.field` or a \"unit/field\" path");
+      fail("regref needs a signal: a dotted `acc.field` or a \"unit/field\" path");
     }
+    const bool writable = true;
     TSNode      a0 = ts_node_named_child(args, 0);
     std::string base, fld;
     if (inst_dot(a0, base, fld)) {
@@ -1354,7 +1355,7 @@ private:
       }
       if (td.has_output(fld)) {
         if (write) {
-          fail("cannot drive output '" + var + "." + fld + "' (an output is read-only; use `sigref`)");
+          fail("cannot drive output '" + var + "." + fld + "' (an output is read-only -- drive the inputs that produce it)");
         }
         width(td.output_width(fld));
         sign(td.output_signed(fld));
@@ -1370,7 +1371,8 @@ private:
       // so with exactly ONE array in the leaf module any indexed name
       // aliases to it.
       if (write) {
-        fail("cannot write hierarchical path '" + var + "." + fld + "' (read-only; use `sigref`)");
+        fail("cannot write hierarchical path '" + var + "." + fld
+             + "' (reads at any depth work; writing below the top instance is not implemented yet -- see fixes_pyrope.md P10)");
       }
       const Dut*  hd   = &duts_.at(inst_of_var.at(var));
       std::string cxx  = var;
@@ -1470,7 +1472,7 @@ private:
     }
     if (d.has_output(fld)) {
       if (write) {
-        fail("cannot drive output '" + var + "." + fld + "' (an output is read-only; use `sigref`)");
+        fail("cannot drive output '" + var + "." + fld + "' (an output is read-only -- drive the inputs that produce it)");
       }
       // The settled outputs of the CURRENT committed state. cycle() refreshes
       // __out on its way out, and reset_cycle() settles it too, so this is
@@ -1500,7 +1502,7 @@ private:
     return {};
   }
 
-  // Resolve a sigref()/regref() hierarchical string path `"<unit>/<field>"` to a
+  // Resolve a regref() hierarchical string path `"<unit>/<field>"` to a
   // field_access on the matching DUT instance (09-verification.md). `<unit>`
   // matches an instance-variable name (`mut dut = cnt` -> "dut") or a module name
   // ("cnt"); one "unit/field" level is supported -- the common testbench probe.
@@ -1538,7 +1540,7 @@ private:
 
   // Value for a `{name}` puts/print interpolation. A dotted `acc.field` (or a
   // hierarchical `acc.sub.state[i]`) resolves to the instance-field read at the
-  // field's OWN width; a `sigref`/`regref` name reads through its binding;
+  // field's OWN width; a `regref` name reads through its binding;
   // anything else is a plain in-scope value (a local, a test parameter, or the
   // `clock` loop var). Every kind renders exactly — the Slop formatters are
   // width-agnostic, so nothing goes through a 64-bit narrowing.
@@ -1663,16 +1665,14 @@ private:
           }
           inst_of_var[ln] = m;  // `mut acc = Module` -> a persistent instance
         } else if (!ts_node_is_null(rv) && is_ref_call(rv)) {
-          // `mut pc = sigref(acc.x)` -> an alias of a storage cell, bound once.
+          // `mut pc = regref(acc.x)` -> an alias of a storage cell, bound once.
           // Deliberately NOT a driver local: it holds no value of its own, so
           // there is nothing to zero-init and nothing to width-infer.
           int  w         = 0;
           bool is_signed = false;
           auto r         = ref_call_target(rv, &w, &is_signed);
           ref_alias_[ln] = {r, w > 0 ? w : 64, is_signed};
-          if (text_of(src_, field(rv, "function")) == "regref") {
-            ref_writable_.insert(ln);
-          }
+          ref_writable_.insert(ln);  // every surviving ref spelling is `regref`
         } else {
           locals_.insert(ln);
           if (const int dw = declared_slop_width(src_, lv); dw > 0) {
@@ -1855,7 +1855,7 @@ private:
       if (nm == "nil") {
         return long_val("0");
       }
-      // A `sigref`/`regref` binding is an ALIAS, not a value: reading it reads
+      // A `regref` binding is an ALIAS, not a value: reading it reads
       // the design's storage at this instant, so it re-reads on every use rather
       // than holding whatever the cell contained when it was bound.
       if (auto it = ref_alias_.find(nm); it != ref_alias_.end()) {
@@ -1905,7 +1905,7 @@ private:
       return apply_unary(op, eval(opnd));
     }
     if (t == "function_call_expression") {
-      // A bare `sigref(x)` / `regref(x)` used as a value (rather than bound to a
+      // A bare `regref(x)` used as a value (rather than bound to a
       // name) still reads the cell -- it is just an unnamed binding.
       if (is_ref_call(n)) {
         int         w         = 0;
@@ -2527,10 +2527,10 @@ private:
       }
       if (fnnm == "peek" || fnnm == "poke") {
         fail(std::string("`") + fnnm
-             + "` was removed: bind the cell once with `sigref` (read-only) or `regref` (writable) "
-               "outside the loop, then read or assign that name -- e.g. `mut c = regref(\"cnt/c\")` then `c = 42`");
+             + "` was removed: read a cell with bare dotted access (`dut.c`), and to DRIVE one bind it once "
+               "with `regref` outside the loop -- e.g. `mut c = regref(\"cnt/c\")` then `c = 42`");
       }
-      if (fnnm == "sigref" || fnnm == "regref") {
+      if (fnnm == "regref") {
         fail(std::string("`") + fnnm + "` is a binding, not a statement: assign it to a name (`mut r = " + fnnm + "(...)`)");
       }
     }
@@ -2594,15 +2594,11 @@ private:
     // Writing through a bound ref. Rebinding is NOT a thing: `r = v` where `r`
     // is a ref drives the cell, exactly as `acc.field = v` does.
     if (auto it = ref_alias_.find(lname); it != ref_alias_.end()) {
-      // The BINDING (`mut r = sigref(...)`) emits nothing here -- the hoisted
+      // The BINDING (`mut r = regref(...)`) emits nothing here -- the hoisted
       // `auto& __refN = ...` was already placed at function scope. Only a later
-      // assignment to the same name is a write through the ref, and that is the
-      // one a `sigref` must refuse.
+      // assignment to the same name is a write through the ref.
       if (!ts_node_is_null(rv) && is_ref_call(rv)) {
         return;
-      }
-      if (!ref_writable_.count(lname)) {
-        fail("cannot write through the read-only reference '" + lname + "' (bind it with `regref`, not `sigref`)");
       }
       o << ind << "__prp_poke(" << it->second.storage << ", " << to_slop(rhs_val()).cpp << ");\n";
       return;

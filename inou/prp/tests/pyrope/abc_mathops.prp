@@ -3,22 +3,11 @@
 :type: lgraph compile
 */
 
-// Flat combinational fixture for the pass.abc multiplier / right-shift bit-blast
-// and the division blackbox (task 2a-abc follow-on). No hierarchy and no
-// narrowing, so the design stays a clean combinational cone that `pass color
-// acyclic` colors in full (synth coloring deliberately excludes mult/div as
-// region seeds; acyclic does not, so every arithmetic op lands in a region and
-// is exercised end-to-end). Covers:
-//   * mult   : unsigned `a*b`, signed `c*e`, and an n-ary `a*b*a`
-//              (array multiplier; the partial-product adds use pass.abc.adder)
-//   * sra    : logical `a>>n` (unsigned operand) and arithmetic `c>>n` (signed)
-//   * div    : unsigned `a/b`, signed equal-width `c/e`, and signed `cw/e` with a
-//              divisor (e:s4) NARROWER than the dividend (cw:s8) — BLACKBOXED
-//              (kept native), so a `div-blackbox` warning fires and the divider is
-//              not tech-mapped. The narrower-signed-operand case exercises the
-//              blackbox read-back's operand-sign preservation (the LEC fit()s a
-//              Div operand by sign, so dropping it would zero- instead of
-//              sign-extend the divisor and diverge for negatives).
+// Flat combinational fixture for mapped multiplication, shifts, and division.
+// Acyclic coloring puts every operation into a region. Covers unsigned, signed,
+// and n-ary multiplication; logical and arithmetic shifts; and division with a
+// signed divisor narrower than its dividend. Division must preserve the complete
+// operands until after computing the quotient.
 //
 // Widths are deliberately small (u4/s4, n:u2): the cvc5 LEC of a bit-blasted
 // array multiplier scales steeply with operand width, and these widths still

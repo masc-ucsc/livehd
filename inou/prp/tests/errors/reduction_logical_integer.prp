@@ -1,0 +1,13 @@
+/*
+:name: reduction_logical_integer
+:type: error
+:error: requires boolean operands
+:help: bitwise integers
+*/
+comb foo(a:u8) -> (r:u1) {
+  if true and a#|[..] {
+    r = 1
+  } else {
+    r = 0
+  }
+}

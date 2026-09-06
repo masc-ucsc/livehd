@@ -30,6 +30,7 @@ SLANG_LADDER = {
     "dce1": "lec",
     "dce2": "lec",
     "dce3": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "empty_task": "lec",  # structural no-op task used by synthesis assertion macros
     "expression_00002": "lec",
     "fflop": "lec",
     "fixme_array": "lec",
@@ -61,6 +62,8 @@ SLANG_LADDER = {
     # connections are all BROADCAST (`lg[32:0](.x(testi[5]), .y(testo[0]))`).
     "grid_hier_test": "lec",
     "hierarchy": "lec",
+    "generate_reverse_tree": "lec",  # array dependencies, root-first generated tree
+    "hier_generate_slice": "lec",  # packed writes through sibling generate scopes
     "inc_after_nb": "lec",  # x++ is blocking even after a nonblocking <= in the same process
     "issue_047": "lec",  # narrow signed port range: signed[1:0] is {-2..1}, signed[0:0] is {-1,0}
     "issue_057": "lec",

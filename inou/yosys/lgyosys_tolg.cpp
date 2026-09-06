@@ -32,6 +32,7 @@
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
 #include "source_path.hpp"
+#include "split_selfref.hpp"
 #include "str_tools.hpp"
 
 using livehd::Hhds_graph_library;
@@ -343,11 +344,32 @@ bool operator==(const Pick_ID& lhs, const Pick_ID& rhs) {
 
 static absl::flat_hash_map<Pick_ID, hhds::Pin_class> picks;
 
-static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, int offset, int width, bool is_signed) {
-  if (offset == 0 && (int)bits_of(wide_dpin) == width && !is_signed) {
-    return wide_dpin;
+// Yosys process cell IDs change whenever the source is regenerated. A whole
+// public Q wire is the stable identity of a register/latch across that round
+// trip; using $procdff$123 instead gives LEC unrelated power-on state symbols.
+static void name_state_node(const hhds::Node_class& node, const RTLIL::Cell* cell) {
+  std::string name = cell->name.str();
+  if (!name.empty() && name.front() == '\\') {
+    name.erase(0, 1);
   }
+  // hasPort FIRST: RTLIL::Cell::getPort is `connections_.at()`, which THROWS
+  // (uncaught -> silent process abort, and on macOS an exit 1 with no output)
+  // for a `$dff`-prefixed cell that arrives without a Q connection -- a
+  // read_rtlil input or a blackbox stub. Both call sites already guard the same
+  // port right after this call.
+  if (cell->hasPort(ID::Q)) {
+    auto chunks = cell->getPort(ID::Q).chunks();
+    if (chunks.size() == 1) {
+      const auto& q = chunks.at(0);
+      if (q.wire && q.offset == 0 && q.width == q.wire->width && q.wire->name.c_str()[0] == '\\') {
+        name = q.wire->name.str().substr(1);
+      }
+    }
+  }
+  node.attr(hhds::attrs::name).set(name);
+}
 
+static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, int offset, int width, bool is_signed) {
   Pick_ID pick_id(wide_dpin, offset, width, is_signed);
   if (picks.find(pick_id) != picks.end()) {
     return picks.at(pick_id);
@@ -374,22 +396,15 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
     setup_sink_by_name(sext_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(width)));
     dpin = sext_node.create_driver_pin(0);
   } else {
-    // Pick(a,width,offset, false): x = a>>offset; y = x & ((1<<width)-1)
-    auto and_node = create_typed_node(*g, Ntype_op::And, width);
-
-    if (offset) {
-      auto shr_node = create_typed_node(*g, Ntype_op::SRA, width);
-      setup_sink_by_name(shr_node, "a").connect_driver(wide_dpin);
-      setup_sink_by_name(shr_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(offset)));
-
-      // NOT needed and_node.create_driver_pin(0);  // ensure dpin exists
-      shr_node.create_driver_pin(0).connect_sink(and_node.create_sink_pin(0));
-    } else {
-      wide_dpin.connect_sink(and_node.create_sink_pin(0));
-    }
-
-    create_const(*g, *Dlop::get_mask_value(width)).connect_sink(and_node.create_sink_pin(0));
-    dpin = and_node.create_driver_pin(0);
+    // A SigChunk is a finite selection even when its width equals the
+    // producer's initial hint. Arithmetic producers can grow during bitwidth
+    // inference; forwarding that hint used to put a 65-bit value into a
+    // one-bit Concat lane in picorv32. Encode the selection intrinsically.
+    auto get = create_typed_node(*g, Ntype_op::Get_mask, width);
+    setup_sink_by_name(get, "a").connect_driver(wide_dpin);
+    setup_sink_by_name(get, "mask").connect_driver(create_const(*g, *Dlop::get_mask_value(offset + width - 1, offset)));
+    dpin = get.create_driver_pin(0);
+    set_ubits(dpin, width);
   }
 
   picks.insert(std::make_pair(pick_id, dpin));
@@ -449,7 +464,9 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
     // it.  The LGraph input may correctly hold the same bits as a non-negative
     // unlimited integer, so a full-width signed use still needs an explicit
     // Sext boundary (including the important one-bit 1 -> -1 case).
-    return is_signed ? create_pick_operator(dpin, 0, width, true) : dpin;
+    // Unsigned whole-wire reads are finite selections too. A temporary wire
+    // may name a producer whose arithmetic range grows beyond this RTLIL bus.
+    return create_pick_operator(dpin, 0, width, is_signed);
   }
   if (auto it = partially_assigned.find(wire); it != partially_assigned.end()) {
     const auto it_bits = partially_assigned_bits.find(wire);
@@ -698,9 +715,9 @@ static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_cla
   }
 
   const auto& mask_v    = livehd::graph_util::const_of(mask);
-  auto dpin_bits = bits_of(dpin);
-  auto a_bits    = bits_of(a);
-  bool all_ones  = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
+  auto        dpin_bits = bits_of(dpin);
+  auto        a_bits    = bits_of(a);
+  bool        all_ones  = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
   if (!all_ones && mask_v.is_just_i64() && dpin_bits > 0 && dpin_bits <= 62) {
     all_ones = mask_v.to_just_i64() == ((int64_t{1} << dpin_bits) - 1);
   }
@@ -1765,6 +1782,32 @@ static void connect_comparator(hhds::Node_class& exit_node, const RTLIL::Cell* c
 static void process_partially_assigned(hhds::Graph* g) {
   process_partially_assigned_other(g);
   process_partially_assigned_self_chains(g);
+
+  // Yosys can pack an unpacked array into one wire. A later lane may read an
+  // earlier lane, closing a word-level cycle through the partial-wire Or even
+  // though every bit has an acyclic definition. Resolve those reads after ALL
+  // partial writes are attached, using the same lowering operation as LNAST.
+  for (const RTLIL::Wire* wire : sorted_wire_keys(partially_assigned)) {
+    auto                          buffer_pin = get_partial_dpin(g, wire);
+    auto                          buffer     = master_node(buffer_pin);
+    std::vector<hhds::Node_class> readers;
+    for (auto e : buffer.out_edges()) {
+      readers.push_back(e.sink.get_master_node());
+    }
+    if (readers.empty() || !buffer.has_inp_edges()) {
+      continue;
+    }
+    auto definition = create_typed_node(*g, Ntype_op::Or, bits_of(buffer_pin));
+    set_loc(definition, wire->get_src_attribute());
+    auto driver = definition.create_driver_pin(0);
+    mark_pin_sign_from_wire(driver, wire);
+    for (auto e : buffer.inp_edges()) {
+      definition.create_sink_pin(0).connect_driver(e.driver);
+      e.del_edge();
+    }
+    buffer.create_sink_pin(0).connect_driver(driver);
+    livehd::graph_util::split_packed_selfref_wire(g, buffer, driver, readers);
+  }
 }
 
 static void process_connect_outputs(RTLIL::Module* mod, hhds::Graph* g) {
@@ -2121,11 +2164,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
                || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
       set_type_op(exit_node, Ntype_op::Flop);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
-      std::string inst_name{cell->name.str()};
-      if (!inst_name.empty()) {
-        std::string nm = inst_name[0] == '\\' ? inst_name.substr(1) : inst_name;
-        exit_node.attr(hhds::attrs::name).set(nm);
-      }
+      name_state_node(exit_node, cell);
 
       if (cell->hasPort(ID::Q)) {
         const RTLIL::Wire* wire = cell->getPort(ID::Q).chunks().at(0).wire;
@@ -2262,16 +2301,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::Latch);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
-      // Keep both identities, just like the flop importer above: the cell
-      // name identifies the native state node, while Q's wire name identifies
-      // the packed state bus.  pass.color cuts at this node and pass.abc uses
+      // Keep Q's identity on both the state node and packed bus, as above.
+      // pass.color cuts at this node and pass.abc uses
       // one boundary PI per Q bit, so the pin name is what lets read-back join
       // those bits to the original bus instead of a synthetic latch_<nid> net.
-      std::string inst_name{cell->name.str()};
-      if (!inst_name.empty()) {
-        std::string nm = inst_name[0] == '\\' ? inst_name.substr(1) : inst_name;
-        exit_node.attr(hhds::attrs::name).set(nm);
-      }
+      name_state_node(exit_node, cell);
       if (cell->hasPort(ID::Q)) {
         const RTLIL::Wire* wire = cell->getPort(ID::Q).chunks().at(0).wire;
         if (wire) {
@@ -2678,7 +2712,13 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           collx = Dlop::from_pyrope(val);
         }
       }
-      auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
+      const auto& rd_clocks = cell->getParam(ID::RD_CLK_ENABLE);
+      const int   rd_clke   = rd_clocks.size() > 0 && rd_clocks[0] == RTLIL::State::S1 ? 1 : 0;
+      for (int i = 0; i < rd_clocks.size(); ++i) {
+        if (rd_clocks[i] != (rd_clke ? RTLIL::State::S1 : RTLIL::State::S0)) {
+          log_error("Memory %s has mixed read latencies; keep read registers separate with memory -nordff.\n", cell->name.c_str());
+        }
+      }
 
       // ---- ONE edge per memory ----------------------------------------------
       // The Memory cell carries a SINGLE global `posclk`; yosys keeps a bit per
@@ -2720,9 +2760,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           mem_mixed = true;
           log_warning(
               "memory '%s' mixes clock edges across its ports (%s, but %s port %d is %s). The Memory cell has ONE "
-               "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
-               "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
-               "--set formal.ignore_memory=<name>, which blackboxes it).\n",
+              "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
+              "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
+              "--set formal.ignore_memory=<name>, which blackboxes it).\n",
               cell->name.c_str(),
               edge_why.c_str(),
               kind,

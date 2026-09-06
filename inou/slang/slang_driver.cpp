@@ -34,12 +34,25 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
     // (-I/-D/-U, --ignore-unknown-modules) is a standard arg.
     std::optional<bool> quiet;
     driver.cmdLine.add("-q,--quiet", quiet, "Suppress non-essential output");
+    std::optional<std::string> literalTop;
+    driver.cmdLine.add("--lhd-top", literalTop, "Select a literal LiveHD module name");
 
     if (!driver.parseCommandLine(argc, argv)) {
       return 1;
     }
     if (!driver.processOptions()) {
       return 2;
+    }
+    if (literalTop) {
+      // Slang interprets the first dot as a library qualifier. LiveHD's top
+      // names are literal module names, including escaped SV identifiers.
+      // Qualify those names explicitly while preserving raw --top semantics.
+      auto name = *literalTop;
+      if (name.find('.') != std::string::npos) {
+        const auto& library = driver.options.defaultLibName;
+        name                = (library && !library->empty() ? *library : "work") + "." + name;
+      }
+      driver.options.topModules.push_back(std::move(name));
     }
 
     // Route slang's diagnostics through LiveHD's sink instead of stderr text.

@@ -194,7 +194,7 @@ void Inou_slang::work(Eprp_var& var) {
   if (!user_has("--top") && var.has_label("top")) {
     auto top = var.get("top");
     if (!top.empty() && top != "-auto-top") {
-      argv.push_back(strdup("--top"));
+      argv.push_back(strdup("--lhd-top"));
       argv.push_back(strdup(std::string(top).c_str()));
     }
   }

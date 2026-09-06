@@ -47,6 +47,9 @@ struct Lnast_range {
   // Signed 1-bit: range [-1, 0].  Used for boolean and comparison results.
   static constexpr Lnast_range boolean() noexcept { return bounded(-1, 0); }
 
+  // Bit selection and reduction produce integer 0/1, distinct from bool.
+  static constexpr Lnast_range unsigned_bit() noexcept { return bounded(0, 1); }
+
   // ── Predicates ────────────────────────────────────────────────────────────
 
   bool is_constant() const noexcept { return !unbounded && min == max; }

@@ -6,6 +6,13 @@ plugin -i {{slang_plugin_path}}
 
 verilog_defines -DSYNTHESIS=1
 
+{{#macrolib}}
+read_liberty -lib {{input}}
+{{/macrolib}}
+{{#blackbox}}
+read_verilog -sv -lib {{input}}
+{{/blackbox}}
+
 {{#use_verilog}}
 {{#filelist}}
 read_verilog -sv -nomeminit {{input}}
@@ -56,7 +63,10 @@ opt_expr
 opt_merge
 pmuxtree
 bmuxmap
-memory -nomap
+# Keep read registers as ordinary DFFs. A Memory cell has one global read
+# latency; memory_dff can merge a mixture of synchronous/asynchronous reads
+# (and read reset/enable policies) that cannot be represented by that field.
+memory -nomap -nordff
 {{/memory_collect}}
 
 #flatten

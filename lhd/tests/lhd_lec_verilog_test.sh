@@ -486,3 +486,24 @@ echo "$out" | grep -q 'cvc5|bitwuzla|lgyosys' || fail "bad solver error lacks th
 echo "PASS: formal.solver=foo rejected"
 
 echo "ALL PASS: lhd lec verilog inputs + solver backends"
+
+# A reset in one cone must not hide the stable identity of unreset state in
+# another. Yosys assigns different $procdff IDs after the cgen round trip.
+cat >"$W/state_identity.v" <<'V'
+module state_identity(input clk, reset, en, input [7:0] d,
+                      output reg ready, output reg [7:0] q);
+  always @(posedge clk) begin
+    if (reset) ready <= 0;
+    else ready <= 1;
+    if (en) q <= d;
+  end
+endmodule
+V
+"$LHD" compile "$W/state_identity.v" --reader yosys-verilog --top state_identity \
+  --emit verilog:"$W/state_identity_out.v" --workdir "$W/state_compile" -q \
+  || fail "Yosys state identity compile"
+"$LHD" lec --impl "$W/state_identity_out.v" --ref "$W/state_identity.v" --reader yosys-verilog \
+  --top state_identity --workdir "$W/state_lec" -q --result-json "$W/state_lec.json" \
+  || fail "Yosys state identity round trip: $(cat "$W/state_lec.json")"
+grep -q '"verdict":"proven"' "$W/state_lec.json" || fail "state identity proof was inconclusive"
+echo "PASS: Yosys state names survive a Verilog round trip with partially reset state"

@@ -159,9 +159,8 @@ run synth "$CSPR" --top ot_const_splitter --workdir "$W/csw" --emit-dir lg:"$W/c
 grep -q '__livehd_abc_input_bits_300' "$W/cs.tree" || fail "constant-splitter fixture did not instantiate dense input helper"
 grep -q '"kind":"sta"' "$W/csw/synth/timing.json" || fail "constant-splitter timing.json missing STA report"
 
-# 4ab. A native divider is an intentional ABC black-box boundary, not an
-# unmapped cell that should make whole-design STA fail. Its output starts a new
-# zero-arrival segment while mapped input/output-side cones remain timed.
+# 4ab. Division maps to gates, so whole-design STA must time the mapped cone
+# and ABC must no longer report an untimed divider boundary.
 DPRP="$W/div_boundary.prp"
 cat >"$DPRP" <<'EOF'
 pub mod ot_div_boundary(a:u16, b:u8) -> (y:u16@[0]) {
@@ -170,7 +169,9 @@ pub mod ot_div_boundary(a:u16, b:u8) -> (y:u16@[0]) {
 EOF
 run synth "$DPRP" --top ot_div_boundary --workdir "$W/dw" --emit-dir lg:"$W/dnet" \
     --set synth.liberty="$LIB"
-grep -q '"div_blackbox":1' "$W/r.json" || fail "divider fixture was not reported as one ABC blackbox"
+if grep -q '"div_blackbox":[1-9]' "$W/r.json"; then
+  fail "mapped divider was incorrectly reported as an ABC blackbox"
+fi
 grep -q '"kind":"sta"' "$W/dw/synth/timing.json" || fail "divider-boundary timing.json missing STA report"
 
 # 4ac. A packed-array assignment around a sliced memory read creates a 64-bit

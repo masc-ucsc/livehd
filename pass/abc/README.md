@@ -1,7 +1,10 @@
 # pass/abc — ABC technology mapping (task 2a-abc)
 
 `lhd pass abc --top <mod> lg:dir --emit-dir lg:netlist` technology-maps a
-design to a standard-cell netlist. A prior coloring (`pass color synth`) is
+design to a standard-cell netlist. `--emit-dir verilog:DIR` or
+`--emit verilog:FILE` emits that mapped netlist directly; an `lg:` output is
+optional and can be requested alongside it. LNAST/Pyrope outputs are rejected
+before the pass runs. A prior coloring (`pass color synth`) is
 **optional**: it controls how the design is split into per-region modules. With
 no coloring (or for any node left at color 0), color 0 is treated as just
 another color — the uncolored logic becomes a single `<mod>__c0` region — and
@@ -9,8 +12,11 @@ the pass emits one warning that it is partitioning an uncolored design.
 
 It reuses `pass.partition`'s decomposition seam
 (`Pass_partition::build_decomposition` + a body-builder hook): one module per
-color region, with the **module structure identical to `pass partition`** so each
-netlist module LEC-checks against its `partition` twin. The body-builder hook
+color region. ABC first specializes materialized loop bodies in its private
+copy, folding iteration indices and control constants; the source library stays
+compact. Ordinary module boundaries and loop bodies with explicit ABC region
+options remain intact. Shared pattern sites are specialized when their inputs
+become constant; dynamic sites retain reuse. The body-builder hook
 replaces each region body with an ABC-mapped netlist instead of the original
 logic.
 
@@ -31,7 +37,7 @@ Per region (`Region_body` from the partition seam):
 
 1. **to ABC** — bit-blast each comb cell into a 1-bit AIG netlist
    (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`). Multi-bit module IO becomes per-bit ABC
-   PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not`,
+   PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not/ror`,
    `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
    `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), `mult` (a simple
    single-cycle array multiplier whose partial-product additions reuse the
@@ -40,10 +46,10 @@ Per region (`Region_body` from the partition seam):
    amount becomes pure bit re-wiring, a runtime amount a combinational barrel/log
    shifter; multi-driver one-hot amounts are ORed, matching the LEC), `sra` (right
    shift: arithmetic for a signed operand, logical otherwise — a constant amount
-   re-wires, a runtime amount is a barrel shifter), and constants. `div` (and
-   `mod`, which lowers to `a-(a/b)*b`, hence a `div`) is **blackboxed**: a
-   synthesizable divider is large and out of scope, so the `div` node is kept
-   native as a boundary (like a `Sub`/memory) and a `div-blackbox` warning fires.
+   re-wires, a runtime amount is a barrel shifter), and constants. `div` uses
+   restoring division with the selectable adder. Each operand retains its sign;
+   the quotient is computed at the full operand width before narrowing to the
+   result width. Nontrivial `rem` still reports an unsupported-operation error.
    Anything else is still an `unsupported-cell` error.
 
    Width note: `mult`/`sra` size their result at the LEC's literal
@@ -457,6 +463,13 @@ technology-mapping step (`&nf {D}`) for the read-back to find cells, e.g.
 link. Keep `kAbcAliases` and that help text in sync.
 
 ## QoR read-back (2opt-freq A)
+
+`regions[].logic_depth` reports integer mapped-gate levels from ABC, independent
+of the timing library and delay target. State and region boundaries cut paths;
+the count is taken before read-back aliases identity buffers. The summary's
+`total.max_region_depth` is the maximum over instantiated regions, not a
+whole-design path across partitions. Both fields survive incremental cache
+reuse and appear in the pretty report (`--stats` adds the per-region rows).
 
 After each region's flow, while ABC still holds the mapped *logic* network, the
 pass reads back the region's **gates / Liberty area / critical delay**

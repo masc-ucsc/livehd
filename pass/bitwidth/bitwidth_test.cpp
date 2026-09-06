@@ -61,6 +61,29 @@ TEST(BitwidthRange, UnsignedUnknownKeepsPayloadWidthWhenMerged) {
   }
 }
 
+TEST(BitwidthRange, WideBoundsRemainStableWhenMerged) {
+  for (int bits : {61, 62, 63, 64, 80, 128}) {
+    Bitwidth_range unsign;
+    unsign.set_ubits_range(bits);
+    Bitwidth_range sign;
+    sign.set_sbits_range(bits);
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      EXPECT_EQ(unsign.get_ubits(), bits);
+      EXPECT_EQ(unsign.get_sbits(), bits + 1);
+      EXPECT_TRUE(unsign.get_max().eq_op(*Dlop::get_mask_value(bits))->is_known_true());
+      EXPECT_TRUE(unsign.get_min().is_known_zero());
+      EXPECT_EQ(sign.get_sbits(), bits);
+      EXPECT_TRUE(sign.get_max().eq_op(*Dlop::get_mask_value(bits - 1))->is_known_true());
+      EXPECT_TRUE(sign.get_min().eq_op(*Dlop::get_neg_mask_value(bits - 1))->is_known_true());
+      unsign.set_wider_range(unsign);
+      sign.set_wider_range(sign);
+    }
+  }
+  Bitwidth_range mixed(*Dlop::create_integer(-1), *Dlop::get_mask_value(80));
+  EXPECT_TRUE(mixed.get_min().eq_op(*Dlop::create_integer(-1))->is_known_true());
+  EXPECT_EQ(mixed.get_sbits(), 81);
+}
+
 // A Sum fed by two graph inputs that carry NO declared width: bitwidth cannot
 // derive a range, so the Sum driver pin stays unbounded (bits == 0) and
 // report_unbounded() must surface a `bitwidth-unbounded` warning.
@@ -566,7 +589,13 @@ TEST(BitwidthInfer, GetMaskOverUnsignedInputKeepsWidth) {
   livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
   gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, gm), 3) << "a 3-bit unsigned port spans [0..7]: u3";
+  Bitwidth bw(10);
+  bw.do_trans(g);
+  EXPECT_TRUE(gm.is_invalid());
+  const auto drivers = g->get_output_pin("o").get_driver_pins();
+  ASSERT_EQ(drivers.size(), 1);
+  EXPECT_EQ(drivers.front(), g->get_input_pin("a"));
+  EXPECT_EQ(gio->get_bits("a"), 3) << "the forwarded unsigned port still spans [0..7]: u3";
 }
 
 // The tup_in_port shape: `get_mask(a, 0b111) + 1` where `a` is 3 signed bits.
@@ -809,6 +838,31 @@ TEST(BitwidthInfer, ShiftedComparatorStaysNonNegative) {
   EXPECT_TRUE(livehd::graph_util::is_unsign(shl.create_driver_pin(0))) << "a shifted boolean must stay non-negative";
 }
 
+TEST(BitwidthInfer, ZeroLeftShiftCountPreservesData) {
+  namespace gu = livehd::graph_util;
+  for (const auto value : {0, 1, -5}) {
+    const auto name = "bw_shl_zero_" + std::to_string(value);
+    auto       g    = bounded_inputs(name.c_str(), 8, 8);
+    auto       shl  = gu::create_typed_node(*g, Ntype_op::SHL);
+    gu::setup_sink_by_name(shl, "a").connect_driver(gu::create_const(*g, *Dlop::create_integer(value)));
+    gu::setup_sink_by_name(shl, "b").connect_driver(gu::create_const(*g, *Dlop::create_integer(0)));
+    shl.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+    Bitwidth bw(10);
+    bw.do_trans(g);
+    const auto drivers = g->get_output_pin("o").get_driver_pins();
+    ASSERT_EQ(drivers.size(), 1);
+    ASSERT_TRUE(drivers.front().is_const());
+    EXPECT_EQ(gu::const_of(drivers.front()).to_just_i64(), value);
+  }
+  auto g   = bounded_inputs("bw_shl_zero_variable", 8, 8);
+  auto shl = gu::create_typed_node(*g, Ntype_op::SHL);
+  gu::setup_sink_by_name(shl, "a").connect_driver(g->get_input_pin("a"));
+  gu::setup_sink_by_name(shl, "b").connect_driver(gu::create_const(*g, *Dlop::create_integer(0)));
+  shl.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  EXPECT_EQ(run_and_read_driver(g, shl), 8);
+  EXPECT_FALSE(shl.is_invalid());
+}
+
 // Mux: sink 0 is the selector, sinks 1..N the data arms; the output unions
 // the data arms' ranges. Two u8 data arms -> at least 8 bits.
 TEST(BitwidthInfer, MuxUnionsDataArms) {
@@ -861,4 +915,175 @@ TEST(BitwidthInfer, ConcatWidthIsSumOfDeclaredLanes) {
       << "every lane is masked into its own window, so a concat result is never negative";
 }
 
+TEST(BitwidthInfer, OversizedConcatLaneReportsError) {
+  auto g      = bounded_inputs("bw_concat_invalid", 8, 1);
+  auto select = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_by_name(select, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(15))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(select, "mask"));
+  auto concat = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);
+  select.create_driver_pin(0).connect_sink(concat.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(concat.create_sink_pin(1));
+  concat.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  EXPECT_THROW((void)run_and_read_driver(g, concat), std::runtime_error);
+}
+
+TEST(BitwidthMasks, DropsOnlyFiniteLowMaskIdentities) {
+  namespace gu = livehd::graph_util;
+  int id       = 0;
+  for (auto op : {Ntype_op::Get_mask, Ntype_op::And}) {
+    for (auto mask : {15, 31, 12, 5}) {
+      for (bool signed_input : {false, true}) {
+        auto name = "bw_mask_identity_" + std::to_string(id++);
+        auto g    = bounded_inputs(name.c_str(), 4, 1);
+        g->get_io()->set_unsign("a", !signed_input);
+        auto node     = gu::create_typed_node(*g, op);
+        auto src      = g->get_input_pin("a");
+        auto constant = gu::create_const(*g, *Dlop::create_integer(mask));
+        if (op == Ntype_op::Get_mask) {
+          src.connect_sink(gu::setup_sink_by_name(node, "a"));
+          constant.connect_sink(gu::setup_sink_by_name(node, "mask"));
+        } else {
+          src.connect_sink(node.create_sink_pin(0));
+          constant.connect_sink(node.create_sink_pin(0));
+        }
+        node.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+        Bitwidth bw(10);
+        bw.do_trans(g);
+        const bool identity = !signed_input && (mask == 15 || mask == 31);
+        EXPECT_EQ(node.is_invalid(), identity) << name;
+        if (identity) {
+          const auto drivers = g->get_output_pin("o").get_driver_pins();
+          ASSERT_EQ(drivers.size(), 1);
+          EXPECT_EQ(drivers.front(), src);
+        }
+      }
+    }
+  }
+}
+
+TEST(BitwidthMasks, KeepsDeclaredWidthAndDuplicateConsumers) {
+  namespace gu = livehd::graph_util;
+  for (bool duplicate : {false, true}) {
+    auto g = bounded_inputs(duplicate ? "bw_mask_duplicate" : "bw_mask_declared", 4, 1);
+    g->get_io()->set_unsign("a", true);
+    auto src  = g->get_input_pin("a");
+    auto node = gu::create_typed_node(*g, Ntype_op::Get_mask);
+    src.connect_sink(gu::setup_sink_by_name(node, "a"));
+    gu::create_const(*g, *Dlop::create_integer(15)).connect_sink(gu::setup_sink_by_name(node, "mask"));
+    if (duplicate) {
+      auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
+      src.connect_sink(sum.create_sink_pin(0));
+      node.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
+      sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+    } else {
+      g->get_io()->set_bits("o", 8);
+      node.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+    }
+    Bitwidth bw(10);
+    bw.do_trans(g);
+    EXPECT_FALSE(node.is_invalid());
+  }
+}
+
+TEST(BitwidthMasks, KeepsInstancePortWidth) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  child  = lib.create_io("bw_mask_child");
+  child->add_input("a", 1);
+  child->set_bits("a", 8);
+  child->add_output("o", 2);
+  child->set_bits("o", 8);
+  auto body = child->create_graph();
+  body->get_input_pin("a").connect_sink(body->get_output_pin("o"));
+  auto g = bounded_inputs("bw_mask_instance", 4, 1);
+  g->get_io()->set_unsign("a", true);
+  auto node = gu::create_typed_node(*g, Ntype_op::Get_mask);
+  g->get_input_pin("a").connect_sink(gu::setup_sink_by_name(node, "a"));
+  gu::create_const(*g, *Dlop::create_integer(15)).connect_sink(gu::setup_sink_by_name(node, "mask"));
+  auto sub = gu::create_typed_node(*g, Ntype_op::Sub);
+  sub.set_subnode(child);
+  node.create_driver_pin(0).connect_sink(sub.create_sink_pin("a"));
+  sub.create_driver_pin("o").connect_sink(g->get_output_pin("o"));
+  Bitwidth bw(10);
+  bw.do_trans(g);
+  EXPECT_FALSE(node.is_invalid());
+}
+
 }  // namespace
+
+TEST(BitwidthInfer, SignedDivisionRetainsMinimumOverMinusOne) {
+  using namespace livehd::graph_util;
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  for (int width : {5, 65}) {
+    auto gio = lib.create_io("bw_div_signed_" + std::to_string(width));
+    gio->add_input("a", 1);
+    gio->set_bits("a", width);
+    gio->set_unsign("a", false);
+    gio->add_input("b", 2);
+    gio->set_bits("b", 3);
+    gio->set_unsign("b", false);
+    gio->add_output("o", 3);
+    gio->set_bits("o", width + 1);
+    gio->set_unsign("o", false);
+    auto g   = gio->create_graph();
+    auto div = create_typed_node(*g, Ntype_op::Div);
+    g->get_input_pin("a").connect_sink(setup_sink_by_name(div, "a"));
+    g->get_input_pin("b").connect_sink(setup_sink_by_name(div, "b"));
+    set_sbits(div.create_driver_pin(0), width);  // stale frontend estimate
+    div.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+    EXPECT_EQ(run_and_read_driver(g, div), width + 1);
+    EXPECT_FALSE(is_unsign(div.create_driver_pin(0)));
+  }
+}
+
+TEST(BitwidthInfer, DivisionByLargeConstantNarrowsQuotient) {
+  using namespace livehd::graph_util;
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_div_narrow");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 5);
+  gio->set_unsign("a", true);
+  gio->add_output("o", 2);
+  gio->set_bits("o", 1);
+  auto g   = gio->create_graph();
+  auto div = create_typed_node(*g, Ntype_op::Div);
+  g->get_input_pin("a").connect_sink(setup_sink_by_name(div, "a"));
+  create_const(*g, *Dlop::create_integer(17)).connect_sink(setup_sink_by_name(div, "b"));
+  set_ubits(div.create_driver_pin(0), 5);
+  div.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+  EXPECT_EQ(run_and_read_driver(g, div), 1);
+  EXPECT_TRUE(is_unsign(div.create_driver_pin(0)));
+}
+
+TEST(BitwidthMemory, BackwardAddressSeedPreservesUnsignedConcat) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio    = lib.create_io("bw_memory_concat_address");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 2);
+  gio->set_unsign("a", true);
+  gio->add_input("b", 2);
+  gio->set_bits("b", 1);
+  gio->set_unsign("b", true);
+  gio->add_output("q", 3);
+  gio->set_bits("q", 1);
+  gio->set_unsign("q", true);
+  auto g      = gio->create_graph();
+  // Memory is a traversal cut, so it can seed addr before its producer runs.
+  auto memory = gu::create_typed_node(*g, Ntype_op::Memory);
+  auto addr   = gu::create_typed_node(*g, Ntype_op::Concat, 3);
+  gu::set_ubits(addr.create_driver_pin(0), 3);
+  g->get_input_pin("a").connect_sink(addr.create_sink_pin(0));
+  gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(addr.create_sink_pin(1));
+  g->get_input_pin("b").connect_sink(addr.create_sink_pin(2));
+  gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(addr.create_sink_pin(3));
+  addr.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(memory, "addr"));
+  gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(memory, "bits"));
+  gu::create_const(*g, *Dlop::create_integer(8)).connect_sink(gu::setup_sink_by_name(memory, "size"));
+  gu::set_ubits(memory.create_driver_pin(0), 1);
+  memory.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  Bitwidth(10).do_trans(g);
+  EXPECT_TRUE(gu::is_unsign(addr.create_driver_pin(0)));
+  EXPECT_EQ(gu::bits_of(addr.create_driver_pin(0)), 3);
+}

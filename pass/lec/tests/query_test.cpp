@@ -283,6 +283,48 @@ TEST(LecState, PartialUnknownInitialPreservesKnownBits) {
   EXPECT_TRUE(concrete->x_mask.isNull());
 }
 
+TEST(LecState, PowerOnInitialIsPerDesignWithOrWithoutOtherReset) {
+  for (bool other_reset : {false, true}) {
+    hhds::GraphLibrary lib;
+    auto               build = [&](const std::string& name, const char* initial) {
+      auto io = lib.create_io(name);
+      io->add_input("clock", 0);
+      io->set_bits("clock", 1);
+      io->set_unsign("clock", true);
+      if (other_reset) {
+        io->add_input("reset", 1);
+        io->set_bits("reset", 1);
+        io->set_unsign("reset", true);
+      }
+      io->add_output("out", 2);
+      io->set_bits("out", 4);
+      io->set_unsign("out", true);
+      auto g = io->create_graph();
+      auto f = graph_util::create_typed_node(*g, Ntype_op::Flop);
+      f.set_name("state");  // Same name must not override different contents.
+      auto q = f.create_driver_pin(0);
+      graph_util::set_ubits(q, 4);
+      q.connect_sink(graph_util::setup_sink_by_name(f, "din"));
+      q.connect_sink(g->get_output_pin("out"));
+      g->get_input_pin("clock").connect_sink(graph_util::setup_sink_by_name(f, "clock_pin"));
+      graph_util::create_const(*g, *Dlop::from_binary(initial, /*unsigned_result=*/true))
+          .connect_sink(graph_util::setup_sink_by_name(f, "initial"));
+      return g;
+    };
+    auto             ref  = build("ref", "10?1");
+    auto             same = build("same", "1011");
+    auto             bad  = build("bad", "0011");
+    lec::Lec_options opts;
+    opts.engine      = "bmc";
+    opts.phase       = "after_reset";
+    opts.gold_x      = "ignore";
+    auto good_result = lec::prove_equal(ref.get(), same.get(), opts);
+    EXPECT_EQ(good_result.verdict, Verdict::Proven) << good_result.detail;
+    auto bad_result = lec::prove_equal(ref.get(), bad.get(), opts);
+    EXPECT_EQ(bad_result.verdict, Verdict::Refuted) << bad_result.detail;
+  }
+}
+
 TEST(CombEquiv, AndCommutativeProven) {
   hhds::GraphLibrary lib;
   auto               ref  = build_binop(lib, "ref", Ntype_op::And, 4, false);

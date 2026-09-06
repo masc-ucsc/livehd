@@ -37,10 +37,13 @@ namespace livehd::graph_util {
 // flop) after the INSTANCE, so a flop-cut correspondence key survives the
 // inline. Without it the cut is keyed on a synthesized net name that has no
 // counterpart on the other design.
+// `inherit_color` stamps cloned nodes with the parent instance color when
+// inlining an already-colored private backend graph.
 // `prefix_instance` preserves the ordinary `instance.child` hierarchy names.
 // A caller dissolving an UNNAMED, compiler-generated wrapper may set it false:
 // the wrapper's `sub_<nid>` default is storage noise rather than RTL hierarchy.
 [[nodiscard]] bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass,
-                                       hhds::Graph* def = nullptr, bool name_state = false, bool prefix_instance = true);
+                                       hhds::Graph* def = nullptr, bool name_state = false, bool prefix_instance = true,
+                                       bool inherit_color = false);
 
 }  // namespace livehd::graph_util

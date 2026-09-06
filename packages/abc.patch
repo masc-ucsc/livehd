@@ -43,3 +43,33 @@ index 2965f9f6..5b0b5790 100644
  #include "bdd/cudd/cudd.h"
  
  ABC_NAMESPACE_IMPL_START
+diff --git src/sat/bsat2/Solver.cpp src/sat/bsat2/Solver.cpp
+--- src/sat/bsat2/Solver.cpp
++++ src/sat/bsat2/Solver.cpp
+@@ -520,1 +520,3 @@
+ |________________________________________________________________________________________________@*/
++// Solver implementations have different clause layouts; keep this helper local.
++namespace {
+@@ -526,1 +528,2 @@
+ };
++} // namespace
+diff --git src/sat/glucose/Glucose.cpp src/sat/glucose/Glucose.cpp
+--- src/sat/glucose/Glucose.cpp
++++ src/sat/glucose/Glucose.cpp
+@@ -912,1 +912,3 @@
+ |________________________________________________________________________________________________@*/
++// Solver implementations have different clause layouts; keep this helper local.
++namespace {
+@@ -933,1 +935,2 @@
+ };
++} // namespace
+diff --git src/sat/glucose2/Glucose2.cpp src/sat/glucose2/Glucose2.cpp
+--- src/sat/glucose2/Glucose2.cpp
++++ src/sat/glucose2/Glucose2.cpp
+@@ -1072,1 +1072,3 @@
+ |________________________________________________________________________________________________@*/
++// Solver implementations have different clause layouts; keep this helper local.
++namespace {
+@@ -1093,1 +1095,2 @@
+ };
++} // namespace

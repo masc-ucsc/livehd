@@ -3,7 +3,7 @@
 :type: lec
 :set: compile.upass.roll_arrays=true
 :expect_instances: u_loop_0=1 u_loop_1=1 u_loop_2=1 u_loop_3=1 t=1
-:lec_grep: roll declined for `for lvl`: a loop nested in the body has a domain that reads the index
+:lec_grep: roll declined for `for lvl`: a nested loop domain or a generic `<...>` bind in the body reads the index
 */
 // The base design with ARRAY carries allowed to roll (`compile.upass.roll_arrays=true`):
 // the tap chain and each of the LOG2N=3 per-level node loops become ONE

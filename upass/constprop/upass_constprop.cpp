@@ -464,7 +464,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
               .pass     = "upass.constprop",
               .message  = std::format("array element `{}` is an integer but is written a boolean value "
                                       "(a variable's type cannot change)",
-                                     field_key),
+                                      field_key),
               .span     = lm->current_span(),
               .hint     = "cast the boolean explicitly, e.g. `u1(v)` or `unsigned(v)`",
           });
@@ -478,7 +478,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
               .pass     = "upass.constprop",
               .message  = std::format("array element `{}` is a boolean but is written an integer value "
                                       "(a variable's type cannot change)",
-                                     field_key),
+                                      field_key),
               .span     = lm->current_span(),
               .hint     = "compare to make a boolean, e.g. `v != 0`",
           });
@@ -493,8 +493,8 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
                 .pass     = "upass.constprop",
                 .message  = std::format("array element `{}` (value {}) does not fit its declared range "
                                         "(the element type is unsigned)",
-                                       field_key,
-                                       value.to_decimal_string()),
+                                        field_key,
+                                        value.to_decimal_string()),
                 .span     = lm->current_span(),
                 .hint     = "widen to a signed element type, or store a non-negative value",
             });
@@ -534,9 +534,9 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
         .category = "type",
         .pass     = "upass.constprop",
         .message  = std::format("`{}` is {} but is written a {} value (a variable's type cannot change)",
-                               field_key,
-                               cur_str ? "a string" : "an integer",
-                               v_str ? "string" : "integer"),
+                                field_key,
+                                cur_str ? "a string" : "an integer",
+                                v_str ? "string" : "integer"),
         .span     = lm->current_span(),
         .hint     = "keep the field's declared kind, or declare it with the intended type",
     });
@@ -589,6 +589,18 @@ void uPass_constprop::record_field_write(std::string_view dst_name, upass::Src_s
     return;  // scalar store — not a field write
   }
   st().field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), path));
+}
+
+// HLOP reductions return Boolean values. Pyrope bit operations expose an
+// unsigned integer bit, including an unsigned unknown when it cannot fold.
+static Dlop reduction_integer(const Dlop& value) {
+  if (!value.is_bool()) {
+    return value;
+  }
+  if (value.has_unknowns()) {
+    return *Dlop::from_pyrope("0ub?");
+  }
+  return *Dlop::create_integer(value.is_known_true() ? 1 : 0);
 }
 
 upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -3472,17 +3484,17 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "ror") {
     if (need_n(1)) {
-      result  = *args[0].ror_op();
+      result  = reduction_integer(*args[0].ror_op());
       matched = true;
     }
   } else if (op == "rand") {
     if (need_n(1)) {
-      result  = *args[0].rand_op();
+      result  = reduction_integer(*args[0].rand_op());
       matched = true;
     }
   } else if (op == "rxor") {
     if (need_n(1)) {
-      result  = *args[0].rxor_op();
+      result  = reduction_integer(*args[0].rxor_op());
       matched = true;
     }
   } else if (op == "sext") {
@@ -3977,10 +3989,10 @@ void uPass_constprop::process_func_call() {
               .category = "type",
               .pass     = "upass.constprop",
               .message  = std::format("value {} does not fit the `{}` cast range [{}, {}]",
-                                     v.to_decimal_string(),
-                                     fname,
-                                     tmin.to_decimal_string(),
-                                     tmax.to_decimal_string()),
+                                      v.to_decimal_string(),
+                                      fname,
+                                      tmin.to_decimal_string(),
+                                      tmax.to_decimal_string()),
               .span     = lm->current_span(),
               .hint     = "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` "
                           "prefix to drop bits intentionally",
@@ -4085,8 +4097,8 @@ void uPass_constprop::process_range() {
           .category = "type",
           .pass     = "upass.constprop",
           .message  = std::format("invalid descending range: {} never reaches {} (only ascending ranges are allowed)",
-                                 start.to_decimal_string(),
-                                 end.to_decimal_string()),
+                                  start.to_decimal_string(),
+                                  end.to_decimal_string()),
           .span     = std::move(span),
           .hint     = "swap the bounds so the range ascends, e.g. `0..=5`",
       });
@@ -4274,7 +4286,7 @@ void uPass_constprop::process_tuple_get() {
       const auto           fpath = std::string_view(key).substr(src.size() + 1);
       const Bundle::Entry& fe    = sb->get_entry(bundle_path::of_string(fpath));
       const bool           facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown || !fe.decl_max.is_invalid()
-                         || !fe.decl_min.is_invalid() || fe.comptime;
+                                   || !fe.decl_min.is_invalid() || fe.comptime;
       if (facts) {
         if (auto db = st().get_bundle_for_write(dst); db && db->has_trivial(bundle_path::of_string("0"))) {
           Bundle::Entry e = db->get_entry(bundle_path::of_string("0"));
@@ -4323,10 +4335,10 @@ void uPass_constprop::process_tuple_get() {
         .span     = lm->current_span(),
         .hint     = std::format("`{}` has no field `{}` — check existence with `{} has '{}'` "
                                 "(reading an absent field is a compile error)",
-                            src,
-                            first_seg,
-                            src,
-                            first_seg),
+                                src,
+                                first_seg,
+                                src,
+                                first_seg),
     });
     store_trivial(dst, *Dlop::nil());
   } else if (st().has_trivial(src)) {
@@ -4348,11 +4360,11 @@ void uPass_constprop::process_tuple_get() {
           .message  = std::format("`{}` has no field `{}` (a scalar has no fields)", shown, first_seg),
           .span     = lm->current_span(),
           .hint     = std::format("`{}` is a built-in attribute — read it with `{}.[{}]`, not `{}.{}`",
-                              first_seg,
-                              shown,
-                              first_seg,
-                              shown,
-                              first_seg),
+                                  first_seg,
+                                  shown,
+                                  first_seg,
+                                  shown,
+                                  first_seg),
       });
       store_trivial(dst, *Dlop::nil());
       return;
@@ -4814,19 +4826,40 @@ void uPass_constprop::process_reduction(F op) {
   }
 }
 
+// Reductions intrinsically produce u1, so signed()/unsigned() can reinterpret
+// the result even after it folds to an ordinary integer constant.
+static void stamp_reduction_type(Symbol_table& table, std::string_view dst) {
+  if (table.in_uncertain_scope()) {
+    return;
+  }
+  if (auto b = table.get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
+    auto e     = b->get_entry(bundle_path::of_string("0"));
+    e.kind     = upass::Kind::integer;
+    e.decl_min = *Dlop::create_integer(0);
+    e.decl_max = *Dlop::create_integer(1);
+    b->set(bundle_path::of_string("0"), std::move(e));
+  }
+}
+
 upass::Vote uPass_constprop::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return *v.ror_op(); });
+  auto vote = push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return reduction_integer(*v.ror_op()); });
+  stamp_reduction_type(st(), dst_name);
+  return vote;
 }
 
 upass::Vote uPass_constprop::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return *v.rand_op(); });
+  auto vote = push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return reduction_integer(*v.rand_op()); });
+  stamp_reduction_type(st(), dst_name);
+  return vote;
 }
 
 upass::Vote uPass_constprop::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return *v.rxor_op(); });
+  auto vote = push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return reduction_integer(*v.rxor_op()); });
+  stamp_reduction_type(st(), dst_name);
+  return vote;
 }
 
 // popcount (`a#+[..]`): number of set bits, returned as an integer Dlop.

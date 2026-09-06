@@ -52,6 +52,12 @@ sh_test(
 )
 
 sh_test(
+    name = "slang_escaped_top",
+    srcs = ["tests/escaped_top.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
     name = "slang_test.sh",
     srcs = ["tests/slang_test.sh"],
     data = [
@@ -758,4 +764,11 @@ sh_test(
         "tests/sv/mem_double_partial_write.v",
         "//lhd",
     ],
+)
+
+sh_test(
+    name = "slang_memory_clock_diagnostic",
+    size = "large",
+    srcs = ["tests/memory_clock_diagnostic.sh"],
+    data = ["//lhd"],
 )

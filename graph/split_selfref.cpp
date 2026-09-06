@@ -627,12 +627,14 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
           res = dp;
         }
       }
-    } else if (op == Ntype_op::EQ) {
-      // Equality is a one-bit control result, but unlike bit-parallel ops its
-      // bit depends on every operand bit. Rebuild it only when each on-cycle
-      // operand can be resolved as its COMPLETE unsigned value. This covers
+    } else if (op == Ntype_op::EQ || op == Ntype_op::Ror) {
+      // Equality and reduce-OR have a one-bit control result, but unlike
+      // bit-parallel ops that bit depends on every operand bit. Rebuild only
+      // when each on-cycle operand resolves as its COMPLETE unsigned value.
+      // This covers
       // packed-slice predicates used as Mux selectors (the XSCore Btb/PreDecode
-      // tail) without pretending that a partial comparator cone is local.
+      // tail) and packed reduction trees without treating a partial operand
+      // as the complete value.
       if (lo >= 1) {
         res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
       } else {
@@ -659,7 +661,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             }
             if (whole_w == 0) {
               if (split_dbg) {
-                std::print("split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
+                std::print("split[dbg]:   control operand {} bits={} unsigned={} has no complete bound\n",
                            Ntype::get_name(gu::type_op_of(d.get_master_node())),
                            db,
                            gu::is_unsign(d));
@@ -669,7 +671,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             }
             d = self(self, d, 0, whole_w, depth + 1);
             if (split_dbg) {
-              std::print("split[dbg]:   EQ operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
+              std::print("split[dbg]:   control operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
             }
           }
           if (d.is_invalid()) {
@@ -679,7 +681,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
           operands.push_back(d);
         }
         if (ok && !operands.empty()) {
-          auto n = gu::create_typed_node(*g, Ntype_op::EQ);
+          auto n = gu::create_typed_node(*g, op);
           ++created;
           for (auto& d : operands) {
             d.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));

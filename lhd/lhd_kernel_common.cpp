@@ -1144,6 +1144,11 @@ std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Opti
   };
   steps.insert(steps.end(), fuzz.begin(), fuzz.end());
   steps.emplace_back("compile.bitwidth", "pass.bitwidth");
+  // Inference can resolve values that cprop could not know yet (notably
+  // reads of procedurally built constant tables). Fold their consumers and
+  // infer widths on the resulting graph before coloring or emission.
+  steps.emplace_back("compile.cprop", "pass.cprop");
+  steps.emplace_back("compile.bitwidth", "pass.bitwidth");
   return steps;
 }
 

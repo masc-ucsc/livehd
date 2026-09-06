@@ -73,12 +73,15 @@ struct Slang_module_state {
   // the width-taking `0sb?` wildcard, so no width/signedness is kept here.
   absl::flat_hash_set<const slang::ast::Symbol*>              output_info_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;  // clocked state vars
+  using Memory_clock = std::pair<const slang::ast::ValueSymbol*, bool>;
+  // LNAST memory clock attributes apply to the whole array, not individual ports.
+  absl::flat_hash_map<const slang::ast::Symbol*, Memory_clock> memory_clocks_;
   // Symbols that ALSO have a continuous-assign driver. A packed array whose
   // element 0 is `assign`ed while [1..N] are flops (the cvfpu pipeline idiom,
   // `assign q[0] = in; FFL(q[i+1], q[i], …)`) is only PARTLY register, so its
   // async-reset slices can never cover the whole symbol -- see
   // finalize_pending_async_resets.
-  absl::flat_hash_set<const slang::ast::Symbol*>              cont_assign_syms_;
+  absl::flat_hash_set<const slang::ast::Symbol*>               cont_assign_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>
       wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   // A `wire` net that is MULTIPLY written (a case/priority-if or bit-slice
@@ -822,6 +825,7 @@ private:
   // base (caller then falls back to the unpacked/memory path or a diagnostic).
   bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out);
   void emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
+  void emit_dynamic_slice_write(const std::string& base, const std::string& lo, int width, const std::string& value);
   // Partial (bit-slice) write whose resolved root is a BUNDLE port: const
   // offsets split per overlapped field (full cover = plain field store,
   // partial = field-local splice); a dynamic offset reassembles the whole

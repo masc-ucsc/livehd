@@ -344,6 +344,9 @@ bool write_pretty_abc_map(const rapidjson::Value& d, bool stats) {
       line += std::format(" ({})", crit);
     }
   }
+  if (double depth = 0; json_num(t, "max_region_depth", depth)) {
+    line += std::format(", max region depth {:.0f}", depth);
+  }
   if (double bb = 0; json_num(t, "div_blackbox", bb) && bb > 0) {
     line += std::format("  [PARTIAL: {:.0f} blackboxed div/mod cone(s) unscored]", bb);
   }
@@ -376,6 +379,9 @@ bool write_pretty_abc_map(const rapidjson::Value& d, bool stats) {
                           input_ge,
                           region_gates,
                           region_area);
+        if (double depth = 0; json_num(r, "logic_depth", depth)) {
+          row += std::format(" logic_depth={:.0f}", depth);
+        }
         if (double delay = 0; json_num(r, "delay", delay)) {
           row += std::format(" delay={:.3f}", delay);
         } else {

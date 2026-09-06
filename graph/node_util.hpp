@@ -97,9 +97,10 @@ inline constexpr uint32_t kFormalAssumeHier   = 5;
 
 // Create-or-find the canonical const pin for `value`. Canonicalized HERE,
 // once, so structural dedup and every consumer see one spelling:
-//  * Boolean -> Integer (`true` = -1, `false` = 0). `true`/`false` are a
-//    front-end type (tolg mints them via Dlop::from_pyrope) and every graph
-//    consumer reads the Integer -- exactly what the old pid encoding produced.
+//  * Boolean -> unsigned Integer (`true` = 1, `false` = 0). Booleans are a
+//    front-end type; graph consumers need the 0/1 value, including mux arm
+//    selection and loop activation. Dlop's signed Boolean payload is not the
+//    graph value.
 //  * a known integer that fits 62 bits is re-built at its minimal (size-1)
 //    width, so a wide-operand fold and a literal dedup to ONE pin (Dlop::hash
 //    mixes size).
@@ -107,6 +108,15 @@ inline constexpr uint32_t kFormalAssumeHier   = 5;
 // Invalid / Nil are not values: hhds refuses them (std::invalid_argument) --
 // a producer that computed "no value" must keep its node, not mint a 0.
 [[nodiscard]] inline hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) {
+  if (value.is_bool()) {
+    Dlop canonical;
+    if (value.has_unknowns()) {
+      canonical.init_unknown_positive(1);
+    } else {
+      canonical.init_integer(value.is_known_true() ? 1 : 0);
+    }
+    return g.create_constant(canonical);
+  }
   if (value.is_numeric() && value.is_just_i64()) {
     // Build the canonical form on the STACK: create_constant copies it into the
     // pool anyway, so the spool_ptr round-trip Dlop::create_integer needs is

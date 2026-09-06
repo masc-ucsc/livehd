@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # End-to-end test for the pass.abc multiplier / right-shift bit-blast and the
-# division blackbox (task 2a-abc follow-on): technology-map a colored
+# division bit-blast (task 2a-abc follow-on): technology-map a colored
 # combinational design that uses `*`, `>>` and `/` to a standard-cell netlist and
 # prove every region equivalent to the original logic with `lhd lec` (the
 # graph-native cvc5 engine).
@@ -12,15 +12,13 @@
 #                                            mult/div as region seeds)
 #   pass partition --emit-dir lg:re         (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models
-#   pass abc --emit-dir lg:net              (bit-blast mult/sra, blackbox div)
+#   pass abc --emit-dir lg:net              (bit-blast mult/sra/div)
 #   lhd lec --impl lg:net --ref lg:re --lib lg:models   (per region)
 #
 # Coverage: unsigned + signed + n-ary multiply (array multiplier), logical +
-# arithmetic right shift (barrel shifter), and unsigned + signed division (kept
-# native as a blackbox boundary -- abc must emit a `div-blackbox` warning and must
-# NOT technology-map the divider). The multiplier/shifter math itself is also
-# proven against reference arithmetic by the graph-free //pass/abc:abc_arith_test
-# unit test.
+# arithmetic right shift (barrel shifter), and unsigned + signed division.
+# Divider widths must preserve the full operands even for a narrow quotient.
+# Arithmetic builders are also checked independently with software bit models.
 #
 # Hermetic: small vendored Liberty (inou/prp/tests/abc/test.lib), not the PDK.
 
@@ -48,18 +46,15 @@ run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
 REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
 [ -n "$REGIONS" ] || fail "no __cN region modules in the partition twin: $(cat "$W/re/library.txt")"
 
-# pass abc: the divider regions must warn (and stay native), the rest map. Run
-# WITHOUT -q so the div-blackbox diagnostic is written to stderr (quiet mode
-# suppresses the per-diagnostic stream, leaving only a count in the result JSON).
+# Map every arithmetic region, including division.
 "$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" \
   --workdir "$W/w3" --result-json "$W/r.json" 2>"$W/abc.err" || fail "pass abc -> $(cat "$W/r.json" 2>/dev/null)"
-grep -q '"code":"div-blackbox"' "$W/abc.err" || fail "expected a div-blackbox warning (a/b and c/e are divisions): $(cat "$W/abc.err")"
+if grep -q '"code":"div-blackbox"' "$W/abc.err"; then fail "divider was not mapped"; fi
 ls "$W/net"/graph_* >/dev/null 2>&1 || fail "no mapped netlist emitted"
 
 # Prove every region of the mapped netlist equivalent to its original-logic twin.
 # lec flattens the netlist's blackbox standard-cell Subs inline against --lib; the
-# native div blackbox is understood directly. Covers mult/sra (mapped) and div
-# (passed through), signed and unsigned.
+# divider is bit-blasted too. Covers mapped mult/sra/div, signed and unsigned.
 for r in $REGIONS; do
   run lec --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$r" --workdir "$W/wlec"
 done
@@ -94,4 +89,4 @@ if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$one_region" \
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi
 
-echo "PASS: pass.abc mult/sra mapped + div blackboxed, all lhd-lec-equivalent (signed + unsigned)"
+echo "PASS: pass.abc mult/sra/div mapped, all lhd-lec-equivalent (signed + unsigned)"

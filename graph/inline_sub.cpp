@@ -20,13 +20,14 @@ namespace {
 class Sub_inliner {
 public:
   Sub_inliner(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def = nullptr,
-              bool name_state = false, bool prefix_instance = true)
+              bool name_state = false, bool prefix_instance = true, bool inherit_color = false)
       : parent_(parent)
       , inst_(inst)
       , from_pass_(from_pass)
       , def_(def)
       , name_state_(name_state)
-      , prefix_instance_(prefix_instance) {}
+      , prefix_instance_(prefix_instance)
+      , inherit_color_(inherit_color) {}
 
   bool run();
 
@@ -45,6 +46,7 @@ private:
   // False only for an unnamed compiler-generated wrapper whose default
   // `sub_<nid>` name is not part of the source hierarchy.
   bool             prefix_instance_ = true;
+  bool             inherit_color_   = false;
   hhds::Graph*     child_           = nullptr;
   std::string      prefix_;
 
@@ -85,6 +87,9 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
     auto newid = parent_->source_locator().import_from(child_->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
+  }
+  if (inherit_color_ && has_color(inst_)) {
+    set_color(neo, color_of(inst_));
   }
   // A color on an absorbed node is meaningless in the parent's id space (colors
   // are per-def), and pass.color recolors the parent right after. Dropping it is
@@ -338,8 +343,8 @@ bool Sub_inliner::run() {
 }  // namespace
 
 bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def,
-                         bool name_state, bool prefix_instance) {
-  Sub_inliner s(parent, inst, from_pass, def, name_state, prefix_instance);
+                         bool name_state, bool prefix_instance, bool inherit_color) {
+  Sub_inliner s(parent, inst, from_pass, def, name_state, prefix_instance, inherit_color);
   return s.run();
 }
 

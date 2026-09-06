@@ -50,9 +50,10 @@ public:
     std::string              pre;      // cache-lib name of the pre-abc body ("p_"+module_name)
     std::string              recipe;   // verbatim resolved ABC recipe (the recipe gate)
     std::vector<std::string> in, out;  // cached module port names (existence-checked on reuse)
-    int                      gates = 0;
-    double                   area  = 0.0;
-    float                    delay = -1.0f;
+    int                      gates       = 0;
+    double                   area        = 0.0;
+    int                      logic_depth = -1;
+    float                    delay       = -1.0f;
     std::string              crit_output;  // region output port with the worst arrival (a name)
     std::string              crit_src;
     int                      div_blackbox = 0;
@@ -128,14 +129,14 @@ public:
                                           std::string_view dff_desc);
 
 private:
-  std::string dir_;
-  std::string pre_dir_;  // dir_ + "_pre": the pre-body library (see cached_pre_lib)
+  std::string         dir_;
+  std::string         pre_dir_;  // dir_ + "_pre": the pre-body library (see cached_pre_lib)
   // The output library the deferred mapped bodies live in until save(). Set by
   // store(); null when this run mapped nothing.
   hhds::GraphLibrary* outlib_ = nullptr;
-  uint64_t    salt_  = 0;
-  bool        dirty_ = false;
-  int         hits_ = 0, misses_ = 0;
+  uint64_t            salt_   = 0;
+  bool                dirty_  = false;
+  int                 hits_ = 0, misses_ = 0;
 
   absl::flat_hash_map<std::string, Row>                      rows_;  // module_name -> row
   // Canonical digest + recipe -> previously mapped region names. The digest is

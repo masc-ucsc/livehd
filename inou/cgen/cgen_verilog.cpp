@@ -49,6 +49,22 @@ namespace {
 
 using livehd::graph_util::const_of;
 
+// A graph-boundary mask can remain to preserve a declared port width even
+// when it changes no value. Emit that identity without an intermediate net.
+bool unsigned_mask_identity(const hhds::Node_class& node) {
+  auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  auto m = livehd::graph_util::get_driver_of_sink_name(node, "mask");
+  if (a.is_invalid() || a.is_const() || !is_unsign(a) || bits_of(a) <= 0 || !m.is_const()) {
+    return false;
+  }
+  const auto& mask = const_of(m);
+  if (!mask.is_integer() || mask.has_unknowns() || mask.is_negative()) {
+    return false;
+  }
+  auto [lo, hi] = mask.get_mask_range();
+  return lo == 0 && hi >= bits_of(a) && bits_of(node.get_driver_pin(0)) == bits_of(a);
+}
+
 // Emit a constant as Verilog. hlop's Dlop::to_verilog() formats a NEGATIVE
 // value as its bare magnitude ("{n}'sh{mag}", dropping the sign), so it
 // re-reads as +mag (e.g. -6 -> "4'sh6" == +6, a silent miscompile that broke
@@ -692,6 +708,13 @@ bool Cgen_verilog::declared_unsigned_net(const hhds::Pin_class& dpin) const {
 
 std::string Cgen_verilog::signed_operand(const hhds::Pin_class& dpin, std::string_view expr) const {
   if (!declared_unsigned_net(dpin)) {
+    if (!dpin.is_const() && !operand_reads_signed(dpin) && bits_of(dpin) > 0) {
+      // An inlined unsigned expression (including a reduction/comparison)
+      // also makes Verilog arithmetic unsigned. Give it its inferred width
+      // before the concatenation makes it self-determined: an inlined u8+u8
+      // still needs its ninth carry bit here.
+      return absl::StrCat("$signed({1'b0,", bits_of(dpin), "'(", expr, ")})");
+    }
     return std::string{expr};
   }
   // `{1'b0, x}` is self-determined at x's declared width + 1 (safe: x IS a
@@ -706,7 +729,7 @@ bool Cgen_verilog::mixes_operand_signs(const hhds::Node_class& node) const {
   for (const auto& e : node.inp_edges()) {
     if (operand_reads_signed(e.driver)) {
       saw_signed = true;
-    } else if (declared_unsigned_net(e.driver)) {
+    } else if (!e.driver.is_const()) {
       saw_unsigned = true;
     }
   }
@@ -1858,7 +1881,10 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     };
     for (auto e : node.inp_edges()) {
       const auto raw     = sum_expr(e.driver);
-      const auto operand = mixed_signs ? signed_operand(e.driver, raw) : std::string{};
+      // Subtraction can produce a signed value from entirely unsigned inputs
+      // (for example -a-1). Preserve that sign when the Sum is inlined into
+      // division or comparison, where modular unsigned arithmetic is different.
+      const auto operand = (mixed_signs || !result_uns) ? signed_operand(e.driver, raw) : std::string{};
       if (e.sink.get_port_id() == 0) {
         const auto& term = operand.empty() ? raw : operand;
         add_seq          = add_seq.empty() ? term : absl::StrCat(add_seq, " + ", term);
@@ -1895,14 +1921,18 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       }
       final_expr = absl::StrCat(final_expr, "}");
     }
-  } else if (op == Ntype_op::Div) {
-    auto lhs   = get_expression(get_driver(find_sink_pin(node, "a")));
-    auto rhs   = get_expression(get_driver(find_sink_pin(node, "b")));
-    final_expr = absl::StrCat(lhs, "/", rhs);
-  } else if (op == Ntype_op::Rem) {
-    auto lhs   = get_expression(get_driver(find_sink_pin(node, "a")));
-    auto rhs   = get_expression(get_driver(find_sink_pin(node, "b")));
-    final_expr = absl::StrCat(lhs, "%", rhs);
+  } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
+    const auto a   = get_driver(find_sink_pin(node, "a"));
+    const auto b   = get_driver(find_sink_pin(node, "b"));
+    auto       lhs = get_expression(a);
+    auto       rhs = get_expression(b);
+    // Verilog makes both operands unsigned when either is unsigned. Preserve
+    // the LGraph's numeric operand values with a zero-extended signed carrier.
+    if (mixes_operand_signs(node)) {
+      lhs = signed_operand(a, lhs);
+      rhs = signed_operand(b, rhs);
+    }
+    final_expr = absl::StrCat(lhs, op == Ntype_op::Div ? "/" : "%", rhs);
   } else if (op == Ntype_op::Not) {
     auto lhs_dpin = get_driver(find_sink_pin(node, "a"));
     auto lhs      = get_expression(lhs_dpin);
@@ -2011,7 +2041,11 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a_bits = bits_of(a_dpin);
     auto a      = get_expression(a_dpin);
-    if (a_dpin.is_const()) {
+    if (unsigned_mask_identity(node)) {
+      // The size cast supplies the arithmetic context that the removed
+      // temporary would have provided. A named unsigned net already has it.
+      final_expr = pin2var.contains(a_dpin.get_class_index()) ? a : absl::StrCat("$unsigned(", a_bits, "'(", a, "))");
+    } else if (a_dpin.is_const()) {
       // A bit-select of a CONSTANT operand: get_expression returns a parenthesized
       // literal `(N'sb1?...)`, and appending `[hi:lo]` produces invalid Verilog — a
       // part-select of a parenthesized constant, often out of range (slang rejects
@@ -3105,17 +3139,21 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
   // inter-process edge the simulator schedules -- rather than sitting
   // mis-ordered inside one block, which is the form that ships wrong values.
   //
-  // The acyclic path is left EXACTLY as it was, one block in `forward` order, so
-  // an ordinary design re-emits byte for byte.
+  // Bound each process at cell boundaries. Yosys proc_clean erases assignments
+  // from a vector one at a time, making a single huge wiring process quadratic.
+  // Cells retain their blocking-assignment sequence; dependencies between cells
+  // cross ordinary combinational process boundaries.
   absl::flat_hash_set<hhds::Node_class> cyc;
   livehd::graph_util::word_level_cycle_nodes(graph, /*strict=*/true, cyc);
 
   std::vector<hhds::Node_class>         order;
   absl::flat_hash_set<hhds::Node_class> cut_subs;
+  bool                                  split_blocks = true;
   if (!cyc.empty()) {
     std::vector<hhds::Node_class> residual;
     livehd::graph_util::comb_emit_order(graph, order, &cut_subs, &residual);
     if (!residual.empty()) {
+      split_blocks = false;
       livehd::diag::warn("inou.cgen.verilog", "combinational-loop", "internal")
           .msg(
               "'{}': {} node(s) on a combinational cycle with no instance to break it -- they are emitted in raw "
@@ -3130,8 +3168,9 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     }
   }
 
-  bool       block_open = false;
-  const auto open_block = [&]() {
+  bool       block_open  = false;
+  size_t     block_cells = 0;
+  const auto open_block  = [&]() {
     if (!block_open) {
       note_module(fout);
       fout->append("always_comb begin\n");
@@ -3142,9 +3181,21 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     if (block_open) {
       note_module(fout);
       fout->append("end\n");
-      block_open = false;
+      block_open  = false;
+      block_cells = 0;
     }
   };
+
+  // Every pin2var name this def has already ASSIGNED. create_locals aliases a
+  // whole Set_mask chain onto ONE procedural accumulator (`v = <expr using
+  // v>`, one blocking assignment per link) -- and it does so exactly when the
+  // body is acyclic, which is exactly when `split_blocks` is true. Cutting a
+  // block in the middle of such a chain would give `v` two always_comb drivers
+  // (illegal SystemVerilog) and lose the lanes the earlier block wrote. So a
+  // split is only taken where the upcoming cell does not RE-assign a variable
+  // an earlier block already drove. Reads across a split are fine; writes are
+  // not.
+  absl::flat_hash_set<std::string> written_targets;
 
   const auto emit_one = [&](const hhds::Node_class& node) {
     auto op = type_op_of(node);
@@ -3165,6 +3216,15 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
         // missing bits; was a hard error in the original — skip silent.
       }
     }
+    std::string target;  // the procedural variable this cell assigns, if any
+    if (auto it = pin2var.find(node.get_driver_pin(0).get_class_index()); it != pin2var.end()) {
+      target = it->second;
+    }
+    // `>=`, not `==`: a deferred split must still be taken at the next safe
+    // cell rather than being skipped for the rest of the def.
+    if (split_blocks && block_cells >= 256 && (target.empty() || !written_targets.contains(target))) {
+      close_block();
+    }
     open_block();
     if (op == Ntype_op::Mux) {
       process_mux(fout, node);
@@ -3173,6 +3233,10 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     } else {
       process_simple_node(fout, node);
     }
+    if (!target.empty()) {
+      written_targets.insert(std::move(target));
+    }
+    ++block_cells;
   };
 
   if (cyc.empty()) {
@@ -3200,6 +3264,15 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
 void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
   note_module(fout);
   fout->append("always_comb begin\n");
+  size_t     block_cells = 0;
+  const auto next_cell   = [&]() {
+    if (block_cells == 256) {
+      note_module(fout);
+      fout->append("end\nalways_comb begin\n");
+      block_cells = 0;
+    }
+    ++block_cells;
+  };
   auto gio = graph->get_io();
   I(gio);
   for (const auto& d : gio->get_output_pin_decls()) {
@@ -3214,6 +3287,7 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph
     auto name = get_scaped_name(d.name);
     auto expr = get_expression(out_dpin);
     if (name != expr) {
+      next_cell();
       // An inlined expression's statement line lands here — anchor
       // the output assignment at its driver cell's source.
       note_src(fout, out_dpin.get_master_node());
@@ -3222,6 +3296,7 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph
   }
   for (auto node : graph->body().nodes()) {
     if (is_type_flop(node)) {
+      next_cell();
       process_flop(fout, node);
     }
   }
@@ -3355,6 +3430,14 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     // Anchor the whole always block at the reg's source site.
     note_src(fout, node);
 
+    // A resetless constant initial pin specifies power-on contents, as it does
+    // for a Memory before memory lowering. A reset-backed initial pin remains
+    // only its reset value and must not invent a power-on guarantee.
+    const bool power_on_init = reset.empty() && initial_dpin.is_const();
+    if (power_on_init) {
+      fout->append("initial ", name, " = ", reset_initial, ";\n");
+    }
+
     if (depth <= 1) {
       // Depth 1 (or unset): today's single-flop emission, plus the optional
       // enable gate.
@@ -3396,6 +3479,12 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
         fout->append(out_uns ? "reg " : "reg signed ", "[", std::to_string(bits - 1), ":0] ", sname, ";\n");
       }
       stage_names.emplace_back(std::move(sname));
+    }
+
+    if (power_on_init) {
+      for (const auto& sname : stage_names) {
+        fout->append("initial ", sname, " = ", reset_initial, ";\n");
+      }
     }
 
     fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
@@ -3921,6 +4010,9 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       auto final_expr = const_to_verilog(const_of(dpin));
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
+      if (unsigned_mask_identity(node)) {
+        continue;
+      }
       auto a_spin  = find_sink_pin(node, "a");
       name         = get_scaped_name(absl::StrCat(unquote_prp_name(pin_wire_name(dpin)), "_u"));
       out_unsigned = true;

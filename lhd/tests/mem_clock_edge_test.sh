@@ -56,7 +56,7 @@ compile_emit() { # <name> <src> <top> -> $W/<name>.log, $W/emit_<name>/ (Verilog
 }
 
 # ---------------------------------------------------------------------------
-# 1. Mixed edges: posedge write, negedge read. MUST be refused, BY NAME.
+# 1. Mixed WRITE edges remain on the Memory cell and must be refused by name.
 # ---------------------------------------------------------------------------
 # `dbg` is deliberate: it is logic OUTSIDE the memory, so case 1d can introduce a
 # real difference that the ignored memory must NOT swallow.
@@ -65,7 +65,8 @@ module mixed(input clk, input [3:0] wa, input we, input [7:0] d,
              input [3:0] ra, output reg [7:0] q, output [7:0] dbg);
    reg [7:0] m[15:0];
    always @(posedge clk) if (we) m[wa] <= d;
-   always @(negedge clk) q <= m[ra];
+   always @(negedge clk) if (we) m[wa] <= d ^ 8'h80;
+   always @* q = m[ra];
    assign dbg = d ^ 8'hFF;
 endmodule
 EOF
@@ -73,7 +74,7 @@ compile_emit mixed "$W/mixed.v" mixed \
   || { tail -8 "$W/mixed.log"; fail "case 1: a mixed-edge memory must PARSE (the language allows it); only FORMAL refuses it"; }
 grep -qa "mixes clock edges" "$W/mixed.log" \
   || { tail -8 "$W/mixed.log"; fail "case 1: parsed, but SILENTLY -- the lost per-port edges must be warned about where they are lost"; }
-grep -qa "read port 0" "$W/mixed.log" \
+grep -qa "write port 1" "$W/mixed.log" \
   || { tail -8 "$W/mixed.log"; fail "case 1: the warning does not name the offending port"; }
 echo "ok: a mixed-edge memory parses, with a warning naming the disagreeing ports"
 
@@ -129,7 +130,7 @@ echo "ok: an ignored memory does not hide a difference in the logic around it"
 # 2. The vacuity guard: the SAME design with both ports on posedge must build.
 #    Without this, a reader that refused every memory would pass case 1.
 # ---------------------------------------------------------------------------
-sed 's/always @(negedge clk) q/always @(posedge clk) q/' "$W/mixed.v" > "$W/same.v"
+sed 's/always @(negedge clk)/always @(posedge clk)/' "$W/mixed.v" > "$W/same.v"
 sed -i.bak 's/module mixed/module same/' "$W/same.v"
 compile_emit same "$W/same.v" same \
   || { tail -8 "$W/same.log"; fail "case 2: a single-edge memory must still compile"; }
@@ -160,6 +161,26 @@ compile_emit rom_n "$W/rom_n.v" rom_n \
 grep -qa "negedge" "$W/emit_rom_n"/*.v \
   || { fail "case 3: a negedge-read ROM lost its edge"; }
 echo "ok: a clocked ROM takes its edge from the read port, in both polarities"
+
+# Read registers remain explicit under memory -nordff. Their edge no longer
+# competes with the Memory cell's write edge, and neither event may be lost.
+cat > "$W/split_read.v" <<'EOF'
+module split_read(input clk, input [3:0] wa, input we, input [7:0] d,
+                  input [3:0] ra, output reg [7:0] q);
+  reg [7:0] m[15:0];
+  always @(posedge clk) if (we) m[wa] <= d;
+  always @(negedge clk) q <= m[ra];
+endmodule
+EOF
+compile_emit split_read "$W/split_read.v" split_read || fail "explicit read-register case did not compile"
+if grep -qa "mixes clock edges" "$W/split_read.log"; then
+  fail "separate read-register edge was incorrectly classified as a mixed-edge Memory"
+fi
+grep -qa "negedge" "$W/emit_split_read/"*.v || fail "read register lost its negedge"
+# The positive write edge lives inside this RTL wrapper; the top passes clk
+# directly to its write-clock port while the read-register event stays explicit.
+grep -qa 'cgen_memory_multiclock_1rd_1wr' "$W/emit_split_read/"*.v || fail "missing memory wrapper"
+grep -qa '\.wr_clock_0(clk)' "$W/emit_split_read/"*.v || fail "memory write clock was changed"
 
 echo "PASS: mem_clock_edge_test"
 exit 0

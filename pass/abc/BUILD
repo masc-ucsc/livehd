@@ -6,7 +6,7 @@ load("//tools:copt_default.bzl", "COPTS")
 # Mapper-engine identity for the persistent synthesis cache. Any implementation
 # or ABC-pin change automatically invalidates mapped bodies; unrelated lhd
 # rebuilds leave the cache warm. Hash the module pin conservatively via the
-# workspace MODULE file because it is the source of the @abc revision.
+# workspace MODULE file and local patches because both define the @abc code.
 #
 # `pass/partition` is in the hash too: it decides region boundaries and boundary
 # port names, and those ARE the shape of the cache key (docs/opt_loop_incr.md
@@ -37,9 +37,14 @@ genrule(
     name = "abc_salt",
     srcs = [
         ":mapper_srcs",
+        "//graph",  # private occurrence expansion and inlining
+        "//pass/cprop:pass_cprop",
+        "//pass/bitwidth:pass_bitwidth",
+        "//pass/color:pass_color",  # shared pattern identity
         "//pass/liberty:liberty_dff_srcs",
         "//pass/partition:partition_srcs",
         "//:MODULE.bazel",
+        "//packages:abc.patch",
     ],
     outs = ["abc_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
@@ -67,6 +72,9 @@ cc_library(
         "//core",
         "//graph",
         "//pass/common:pass",
+        "//pass/cprop:pass_cprop",
+        "//pass/color:pass_color",
+        "//pass/bitwidth:pass_bitwidth",
         "//pass/cost:host_mem",
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
@@ -95,6 +103,20 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "abc_map_test",
+    srcs = ["abc_map_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/prp:abc_tests"],
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
 # Functional unit test for the backend-agnostic adder/comparator builders
 # (abc_arith.hpp), instantiated with a software bit model — no ABC dependency.
 cc_test(
@@ -107,3 +129,5 @@ cc_test(
     includes = ["."],
     deps = ["@googletest//:gtest_main"],
 )
+
+exports_files(["abc_arith.hpp"])

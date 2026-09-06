@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2c-color-synthcones — cone-seeded synthesis coloring (pass.color synth_alg=cones)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2c-color-synthcones</strong> Cone-seeded synthesis coloring (<code>pass.color synth --set synth_alg=cones</code>)</h1>
+
+<p><strong>Goal.</strong> Add a second synthesis-boundary coloring next to <code>pass.color synth</code>:
+seed one backward cone per register data input (and one per register enable), let cones
+record how much logic they <em>share</em> with cones that reached it first, then merge the
+most-sharing color pairs while the merged color stays under a configurable <em>soft</em>
+clustering threshold expressed in a predicted AIG-size score
+(<code>predict_abc_size</code>), not in LGraph node counts or the current synthesis-GE unit.
+The score guides region granularity; it is not an ABC admission limit, and the existing
+pass.abc memory/time checks remain the backstop. Both algorithms stay; a <code>--set</code>
+selects one. No default flip in this task — after both have been iterated on, a later
+ruling decides whether to delete one, alternate, or keep both.</p>
+
+<h2>Status — LANDED and measured (2026-08-26)</h2>
+<p>P0–P5 are done. <code>pass.color synth --set synth_alg=cones</code> ships next to
+<code>synth</code>/<code>pipe</code>; <strong>no default flip</strong> (ruling 8). What landed:
+<code>graph/predict_abc_size.hpp</code> + <code>shift_mux_count</code> factored out of
+<code>synthesis_cost.hpp</code> (<code>graph/predict_abc_size_smoke.cpp</code>, 11 cases);
+<code>pass/color/color_region_graph.{hpp,cpp}</code> (the hoisted <code>Region_graph</code> plus an
+injection ctor and <code>dissolved_side</code>); <code>pass/color/color_synth_cones.cpp</code>
+(<code>Color_synth::label_cones</code>, 14 gtests in <code>color_synth_cones_test.cpp</code>);
+<code>Color_opts::max_gate</code> / <code>Def_color_sizes::color_pred</code>; the
+<code>pass.color.max_gate</code> label (default 30000) and <code>synth_alg=cones</code> validation;
+a per-region <code>pred_aig</code> column in <code>pass.abc</code>'s <code>qor.json</code>; and
+<code>lhd/tests/lhd_color_cones_test.sh</code> (partition + ABC + LEC PROVEN on both hier
+fixtures).</p>
+<p><strong>Measured A/B</strong> (§F, cold <code>full</code> leg, sky130, both rounds from one
+<code>-c opt</code> binary; ratios are cones/synth, so &lt;1 is cones winning). The full
+table and its reading live in <code>docs/opt_loop_synth.md</code> §W1.4.</p>
+<table>
+<tr><th>design</th><th>regions</th><th>gates</th><th>area</th><th>ABC max_delay</th><th>STA delay</th><th>color ms</th><th>abc ms</th></tr>
+<tr><td>dino</td><td>2.31x</td><td>0.989x</td><td>1.013x</td><td>1.000x</td><td>1.001x</td><td>0.80x</td><td>0.91x</td></tr>
+<tr><td>minion</td><td>4.81x</td><td>0.968x</td><td>0.974x</td><td>1.000x</td><td>blocked</td><td>0.85x</td><td>0.94x</td></tr>
+<tr><td>xs_alu</td><td>1.62x</td><td>0.975x</td><td>0.987x</td><td>1.000x</td><td>1.000x</td><td>0.67x</td><td>1.13x</td></tr>
+<tr><td>xs_renametable</td><td>3.49x</td><td>1.046x</td><td>1.037x</td><td>1.125x</td><td><strong>0.256x</strong></td><td>0.63x</td><td>1.07x</td></tr>
+</table>
+<ul>
+<li><strong>QoR is a wash on area, with one large timing win.</strong> Three designs map
+1–3% fewer gates, xs_renametable 4.7% more; per-region ABC delay is identical on three.
+The move that matters is xs_renametable's whole-design <code>pass.opentimer</code> delay,
+735.1 ns → 188.5 ns. Cutting at register cones keeps a long combinational path inside one
+region, where the GE window chops it by size and ABC then optimizes the pieces separately.</li>
+<li><strong>Coloring is cheaper on every design</strong> (0.63–0.85x): the cached fan-in/
+fan-out CSR keeps the per-cone walk off the graph's edge lists, and the §G quadratic risk
+did not materialize.</li>
+<li><strong>Region count is 1.6–4.8x higher</strong> — ruling 4 (no floor) working as
+specified. minion's <code>&lt;1k GE</code> bucket goes 324 → 2479, xs_renametable's 31 → 1476.
+ABC absorbs it (peak RSS 0.55–0.66x and <code>max_region_ms</code> 0.77–0.80x on the two
+large designs), but it is the first thing to revisit if cones is ever a default candidate.</li>
+<li><strong>Cache-name stability is the real regression</strong> (§G predicted it). dino,
+xs_alu and xs_renametable are unaffected; minion goes from 2 misses of 550 to
+<strong>416 of 2640</strong> after a one-line edit, and <code>abc_warm_speedup</code> 169x → 67x.</li>
+<li><strong>The predictor validates.</strong> Against mapped gates on the same runs,
+predicted AIG correlates at r = +0.95/+0.99/+0.67 (dino/xs_alu/minion) where GE manages
++0.82/+0.59/+0.60, and its whole-design ratio to mapped gates is a consistent 2.8–4.5x
+across all four designs where GE's spans 1.4–6.4x. <code>predict_abc_size</code> is a stable
+~3x over-count of mapped cells; that consistency is exactly what one shared threshold needs.</li>
+</ul>
+
+<h2>Rulings (2026-08-25, do not relitigate)</h2>
+<ol>
+<li><strong>Walk-through, budgeted.</strong> When a cone reaches a node already owned by an
+earlier color it keeps walking <em>through</em> it (so overlap = the shared sub-cone), but a
+cone stops expanding once its traversed predicted score (owned + foreign) exceeds
+<code>max_gate</code>. The threshold is heuristic, like the merge threshold itself: it bounds
+positive-score work on shared hubs without claiming that the score is an exact ABC size or
+admission certificate.</li>
+<li><strong>Roots per register: <code>din</code> is one color, <code>enable</code> (when
+connected) is a separate color. Clock and reset never seed and are never colored through
+the register.</strong> (Reset/clock driver logic that nothing else reaches is picked up by the
+leftover sweep, §A4.)</li>
+<li><strong>Unit = predicted generic-AIG complexity.</strong>
+<code>predict_abc_size(node)</code> is a stable, technology-independent heuristic derived
+from the structure of <code>pass.abc</code>'s default bit blast and the measured per-op scale.
+It intentionally does not reproduce every simplification or configurable adder architecture.
+<code>max_gate</code> is a <em>soft, user-configurable clustering threshold</em>: lowering it
+usually produces more/smaller (and potentially worse) regions, but neither side of the
+threshold guarantees ABC success or failure. No Liberty-specific calibration or runtime
+fitting is part of v1.</li>
+<li><strong>No floor, no split.</strong> A zero-overlap cone is its own ABC block. Once the
+overlapping colors are merged nothing further is added even if the result is far below the
+bound. A single cone already over <code>max_gate</code> is left intact and reported.</li>
+<li><strong>Exposure: third <code>synth_alg</code> value</strong> (<code>synth|pipe|cones</code>)
+dispatched inside <code>Color_synth</code>; knob <code>pass.color.max_gate</code> (flat leaf —
+<code>pass.color.synthcones.max_gate</code> is not an expressible <code>--set</code> key: the
+kernel splits at the last dot, <code>lhd/lhd_kernel_common.cpp check_known_set_passes</code>).
+<code>lhd synth --set color.synth_alg=cones</code> and the lhdsuite bench's
+<code>BENCH_COLOR_SYNTH_ALG=cones</code> then work with zero kernel/harness changes, and
+absorb, seeded-color exclusion, <code>--stats</code> and the <code>"packed"</code> plumbing are
+inherited.</li>
+<li><strong>Overlap unit = predicted AIG-size score of the shared nodes</strong>, i.e.
+<code>overlap(A,B) = Σ predict_abc_size(n)</code> over the A-owned nodes B's walk traversed —
+same unit as <code>max_gate</code>.</li>
+<li><strong>Keep the arithmetic cuts.</strong> Mult/Div and Sum wider than 8 bits are roots of
+their own cone (own color), exactly the boundary <code>synth</code> mode uses; register
+cones stop at them and record contact overlap, so the merge can still fold an adder into a
+consumer cone when it fits.</li>
+<li><strong>Acceptance = keep both, measure.</strong> The A/B (§F) is a report, not a gate on
+landing; <code>synth</code> remains the <code>lhd synth</code> default.</li>
+<li><strong>Zero-score nodes stay zero.</strong> Wiring-like nodes are treated exactly like
+every other node by ownership and traversal; there is no walk-only minimum charge or
+second node-count budget. A zero score therefore consumes no <code>max_gate</code> budget.</li>
+<li><strong>V1 coloring remains node-granular.</strong> A Flop/Latch/Fflop node gets one
+<code>din</code> root regardless of width; v1 does not track or assign colors per bit. Large
+register arrays should normally lower to Memory, whose surrounding input logic is seeded
+once per logical read/write port. Register storage width is not a separate merge guard:
+the storage element itself scores zero, while any folded enable/reset mux complexity is
+ordinary predicted combinational cost. A true bit-demand coloring is deferred.</li>
+<li><strong>Default <code>max_gate=30000</code>.</strong> It remains user-configurable; this
+is the shipped starting point for the A/B evaluation, not a claim that 30k is universally
+safe or optimal.</li>
+</ol>
+
+<h2>Why (measured, 2026-08-25)</h2>
+<p>The existing window bounds regions in <code>synthesis_ge_weight</code> (GE). Over 1930
+regions from 7 lhdsuite designs, GE predicts mapped gates with a median error of 1.8x and
+p90 of 5.6x, in <em>both</em> directions: runtime shifts over-count up to 24x (the x6 in
+<code>graph/synthesis_cost.hpp</code> is an ABC <em>time</em> safety factor), Sum under-counts
+~5x, Mult 1.5–6x, register-file arrays 8–11x (the 25k-GE window certified
+<code>RenameTable_2__c10</code> at 24.8k GE; it mapped to 195k cells). ABC time correlates
+with mapped gates (r≈0.9) far better than with GE (r≈0.31 on cva6). A per-op
+sky130 fixture (<code>ops.sv</code>, one module per (op, 8/16/32/64 bits)) gives the ratios the
+table below encodes structurally: and/or/xor/mux2 1/bit, eq 1.35, lt 2.6, add 5.5, mux4
+3.1, mul ≈ 5.9·a·b, shifts ≈ 1.15 per bit×amount-bit, flops 0 (+1/bit per folded
+enable/reset mux).</p>
+
+<h2>A. Algorithm (per def, inside <code>Color_synth::label</code> when <code>synth_alg=cones</code>)</h2>
+<ol>
+<li><strong>A1 — Preparation, one pass.</strong> Dense per-node arrays indexed by
+<code>nid&gt;&gt;2</code> (user nodes start at index 4): <code>owner</code> (color id, 0 =
+none), <code>visit_epoch</code>, <code>pred</code> (cached <code>predict_abc_size</code>),
+and a per-node list of <em>(sink port, driver node)</em> entries
+materialized from ONE
+<code>inp_edges()</code> call per node. This cache is load-bearing: hhds
+<code>inp_edges_local</code> scans every edge slot of the node <em>including its out-edges</em>
+(graph.cpp <code>inp_edges_local</code>, the <code>vid &amp; 2</code> filter), so calling it on a
+100k-fanout enable/reset driver inside a per-cone loop is the quadratic re-scan trap
+(memory <code>sta_cache_and_two_quadratic_walks</code>). Root discovery and the per-cone
+loop use this cache and never call <code>inp_edges()</code> or
+<code>get_driver_of_sink_name()</code>. Seeded (block-attr) nodes, builtins, constants and IO are marked
+non-traversable up front (<code>is_partitionable</code>, <code>Color_synth::is_seeded</code>).</li>
+
+<li><strong>A2 — Roots, in <code>body().nodes(Node_order::forward)</code> first-encounter
+order</strong> (HHDS's deterministic dependency order with storage-index tie-breaking and
+cut nodes emitted first by default — therefore a flop may appear before its din cone, so
+roots are collected in one pass and walked in a second, never during the iteration):
+  <ul>
+  <li>Flop/Latch/Fflop: root <code>R_din</code> = cached driver of sink <code>din</code>,
+  for the whole node regardless of Q width;
+  root <code>R_en</code> = cached driver of <code>enable</code> when connected, a separate
+  color. Nothing for clock/reset/async/initial.</li>
+  <li>Memory: one root per logical port, decoded from the
+  <code>Ntype::Memory_port_stride</code> blocks and each port's <code>rdport</code> metadata.
+  A write-port root starts from that port's <code>addr</code>/<code>din</code>/<code>enable</code>
+  drivers; a read-port root starts from its <code>addr</code>/<code>enable</code> drivers.
+  Clock and comptime pins do not participate. Whole-array
+  <code>update</code>/<code>update_enable</code> form one additional logical write root. The
+  Memory node remains one hard-stop node with one color; the per-port colors describe its
+  surrounding logic, not multiple colors on the Memory node itself.</li>
+  <li>Stateful Sub (<code>is_loop_break()</code> after the <code>set_subnode</code> re-stamp):
+  one root per node over all non-clock input drivers. A comb-only Sub is a pass-through node
+  in every walk (blackbox, 0 AIG).</li>
+  <li>Arithmetic cuts (ruling 7): every Mult/Div and Sum with <code>driver_bits &gt; 8</code>
+  (reuse <code>Color_synth::is_cut</code> minus the loop-break arm) is a root of its own
+  color and is pre-owned before any walk; its cone is its operand logic.</li>
+  <li>Graph outputs: one root per output pin (they overlap and merge like registers).</li>
+  </ul>
+  Within a node, emit roots in fixed semantic order (din then enable; Memory port blocks in
+  ascending raw port index; graph output pins in ascending port id). Ids are minted
+  1,2,3,… in that root order. Ordinary din/enable/output root drivers remain
+  traversable by later cones — that traversal is what measures their shared sub-cone.
+  Only loop breaks and arithmetic cuts are hard stops and are never claimed by another
+  walk.</li>
+
+<li><strong>A3 — Walk (explicit LIFO worklist, never recursion; epoch-stamped visited).</strong>
+For root r with color c, initialize <code>traversed</code> with the predicted score of an
+arithmetic-cut node owned by that root (ordinary din/enable/output/memory-port roots start
+at 0), then push the root driver node(s). Registers are placed only in A4, so their folded
+enable/reset score contributes to the final color weight and over-max report, not to this
+earlier walk cutoff. Pop n:
+  <ul>
+  <li>skip if not partitionable, seeded, already visited in this epoch (also covers
+  compact-loop self edges and comb cycles);</li>
+  <li>if n is a loop break: stop without claiming it or recording a pair (crossing a
+  register/memory/stateful Sub is not sharing logic);</li>
+  <li>if n is an arithmetic cut: it was pre-owned by its own root; add
+  <code>pred[n]</code> to <code>pair(owner(n), c)</code> when nonzero (contact overlap), then
+  stop without claiming or expanding it;</li>
+  <li>else if <code>owner[n]==0</code>: claim it (<code>owner[n]=c</code>); else
+  add <code>pred[n]</code> to <code>pair(owner[n], c)</code> when nonzero (foreign visit).
+  Never materialize zero-valued pair-map entries: zero overlap must remain "no edge" for
+  ruling 4;</li>
+  <li><code>traversed += pred[n]</code>; if <code>max_gate != 0 &amp;&amp; traversed &gt;
+  max_gate</code>: count it in <code>budget_truncated</code>, clear the worklist and end this
+  root's walk — the popped node is still claimed/counted, but no already-queued sibling is
+  visited after the threshold crossing;</li>
+  <li>push n's cached drivers.</li>
+  </ul>
+  A root whose entire reachable cone was already claimed may own no node (an enable or
+  output root has no fixed state node of its own). Its overlap still contributes to merge
+  ordering, but with <code>max_gate=0</code> the empty root naturally emits no color; "separate
+  root" means a separate cone seed, not duplicated ownership of shared logic.
+  SRA demand-slice group (best effort): when a cone claims a runtime SRA it also claims that SRA's
+  still-unowned <em>constant-mask</em> Get_mask consumers (one forward hop), so the
+  demand-sliced barrel that <code>pass.abc</code> builds only when both share a region is not
+  split when ownership permits it (the same reason <code>topo_chunk</code> never chops a
+  weightless Get_mask off its SRA). A consumer already owned by an earlier root stays with
+  that root; §G records the resulting prediction exposure rather than violating first-wins.</li>
+
+<li><strong>A4 — Root placement and totality.</strong> The register node itself takes the
+color of its <code>din</code> driver when that driver is an owned non-cut node
+(<code>data_cone_id</code> semantics: "the stage is the logic plus the register it writes"),
+else the fresh <code>R_din</code> id — a register fed by a PI or another register is a
+one-node color, by ruling 4. A Memory or stateful Sub node takes one fresh anchor color of
+its own; its per-port/input roots color the surrounding logic and never assign multiple
+colors to the state/boundary node. Leftover sweep: after all roots, walk
+<code>body().nodes(forward)</code> once more and root every still-unowned partitionable node
+that has no unowned consumer (a sink of the uncolored subgraph — reset/clock glue, output
+glue nobody reached, dead logic), same walk as A3. Finally, root every still-unowned node
+in forward order; this is the totality fallback for an isolated combinational cycle, whose
+members all have an unowned consumer and therefore have no sink seed. Result: no
+partitionable node is left at
+<code>NO_COLOR</code> (pass.partition warns and <code>pass.analyze</code> flags
+<code>uncolored</code> otherwise).</li>
+
+<li><strong>A5 — Merge.</strong> Sizes are additive because ownership is disjoint:
+<code>size(A∪B) = size(A)+size(B)</code>, and the same holds for folded overlaps
+<code>overlap(A∪B, C) = overlap(A,C)+overlap(B,C)</code> (the A–B entry is
+erased). That additivity is what makes "discard forever" sound. Driver:
+  <ul>
+  <li>Region graph over colors: <code>weight = Σ pred</code>, adjacency = the pair map
+  (key <code>(min&lt;&lt;32)|max</code>, value overlap score). Only
+  encountered pairs exist, so zero-overlap colors have no entry and never merge.</li>
+  <li>Max-heap of <code>(overlap desc, min id asc, max id asc)</code> with a version per
+  adjacency pair and lazy invalidation: an entry is valid iff both ids are live roots and
+  its stored pair version matches. A merge increments and re-pushes only the pairs whose
+  overlap changed; untouched survivor pairs remain valid even though the survivor's size
+  grew.</li>
+  <li>Pop the best valid pair (a,b). If <code>weight(a)+weight(b) ≤ max_gate</code>: merge through
+  <code>Region_graph::merge</code> (survivor = larger degree, fold the dissolved side's
+  adjacency additively, push only the dissolved side's updated pairs — small-to-large,
+  O(P log P)) and also union the two original cone-id classes in
+  <code>Int_union_find</code>. Region_graph's degree-selected storage representative and
+  the union-find's minimum-id semantic representative are deliberately independent.
+  Otherwise discard the pair for good (sizes only grow).</li>
+  <li>When <code>max_gate==0</code>, skip the merge driver entirely: zero means raw cones,
+  not an unlimited merge cap.</li>
+  <li>A color whose own weight exceeds <code>max_gate</code> never merges and is counted as
+  <code>over_max</code> (ruling 4).</li>
+  </ul></li>
+
+<li><strong>A6 — Finalize.</strong> Resolve owners through the union-find (union-by-min,
+<code>Int_union_find</code>), renumber 1..k in forward first-encounter order (lift the tail of
+<code>apply_size_window</code>, <code>color_size.cpp</code> "Final renumber", into a shared
+helper), force <code>continuous=false</code>, skip <code>apply_size_window</code> entirely in
+cones mode (ruling 4: <code>min_ge</code>/<code>max_ge</code> do not shape cones; <code>min_ge</code>
+still drives absorb, see §C), then <code>apply_coloring</code>. Emit
+<code>"packed":true</code> unconditionally for cones: a first-wins cone can be split by an
+earlier owner (<code>flopB ← n1 ← n2[A] ← n3</code> gives B = {flopB, n1, n3}), so colors are
+not connected components; without the flag pass.partition shreds them into
+<code>&lt;def&gt;__c&lt;id&gt;_r&lt;k&gt;</code> modules ordered by min-nid (unstable cache
+keys). Disjoint clouds behind one port list are sound for partition/ABC/LEC/cgen (documented
+in <code>color_size.hpp</code>).</li>
+
+<li><strong>A7 — Cost.</strong> Preparation O(N+E). The walk costs O(total node visits before
+each root's score truncation), with O(1) work per visit from cached drivers and epoch arrays.
+Zero-score wiring does not consume the score budget, so <code>#roots × max_gate</code> is not
+by itself a node-visit bound; §G records this accepted exposure. Pair map ≤ number of
+foreign visits. Merge O(P log P). Memory: four dense per-node arrays plus the pair map; no
+per-cone hash sets (40k roots on one XSCore def).</li>
+</ol>
+
+<h2>B. <code>predict_abc_size</code> (new <code>graph/predict_abc_size.hpp</code>, next to <code>synthesis_cost.hpp</code>)</h2>
+<p><code>[[nodiscard]] uint64_t predict_abc_size(const hhds::Node_class&amp;)</code>. Unit: a predicted 2-input
+AIG-size score informed by <code>pass.abc</code>'s default blast
+(<code>pass/abc/abc_map.cpp</code> blast arms, <code>abc_arith.hpp</code> builders), before
+ABC optimization. It is deliberately a stable heuristic rather than an exact count: ABC
+performs constant simplification while building, the adder architecture is configurable,
+and mapped size is the quantity the calibration ultimately tries to track. A pure
+<code>(Ntype_op, bits)</code> key cannot express the ops that dominate region size, so the
+function reads op + output bits + the op-specific extras below; the per-op constants are a
+single table and are pinned by a test. Initial values:</p>
+<ul>
+<li>Nconst, IO, Concat, const-mask Get_mask/Set_mask, Sext, const-amount SHL/SRA, Not (AIG
+complement edge): <code>0</code>.</li>
+<li>And/Or: <code>bits × (inputs − 1)</code>; Xor: <code>3 × bits × (inputs − 1)</code>; Ror:
+<code>bits</code>.</li>
+<li>Mux: <code>3 × bits × (arms − 1)</code>; Hotmux: <code>2 × bits × arms</code>.</li>
+<li>Sum (rca full adder = 2 XOR + carry with the shared half-XOR): <code>8 × bits × (terms −
+1)</code>; LT/GT (subtractor chain): <code>5 × max(a_bits, b_bits)</code>; EQ (XNOR + AND
+chain): <code>4 × max_bits × (inputs − 1)</code>.</li>
+<li>Runtime SHL/SRA: <code>3 × muxes</code>, where <code>muxes</code> is the structural count
+<code>synthesis_ge_weight</code> already derives (SHL <code>out_w × amount_bits</code>; SRA the
+backward <code>need[k]</code> prefix trim at <code>cw = max(operand, result)</code>). Factor that
+calculation out of <code>synthesis_cost.hpp</code> into a shared <code>shift_mux_count(node)</code> so
+the two never drift; the x6 there stays x6 (it is a time factor, see §G).</li>
+<li>Mult: <code>9 × a_bits × b_bits</code> (partial-product ANDs + an adder row per operand
+bit) — operand widths, <em>not</em> <code>out_width²</code> as <code>ge_weight</code> uses.</li>
+<li>Flop/Latch/Fflop: <code>3 × bits × [enable connected] + 3 × bits × [reset connected]</code>
+(the next-state muxes pass.abc folds into the latch D); the DFF itself <code>0</code>.</li>
+<li>Memory (default <code>memory=false</code>), Div, Rem, Sub (comb or stateful), Clock_cell,
+LUT, AttrSet: <code>0</code> — blackbox / not blasted. (<code>a % 2^k</code> Rem rewrites to an
+And before ABC; charge as And.)</li>
+</ul>
+<p>All products and sums saturate at <code>UINT64_MAX</code>; an unknown required width
+degrades to 1 rather than making a live operation free. This table is a sizing heuristic,
+not a pass.abc support list: assigning a score to an operation such as Ror does not add a
+missing blast arm or make that operation synthesizable.</p>
+<p>Scope of the unit: <strong>only</strong> cones mode's budget, overlap and merge test.
+<code>synthesis_ge_weight</code> stays the unit of the window, <code>--stats</code> GE columns,
+absorb, reduce, pass.abc size tiers and <code>Region_qor::input_ge</code>. Replacing it
+design-wide is a separate task with its own pinned tests.</p>
+
+<h2>C. Integration points</h2>
+<ul>
+<li><code>pass/color/color_synth.{hpp,cpp}</code>: replace the ctor's two-way boolean with an
+explicit <code>pipe|synth|cones</code> mode; <code>label()</code> branches to the private
+<code>Color_synth::label_cones(g)</code> method (defined in new
+<code>pass/color/color_synth_cones.cpp</code>, picked up by the BUILD glob). Keeping it a
+class method lets it reuse the cut/seed/driver helpers without widening their public API;
+promote the file-local <code>driver_bits</code> helper to a private static member so both
+translation units can use it. The existing pipe/synth path is unchanged. Verbose
+line <code>[color.cones] &lt;def&gt; roots R (din D, en E, mem-port P, sub B, cut C, out O, sweep S), truncated T,
+pairs P, merges M, refused U over cap, colors K, max pred X (Y over max_gate)</code>.</li>
+<li><code>pass/color/BUILD</code>: add <code>color_synth_cones_test</code> to the explicit
+<code>cc_test</code> list (the production <code>.cpp</code> is globbed; tests are not).</li>
+<li><code>pass/color/color_common.hpp</code>: <code>Color_opts::max_gate = 0</code> (INERT for direct
+callers/tests, same contract as <code>min_ge</code>/<code>max_ge</code>: 0 = no budget, no
+merge, raw cones); <code>Def_color_sizes::color_pred</code> (predicted AIG-size score per written color)
+so <code>Color_stats::report</code> can print <code>cones: max_gate N — K color(s) over</code>.
+Only algorithm-owned nodes contribute to <code>color_pred</code>; source-seeded colors are
+outside the cones policy and must not be reported as threshold escapes.</li>
+<li><code>pass/color/color_size.{hpp,cpp}</code>: hoist the file-local <code>Region_graph</code>
+into <code>pass/color/color_region_graph.hpp</code> with a second ctor
+<code>Region_graph(weights, members, adjacency)</code>; keep
+<code>merge()</code>/<code>find()</code>/<code>region_of()</code>; <code>apply_size_window</code> is
+unchanged in behavior (pure refactor, existing tests green).</li>
+<li><code>pass/color/pass_color.cpp</code>: <code>synth_alg</code> validation and hints accept
+<code>cones</code>; label <code>max_gate</code> ("synth: cones mode — soft bound on a color's
+predicted AIG size; merge the most-sharing cones under it; 0 = no merge", default
+<code>30000</code>, parsed with <code>parse_ge_bound</code>-style strictness; folds to
+<code>maxgate</code>, distinct from <code>maxge</code> — never add <code>max_gates</code>);
+<code>params_json</code> records <code>synth_alg</code>, <code>max_gate</code> and
+<code>"packed":true</code> for cones; absorb keeps its current gate (alg==synth, min_ge != 0)
+— in cones mode <code>min_ge</code> only means "absorb defs below this GE".</li>
+<li><code>pass/color/color_stats.{hpp,cpp}</code>: carry <code>synth_alg</code> and
+<code>max_gate</code> into <code>report</code>; print the predicted-score threshold summary
+only for cones, while retaining the existing GE histogram and window report for synth/pipe.</li>
+<li>Help/meta surfaces: <code>pass_color.cpp</code> synth_alg help + bad-synth-alg hints,
+<code>lhd/lhd_meta.cpp</code> lines listing <code>pipe|synth</code>; <code>docs/opt_loop_synth.md</code>
+knob table gets a <code>pass.color.max_gate</code> row (and its stale <code>max_ge</code> row —
+it says 30M, source default is 25000 — is fixed in passing).</li>
+<li><code>../lhdsuite/bench/synth.sh</code>: <code>BENCH_COLOR_MAX_GATE → --set color.max_gate</code>
+next to <code>BENCH_COLOR_MAX_GE</code>.</li>
+<li><code>pass/abc/pass_abc.cpp</code>: the two admission hints ("lower <code>color.max_ge</code>")
+also name <code>color.max_gate</code> when the top's <code>coloring_info</code> says
+<code>synth_alg=cones</code>. Optional but recommended for iterating on the table: a
+<code>pred_aig</code> column in <code>Region_qor</code>/<code>qor.json</code> (Σ
+<code>predict_abc_size</code> over the region, next to <code>input_ge</code>) so every production
+run validates predicted-vs-mapped per region — no per-op post-ABC attribution exists, so
+region sums are the only ground truth. Admission/tier logic itself is untouched.</li>
+<li>Fix in passing: the stale comment at <code>color_synth.hpp</code> ("the driver reuses one
+Color_synth across defs" — <code>run_one</code> constructs a fresh one per def).</li>
+</ul>
+
+<h2>D. Reuse map</h2>
+<ul>
+<li><code>Color_synth::is_cut</code> (arithmetic arm), <code>is_seeded</code>, the promoted
+private <code>driver_bits</code>, and the <em>semantics</em> of <code>data_cone_id</code> — reused
+by the private <code>label_cones</code> method. Cones does not call <code>data_cone_id</code>
+itself because that helper performs a named driver lookup; root placement reads the din
+owner from A1's cached fan-ins.</li>
+<li><code>Region_graph::merge/find/region_of</code> — the merge engine; only the ordering driver is
+new (the existing per-actor Best-Choice worklists are the wrong order for a global "most
+overlapping first" and are not touched).</li>
+<li><code>Int_union_find</code> (union-by-min), the forward first-encounter renumber, and
+<code>apply_coloring</code> — determinism and write-out.</li>
+<li><code>synthesis_cost.hpp</code>'s shift-mux replay — shared via <code>shift_mux_count</code>.</li>
+<li><code>hhds</code>: <code>inp_edges()</code> (eager, includes the port-0 sink),
+<code>is_loop_break()</code>, and <code>is_graph_output_pin</code>.</li>
+</ul>
+
+<h2>E. Tests</h2>
+<p><code>graph/predict_abc_size_smoke.cpp</code> (standalone check: there is no matching
+<code>predict_abc_size.cpp</code>; register it in <code>graph/BUILD</code>'s explicit
+<code>cc_test</code> list and add the header to <code>hdrs</code>):
+each op's constant at 8/16/32/64 bits; Mult keyed by operand widths; runtime SRA = 3 ×
+<code>shift_mux_count</code> and equals <code>synthesis_ge_weight/2</code>; const shifts and wiring
+= 0; flop = 0 / +3 per bit with enable.</p>
+<p><code>pass/color/color_synth_cones_test.cpp</code>, <code>TEST(ColorSynthCones, …)</code>, one
+<code>lgdb_cones_&lt;x&gt;</code> library dir per test, fixture style of
+<code>color_synth_test.cpp</code> (Flop din = sink pin 3, enable = 4), raw mode via
+<code>max_gate=0</code>:</p>
+<ol>
+<li><em>TwoFlopsShareSubcone</em>: <code>flopA ← xorA ← shared ← in</code>, <code>flopB ← andB ← shared</code>:
+shared belongs to the first forward-order cone; raw → 2 colors and one recorded pair;
+<code>max_gate</code> large → 1 color; <code>max_gate</code> below the union → 2.</li>
+<li><em>EnableIsItsOwnCone</em>: din logic and enable logic get different colors; the flop carries the
+din color.</li>
+<li><em>WideFlopIsNodeGranular</em>: a wide flop still creates one whole-node din root and
+one enable root, never one root/color per bit; changing only its storage width introduces
+no merge guard.</li>
+<li><em>ClockResetNeverSeed</em>: reset-tree logic is not claimed through the flop; it is colored by
+the sweep and shares no pair with the din cone.</li>
+<li><em>BudgetStopsWalk</em>: a chain heavier than <code>max_gate</code> is truncated
+(<code>budget_truncated == 1</code>); the tail is claimed by the sweep; every node colored.</li>
+<li><em>ArithCutIsOwnRoot</em>: a Mult between two cones is its own color; the consumer cone
+records contact overlap = <code>predict(Mult)</code>; merges only when it fits.</li>
+<li><em>OutputsAndMemoryPortsAreRoots</em>: output-only logic is colored; a multi-port
+Memory seeds distinct cones for each logical read/write port while the Memory node itself
+has one color; nothing remains <code>NO_COLOR</code>.</li>
+<li><em>DisjointColorIsPacked</em>: the split-cone shape above yields one id spanning two clouds and
+<code>coloring_info</code> carries <code>"packed":true</code>.</li>
+<li><em>Deterministic</em>: label twice → identical Node2Id, ids dense 1..k, first forward
+partitionable node is 1 (mirrors <code>ColorSize.IdsAreDeterministicAndDense</code>).</li>
+<li><em>SeededIsAWall</em>: a block-attr node keeps its id, is never traversed, never in a pair;
+algorithm ids land above the seeded max.</li>
+<li><em>ThresholdBoundary</em>: 15000 + 15000 merges at <code>max_gate=30000</code> and not at 29999;
+a pair refused once is never revisited even after other merges (discard-forever).</li>
+<li><em>HubMergesInOverlapOrder</em>: one hub cone shared by five register cones of different
+sizes merges with them largest-overlap-first until the cap, and the rest keep boundaries
+to it.</li>
+</ol>
+<p>End-to-end <code>lhd/tests/lhd_color_cones_test.sh</code> (sh_test, <code>_FLOW_DATA +
+//inou/prp:hier_tests</code>, template <code>lhd_color_absorb_test.sh</code>): <code>hier_seq.prp</code> and
+<code>hier_comb.prp</code> → <code>pass color synth --set pass.color.synth_alg=cones --set
+pass.color.max_gate=&lt;small&gt; --stats</code> → <code>pass partition --emit-dir</code> asserting one
+<code>&lt;def&gt;__c&lt;id&gt;</code> module per id → <code>pass abc</code> → <code>lec</code> PASS; plus one
+<code>lhd synth … --set color.synth_alg=cones --set synth.opentimer=false</code> smoke asserting
+<code>qor.abc.total.regions &gt; 0</code>. <code>lhd_color_test.sh</code>'s alg loop gains a cones line.
+The negative control in <code>lhd_synth_test.sh</code> (<code>color.alg=flat</code> refused) stays
+valid.</p>
+
+<h2>F. Evaluation recipe (report only; both algorithms kept)</h2>
+<p>From <code>../lhdsuite</code>, same sitting, same <code>-c opt</code> build (the
+<code>./bazel-bin</code> symlink flips to the last config). Run the exact targets below for
+the baseline, append them before overwriting Bazel's latest testlogs, then repeat with the
+cones environment:</p>
+<pre><code>bazel test -c opt \
+  //bench:dino_synth //bench:minion_synth \
+  //bench:xs_alu_synth //bench:xs_renametable_synth //bench:xs_rob_synth \
+  //bench:dino_synth_incremental //bench:minion_synth_incremental \
+  //bench:xs_alu_synth_incremental //bench:xs_renametable_synth_incremental \
+  //bench:xs_rob_synth_incremental \
+  --override_module=livehd=../livehd --test_output=all
+bazel run //bench:ledger -- append synth-baseline dino minion xs_alu xs_renametable xs_rob
+
+bazel test -c opt \
+  //bench:dino_synth //bench:minion_synth \
+  //bench:xs_alu_synth //bench:xs_renametable_synth //bench:xs_rob_synth \
+  //bench:dino_synth_incremental //bench:minion_synth_incremental \
+  //bench:xs_alu_synth_incremental //bench:xs_renametable_synth_incremental \
+  //bench:xs_rob_synth_incremental \
+  --override_module=livehd=../livehd --test_output=all \
+  --test_env=BENCH_COLOR_SYNTH_ALG=cones --test_env=BENCH_COLOR_MAX_GATE=30000
+bazel run //bench:ledger -- append synth-cones-30k dino minion xs_alu xs_renametable xs_rob</code></pre>
+<p>The target names above are verified by <code>bazel query</code>. Compare per design:
+<code>regions</code>, physical <code>gates</code>/<code>area</code>,
+ABC <code>max_delay</code> (and <code>sta_delay</code> where pass.opentimer completes), <code>abc_ms</code>,
+<code>max_region_ms</code>, <code>abc_peak_rss_kb</code>, the per-color histogram, and — first-class —
+<code>pass3_cache_hits/misses</code> from the incremental scenario: an overlap-ordered merge can
+renumber many colors after a one-line edit, and abc_incr keys on <code>&lt;def&gt;__c&lt;id&gt;</code>.
+Any region over the evaluation's 15-minute / 16 GiB per-color target envelope is reported
+as a candidate defect.
+Whole-process peak RSS is STA-dominated and will not show the coloring's effect.</p>
+
+<h2>Order of work (all landed 2026-08-26 — see Status)</h2>
+<ol>
+<li><strong>P0 — cost table.</strong> <code>graph/predict_abc_size.hpp</code>, <code>shift_mux_count</code>
+factored out of <code>synthesis_cost.hpp</code> (its behavior unchanged, pinned by the existing
+<code>ColorSize.WideSraUsesNarrowSliceDemand</code>), <code>predict_abc_size_smoke</code>. Independent of
+everything else.</li>
+<li><strong>P1 — hoist <code>Region_graph</code></strong> into <code>color_region_graph.hpp</code> with the
+injection ctor; <code>color_size_test</code> and <code>color_synth_test</code> unchanged and green.</li>
+<li><strong>P2 — cone walk</strong> (A1–A4): <code>Color_synth::label_cones</code>, roots,
+cached drivers, budget, pair map, SRA group, sweep, root placement;
+<code>Color_opts::max_gate</code>; the raw-mode walk, state-boundary, memory-port, totality,
+determinism and seeded-wall tests.</li>
+<li><strong>P3 — merge + finalize</strong> (A5–A6): heap driver, renumber,
+<code>packed</code>, verbose/<code>--stats</code> counters; the merged-share, disjoint-packed,
+threshold-boundary and overlap-order tests.</li>
+<li><strong>P4 — surfaces</strong>: <code>synth_alg=cones</code> validation, <code>max_gate</code> label,
+<code>params_json</code>, help/meta strings, <code>docs/opt_loop_synth.md</code> row, bench knob, e2e
+sh_test and the <code>lhd synth</code> smoke.</li>
+<li><strong>P5 — measure</strong> (§F) on the routine set and record the table in
+<code>docs/opt_loop_synth.md</code> next to the W1.4 <code>synth_alg</code> experiment slot. No default
+flip.</li>
+</ol>
+
+<h2>G. Risks and open items</h2>
+<ul>
+<li><strong>OPEN (not the coloring's bug, but it blocks minion's STA number).</strong>
+<code>pass.opentimer</code> refuses minion's cones netlist:
+<code>internal: Concat lane 0 (of 2, MSB-first) driver 'concat_7722340' occupies 33 bits but
+its declared window is 32</code>. The same refusal happens under the shipped
+<code>pass.color flat</code>, and NOT under <code>synth</code> (at any <code>max_ge</code>,
+including a 2000-GE window that produces far more regions) nor under
+<code>synth_alg=pipe</code> — so it is region-membership dependent, not region-count
+dependent. The pre-ABC design passes <code>cgen_verilog</code>'s identical
+<code>concat_lane_violation</code> check, so the width is widened somewhere between
+<code>pass.partition</code> and <code>pass.abc</code>'s read-back, not present in the source.
+ABC itself completes: minion's cones QoR above is real, only the whole-design STA is missing.
+Reproducer (one <code>-c opt</code> pair):
+<pre>lhd synth ../lhdsuite/minion/pyrope/minion_top.prp --top minion_top --workdir W \
+  --set synth.liberty=$LIB --set color.synth_alg=cones --set color.max_gate=30000 \
+  --set synth.opentimer=false --emit-dir lg:net
+lhd pass opentimer --top minion_top.minion_top lg:net $LIB --workdir OT</pre>
+Unrelated and also pre-existing: a <code>-c dbg</code> build aborts inside ABC
+(<code>Abc_ObjAddFanin: !Abc_ObjIsNet(pObj) || !Abc_ObjFaninNum(pObj)</code>) on minion under
+BOTH <code>synth</code> and <code>cones</code>, so every minion measurement above is
+<code>-c opt</code>.</li>
+<li><strong>Very wide flop nodes.</strong> V1 deliberately follows the graph's node-granular
+color contract: even a very wide Flop/Latch/Fflop has one <code>din</code> cone. If real
+designs retain large register arrays instead of lowering them to multi-port Memory nodes,
+record those cases in §F; per-bit demand tracking would be a separate design because a
+single LGraph node cannot carry multiple colors.</li>
+<li><strong>Zero-score traversal.</strong> Concat, masks, constant shifts and other wiring
+score 0, so a score-only walk threshold does not bound the number of visited nodes. By
+ruling, there is no special walk charge: a wiring-dominated shared cone may be revisited
+once per root. Measure this explicitly on the 40k-root XSCore case; if it is a problem, a
+future change must revisit the ruling rather than silently introducing another metric.</li>
+<li><strong>Shift-heavy ABC time.</strong> The AIG unit charges a runtime barrel 3 per mux; the
+window's x6 was calibrated on ROB colors that ran past 15 minutes. If §F shows a merged
+shift/Mult color breaching <code>abc.time_budget_ms</code>, report it and sweep a lower
+<code>max_gate</code> and/or revise the single prediction table. V1 does not silently add a
+second time metric.</li>
+<li><strong>SRA demand ownership.</strong> The predictor uses constant-mask consumers to
+discount unused high barrel stages. If first-wins assigned such a consumer before its SRA
+is reached, the best-effort forward claim cannot reunite them and the owning SRA color can
+be under-predicted. Record split SRA/Get_mask pairs in verbose statistics during §F; if
+they are material, a future revision needs atomic group ownership or a conservative full
+barrel score, not silent reassignment.</li>
+<li><strong>Cache-name stability.</strong> A global "most overlap first" order is chaotic under
+small edits (one changed count flips one merge; union-by-min then shifts later ids).
+Deterministic per run by construction (roots, heap order, renumber). If pass3 hits collapse
+versus <code>synth</code>, the mitigation is to break equal-overlap ties on min id (already the
+heap order) and to reconsider whether the final ids should come from the min forward-order
+seed of each merged class rather than the dense renumber.</li>
+<li><strong>Threshold scale.</strong> In the current measurements, a 30k predicted score is
+conservative for ordinary logic (57k-cell colors mapped in ~5 s), but that observation is
+not an admission guarantee. Cones are expected to produce more, smaller colors than
+<code>synth</code>'s 25k-GE window on datapath-heavy defs and fewer on shift-heavy ones. This
+is expected by ruling 3 (granularity/soft bound, not an admission recalibration); the
+pass.abc RSS/time guards remain the backstop.</li>
+<li><strong><code>memory=true</code></strong> lowers memories to flops/muxes after coloring, stamped
+with the memory's color; the 0-AIG Memory entry under-predicts those colors. Same
+limitation as today's GE; documented, not solved here.</li>
+<li><strong>Enable cones that share everything with their din cone</strong> (e.g. <code>en</code> is
+one AND of the same operands) merge back by overlap when small — expected; the separate
+root only matters when the enable logic is a hub.</li>
+<li><strong>hhds forward-reference Subs</strong>: a stateful Sub whose body is not yet
+materialized reads as combinational until <code>set_subnode</code> re-runs; same exposure as
+<code>synth</code> today.</li>
+<li>Stale references to <code>todo/livehd/2c-color-size.html</code> in <code>color_size.hpp</code>,
+<code>color_common.hpp</code>, <code>color_size_test.cpp</code> and <code>lhd/tests/BUILD</code> point at a
+file that no longer exists; do not add more.</li>
+</ul>
+
+<h2>Scope</h2>
+<p>This task adds the cones coloring, its cost table, tests and the A/B report. It does not
+change the <code>synth</code> algorithm, the size window, <code>synthesis_ge_weight</code> or any
+<code>pass.abc</code> admission/tier logic, does not touch <code>lhd synth</code>'s kernel (cones is
+reached through <code>color.synth_alg</code>), and does not decide which algorithm survives.</p>
+</main>
+<footer>LiveHD TODO · <a href="../index.html">index</a></footer>
+</body>
+</html>

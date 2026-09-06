@@ -35,10 +35,12 @@ inline bool is_builtin_function(std::string_view name) {
   static constexpr std::string_view names[] = {
       // verification (`requires`/`ensures` were removed — use assume/assert)
       "assert", "cassert", "assume", "assert_always",
-      // debug / string output
-      "cputs", "puts", "print", "format",
+      // debug / string output (`format` was REMOVED: it never had an
+      // implementation in any context -- use `string(...)` to convert and
+      // `puts`/`print` to emit)
+      "cputs", "puts", "print",
       // compilation / directives
-      "import", "optimize",
+      "import",
       // overflow policies (also usable as `wrap x = …` statements)
       "wrap", "sat", "saturate",
       // bit concatenation — `concat(a, b, c)`, argument 0 the MOST significant
@@ -46,13 +48,14 @@ inline bool is_builtin_function(std::string_view name) {
       // n-ary LNAST `concat` node (a func_call would lose the lane order, and
       // each lane is sized by its DECLARED type at upass.tolg).
       "concat",
-      // concurrency / timing
-      "spawn", "defer",
-      // testbench storage references (sim-only; handled by prp_sim, not tolg).
-      // `sigref` binds a read-only window onto a cell, `regref` a writable one;
-      // they replaced `peek`/`poke`, whose every read copied a value out of a
-      // freshly recomputed snapshot of the whole design.
-      "sigref", "regref",
+      // testbench storage reference (sim-only; handled by prp_sim, not tolg).
+      // `regref` binds a WRITABLE window onto a register, and is the only way to
+      // drive one from a `test`. Reads need no builtin -- a bare dotted
+      // `dut.field` already reads any cell. (`sigref` was REMOVED: it was
+      // exactly a bare dotted read. `spawn`/`defer`/`optimize` were also removed
+      // -- spawn/defer are gone from the language and `optimize` never had an
+      // implementation, a grammar rule or any documentation.)
+      "regref",
   };
   for (const auto n : names) {
     if (n == name) {

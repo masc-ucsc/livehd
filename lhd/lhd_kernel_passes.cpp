@@ -627,6 +627,31 @@ void pass_command(Options& opts, Result& res) {
   }
   const std::string sub = opts.files[0];
 
+  // Graph-producing passes need a library even when Verilog is the only
+  // requested artifact. Their EPRP input var remains the original design;
+  // emit from the output library, never from that input snapshot.
+  const bool wants_verilog = find_slot(opts.emits, "verilog") != nullptr || find_slot(opts.emit_dirs, "verilog") != nullptr;
+  std::optional<Typed_path> graph_out;
+  if (const auto* out = find_slot(opts.emit_dirs, "lg")) {
+    graph_out = *out;
+  } else if (wants_verilog) {
+    graph_out = Typed_path{"lg", workdir(opts) + "/pass_net"};
+  }
+  const auto finish_graph_output = [&] {
+    if (!graph_out) {
+      return;
+    }
+    if (find_slot(opts.emit_dirs, "lg") == nullptr
+        && std::find(res.inputs.begin(), res.inputs.end(), graph_out->path) == res.inputs.end()) {
+      std::erase(res.outputs, graph_out->path);  // internal scratch is not a declared output
+    }
+    if (wants_verilog) {
+      Eprp_var output;
+      load_lg_into_var(graph_out->path, output);
+      emit_verilog_outputs(opts, res, output);
+    }
+  };
+
   // `pass semdiff --ref lg:A --impl lg:B`: the structural diff/match pass takes
   // two lg: libraries via --ref/--impl (not a positional lg: input) and marks
   // the `match` attribute on both in place — so handle it before the single
@@ -651,7 +676,7 @@ void pass_command(Options& opts, Result& res) {
     // other Liberty reader, so one spelling serves the whole flow.
     const std::string lib_file = opts.files.size() > 2 ? opts.files[2] : resolve_liberty(opts);
     check_inputs_exist({lib_file});
-    const auto* lg_out = find_slot(opts.emit_dirs, "lg");
+    const auto* lg_out = graph_out ? &*graph_out : nullptr;
     if (lg_out == nullptr) {
       throw Lhd_error{"usage", "pass liberty gensim needs --emit-dir lg:DIR for the model library", ""};
     }
@@ -674,6 +699,7 @@ void pass_command(Options& opts, Result& res) {
       livehd::Hhds_graph_library::save(lg_out->path);
     }
     res.outputs.push_back(lg_out->path);
+    finish_graph_output();
     return;
   }
 
@@ -721,6 +747,11 @@ void pass_command(Options& opts, Result& res) {
       livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
     }
     res.outputs.push_back(lg_in);
+    if (alg == "reduce" && wants_verilog) {
+      graph_out = Typed_path{"lg", lg_in};
+      finish_graph_output();
+      return;
+    }
 
     // `--emit-dir lg:OUT` fuses pass.partition: emit the per-(def,color) module
     // library straight from this run, so a coloring that produces regions (synth,
@@ -728,7 +759,7 @@ void pass_command(Options& opts, Result& res) {
     // on the just-colored graphs in memory. `flat` colors everything one id, so
     // partition flattens the hierarchy into a single module -- the same result as
     // running the two passes by hand (never a silent no-op).
-    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+    if (const auto* lg_out = graph_out ? &*graph_out : nullptr; lg_out != nullptr) {
       if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
         throw Lhd_error{"usage", "color --emit-dir lg: must differ from the input lg:", ""};
       }
@@ -752,7 +783,7 @@ void pass_command(Options& opts, Result& res) {
     if (var.graphs.empty()) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
-    const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
+    const auto*         lg_out = graph_out ? &*graph_out : nullptr;
     Eprp_var::Eprp_dict labels;
     set_top_label(opts, var, labels, "pass.partition");
     if (lg_out != nullptr) {
@@ -779,7 +810,7 @@ void pass_command(Options& opts, Result& res) {
     if (var.graphs.empty()) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
-    const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
+    const auto*         lg_out = graph_out ? &*graph_out : nullptr;
     Eprp_var::Eprp_dict labels;
     set_top_label(opts, var, labels, "pass.abc");
     if (lg_out != nullptr) {
@@ -836,7 +867,7 @@ void pass_command(Options& opts, Result& res) {
     // (2opt-freq D): STA on ONE tech-mapped module. Timing files are the bare
     // positional args after the subcommand (like `pass liberty gensim`);
     // `files` is a kernel-managed label, so the kernel builds it here.
-    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+    if (const auto* lg_out = graph_out ? &*graph_out : nullptr; lg_out != nullptr) {
       throw Lhd_error{"usage",
                       std::format("pass opentimer does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
                       "opentimer reports timing (see --workdir/timing.json), it does not transform the graph"};
@@ -899,7 +930,7 @@ void pass_command(Options& opts, Result& res) {
       std::erase(res.outputs, ephemeral_qor);
     }
   } else if (sub == "formal") {
-    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+    if (const auto* lg_out = graph_out ? &*graph_out : nullptr; lg_out != nullptr) {
       throw Lhd_error{"usage",
                       std::format("pass formal does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
                       "formal produces a verdict (and marks proven/runtime_check in place), not a graph library"};
@@ -924,7 +955,7 @@ void pass_command(Options& opts, Result& res) {
     if (var.graphs.empty()) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
-    const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
+    const auto*         lg_out = graph_out ? &*graph_out : nullptr;
     Eprp_var::Eprp_dict labels;
     set_top_label(opts, var, labels, "pass.single_edge");
     if (lg_out != nullptr) {
@@ -954,7 +985,7 @@ void pass_command(Options& opts, Result& res) {
     if (var.graphs.empty()) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
-    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+    if (const auto* lg_out = graph_out ? &*graph_out : nullptr; lg_out != nullptr) {
       throw Lhd_error{"usage",
                       std::format("pass analyze does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
                       "analyze reports findings as JSONL on stdout; it transforms nothing"};
@@ -969,6 +1000,7 @@ void pass_command(Options& opts, Result& res) {
                     "use: color <alg> | partition | single_edge | abc | opentimer | formal | liberty gensim | semdiff "
                     "| analyze"};
   }
+  finish_graph_output();
 }
 
 }  // namespace lhd

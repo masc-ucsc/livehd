@@ -2934,7 +2934,7 @@ private:
           }
         } else if (Lnast_ntype::is_const(cht)) {
           auto v = Dlop::from_pyrope(lnast_->get_name(ch));
-          if (!v || !v->is_just_i64()) {
+          if (!v || !v->is_integer()) {
             error_here(
                 "upass.tolg: memory '{}' initializer '{}' is not an "
                 "integer constant",
@@ -2965,7 +2965,7 @@ private:
           break;
         }
         auto v = Dlop::from_pyrope(txt);
-        if (!v || !v->is_just_i64()) {
+        if (!v || !v->is_integer()) {
           error_here(
               "upass.tolg: memory '{}' initializer '{}' is not an "
               "integer constant",
@@ -3229,7 +3229,7 @@ private:
         return create_const(*g_, *Dlop::create_integer(0));  // zero-filled
       }
       auto v = Dlop::from_pyrope(txt);
-      if (!v || !v->is_just_i64()) {
+      if (!v || !v->is_integer()) {
         error_here(
             "upass.tolg: whole-array value '{}' for memory '{}' is not "
             "supported — use an integer, a tuple literal or nil",
@@ -3385,7 +3385,7 @@ private:
       // Scalar broadcast: every entry = value (masked to the element) — the
       // same treatment the reg declare-initializer path applies.
       auto v = Dlop::from_pyrope(txt);
-      if (!v || !v->is_just_i64()) {
+      if (!v || !v->is_integer()) {
         error_here(
             "upass.tolg: array '{}' initializer '{}' is not supported — "
             "use an integer, a tuple literal or nil",
@@ -3468,7 +3468,7 @@ private:
         return false;
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(e));
-      if (!v || !v->is_just_i64()) {
+      if (!v || !v->is_integer()) {
         error_here("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
         return false;
       }
@@ -6236,6 +6236,13 @@ private:
     if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
       const std::string raw{lnast_->get_name(val)};
       const std::string name{canon_io_name(raw)};
+      // Every partial write accumulates on the pending input, including
+      // runtime ranges. Ordinary expression reads still resolve to committed Q.
+      if (reg_map_.contains(raw) || wire_names_.contains(raw)) {
+        if (auto dit = pin_map_.find(din_key(raw)); dit != pin_map_.end()) {
+          return {dit->second, mw_lookup(din_key(raw))};
+        }
+      }
       if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
         return {nil_pin(), 1};
       }
@@ -6427,22 +6434,7 @@ private:
     // image from stale q and silently drop the first write when both enables
     // fired (the DataModule__64entry per-entry register file: entry 63's write
     // vanished under a same-cycle entry-62 write).
-    Val               vv;
-    bool              base_from_accum = false;
-    if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
-      const std::string val_name{lnast_->get_name(val)};
-      const bool        vreg  = reg_map_.contains(val_name) && reg_info_.contains(val_name);
-      const bool        vwire = !vreg && wire_names_.contains(val_name);
-      if (vreg || vwire) {
-        if (auto dit = pin_map_.find(din_key(val_name)); dit != pin_map_.end()) {
-          vv              = Val{dit->second, mw_lookup(din_key(val_name))};
-          base_from_accum = true;
-        }
-      }
-    }
-    if (!base_from_accum) {
-      vv = set_mask_base(val);
-    }
+    auto              vv = set_mask_base(val);
 
     auto node = make_node(Ntype_op::Set_mask);
     setup_sink_by_name(node, "a").connect_driver(vv.pin);

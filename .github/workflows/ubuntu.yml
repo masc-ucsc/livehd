@@ -31,6 +31,12 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
+      - name: Install Verilog simulator
+        run: |
+          brew install icarus-verilog
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          command -v iverilog vvp
+
       - run: bazel test -c dbg --test_output=errors //...
 
       # A full build is expensive and failures tend to happen late. Keep
@@ -72,6 +78,12 @@ jobs:
         run: |
           "$CC" --version
           "$CXX" --version
+
+      - name: Install Verilog simulator
+        run: |
+          brew install icarus-verilog
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          command -v iverilog vvp
 
       # continue-on-error so partial coverage is still uploaded when some
       # tests fail (the failure is re-raised after the upload below).

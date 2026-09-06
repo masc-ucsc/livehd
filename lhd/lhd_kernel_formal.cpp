@@ -285,10 +285,10 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
   const std::string eng = r.engine.empty() ? o.engine : r.engine;
   const long long   ms  = r.elapsed_ms >= 0 ? r.elapsed_ms : elapsed_ms;
   auto              b   = livehd::diag::info("pass.lec", code, "progress")
-               .msg("lec block '{}' {}", block, verdict)
-               .verdict(verdict)
-               .engine(eng)
-               .duration_ms(ms);
+                              .msg("lec block '{}' {}", block, verdict)
+                              .verdict(verdict)
+                              .engine(eng)
+                              .duration_ms(ms);
   if (!r.detail.empty()) {
     b.attr("detail", r.detail);
   }
@@ -1865,7 +1865,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     const long long cheap_ms               = o.timeout > 0 ? static_cast<long long>(o.timeout) * 100 : 1000;
     const bool      cheap_unknown          = r.elapsed_ms >= 0 && r.elapsed_ms < cheap_ms;
     const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
-                                        && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
+                                             && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
     //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one
     //        place a wrong PROVEN silently converts a DEFINITE counterexample into
     //        a run-level pass, so it gets the same flat confirmation (a) already
@@ -1882,8 +1882,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // partially-collapsed case.  Keying this on `coll` let the all-inlined
     // matched-filter parent accept PASS(6) even though the tap divergence
     // reaches the top after that window.
-    const bool proven_absorbing = r.verdict == Verdict::Proven && !force_flat_refuted[def_ix].empty();
-    bool       absorb_demoted   = false;  // set when that PROVEN is rejected: nothing may restore it
+    const bool      proven_absorbing       = r.verdict == Verdict::Proven && !force_flat_refuted[def_ix].empty();
+    bool            absorb_demoted         = false;  // set when that PROVEN is rejected: nothing may restore it
     if (refuted_under_collapse || unknown_under_collapse || proven_absorbing) {
       {
         std::lock_guard report_lock(report_mutex);
@@ -1906,11 +1906,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // query we are about to request.  Reuse it instead of spending the same
       // solver budget twice; deepen_if_bounded below is the additional check
       // that matters.
-      const bool already_flat      = proven_absorbing && coll.empty();
-      auto       rf                = already_flat ? r
-                                                  : (order.size() == 1
-                                                         ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
-                                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
+      const bool already_flat = proven_absorbing && coll.empty();
+      auto rf = already_flat ? r
+                             : (order.size() == 1
+                                    ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
+                                    : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
       // The collapsed run really ran cvc5, so its effort is part of what this def
       // cost: carry it into the survivor BEFORE the move discards `r` (formal.stats).
       // A BOUNDED flat pass ("no CEX up to bound k") cannot by itself overrule
@@ -1929,7 +1929,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // ordinary bounded-proof policy; an Unknown stays inconclusive, keeping
       // the collapsed witness (a hard fail under strict), and must NOT fall
       // through to the collapsed int-blast retry below.
-      auto       deepen_if_bounded = [&](livehd::lec::Query_result& cand) -> bool {  // true = demoted to Unknown
+      auto deepen_if_bounded = [&](livehd::lec::Query_result& cand) -> bool {  // true = demoted to Unknown
         if (!(cand.verdict == Verdict::Proven && cand.bounded)) {
           return false;
         }
@@ -1955,7 +1955,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                      flush);
         }
         auto rd      = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], odeep, sub_lib)
-                                               : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], odeep, sub_lib);
+                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], odeep, sub_lib);
         rd.cvc5     += cand.cvc5;
         rd.solve_ms += cand.solve_ms;  // the shallow flat leg really ran: the budget must see it
         if (rd.verdict == Verdict::Unknown) {
@@ -1963,7 +1963,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           cand.witness = r.witness;
           cand.detail  = std::format(
               "INCONCLUSIVE: flat confirmation only BOUNDED ({} step(s)) and the deepened run (bound {}) did not settle — "
-                     "cannot overrule the collapsed-box REFUTE; {}",
+              "cannot overrule the collapsed-box REFUTE; {}",
               cand.checked_steps,
               odeep.bound,
               rd.detail);
@@ -1976,15 +1976,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         rd.detail = std::format("deepened flat confirmation (bound {} = {} + flush {}); ", odeep.bound, odeep.bound - flush, flush)
                     + rd.detail;
-        cand = std::move(rd);
+        cand      = std::move(rd);
         return false;
       };
       if (refuted_under_collapse) {
         if (deepen_if_bounded(rf)) {
           absorb_demoted = true;  // see the int_blast_retry guard below
         }
-        rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                    + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+        rf.detail      = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                         + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms  = -1;  // the progress record carries the combined wall-clock below
         rf.cvc5       += r.cvc5;
         r              = std::move(rf);
@@ -2006,8 +2006,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         } else {
           r.verdict = Verdict::Unknown;
           r.detail  = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
-                     + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                     + std::string(already_flat || r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+                      + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                      + std::string(already_flat || r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
           // When `rf` STARTED as a copy of `r` (already_flat), deepen_if_bounded
           // already folded r's own effort into it -- accumulating again would
           // double-charge the shared solver budget and starve the remaining defs.
@@ -2029,10 +2029,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // refuting, then a shallow 6-cycle flat retry that cannot reach the
         // divergence. Gated on a real child REFUTE: an ordinary Unknown -> flat
         // retry with nothing to absorb must not pay for a second solve.
-        r.verdict = Verdict::Unknown;
-        r.detail  = "a bounded flat retry cannot clear a collapsed-box UNKNOWN while a child REFUTE stands"
-                   + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                   + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+        r.verdict       = Verdict::Unknown;
+        r.detail        = "a bounded flat retry cannot clear a collapsed-box UNKNOWN while a child REFUTE stands"
+                          + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                          + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
         r.cvc5         += rf.cvc5;
         r.solve_ms     += rf.solve_ms;  // both flat legs really ran: the soft budget must see them
         // The progress record below carries the combined wall clock, exactly as
@@ -2041,8 +2041,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         r.elapsed_ms    = -1;
         absorb_demoted  = true;  // see the int_blast_retry guard below
       } else if (rf.verdict != Verdict::Unknown) {
-        rf.detail = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                    + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
+        rf.detail      = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                         + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
         rf.elapsed_ms  = -1;
         rf.cvc5       += r.cvc5;
         r              = std::move(rf);
@@ -2074,8 +2074,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         r.verdict = Verdict::Unknown;
         r.detail  = std::format(
             "INCONCLUSIVE: refuted only at trusted-box input (bbin:{}) — a trust box asserts every leaf input "
-             "equal incl. functional don't-cares, and the trusted leaf cannot be flattened to tell them apart, so "
-             "this is not a disproof; {}",
+            "equal incl. functional don't-cares, and the trusted leaf cannot be flattened to tell them apart, so "
+            "this is not a disproof; {}",
             tb,
             r.detail);
       }
@@ -2418,7 +2418,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       top_result.verdict = Verdict::Unknown;
       top_result.detail  = std::format(
           "INCONCLUSIVE: '{}' proved with every child BOXED, but {} premise(s) never discharged ({}) — the top's own "
-           "logic matches, so the difference is inside those block(s); {}",
+          "logic matches, so the difference is inside those block(s); {}",
           top_key,
           n,
           open_premises,
@@ -2519,9 +2519,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     const bool skipped = !have_top;
     top_result         = refuted_result;
     top_result.detail  = std::format("hierarchical: block '{}' REFUTED{}; {}",
-                                    refuted_def,
-                                    skipped ? "" : " (top itself inconclusive)",
-                                    top_result.detail);
+                                     refuted_def,
+                                     skipped ? "" : " (top itself inconclusive)",
+                                     top_result.detail);
     have_top           = true;
   }
   if (have_top && top_result.verdict == Verdict::Proven && top_down) {
@@ -3094,7 +3094,7 @@ bool lecfail_emit_side(const std::string& lhd_bin, const Options& opts, const st
   ensure_dir(scratch);
   std::string sidearg = kind == "lg" ? "lg:" + path : (kind == "ln" ? "ln:" + path : path);
   std::string cmd     = shell_quote(lhd_bin) + " compile " + shell_quote(sidearg) + " --emit-dir " + shell_quote("pyrope:" + outdir)
-                    + " --workdir " + shell_quote(scratch);
+                        + " --workdir " + shell_quote(scratch);
   if (kind == "verilog") {
     cmd += " --reader " + shell_quote(opts.reader);
   }
@@ -3188,10 +3188,10 @@ static void emit_witness_json(const std::string& path, std::string_view kind, st
     for (size_t i = 0; i < cy.inputs.size(); ++i) {
       const auto& in  = cy.inputs[i];
       j              += std::format("{}{{\"name\": \"{}\", \"value\": \"{}\", \"width\": {}}}",
-                       i ? ", " : "",
-                       esc(in.name),
-                       esc(in.value),
-                       in.width);
+                                    i ? ", " : "",
+                                    esc(in.name),
+                                    esc(in.value),
+                                    in.width);
     }
     j += std::format("]}}{}\n", c + 1 < t.cycles.size() ? "," : "");
   }
@@ -3681,11 +3681,72 @@ static int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds:
   return n;
 }
 
-// See the call site: warn when the impl instantiates a `--lib` cell whose model
-// holds STATE. encode.cpp only inlines a COMBINATIONAL cell model, so such an
-// instance is blackboxed and contributes no state — every cut that reads it then
-// sees two unrelated symbols and both engines answer unknown in milliseconds.
-// Emitted once per run, naming the cells, with the concrete way out.
+// Clock analysis runs before the encoder's ordinary combinational --lib
+// expansion, so expose modeled gates on clock cones before scheduling edges.
+static void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* graph) {
+  if (graph == nullptr || sub_lib.empty()) {
+    return;
+  }
+  absl::flat_hash_set<hhds::Gid> combinational;
+  for (const auto& [gid, model] : sub_lib) {
+    if (model == nullptr) {
+      continue;
+    }
+    bool pure = true;
+    for (auto node : model->body().nodes()) {
+      const auto op = livehd::graph_util::type_op_of(node);
+      if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub
+          || op == Ntype_op::Clock_cell) {
+        pure = false;
+        break;
+      }
+    }
+    if (pure) {
+      combinational.insert(gid);
+    }
+  }
+  std::vector<hhds::Pin_class> pending;
+  for (auto node : graph->body().nodes()) {
+    const auto op = livehd::graph_util::type_op_of(node);
+    if (op == Ntype_op::Memory) {
+      livehd::graph_util::for_each_memory_clock_driver(node, [&](auto pin) { pending.push_back(pin); });
+    } else if (livehd::graph_util::is_type_register(node)) {
+      pending.push_back(livehd::graph_util::get_driver_of_sink_name(node, "clock_pin"));
+    }
+  }
+  absl::flat_hash_set<hhds::Class_index> seen;
+  std::vector<hhds::Node_class>          cells;
+  while (!pending.empty()) {
+    const auto pin = pending.back();
+    pending.pop_back();
+    if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) {
+      continue;
+    }
+    auto node = pin.get_master_node();
+    if (!seen.insert(node.get_class_index()).second || livehd::graph_util::is_type_register(node)) {
+      continue;
+    }
+    if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+      if (!combinational.contains(node.get_subnode_gid())) {
+        continue;
+      }
+      cells.push_back(node);
+    }
+    for (const auto& edge : node.inp_edges()) {
+      pending.push_back(edge.driver);
+    }
+  }
+  for (const auto& cell : cells) {
+    // Explicit --lib models live outside the design library. Inline only the
+    // clock cone so phase analysis sees buffer/inverter polarity and gates.
+    if (!livehd::graph_util::inline_sub_instance(graph, cell, "pass.lec", sub_lib.at(cell.get_subnode_gid()))) {
+      return;  // leave the unresolved clock for the existing fail-closed analysis
+    }
+  }
+}
+
+// Stateful --lib models must contribute real state before the encoder cuts
+// flops; an opaque instance would otherwise leave unrelated free symbols.
 static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* impl_g) {
   if (sub_lib.empty() || impl_g == nullptr) {
     return;
@@ -4470,9 +4531,11 @@ void lec_command(Options& opts, Result& res) {
       }
     }
     inline_stateful_lib_cells(sub_lib, impl_g.get());
+    inline_clock_lib_cells(sub_lib, impl_g.get());
     for (auto* d : impl_defs) {
       if (d != nullptr && d != impl_g.get() && sub_lib.find(d->get_gid()) == sub_lib.end()) {
         inline_stateful_lib_cells(sub_lib, d);
+        inline_clock_lib_cells(sub_lib, d);
       }
     }
     // CLOCK-GATE CELLS first. A real design instantiates its ICG
@@ -4921,7 +4984,7 @@ void lec_command(Options& opts, Result& res) {
             rf.witness = r.witness;
             rf.detail  = std::format(
                 "INCONCLUSIVE: flat confirmation only BOUNDED ({} step(s)) and the deepened run (bound {}) did not settle — "
-                 "cannot overrule the collapsed-box REFUTE; {}",
+                "cannot overrule the collapsed-box REFUTE; {}",
                 rf.checked_steps,
                 odeep.bound,
                 rd.detail);
@@ -4935,8 +4998,8 @@ void lec_command(Options& opts, Result& res) {
             rf = std::move(rd);
           }
         }
-        rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                    + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+        rf.detail      = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                         + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms  = -1;          // the progress record carries the combined wall-clock below
         rf.cvc5       += r.cvc5;      // the collapsed run's cvc5 effort was still spent (formal.stats)
         rf.solve_ms   += r.solve_ms;  // and so was its solve time
@@ -4960,7 +5023,7 @@ void lec_command(Options& opts, Result& res) {
           r.verdict = livehd::lec::Verdict::Unknown;
           r.detail  = std::format(
               "INCONCLUSIVE: refuted only at trusted-box input (bbin:{}) — trust asserts all leaf "
-               "inputs equal incl. don't-cares, not flattenable, so not a disproof; {}",
+              "inputs equal incl. don't-cares, not flattenable, so not a disproof; {}",
               tb,
               r.detail);
         }
@@ -5220,10 +5283,10 @@ void lec_command(Options& opts, Result& res) {
   auto yosys   = locate_lgcheck_yosys();
   auto rundir  = fs::absolute(workdir(opts)).string();
   auto cmd     = std::format("cd {} && {} --implementation {} --reference {}",
-                         shell_quote(rundir),
-                         shell_quote(lgcheck),
-                         shell_quote(impl_v),
-                         shell_quote(ref_v));
+                             shell_quote(rundir),
+                             shell_quote(lgcheck),
+                             shell_quote(impl_v),
+                             shell_quote(ref_v));
   if (!yosys.empty()) {
     cmd += std::format(" --yosys {}", shell_quote(yosys));
   }
@@ -5517,12 +5580,12 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   // counterexample was spurious".
   std::string       out   = std::format(
       "/*\n:name: {}\n:type: simulation\n*/\n"
-              "// AUTO-GENERATED by `lhd formal verify` from a REFUTED obligation.\n"
-              "// design='{}'  violated: {}\n"
-              "// Drives the design with the violating input sequence ({} cycle(s), {} reset-hold);\n"
-              "// the violation lands at cycle {}.\n"
-              "{}"
-              "// Re-run:  {}   (dumps {}.vcd)\n\n",
+      "// AUTO-GENERATED by `lhd formal verify` from a REFUTED obligation.\n"
+      "// design='{}'  violated: {}\n"
+      "// Drives the design with the violating input sequence ({} cycle(s), {} reset-hold);\n"
+      "// the violation lands at cycle {}.\n"
+      "{}"
+      "// Re-run:  {}   (dumps {}.vcd)\n\n",
       test_name,
       design_path,
       what,
@@ -5530,10 +5593,10 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       tr.reset_cycles,
       tr.diverge_cycle,
       embed_assert.empty() ? "// NO runtime check is embedded (a design-body assert is not executed by sim, and a\n"
-                                     "// formal-block obligation could not be pinned to one statement) — read the violation\n"
-                                     "// off the VCD against the sibling simfail JSON.\n"
-                                   : "// The formal-block obligation is re-checked in the test body below, so the replay\n"
-                                     "// FAILS on it; a design-body assert is not yet executed by sim — read those off the VCD.\n",
+                             "// formal-block obligation could not be pinned to one statement) — read the violation\n"
+                             "// off the VCD against the sibling simfail JSON.\n"
+                           : "// The formal-block obligation is re-checked in the test body below, so the replay\n"
+                             "// FAILS on it; a design-body assert is not yet executed by sim — read those off the VCD.\n",
       rerun,
       test_name);
   if (can_import) {
@@ -5762,12 +5825,12 @@ static void emit_formal_report(const std::string& path, const std::string& desig
   j               += "  \"run\": {\n";
   j               += std::format("    \"verdict\": \"{}\",\n    \"detail\": \"{}\",\n", agg, json_esc(r.detail));
   j               += std::format("    \"elapsed_ms\": {},\n    \"checked_steps\": {},\n    \"reset_hold\": {},\n",
-                   r.elapsed_ms,
-                   r.checked_steps,
-                   r.reset_hold);
+                                 r.elapsed_ms,
+                                 r.checked_steps,
+                                 r.reset_hold);
   j               += std::format("    \"reset_detected\": {},\n    \"vacuous\": {},\n",
-                   r.reset_detected ? "true" : "false",
-                   r.vacuous ? "true" : "false");
+                                 r.reset_detected ? "true" : "false",
+                                 r.vacuous ? "true" : "false");
   {  // which assume scopes were contradictory ("" = the design tier)
     std::string vs;
     for (const auto& s : r.vacuous_scopes) {
@@ -5823,11 +5886,11 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     std::string why;
     if (!env_assume && p.verdict != livehd::lec::Verdict::Proven && p.verdict != livehd::lec::Verdict::Refuted) {
       const bool scope_vacuous = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
-      why                      = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
-                                 : p.unknown_at >= 0 ? std::format("solver gave up at cycle {}", p.unknown_at)
-                                 : scope_vacuous     ? (p.scope.empty() ? std::string{"design assume set contradictory"}
-                                                                        : std::format("assume set of block '{}' contradictory", p.scope))
-                                                     : std::string{"not checked"};
+      why = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
+            : p.unknown_at >= 0 ? std::format("solver gave up at cycle {}", p.unknown_at)
+            : scope_vacuous     ? (p.scope.empty() ? std::string{"design assume set contradictory"}
+                                                   : std::format("assume set of block '{}' contradictory", p.scope))
+                                : std::string{"not checked"};
       if (p.kind == "assume") {
         why += "; unproven assume — NOT used";
       }
@@ -6494,17 +6557,19 @@ void formal_verify_command(Options& opts, Result& res) {
           // rose(ack, 1..=10)` must read `req` at the anchor, not at `c+F`.
           struct Top {
             std::string_view name;
-            int              nargs;    // 2 = takes a second argument
-            bool             window;   // second argument is a bounded range, not a count
-            bool             wneed;    // ...and it is REQUIRED
+            int              nargs;   // 2 = takes a second argument
+            bool             window;  // second argument is a bounded range, not a count
+            bool             wneed;   // ...and it is REQUIRED
           };
-          static constexpr std::array<Top, 7> kTemporal{{{"past", 2, false, false},
-                                                         {"rose", 2, true, false},
-                                                         {"fell", 2, true, false},
-                                                         {"stable", 2, true, false},
-                                                         {"changed", 2, true, false},
-                                                         {"eventually", 2, true, true},
-                                                         {"always", 2, true, true}}};
+          static constexpr std::array<Top, 7> kTemporal{
+              {{"past", 2, false, false},
+               {"rose", 2, true, false},
+               {"fell", 2, true, false},
+               {"stable", 2, true, false},
+               {"changed", 2, true, false},
+               {"eventually", 2, true, true},
+               {"always", 2, true, true}}
+          };
 
           // A bounded window literal: `lo..=hi` (inclusive) or `lo..<hi`.
           struct Window {
@@ -6524,12 +6589,10 @@ void formal_verify_command(Options& opts, Result& res) {
             const std::string hi_s = trim(s.substr(dots + 3));
             auto              num  = [&](const std::string& t) {
               if (t.empty() || t.find_first_not_of("0123456789") != std::string::npos) {
-                throw Lhd_error{"usage",
-                                             std::format("formal block '{}': `{}` window bound '{}' is not a literal cycle",
-                                                         blk.name,
-                                                         opname,
-                                                         t),
-                                             "both ends must be compile-time numbers: rose(x, 1..=10)"};
+                throw Lhd_error{
+                    "usage",
+                    std::format("formal block '{}': `{}` window bound '{}' is not a literal cycle", blk.name, opname, t),
+                    "both ends must be compile-time numbers: rose(x, 1..=10)"};
               }
               return std::stoi(t);
             };
@@ -6555,8 +6618,8 @@ void formal_verify_command(Options& opts, Result& res) {
             std::string second;  // "" when the call has one argument
           };
           auto next_call = [&](const std::string& text, size_t from) -> Call {
-            Call  c;
-            bool  in_str = false;
+            Call c;
+            bool in_str = false;
             for (size_t pos = 0; pos < text.size();) {
               const char ch = text[pos];
               if (in_str && ch == '\\') {
@@ -6647,12 +6710,10 @@ void formal_verify_command(Options& opts, Result& res) {
               return Window{0, 0};  // backward only
             }
             if (c.second.find("..") == std::string::npos) {
-              throw Lhd_error{"usage",
-                              std::format("formal block '{}': `{}` second argument must be a window, got '{}'",
-                                          blk.name,
-                                          nm,
-                                          c.second),
-                              "a bare count is `past`; a window is a range, e.g. rose(x, 1..=10)"};
+              throw Lhd_error{
+                  "usage",
+                  std::format("formal block '{}': `{}` second argument must be a window, got '{}'", blk.name, nm, c.second),
+                  "a bare count is `past`; a window is a range, e.g. rose(x, 1..=10)"};
             }
             return parse_window(c.second, nm);
           };
@@ -6689,8 +6750,8 @@ void formal_verify_command(Options& opts, Result& res) {
                 continue;
               }
               if (ch == '"') {
-                in_str = true;
-                out += ch;
+                in_str  = true;
+                out    += ch;
                 ++pos;
                 continue;
               }
@@ -6711,7 +6772,7 @@ void formal_verify_command(Options& opts, Result& res) {
                 const std::string_view             nm        = c.op->name;
                 // `port(d)` — the signal `d` cycles before the CURRENT unroll
                 // cycle, remembering that every term already carries the shift.
-                auto port = [&](int d) {
+                auto                               port      = [&](int d) {
                   const std::string id = hist_port(base_copy, d);
                   if (id != base_copy.ident) {
                     st.idents.push_back(id);
@@ -6722,14 +6783,14 @@ void formal_verify_command(Options& opts, Result& res) {
                 if (nm == "past") {
                   repl = port(std::stoi(c.second) + F);
                 } else {
-                  const Window w      = call_window(c);
+                  const Window w        = call_window(c);
                   const bool   windowed = !c.second.empty();
                   // Unwindowed forms are the single anchor cycle: offset 0.
-                  const int    klo    = windowed ? w.lo : 0;
-                  const int    khi    = windowed ? w.hi : 0;
+                  const int    klo      = windowed ? w.lo : 0;
+                  const int    khi      = windowed ? w.hi : 0;
                   // `stable`/`always` are universal over the window, the rest
                   // existential — the doc's OR/AND split.
-                  const bool   univ   = (nm == "stable" || nm == "always");
+                  const bool   univ     = (nm == "stable" || nm == "always");
                   std::string  acc;
                   for (int k = klo; k <= khi; ++k) {
                     const int   d = F - k;  // >= 0: F is the largest hi in the statement
@@ -6750,9 +6811,9 @@ void formal_verify_command(Options& opts, Result& res) {
                   repl = acc;
                 }
                 out += repl;
-                pos = c.close + 1;
+                pos  = c.close + 1;
                 continue;
-            }
+              }
               // A bare read of a block signal: shift it to the anchor cycle.
               if (F > 0 && (std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_')) {
                 size_t end = pos;
@@ -7113,9 +7174,9 @@ void formal_verify_command(Options& opts, Result& res) {
         const bool  scope_vacuous = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
         std::string why = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
                           : p.unknown_at >= 0 ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
-                          : scope_vacuous     ? (p.scope.empty() ? std::string{"the design's own assume set is contradictory"}
-                                                                 : std::format("assume set of block '{}' is contradictory", p.scope))
-                                              : std::string{"not checked"};
+                          : scope_vacuous ? (p.scope.empty() ? std::string{"the design's own assume set is contradictory"}
+                                                             : std::format("assume set of block '{}' is contradictory", p.scope))
+                                          : std::string{"not checked"};
         if (p.kind == "assume") {
           why += "; unproven assume — NOT used (make it provable, or spell assume_nocheck to impose it UNCHECKED)";
         }

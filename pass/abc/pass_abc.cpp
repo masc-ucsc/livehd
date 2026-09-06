@@ -23,6 +23,7 @@
 #include "json_util.hpp"
 #include "liberty_dff.hpp"
 #include "mem_lower.hpp"
+#include "loop_cleanup.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
@@ -288,12 +289,16 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   uint64_t tpred_aig         = 0;
   uint64_t peak_rss_kb       = 0;
   uint64_t color_peak_rss_kb = 0;
+  int      max_region_depth  = -1;
   int      worst             = -1;  // index of the region with the worst delay
   // Where the run's time went, split by what the cache did with each region.
   // hits/misses alone cannot distinguish "the cache saved nothing" from "the
   // cache saved everything there was to save" — these can.
   double   hit_ms = 0.0, miss_ms = 0.0;
   for (size_t r = 0; r < qor.size(); ++r) {
+    if (inst_of(qor[r]) > 0) {
+      max_region_depth = std::max(max_region_depth, qor[r].logic_depth);
+    }
     tgates       += qor[r].gates;
     tarea        += qor[r].area;
     tbypassed    += qor[r].bypassed;
@@ -325,6 +330,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       crit += std::format(" @ {}", w.crit_src);
     }
     crit += ")";
+  }
+  if (max_region_depth >= 0) {
+    crit += std::format(", max region depth {}", max_region_depth);
   }
   std::print(
       "pass.abc qor: {} region(s), {} gates, area {:.2f} (physical: every region x its instantiations; mapped once: {} gates, area "
@@ -409,6 +417,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       tarea_phys,
       tgates,
       tarea);
+  if (max_region_depth >= 0) {
+    j += std::format(",\"max_region_depth\":{}", max_region_depth);
+  }
   if (peak_rss_kb != 0) {
     j += std::format(",\"peak_rss_kb\":{}", peak_rss_kb);
   }
@@ -482,6 +493,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (q.bypassed > 0) {
       j += std::format(",\"bypassed\":{}", q.bypassed);
     }
+    if (q.logic_depth >= 0) {
+      j += std::format(",\"logic_depth\":{}", q.logic_depth);
+    }
     if (q.delay >= 0) {
       j += std::format(",\"delay\":{:.4f}", q.delay);
     }
@@ -553,6 +567,13 @@ void Pass_abc::work(Eprp_var& var) {
             .emit();
         return;
       }
+      // Definition traversal visits bodies only. Preserve opaque callee IOs
+      // too, so copied macro instances can still resolve their declarations.
+      for (const auto node : graph->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub && node.get_subnode_io() && !node.get_subnode_graph()) {
+          livehd::partition::resolve_or_clone_subdef(&occurrence_library, node);
+        }
+      }
     }
   }
   for (const auto& source : var.graphs) {
@@ -569,7 +590,18 @@ void Pass_abc::work(Eprp_var& var) {
       scratch_graphs.push_back(std::move(graph));
     }
   }
+  std::unordered_set<hhds::Gid> loop_bodies;
+  for (const auto& graph : scratch_graphs) {
+    for (const auto node : graph->body().nodes()) {
+      if (node.is_loop_subnode() && node.get_subnode_graph()) {
+        loop_bodies.insert(node.get_subnode_graph()->get_gid());
+      }
+    }
+  }
   if (!livehd::graph_util::materialize_occurrences_all(scratch_graphs, "pass.abc")) {
+    return;
+  }
+  if (!livehd::abc::cleanup_loop_bodies(scratch_graphs, loop_bodies)) {
     return;
   }
   // Def list handed to the hierarchy walks below (size gate, decomposition).

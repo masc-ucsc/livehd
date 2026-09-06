@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 # Hashed into //pass/abc:abc_salt: the partitioner decides region boundaries and
@@ -32,4 +32,15 @@ cc_library(
         "//pass/common:pass",
     ],
     alwayslink = True,  # static Pass_plugin registration
+)
+
+cc_test(
+    name = "pass_partition_test",
+    srcs = ["pass_partition_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_partition",
+        "//graph",
+        "@googletest//:gtest_main",
+    ],
 )

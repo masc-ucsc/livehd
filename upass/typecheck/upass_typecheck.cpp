@@ -537,10 +537,10 @@ upass::Vote uPass_typecheck::process_log_and(std::string_view, Bundle& dst, upas
 upass::Vote uPass_typecheck::process_log_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "or", "type-mismatch-logical", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_log_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "not", "type-mismatch-logical", dst, src); return Vote::keep; }
 
-// ── reductions (→ bool) / popcount (→ int): int operand ─────────────────────
-upass::Vote uPass_typecheck::process_red_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_red_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_red_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
+// ── reductions / popcount: integer operand → unsigned integer ──────────────
+upass::Vote uPass_typecheck::process_red_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_popcount(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "#+", "type-mismatch-arith", dst, src); return Vote::keep; }
 
 // ── comparison: eq/ne same-class → bool; ordering int → bool ────────────────

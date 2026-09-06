@@ -15,6 +15,13 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
+sh_test(
+    name = "lhd_comb_blocks_test",
+    size = "large",
+    srcs = ["lhd_comb_blocks_test.sh"],
+    data = ["//lhd"],
+)
+
 lhd_verilog(
     name = "trivial_net",
     srcs = ["trivial.v"],
@@ -80,6 +87,19 @@ sh_test(
     size = "large",
     srcs = ["bitfuzz_tripwires_test.sh"],
     data = _FLOW_DATA,
+)
+
+# EMITTED-WIDTH SCOREBOARD: sum the declared bits of every port/net in the
+# emitted Verilog for a pinned design list and compare against a golden table.
+# Width inflation is always CORRECT (an extra bit never changes behaviour), so
+# neither debug_check_pin_hint nor `lhd lec` can see it -- a pinned number is
+# the only way an always-legal regression gets caught. Regenerate the table
+# with UPDATE_GOLDEN=1.
+sh_test(
+    name = "width_scoreboard_test",
+    size = "medium",
+    srcs = ["width_scoreboard_test.sh"],
+    data = _FLOW_DATA + ["width_scoreboard_golden.txt"],
 )
 
 # `lhd lec` as the single equivalence command: verilog inputs (slang default +
@@ -1248,6 +1268,41 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+sh_test(
+    name = "lhd_abc_mux_condition_test",
+    size = "large",
+    srcs = ["lhd_abc_mux_condition_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_memory_init_test",
+    size = "large",
+    srcs = ["lhd_abc_memory_init_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_rom_test",
+    size = "large",
+    srcs = ["lhd_abc_rom_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_shift_mask_test",
+    size = "large",
+    srcs = ["lhd_abc_shift_mask_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_whole_array_test",
+    size = "large",
+    srcs = ["lhd_abc_whole_array_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # A Bedrock-style 5x34 one-hot mux under the hermetic NLDM Liberty. The default
 # fanout treatment must not invoke an unconstrained speed-grade upsize after the
 # requested delay is already met.
@@ -1733,4 +1788,69 @@ sh_test(
     size = "small",
     srcs = ["blocking_ff_state_test.sh"],
     data = ["//lhd"],
+)
+
+# Multi-cycle Flop storage survives ABC mapping with Q and QN libraries.
+sh_test(
+    name = "lhd_abc_pipeline_test",
+    size = "large",
+    srcs = ["lhd_abc_pipeline_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_division_test",
+    size = "large",
+    srcs = ["lhd_abc_division_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# SAT learned-clause reduction and exhaustive mapped quadratic simulation.
+sh_test(
+    name = "lhd_abc_fraig_test",
+    size = "large",
+    srcs = ["lhd_abc_fraig_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_constant_table_test",
+    size = "medium",
+    srcs = ["lhd_constant_table_test.sh"],
+    data = _FLOW_DATA,
+)
+
+sh_test(
+    name = "lhd_macro_declarations_test",
+    size = "large",
+    srcs = ["lhd_macro_declarations_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_clock_edges_test",
+    size = "large",
+    srcs = ["lhd_abc_clock_edges_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_loop_cleanup_test",
+    size = "large",
+    srcs = ["lhd_loop_cleanup_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_parameter_array_test",
+    size = "large",
+    srcs = ["lhd_parameter_array_test.sh"],
+    data = _FLOW_DATA,
+)
+
+sh_test(
+    name = "lhd_yosys_packed_wire_test",
+    size = "large",
+    srcs = ["lhd_yosys_packed_wire_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )

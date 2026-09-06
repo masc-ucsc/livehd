@@ -16,7 +16,7 @@
 //   ordering="none"     -> UNDEFINED (a PRNG draw in Slop), so only the
 //                          NON-colliding address is asserted here
 //
-// WHAT THIS FIXTURE CAN AND CANNOT SEE (changed with the sigref/regref model).
+// WHAT THIS FIXTURE CAN AND CANNOT SEE (bare dotted reads + `regref` writes).
 // A testbench read is a reference into the outputs `step` settled, and `step` is
 // settle -> commit -> settle. Both settles run with the SAME driven inputs, so
 // by the time a read can happen the write has committed and every mode reads the

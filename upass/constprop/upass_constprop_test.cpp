@@ -57,8 +57,8 @@ public:
       return;
     }
     lm->move_to_child();
-    std::string dst{lm->current_text()};
-    std::shared_ptr<Bundle>     dstb = st().get_bundle_for_write(dst);
+    std::string             dst{lm->current_text()};
+    std::shared_ptr<Bundle> dstb = st().get_bundle_for_write(dst);
     if (!dstb) {
       dstb = std::make_shared<Bundle>(dst);
     }
@@ -498,6 +498,7 @@ TEST(UpassConstprop, RedOrNonZero) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_red_or);
+  EXPECT_TRUE(cp.get_result("a").is_integer());
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // 5 != 0 → true
 }
 
@@ -507,6 +508,7 @@ TEST(UpassConstprop, RedOrZero) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_red_or);
+  EXPECT_TRUE(cp.get_result("a").is_integer());
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // 0 == 0 → false
 }
 
@@ -532,6 +534,7 @@ TEST(UpassConstprop, RedAndAllOnes) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_red_and);
+  EXPECT_TRUE(cp.get_result("a").is_integer());
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -542,6 +545,7 @@ TEST(UpassConstprop, RedAndNotAllOnes) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_red_and);
+  EXPECT_TRUE(cp.get_result("a").is_integer());
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -554,6 +558,7 @@ TEST(UpassConstprop, RedXorOddParity) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_red_xor);
+  EXPECT_TRUE(cp.get_result("a").is_integer());
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // popcount(7) = 3, odd → true
 }
 
@@ -564,10 +569,28 @@ TEST(UpassConstprop, RedXorEvenParity) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_red_xor);
+  EXPECT_TRUE(cp.get_result("a").is_integer());
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // popcount(10) = 2, even → false
 }
 
-// popcount: number of set bits, as an integer (not boolean like the reductions).
+TEST(UpassConstprop, UnknownReductionsAreUnsignedIntegers) {
+  for (auto method : {&uPass_constprop::process_red_or, &uPass_constprop::process_red_and, &uPass_constprop::process_red_xor}) {
+    ConstpropFixture f;
+    auto             op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_red_or());
+    f.ln->add_child(op, Lnast_node::create_ref("out"));
+    f.ln->add_child(op, Lnast_node::create_ref("in"));
+    TestableConstprop cp(f.lm);
+    cp.seed("in", Dlop::from_pyrope("0ub?"));
+    cp.position(op);
+    cp.push_from_cursor(method);
+    const auto result = cp.get_result("out");
+    EXPECT_TRUE(result.is_integer());
+    EXPECT_TRUE(result.has_unknowns());
+    EXPECT_FALSE(result.is_negative());
+  }
+}
+
+// popcount: number of set bits, as an integer.
 TEST(UpassConstprop, PopcountSetBits) {
   ConstpropFixture  f;
   // 0b1010_0100 = 0xa4: bits 2, 5, 7 set → popcount = 3.

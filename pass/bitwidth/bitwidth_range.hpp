@@ -45,6 +45,9 @@ protected:
   //  {x[33:2], 1'b0, x[0]} // verilog
 
 public:
+  // In overflow form, max > 0 encodes 2^max - 1 and min < 0 encodes
+  // -2^(-min - 1). Zero is literal in both fields. This keeps the bounds
+  // stable when reconstructed and merged, without adding a sign bit to max.
   int64_t max;
   int64_t min;
 

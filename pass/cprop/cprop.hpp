@@ -60,6 +60,7 @@ protected:
   // redundant hold arm from `din = enable ? data : Q` before the ordinary
   // scalar sweep, so downstream passes see the canonical `din = data` form.
   void canonicalize_latch_hold(const hhds::Node_class& latch);
+  void canonicalize_flop_hold(const hhds::Node_class& flop);
 
   // Retype And(x, 2^n-1) [binary, one const] into the value-identical
   // Get_mask(x, 2^n-1) so every low-mask truncation shares ONE shape.

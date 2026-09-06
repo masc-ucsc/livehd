@@ -141,7 +141,7 @@ const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expression& lhs
   const auto* e = &lhs;
   while (true) {
     switch (e->kind) {
-      case ExpressionKind::NamedValue:
+      case ExpressionKind::NamedValue       :
       case ExpressionKind::HierarchicalValue: return &e->as<slang::ast::ValueExpressionBase>().symbol;
       case ExpressionKind::ElementSelect    : e = &e->as<slang::ast::ElementSelectExpression>().value(); break;
       case ExpressionKind::RangeSelect      : e = &e->as<slang::ast::RangeSelectExpression>().value(); break;
@@ -293,8 +293,8 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
         definite_blocking_writes(*s, out, strict);  // sequential: a later write still counts
       }
       return;
-    case StatementKind::Block              : definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, strict); return;
-    case StatementKind::Timed              : definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, strict); return;
+    case StatementKind::Block: definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, strict); return;
+    case StatementKind::Timed: definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, strict); return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
       if (e.kind != ExpressionKind::Assignment) {
@@ -3378,7 +3378,7 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
 
   void note_lhs(const slang::ast::Expression& lhs) {
     switch (lhs.kind) {
-      case ExpressionKind::NamedValue:
+      case ExpressionKind::NamedValue       :
       case ExpressionKind::HierarchicalValue: writes.insert(&lhs.as<slang::ast::ValueExpressionBase>().symbol); return;
       case ExpressionKind::Conversion       : note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
       case ExpressionKind::Concatenation:
@@ -3568,6 +3568,28 @@ static void collect_state_outputs(const slang::ast::InstanceSymbol&             
   }
 }
 
+// Constant first-dimension selects identify disjoint portions of the same
+// packed/unpacked array. Keep whole or dynamic reads conservative.
+struct Element_reads : public slang::ast::ASTVisitor<Element_reads, slang::ast::VisitFlags::AllGood> {
+  std::function<std::optional<int64_t>(const slang::ast::Expression&)>              eval;
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, absl::flat_hash_set<int64_t>> elements;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                               whole;
+
+  void handle(const slang::ast::NamedValueExpression& e) { whole.insert(&e.symbol); }
+  void handle(const slang::ast::HierarchicalValueExpression& e) { whole.insert(&e.symbol); }
+  void handle(const slang::ast::ElementSelectExpression& e) {
+    const auto& base = e.value();
+    if (base.kind == ExpressionKind::NamedValue || base.kind == ExpressionKind::HierarchicalValue) {
+      if (auto index = eval(e.selector())) {
+        elements[&base.as<slang::ast::ValueExpressionBase>().symbol].insert(*index);
+        e.selector().visit(*this);
+        return;
+      }
+    }
+    visitDefault(e);
+  }
+};
+
 void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // ── pass 1: collect drivers (recursing through generate blocks) ───────────
   struct Driver {
@@ -3605,22 +3627,22 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
       switch (member.kind) {
-        case SymbolKind::Port:
-        case SymbolKind::Parameter:
-        case SymbolKind::TypeParameter:
-        case SymbolKind::TypeAlias:
+        case SymbolKind::Port             :
+        case SymbolKind::Parameter        :
+        case SymbolKind::TypeParameter    :
+        case SymbolKind::TypeAlias        :
         case SymbolKind::TransparentMember:
-        case SymbolKind::EmptyMember:
-        case SymbolKind::Genvar:
-        case SymbolKind::StatementBlock:  // lowered where referenced (slang puts them next to procedures)
-        case SymbolKind::Subroutine:      // bodies fold at call sites or are diagnosed there
-        case SymbolKind::ElabSystemTask:  // $info/$warning/$error handled by slang itself
-        case SymbolKind::WildcardImport:  // `import pkg::*` — slang already resolved the names
-        case SymbolKind::ExplicitImport:  // `import pkg::sym` — ditto
-        case SymbolKind::Modport:         // interface modport view; not codegen-relevant here
-        case SymbolKind::AssertionPort:   // property/sequence formal args
-        case SymbolKind::Sequence:        // named sequences (assertion-only, not synthesized)
-        case SymbolKind::Property:        // named properties (assertion-only, not synthesized)
+        case SymbolKind::EmptyMember      :
+        case SymbolKind::Genvar           :
+        case SymbolKind::StatementBlock   :  // lowered where referenced (slang puts them next to procedures)
+        case SymbolKind::Subroutine       :  // bodies fold at call sites or are diagnosed there
+        case SymbolKind::ElabSystemTask   :  // $info/$warning/$error handled by slang itself
+        case SymbolKind::WildcardImport   :  // `import pkg::*` — slang already resolved the names
+        case SymbolKind::ExplicitImport   :  // `import pkg::sym` — ditto
+        case SymbolKind::Modport          :  // interface modport view; not codegen-relevant here
+        case SymbolKind::AssertionPort    :  // property/sequence formal args
+        case SymbolKind::Sequence         :  // named sequences (assertion-only, not synthesized)
+        case SymbolKind::Property         :  // named properties (assertion-only, not synthesized)
           break;
 
         case SymbolKind::Net: {
@@ -3902,6 +3924,54 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       writers_of[w].push_back(i);
     }
   }
+  // Refine generated co-writers by constant element whenever every writer
+  // selects exactly one distinct element. This admits root-first trees as
+  // well as forward pipelines without giving their synthetic RMW reads an
+  // ordering edge. Emission still accumulates all disjoint writes.
+  std::vector<Element_reads>          element_reads(drivers.size());
+  std::vector<std::optional<int64_t>> element_writes(drivers.size());
+  for (size_t i = 0; i < drivers.size(); ++i) {
+    auto& reads        = element_reads[i];
+    reads.eval         = [this](const slang::ast::Expression& e) { return try_eval_int(e); };
+    const auto* member = drivers[i].member;
+    if (member == nullptr) {
+      continue;
+    }
+    if (member->kind == SymbolKind::ContinuousAssign) {
+      const auto& raw = member->as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+      if (raw.kind != ExpressionKind::Assignment) {
+        continue;
+      }
+      const auto& as = raw.as<slang::ast::AssignmentExpression>();
+      as.right().visit(reads);
+      if (as.left().kind == ExpressionKind::ElementSelect) {
+        const auto& select = as.left().as<slang::ast::ElementSelectExpression>();
+        if (select.value().kind == ExpressionKind::NamedValue || select.value().kind == ExpressionKind::HierarchicalValue) {
+          element_writes[i] = try_eval_int(select.selector());
+        }
+      }
+    } else if (member->kind == SymbolKind::Net) {
+      if (auto* init = member->as<slang::ast::NetSymbol>().getInitializer()) {
+        init->visit(reads);
+      }
+    } else {
+      reads.whole.insert(drivers[i].reads.begin(), drivers[i].reads.end());
+    }
+  }
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> disjoint_elements;
+  for (const auto& [net, writers] : writers_of) {
+    absl::flat_hash_set<int64_t> indices;
+    bool                         all_elements = true;
+    for (size_t writer : writers) {
+      if (!element_writes[writer] || !indices.insert(*element_writes[writer]).second) {
+        all_elements = false;
+        break;
+      }
+    }
+    if (all_elements) {
+      disjoint_elements.insert(net);
+    }
+  }
   std::vector<absl::flat_hash_set<size_t>> deps(drivers.size());
   for (size_t i = 0; i < drivers.size(); ++i) {
     for (const auto* r : drivers[i].reads) {
@@ -3913,6 +3983,19 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         continue;
       }
       const bool i_writes_r = drivers[i].writes.contains(r);
+      if (disjoint_elements.contains(r) && !element_reads[i].whole.contains(r)) {
+        auto selected = element_reads[i].elements.find(r);
+        if (!drivers[i].rhs_reads.contains(r) || selected != element_reads[i].elements.end()) {
+          if (selected != element_reads[i].elements.end()) {
+            for (size_t writer : it->second) {
+              if (writer != i && selected->second.contains(*element_writes[writer])) {
+                deps[i].insert(writer);
+              }
+            }
+          }
+          continue;
+        }
+      }
 
       // A generated packed-array pipeline is commonly written as one partial
       // continuous assignment per stage:
@@ -4994,7 +5077,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       // gives din = cond?d:q, enable = cond), exactly as for a reg.
       lower_comb_process(pbs.getBody());
       return;
-    case ProceduralBlockKind::Always:
+    case ProceduralBlockKind::Always  :
     case ProceduralBlockKind::AlwaysFF: break;
   }
 
@@ -5005,8 +5088,8 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   // synthesized, so ignore such bodies (mirrors lower_statement in slang_stmt.cpp).
   std::function<bool(const slang::ast::Statement&)> assertion_only = [&](const slang::ast::Statement& s) -> bool {
     switch (s.kind) {
-      case StatementKind::Empty:
-      case StatementKind::ImmediateAssertion:
+      case StatementKind::Empty              :
+      case StatementKind::ImmediateAssertion :
       case StatementKind::ConcurrentAssertion: return true;
       case StatementKind::Block              : return assertion_only(s.as<slang::ast::BlockStatement>().body);
       case StatementKind::List:
@@ -5654,6 +5737,23 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
 
   Write_collector wc;
   body.visit(wc);
+
+  for (const auto* sym : emit_ordered(wc.nonblocking)) {
+    if (!reg_syms_.contains(sym) || !sym->getType().getCanonicalType().isUnpackedArray()) {
+      continue;
+    }
+    const auto clock_key = std::make_pair(clk_sym, negedge);
+    auto [it, inserted]  = memory_clocks_.try_emplace(sym, clock_key);
+    if (!inserted && it->second != clock_key) {
+      emit_unsupported(clock.sourceRange,
+                       "multi-clock-memory",
+                       std::string("array '") + std::string(sym->name)
+                           + "' is written on different clocks or edges; --reader slang requires one clock per memory",
+                       "read the design with --reader yosys-slang to preserve per-port memory clocks");
+      proc_kind_ = Proc_kind::none;
+      return;
+    }
+  }
 
   // A blocking-written variable of an edge process that other code reads has
   // flop semantics this reader does not model yet.

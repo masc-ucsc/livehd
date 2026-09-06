@@ -83,6 +83,21 @@ void validate_emits(const Options& opts) {
                         "run `lhd compile` for the pre-synthesis observables"});
     }
   }
+  if (opts.command == "pass" && !is_pass_semdiff(opts)) {
+    const std::string sub   = opts.files.empty() ? std::string{} : opts.files.front();
+    const bool graph_output = sub == "color" || sub == "partition" || sub == "abc" || sub == "single_edge" || sub == "liberty";
+    for (const char* k : {"ln", "pyrope", "lnast-dump", "isabelle", "lean", "sim", "lg", "verilog"}) {
+      if (graph_output && (std::string_view{k} == "lg" || std::string_view{k} == "verilog")) {
+        continue;
+      }
+      reject_emit_kind(
+          opts,
+          k,
+          {"usage",
+           std::format("pass {} does not emit {}:", sub, k),
+           graph_output ? "use --emit-dir lg:DIR or --emit-dir verilog:DIR for graph outputs" : "this pass has no graph outputs"});
+    }
+  }
 
   bool has_ln_inputs = false;
   for (const auto& in : opts.in_dirs) {

@@ -436,7 +436,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
     // connection driving a named generate block's net) is a ValueExpressionBase
     // with the symbol already resolved — same lowering as NamedValue (the
     // rvalue side already reads both alike).
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       const auto& nv  = lhs.as<slang::ast::ValueExpressionBase>();
       const auto& sym = nv.symbol;
@@ -807,7 +807,7 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
   std::span<const slang::ast::Expression* const> elems;
   bool                                           is_pattern = true;
   switch (r->kind) {
-    case ExpressionKind::SimpleAssignmentPattern    : elems = r->as<slang::ast::SimpleAssignmentPatternExpression>().elements(); break;
+    case ExpressionKind::SimpleAssignmentPattern: elems = r->as<slang::ast::SimpleAssignmentPatternExpression>().elements(); break;
     case ExpressionKind::StructuredAssignmentPattern: {
       // One exception to "element[i] is field[i]": an `index:` key, which only a
       // packed-ARRAY pattern can carry and which slang orders ascending, not
@@ -1756,12 +1756,17 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
   } else {
     idx = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
   }
-  std::string shamt    = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
-  auto        sel_mask = builder_.create_shl_stmts(mask_text(mi.elem_bits), shamt);
-  auto        keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-  auto        ins      = builder_.create_shl_stmts(val, shamt);
-  auto        next     = builder_.create_bit_or_stmts({keep, ins});
-  next                 = trunc_to(next, flat_bits);
+  std::string shamt = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
+  if (current_assign_nonblocking_) {
+    note_write(*base_sym, true, es.sourceRange.start());
+    emit_dynamic_slice_write(base_name, shamt, mi.elem_bits, val);
+    return;
+  }
+  auto sel_mask = builder_.create_shl_stmts(mask_text(mi.elem_bits), shamt);
+  auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
+  auto ins      = builder_.create_shl_stmts(val, shamt);
+  auto next     = builder_.create_bit_or_stmts({keep, ins});
+  next          = trunc_to(next, flat_bits);
   note_write(*base_sym, current_assign_nonblocking_, es.sourceRange.start());
   builder_.create_assign_stmts(base_name, next);
 }
@@ -1791,8 +1796,9 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
   using slang::ast::RangeSelectionKind;
 
   switch (lhs.kind) {
-    case ExpressionKind::NamedValue: {
-      const auto& sym = lhs.as<slang::ast::NamedValueExpression>().symbol;
+    case ExpressionKind::NamedValue       :
+    case ExpressionKind::HierarchicalValue: {
+      const auto& sym = lhs.as<slang::ast::ValueExpressionBase>().symbol;
       const auto& ct  = sym.getType().getCanonicalType();
       if (!ct.isIntegral() || !ct.hasFixedRange()) {
         return false;  // unpacked / non-packed root: not a packed slice
@@ -1882,8 +1888,8 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       std::optional<int64_t> const_low;
       std::string            dyn_low;
       auto                   normalize = [&](const slang::ast::Expression& idx,
-                           int64_t                       width_down,
-                           int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
+                                             int64_t                       width_down,
+                                             int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
         if (auto ci = try_eval_int(idx)) {
           int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
           return {bottom, {}};
@@ -1975,6 +1981,13 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
     return;
   }
 
+  if (current_assign_nonblocking_) {
+    // Pending writes supply untouched bits; RHS/index reads still observe Q.
+    auto shamt = lv.const_off == 0 ? lv.dyn_off : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
+    note_write(*lv.base, true, sr.start());
+    emit_dynamic_slice_write(base_name, shamt, static_cast<int>(lv.width), val);
+    return;
+  }
   // Dynamic offset: tolg requires const set_mask masks, so lower an explicit
   // read-modify-write with shifts (and/or/shl) on the full base.
   auto bi    = tinfo(lv.base->getType());
@@ -1995,4 +2008,15 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   }
   note_write(*lv.base, current_assign_nonblocking_, sr.start());
   builder_.create_assign_stmts(base_name, next);
+}
+
+void Slang_context::emit_dynamic_slice_write(const std::string& base, const std::string& lo, int width, const std::string& value) {
+  auto  hi       = width == 1 ? lo : builder_.create_plus_stmts(lo, std::to_string(width - 1));
+  auto& ln       = *builder_.lnast;
+  auto  range    = builder_.add_child(Lnast_ntype::create_range());
+  auto  range_id = builder_.create_lnast_tmp();
+  ln.add_child(range, Lnast_node::create_ref(range_id));
+  builder_.add_value_child_pub(range, lo);
+  builder_.add_value_child_pub(range, hi);
+  builder_.create_set_mask_stmts(base, range_id, value);
 }

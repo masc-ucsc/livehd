@@ -196,6 +196,51 @@ inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, cons
   return rca_add(ops, a, b, cin);
 }
 
+// Restoring division. Operands have equal width; their signedness is
+// independent, so a mixed signed/unsigned expression keeps its numeric values.
+// Each step subtracts the divisor from the shifted partial remainder and keeps
+// that subtraction only if it did not borrow. The extra remainder bit prevents
+// overflow when the divisor occupies the full input width.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_div(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
+                                  bool a_signed, bool b_signed) {
+  const int w = static_cast<int>(a.size());
+  if (w == 0) {
+    return {};
+  }
+  const auto select             = [&](Bit sel, Bit yes, Bit no) { return ops.or_(ops.and_(sel, yes), ops.and_(ops.inv(sel), no)); };
+  const auto conditional_negate = [&](const std::vector<Bit>& value, Bit negative) {
+    std::vector<Bit> toggled;
+    toggled.reserve(value.size());
+    for (auto bit : value) {
+      toggled.push_back(ops.xor_(bit, negative));
+    }
+    return build_add(kind, block_size, ops, toggled, std::vector<Bit>(value.size(), ops.zero()), negative).sum;
+  };
+  const Bit  aneg     = a_signed ? a.back() : ops.zero();
+  const Bit  bneg     = b_signed ? b.back() : ops.zero();
+  const auto dividend = conditional_negate(a, aneg);
+  auto       divisor  = conditional_negate(b, bneg);
+  divisor.push_back(ops.zero());
+  const auto       inverse = bv_invert(ops, divisor);
+  std::vector<Bit> rem(w + 1, ops.zero());
+  std::vector<Bit> quotient(w, ops.zero());
+  for (int i = w; i-- > 0;) {
+    for (int j = w; j > 0; --j) {
+      rem[j] = rem[j - 1];
+    }
+    rem[0]      = dividend[i];
+    auto diff   = build_add(kind, block_size, ops, rem, inverse, ops.one());
+    quotient[i] = diff.carry_out;
+    for (int j = 0; j <= w; ++j) {
+      rem[j] = select(diff.carry_out, diff.sum[j], rem[j]);
+    }
+  }
+  // Division by zero yields all ones in the unsigned machine, and +/-1
+  // after restoring the dividend sign, as in SMT bit-vector division.
+  return conditional_negate(quotient, ops.xor_(aneg, bneg));
+}
+
 // a < b via the chosen subtractor: d = a + ~b + 1. Unsigned: a<b iff the
 // subtract borrows (no carry-out). Signed: callers pass operands extended by
 // one guard bit so a-b cannot overflow W bits, hence the sign bit d[W-1] is the

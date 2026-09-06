@@ -1,3 +1,6 @@
+`ifndef LIVEHD_CGEN_MEMORY_1RD_2WR_V
+`define LIVEHD_CGEN_MEMORY_1RD_2WR_V
+
 `define log2(n)   ((n) <= (1<<0) ? 0 : (n) <= (1<<1) ? 1 :\
                    (n) <= (1<<2) ? 2 : (n) <= (1<<3) ? 3 :\
                    (n) <= (1<<4) ? 4 : (n) <= (1<<5) ? 5 :\
@@ -121,3 +124,5 @@ generate
 endgenerate
 
 endmodule
+
+`endif // LIVEHD_CGEN_MEMORY_1RD_2WR_V

@@ -7,6 +7,7 @@
 #include <format>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@
 #include "absl/strings/str_cat.h"
 #include "bitwidth_range.hpp"
 #include "diag.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
@@ -59,6 +61,11 @@ void sort_inp(EdgeVec& edges) {
 
 using livehd::graph_util::const_of;
 
+bool is_finite_low_mask(const Dlop& value) {
+  return value.is_integer() && !value.has_unknowns() && !value.is_negative() && !value.is_known_zero()
+         && value.eq_op(*Dlop::get_mask_value(value.get_last_bit_set() + 1))->is_known_true();
+}
+
 // These cells have a complete value-range rule below.  Their pin `bits`
 // attribute is an output cache/materialization hint, not a finite-width
 // operation contract: LNAST and LGraph arithmetic is signed and unbounded.
@@ -68,12 +75,13 @@ using livehd::graph_util::const_of;
 // Slop operations wider than their consumers.
 //
 // Cells absent from this list intentionally retain their pre-stamped width.
-// In particular LUT has a finite truth-table width, Div/Rem may explicitly
+// In particular LUT has a finite truth-table width, Rem may explicitly
 // reduce precision, and Clock_cell is timing metadata rather than arithmetic.
 constexpr bool infer_internal_range(Ntype_op op) {
   switch (op) {
     case Ntype_op::Sum     :
     case Ntype_op::Mult    :
+    case Ntype_op::Div     :
     case Ntype_op::And     :
     case Ntype_op::Or      :
     case Ntype_op::Xor     :
@@ -530,18 +538,8 @@ void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   }
   Bitwidth_range n_bw = n_it->second;
 
-  if (n_bw.get_sbits() == 0 || a_bw.get_sbits() == 0) {
-    auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    // Reconnect every consumer to const-0, then del_node (below) drops all of
-    // node's edges in one bulk op (no per-edge del_edge lookup). Iterating the
-    // live out_edges while connecting is safe: connect_sink only grows
-    // zero_dpin/sink storage, never node's out-edge set.
-    for (const auto& e : node.out_edges()) {
-      zero_dpin.connect_sink(e.sink);
-    }
-    node.del_node();
-    return;
-  }
+  // A zero count is the identity (a << 0 == a), not a zero result.
+  // Evaluate it through the same range corners as every other count.
   if (!n_bw.is_always_positive()) {
     not_finished = true;
     return;
@@ -816,7 +814,10 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   // without it, an explicitly sized memory whose address driver is still
   // unranged leaves that driver unsized forever (no retry is even scheduled).
   if (mem_size && mem_addr_bits_missing) {
-    Bitwidth_range addr_bw(-mem_size / 2, mem_size / 2 - 1);
+    // Memory indices are non-negative. A signed backward seed contaminates
+    // a not-yet-visited Concat address with a negative range, despite its
+    // unsigned lane contract, and a later cprop pass correctly rejects it.
+    Bitwidth_range addr_bw(0, mem_size - 1);
     for (auto& dpin : addr_drivers) {
       auto it = bwmap.find(dpin.get_class_index());
       if (it == bwmap.end()) {
@@ -824,7 +825,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         discovered_some_backward_nodes_try_again = true;
       }
       // else: the address driver already has a derived range. It may
-      // legitimately be WIDER than the freshly inferred signed address width
+      // legitimately be WIDER than the freshly inferred address width
       // — a normal unsigned address `raddr:uN` carries an extra sign bit
       // (get_sbits() == N+1), one more than the ceil(log2(entries)) the
       // memory needs. Keep the existing range. (The removed
@@ -952,6 +953,70 @@ void Bitwidth::process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
 }
 
+void Bitwidth::process_div(hhds::Node_class& node) {
+  const auto a  = get_driver_of_sink_name(node, "a");
+  const auto b  = get_driver_of_sink_name(node, "b");
+  const auto ai = bwmap.find(a.get_class_index());
+  const auto bi = bwmap.find(b.get_class_index());
+  if (ai == bwmap.end() || bi == bwmap.end()) {
+    not_finished = true;
+    return;
+  }
+  const auto        alo = ai->second.get_min();
+  const auto        ahi = ai->second.get_max();
+  const auto        blo = bi->second.get_min();
+  const auto        bhi = bi->second.get_max();
+  std::vector<Dlop> divisors{blo, bhi};
+  const Dlop        one       = *Dlop::create_integer(1);
+  const Dlop        minus_one = *Dlop::create_integer(-1);
+  const auto        contains  = [&](const Dlop& v) { return !v.lt_op(blo)->is_known_true() && !v.gt_op(bhi)->is_known_true(); };
+  if (contains(one)) {
+    divisors.push_back(one);
+  }
+  if (contains(minus_one)) {
+    divisors.push_back(minus_one);
+  }
+  std::optional<Dlop> lo, hi;
+  const auto          include = [&](const Dlop& value) {
+    if (!lo || value.lt_op(*lo)->is_known_true()) {
+      lo = value;
+    }
+    if (!hi || value.gt_op(*hi)->is_known_true()) {
+      hi = value;
+    }
+  };
+  for (const auto& divisor : divisors) {
+    if (!divisor.is_known_zero()) {
+      include(*alo.div_op(divisor));
+      include(*ahi.div_op(divisor));
+    }
+  }
+  if (contains(*Dlop::create_integer(0))) {
+    // Keep the total bit-vector behavior used by the mapper/LEC in range;
+    // in particular a possible zero divisor must not fold 0/b into a constant.
+    if (livehd::graph_util::is_unsign(a) && livehd::graph_util::is_unsign(b)) {
+      // The dividend's width, NOT max(a,b): both the LEC (encode.cpp's Div arm)
+      // and the mapper compute the quotient at a scratch width and then FIT it
+      // back to the Div pin's own W, so `2^W-1` is what x/0 can actually reach.
+      // Anchoring W to bits_of(a) is self-consistent and tight; folding in a
+      // wide divisor instead self-widens the pin (`a:u4 / b:u32` stamped 32
+      // bits) and hands ABC an O(W^2) divider eight times too big.
+      const int width = std::max(bits_of(a), 1);
+      include(*Dlop::get_mask_value(width));
+    } else {
+      if (alo.is_negative()) {
+        include(one);
+      }
+      if (!ahi.is_negative()) {
+        include(minus_one);
+      }
+    }
+  }
+  if (lo && hi) {
+    adjust_bw(node.create_driver_pin(0), Bitwidth_range(*lo, *hi));
+  }
+}
+
 void Bitwidth::process_set_mask(hhds::Node_class& node) {
   auto a_dpin = get_driver_of_sink_name(node, "a");
   if (a_dpin.is_invalid()) {
@@ -1056,19 +1121,27 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
 
   auto it2 = bwmap.find(mask_dpin.get_class_index());
   Dlop mask_val;
-  if (it2 == bwmap.end()) {
-    if (!mask_dpin.is_const()) {
-      debug_unconstrained_msg(node, mask_dpin);
-      not_finished = true;
-      return;
-    }
+  if (mask_dpin.is_const()) {
     mask_val = const_of(mask_dpin);
+  } else if (it2 == bwmap.end()) {
+    debug_unconstrained_msg(node, mask_dpin);
+    not_finished = true;
+    return;
   } else {
     mask_val = it2->second.get_max().or_op(it2->second.get_min());
   }
 
   Dlop a_max = it->second.get_max();
   Dlop a_min = it->second.get_min();
+
+  if (mask_dpin.is_const() && is_finite_low_mask(mask_val) && !a_min.is_negative() && a_max.le_op(mask_val)->is_known_true()) {
+    // Preserve the lower bound as well as the width. Turning [1,8] into
+    // [0,15] here makes a following `(1 << count) - 1` look possibly negative
+    // and leaves unnecessary coercion masks behind even after this one dies.
+    const auto unchanged = it->second;
+    adjust_bw(node.create_driver_pin(0), unchanged);
+    return;
+  }
 
   // get_mask is the zext (force) bit-select: a non-negative mask yields a
   // non-negative result. Dlop::get_mask_op returns the signed 1-bit -1 for a
@@ -1189,13 +1262,8 @@ void Bitwidth::process_concat(hhds::Node_class& node) {
     return;
   }
 
-  // The lane contract. Run AFTER the total<=0 bail so a malformed cell keeps
-  // retrying (its widths may still const-fold) instead of aborting, and only on
-  // a fully decoded table. A lane driver may be narrower than its window (this
-  // very pass narrows drivers); wider means some producer sized a lane from
-  // something other than its declared type.
-  const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes);
-  I(lane_bad.empty(), lane_bad.c_str());
+  // Check lane carriers after inference finishes: intermediate ranges can
+  // still narrow. The final check is a diagnostic in every build mode.
 
   Bitwidth_range bw;
   bw.set_ubits_range(total);
@@ -1403,9 +1471,6 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_
 void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(!inp_edges.empty());
 
-  int mask_pos          = -1;
-  int pos_min_sbits_pos = -1;
-
   int32_t pos_min_sbits = Bits_unknown;
   int32_t unk_max_sbits = 0;
 
@@ -1429,51 +1494,17 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
     }
 
     if (it->second.is_always_positive()) {
-      if (bw_sbits <= pos_min_sbits) {
-        if (e.driver.is_const()) {
-          mask_pos = i;
-          if (pos_min_sbits_pos < 0) {
-            pos_min_sbits_pos = i;
-          }
-        } else {
-          pos_min_sbits_pos = i;
-        }
-        pos_min_sbits = bw_sbits;
-      }
+      pos_min_sbits = std::min(pos_min_sbits, bw_sbits);
     } else {
       if (bw_sbits > unk_max_sbits) {
         unk_max_sbits = bw_sbits;
       }
     }
   }
-  mask_pos = -1;
 
   if (unk_max_sbits == Bits_unknown && pos_min_sbits == Bits_unknown) {
     Pass::info("could not find constrains for AND node:{}\n", debug_name(node));
     return;
-  }
-
-  if (mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
-    auto v
-        = Dlop::create_integer(1)->shl_op(*Dlop::create_integer(pos_min_sbits - 1))->sub_op(const_of(inp_edges[mask_pos].driver));
-    if (v->is_just_i64() && v->to_just_i64() == 1) {
-      if (inp_edges.size() == 2) {
-        int pos = mask_pos == 0 ? 1 : 0;
-        if (is_graph_input_pin(inp_edges[pos].driver) || is_graph_output_pin(inp_edges[pos].driver)) {
-          mask_pos = -1;
-        } else {
-          // live-reconnect each consumer to the surviving input; del_node
-          // bulk-drops node's edges (no per-edge find).
-          for (const auto& out : node.out_edges()) {
-            inp_edges[pos].driver.connect_sink(out.sink);
-          }
-          node.del_node();
-          return;
-        }
-      }
-    } else {
-      mask_pos = -1;
-    }
   }
 
   Dlop max_val;
@@ -1503,10 +1534,6 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
     if (is_graph_input_pin(e.driver) || Ntype::is_loop_last(type_op_of(drv_node))) {
       set_bits_sign(e.driver, bw);
     }
-  }
-
-  if (mask_pos >= 0) {
-    inp_edges[mask_pos].del_edge();
   }
 }
 
@@ -1906,6 +1933,8 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         process_sum(node, inp_edges);
       } else if (op == Ntype_op::Mult) {
         process_mult(node, inp_edges);
+      } else if (op == Ntype_op::Div) {
+        process_div(node);
       } else if (op == Ntype_op::SRA) {
         process_sra(node, inp_edges);
       } else if (op == Ntype_op::SHL) {
@@ -1980,7 +2009,121 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
     }
   }
 
+  // Only on a CONVERGED run, and only AFTER remove_mask_identities: an aborted
+  // fixed point (`BW aborting after N iterations`) leaves lane drivers on
+  // TolG's conservative over-wide carrier, and this is a `.fatal()` in every
+  // build mode (it used to be a debug-only `I()` retried each iteration), so an
+  // un-converged design would hard-fail the compile in release. And the mask
+  // removal below rewires lane sinks, so checking before it would miss exactly
+  // the violations it can introduce.
+  if (!not_finished) {
+    remove_mask_identities(g);
+    for (auto node : g->body().nodes()) {
+      if (type_op_of(node) != Ntype_op::Concat) {
+        continue;
+      }
+      const auto lanes = livehd::graph_util::concat_lanes(node);
+      const auto bad   = livehd::graph_util::concat_lane_violation(lanes);
+      if (bad.empty()) {
+        continue;
+      }
+      livehd::diag::Span span;
+      const auto         source = node.attr(hhds::attrs::srcid);
+      if (source.has() && source.get() != 0) {
+        span = g->source_locator().resolve_span(source.get());
+      }
+      livehd::diag::err("pass.bitwidth", "concat-lane-width", "internal").at(span).msg("{}", bad).fatal();
+    }
+  }
   report_unbounded(g);
+}
+
+void Bitwidth::remove_mask_identities(hhds::Graph* g) {
+  // Only completed ranges justify removing a precision boundary. A node's
+  // first visit can precede a later range widening in this same inference run.
+  std::vector<hhds::Node_class> masks;
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    if (type_op_of(node) == Ntype_op::Get_mask || type_op_of(node) == Ntype_op::And) {
+      masks.push_back(node);
+    }
+  }
+  for (auto node : masks) {
+    hhds::Pin_class source;
+    hhds::Pin_class mask;
+    if (type_op_of(node) == Ntype_op::Get_mask) {
+      source = get_driver_of_sink_name(node, "a");
+      mask   = get_driver_of_sink_name(node, "mask");
+    } else {
+      const auto inputs = node.inp_edges();
+      if (inputs.size() != 2) {
+        continue;
+      }
+      const auto pos = inputs[0].driver.is_const() ? 0 : 1;
+      mask           = inputs[pos].driver;
+      source         = inputs[1 - pos].driver;
+    }
+    if (source.is_invalid() || !mask.is_const()) {
+      continue;
+    }
+    const auto& value = const_of(mask);
+    // is_mask alone is not enough: only a finite mask beginning at bit zero
+    // preserves positions. Sparse and offset selections pack their bits.
+    if (!is_finite_low_mask(value)) {
+      continue;
+    }
+    const auto range = bwmap.find(source.get_class_index());
+    if (range == bwmap.end() || !range->second.is_always_positive() || !range->second.get_max().le_op(value)->is_known_true()) {
+      continue;
+    }
+    const auto source_bits = is_graph_input_pin(source)
+                                 ? static_cast<int32_t>(g->get_io()->get_bits(livehd::graph_util::pin_name_of(source)))
+                                 : bits_of(source);
+    bool       safe        = source_bits > 0;
+    for (const auto& edge : node.out_edges()) {
+      for (auto driver : edge.sink.get_driver_pins()) {
+        if (driver == source) {
+          safe = false;  // HHDS would deduplicate a repeated operand.
+        }
+      }
+      int  declared    = 0;
+      bool lane_window = false;  // a Concat window only forbids a WIDER driver
+      if (is_graph_output_pin(edge.sink)) {
+        declared = g->get_io()->get_bits(livehd::graph_util::pin_name_of(edge.sink));
+      } else if (auto consumer = edge.sink.get_master_node(); type_op_of(consumer) == Ntype_op::Sub) {
+        if (auto io = consumer.get_subnode_io()) {
+          declared = io->get_bits(edge.sink.get_pin_name());
+        }
+      } else if (type_op_of(consumer) == Ntype_op::Concat) {
+        // The third width contract in this IR: a lane driver may only be
+        // NARROWER than its declared window; a wider one shifts every lane
+        // above it and is an internal compile error (concat_lane_violation).
+        const auto pid = edge.sink.get_port_id();
+        if ((pid % 2) != 0) {
+          safe = false;  // the width operand itself: never rewire
+        } else {
+          const auto   lanes = livehd::graph_util::concat_lanes(consumer);
+          const size_t idx   = static_cast<size_t>(pid) / 2;
+          if (lanes.empty() || idx >= lanes.size()) {
+            safe = false;  // malformed/undecodable table: keep the mask
+          } else {
+            declared    = lanes[idx].width;
+            lane_window = true;
+          }
+        }
+      }
+      if (declared > 0 && (lane_window ? source_bits > declared : declared != source_bits)) {
+        safe = false;
+      }
+    }
+    if (!safe) {
+      continue;
+    }
+    for (const auto& edge : node.out_edges()) {
+      source.connect_sink(edge.sink);
+    }
+    bwmap.erase(node.get_driver_pin(0).get_class_index());
+    node.del_node();
+  }
 }
 
 // After the iteration budget is spent, every materialised driver pin should

@@ -10,8 +10,6 @@
 // predict_abc_size.cpp), and AGENTS.md reserves the _test suffix for a file that
 // pairs with a same-named .cpp.
 
-#include "predict_abc_size.hpp"
-
 #include <cstdint>
 
 #include "graph_library_singleton.hpp"
@@ -19,6 +17,7 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
+#include "predict_abc_size.hpp"
 
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
@@ -299,7 +298,7 @@ TEST(PredictAbcSize, FlopIsFreeUntilItHasControl) {
 }
 
 // Blackboxes weigh nothing HERE: a Sub's logic is scored inside its own def's
-// cones, and a Memory/Div is a macro pass.abc does not blast by default.
+// cones, and a native Memory is a macro. A divider now contributes its quadratic network.
 TEST(PredictAbcSize, BlackboxesAreZero) {
   auto& lib = lib_for("lgdb_pred_black");
   auto  gio = lib.create_io("black");
@@ -328,13 +327,13 @@ TEST(PredictAbcSize, BlackboxesAreZero) {
   g->get_input_pin("b").connect_sink(sub.create_sink_pin(1));
   set_bits(sub.create_driver_pin(0), 32);
 
-  EXPECT_EQ(predict_abc_size(dv), 0u);
+  EXPECT_EQ(predict_abc_size(dv), 16u * 32u * 33u);
   EXPECT_EQ(predict_abc_size(mem), 0u);
   EXPECT_EQ(predict_abc_size(sub), 0u);
 }
 
 // `a % 2^k` never reaches ABC as a remainder -- it is rewritten to an AND, so it
-// is charged as one rather than as the 0 a true divider gets.
+// is charged as one rather than as a full divider.
 TEST(PredictAbcSize, PowerOfTwoRemIsAnAnd) {
   auto& lib = lib_for("lgdb_pred_rem");
   auto  gio = lib.create_io("rems");

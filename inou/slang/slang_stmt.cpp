@@ -14,6 +14,7 @@
 #include "slang/ast/Statement.h"
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/symbols/AttributeSymbol.h"
+#include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang_context.hpp"
 
 using slang::ast::StatementKind;
@@ -24,6 +25,28 @@ namespace {
 // the same namespace, so this is a plain forward declaration.)
 bool subtree_has_break(const slang::ast::Statement& stmt);
 bool subtree_has_return(const slang::ast::Statement& stmt);
+
+// Synthesis assertion macros commonly call an empty, zero-argument task.
+// Only structural no-ops qualify: declarations, expressions, timing controls,
+// and calls must still go through normal lowering and diagnostics.
+bool empty_task_body(const slang::ast::Statement& stmt) {
+  if (stmt.kind == StatementKind::Empty) {
+    return true;
+  }
+  if (stmt.kind == StatementKind::Block) {
+    const auto& block = stmt.as<slang::ast::BlockStatement>();
+    return block.blockKind == slang::ast::StatementBlockKind::Sequential && empty_task_body(block.body);
+  }
+  if (stmt.kind == StatementKind::List) {
+    for (const auto* child : stmt.as<slang::ast::StatementList>().list) {
+      if (!empty_task_body(*child)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
 }  // namespace
 
 void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
@@ -107,6 +130,12 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           emit_unsupported(stmt.sourceRange,
                            "unsupported-system-task",
                            std::string("system task '") + std::string(name) + "' is not supported by --reader slang");
+          return;
+        }
+        const auto* sub = std::get<const slang::ast::SubroutineSymbol*>(call.subroutine);
+        if (sub && sub->subroutineKind == slang::ast::SubroutineKind::Task && call.arguments().empty()
+            && sub->getArguments().empty() && !sub->flags.has(slang::ast::MethodFlags::DPIImport)
+            && empty_task_body(sub->getBody())) {
           return;
         }
       }

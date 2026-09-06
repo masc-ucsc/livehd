@@ -138,9 +138,13 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
 * Enums: `enum State = (Idle, Run, Done)` — one-hot encoding by default; any
   explicit value (or an `:int` type) switches to sequential. **Always compare
   against names** (`st == State.Idle`), never raw integers. Casts:
-  `string(E.a)`, `E("a")`. Hierarchical enums are documented but do NOT
-  compile yet — use flat enums.
-* Ranges: `0..=7`, `0..<8`, `2..+3`, optional `step 2`; ascending only. Open
+  `string(E.a)`, `E("a")`, and `E.a#[..]` for the bits. Hierarchical enums
+  (`Animal.bird.eagle`) DO work. A variant taking a named constant
+  (`const c=1; enum(a=c, b)`) MISCOMPILES today — b restarts at 0; use
+  literals until that is fixed.
+* Ranges: `0..=7`, `0..<8`, `2..+3`, optional `step 2`; ascending only.
+  `step` is honoured by a `for` loop but IGNORED when the range is used as a
+  value (`(0..<30 step 10)` yields all 30 entries) — a known bug. Open
   ends in selectors (`a[1..]`); negative = distance from the end
   (`b#[1..=-2]`).
 
@@ -436,9 +440,10 @@ formal cnt.bounded {
 * A file's top scope is setup code, run once. Only `pub` top-scope lambdas,
   types, and constants can be imported: `const lib = import("file")` /
   `import("file.pub_name")` / `import("proj/file")`. No glob patterns.
-  `pub mut` and `pub reg` are compile errors; cross-hierarchy register access
-  (`regref`) is TBD — verification code reaches registers through the
-  ordinary instance hierarchy instead.
+  `pub mut`, `pub reg` and `pub wire` are compile errors; the SYNTHESIZABLE
+  cross-hierarchy register attach (`regref` by string path, zero-or-many
+  matches) is TBD — design code reaches registers through the ordinary
+  instance hierarchy instead.
 * Pin the generated netlist/Verilog module name with the `lg` attribute:
   `pub comb my_top::[lg="chip_top"](...)` — pub-only, comptime string; the
   `import` key stays `my_top`; the artifact becomes importable as
@@ -556,19 +561,32 @@ build
   `.[rising]`/`.[falling]`/`.[changed]` attributes. `lhd formal verify`
   rejects these with an explicit not-implemented diagnostic. (The *pipelining*
   `past[N](x)` DOES work — design body only.)
-* Testbench extras: `force`/`release`, string `sigref`, `cpp("model")`
-  external models, unbounded `tick`; `regref`; `assert.[failed]`.
+* Testbench extras: `force`/`release`, `cpp("model")` external models,
+  unbounded `tick`; the SYNTHESIZABLE string-path `regref`; `assert.[failed]`.
+  The `test`-block `regref` (dotted or single-cell string) WORKS and is the
+  only way to drive a cell; reads are bare dotted `dut.x` at any depth.
+  `sigref` was REMOVED 2026-09-06 — it was exactly a bare dotted read.
+  Writing a register BELOW the top instance is not implemented.
 * `cover`/`covercase`; in-language `lec()`; `.[rand]`/`.[crand]` (rejected in
   test blocks and design bodies; survive only where they constant-fold).
 * `macro=` memory-compiler binding; `import("prp")` stdlib.
 * **Registered-output interface form** `mod f(...) -> (reg count:u8@[0])` →
   `reg-output-cycle` error. Use a body register (`counter1` pattern above).
-* **Hierarchical enums** — nested member names error; use a flat enum.
+* `format(...)`, operator-overload hooks (`eq`/`lt`/`to_string`/`to_bool`),
+  strings as char tuples, `:Param_type(string)`, `u(W)`, recursive-enum ADTs
+  and the tuple-LHS `in` subset test were all REMOVED 2026-09-06 — see
+  `fixes_pyrope.md`. (Nested/hierarchical enums such as `Animal.bird.eagle`
+  DO work; the old "use a flat enum" note here was wrong.)
 
-Note: the `15-tbd` chapter still lists generic constant/lambda bindings, generic
-defaults, named `<T=…>` bindings, body references of a generic, and input
-default values as task `3g` — all of these **already work** in the current
-build (verified 2026-07-31); prefer trusting `lhd` over the TBD table there.
+Note: generic constant/lambda bindings, generic defaults, named `<T=…>`
+bindings, body references of a generic, and input default values **all work**
+(re-verified 2026-09-06 — every tracker compiles green); the stale `15-tbd`
+rows claiming otherwise were removed. Prefer trusting `lhd` over any TBD table.
+
+Checking a comptime-only `.prp` (no `pub mod`/`pub comb` hardware entity) needs
+`--set upass.tolg=false --set upass.verifier=true`. Bare `lhd compile` forces
+lowering and invents `tolg-error: unresolved reference '%self_0'` /
+`tuple-store-unsupported` on programs that contain no hardware.
 
 ## Checking code with `lhd`
 

@@ -158,8 +158,7 @@ TEST(Bitfuzz, ExplicitGetMaskIsClean) {
   quiet_diag();
   auto st = livehd::bitfuzz::fuzz(g, wires_opts());
 
-  EXPECT_EQ(st.wider, 0) << "an explicitly masked cone must recover exactly; nothing is doing hidden truncation:"
-                         << describe(st);
+  EXPECT_EQ(st.wider, 0) << "an explicitly masked cone must recover exactly; nothing is doing hidden truncation:" << describe(st);
   EXPECT_EQ(st.unrecovered, 0) << describe(st);
   livehd::diag::sink().clear();
 }
@@ -234,10 +233,10 @@ TEST(Bitfuzz, RepairLeavesNoUnsizedPin) {
   gio->set_bits("o", 8);
   auto g = gio->create_graph();
 
-  // Div has NO bitwidth inference rule (bitwidth.cpp has no Ntype_op::Div
+  // Rem has NO bitwidth inference rule (bitwidth.cpp has no Ntype_op::Rem
   // branch), so its width is unrecoverable by construction -- exactly the case
   // repair exists for.
-  auto op = gu::create_typed_node(*g, Ntype_op::Div, 8);
+  auto op = gu::create_typed_node(*g, Ntype_op::Rem, 8);
   g->get_input_pin("a").connect_sink(gu::setup_sink_by_name(op, "a"));
   g->get_input_pin("b").connect_sink(gu::setup_sink_by_name(op, "b"));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
@@ -246,7 +245,7 @@ TEST(Bitfuzz, RepairLeavesNoUnsizedPin) {
   auto st = livehd::bitfuzz::fuzz(g, wires_opts());
 
   EXPECT_EQ(st.repaired, 1) << "an unbounded pin must be repaired";
-  EXPECT_EQ(st.no_rule, 1) << "Div must be reported as a missing inference rule, not a translation bug";
+  EXPECT_EQ(st.no_rule, 1) << "Rem must be reported as a missing inference rule, not a translation bug";
   EXPECT_EQ(gu::bits_of(op.create_driver_pin(0)), 8) << "repair must restore the original width";
   livehd::diag::sink().clear();
 }

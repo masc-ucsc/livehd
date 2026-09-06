@@ -150,6 +150,32 @@ run synth lg:"$W/lg_in" --top top --set synth.liberty="$LIB" --set color.absorb=
 [ "$(tree_sum "$W/lg_in")" = "$before" ] || fail "synth rewrote its lg: INPUT (the coloring must stay in memory)"
 echo "PASS: an lg: input is never rewritten"
 
+# Conditional writes to packed lanes must finish canonicalizing in one compile.
+# Otherwise the extra cprop invocation on lg: input changes the ABC regions.
+cat >"$W/packed_mux.v" <<'V'
+module packed_mux(input [11:0] d, input [8:0] s, output reg [11:0] q);
+  integer lane, choice;
+  always @* begin
+    q = 0;
+    for (lane = 0; lane < 3; lane = lane + 1)
+      for (choice = 0; choice < 3; choice = choice + 1)
+        if (s[3*lane + choice]) q[4*lane +: 4] = d[4*choice +: 4];
+  end
+endmodule
+V
+run compile "$W/packed_mux.v" --emit-dir lg:"$W/packed_lg" --workdir "$W/packed_compile" --set lhd.incremental=false
+run synth "$W/packed_mux.v" --top packed_mux --set synth.liberty="$LIB" --set synth.opentimer=false \
+    --set lhd.incremental=false --workdir "$W/packed_direct" --emit verilog:"$W/packed_direct.v"
+cp "$W/r.json" "$W/packed_direct.json"
+run synth lg:"$W/packed_lg" --top packed_mux --set synth.liberty="$LIB" --set synth.opentimer=false \
+    --set lhd.incremental=false --workdir "$W/packed_staged" --emit verilog:"$W/packed_staged.v"
+for metric in regions input_nodes input_ge pred_aig gates area module_gates module_area max_region_depth max_delay; do
+  [ "$(jget "$W/r.json" qor.abc.total.$metric)" = "$(jget "$W/packed_direct.json" qor.abc.total.$metric)" ] \
+    || fail "source and lg: synthesis disagree on $metric"
+done
+cmp -s "$W/packed_direct.v" "$W/packed_staged.v" || fail "source and lg: synthesis produce different mapped Verilog"
+echo "PASS: source and compile+synth produce identical packed-lane mapping"
+
 # --- 6. negative controls ----------------------------------------------------
 expect_fail() {  # CLASS PATTERN ARGS...
   local cls=$1 pat=$2

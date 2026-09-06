@@ -7,6 +7,8 @@
 // in the integer range of its slang type; conversions go through the single
 // materialize_conversion seam (slang_types.cpp).
 
+#include <functional>
+
 #include "absl/strings/str_cat.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
@@ -556,6 +558,31 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     const auto& cv = sym.as<slang::ast::ParameterSymbol>().getValue(range);
     if (cv.isInteger()) {
       return const_text(cv.integer());
+    }
+    // A flattened fixed array uses a packed bus in declaration order (the
+    // rightmost element is the LSB). Parameter elements are compile-time
+    // constants, including signed and unknown bits; runtime selection then
+    // follows exactly the same path as any other flattened array read.
+    if (cv.isUnpacked() && flat_port_syms_.contains(&sym)) {
+      std::vector<Lnast_builder::Concat_lane>         lanes;
+      std::function<bool(const slang::ConstantValue&)> append = [&](const auto& value) {
+        if (value.isInteger()) {
+          lanes.push_back({const_text(value.integer()), static_cast<int>(value.integer().getBitWidth())});
+          return true;
+        }
+        if (!value.isUnpacked()) {
+          return false;
+        }
+        for (const auto& element : value.elements()) {
+          if (!append(element)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (append(cv) && !lanes.empty()) {
+        return builder_.create_concat_stmts(lanes);
+      }
     }
     emit_error(range, "non-integer-parameter", "type", std::string("parameter '") + std::string(sym.name) + "' is not integral");
     return "0";

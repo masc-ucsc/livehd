@@ -47,4 +47,173 @@ TEST(CpropCleanup, RunsAfterFinalCanonicalization) {
   EXPECT_TRUE(clock_shape.is_invalid()) << "final cleanup must remove the control cone orphaned by that rewrite";
 }
 
+// Conditional lane writes mint Get_mask reads while factoring their word muxes.
+// Once those reads resolve, the intermediate writers become private and must
+// collapse in the SAME invocation, without another compile to discover them.
+TEST(CpropCleanup, ConditionalPackReachesFixedPoint) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_pack_test");
+  auto  io     = lib.create_io("conditional_pack");
+  io->add_input("d", 1);
+  io->set_bits("d", 4);
+  for (int i = 0; i < 9; ++i) {
+    auto name = "s" + std::to_string(i);
+    io->add_input(name, i + 2);
+    io->set_bits(name, 1);
+  }
+  io->add_output("q", 11);
+  io->set_bits("q", 12);
+  auto g     = io->create_graph();
+  auto value = gu::create_const(*g, *Dlop::create_integer(0));
+  for (int i = 0; i < 9; ++i) {
+    auto write = gu::create_typed_node(*g, Ntype_op::Set_mask, 12);
+    gu::set_ubits(write.create_driver_pin(0), 12);
+    gu::setup_sink_by_name(write, "a").connect_driver(value);
+    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(15LL << (4 * (i / 3)))));
+    gu::setup_sink_by_name(write, "value").connect_driver(g->get_input_pin("d"));
+    auto mux = gu::create_typed_node(*g, Ntype_op::Mux, 12);
+    gu::set_ubits(mux.create_driver_pin(0), 12);
+    mux.create_sink_pin(0).connect_driver(g->get_input_pin("s" + std::to_string(i)));
+    mux.create_sink_pin(1).connect_driver(value);
+    mux.create_sink_pin(2).connect_driver(write.create_driver_pin(0));
+    value = mux.create_driver_pin(0);
+  }
+  value.connect_sink(g->get_output_pin("q"));
+  Cprop cp;
+  cp.do_trans(g);
+  size_t before = 0;
+  for (auto n : g->body().nodes()) {
+    ++before;
+    EXPECT_NE(gu::type_op_of(n), Ntype_op::Set_mask);
+  }
+  cp.do_trans(g);
+  size_t after = 0;
+  for ([[maybe_unused]] auto n : g->body().nodes()) {
+    ++after;
+  }
+  EXPECT_EQ(before, after);
+}
+
+TEST(CpropCleanup, PackedWritesKeepTruncation) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_truncated_pack_test");
+  auto  io     = lib.create_io("truncated_pack");
+  io->add_input("d", 1);
+  io->set_bits("d", 16);
+  io->add_input("s", 2);
+  io->set_bits("s", 1);
+  io->add_output("q", 3);
+  io->set_bits("q", 8);
+  auto g     = io->create_graph();
+  auto value = gu::create_const(*g, *Dlop::create_integer(0));
+  // The frontend's enclosing expression hint is narrower than this unlimited
+  // mux's actual input. It must not justify removing a lane's truncation.
+  auto mux   = gu::create_typed_node(*g, Ntype_op::Mux, 4);
+  gu::set_ubits(mux.create_driver_pin(0), 4);
+  mux.create_sink_pin(0).connect_driver(g->get_input_pin("s"));
+  mux.create_sink_pin(1).connect_driver(value);
+  mux.create_sink_pin(2).connect_driver(g->get_input_pin("d"));
+  for (int lane = 0; lane < 2; ++lane) {
+    auto write = gu::create_typed_node(*g, Ntype_op::Set_mask, 8);
+    gu::set_ubits(write.create_driver_pin(0), 8);
+    gu::setup_sink_by_name(write, "a").connect_driver(value);
+    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(15 << (4 * lane))));
+    gu::setup_sink_by_name(write, "value").connect_driver(mux.create_driver_pin(0));
+    value = write.create_driver_pin(0);
+  }
+  value.connect_sink(g->get_output_pin("q"));
+  Cprop cp;
+  cp.do_trans(g);
+  size_t concats = 0;
+  for (auto n : g->body().nodes()) {
+    if (gu::type_op_of(n) != Ntype_op::Concat) {
+      continue;
+    }
+    ++concats;
+    auto lanes = gu::concat_lanes(n);
+    EXPECT_EQ(gu::concat_total_width(lanes), 8);
+    EXPECT_TRUE(gu::concat_lane_violation(lanes).empty());
+    for (const auto& lane : lanes) {
+      EXPECT_EQ(gu::type_op_of(lane.value.get_master_node()), Ntype_op::Get_mask);
+      EXPECT_EQ(gu::bits_of(lane.value), 4);
+    }
+  }
+  EXPECT_EQ(concats, 1);
+}
+
+TEST(CpropMux, NonzeroConstantConditionSelectsTrueArm) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_mux_condition");
+  int   id     = 0;
+  for (const auto literal : {"0", "1", "32", "-1", "0x100000000000000000000"}) {
+    for (bool constant_arms : {false, true}) {
+      auto io = lib.create_io("mux_condition_" + std::to_string(id++));
+      io->add_input("a", 1);
+      io->set_bits("a", 4);
+      io->add_input("b", 2);
+      io->set_bits("b", 4);
+      io->add_output("q", 3);
+      io->set_bits("q", 4);
+      auto g         = io->create_graph();
+      auto mux       = gu::create_typed_node(*g, Ntype_op::Mux, 4);
+      auto false_arm = constant_arms ? gu::create_const(*g, *Dlop::create_integer(5)) : g->get_input_pin("a");
+      auto true_arm  = constant_arms ? gu::create_const(*g, *Dlop::create_integer(9)) : g->get_input_pin("b");
+      mux.create_sink_pin(0).connect_driver(gu::create_const(*g, *Dlop::from_pyrope(literal)));
+      mux.create_sink_pin(1).connect_driver(false_arm);
+      mux.create_sink_pin(2).connect_driver(true_arm);
+      mux.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+      Cprop cp;
+      cp.do_trans(g);
+      const auto drivers = g->get_output_pin("q").get_driver_pins();
+      ASSERT_EQ(drivers.size(), 1);
+      EXPECT_EQ(drivers.front(), std::string_view(literal) == "0" ? false_arm : true_arm) << literal;
+    }
+  }
+}
+
 }  // namespace
+
+TEST(CpropCleanup, EnabledFlopDoesNotNeedItsDataHoldMux) {
+  namespace gu = livehd::graph_util;
+  for (bool shared : {false, true}) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_cprop_flop_hold_test");
+    auto  io  = lib.create_io(shared ? "shared_hold" : "private_hold");
+    io->add_input("d", 1);
+    io->set_bits("d", 8);
+    io->add_input("en", 2);
+    io->set_bits("en", 1);
+    io->add_input("clock", 3);
+    io->set_bits("clock", 1);
+    io->add_output("q", 4);
+    io->set_bits("q", 8);
+    if (shared) {
+      io->add_output("observe", 5);
+      io->set_bits("observe", 8);
+    }
+    auto g    = io->create_graph();
+    auto flop = gu::create_typed_node(*g, Ntype_op::Flop, 8);
+    auto q    = flop.create_driver_pin(0);
+    gu::set_ubits(q, 8);
+    q.connect_sink(g->get_output_pin("q"));
+    g->get_input_pin("en").connect_sink(gu::setup_sink_by_name(flop, "enable"));
+    g->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+    gu::create_const(*g, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(flop, "posclk"));
+    auto mux = gu::create_typed_node(*g, Ntype_op::Mux, 8);
+    auto d   = mux.create_driver_pin(0);
+    gu::set_ubits(d, 8);
+    g->get_input_pin("en").connect_sink(gu::setup_sink_by_name(mux, "s"));
+    q.connect_sink(gu::setup_sink_by_name(mux, "p1"));
+    g->get_input_pin("d").connect_sink(gu::setup_sink_by_name(mux, "p2"));
+    d.connect_sink(gu::setup_sink_by_name(flop, "din"));
+    if (shared) {
+      d.connect_sink(g->get_output_pin("observe"));
+    }
+    Cprop{}.do_trans(g, false);
+    EXPECT_FALSE(flop.is_invalid());
+    EXPECT_EQ(gu::get_driver_of_sink_name(flop, "din"), g->get_input_pin("d"));
+    if (shared) {
+      EXPECT_FALSE(mux.is_invalid());
+      EXPECT_EQ(gu::get_driver_of_sink_name(mux, "p1"), q);
+    }
+  }
+}

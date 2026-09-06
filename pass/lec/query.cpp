@@ -4316,6 +4316,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       Io_name_map<int>  fw;
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
       Io_name_map<Val>  init;
+      Io_name_map<Val>  power_init[2];
       // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
       // cannot tell "this key exists on both sides" from "only one side has it".
       Io_name_map<int>  fw_side[2];
@@ -4370,6 +4371,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (!init.count(key)) {
             if (auto iv = flop_initial(tm, node, w, opts.gold_x != "zero")) {
               init[key] = *iv;
+            }
+          }
+          // Without a reset pin, a constant initial value is a power-on
+          // guarantee (including storage lowered from initialized memories).
+          // Keep it per side: mapping may complement state or change its names.
+          // Its '?' bits become the gold_x=ignore don't-care plane, which is
+          // what LecState.PowerOnInitialIsPerDesignWithOrWithoutOtherReset
+          // pins -- note this is strictly WEAKER than the shared free symbol
+          // the run phase would otherwise give those bits.
+          //
+          // FIRST-wins, like the shared `init` map above and for the same
+          // reason: eff() is NOT injective, so plain assignment would make the
+          // pinned power-on state of a soundness-critical miter depend on the
+          // occurrence walk order.
+          if (nop == Ntype_op::Flop && gu::get_driver_of_sink_name(node, "reset_pin").is_invalid()
+              && !power_init[side_ix].count(key)) {
+            if (auto iv = flop_initial(tm, node, w, opts.gold_x != "zero")) {
+              power_init[side_ix][key] = *iv;
             }
           }
         }
@@ -4481,6 +4500,22 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ref_state[key].x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(w), 0)});
         }
         impl_state[key] = v;
+      }
+      // Explicit power-on values take precedence over speculative shared-state
+      // correspondence and over the unknown-state policy for uninitialized
+      // registers. They also apply during a reset prologue elsewhere in the
+      // design; unrelated reset logic cannot erase initialized memory contents.
+      //
+      // BEFORE the bit-blast slicing below, not after: those slices are derived
+      // from `ref_state[parent]` as it stands, so overriding the parent
+      // afterwards leaves the impl's one-bit cuts on the OLD (free) symbol
+      // while the ref starts at the constant -- a cycle-0 mismatch that refutes
+      // a correct pair.
+      for (const auto& [key, value] : power_init[0]) {
+        ref_state[key] = value;
+      }
+      for (const auto& [key, value] : power_init[1]) {
+        impl_state[key] = value;
       }
       // Bit slices of a bit-blasted register (see the pairing above): the impl's
       // one-bit cut for bit i IS bit i of the ref's N-bit symbol, so the two
