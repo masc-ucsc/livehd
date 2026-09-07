@@ -60,7 +60,7 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
           if (!child || !livehd::color::is_pattern_def_name(child->get_name())) {
             continue;
           }
-          for (const auto edge : node.inp_edges()) {
+          for (const auto& edge : node.inp_edges()) {
             if (edge.driver.is_const()) {
               constant_patterns.push_back(node);
               break;
