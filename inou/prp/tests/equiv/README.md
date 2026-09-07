@@ -24,6 +24,7 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:set: k=v …` | extra `--set` flags, applied to every mode |
 | `:reset_style: async` | elaborate implicit resets as async, so the golden can spell an async `always` |
 | `:equiv_engine: cvc5` | prove with `lhd lec` only; skip lgcheck (latch/edge shapes it calls different) |
+| `:verilog_check_timeout: N` | v2prp2v only: seconds for the lgcheck oracle (default 240). Cap it for a shape lgcheck provably cannot close — a refutation still lands in ~1s, so only dead wait is dropped |
 | `:gold_reader: slang` | read the golden with yosys's built-in `read_slang` |
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |

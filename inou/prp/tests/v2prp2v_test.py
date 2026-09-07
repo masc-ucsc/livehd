@@ -54,6 +54,13 @@ import subprocess
 import sys
 
 NATIVE_CHECK_TIMEOUT = 60
+# lgcheck budget for the SECOND, independent oracle. A REFUTATION arrives in
+# about a second (measured: a one-XOR corruption of
+# comb_array_const_index_read's netlist refutes in 0.9s), so this budget only
+# ever buys a longer wait before a hard PROOF gives up. A fixture whose shape
+# lgcheck provably cannot close sets `:verilog_check_timeout: N` to stop paying
+# for that wait on every run -- it keeps the fast refutation check and drops
+# only the dead time.
 VERILOG_CHECK_TIMEOUT = 240
 
 
@@ -241,6 +248,16 @@ def main():
               "(:equiv_engine: cvc5; latch/edge structure)".format(name))
         return 1 if native_failed else 0
 
+    verilog_timeout = VERILOG_CHECK_TIMEOUT
+    hdr_timeout = _header(ref_prp, "verilog_check_timeout")
+    if hdr_timeout:
+        try:
+            verilog_timeout = int(hdr_timeout)
+        except ValueError:
+            print("{} - v2prp2v - FAILED: :verilog_check_timeout: must be an "
+                  "integer (got '{}')".format(name, hdr_timeout))
+            return 1
+
     cmd = ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
            "--reference_top", vtop, "--implementation_top", impl_top]
     if (_header(ref_prp, "gold_reader") or "") == "slang":
@@ -248,10 +265,10 @@ def main():
         cmd += ["--gold_reader", "slang"]
     try:
         chk = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             timeout=VERILOG_CHECK_TIMEOUT)
+                             timeout=verilog_timeout)
     except subprocess.TimeoutExpired:
         print("{} - v2prp2v - original Verilog check inconclusive "
-              "(lgcheck timeout >{}s, NOT a fail)".format(name, VERILOG_CHECK_TIMEOUT))
+              "(lgcheck timeout >{}s, NOT a fail)".format(name, verilog_timeout))
         return 1 if native_failed else 0
 
     out = chk.stdout.decode("utf-8", "ignore")

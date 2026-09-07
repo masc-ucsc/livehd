@@ -34,5 +34,21 @@ module tb;
   end
 endmodule
 TB
-iverilog -g2012 -s tb -o "$W/sim" "$W/net.v" "$W/models.v" "$W/tb.v"
-vvp "$W/sim"
+# The sweep is EXHAUSTIVE over the 16-bit input, and the netlist is ~2.5k mapped
+# gates, so the simulator choice is the whole cost of this test. Measured here:
+#
+#   iverilog build 0.1s + vvp   70.0s   (event-driven, ~161M gate events)
+#   verilator build 2.6s + run   0.02s
+#
+# Same 65536 vectors either way -- verilator just compiles the netlist to C++
+# instead of interpreting it. `lhd synth` (the &fraig crash this test guards)
+# is 0.9s of the total in both cases. iverilog stays as the fallback: it is the
+# tool the rest of the abc suite already requires, and verilator is not.
+if command -v verilator >/dev/null 2>&1; then
+  ( cd "$W" && verilator --binary -j 0 --timing -Wno-fatal --top-module tb -o sim \
+      tb.v net.v models.v >verilator.log 2>&1 ) || { tail -20 "$W/verilator.log"; exit 1; }
+  "$W/obj_dir/sim"
+else
+  iverilog -g2012 -s tb -o "$W/sim" "$W/net.v" "$W/models.v" "$W/tb.v"
+  vvp "$W/sim"
+fi

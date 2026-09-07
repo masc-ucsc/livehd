@@ -3,7 +3,15 @@
 :type: equiv
 :verilog_top: comb_array_const_index_read
 :pyrope_top: top
+:verilog_check_timeout: 20
 */
+
+// `:verilog_check_timeout:` -- lgcheck's `sat -tempinduct` cannot close this
+// 8x3 register file with runtime read AND write addresses, so its leg spent
+// the full 240s default on every run to print "inconclusive, NOT a fail".
+// Nothing is lost by capping it: a real divergence still comes back fast (a
+// one-XOR corruption of the emitted netlist refutes in 0.9s), and the leg that
+// actually guards this regression is the native `lhd lec` above, which PROVES.
 
 // Pyrope twin: the comb array `d` is copied out of `q` entry by entry with
 // CONSTANT indices, which is exactly what pass/prp_writer emits for the
