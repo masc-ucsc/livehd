@@ -66,10 +66,10 @@ TEST(HostMem, RssTracksATouchedAllocation) {
   EXPECT_GT(after, before + (64 * kMiB)) << "RSS did not follow a 128 MiB touched allocation";
 }
 
-TEST(HostMem, ReserveIsTheLargerOfTwoGiBAndAFifth) {
+TEST(HostMem, ReserveIsTheLargerOfTwoGiBAndAQuarter) {
   const auto phys    = livehd::cost::physical_ram_bytes();
   const auto reserve = livehd::cost::reserve_bytes();
-  EXPECT_EQ(reserve, std::min(std::max<uint64_t>(uint64_t{2} << 30, phys / 5), phys / 2));
+  EXPECT_EQ(reserve, std::min(std::max<uint64_t>(uint64_t{2} << 30, phys / 4), phys / 2));
 }
 
 // The reserve must never eat the whole host: a <=2 GiB machine would otherwise
@@ -86,7 +86,7 @@ TEST(HostMem, DefaultBudgetLeavesHeadroom) {
   const auto phys   = livehd::cost::physical_ram_bytes();
   const auto budget = livehd::cost::budget_bytes(0);
   ASSERT_NE(0U, budget);
-  EXPECT_LT(budget, phys) << "the budget must never span all of physical RAM";
+  EXPECT_LE(budget, phys - phys / 4) << "the hard ceiling must reserve at least one quarter of RAM";
   EXPECT_EQ(budget, phys - livehd::cost::reserve_bytes());
 }
 
@@ -223,4 +223,21 @@ TEST(HostMem, InstallBackstopArmsFromEnvInChild) {
   ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
   ASSERT_TRUE(WIFEXITED(status));
   EXPECT_EQ(42, WEXITSTATUS(status)) << "install_memory_backstop did not arm under an explicit env budget";
+}
+
+TEST(HostMem, ConfiguredBudgetCannotRaiseThePhysicalCeiling) {
+  const pid_t pid = ::fork();
+  ASSERT_GE(pid, 0);
+  if (pid == 0) {
+    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "2147483647", 1);
+    if (livehd::cost::configured_budget_bytes() != livehd::cost::budget_bytes(0)) {
+      _exit(10);
+    }
+    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "1", 1);
+    _exit(livehd::cost::configured_budget_bytes() == kMiB ? 42 : 11);
+  }
+  int status = 0;
+  ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(42, WEXITSTATUS(status));
 }

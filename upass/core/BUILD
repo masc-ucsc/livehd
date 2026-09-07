@@ -54,3 +54,12 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "bundle_test",
+    srcs = ["tests/bundle_test.cpp"],
+    deps = [
+        ":upass",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "lnast_prp_writer.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "worker_pool.hpp"   // livehd::run_workers (big-stack workers)
@@ -136,7 +137,9 @@ void Pass_prp_writer::work(Eprp_var& var) {
 
     try {
       TRACE_EVENT("pass", "prp_writer.file", "unit", file_name);
-      auto fname = std::format("{}/{}.prp", out_dir, file_name);
+      // The shared long-name policy: a generated parameter specialization
+      // can name a module past NAME_MAX, and the emit must not die on it.
+      auto fname = std::format("{}/{}.prp", out_dir, livehd::unit_file_stem(file_name));
 
       // Two phases: collect the (deduped) file-scope import header from every
       // unit, then render the bodies below it.

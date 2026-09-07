@@ -11,7 +11,6 @@ cc_library(
         ["*.cpp"],
         exclude = [
             "*test*.cpp",
-            "yosys_driver.cpp",
         ],
     ),
     hdrs = glob(["*.hpp"]),
@@ -24,7 +23,6 @@ cc_library(
         "@at_clifford_yosys2//:kernel",
         "@at_clifford_yosys2//:version",
         "@mustache//:headers",
-        "@yosys_slang//:slang.so",
     ],
     alwayslink = True,
 )
@@ -54,15 +52,14 @@ filegroup(
 
 cc_binary(
     name = "yosys2",
-    srcs = [
-        "yosys_driver.cpp",
-    ],
+    srcs = [],
     copts = COPTS + ["-Wno-shadow"],
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
     linkopts = ["-lz", "-rdynamic"],
     deps = [
         ":lgyosys",
+        "@at_clifford_yosys2//:driver",
     ],
 )
 

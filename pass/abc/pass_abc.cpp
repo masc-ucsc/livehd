@@ -22,8 +22,8 @@
 #include "graph_library_singleton.hpp"
 #include "json_util.hpp"
 #include "liberty_dff.hpp"
-#include "mem_lower.hpp"
 #include "loop_cleanup.hpp"
+#include "mem_lower.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
@@ -95,15 +95,15 @@ void Pass_abc::setup() {
                        "200");
   // With no target this is the primary objective; with a target it is a
   // second candidate, accepted only when smaller and still inside the budget.
-  m.add_label_optional(
-      "area_flow",
-      "ABC AREA command string, used without delay or as a second candidate after meeting the delay budget "
-      "(empty => the former baseline: `strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o` "
-      "+ `buffer -N {F}; dnsize {B}`, with `upsize {B}` before dnsize for a timed candidate; "
-      "`none` disables only the second candidate; anything else runs "
-      "verbatim with {D}/{L}/{F}/{B} substituted). The candidate is kept only when it also meets the "
-      "budget with less SCL area. The timed comparison requires an NLDM Liberty",
-      "");
+  m.add_label_optional("area_flow",
+                       "ABC AREA command string, used without delay or as a second candidate after meeting the delay budget "
+                       "(empty => the former baseline: `strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C "
+                       "500; &nf {D}; &put -o` "
+                       "+ `buffer -N {F}; dnsize {B}`, with `upsize {B}` before dnsize for a timed candidate; "
+                       "`none` disables only the second candidate; anything else runs "
+                       "verbatim with {D}/{L}/{F}/{B} substituted). The candidate is kept only when it also meets the "
+                       "budget with less SCL area. The timed comparison requires an NLDM Liberty",
+                       "");
   // ABC's SCL timer sees one region's combinational cone; the period OpenSTA
   // checks also pays the launch flop's clk->Q and the capture flop's setup (69
   // ps of a 400 ps ASAP7 period on br_arb_rr), so a region sized to the full
@@ -160,8 +160,8 @@ void Pass_abc::setup() {
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("memory_budget_mb",
                        "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
-                       "0 => physical RAM minus max(2 GiB, 20%) of OS reserve. Physical only, never swap",
-                       "0");
+                       "default 16384 MiB (16 GiB soft target); 0 uses physical RAM minus max(2 GiB, 25%) reserve",
+                       "16384");
   m.add_label_optional("time_budget_ms",
                        "soft wall-time limit for one mapped color in milliseconds (0 disables); a completed "
                        "oversize color fails with its name so color.max_ge can be reduced",
@@ -648,7 +648,7 @@ void Pass_abc::work(Eprp_var& var) {
   auto region_opts_s       = std::string{var.get("region_opts", "")};
   auto area_flow           = std::string{var.get("area_flow", "")};
   auto reg_margin          = std::string{var.get("reg_margin", "auto")};
-  auto mem_budget_s        = std::string{var.get("memory_budget_mb", "0")};
+  auto mem_budget_s        = std::string{var.get("memory_budget_mb", "16384")};
   auto time_budget_s       = std::string{var.get("time_budget_ms", "0")};
   bool allow_oversize      = truthy(var.get("allow_oversize", "false"));
   auto flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");

@@ -22,6 +22,7 @@
 #include "cgen_verilog.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
+#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "file_output.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
@@ -1263,10 +1264,12 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
     first = false;
     ofs << "{\"name\":\"" << json_escape_min(u.name) << "\"";
     if (!ext.empty()) {
-      // cgen collapses directory separators out of the FILE name (a
-      // path-qualified Pyrope import spells its graph `../lib/core.core`), so
-      // the manifest must name the file that actually landed on disk.
-      const std::string fname = kind == "verilog" ? cgen_verilog_file_stem(u.name) : u.name;
+      // Every per-unit writer runs the unit name through the ONE long-name
+      // policy (livehd::unit_file_stem): directory separators are collapsed (a
+      // path-qualified Pyrope import spells its graph `../lib/core.core`) and a
+      // name past NAME_MAX is shortened to a readable prefix plus a SHA-256.
+      // The manifest must name the file that actually landed on disk.
+      const std::string fname = livehd::unit_file_stem(u.name);
       ofs << ",\"file\":\"" << json_escape_min(fname) << ext << "\"";
     }
     ofs << ",\"content_hash\":\"" << std::format("{:016x}", u.hash) << "\"";
@@ -1529,9 +1532,10 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
       }
       std::ostringstream oss;
       ln->dump(oss);
-      std::ofstream ofs(std::format("{}/{}.lnast", e.path, name));
+      const auto    stem = livehd::unit_file_stem(name);
+      std::ofstream ofs(std::format("{}/{}.lnast", e.path, stem));
       if (!ofs.is_open()) {
-        throw Lhd_error{"config", std::format("could not write {}/{}.lnast", e.path, name), ""};
+        throw Lhd_error{"config", std::format("could not write {}/{}.lnast", e.path, stem), ""};
       }
       ofs << oss.str();
       manifest.emplace_back(name, hash_bytes(oss.str()));
@@ -1564,7 +1568,7 @@ std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, co
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
-    auto f = std::format("{}/{}.v", odir, cgen_verilog_file_stem(n));
+    auto f = std::format("{}/{}.v", odir, livehd::unit_file_stem(n));
     if (::access(f.c_str(), R_OK) != 0) {
       throw Lhd_error{"internal", std::format("inou.cgen.verilog did not produce {}", f), "check the step log in --workdir"};
     }
@@ -1590,7 +1594,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      const auto content = livehd::file_utils::read_file(std::format("{}/{}.v", e.path, cgen_verilog_file_stem(n)));
+      const auto content = livehd::file_utils::read_file(std::format("{}/{}.v", e.path, livehd::unit_file_stem(n)));
       manifest.emplace_back(n, hash_bytes(content.value_or("")));
     }
     write_manifest(e.path, "verilog", manifest);
@@ -1610,7 +1614,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
       throw Lhd_error{"config", std::format("could not write {}", e.path), ""};
     }
     for (const auto& n : names) {
-      std::ifstream ifs(std::format("{}/{}.v", scratch, cgen_verilog_file_stem(n)));
+      std::ifstream ifs(std::format("{}/{}.v", scratch, livehd::unit_file_stem(n)));
       ofs << ifs.rdbuf();
     }
     res.outputs.push_back(e.path);
@@ -1699,16 +1703,12 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     if (!entity.empty() && entity.front() == '%') {
       continue;
     }
-    // Mirror inou.cgen.sim's file-name sanitization: a '/' from a path-qualified
-    // import (`../pp.Foo`) is a directory separator that cgen collapses to '_'
-    // for the emitted .hpp/.cpp — the existence check and the BUILD srcs list
-    // must reference the SAME sanitized basename.
-    for (char& c : gn) {
-      if (c == '/' || c == '\\') {
-        c = '_';
-      }
-    }
-    names.emplace_back(std::move(gn));
+    // Mirror inou.cgen.sim's file-name mapping — the ONE long-name policy: a
+    // '/' from a path-qualified import (`../pp.Foo`) is a directory separator
+    // that collapses to '_', and a generated name past NAME_MAX is shortened.
+    // The existence check and the BUILD srcs list must reference the SAME
+    // basename cgen actually wrote.
+    names.emplace_back(livehd::unit_file_stem(gn));
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
@@ -2177,7 +2177,7 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
     names.erase(std::unique(names.begin(), names.end()), names.end());
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      auto       f       = std::format("{}/{}.prp", e.path, n);
+      auto       f       = std::format("{}/{}.prp", e.path, livehd::unit_file_stem(n));
       const auto content = livehd::file_utils::read_file(f);
       if (!content) {
         throw Lhd_error{"internal", std::format("pass.prp_writer did not produce {}", f), "check the step log in --workdir"};
@@ -2224,7 +2224,7 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
   labels["odir"] = scratch;
   merge_sets(opts, "compile.prp_writer", labels);  // e.g. --set compile.prp_writer.debug=true
   run_step("pass.prp_writer", var, labels, opts, res);
-  auto          src = std::format("{}/{}.prp", scratch, names.front());
+  auto          src = std::format("{}/{}.prp", scratch, livehd::unit_file_stem(names.front()));
   std::ifstream ifs(src);
   if (!ifs.is_open()) {
     throw Lhd_error{"internal", std::format("pass.prp_writer did not produce {}", src), "check the step log in --workdir"};

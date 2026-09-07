@@ -259,7 +259,7 @@ struct Ff_blocking_collector : public slang::ast::ASTVisitor<Ff_blocking_collect
 // skip a write inside a modelled shape (`break`/`continue` need a loop, which is
 // unmodelled anyway, and `return` needs a function body, never descended into).
 void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash_set<const slang::ast::ValueSymbol*>& out,
-                              bool strict = false) {
+                              const std::function<bool(const slang::ast::CaseStatement&)>& exhaustive, bool strict = false) {
   using slang::ast::StatementKind;
   auto all_writes_below = [&](const slang::ast::Statement& s) {
     Write_collector wc;
@@ -271,10 +271,10 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
       return;
     }
     absl::flat_hash_set<const slang::ast::ValueSymbol*> acc;
-    definite_blocking_writes(*arms.front(), acc, strict);
+    definite_blocking_writes(*arms.front(), acc, exhaustive, strict);
     for (size_t i = 1; i < arms.size(); ++i) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> other;
-      definite_blocking_writes(*arms[i], other, strict);
+      definite_blocking_writes(*arms[i], other, exhaustive, strict);
       absl::flat_hash_set<const slang::ast::ValueSymbol*> keep;
       for (const auto* sym : acc) {
         if (other.contains(sym)) {
@@ -290,11 +290,15 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
     case StatementKind::Empty: return;
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        definite_blocking_writes(*s, out, strict);  // sequential: a later write still counts
+        definite_blocking_writes(*s, out, exhaustive, strict);  // sequential: a later write still counts
       }
       return;
-    case StatementKind::Block: definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, strict); return;
-    case StatementKind::Timed: definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, strict); return;
+    case StatementKind::Block:
+      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict);
+      return;
+    case StatementKind::Timed:
+      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict);
+      return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
       if (e.kind != ExpressionKind::Assignment) {
@@ -328,13 +332,16 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
     }
     case StatementKind::Case: {
       const auto& c = stmt.as<slang::ast::CaseStatement>();
-      if (c.defaultCase == nullptr) {
+      if (c.defaultCase == nullptr && !exhaustive(c)) {
         // No default => an unmatched selector holds. A `unique`/`priority`
         // qualifier is a CLAIM about the selector, not a proof of coverage, so it
         // is deliberately not treated as one here.
         return;
       }
-      std::vector<const slang::ast::Statement*> arms{c.defaultCase};
+      std::vector<const slang::ast::Statement*> arms;
+      if (c.defaultCase) {
+        arms.push_back(c.defaultCase);
+      }
       for (const auto& item : c.items) {
         arms.push_back(item.stmt);
       }
@@ -1419,7 +1426,7 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     // would hide a source bug rather than model hardware.
     if (is_latch_block && !wc.blocking.empty()) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> definite;
-      definite_blocking_writes(pbs.getBody(), definite);
+      definite_blocking_writes(pbs.getBody(), definite, [this](const auto& c) { return case_is_exhaustive(c); });
       for (const auto* sym : wc.blocking) {
         if (definite.contains(sym)) {
           continue;  // assigned on every path: ordinary combinational logic
@@ -3692,6 +3699,38 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           break;
         }
 
+        case SymbolKind::PrimitiveInstance: {
+          const auto& primitive = member.as<slang::ast::PrimitiveInstanceSymbol>();
+          const auto  name      = primitive.primitiveType.name;
+          const bool  buffer    = name == "buf" || name == "not";
+          if (primitive.primitiveType.primitiveKind == slang::ast::PrimitiveSymbol::UserDefined
+              || (!buffer && name != "and" && name != "nand" && name != "or" && name != "nor" && name != "xor" && name != "xnor")) {
+            emit_unsupported(member.location,
+                             "unsupported-primitive",
+                             std::string("primitive '") + std::string(name) + "' is not supported by --reader slang");
+            break;
+          }
+          Driver       d{.member = &member, .prefix = genblk_prefix_};
+          const auto   ports   = primitive.getPortConnections();
+          const size_t outputs = buffer ? ports.size() - 1 : 1;
+          for (size_t i = 0; i < ports.size(); ++i) {
+            Dep_collector dc;
+            if (i < outputs) {
+              const auto* target = ports[i];
+              if (const auto* assignment = target->as_if<slang::ast::AssignmentExpression>()) {
+                target = &assignment->left();
+              }
+              dc.note_lhs(*target);
+            } else {
+              ports[i]->visit(dc);
+            }
+            d.reads.insert(dc.reads.begin(), dc.reads.end());
+            d.writes.insert(dc.writes.begin(), dc.writes.end());
+          }
+          drivers.push_back(std::move(d));
+          break;
+        }
+
         case SymbolKind::Instance: {
           collect_state_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
           Driver d{.member = &member, .prefix = genblk_prefix_};
@@ -4395,7 +4434,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // licence to drop the accumulator, so it needs the proof, not the
         // latch analysis' bias-to-combinational guess (which calls a store
         // under an unmodelled statement — a loop, a `case … matches` — definite).
-        definite_blocking_writes(pbs.getBody(), definite_proc_written, /*strict=*/true);
+        definite_blocking_writes(
+            pbs.getBody(),
+            definite_proc_written,
+            [this](const auto& c) { return case_is_exhaustive(c); },
+            /*strict=*/true);
       } else if (d.member->kind == SymbolKind::ContinuousAssign) {
         d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(sc);
       } else if (d.member->kind == SymbolKind::Instance) {
@@ -4410,6 +4453,33 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
             continue;
           }
           const auto* t = expr;
+          if (const auto* a = t->as_if<slang::ast::AssignmentExpression>()) {
+            t = &a->left();
+          }
+          while (t->kind == ExpressionKind::Conversion) {
+            t = &t->as<slang::ast::ConversionExpression>().operand();
+          }
+          if (t->kind != ExpressionKind::NamedValue && t->kind != ExpressionKind::HierarchicalValue) {
+            if (const auto* s = lhs_base_symbol(*t)) {
+              partial_writes.insert(s);
+            }
+          }
+        }
+      } else if (d.member->kind == SymbolKind::PrimitiveInstance) {
+        // Same rule for a built-in gate: `and g(net[0], a, b)` is a partial
+        // (set_mask) driver of `net`. Without this a net driven only by gate
+        // terminals on individual bits would look like a plain single-driver
+        // whole wire (the Store_counter scan does not see gate terminals, and
+        // one gate keeps writers_of at a single driver).
+        const auto&  primitive = d.member->as<slang::ast::PrimitiveInstanceSymbol>();
+        const auto   ports     = primitive.getPortConnections();
+        const auto   pname     = primitive.primitiveType.name;
+        const size_t outputs   = (pname == "buf" || pname == "not") ? ports.size() - 1 : 1;
+        for (size_t i = 0; i < outputs && i < ports.size(); ++i) {
+          const auto* t = ports[i];
+          if (t == nullptr) {
+            continue;
+          }
           if (const auto* a = t->as_if<slang::ast::AssignmentExpression>()) {
             t = &a->left();
           }
@@ -4950,6 +5020,50 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // the continuous-`assign` path.
         auto v = to_int_value(lower_rvalue(*ns.getInitializer()));
         builder_.create_assign_stmts(lname_of(ns), v);
+        clear_pending_loc();
+        break;
+      }
+      case SymbolKind::PrimitiveInstance: {
+        const auto&  primitive = d.member->as<slang::ast::PrimitiveInstanceSymbol>();
+        const auto   name      = primitive.primitiveType.name;
+        const auto   ports     = primitive.getPortConnections();
+        const bool   buffer    = name == "buf" || name == "not";
+        const size_t outputs   = buffer ? ports.size() - 1 : 1;
+        proc_kind_             = Proc_kind::none;
+        proc_assign_style_.clear();
+        proc_blocking_written_.clear();
+        current_assign_nonblocking_ = false;
+        set_pending_loc(primitive.location);
+        if (primitive.getDelay() != nullptr) {
+          emit_warning(slang::SourceRange(primitive.location, primitive.location),
+                       "delay-ignored",
+                       "unsupported",
+                       "primitive delay is ignored (synthesis semantics)");
+        }
+        auto value = to_int_value(lower_rvalue(*ports[outputs]));
+        for (size_t port_index = outputs + 1; port_index < ports.size(); ++port_index) {
+          auto input = to_int_value(lower_rvalue(*ports[port_index]));
+          if (name == "and" || name == "nand") {
+            value = builder_.create_bit_and_stmts(value, input);
+          } else if (name == "or" || name == "nor") {
+            value = builder_.create_bit_or_stmts({value, input});
+          } else {
+            value = builder_.create_bit_xor_stmts(value, input);
+          }
+        }
+        if (name == "not" || name == "nand" || name == "nor" || name == "xnor") {
+          value = builder_.create_bit_not_stmts(value);
+        }
+        // Built-in gate terminals are scalar; array instances have already
+        // been sliced into their individual connections by slang.
+        value = fit_wrap(value, 1, false);
+        for (size_t port_index = 0; port_index < outputs; ++port_index) {
+          const auto* target = ports[port_index];
+          if (const auto* assignment = target->as_if<slang::ast::AssignmentExpression>()) {
+            target = &assignment->left();
+          }
+          assign_to(*target, value);
+        }
         clear_pending_loc();
         break;
       }

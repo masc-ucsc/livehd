@@ -8,8 +8,9 @@
 # its FIRST failing stage (the 10 categories the project tracks).  One TSV line
 # is appended to $RESULTS; PASS .prp -> soomrv/pass/, fails -> soomrv/fail/ (+.md).
 #
-# yosys+slang gate: the raw `yosys2 -m slang.so -p read_slang …` parse, run on a
-# `!&`/`!|`/`!^`-normalized copy of the tree ($NORM) — yosys-slang's bundled slang
+# yosys+slang gate: the raw `yosys2 -p read_slang …` parse (read_slang is built
+# into yosys, no plugin), run on a
+# `!&`/`!|`/`!^`-normalized copy of the tree ($NORM) — yosys's bundled slang
 # lacks the chained-unary-reduction parse LiveHD's patched slang has, so `!&x`
 # (3 soomrv files) would otherwise fail the whole single-unit read; `!&`≡`~&`
 # (reduction NAND) is semantics-preserving.  If the gate STILL fails, yosys+slang
@@ -17,7 +18,6 @@
 set -u
 LHD=/mada/users/renau/projs/livehd/bazel-bin/lhd/lhd
 YOSYS=/mada/users/renau/projs/livehd/bazel-bin/inou/yosys/yosys2
-SLANGSO=/mada/users/renau/projs/livehd/bazel-bin/external/+http_archive+yosys_slang/slang.so
 ABCLIB=/mada/users/renau/projs/livehd/inou/prp/tests/abc/test.lib
 ORIG=/mada/users/renau/projs/soomrv/repo
 NORM=/tmp/snorm
@@ -40,7 +40,7 @@ GATE=NA; RSLANG=NA; LGSLANG=NA; LGYS=NA; PRPGEN=NA; LECSL=NA; LECYS=NA; ABC=NA
 MSG=""; kind="-"
 
 # 1. yosys+slang gate (normalized tree)
-(cd "$NORM" && timeout 200 $YOSYS -m "$SLANGSO" -p "read_slang --top $TOP $YSREAD_GATE $FILES") > "$W/gate.log" 2>&1
+(cd "$NORM" && timeout 200 $YOSYS -p "read_slang --top $TOP $YSREAD_GATE $FILES") > "$W/gate.log" 2>&1
 [ $? -eq 0 ] && GATE=PASS || GATE=FAIL
 
 # 2. --reader slang -> prp

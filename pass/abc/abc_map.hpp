@@ -114,7 +114,7 @@ struct Map_options {
   // was SIGKILLed by the OS. `memory_budget_mb` pins the ceiling for
   // reproducible hosts/CI (0 => physical RAM minus an OS reserve);
   // `allow_oversize` acknowledges the risk and disables the guard.
-  int               memory_budget_mb = 0;
+  int               memory_budget_mb = 16384;
   uint64_t          time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
   bool              allow_oversize   = false;
 };

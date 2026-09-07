@@ -638,6 +638,7 @@ private:
   // asserts verify as "no obligations found" — proving nothing at exit 0.
   void lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt);
   void lower_case(const slang::ast::CaseStatement& stmt);
+  bool case_is_exhaustive(const slang::ast::CaseStatement& stmt);
   // `(* full_case *)`: the arms are DECLARED exhaustive, so an uncovered
   // selector value is a DON'T CARE, not "hold the previous value". Unhonored,
   // an incompletely-assigned `always @*` infers a latch whose Q feeds its own D

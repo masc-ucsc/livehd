@@ -48,7 +48,6 @@ using livehd::graph_util::is_unsign;
 using livehd::graph_util::node_name_of;
 using livehd::graph_util::pin_name_of;
 using livehd::graph_util::set_bits;
-using livehd::graph_util::set_pin_name;
 using livehd::graph_util::set_pin_offset;
 using livehd::graph_util::set_sign;
 using livehd::graph_util::set_type_op;
@@ -89,6 +88,28 @@ static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>             par
 static absl::flat_hash_set<hhds::Class_index>                                explicit_pin_signs;
 
 static std::vector<const RTLIL::Wire*> pending_outputs;
+
+// Import-local reverse index. Naming is common on flattened designs: walking
+// every graph pin for every wire made BlackParrot import quadratic. All pin
+// name writes in this file update the index, including unconditional renames.
+static absl::flat_hash_map<std::string, absl::flat_hash_set<hhds::Pin_class>> driver_names;
+
+static void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
+  const auto old = pin_name_of(pin);
+  if (!old.empty()) {
+    auto it = driver_names.find(old);
+    if (it != driver_names.end()) {
+      it->second.erase(pin);
+      if (it->second.empty()) {
+        driver_names.erase(it);
+      }
+    }
+  }
+  livehd::graph_util::set_pin_name(pin, name);
+  if (!name.empty()) {
+    driver_names[std::string(name)].insert(pin);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -204,25 +225,6 @@ static void set_loc(hhds::Node_class& node, const std::string& src) {
   }
 }
 
-// "Find any driver pin in `g` whose pin_name attr matches `name`". HHDS does
-// not maintain a reverse index for pin names; this is a linear walk used only
-// in the rename-protect path (see set_driver_name_if_free below). Pin renames
-// in tolg are rare enough that this is acceptable.
-[[nodiscard]] hhds::Pin_class find_driver_by_name(hhds::Graph* g, std::string_view name) {
-  if (name.empty()) {
-    return {};
-  }
-  for (auto node : g->body().nodes()) {
-    for (const auto& dpin : node.out_pins()) {
-      auto pn = pin_name_of(dpin);
-      if (pn == name) {
-        return dpin;
-      }
-    }
-  }
-  return {};
-}
-
 static bool set_driver_name_if_free(hhds::Pin_class& pin, std::string_view name) {
   if (name.empty()) {
     return false;
@@ -236,9 +238,15 @@ static bool set_driver_name_if_free(hhds::Pin_class& pin, std::string_view name)
     return false;
   }
 
-  auto existing = find_driver_by_name(pin.get_graph(), name);
-  if (!existing.is_invalid() && existing != pin) {
+  // Graph IO names live in declarations, outside the cosmetic attribute index.
+  const auto gio = pin.get_graph()->get_io();
+  if (gio->has_input(name) || gio->has_output(name)) {
     return false;
+  }
+  if (const auto it = driver_names.find(name); it != driver_names.end()) {
+    if (it->second.size() != 1 || !it->second.contains(pin)) {
+      return false;
+    }
   }
 
   set_pin_name(pin, name);
@@ -1922,7 +1930,15 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           auto not_a_node = create_typed_node(*g, Ntype_op::Not, a_bits + 1);
           not_a_node.create_sink_pin(0).connect_driver(a_dpin);
 
-          ror_node.create_sink_pin(0).connect_driver(not_a_node.create_driver_pin(0));
+          // RTLIL reduction consumes exactly A_WIDTH bits. The unlimited
+          // inversion above has a leading one; allowing Ror to consume that
+          // carrier bit makes every reduction-AND constant zero after ABC.
+          auto finite_not = create_typed_node(*g, Ntype_op::And, a_bits);
+          set_ubits(finite_not.create_driver_pin(0), a_bits);
+          explicit_pin_signs.insert(finite_not.create_driver_pin(0).get_class_index());
+          finite_not.create_sink_pin(0).connect_driver(not_a_node.create_driver_pin(0));
+          finite_not.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(a_bits)));
+          ror_node.create_sink_pin(0).connect_driver(finite_not.create_driver_pin(0));
 
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(a_bits - 1)));
@@ -2287,17 +2303,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           "$dlatchsr (set/reset latch) is not supported: the Latch cell has no SET/CLR yet, and importing it as a "
           "plain $dlatch would SILENTLY DROP them (cell %s). See todo/livehd/2f-latch M7.\n",
           cell->type.c_str());
-    } else if (std::strncmp(cell->type.c_str(), "$adlatch", 8) == 0) {
-      // $adlatch matches NO dispatch branch (it is not a "$dlatch" prefix — the
-      // 'a' differs at index 1), so it used to reach the catch-all `log()` far
-      // below: a plain message, exit 0, and an UNTYPED Ntype_op::Invalid node
-      // left in the graph. A silent drop is strictly worse than an abort, since
-      // everything downstream then reasons about a design missing a register.
-      log_error(
-          "$adlatch (async-reset latch) is not supported: the Latch cell has no async reset yet, and it was "
-          "previously dropped SILENTLY as an untyped node (cell %s). See todo/livehd/2f-latch M7.\n",
-          cell->type.c_str());
-    } else if (std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
+    } else if (cell->type == ID($adlatch) || cell->type == ID($dlatch)) {
       set_type_op(exit_node, Ntype_op::Latch);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
@@ -2314,12 +2320,53 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         }
       }
 
-      if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
+      // Unsigned: EN/ARST are 1-bit gate signals, and the $adlatch folding
+      // below inverts them with a 1-bit Xor. Mirror get_dpin's missing-port
+      // fallback so a malformed cell cannot connect an invalid pin.
+      auto gate_dpin = [&](const RTLIL::IdString& port) {
+        if (!cell->hasPort(port)) {
+          return create_const(*g, *Dlop::from_pyrope("0ub?"));
+        }
+        return create_pick_concat_dpin(g, cell->getPort(port), false);
+      };
+      // A missing polarity parameter means ACTIVE HIGH; Yosys' getParam returns
+      // an empty Const for an absent key, whose as_bool() would read as active
+      // LOW and silently invert the signal.
+      auto polarity_of = [&](const RTLIL::IdString& param) { return !cell->hasParam(param) || cell->getParam(param).as_bool(); };
+
+      auto enable = gate_dpin(ID::EN);
+      auto data   = get_dpin(g, cell, ID::D);
+      if (cell->type == ID($adlatch)) {
+        // An asynchronous reset makes a transparent latch open, independent
+        // of EN. Fold reset into both its gate and data, preserving priority.
+        auto active_high = [&](auto pin, bool polarity) {
+          if (polarity) {
+            return pin;
+          }
+          auto inv = create_typed_node(*g, Ntype_op::Xor, 1);
+          inv.create_sink_pin(0).connect_driver(pin);
+          inv.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+          set_ubits(inv.create_driver_pin(0), 1);
+          explicit_pin_signs.insert(inv.create_driver_pin(0).get_class_index());
+          return inv.create_driver_pin(0);
+        };
+        enable     = active_high(enable, polarity_of(ID::EN_POLARITY));
+        auto reset = active_high(gate_dpin(ID::ARST), polarity_of(ID::ARST_POLARITY));
+        auto gate  = create_typed_node(*g, Ntype_op::Or, 1);
+        gate.create_sink_pin(0).connect_driver(enable);
+        gate.create_sink_pin(0).connect_driver(reset);
+        set_ubits(gate.create_driver_pin(0), 1);
+        auto mux = create_typed_node(*g, Ntype_op::Mux, get_output_size(cell));
+        setup_sink_by_name(mux, "s").connect_driver(reset);
+        setup_sink_by_name(mux, "p1").connect_driver(data);
+        setup_sink_by_name(mux, "p2").connect_driver(get_dpin(g, cell, ID::ARST_VALUE));
+        enable = gate.create_driver_pin(0);
+        data   = mux.create_driver_pin(0);
+      } else if (!polarity_of(ID::EN_POLARITY)) {
         setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(0)));
       }
-
-      setup_sink_by_name(exit_node, "din").connect_driver(get_dpin(g, cell, ID::D));
-      setup_sink_by_name(exit_node, "enable").connect_driver(get_dpin(g, cell, ID::EN));
+      setup_sink_by_name(exit_node, "din").connect_driver(data);
+      setup_sink_by_name(exit_node, "enable").connect_driver(enable);
     } else if (std::strncmp(cell->type.c_str(), "$neg", 4) == 0) {
       set_type_op(exit_node, Ntype_op::Sum);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
@@ -3128,6 +3175,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         driven_signals.clear();
         cell_port_inputs.clear();
         cell_port_outputs.clear();
+        driver_names.clear();
         wire2pin.clear();
         cell2node.clear();
         partially_assigned.clear();
@@ -3177,6 +3225,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         process_connect_outputs(mod, g);
         finalize_module(g);
 
+        driver_names.clear();
         wire2pin.clear();
         cell2node.clear();
         partially_assigned.clear();

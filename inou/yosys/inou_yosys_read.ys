@@ -1,8 +1,5 @@
 # default yosys2lg script inou_yosys_read.ys
 #
-{{#use_slang}}
-plugin -i {{slang_plugin_path}}
-{{/use_slang}}
 
 verilog_defines -DSYNTHESIS=1
 
@@ -25,7 +22,12 @@ read_verilog -sv -nomeminit {{input}}
 # fragments into millions of cubes on wide casex/casez decoders (e.g. 32-bit
 # instruction decoders), effectively hanging. `proc -ifx` routes case-x through
 # proc_mux (x = don't-care match) and skips proc_rmdead entirely.
-read_slang {{slang_top}} --no-proc {{slang_flags}} {{files_str}} {{filelist_file_str}}
+#
+# --ignore-timing: delay controls (`#5`, `always @(...) #1 q <= d`) have no
+# synthesis meaning and read_slang refuses them by default. This DROPS them
+# silently -- the same synthesis semantics the native --reader slang applies,
+# but note that a simulation-only source loses those side effects here.
+read_slang {{slang_top}} --ignore-timing --no-proc {{slang_flags}} {{files_str}} {{filelist_file_str}}
 {{/use_slang}}
 
 # single file, no hierarchy needed

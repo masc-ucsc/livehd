@@ -77,20 +77,6 @@ def _modules(vpath):
         return []
 
 
-def _slang_plugin():
-    # yosys-slang plugin for `:gold_reader: slang` goldens (same probes as
-    # prplib._yosys_slang_plugin; cwd is the runfiles _main dir under bazel,
-    # the repo root on manual runs).
-    for cand in ("../+http_archive+yosys_slang/slang.so",
-                 "../+_repo_rules+yosys_slang/slang.so",
-                 "bazel-bin/external/+http_archive+yosys_slang/slang.so",
-                 "bazel-bin/external/+_repo_rules+yosys_slang/slang.so"):
-        path = os.path.normpath(cand)
-        if os.path.exists(path):
-            return path
-    return None
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="golden .v file")
@@ -258,11 +244,8 @@ def main():
     cmd = ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
            "--reference_top", vtop, "--implementation_top", impl_top]
     if (_header(ref_prp, "gold_reader") or "") == "slang":
-        plugin = _slang_plugin()
-        if not plugin:
-            print("{} - v2prp2v - FAILED: :gold_reader: slang but yosys-slang plugin not found".format(name))
-            return 1
-        cmd += ["--gold_reader", "slang", "--slang_plugin", plugin]
+        # read_slang is built into the bundled yosys; no plugin to load.
+        cmd += ["--gold_reader", "slang"]
     try:
         chk = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              timeout=VERILOG_CHECK_TIMEOUT)

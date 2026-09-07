@@ -135,7 +135,7 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$T/timed" --set synth.libert
 timed_delay=$(grep -o '"max_delay":[0-9.]*' "$W/r.json" | head -1 | cut -d: -f2)
 grep -q 'resolved flow: .*&synch2 -K 6 -C 500' "$T/w_timed/logs/"*_lhd_pass_abc.log \
   || fail "delay did not select the flow2/K6 timing default"
-grep -q 'resolved flow: .*&fraig -x; &put; dc2;' "$T/w_unit/logs/"*_lhd_pass_abc.log \
+grep -q 'resolved flow: .*&fraig -x -C 500; &put; dc2;' "$T/w_unit/logs/"*_lhd_pass_abc.log \
   || fail "untimed mapping did not retain the area baseline"
 grep 'resolved flow:' "$T/w_timed/logs/"*_lhd_pass_abc.log | grep -q '&scorr' \
   && fail "the built-in timing flow must not perform sequential correlation"

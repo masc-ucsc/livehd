@@ -18,13 +18,13 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 
 | tag | meaning |
 | --- | --- |
-| `:type: equiv` | run the LEC pair (`equiv_slang` for a golden yosys-slang cannot read) |
+| `:type: equiv` | run the LEC pair (`equiv_slang` for a golden `read_slang` cannot read) |
 | `:verilog_top:` | module to compare on the GOLDEN side (default: first module in the `.v`) |
 | `:pyrope_top:` | generated module to compare on the Pyrope side |
 | `:set: k=v …` | extra `--set` flags, applied to every mode |
 | `:reset_style: async` | elaborate implicit resets as async, so the golden can spell an async `always` |
 | `:equiv_engine: cvc5` | prove with `lhd lec` only; skip lgcheck (latch/edge shapes it calls different) |
-| `:gold_reader: slang` | read the golden through the yosys-slang plugin |
+| `:gold_reader: slang` | read the golden with yosys's built-in `read_slang` |
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |
 

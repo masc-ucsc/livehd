@@ -59,12 +59,6 @@ bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 # symbols). Do not add a standalone Taskflow archive while OpenTimer is linked
 # in; see packages/opentimer.BUILD.
 
-# slang v11.0 (@slang, the direct inou/slang reader) vendors boost_unordered as a
-# single header (SLANG_BOOST_SINGLE_HEADER). These boost.* BCR deps are kept only
-# for the pinned slang v10.0 (@slang_v10) that @yosys_slang still builds against
-# (todo/ 1s, subtask A).
-bazel_dep(name = "boost.multiprecision", version = "1.90.0.bcr.1")
-bazel_dep(name = "boost.unordered", version = "1.90.0.bcr.1")
 #### Flex/Bison
 bazel_dep(name = "bison", version = "3.8.2.bcr.8")
 bazel_dep(name = "flex", version = "2.6.4.bcr.5")
@@ -133,30 +127,6 @@ http_archive(
     strip_prefix = "slang-11.0",
     urls = [
         "https://github.com/MikePopoloski/slang/archive/refs/tags/v11.0.zip",
-    ],
-)
-
-# fmt 11.1.4 + slang 10.0 pinned for @yosys_slang only (todo/ 1s). yosys-slang
-# upstream is written against the v10 slang API; the direct inou/slang reader
-# (@slang above) is the one on v11.0.
-http_archive(
-    name = "fmt_v10",
-    build_file = "//packages:fmt.BUILD",
-    sha256 = "7e85cbf6125a76daa0f83cd9240eff863d988aca68cd5f66c01ff7b59fa886b6",
-    strip_prefix = "fmt-11.1.4",
-    urls = [
-        "https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip",
-    ],
-)
-
-http_archive(
-    name = "slang_v10",
-    build_file = "//packages:slang_v10.BUILD",
-    patches = ["//packages:slang_v10.patch"],
-    sha256 = "f04fa094e421d7306f817d5411f4de78017e594615e2fb9666b63d22df4188ff",
-    strip_prefix = "slang-10.0",
-    urls = [
-        "https://github.com/MikePopoloski/slang/archive/refs/tags/v10.0.zip",
     ],
 )
 
@@ -307,32 +277,46 @@ new_git_repository(
     shallow_since = "1554534526 -1000",
 )
 
-# povik/yosys-slang was RENAMED to povik/sv-elab. GitHub names an
-# /archive/<sha>.zip root directory after the repo's CURRENT name, so the SAME
-# commit now arrives as `sv-elab-<sha>/` with different archive bytes: the old
-# url/sha256/strip_prefix fail every FRESH fetch ("Checksum was 5759fda... but
-# wanted e3cde28..."), while a warm bazel cache never notices. Same commit as
-# before — contents verified byte-identical to upstream 7cdd147.
+# Yosys main, including its built-in read_slang frontend. sv-elab and
+# SymFPU are library submodules pinned to exactly this Yosys revision;
+# there is no separately built or dynamically loaded Slang plugin.
 http_archive(
-   name = "yosys_slang",
-   urls = [
-     "https://github.com/povik/sv-elab/archive/7cdd147a6dd14e8f57cd321df8be377c04c9b31f.zip"
-   ],
-   sha256 = "5759fda34036d3644683c55912b556533a5f24d4b3e0c2c85c7dc5b9552a79a9",
-   strip_prefix = "sv-elab-7cdd147a6dd14e8f57cd321df8be377c04c9b31f",
-   build_file = "//packages:yosys_slang.BUILD",
-   patches = ["//packages:yosys_slang.patch"],
+    name = "sv_elab",
+    urls = ["https://github.com/povik/sv-elab/archive/b6e440d6a2586b93c2a43da676c207c8c2a15778.zip"],
+    sha256 = "7331848d30690661822759c265a5543571be6e74a21eee660e92a4dc634a81d3",
+    strip_prefix = "sv-elab-b6e440d6a2586b93c2a43da676c207c8c2a15778",
+    build_file = "//packages:sv_elab.BUILD",
+    patches = ["//packages:sv_elab.patch"],
+    patch_cmds = ["rm src/yosys_plugin/BUILD.bazel .bazelignore"],
 )
 
 http_archive(
-   name = "at_clifford_yosys2",
-   urls = [
-     "https://github.com/YosysHQ/yosys/archive/refs/tags/v0.60.zip",
-   ],
-   sha256 = "cd2b29bbd3c92e0cdc4df37af3c7b17b965b6ebdb9079377d7e32fdefb4dcd3b",
-   strip_prefix = "yosys-0.60",
-   build_file = "//packages:yosys.BUILD",
-   patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
+    name = "yosys_symfpu",
+    urls = ["https://github.com/YosysHQ/symfpu/archive/5d5e50867437fe5cabd6ab5aad3b3808ec86701f.zip"],
+    sha256 = "8f16e768c9075692a2509803247b06a12bf1f6fb98deb647fce0c1e90835b0e6",
+    strip_prefix = "symfpu-5d5e50867437fe5cabd6ab5aad3b3808ec86701f",
+    build_file_content = """load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(name = "headers", hdrs = glob(["**/*.h"]), include_prefix = "symfpu", visibility = ["//visibility:public"])
+""",
+)
+
+http_archive(
+    name = "yosys_cxxopts",
+    urls = ["https://github.com/jarro2783/cxxopts/archive/4bf61f08697b110d9e3991864650a405b3dd515d.zip"],
+    sha256 = "706ef0fdef7e26f36d5d1cbe24f72afb816abe345c7852eb87b8097971506270",
+    strip_prefix = "cxxopts-4bf61f08697b110d9e3991864650a405b3dd515d",
+    build_file_content = """load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(name = "headers", hdrs = ["include/cxxopts.hpp"], include_prefix = "libs/cxxopts", visibility = ["//visibility:public"])
+""",
+)
+
+http_archive(
+    name = "at_clifford_yosys2",
+    urls = ["https://github.com/YosysHQ/yosys/archive/435977e97008578a4532da60e70f75b5e88d076d.zip"],
+    sha256 = "69fbe16a8bc5032d55b5f1ddc8437b73e083c538043999a137add530e697a789",
+    strip_prefix = "yosys-435977e97008578a4532da60e70f75b5e88d076d",
+    build_file = "//packages:yosys.BUILD",
+    patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
 )
 
 # cvc5 -- SMT backend for pass/lec, used directly via its native C++ API. We use the

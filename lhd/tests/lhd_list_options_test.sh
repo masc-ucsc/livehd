@@ -48,6 +48,13 @@ echo "$out" | grep -q '"name":"pass.opentimer.hier","method":"pass.opentimer","d
 echo "$out" | grep -q '"name":"pass.opentimer.top"' && fail "pass.opentimer.top must be hidden (use --top / lhd.top): $out"
 echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
+# Incremental partition defaults and the separate per-color memory target.
+for entry in 'pass.color.min_ge:500' 'pass.color.max_ge:5000' 'pass.color.max_gate:5000' 'pass.abc.memory_budget_mb:16384'; do
+  flag=${entry%:*}
+  expected=${entry##*:}
+  description=$("$LHD" describe "$flag") || fail "cannot describe $flag"
+  echo "$description" | grep -q "\"default\":\"$expected\"" || fail "$flag default must be $expected: $description"
+done
 # ONE incremental switch (lhd.incremental); the per-tier cache flags are gone.
 echo "$out" | grep -q '"name":"lhd.incremental","method":"lhd","default":"true"' || fail "lhd.incremental missing/wrong: $out"
 echo "$out" | grep -q '"name":"compile.cache"' && fail "compile.cache must be gone (use lhd.incremental): $out"

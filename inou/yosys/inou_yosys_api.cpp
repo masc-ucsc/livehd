@@ -28,10 +28,15 @@
 static void log_error_atexit() { throw std::runtime_error("yosys finished"); }
 
 void setup_inou_yosys() {
-  Yosys::log_error_stderr    = true;
-  Yosys::log_cmd_error_throw = true;
-  Yosys::log_errfile         = stderr;
-  Yosys::log_error_atexit    = log_error_atexit;
+  // stdout is redirected to the per-step log while a pass runs (run_step's
+  // Stdout_to_log), so a stdout-only sink hides every yosys warning/error from
+  // the caller. The stderr sink is what the pre-Logger `log_error_stderr` /
+  // `log_errfile = stderr` pair used to provide: warnings and errors stay
+  // visible (and greppable) on the terminal, the full transcript in the log.
+  Yosys::logger().add_sink<Yosys::ConsoleLogSink>();
+  Yosys::logger().add_sink<Yosys::StderrLogSink>(/*quiet_warnings=*/false);
+  Yosys::logger().set_cmd_error_throw(true);
+  Yosys::log_error_atexit = log_error_atexit;
   Inou_yosys_api::setup();
 }
 
@@ -317,25 +322,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     }
     vars.set(key, declarations);
   }
-
-  // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
-  auto        exe_path = livehd::file_utils::get_exe_path();
-  std::string slang_plugin_path;
-  for (const auto& candidate : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
-                                absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
-                                absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {
-    if (access(candidate.c_str(), R_OK) != -1) {
-      slang_plugin_path = candidate;
-      break;
-    }
-  }
-  if (slang_plugin_path.empty()) {
-    livehd::diag::err("inou.yosys", "missing-file", "io")
-        .msg("internal error: slang.so could not be found (tried paths relative to exe_path:{})", exe_path)
-        .fatal();
-    return;
-  }
-  vars.set("slang_plugin_path", slang_plugin_path);
 
   // For verilog frontend
   mustache::data filelist{mustache::data::type::list};

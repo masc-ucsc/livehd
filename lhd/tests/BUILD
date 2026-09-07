@@ -1578,8 +1578,9 @@ sh_test(
     data = _FLOW_DATA + glob(["merge_demo/*"]),
 )
 
-# --reader yosys-verilog|yosys-slang|slang trichotomy (slang = direct
-# inou.slang SV->LNAST front-end: ln:/pyrope: only until tolg can lower it).
+# --reader slang|yosys|yosys-slang|yosys-verilog (slang = direct inou.slang
+# SV->LNAST front-end; yosys/yosys-slang = yosys's built-in read_slang). The
+# latch leg reuses the shared inou/yosys/tests/latch_async.v fixture.
 sh_test(
     name = "lhd_reader_test",
     srcs = ["lhd_reader_test.sh"],
@@ -1846,4 +1847,12 @@ sh_test(
     size = "large",
     srcs = ["lhd_parameter_array_test.sh"],
     data = _FLOW_DATA,
+)
+
+# RTLIL finite reduction width must survive ABC bit blasting.
+sh_test(
+    name = "lhd_abc_reduction_smoke",
+    size = "large",
+    srcs = ["lhd_abc_reduction_smoke.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )

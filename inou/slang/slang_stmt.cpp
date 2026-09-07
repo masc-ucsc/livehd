@@ -120,8 +120,18 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
         const auto& call = expr.as<slang::ast::CallExpression>();
         if (call.isSystemCall()) {
           auto name = call.getSubroutineName();
-          // Simulation-side tasks are no-ops for synthesis; keep quiet for the
-          // common printers, diagnose the rest.
+          // File I/O is simulation-only. Synthesis can drop it, but make the
+          // missing side effects visible until simulation lowering supports it.
+          if (name == "$fwrite" || name == "$fwriteb" || name == "$fwriteh" || name == "$fwriteo" || name == "$fdisplay"
+              || name == "$fdisplayb" || name == "$fdisplayh" || name == "$fdisplayo" || name == "$fflush" || name == "$fclose") {
+            emit_warning(stmt.sourceRange,
+                         "file-io-ignored",
+                         "unsupported",
+                         std::string("simulation-only task '") + std::string(name)
+                             + "' is ignored (synthesis semantics); simulation side effects are not implemented");
+            return;
+          }
+          // Keep the existing quiet synthesis behavior for common printers.
           if (name == "$display" || name == "$write" || name == "$monitor" || name == "$strobe" || name == "$time"
               || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile" || name == "$dumpvars"
               || name == "$finish" || name == "$stop" || name == "$fatal") {
@@ -459,6 +469,43 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
   return builder_.create_eq_stmts(sel, to_int_value(lower_rvalue(item)));
 }
 
+bool Slang_context::case_is_exhaustive(const slang::ast::CaseStatement& stmt) {
+  if (stmt.condition != slang::ast::CaseStatementCondition::Normal) {
+    return false;
+  }
+  // Unsized case items can widen a small unsigned selector to 32 bits.
+  // Its value domain still comes from the original selector, not that width.
+  const auto* selector = &stmt.expr;
+  while (selector->kind == slang::ast::ExpressionKind::Conversion) {
+    const auto& conv = selector->as<slang::ast::ConversionExpression>();
+    if (!conv.isImplicit() || !conv.operand().type->isIntegral() || conv.operand().type->isSigned()
+        || conv.operand().type->getBitWidth() > selector->type->getBitWidth()) {
+      break;
+    }
+    selector = &conv.operand();
+  }
+  auto bits = selector->type->getBitWidth();
+  if (!selector->type->isIntegral() || selector->type->isSigned() || bits == 0 || bits >= 20) {
+    return false;
+  }
+  const uint64_t                count = 1ULL << bits;
+  absl::flat_hash_set<uint64_t> values;
+  for (const auto& group : stmt.items) {
+    for (const auto* item : group.expressions) {
+      auto cv = try_eval(*item);
+      if (!cv || !cv->isInteger() || cv->integer().hasUnknown()) {
+        return false;
+      }
+      auto value = cv->integer().as<uint64_t>();
+      if (!value || *value >= count) {
+        return false;
+      }
+      values.insert(*value);
+    }
+  }
+  return values.size() == count;
+}
+
 void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
   using slang::ast::CaseStatementCondition;
   using slang::ast::UniquePriorityCheck;
@@ -473,19 +520,18 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
   // also lowers to unique_if (-> one Hotmux). Anything else keeps priority
   // (first-match) semantics as a flat if/elif chain.
   //
-  // The const scan below ALSO answers "do the arms cover every selector value"
-  // (see `exhaustive`), which a plain `case (sel1b) 1'b0: … 1'b1: …` does even
-  // with no default — so it runs unconditionally, not only when `unique` is
-  // still undecided.
+  // Coverage ("do the arms span every selector value") is a SEPARATE question,
+  // answered by case_is_exhaustive — which the latch analysis in
+  // slang_structure.cpp shares. A missing `default` is then unreachable, so an
+  // else assigning don't-care is behavior-preserving and stops an `always @*`
+  // from inferring a latch.
   const bool unique_declared = stmt.check == UniquePriorityCheck::Unique || stmt.check == UniquePriorityCheck::Unique0;
   bool       unique          = unique_declared;
-  bool       exhaustive      = false;
+  const bool exhaustive      = case_is_exhaustive(stmt);
   {
     std::vector<std::pair<uint64_t, uint64_t>> seen;  // (mask, value-under-mask)
     bool                                       all_const = true;
     bool                                       disjoint  = true;
-    bool                                       all_exact = true;  // no wildcard bits in any item
-    uint64_t                                   n_items   = 0;
     for (const auto& group : stmt.items) {
       for (const auto* item : group.expressions) {
         auto cv = try_eval(*item);
@@ -519,10 +565,6 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
             break;
           }
         }
-        if (mask != ~0ULL) {
-          all_exact = false;  // wildcard bits: this item covers a value RANGE, not one value
-        }
-        ++n_items;
         seen.emplace_back(mask, val);
         if (!disjoint) {
           break;
@@ -533,14 +575,6 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
       }
     }
     unique = unique_declared || (all_const && disjoint);
-    // Exhaustive: every arm is one exact constant, the arms are pairwise
-    // distinct, and there are as many of them as the selector has values. Then
-    // the missing `default` is UNREACHABLE, so an else assigning don't-care is
-    // behavior-preserving — and it stops an `always @*` from inferring a latch
-    // (picorv32: `case (reg_op1[1]) 1'b0: … 1'b1: …` inside a full_case arm).
-    // The width cap keeps 1ULL << bits well-defined and the count sane.
-    exhaustive
-        = all_const && disjoint && all_exact && si.bits > 0 && si.bits < 20 && n_items == (1ULL << static_cast<unsigned>(si.bits));
   }
 
   // Pre-compute every arm's match condition BEFORE the if node. A `uif`

@@ -4312,6 +4312,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     Io_name_map<Val>                  ref_state, impl_state;
     std::vector<Packed_scalar_bridge> bmc_packed_scalar;
     absl::flat_hash_set<std::string>  bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
+    size_t                            unpaired_state_n = 0;  // state cuts with no counterpart (disclosed in the verdict)
     {
       Io_name_map<int>  fw;
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
@@ -4451,6 +4452,34 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         bitblast.emplace(bridge.wide_key, bridge.bit_keys);
       }
+      // A state key with NO counterpart on the other side (and not bridged
+      // above) gets an INDEPENDENT free `s0_` symbol per side, so the two
+      // designs start it at different values and the checked window can
+      // "find" a divergence the hardware cannot have. Splitting one N-bit
+      // register/latch into N one-bit cells is a legal, purely structural
+      // choice -- and cgen's `_cgenN` is a name-COLLISION uniquifier, not a
+      // bit-index contract, so the suffix bridge above cannot relate them.
+      // The reset prologue does not repair it either: a latch whose reset
+      // polarity the prologue never asserts simply HOLDS its arbitrary
+      // power-on value (inou/yosys/tests/latch_async.v, `qn` vs
+      // `qn_cgen1..3`, refuted at checked step 1 on state neither side ever
+      // wrote). Seed such state exactly as a reset-less design's power-on
+      // state is seeded -- tracked '?' (or a shared canonical zero under
+      // gold_x=zero) -- so an unmatched state shape can come back PROVEN or
+      // inconclusive, never falsely REFUTED. Strictly narrower than
+      // `init_no_reset`: keys that DO correspond keep their exact shared
+      // symbol and full proof strength.
+      absl::flat_hash_set<std::string> unpaired_state;
+      for (int side = 0; side < 2; ++side) {
+        for (const auto& kv : fw_side[side]) {
+          const auto& key = kv.first;
+          if (fw_side[1 - side].count(key) != 0 || bitblast.count(key) != 0 || bitblast_bits.count(key) != 0) {
+            continue;
+          }
+          unpaired_state.insert(key);
+        }
+      }
+      unpaired_state_n = unpaired_state.size();
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
@@ -4483,8 +4512,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (bitblast_bits.count(key) != 0) {
           continue;  // seeded below as a bit-slice of its N-bit ref counterpart
         }
-        Val v;
-        if (init_no_reset && opts.gold_x == "zero") {
+        Val        v;
+        const bool synth_init = init_no_reset || unpaired_state.count(key) != 0;
+        if (synth_init && opts.gold_x == "zero") {
           v = Val{tm.mkBitVector(static_cast<uint32_t>(w), 0), w, fsgn.at(key)};
         } else if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
           v = init.at(key);
@@ -4492,7 +4522,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
         }
         ref_state[key] = v;
-        if (init_no_reset && opts.gold_x != "zero") {
+        if (synth_init && opts.gold_x != "zero") {
           // No-reset power-on is hardware '?': preserve an arbitrary value term
           // for dataflow, but mark every REF bit unknown so gold_x=ignore masks
           // only observations still depending on unwritten state. A real write
@@ -5418,12 +5448,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                            || !impl_reads.empty();
     res.bounded = has_state;
     res.detail  = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
-                 + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
-                 + (init_no_reset ? (opts.gold_x == "zero" ? "; synthetic zero initialization (no reset)"
-                                                           : "; synthetic ? initialization (no reset)")
-                                  : "")
-                 + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
-                 + bundle_note;
+                  + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
+                  + (init_no_reset ? (opts.gold_x == "zero" ? "; synthetic zero initialization (no reset)"
+                                                            : "; synthetic ? initialization (no reset)")
+                                   : "")
+                  + (!init_no_reset && unpaired_state_n > 0
+                         ? "; " + std::to_string(unpaired_state_n) + " unmatched state cut(s) synthetically initialized"
+                         : "")
+                  + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
+                  + bundle_note;
     disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
     // Bound bookkeeping for the auto bounded-Proven policy: N checked cycles and
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).

@@ -23,6 +23,7 @@
 #include "cgen_llvm.hpp"
 #include "cgen_salt.hpp"  // livehd::kCgenSrcSalt — emitter content hash (L2)
 #include "diag.hpp"       // livehd::diag::err — Stage 0 comb-loop safety net
+#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "hash_util.hpp"
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
@@ -444,15 +445,7 @@ std::string Cgen_sim::cpp_id(std::string_view name) {
 // dotted `file.entity` form so ordinary (dot-only) filenames are unchanged.
 // Applied identically to the module's own name and to a child's name in the
 // `#include`, so the reference always resolves to the emitted file.
-static std::string sim_file_stem(std::string_view name) {
-  std::string s(name);
-  for (auto& c : s) {
-    if (c == '/' || c == '\\') {
-      c = '_';
-    }
-  }
-  return s;
-}
+static std::string sim_file_stem(std::string_view name) { return livehd::unit_file_stem(name); }
 
 hhds::Pin_class Cgen_sim::get_driver(const hhds::Pin_class& sink) {
   if (sink.is_invalid()) {

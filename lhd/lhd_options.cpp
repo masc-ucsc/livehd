@@ -425,9 +425,12 @@ Options parse_args(int argc, char** argv) {
       }
     } else if (a == "--reader") {
       opts.reader = need_value(a, i, argc, argv);
+      if (opts.reader == "yosys") {
+        opts.reader = "yosys-slang";
+      }
       if (opts.reader != "yosys-verilog" && opts.reader != "yosys-slang" && opts.reader != "slang") {
         throw Lhd_error{"usage",
-                        std::format("--reader must be yosys-verilog, yosys-slang, or slang, got '{}'", opts.reader),
+                        std::format("--reader must be slang, yosys, yosys-slang, or yosys-verilog, got '{}'", opts.reader),
                         "yosys-* elaborate to LGraphs via yosys; slang is the direct SV -> LNAST front-end"};
       }
     } else if (a == "--config") {

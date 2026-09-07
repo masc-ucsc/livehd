@@ -27,7 +27,7 @@ exports_files(["LICENSE"])
 genrule(
     name = "version_src",
     outs = ["kernel/version.cc"],
-    cmd = "echo 'namespace Yosys { extern const char *yosys_version_str; const char *yosys_version_str=\"Yosys livehd+0.9+\"; }' >$@",
+    cmd = "echo 'namespace Yosys { extern const char *yosys_version_str; const char *yosys_version_str=\"Yosys 0.68+435977e97 (LiveHD)\"; const char *yosys_git_hash_str=\"435977e97008578a4532da60e70f75b5e88d076d\"; const char *yosys_build_datetime_str=__DATE__ \" \" __TIME__; }' >$@",
 )
 
 cc_library(
@@ -80,7 +80,7 @@ yosys_bison(
 
 py_binary(
     name = "cellhelp",
-    srcs = ["techlibs/common/cellhelp.py"],
+    srcs = ["kernel/cellhelp.py"],
     python_version = "PY3",
     srcs_version = "PY3ONLY",
     deps = [
@@ -92,7 +92,7 @@ genrule(
     srcs = [
         "techlibs/common/simlib.v",
     ],
-    outs = ["techlibs/common/simlib_help.inc"],
+    outs = ["kernel/simlib_help.inc"],
     cmd = (
         "python3 $(location :cellhelp) $(SRCS) > $@"
     ),
@@ -104,7 +104,7 @@ genrule(
     srcs = [
         "techlibs/common/simcells.v",
     ],
-    outs = ["techlibs/common/simcells_help.inc"],
+    outs = ["kernel/simcells_help.inc"],
     cmd = (
         "python3 $(location :cellhelp) $(SRCS) > $@"
     ),
@@ -112,6 +112,7 @@ genrule(
 )
 
 GENERATED_HEADERS = [
+    "techlibs/lattice/lattice_dsp_nexus_pm.h",
     "techlibs/ice40/ice40_dsp_pm.h",
     "techlibs/ice40/ice40_wrapcarry_pm.h",
     "passes/pmgen/test_pmgen_pm.h",
@@ -155,7 +156,7 @@ cc_library(
         exclude = [
             "backends/protobuf/*.h",
         ],
-    ) + GENERATED_HEADERS,
+    ) + GENERATED_HEADERS + [":config_header"],
     visibility = ["//visibility:public"],
     defines = [
         "_YOSYS_",
@@ -190,6 +191,7 @@ cc_library(
             "libs/**/sample*.cc",
             "libs/**/test*.cc",
             "libs/ezsat/puzzle3d.cc",
+            "kernel/log_compat.cc",
             "libs/subcircuit/scshell.cc",
             "techlibs/quicklogic/testbench.cc",
             "testsuite.cc",
@@ -200,11 +202,12 @@ cc_library(
         #":ilang_lexer",
         #":ilang_parser",
         "passes/techmap/techmap.inc",
-        "techlibs/common/simcells_help.inc",
-        "techlibs/common/simlib_help.inc",
+        "kernel/simcells_help.inc",
+        "kernel/simlib_help.inc",
         ":peepopt_pm_h",
         ":test_pmgen_pm_h",
         ":ql_dsp_macc_pm_h",
+        ":lattice_dsp_nexus_pm_h",
     ] + [
         ":ice40_%s_pm_h" % pm for pm in ["dsp", "wrapcarry"]
     ] + [
@@ -232,6 +235,8 @@ cc_library(
         ":minisat",
         ":sha1",
         ":subcircuit",
+        "@sv_elab//:frontend",
+        "@yosys_symfpu//:headers",
         # "@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
         # "@edu_berkeley_abc//:abc-lib",
         "@abc",
@@ -439,6 +444,7 @@ genrule(
         "passes/opt/peepopt_muldiv_c.pmg",
         "passes/opt/peepopt_shiftmul_right.pmg",
         "passes/opt/peepopt_shiftadd.pmg",
+        "passes/opt/peepopt_shiftpow2.pmg",
         "passes/opt/peepopt_shiftmul_left.pmg",
         "passes/opt/peepopt_formal_clockgateff.pmg",
     ],
@@ -485,5 +491,42 @@ genrule(
     srcs = ["techlibs/quicklogic/ql_dsp_macc.pmg"],
     outs = ["techlibs/quicklogic/ql_dsp_macc_pm.h"],
     cmd = "python3 $(location :pmgen) -o $(OUTS) -p ql_dsp_macc $(SRCS)",
+    tools = [":pmgen"],
+)
+
+# Public configuration header required by the current Yosys kernel API.
+genrule(
+    name = "config_header",
+    outs = ["kernel/yosys_config.h"],
+    cmd = """cat > $@ <<'EOF'
+#ifndef YOSYS_CONFIG_H
+#define YOSYS_CONFIG_H
+#define YOSYS_PROGRAM_PREFIX ""
+#ifndef YOSYS_DATDIR
+#define YOSYS_DATDIR "third_party/yosys"
+#endif
+#define YOSYS_ENABLE_GLOB
+#define YOSYS_ENABLE_SPAWN
+#define YOSYS_ENABLE_DLOPEN
+#define YOSYS_ENABLE_LIBFFI
+#define YOSYS_ENABLE_PLUGINS
+#endif
+EOF
+""",
+)
+
+cc_library(
+    name = "driver",
+    srcs = ["kernel/driver.cc"],
+    copts = YOSYS_COPTS,
+    deps = [":kernel", ":version", "@yosys_cxxopts//:headers"],
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "lattice_dsp_nexus_pm_h",
+    srcs = ["techlibs/lattice/lattice_dsp_nexus.pmg"],
+    outs = ["techlibs/lattice/lattice_dsp_nexus_pm.h"],
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p lattice_dsp_nexus $(SRCS)",
     tools = [":pmgen"],
 )

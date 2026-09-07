@@ -13,6 +13,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        "//core:file_name",
         "//pass/common:pass",
         "//upass/prp_writer:upass_prp_writer",
     ],

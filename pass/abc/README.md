@@ -58,7 +58,7 @@ Per region (`Region_body` from the partition seam):
    built-in timing flow uses ABC9 flow2's 6-input LUT restructuring, then
    `&st; &nf {D}; &put -o` for standard-cell mapping. Without a delay, the
    area default is the former baseline:
-   `strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o`.
+   `strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o`.
    Both append `buffer -N {F}; dnsize {B}`. The LUT mapper uses unit levels,
    not ps, so it does not receive the physical `{D}` target. `&scorr` is omitted
    to preserve register correspondence (it was a no-op in the combinational
@@ -289,6 +289,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `memory` | bit-blast a `Memory` into a DFF array + per-lane write muxes / read muxes (`true`, see above) vs keep it a native `cgen_memory_*` boundary instance (`false`) | `true` |
 | `memory_max_bits` | with `memory=true`, keep a memory whose `bits x size` exceeds this many bits native, with a one-line note naming it (`0` disables) | `65536` |
 | `adder` | comb adder architecture for `sum`/cmp (also the `mult` partial-product adds): `rca`/`cska`/`cla` | `rca` |
+| `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
 | `delay` / `load` | the timing BUDGET in ps / the load: `{D}` / `{L}` expand to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC. `delay` is also the target the built-in objective sizes to and judges the area candidate against (see below); `{B}` is the per-region budget (`delay` minus `reg_margin` when the region holds flops) as `-D <ps>` | empty |
@@ -625,3 +626,12 @@ arith fixture. `div` (and `mod`, which lowers through `div`) stays blackboxed.
 QoR read-back (gates/area/delay + `qor.json`, above) is in. Not yet
 implemented: per-region `flow` overrides (2opt-freq C). See
 `todo/livehd/2opt-freq.html`.
+
+
+Default synthesis partitions use a 500–5,000 GE window; cones mode uses a
+5,000 predicted-AIG-gate threshold. These smaller regions target incremental
+mapping within the 16 GiB per-color budget. Indivisible nodes and estimation
+errors can exceed the partition target. The process memory budget is capped
+at physical RAM minus max(2 GiB, 25%); an environment override can lower this
+ceiling but cannot raise it. The macOS address-space backstop includes allocator
+headroom, so physical-footprint admission remains a separate check.

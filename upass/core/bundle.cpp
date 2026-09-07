@@ -93,7 +93,33 @@ static std::string path_to_string(Bundle::Path path) {
 // ─────────────────────────────────────────────────────────────────────────────
 // navigation primitives
 // ─────────────────────────────────────────────────────────────────────────────
+void Bundle::append_field(Field field) {
+  fields_.push_back(std::move(field));
+  if (fields_.size() == field_index_threshold) {
+    field_index_.reserve(fields_.size());
+    for (size_t i = 0; i < fields_.size(); ++i) {
+      field_index_.emplace(fields_[i].seg, i);
+    }
+  } else if (fields_.size() > field_index_threshold) {
+    field_index_.emplace(fields_.back().seg, fields_.size() - 1);
+  }
+}
+
 const Bundle::Field* Bundle::find_field(Seg s) const {
+  if (fields_.size() >= field_index_threshold) {
+    const auto it = field_index_.find(s);
+    return it == field_index_.end() ? nullptr : &fields_[it->second];
+  }
+
+  // Dense positional arrays keep field p at slot p. Avoid scanning the whole
+  // array for every fact merge; mixed/sparse insertion orders use the fallback.
+  if (is_unnamed(s)) {
+    const auto pos = static_cast<size_t>(unnamed_pos(s));
+    if (pos < fields_.size() && fields_[pos].seg == s) {
+      return &fields_[pos];
+    }
+  }
+
   for (const auto& f : fields_) {
     if (f.seg == s) {
       return &f;
@@ -102,6 +128,20 @@ const Bundle::Field* Bundle::find_field(Seg s) const {
   return nullptr;
 }
 Bundle::Field* Bundle::find_field(Seg s) {
+  if (fields_.size() >= field_index_threshold) {
+    const auto it = field_index_.find(s);
+    return it == field_index_.end() ? nullptr : &fields_[it->second];
+  }
+
+  // Dense positional arrays keep field p at slot p. Avoid scanning the whole
+  // array for every fact merge; mixed/sparse insertion orders use the fallback.
+  if (is_unnamed(s)) {
+    const auto pos = static_cast<size_t>(unnamed_pos(s));
+    if (pos < fields_.size() && fields_[pos].seg == s) {
+      return &fields_[pos];
+    }
+  }
+
   for (auto& f : fields_) {
     if (f.seg == s) {
       return &f;
@@ -115,17 +155,17 @@ void Bundle::spill_scalar() {
     return;
   }
   has_scalar_ = false;
-  fields_.push_back(Field{make_unnamed(0), scalar_, nullptr});
+  append_field(Field{make_unnamed(0), scalar_, nullptr});
   scalar_ = Entry();
 }
 
 std::shared_ptr<Bundle> Bundle::clone() const {
-  auto b          = std::make_shared<Bundle>();
-  b->scalar_      = scalar_;
-  b->has_scalar_  = has_scalar_;
+  auto b         = std::make_shared<Bundle>();
+  b->scalar_     = scalar_;
+  b->has_scalar_ = has_scalar_;
   b->fields_.reserve(fields_.size());
   for (const auto& f : fields_) {
-    b->fields_.push_back(Field{f.seg, f.leaf, f.sub ? f.sub->clone() : nullptr});
+    b->append_field(Field{f.seg, f.leaf, f.sub ? f.sub->clone() : nullptr});
   }
   b->attr_map      = attr_map;
   b->mode_         = mode_;
@@ -161,15 +201,15 @@ Bundle* Bundle::descend_or_create(Path path, Seg* last) {
     cur->spill_scalar();
     Field* f = cur->find_field(path[i]);
     if (f == nullptr) {
-      cur->fields_.push_back(Field{path[i], Entry(), std::make_shared<Bundle>()});
+      cur->append_field(Field{path[i], Entry(), std::make_shared<Bundle>()});
       f = &cur->fields_.back();
     } else if (!f->sub) {
       // promote a scalar leaf to a sub-bundle holding the old value at pos-0
-      auto sub          = std::make_shared<Bundle>();
-      sub->scalar_      = f->leaf;
-      sub->has_scalar_  = true;
-      f->sub            = std::move(sub);
-      f->leaf           = Entry();
+      auto sub         = std::make_shared<Bundle>();
+      sub->scalar_     = f->leaf;
+      sub->has_scalar_ = true;
+      f->sub           = std::move(sub);
+      f->leaf          = Entry();
     }
     cur = f->sub.get();
   }
@@ -269,8 +309,8 @@ std::shared_ptr<Bundle> Bundle::get_bundle(Path path) const {
   std::shared_ptr<Bundle> result;
   if (has_scalar_) {
     if (path.size() == 1 && path[0] == make_unnamed(0)) {
-      result             = std::make_shared<Bundle>();
-      result->scalar_    = scalar_;
+      result              = std::make_shared<Bundle>();
+      result->scalar_     = scalar_;
       result->has_scalar_ = true;
     }
   } else {
@@ -282,8 +322,8 @@ std::shared_ptr<Bundle> Bundle::get_bundle(Path path) const {
         if (f->sub) {
           result = f->sub->clone();
         } else {
-          result             = std::make_shared<Bundle>();
-          result->scalar_    = f->leaf;
+          result              = std::make_shared<Bundle>();
+          result->scalar_     = f->leaf;
           result->has_scalar_ = true;
         }
       }
@@ -334,7 +374,7 @@ void Bundle::set(Path path, Entry entry) {
     f->leaf = std::move(entry);
     f->sub  = nullptr;  // set replaces any existing subtree
   } else {
-    owner->fields_.push_back(Field{last, std::move(entry), nullptr});
+    owner->append_field(Field{last, std::move(entry), nullptr});
   }
 }
 
@@ -353,8 +393,7 @@ void Bundle::set(Path path, const std::shared_ptr<Bundle const>& tup) {
   // `(zero=0)`) is NOT a bare scalar: it must stay a sub-bundle so the field name
   // survives (else `a ++ b` over `lane=(zero=0)` would lose `zero`).
   const bool bare_scalar
-      = tup->has_scalar_
-        || (tup->fields_.size() == 1 && tup->fields_.front().seg == make_unnamed(0) && !tup->fields_.front().sub);
+      = tup->has_scalar_ || (tup->fields_.size() == 1 && tup->fields_.front().seg == make_unnamed(0) && !tup->fields_.front().sub);
 
   if (bare_scalar) {
     Entry e;
@@ -374,7 +413,7 @@ void Bundle::set(Path path, const std::shared_ptr<Bundle const>& tup) {
       f->leaf = Entry();
       f->sub  = tup->clone();
     } else {
-      owner->fields_.push_back(Field{last, Entry(), tup->clone()});
+      owner->append_field(Field{last, Entry(), tup->clone()});
     }
   }
 
@@ -423,13 +462,13 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup, std::string* confl
 
   for (const auto& g : rhs_fields) {
     if (is_named(g.seg)) {
-      const bool g_scalar  = !g.sub;
+      const bool g_scalar = !g.sub;
       if (g_scalar && g.leaf.trivial.is_nil()) {
         continue;  // a nil scalar from the RHS drops itself
       }
       Field* lf = find_field(g.seg);
       if (lf == nullptr) {
-        fields_.push_back(Field{g.seg, g.leaf, g.sub ? g.sub->clone() : nullptr});
+        append_field(Field{g.seg, g.leaf, g.sub ? g.sub->clone() : nullptr});
         seg_landed.emplace(seg_text(g.seg), seg_text(g.seg));
         continue;
       }
@@ -473,7 +512,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup, std::string* confl
 
     // unnamed: renumber at the next free slot
     const Seg new_seg = make_unnamed(next_unnamed);
-    fields_.push_back(Field{new_seg, g.leaf, g.sub ? g.sub->clone() : nullptr});
+    append_field(Field{new_seg, g.leaf, g.sub ? g.sub->clone() : nullptr});
     seg_landed.emplace(seg_text(g.seg), seg_text(new_seg));
     ++next_unnamed;
   }

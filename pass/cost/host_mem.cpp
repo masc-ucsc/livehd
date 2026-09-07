@@ -198,7 +198,9 @@ uint64_t configured_budget_bytes() {
       budget_mb = v;  // 0 is a valid "use the default budget" value
     }
   }
-  return budget_bytes(budget_mb);
+  const auto ceiling   = budget_bytes(0);
+  const auto requested = budget_bytes(budget_mb);
+  return ceiling == 0 ? requested : std::min(requested, ceiling);
 }
 
 uint64_t install_memory_backstop() { return arm_address_space_limit(configured_budget_bytes()); }
@@ -220,11 +222,11 @@ uint64_t reserve_bytes() {
   if (phys == 0) {
     return kFloor;
   }
-  // max(2 GiB, 20% of physical) -- but never so much that nothing is left to
+  // max(2 GiB, 25% of physical) -- but never so much that nothing is left to
   // work with. Without the half-of-physical cap, the 2 GiB floor swallows a
   // <=2 GiB host entirely, budget_bytes returns 0, and the guard silently turns
   // itself OFF on the machine most likely to run out of memory.
-  return std::min(std::max(kFloor, phys / 5), phys / 2);
+  return std::min(std::max(kFloor, phys / 4), phys / 2);
 }
 
 uint64_t budget_bytes(int budget_mb) {

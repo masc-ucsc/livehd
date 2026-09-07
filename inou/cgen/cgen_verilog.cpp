@@ -15,6 +15,7 @@
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"  // //core — combinational-loop diagnostic
+#include "file_name.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
@@ -2038,9 +2039,13 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     const auto& mask_v = const_of(mask_dpin);
     I(!mask_v.has_unknowns());
 
-    auto a_dpin = get_driver(find_sink_pin(node, "a"));
-    auto a_bits = bits_of(a_dpin);
-    auto a      = get_expression(a_dpin);
+    auto a_dpin   = get_driver(find_sink_pin(node, "a"));
+    auto a_bits   = bits_of(a_dpin);
+    auto a        = get_expression(a_dpin);
+    // Scalar declarations cannot be indexed, including their sign bit. Lazy:
+    // most branches below never need it, and with an unknown width (a_bits==0)
+    // the eager form would build a bogus `a[-1]`.
+    auto sign_bit = [&] { return a_bits == 1 ? a : absl::StrCat(a, "[", a_bits - 1, "]"); };
     if (unsigned_mask_identity(node)) {
       // The size cast supplies the arithmetic context that the removed
       // temporary would have provided. A named unsigned net already has it.
@@ -2093,9 +2098,9 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
           // signed values.
           std::string bit;
           if (a_bits > 0 && i >= a_bits) {
-            bit = is_unsign(a_dpin) ? "1'b0" : absl::StrCat(a, "[", a_bits - 1, "]");
+            bit = is_unsign(a_dpin) ? "1'b0" : sign_bit();
           } else {
-            bit = absl::StrCat(a, "[", i, "]");
+            bit = a_bits == 1 && i == 0 ? a : absl::StrCat(a, "[", i, "]");
           }
           if (sel.empty()) {
             sel = bit;
@@ -2112,7 +2117,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
         if (is_unsign(a_dpin)) {
           final_expr = absl::StrCat("{", range_end - range_begin, "{1'b0}}");
         } else {
-          final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
+          final_expr = absl::StrCat("{", range_end - range_begin, "{", sign_bit(), "}}");
         }
       } else if (a_bits > 0 && range_end > static_cast<int>(a_bits) && range_begin == 0) {
         // Pure widening: let the assignment context extend the bare net per its
@@ -2132,16 +2137,18 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
             final_expr = absl::StrCat("{", range_end - range_begin, "{1'b0}}");
           }
         } else {
-          auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
+          auto top   = absl::StrCat("{{", range_end - a_bits, "{", sign_bit(), "}}");
           final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
         }
       } else if (range_begin == 0 && range_end >= out_bits) {
         final_expr = a;
       } else if (a_bits_to_use == 1) {
         if (a_bits > 0 && range_begin >= a_bits) {
-          final_expr = is_unsign(a_dpin) ? "1'b0" : absl::StrCat(a, "[", a_bits - 1, "]");
+          final_expr = is_unsign(a_dpin) ? "1'b0" : sign_bit();
         } else {
-          final_expr = absl::StrCat(a, "[", range_begin, "]");
+          // Same scalar rule as the bit-list branch above: a 1-bit net is a
+          // scalar declaration and `a[0]` is not legal Verilog on it.
+          final_expr = a_bits == 1 && range_begin == 0 ? a : absl::StrCat(a, "[", range_begin, "]");
         }
       } else {
         final_expr = absl::StrCat(a, "[", range_end - 1, ":", range_begin, "]");
@@ -4256,9 +4263,9 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   std::string filename;
   if (odir.empty()) {
-    filename = absl::StrCat(cgen_verilog_file_stem(graph->get_name()), ".v");
+    filename = absl::StrCat(livehd::unit_file_stem(graph->get_name()), ".v");
   } else {
-    filename = absl::StrCat(odir, "/", cgen_verilog_file_stem(graph->get_name()), ".v");
+    filename = absl::StrCat(odir, "/", livehd::unit_file_stem(graph->get_name()), ".v");
   }
 
   auto fout = std::make_shared<File_output>(filename);

@@ -96,7 +96,7 @@ while true; do
     # reader for the GOLD side: verilog (default; read_verilog -sv) | slang
     # (load the yosys-slang plugin and read_slang — needed for SystemVerilog
     # packed-struct sources, e.g. CIRCT/firtool output, that read_verilog
-    # cannot parse). Needs --slang_plugin.
+    # cannot parse). --slang_plugin is optional for older external Yosys builds.
     case "$2" in
     "") shift 2 ;;
     *)
@@ -170,6 +170,8 @@ done
 
 GOLD_READER=${GOLD_READER:-verilog}
 GATE_READER=${GATE_READER:-verilog}
+# Optional: only older external Yosys builds need a loadable read_slang.
+SLANG_PLUGIN=${SLANG_PLUGIN:-}
 for reader in "$GOLD_READER" "$GATE_READER"; do
   if [ "$reader" != "verilog" ] && [ "$reader" != "slang" ]; then
     echo "lgcheck: reader must be verilog|slang (got '$reader')"
@@ -324,7 +326,7 @@ if [ "${GATE_TOP}" != "" ]; then
 fi
 
 # GOLD-side read command, shared by every strategy below. --gold_reader slang
-# reads through the yosys-slang plugin (SystemVerilog packed structs / '{...}
+# reads through built-in read_slang (SystemVerilog packed structs / '{...}
 # patterns that read_verilog cannot parse); --no-proc leaves the RTLIL
 # processes for the strategies' own `proc`.
 gold_read_cmds() {
@@ -335,7 +337,7 @@ gold_read_cmds() {
     # the parent's top attribute and the child proof compares the wrong module.
     echo "read_rtlil ${GOLD_RTLIL}; hierarchy ${GOLD_TOP_STR}"
   elif [ "${GOLD_READER}" == "slang" ]; then
-    if [ ! -f "${SLANG_PLUGIN}" ]; then
+    if [ -n "${SLANG_PLUGIN}" ] && [ ! -f "${SLANG_PLUGIN}" ]; then
       echo "lgcheck: --gold_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
       exit 5
     fi
@@ -345,7 +347,8 @@ gold_read_cmds() {
     # generation flows. They affect whether legal project idioms elaborate,
     # not the resulting hardware: Minion needs both for forward declarations
     # and plain-bit assignments to enum fields.
-    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GOLD_HIER_FLAG} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+    if [ -n "${SLANG_PLUGIN}" ]; then echo "plugin -i ${SLANG_PLUGIN}"; fi
+    echo "read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GOLD_HIER_FLAG} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   else
     echo "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   fi
@@ -358,13 +361,14 @@ gate_read_cmds() {
   if [ "${GATE_RTLIL}" != "" ]; then
     echo "read_rtlil ${GATE_RTLIL}; hierarchy ${GATE_TOP_STR}"
   elif [ "${GATE_READER}" == "slang" ]; then
-    if [ ! -f "${SLANG_PLUGIN}" ]; then
+    if [ -n "${SLANG_PLUGIN}" ] && [ ! -f "${SLANG_PLUGIN}" ]; then
       echo "lgcheck: --gate_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
       exit 5
     fi
     GATE_SLANG_TOP=""
     if [ "${GATE_TOP}" != "" ]; then GATE_SLANG_TOP="--top ${GATE_TOP}"; fi
-    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GATE_HIER_FLAG} --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
+    if [ -n "${SLANG_PLUGIN}" ]; then echo "plugin -i ${SLANG_PLUGIN}"; fi
+    echo "read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GATE_HIER_FLAG} --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
   else
     echo "read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}"
   fi

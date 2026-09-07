@@ -106,7 +106,7 @@ SLANG_LADDER = {
     "nocheck_async_reset_peel": "error",  # gate 1: no demote after a rung already peeled
     "nocheck_async_reset_unreadable": "error",  # gate 2: demoted reset must be readable
     "nocheck_blackboxing2": "error",  # fail-unknown-module
-    "nocheck_chunk_FetchTargetQueue": "error",  # fail-unsupported-system-task
+    "nocheck_chunk_FetchTargetQueue": "verilog",  # printing tasks ignored; large sequential LEC remains unverified
     "nocheck_cpp_api": "error",  # fail-unknown-module
     "nocheck_gcd_large": "error",  # duplicate definition; slang rejects per 1800
     "nocheck_join_fadd": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800

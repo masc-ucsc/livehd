@@ -4,9 +4,10 @@ The direct `--reader slang` front-end: slang v11 elaborates SystemVerilog and
 `Slang_context` lowers the AST straight to LNAST, one Lnast per module in the
 extracted unit form (`top -> [io, stmts]`, `lambda_kind="mod"`, exact Verilog
 module names) so the standard upass pipeline (SSA → io_meta → tolg) compiles
-it like any Pyrope unit. It is NOT a replacement for the `yosys-verilog` /
-`yosys-slang` production readers; it exists so `ln:`/`lnast-dump:` flows can
-ingest SystemVerilog directly (todo/ 2s).
+it like any Pyrope unit. This is the default SystemVerilog reader and supports
+compilation and synthesis as well as `ln:`/`lnast-dump:` inspection. Use
+`--reader yosys` for the integrated Yosys SystemVerilog frontend when native
+lowering is unsupported; `yosys-slang` remains its compatibility alias.
 
 ## Passing raw slang driver args (`-- ...`)
 
@@ -101,19 +102,19 @@ legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).
 
 When a SystemVerilog construct fails to lower, decide whether it is a bug to fix
 or a test to drop using three reference points — the standalone slang frontend,
-the yosys-slang plugin, and our native reader:
+the integrated Yosys Slang frontend, and our native reader:
 
 1. **slang native frontend rejects it → out of scope, for sure.** slang v11 is
    the strictest valid-SV gate; if its frontend cannot elaborate the construct it
    is either illegal SV or non-elaboratable, so `--reader slang` has nothing
    well-formed to lower. Drop it (or keep it as an `error`-tier test when slang
    rejects it *cleanly*).
-2. **yosys-slang handles it → we must support it too.** A construct the
-   yosys-slang plugin lowers is a real, synthesizable RTL idiom; both
-   `--reader slang` and `--reader yosys-slang` should match it. A failure here is
+2. **`read_slang` handles it → we must support it too.** A construct yosys's
+   built-in `read_slang` lowers is a real, synthesizable RTL idiom; both
+   `--reader slang` and `--reader yosys` should match it. A failure here is
    a genuine bug to fix.
-3. **yosys-slang fails but slang native succeeds → it depends.** The construct is
-   valid SV (the frontend accepts it) but the yosys-slang plugin's RTLIL
+3. **`read_slang` fails but slang native succeeds → it depends.** The construct is
+   valid SV (the frontend accepts it) but the integrated Yosys Slang frontend's RTLIL
    conversion cannot handle it. Try to support it in our native lowering —
    unless it is a non-synthesizable construct (`$foo` system tasks,
    simulation-only strangeness), in which case dropping the test is fine.
@@ -124,16 +125,13 @@ the yosys-slang plugin, and our native reader:
 # 1. standalone slang frontend  (valid-SV gate; NOT always installed locally)
 slang foo.sv
 
-# 2. yosys + the yosys-slang plugin, no LiveHD  (plugin path is bazel-mangled;
-#    `find bazel-bin/external -name slang.so` if the +http_archive+ form moves)
-./bazel-bin/inou/yosys/yosys2 \
-  -m ./bazel-bin/external/+http_archive+yosys_slang/slang.so \
-  -p "read_slang foo.sv"
+# 2. bundled Yosys with integrated Slang, no separately loaded plugin
+./bazel-bin/inou/yosys/yosys2 -p "read_slang foo.sv"
 
 # 3a. LiveHD native reader (slang-library based)
 lhd compile --reader slang       foo.v --emit-dir pyrope:out/
-# 3b. LiveHD yosys-slang reader
-lhd compile --reader yosys-slang foo.v --emit-dir verilog:out/
+# 3b. LiveHD Yosys reader
+lhd compile --reader yosys foo.v --emit-dir verilog:out/
 ```
 
 **When standalone `slang` is not installed**, use `--reader slang` as a proxy for

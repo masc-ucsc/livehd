@@ -65,45 +65,30 @@ void Pass_color::setup() {
   m.add_label_optional("min_ge",
                        "synth: merge a region below this many gate-equivalents into its best-connected "
                        "neighbour (0 => no lower bound). Kills singleton regions",
-                       "1000");
-  // The earlier 30M-GE default was disproved by the ROB stress point: one
-  // 28.2M-GE region grew past 65 GiB and missed a 30-minute budget. A 6M probe
-  // was still projected oversize; 3M later peaked at 14.6 GiB, 2M crossed the
-  // 16 GiB ceiling while translating, 1M reached 18 GiB in ABC, and a 500k
-  // high-width color ran beyond 15 minutes, and 250k still crossed that time
-  // bound. A 44k-bit runtime SRA exposed the missing gate-type multiplier:
-  // width alone hid a multi-stage barrel mux. The shared synthesis estimate now
-  // replays what abc_arith actually emits: for a RIGHT shift the backward
-  // `need[k] = min(w, need[k+1] + 2^k)` prefix trim summed over the amount bits
-  // (so a narrow demanded slice discounts only the LAST few stages, not every
-  // stage), and for a LEFT shift the result width per stage, at 3 gates/mux.
-  // On ROB, 99.9k-GE and
-  // 79.2k-GE SRA colors crossed the stated 15-minute ceiling; even 40k left a
-  // 32.8k-GE mixed RenameBuffer shift region running past 18 minutes. A first
-  // 25k run exposed another shift-heavy tail beyond 20 minutes, so variable
-  // shifts carry an additional 2x complexity safety factor. The 25k shared
-  // ceiling then preserves larger ordinary-logic regions while splitting the
-  // super-linear shift tail. Every color is independently gated at 16 GiB and
-  // 15 minutes. Keep this shared rather than a per-design exception; full/cold
-  // may map more colors while warm incremental reuses them.
+                       "500");
+  // Small incremental regions target a 16 GiB per-color memory budget. The
+  // former 25k-GE window still produced expensive wide-datapath regions in
+  // the full benchmark sweep. Start with 5k GE; this remains a soft estimate,
+  // since an indivisible node can exceed the window. ABC admission and the
+  // process-wide physical-memory ceiling remain independent backstops.
   m.add_label_optional("max_ge",
                        "synth: split a region above this many synthesis gate-equivalents (0 => no upper bound). "
-                       "Default 25k synthesis GE, calibrated for the 16 GiB / 15-minute per-color soft bounds",
-                       "25000");
+                       "Default 5k synthesis GE, targeting small incremental regions and a 16 GiB per-color budget",
+                       "5000");
   // cones mode's clustering threshold. A DIFFERENT unit from max_ge: predicted
   // generic-AIG size (graph/predict_abc_size.hpp), which tracks what ABC will
   // actually build. Over 1930 lhdsuite regions, synthesis GE predicted mapped
   // gates with a median error of 1.8x and a p90 of 5.6x in both directions --
   // runtime shifts 24x over (its x6 is an ABC TIME factor), Sum ~5x under,
-  // register-file arrays 8-11x under. 30k is the shipped starting point for the
-  // A/B evaluation, not a claim that 30k is universally safe: the threshold is
+  // register-file arrays 8-11x under. The 5k default aims for smaller incremental
+  // regions, not a claim that 5k is universally safe: the threshold is
   // SOFT (it shapes granularity), and pass.abc's own RSS/time guards remain the
   // admission backstop.
   m.add_label_optional("max_gate",
                        "synth: cones mode -- soft bound on a color's PREDICTED AIG size; merge the most-sharing cones "
                        "while their union stays under it, and stop a cone's walk past it. 0 = raw cones, no merge. "
                        "Distinct from max_ge, which is the GE size window of the synth/pipe modes",
-                       "30000");
+                       "5000");
   // Phase 2 of cones' merge. A FLAT leaf, like max_gate: the kernel splits a
   // --set key at the LAST dot, so `pass.color.forward` is expressible and
   // `pass.color.synth.forward` is not (it would read as a pass named
@@ -194,11 +179,11 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
     const auto salg  = std::string{var.get("synth_alg", "synth")};
-    s               += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
-                     salg,
-                     opts.min_ge,
-                     opts.max_ge,
-                     opts.name_weight);
+    s                += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
+                                    salg,
+                                    opts.min_ge,
+                                    opts.max_ge,
+                                    opts.name_weight);
     if (salg == "cones") {
       s += std::format(",\"max_gate\":{},\"forward\":\"{}\"", opts.max_gate, opts.forward.empty() ? "false" : opts.forward);
     }
@@ -318,10 +303,10 @@ void Pass_color::color(Eprp_var& var) {
   opts.compact      = parse_bool(var.get("compact", "true"));
   opts.continuous   = parse_bool(var.get("continuous", "false"));
   opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
-  opts.min_ge       = parse_ge_bound(var, "min_ge", "1000");
-  opts.max_ge       = parse_ge_bound(var, "max_ge", "25000");
+  opts.min_ge       = parse_ge_bound(var, "min_ge", "500");
+  opts.max_ge       = parse_ge_bound(var, "max_ge", "5000");
   opts.name_weight  = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
-  opts.max_gate     = parse_ge_bound(var, "max_gate", "30000");
+  opts.max_gate     = parse_ge_bound(var, "max_gate", "5000");
   opts.forward      = forward_on ? forward : std::string{};
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {

@@ -92,7 +92,7 @@ namespace livehd::cost {
 [[nodiscard]] uint64_t arm_address_space_limit(uint64_t budget);
 
 // The budget this process is configured for: env LIVEHD_MEMORY_BUDGET_MB when
-// set, else budget_bytes(0) = physical - reserve. 0 means "unenforceable -- do
+// set (clamped to physical - reserve), else budget_bytes(0) = physical - reserve. 0 means "unenforceable -- do
 // not gate". Reads only the environment and syscalls.
 [[nodiscard]] uint64_t configured_budget_bytes();
 
@@ -124,7 +124,7 @@ namespace livehd::cost {
 // Proven). Host survival is worth a lost verdict; the reverse is not.
 [[nodiscard]] uint64_t arm_child_share(int nsiblings);
 
-// Headroom left to the OS and the rest of the machine: max(2 GiB, 20% of
+// Headroom left to the OS and the rest of the machine: max(2 GiB, 25% of
 // physical), capped at half of physical so a small host still gets a usable
 // budget. Not tunable -- `budget_mb` below is the tunable.
 [[nodiscard]] uint64_t reserve_bytes();

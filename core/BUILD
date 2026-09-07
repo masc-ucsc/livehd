@@ -18,13 +18,33 @@ config_setting(
     values = {"compilation_mode": "opt"},
 )
 
+# The generated-file long-name policy (livehd::shorten_file_name /
+# unit_file_stem). Its OWN target, not part of `:core`: it needs llvm's SHA-256
+# and `:core` is linked by nearly everything, so the dependency stays with the
+# three emitters that name files after a graph or LNAST unit.
+cc_library(
+    name = "file_name",
+    srcs = ["file_name.cpp"],
+    hdrs = ["file_name.hpp"],
+    copts = ["-std=c++23"] + COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["@llvm-project//llvm:Support"],
+)
+
 cc_library(
     name = "core",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "file_name.cpp",
+        ],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(
+        ["*.hpp"],
+        exclude = ["file_name.hpp"],
+    ),
     copts = ["-std=c++23"] + COPTS,
     defines = select({
         ":use_profiling": [
@@ -101,6 +121,17 @@ sh_test(
 # on. A false "same" would leave a stale artifact behind a green run, so both
 # directions are pinned, including payloads that straddle the 64 KiB compare
 # buffer.
+cc_test(
+    name = "file_name_test",
+    srcs = [
+        "tests/file_name_test.cpp",
+    ],
+    deps = [
+        ":file_name",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "file_output_test",
     srcs = [

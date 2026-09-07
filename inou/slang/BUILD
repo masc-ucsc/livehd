@@ -772,3 +772,35 @@ sh_test(
     srcs = ["tests/memory_clock_diagnostic.sh"],
     data = ["//lhd"],
 )
+
+# Built-in gate primitives, including a gate output consumed before its
+# producer in source order and an arrayed `not inv[3:0](n, a)`. Both are
+# tests/sv/ fixtures rather than //inou/yosys:tests/*.v because yosys's own
+# read_verilog refuses the cell array ("Cell arrays of primitives are
+# currently not supported"), so the yosys_compile-* sweep could never run it.
+sh_test(
+    name = "slang_gate_primitives",
+    srcs = ["tests/slang_compile.sh"],
+    args = ["lec_no_x", "$(location tests/sv/gate_primitives.v)"],
+    data = [
+        "tests/sv/gate_primitives.v",
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+)
+
+# A case whose arms cover the whole selector domain is exhaustive (no latch);
+# a duplicate arm does NOT complete it, so the always_latch must hold. Also a
+# tests/sv/ fixture: `proc -ifx` infers a latch on the always_comb half and
+# hard-errors, so yosys_compile-* cannot be its oracle.
+sh_test(
+    name = "slang_case_exhaustive",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = ["lec", "$(location tests/sv/case_exhaustive.v)"],
+    data = [
+        "tests/sv/case_exhaustive.v",
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+)

@@ -119,11 +119,14 @@ constexpr std::string_view kCombFlow
 // slack up to the budget instead of preserving the delay it started from.
 constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize {B}";
 
-// The AREA objective is the former baseline: it won area on the biased mux.
+// Bound SAT work in the area objective, as in the timing flow. Unbounded
+// FRAIG conflicts dominated small regions of beamformer/CPU/KOIOS designs.
+// The AREA objective otherwise retains the former baseline that won mux area.
 // Without a delay it runs once, with kBufferTail. With a delay it is a second
 // candidate, sized to the budget with kAreaTail and accepted only if it meets
 // that budget with less SCL area. The timing result wins every tie.
-constexpr std::string_view kAreaFlow = "strash; &get -n; &fraig -x; &put; dc2; strash; &get -n; &dch -f; &nf {D}; &put -o";
+constexpr std::string_view kAreaFlow
+    = "strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o";
 constexpr std::string_view kAreaTail = "; buffer -N {F}; upsize {B}; dnsize {B}";
 
 // The MAPPER step of both built-in flows, spelled once so map_region's
@@ -3566,8 +3569,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : pad;
       }
     } else if (op == Ntype_op::Div) {
-      const auto a = gu::get_driver_of_sink_name(n, "a");
-      const auto b = gu::get_driver_of_sink_name(n, "b");
+      const auto              a     = gu::get_driver_of_sink_name(n, "a");
+      const auto              b     = gu::get_driver_of_sink_name(n, "b");
       // eff_width, NOT real_width: a constant driver carries no `bits` attr, so
       // real_width clamps it to 1 and the `i < width` loop below would silently
       // drop its high bits (`x / 300` mapped as `x / (300 & 0xF)` = `x / 12`).

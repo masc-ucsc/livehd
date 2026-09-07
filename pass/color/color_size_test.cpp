@@ -312,13 +312,13 @@ TEST(ColorSize, WideSraUsesNarrowSliceDemand) {
   EXPECT_EQ(st.splits, 0u) << "the narrow slice must stay with its shift";
   EXPECT_EQ(st.left_over, 0u);
 
-  // The SHIPPED default window (pass_color.cpp max_ge=25000) is the case that
+  // The SHIPPED default window (pass_color.cpp max_ge=5000) is the case that
   // actually matters: the SRA alone is over it, so a split cannot bring the
   // region under the cap -- and if the weightless Get_mask were chopped off,
   // pass.abc would lose the in-region precondition for the demand slice and
   // build the FULL 10240-mux barrel instead of 8344.
   Size_window_stats sd;
-  const auto        dflt = apply_size_window(g.get(), m, 1000, 25000, &sd);
+  const auto        dflt = apply_size_window(g.get(), m, 500, 5000, &sd);
   EXPECT_EQ(dflt.at(sra), dflt.at(slice)) << "the shift and its constant slice must stay in one region under the default window";
   EXPECT_EQ(sd.left_over, 1u) << "one node heavier than max is honestly reported, not chopped around";
 

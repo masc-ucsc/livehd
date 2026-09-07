@@ -34,17 +34,17 @@ echo "PASS: lec prp vs verilog (default cvc5, slang reader)"
 grep -q '"status":"pass"' "$W/r2.json" || fail "lec lgyosys not pass: $(cat "$W/r2.json")"
 echo "PASS: lec prp vs verilog (--set formal.solver=lgyosys)"
 
-# The yosys-slang reference reader is staged in a sibling external-repository
-# runfiles directory. Exercise that exact lookup: large V2V tests use it for
-# packed-struct SystemVerilog references and must not depend on the caller cwd.
+# The slang reference reader is yosys's built-in read_slang (no plugin to
+# stage). Exercise it: large V2V tests use it for packed-struct SystemVerilog
+# references and must not depend on the caller cwd.
 "$LHD" lec --impl "$INV" --ref "$INV" --top inv --set formal.solver=lgyosys \
   --set formal.lec.gold_reader=slang --workdir "$W/c2_slang" -q --result-json "$W/r2_slang.json" \
   || fail "lec lgyosys slang reader not pass: $(cat "$W/r2_slang.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2_slang.json" \
   || fail "lec lgyosys slang reader not pass: $(cat "$W/r2_slang.json")"
-echo "PASS: lgyosys locates the yosys-slang plugin in runfiles"
+echo "PASS: lgyosys gold-side read_slang reader"
 
-# The generated/implementation side can independently use yosys-slang. This is
+# The generated/implementation side can independently use read_slang. This is
 # the scalable path for large cgen Verilog (Minion/XiangShan), while keeping the
 # legacy read_verilog reader as the default for compatibility.
 "$LHD" lec --impl "$INV" --ref "$INV" --top inv --set formal.solver=lgyosys \
@@ -52,7 +52,7 @@ echo "PASS: lgyosys locates the yosys-slang plugin in runfiles"
   || fail "lec lgyosys gate slang reader not pass: $(cat "$W/r2_gate_slang.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2_gate_slang.json" \
   || fail "lec lgyosys gate slang reader not pass: $(cat "$W/r2_gate_slang.json")"
-echo "PASS: lgyosys gate-side yosys-slang reader"
+echo "PASS: lgyosys gate-side read_slang reader"
 
 # Hierarchical lgyosys fallback must detect reset per selected module, not by
 # grepping the whole concatenated source. A parent may have reset while a child

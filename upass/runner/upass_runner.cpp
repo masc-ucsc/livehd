@@ -2281,7 +2281,11 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
   // orphan and must be folded onto the new slot bundle.
   if (!rn.dst_name.empty() && bundle_key::is_single_level(rn.dst_name)) {
     const auto root = std::string(Bundle::get_first_level(rn.dst_name));
-    if (auto now = symbol_table_.get_bundle_for_write(root); now) {
+    // resolve_node_operands already unshared this dst before dispatch. A
+    // second writable lookup would see rn.dst's reference and clone it again,
+    // forcing a whole-array fact merge even when no pass replaced the slot.
+    auto       now  = symbol_table_.peek_writable_bundle(root) == rn.dst.get() ? rn.dst : symbol_table_.get_bundle_for_write(root);
+    if (now) {
       if (now.get() != rn.dst.get()) {
         merge_fact_fields(*now, *rn.dst);
       }
