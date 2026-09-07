@@ -545,6 +545,16 @@ private:
   // and the incremental pre-body (same edge tables => byte-stable output).
   std::shared_ptr<hhds::GraphIO> declare_region_io(uint32_t r, hhds::GraphLibrary* dst_lib, const std::string& name);
   void                           stamp_region_input_pins(uint32_t r, hhds::Graph* body);
+  // Declared width of a region INPUT port: the external driver pin's own width,
+  // or -- when that pin carries none -- the source def's DECLARATION for the
+  // primary input it comes from. An unsized port is not merely imprecise: the
+  // region is emitted as its own module, and cgen falls back to width-agnostic
+  // bit selects on a driver of unknown width, so a `Get_mask` reading past the
+  // port emits `reset[1]` on a one-bit port (invalid Verilog; iverilog refuses
+  // it, yosys reads it as x). The def itself never had that problem because its
+  // own decl carries the width -- an implicitly minted input (`reset`) is
+  // declared 1 bit and left unstamped on the pin. 0 still means "unknown".
+  [[nodiscard]] int              port_bits(const InputPort& p) const;
   void emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib, const std::vector<hhds::Node_class>& rnodes,
                         const std::vector<IntEdge>& redges, const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
   // Rebuild region r's original logic into `dst_lib` under `name` (decl-only
@@ -1037,6 +1047,25 @@ static std::shared_ptr<hhds::GraphIO> clone_subnode_decl(hhds::GraphLibrary* dst
   return io;
 }
 
+int Partitioner::port_bits(const InputPort& p) const {
+  if (auto b = gu::bits_of(p.driver); b != 0) {
+    return b;
+  }
+  if (!p.from_primary || p.primary_name.empty()) {
+    return 0;
+  }
+  auto src_gio = g_->get_io();
+  if (!src_gio) {
+    return 0;
+  }
+  for (const auto& d : src_gio->get_input_pin_decls()) {
+    if (d.name == p.primary_name) {
+      return static_cast<int>(d.bits);
+    }
+  }
+  return 0;
+}
+
 // Declare + size the region-module IO (input then output ports) in `dst_lib`.
 // Shared by the mapped-module shell on outlib_ and the pre-body's scratch lib,
 // so both carry byte-identical port names/widths/signs.
@@ -1045,7 +1074,7 @@ std::shared_ptr<hhds::GraphIO> Partitioner::declare_region_io(uint32_t r, hhds::
   hhds::Port_id pid = 1;
   for (auto& p : module_inputs_[r]) {
     gio->add_input(p.name, pid++);
-    if (auto b = gu::bits_of(p.driver); b != 0) {
+    if (auto b = port_bits(p); b != 0) {
       gio->set_bits(p.name, static_cast<uint32_t>(b));
     }
     gio->set_unsign(p.name, gu::is_unsign(p.driver));
@@ -1068,7 +1097,7 @@ std::shared_ptr<hhds::GraphIO> Partitioner::declare_region_io(uint32_t r, hhds::
 void Partitioner::stamp_region_input_pins(uint32_t r, hhds::Graph* body) {
   for (auto& p : module_inputs_[r]) {
     auto ip = body->get_input_pin(p.name);
-    if (auto b = gu::bits_of(p.driver); b != 0) {
+    if (auto b = port_bits(p); b != 0) {
       gu::set_bits(ip, b);
     }
     gu::is_unsign(p.driver) ? gu::set_unsign(ip) : gu::set_sign(ip);
@@ -1237,7 +1266,7 @@ void Partitioner::build_module(uint32_t r) {
     rb.module_name    = name;
     rb.reuse_eligible = (r < region_reuse_ok_.size()) ? (region_reuse_ok_[r] != 0) : true;
     for (auto& p : module_inputs_[r]) {
-      rb.inputs.push_back({p.name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
+      rb.inputs.push_back({p.name, p.driver, port_bits(p), !gu::is_unsign(p.driver)});
     }
     for (auto& p : module_outputs_[r]) {
       rb.outputs.push_back({p.name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
@@ -1332,7 +1361,7 @@ void Partitioner::build_module_as_top(uint32_t r) {
     rb.module_name    = top_;
     rb.reuse_eligible = (r < region_reuse_ok_.size()) ? (region_reuse_ok_[r] != 0) : true;
     for (const auto& p : module_inputs_[r]) {
-      rb.inputs.push_back({p.primary_name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
+      rb.inputs.push_back({p.primary_name, p.driver, port_bits(p), !gu::is_unsign(p.driver)});
     }
     for (const auto& ow : top_outputs_) {
       if (ow.kind == OutWire::Region) {

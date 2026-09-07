@@ -54,10 +54,11 @@ void Pass_color::setup() {
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
   m.add_label_optional("synth_alg",
-                       "synth: pipe|synth|cones boundary mode. pipe/synth propagate one id forward and cut at state "
-                       "(synth also at large arithmetic), then reshape with the min_ge/max_ge GE window; cones seeds one "
-                       "BACKWARD cone per register din/enable and merges the most-sharing cones under `max_gate`",
-                       "synth");
+                       "synth: cones|synth|pipe boundary mode. cones (default) seeds one BACKWARD cone per register "
+                       "din/enable and merges the most-sharing cones under `max_gate`; pipe/synth propagate one id "
+                       "forward and cut at state (synth also at large arithmetic), then reshape with the min_ge/max_ge "
+                       "GE window",
+                       "cones");
   // The size window. Synthesis gate equivalents (synthesis_ge_weight:
   // Sub instances count ~1 -- their logic is weighed in their own def), not
   // nodes: ABC's memory scales with the BIT-BLASTED gate count, so a 200k-node
@@ -178,7 +179,7 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   } else if (alg == "synth") {
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
-    const auto salg  = std::string{var.get("synth_alg", "synth")};
+    const auto salg   = std::string{var.get("synth_alg", "cones")};
     s                += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
                                     salg,
                                     opts.min_ge,
@@ -191,11 +192,14 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
     // same-color anchor union off this flag; without it the component split
     // would silently shred those back into per-cloud modules.
     //
-    // The GE window bin-packs isolated under-min leftovers, so it needs the flag
-    // only with a floor. A CONES color is first-wins, so an earlier owner can
-    // split a later cone in two (flopB <- n1 <- n2[A] <- n3 leaves B = {flopB,
-    // n1, n3}) whatever the thresholds -- hence unconditionally there.
-    if (salg == "cones" || opts.min_ge != 0) {
+    // A CONES color is first-wins, so an earlier owner can split a later cone in
+    // two (flopB <- n1 <- n2[A] <- n3 leaves B = {flopB, n1, n3}) whatever the
+    // thresholds. `synth` packs too: the GE window bin-packs isolated under-min
+    // leftovers, and preserve_arith_cuts then LIFTS every wide-arithmetic node
+    // (plus its constant-mask slices) back out of whatever region the window
+    // merged it into, which can leave that region in two pieces. Only `pipe`,
+    // which does neither, is packed solely by the window's floor.
+    if (salg != "pipe" || opts.min_ge != 0) {
       s += ",\"packed\":true";
     }
   } else if (alg == "mincut") {
@@ -222,7 +226,7 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
     Color_cgen c(opts);
     c.label(g);
   } else if (alg == "synth") {
-    Color_synth c(opts, var.get("synth_alg", "synth"));
+    Color_synth c(opts, var.get("synth_alg", "cones"));
     c.label(g);
   } else if (alg == "path") {
     Color_path c(opts, var.get("instance", ""));
@@ -263,13 +267,13 @@ void Pass_color::color(Eprp_var& var) {
   // A silent fallback here is a wrong ANSWER, not a wrong flag: `synth_alg=pipe`
   // and `synth_alg=synth` cut at different boundaries, and a typo used to mean
   // "synth" -- so it colored, exited 0, and reported nothing.
-  const auto synth_alg = std::string{var.get("synth_alg", "synth")};
+  const auto synth_alg = std::string{var.get("synth_alg", "cones")};
   if (alg == "synth" && synth_alg != "synth" && synth_alg != "pipe" && synth_alg != "cones") {
     livehd::diag::err("pass.color", "bad-synth-alg", "unsupported")
-        .msg("unknown synth_alg '{}' (expected synth|pipe|cones)", synth_alg)
+        .msg("unknown synth_alg '{}' (expected cones|synth|pipe)", synth_alg)
+        .hint("cones (default): one backward cone per register din/enable, merged by shared logic under `max_gate`")
         .hint("synth: cut at state AND large arithmetic (Mult/Div, Sum wider than 8)")
         .hint("pipe: cut at state only -- one region per pipeline stage")
-        .hint("cones: one backward cone per register din/enable, merged by shared logic under `max_gate`")
         .fatal();
   }
 

@@ -55,6 +55,9 @@ for entry in 'pass.color.min_ge:500' 'pass.color.max_ge:5000' 'pass.color.max_ga
   description=$("$LHD" describe "$flag") || fail "cannot describe $flag"
   echo "$description" | grep -q "\"default\":\"$expected\"" || fail "$flag default must be $expected: $description"
 done
+description=$("$LHD" describe synth.reduce) || fail "cannot describe synth.reduce"
+echo "$description" | grep -q '"default":"false"' || fail "synth.reduce must default false: $description"
+echo "$description" | grep -q 'experimental.*synthesis time.*QoR' || fail "synth.reduce tradeoff missing: $description"
 # ONE incremental switch (lhd.incremental); the per-tier cache flags are gone.
 echo "$out" | grep -q '"name":"lhd.incremental","method":"lhd","default":"true"' || fail "lhd.incremental missing/wrong: $out"
 echo "$out" | grep -q '"name":"compile.cache"' && fail "compile.cache must be gone (use lhd.incremental): $out"

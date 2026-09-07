@@ -64,21 +64,36 @@ for entry in "${DESIGNS[@]}"; do
     # hierarchy preserved: the child def survives as its own module (partition
     # re-links the Sub instances to it).
     grep -q "^module ${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"
-    if [ "$ALG" = synth ]; then
-      # synth colors each def as ONE region, so every def is emitted directly
-      # under its own name -- no pointless `<def>__c<id>` wrapper whose only body
-      # is a single region instance (the single-region optimization).
-      grep -q "__c" "$D/part.v" && fail "$FIX/$ALG: single-region defs must not get a __c wrapper"
-    else
-      # acyclic splits some defs into several colors -> per-(def,color) region
-      # submodules under a wrapper.
-      grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
-    fi
+    # Both colorings split at least one def into several colors -> per-(def,
+    # color) region submodules under a wrapper. (`synth` does too now: `cones`,
+    # the default, opens one region per register cone, and even `synth_alg=synth`
+    # keeps every wide-arithmetic cut as its own replaceable region.) The
+    # single-region optimization -- no pointless `<def>__c<id>` wrapper whose
+    # only body is one region instance -- is pinned below on `synth_alg=pipe`
+    # over the combinational fixture, which is one region per def.
+    grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
     # 6. LEC: the partitioned hierarchical design must equal the original
     run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"
   done
 done
+
+# The single-region optimization: a def that IS one region is emitted directly
+# under its own name -- no `<def>__c<id>` wrapper whose only body is one region
+# instance. `synth_alg=pipe` on the purely combinational fixture is the coloring
+# that gives it (pipe cuts at state only, and hier_comb has none), so every def
+# there is exactly one region. The hierarchy and the LEC must survive it too.
+FD="$W/onecolor"
+mkdir -p "$FD"
+run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
+run compile lg:"$FD/lg" --top hier_comb.top --emit verilog:"$FD/ref.v" --workdir "$FD/w2"
+run pass color synth --top hier_comb.top --set color.absorb=false --set color.synth_alg=pipe lg:"$FD/lg" --workdir "$FD/w3"
+run pass partition --top hier_comb.top lg:"$FD/lg" --emit-dir lg:"$FD/lg2" --workdir "$FD/w4"
+run compile lg:"$FD/lg2" --top hier_comb.top --emit verilog:"$FD/part.v" --workdir "$FD/w5"
+grep -q "^module adder" "$FD/part.v" || fail "pipe: child def 'adder' dropped (hierarchy lost)"
+grep -q "__c" "$FD/part.v" && fail "pipe: single-region defs must not get a __c wrapper"
+run lec --set formal.solver=lgyosys --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
+echo "PASS: single-region-per-def partition needs no __c wrapper and is LEC-equivalent"
 
 # stats-only mode on a hierarchical input must succeed (per-def region stats).
 SD="$W/stats"

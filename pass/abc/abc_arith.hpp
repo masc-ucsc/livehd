@@ -43,14 +43,14 @@ inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
 }
 
 // Combinational multiplier architecture (mirrors Adder_kind). `array` is the
-// simple single-cycle shift-and-add array multiplier (the default and, for now,
-// the only reasonable option). The enum exists so future architectures (Booth,
-// Wallace/Dadda tree) can be added with a new builder + dispatch arm, exactly as
-// the adder library is extended — the partial-product summation already reuses
-// the selected Adder_kind, so an `array` multiplier under any adder is available.
-enum class Mult_kind { array };
+// simple shift-and-add multiplier; `tree` sums partial products in balanced
+// pairs. Both reuse the selected adder. Tree is not a carry-save Wallace tree.
+enum class Mult_kind { array, tree };
 
 inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
+  if (s == "tree") {
+    return Mult_kind::tree;
+  }
   if (s == "array") {
     return Mult_kind::array;
   }
@@ -268,14 +268,16 @@ inline Bit build_lt(Adder_kind kind, int block_size, Ops& ops, const std::vector
 // result. Needs only zero/inv/and_/or_ from Ops (mux built inline). A constant
 // amount works too (the muxes fold), but abc_map wires constants directly.
 template <class Bit, class Ops>
-inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, int out_w) {
+inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, int out_w,
+                                  bool reverse = false) {
   std::vector<Bit> data(out_w);
   int              aw = static_cast<int>(a.size());
   for (int i = 0; i < out_w; ++i) {
     data[i] = i < aw ? a[i] : ops.zero();  // a, zero-extended to the result width
   }
   int nb = static_cast<int>(amount.size());
-  for (int k = 0; k < nb; ++k) {
+  for (int stage = 0; stage < nb; ++stage) {
+    const int        k    = reverse ? nb - 1 - stage : stage;
     // sh = 2^k, capped to out_w (any shift >= out_w shifts everything out). The
     // k >= 31 guard keeps 1<<k from overflowing int before the >= out_w compare.
     int              sh   = (k >= 31 || (int64_t{1} << k) >= out_w) ? out_w : static_cast<int>(int64_t{1} << k);
@@ -304,7 +306,8 @@ inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std
 // width, matching cvc5's BITVECTOR_LSHR / BITVECTOR_ASHR at cw. Needs only
 // zero/inv/and_/or_ from Ops (mux built inline).
 template <class Bit, class Ops>
-inline std::vector<Bit> build_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill, int out_w) {
+inline std::vector<Bit> build_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill, int out_w,
+                                         bool reverse = false) {
   const int w  = static_cast<int>(a.size());
   const int nb = static_cast<int>(amount.size());
   out_w        = std::clamp(out_w, 0, w);
@@ -316,19 +319,22 @@ inline std::vector<Bit> build_shr_prefix(Ops& ops, const std::vector<Bit>& a, co
   // full-width barrel-shifter semantics.
   std::vector<int> need(static_cast<size_t>(nb) + 1);
   need[static_cast<size_t>(nb)] = out_w;
-  for (int k = nb - 1; k >= 0; --k) {
-    const int sh                 = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
-    need[static_cast<size_t>(k)] = sh >= w ? need[static_cast<size_t>(k + 1)] : std::min(w, need[static_cast<size_t>(k + 1)] + sh);
+  for (int stage = nb - 1; stage >= 0; --stage) {
+    const int k  = reverse ? nb - 1 - stage : stage;
+    const int sh = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
+    need[static_cast<size_t>(stage)]
+        = sh >= w ? need[static_cast<size_t>(stage + 1)] : std::min(w, need[static_cast<size_t>(stage + 1)] + sh);
   }
 
   std::vector<Bit> data(a.begin(), a.begin() + need[0]);
-  for (int k = 0; k < nb; ++k) {
+  for (int stage = 0; stage < nb; ++stage) {
+    const int        k    = reverse ? nb - 1 - stage : stage;
     // sh = 2^k, capped to w (any shift >= w pulls everything past the MSB). The
     // k >= 31 guard keeps 1<<k from overflowing int before the >= w compare.
     int              sh   = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
     Bit              sel  = amount[k];
     Bit              nsel = ops.inv(sel);
-    std::vector<Bit> next(need[static_cast<size_t>(k + 1)]);
+    std::vector<Bit> next(need[static_cast<size_t>(stage + 1)]);
     for (int i = 0; i < static_cast<int>(next.size()); ++i) {
       Bit shifted = (i + sh) < w ? data[i + sh] : fill;                        // bit i takes bit i+sh, or fill past the top
       next[i]     = ops.or_(ops.and_(sel, shifted), ops.and_(nsel, data[i]));  // sel ? shifted : data
@@ -382,15 +388,15 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
 // the product is computed mod 2^out_w and its low out_w bits are correct for
 // signed and unsigned operands alike — exactly what the cvc5 LEC encodes
 // (fit each operand to W, then BITVECTOR_MULT, which is mod 2^W). The `kind`
-// selects the multiplier architecture (only `array` today); `adder`/`block_size`
+// selects serial or balanced partial-product summation; `adder`/`block_size`
 // pick the architecture of the internal partial-product additions.
 template <class Bit, class Ops>
 inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_size, Ops& ops, const std::vector<Bit>& a,
                                   const std::vector<Bit>& b, int out_w) {
-  (void)kind;  // only `array` for now; the dispatch point for future architectures
-  int              aw = static_cast<int>(a.size());
-  int              bw = static_cast<int>(b.size());
-  std::vector<Bit> acc(out_w, ops.zero());
+  std::vector<std::vector<Bit>> rows;
+  int                           aw = static_cast<int>(a.size());
+  int                           bw = static_cast<int>(b.size());
+  std::vector<Bit>              acc(out_w, ops.zero());
   for (int k = 0; k < bw && k < out_w; ++k) {
     // partial product k = (b[k] ? a : 0) shifted up by k, within out_w bits
     std::vector<Bit> pp(out_w);
@@ -398,9 +404,21 @@ inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_si
       int j = i - k;
       pp[i] = (j >= 0 && j < aw) ? ops.and_(b[k], a[j]) : ops.zero();
     }
-    acc = build_add(adder, block_size, ops, acc, pp, ops.zero()).sum;
+    if (kind == Mult_kind::tree) {
+      rows.push_back(std::move(pp));
+    } else {
+      acc = build_add(adder, block_size, ops, acc, pp, ops.zero()).sum;
+    }
   }
-  return acc;
+  while (rows.size() > 1) {
+    std::vector<std::vector<Bit>> next;
+    for (size_t i = 0; i < rows.size(); i += 2) {
+      next.push_back(i + 1 == rows.size() ? std::move(rows[i])
+                                          : build_add(adder, block_size, ops, rows[i], rows[i + 1], ops.zero()).sum);
+    }
+    rows = std::move(next);
+  }
+  return rows.empty() ? acc : rows.front();
 }
 
 // All operands equal the first, bitwise (n-ary ==). Operands equal length.

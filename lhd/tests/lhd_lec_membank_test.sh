@@ -84,8 +84,16 @@ compile_design "$GOOD" -GBAD=0
 D="$W/q"
 cp -r "$GOOD/lg" "$D/lg" 2>/dev/null || { mkdir -p "$D" && cp -r "$GOOD/lg" "$D/lg"; }
 map_design "$D" "$LIB"
-[ "$(grep -c "^\s*DFFx1 " "$D/netv/membank.v")" -eq 64 ] || fail "q: expected 64 DFFx1 storage cells (8 x 8), got $(grep -c '^\s*DFFx1 ' "$D/netv/membank.v")"
-grep -q "mem__mem3_5" "$D/netv/membank.v" || fail "q: storage cells are not named mem__mem<i>_<b>: $(grep -m3 DFFx1 "$D/netv/membank.v")"
+# Cell counts and name lookups run over the WHOLE emitted netlist directory,
+# never one file: a region module (`<def>__c<id>.v`) is where the cells land as
+# soon as the coloring opens more than one region in a def, which the shipped
+# `cones` default routinely does. Which file a cell was written to is not what
+# any assertion here is about.
+ncell() { cat "$1/netv/"*.v | grep -c "^\s*$2 "; }
+nhas() { cat "$1/netv/"*.v | grep -q "$2"; }
+
+[ "$(ncell "$D" DFFx1)" -eq 64 ] || fail "q: expected 64 DFFx1 storage cells (8 x 8), got $(ncell "$D" DFFx1)"
+nhas "$D" "mem__mem3_5" || fail "q: storage cells are not named mem__mem<i>_<b>: $(cat "$D/netv/"*.v | grep -m3 DFFx1)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "q: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "q: cvc5 did not PROVE the bit-blasted register file: $(verdict "$D/lec.json")"
@@ -110,7 +118,7 @@ echo "PASS: lgyosys does not refute the mapped register file"
 D="$W/qn"
 mkdir -p "$D" && cp -r "$GOOD/lg" "$D/lg"
 map_design "$D" "$QLIB"
-[ "$(grep -c "^\s*DFFNx1 " "$D/netv/membank.v")" -eq 64 ] || fail "qn: expected 64 DFFNx1 storage cells, got $(grep -c '^\s*DFFNx1 ' "$D/netv/membank.v")"
+[ "$(ncell "$D" DFFNx1)" -eq 64 ] || fail "qn: expected 64 DFFNx1 storage cells, got $(ncell "$D" DFFNx1)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "qn: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "qn: cvc5 did not PROVE the QN-cell register file (model state != pin?): $(verdict "$D/lec.json")"
@@ -123,8 +131,8 @@ echo "PASS: the same register file on QN-only DFFNx1 cells is PROVEN (unbounded)
 D="$W/native"
 mkdir -p "$D" && cp -r "$GOOD/lg" "$D/lg"
 map_design "$D" "$LIB" --set pass.abc.register_max_bits=1
-[ "$(grep -c "^\s*DFFx1 " "$D/netv/membank.v")" -eq 0 ] || fail "native: register_max_bits=1 still mapped DFF cells"
-grep -q "mem__mem3\b\|mem__mem3 " "$D/netv/membank.v" || fail "native: no whole storage register mem__mem<i> in the netlist: $(grep -m3 posedge "$D/netv/membank.v")"
+[ "$(ncell "$D" DFFx1)" -eq 0 ] || fail "native: register_max_bits=1 still mapped DFF cells"
+nhas "$D" "mem__mem3\b\|mem__mem3 " || fail "native: no whole storage register mem__mem<i> in the netlist: $(cat "$D/netv/"*.v | grep -m3 posedge)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "native: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "native: cvc5 did not PROVE the native storage flops: $(verdict "$D/lec.json")"
@@ -137,7 +145,7 @@ echo "PASS: whole native storage flops mem__mem<i> are PROVEN (unbounded) agains
 BAD="$W/bad"
 compile_design "$BAD" -GBAD=1
 map_design "$BAD" "$LIB"
-[ "$(grep -c "^\s*DFFx1 " "$BAD/netv/membank.v")" -eq 64 ] || fail "bad: expected 64 DFFx1 storage cells, got $(grep -c '^\s*DFFx1 ' "$BAD/netv/membank.v")"
+[ "$(ncell "$BAD" DFFx1)" -eq 64 ] || fail "bad: expected 64 DFFx1 storage cells, got $(ncell "$BAD" DFFx1)"
 rc=$(lec_cvc5 "$BAD" "$GOOD" "$BAD/lec.json")
 [ "$rc" -ne 0 ] || fail "bad: cvc5 lec exited 0 on a netlist that writes the wrong entry: $(verdict "$BAD/lec.json")"
 grep -q '"verdict":"refuted"' "$BAD/lec.json" || fail "bad: expected REFUTED for the corrupted write address, got $(verdict "$BAD/lec.json")"

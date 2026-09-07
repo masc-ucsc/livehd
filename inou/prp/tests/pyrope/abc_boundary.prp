@@ -1,0 +1,19 @@
+/*
+:name: abc_boundary
+:type: lgraph compile
+*/
+
+// Partition-boundary fixture for pass.abc (abc_boundary.cpp). Block 1 computes
+// one bit `t`; block 2 consumes it in eight cells. Mapped on its own, block 1
+// sees `t` as a load-free output and keeps the smallest NAND; sized against
+// what lies beyond the partition -- eight sink pins in block 2 -- it must
+// take the stronger drive. The annotation never changes semantics.
+mod abc_boundary(a:u1, b:u1, c:u8) -> (y:u8@[0]) {
+  mut t:u1 = 0
+  {::[color=1]
+    t = ~(a & b)
+  }
+  {::[color=2]
+    y = if t { ~c } else { c }
+  }
+}

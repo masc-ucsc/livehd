@@ -73,3 +73,261 @@ diff --git src/sat/glucose2/Glucose2.cpp src/sat/glucose2/Glucose2.cpp
 @@ -1093,1 +1095,2 @@
  };
 +} // namespace
+diff --git src/base/main/mainInt.h src/base/main/mainInt.h
+--- src/base/main/mainInt.h
++++ src/base/main/mainInt.h
+@@ -107,6 +107,7 @@
+     void *          pLibSuper;     // the current supergate library
+     void *          pLibScl;       // the current Liberty library
+     void *          pAbcCon;       // constraint manager
++    void *          pAbcBnd;       // per-CI/CO boundary environment for the SCL timer (SC_Bnd, caller-owned)
+     // timing constraints
+     char *          pDrivingCell;  // name of the driving cell
+     float           MaxLoad;       // maximum output load
+diff --git src/base/main/main.h src/base/main/main.h
+--- src/base/main/main.h
++++ src/base/main/main.h
+@@ -171,6 +171,8 @@
+ extern ABC_DLL float           Abc_FrameReadMaxLoad();
+ extern ABC_DLL void            Abc_FrameSetDrivingCell( char * pName );
+ extern ABC_DLL void            Abc_FrameSetMaxLoad( float Load );
++extern ABC_DLL void *          Abc_FrameReadBnd();
++extern ABC_DLL void            Abc_FrameSetBnd( void * pBnd );
+ 
+ extern ABC_DLL void            Abc_FrameSetArrayMapping( int * p );
+ extern ABC_DLL void            Abc_FrameSetBoxes( int * p );
+diff --git src/base/main/mainFrame.c src/base/main/mainFrame.c
+--- src/base/main/mainFrame.c
++++ src/base/main/mainFrame.c
+@@ -121,6 +121,8 @@
+ float       Abc_FrameReadMaxLoad()                           { return s_GlobalFrame->MaxLoad;         }      
+ void        Abc_FrameSetDrivingCell( char * pName )          { ABC_FREE(s_GlobalFrame->pDrivingCell); s_GlobalFrame->pDrivingCell   = pName; }      
+ void        Abc_FrameSetMaxLoad( float Load )                { s_GlobalFrame->MaxLoad = Load;         }      
++void *      Abc_FrameReadBnd()                               { return s_GlobalFrame->pAbcBnd;         }
++void        Abc_FrameSetBnd( void * pBnd )                   { s_GlobalFrame->pAbcBnd = pBnd;         }
+ 
+ int *       Abc_FrameReadArrayMapping( Abc_Frame_t * pAbc )  { return pAbc->pArray;                                            }
+ void        Abc_FrameSetArrayMapping( int * p )              { ABC_FREE( s_GlobalFrame->pArray ); s_GlobalFrame->pArray = p;   }      
+diff --git src/map/scl/sclSize.h src/map/scl/sclSize.h
+--- src/map/scl/sclSize.h
++++ src/map/scl/sclSize.h
+@@ -42,6 +42,20 @@
+ ///                    STRUCTURE DEFINITIONS                         ///
+ ////////////////////////////////////////////////////////////////////////
+ 
++// Per-CI/CO boundary environment of a partitioned design's region, consumed by
++// the SCL timer only (stime/upsize/dnsize and their SC_Man users); the mappers
++// never read it. Installed on the frame by the caller (Abc_FrameSetBnd), which
++// owns the vectors. Index = PI/PO position in the network's vPis/vPos (the
++// first CIs/COs); a missing or negative entry means "unconstrained".
++typedef struct SC_Bnd_          SC_Bnd;
++struct SC_Bnd_
++{
++    Vec_Flt_t *    vPoLoad;       // per PO: external load in fF added to the driver's load (<0: none)
++    Vec_Flt_t *    vPoDelay;      // per PO: virtual delay after the PO in ps -- budget minus required time (<0: none)
++    Vec_Ptr_t *    vPiCell;       // per PI: SC_Cell * of the driving cell (NULL: ideal driver)
++    Vec_Flt_t *    vPiArr;        // per PI: arrival time in ps (<0: none)
++};
++
+ typedef struct SC_Man_          SC_Man;
+ struct SC_Man_ 
+ {
+@@ -63,6 +77,9 @@
+     Vec_Flt_t *    vTimesOut;     // output arrival times
+     Vec_Que_t *    vQue;          // outputs by their time
+     SC_Cell *      pPiDrive;      // cell driving primary inputs
++    Vec_Ptr_t *    vPiDrive;      // boundary: per-CI driving cell (NULL entry: pPiDrive)
++    Vec_Flt_t *    vPiArr;        // boundary: per-CI arrival time
++    Vec_Flt_t *    vCoDelay;      // boundary: per-CO virtual downstream delay
+     // backup information
+     Vec_Flt_t *    vLoads2;       // backup storage for loads
+     Vec_Flt_t *    vLoads3;       // backup storage for loads
+@@ -127,6 +144,11 @@
+ static inline float     Abc_SclObjGetSlack( SC_Man * p, Abc_Obj_t * pObj, float D ) { return D - Abc_MaxFloat(Abc_SclObjTime(p, pObj)->rise + Abc_SclObjDept(p, pObj)->rise, Abc_SclObjTime(p, pObj)->fall + Abc_SclObjDept(p, pObj)->fall);  }
+ static inline double    Abc_SclObjSlackMax( SC_Man * p, Abc_Obj_t * pObj, float D ) { return Abc_SclObjGetSlack(p, pObj, D);                                              }
+ static inline void      Abc_SclObjDupFanin( SC_Man * p, Abc_Obj_t * pObj )          { assert( Abc_ObjIsCo(pObj) ); *Abc_SclObjTime(p, pObj) = *Abc_SclObjTime(p, Abc_ObjFanin0(pObj));  }
++static inline float     Abc_SclObjCoDelay( SC_Man * p, Abc_Obj_t * pObj )           { assert( Abc_ObjIsCo(pObj) ); return p->vCoDelay ? Vec_FltEntry( p->vCoDelay, pObj->iData ) : 0;   }
++// CO arrival = driver arrival + the boundary's virtual downstream delay (a
++// required time expressed as extra path length, so every slack/window/max-delay
++// reader of the timer sees it without knowing about boundaries).
++static inline void      Abc_SclObjTimeCo( SC_Man * p, Abc_Obj_t * pObj )            { float d = Abc_SclObjCoDelay(p, pObj); Abc_SclObjDupFanin(p, pObj); Abc_SclObjTime(p, pObj)->rise += d; Abc_SclObjTime(p, pObj)->fall += d; }
+ static inline float     Abc_SclObjInDrive( SC_Man * p, Abc_Obj_t * pObj )           { return Vec_FltEntry( p->vInDrive, pObj->iData );                                    }
+ static inline void      Abc_SclObjSetInDrive( SC_Man * p, Abc_Obj_t * pObj, float c){ Vec_FltWriteEntry( p->vInDrive, pObj->iData, c );                                   }
+ static inline void      Abc_SclManSetFaninCallBack( SC_Man * p, void * pCallBack )  { p->pFuncFanin = (float (*)(void *, Abc_Obj_t *, Abc_Obj_t *, int, int))pCallBack;   } 
+@@ -280,6 +302,9 @@
+     Vec_QueFreeP( &p->vQue );
+     Vec_FltFreeP( &p->vTimesOut );
+     Vec_IntFreeP( &p->vBestFans );
++    Vec_PtrFreeP( &p->vPiDrive );
++    Vec_FltFreeP( &p->vPiArr );
++    Vec_FltFreeP( &p->vCoDelay );
+     Vec_FltFreeP( &p->vInDrive );
+     Vec_FltFreeP( &p->vWireCaps );
+     ABC_FREE( p->pLoads );
+diff --git src/map/scl/sclSize.c src/map/scl/sclSize.c
+--- src/map/scl/sclSize.c
++++ src/map/scl/sclSize.c
+@@ -330,7 +330,14 @@
+     {
+         SC_Cell * pFanoutCell;
+         int iFanin, iOut;
+-        if ( Abc_ObjIsCo(pFanout) || Abc_ObjIsLatch(pFanout) )
++        if ( Abc_ObjIsCo(pFanout) )
++        {
++            float Delay = Abc_SclObjCoDelay( p, pFanout );
++            Abc_SclObjDept(p, pObj)->rise = Abc_MaxFloat( Abc_SclObjDept(p, pObj)->rise, Delay );
++            Abc_SclObjDept(p, pObj)->fall = Abc_MaxFloat( Abc_SclObjDept(p, pObj)->fall, Delay );
++            continue;
++        }
++        if ( Abc_ObjIsLatch(pFanout) )
+             continue;
+         pFanoutCell = Abc_SclObjCell( pFanout );
+         iFanin = Abc_NodeFindFanin( pFanout, pObj );
+@@ -349,14 +356,54 @@
+ //    float Value = Abc_MaxFloat(pLoad->fall, pLoad->rise) / (p->EstLoadAve * p->EstLoadMax);
+     return (0.5 * Abc_SclObjLoad(p, pObj)->fall + 0.5 * Abc_SclObjLoad(p, pObj)->rise) / (p->EstLoadAve * p->EstLoadMax);
+ }
++// boundary: a driving cell with any number of inputs -- the load-dependent
++// delay delta and slew of its slowest input arc (Scl_LibHandleInputDriver is
++// the one-input special case).
++static void Abc_SclHandleInputDriverAny( SC_Cell * pCell, SC_Pair * pLoadIn, SC_Pair * pArrOut, SC_Pair * pSlewOut )
++{
++    int k;
++    pArrOut->rise = pArrOut->fall = 0;
++    pSlewOut->rise = pSlewOut->fall = 0;
++    for ( k = 0; k < pCell->n_inputs; k++ )
++    {
++        SC_Pair LoadIn   = { 0.0, 0.0 };
++        SC_Pair ArrIn    = { 0.0, 0.0 };
++        SC_Pair SlewIn   = { 0.0, 0.0 };
++        SC_Pair ArrOut0  = { 0.0, 0.0 };
++        SC_Pair ArrOut1  = { 0.0, 0.0 };
++        SC_Pair SlewOut0 = { 0.0, 0.0 };
++        SC_Pair SlewOut1 = { 0.0, 0.0 };
++        SC_Timing * pTime = Scl_CellPinTime( pCell, k );
++        if ( pTime == NULL )
++            continue;
++        Scl_LibPinArrival( pTime, &ArrIn, &SlewIn, &LoadIn, &ArrOut0, &SlewOut0 );
++        Scl_LibPinArrival( pTime, &ArrIn, &SlewIn, pLoadIn, &ArrOut1, &SlewOut1 );
++        pArrOut->rise  = Abc_MaxFloat( pArrOut->rise,  ArrOut1.rise - ArrOut0.rise );
++        pArrOut->fall  = Abc_MaxFloat( pArrOut->fall,  ArrOut1.fall - ArrOut0.fall );
++        pSlewOut->rise = Abc_MaxFloat( pSlewOut->rise, SlewOut1.rise );
++        pSlewOut->fall = Abc_MaxFloat( pSlewOut->fall, SlewOut1.fall );
++    }
++}
+ static inline void Abc_SclTimeCi( SC_Man * p, Abc_Obj_t * pObj )
+ {
+-    if ( p->pPiDrive != NULL )
++    SC_Cell * pDrive = p->pPiDrive;
++    if ( p->vPiDrive != NULL && Vec_PtrEntry(p->vPiDrive, pObj->iData) != NULL )
++        pDrive = (SC_Cell *)Vec_PtrEntry( p->vPiDrive, pObj->iData );
++    if ( pDrive != NULL )
+     {
+         SC_Pair * pLoad = Abc_SclObjLoad( p, pObj );
+         SC_Pair * pTime = Abc_SclObjTime( p, pObj );
+         SC_Pair * pSlew = Abc_SclObjSlew( p, pObj );
+-        Scl_LibHandleInputDriver( p->pPiDrive, pLoad, pTime, pSlew );
++        if ( pDrive->n_inputs == 1 )
++            Scl_LibHandleInputDriver( pDrive, pLoad, pTime, pSlew );
++        else
++            Abc_SclHandleInputDriverAny( pDrive, pLoad, pTime, pSlew );
++    }
++    if ( p->vPiArr != NULL && Vec_FltEntry(p->vPiArr, pObj->iData) > 0 )
++    {
++        SC_Pair * pTime = Abc_SclObjTime( p, pObj );
++        pTime->rise += Vec_FltEntry( p->vPiArr, pObj->iData );
++        pTime->fall += Vec_FltEntry( p->vPiArr, pObj->iData );
+     }
+ }
+ void Abc_SclTimeNode( SC_Man * p, Abc_Obj_t * pObj, int fDept )
+@@ -381,7 +428,7 @@
+     {
+         if ( !fDept )
+         {
+-            Abc_SclObjDupFanin( p, pObj );
++            Abc_SclObjTimeCo( p, pObj );
+             Vec_FltWriteEntry( p->vTimesOut, pObj->iData, Abc_SclObjTimeMax(p, pObj) );
+             Vec_QueUpdate( p->vQue, pObj->iData );
+         }
+@@ -481,6 +528,17 @@
+     if ( fReverse )
+     {
+         p->nEstNodes = 0;
++        if ( p->vCoDelay )
++        {
++            // boundary: a CO with a virtual downstream delay departs that late
++            Abc_NtkForEachCo( p->pNtk, pObj, i )
++            {
++                SC_Pair * pDept = Abc_SclObjDept( p, Abc_ObjFanin0(pObj) );
++                float Delay = Abc_SclObjCoDelay( p, pObj );
++                pDept->rise = Abc_MaxFloat( pDept->rise, Delay );
++                pDept->fall = Abc_MaxFloat( pDept->fall, Delay );
++            }
++        }
+         Abc_NtkForEachNodeReverse1( p->pNtk, pObj, i )
+             Abc_SclTimeNode( p, pObj, 1 );
+     }
+@@ -551,7 +609,7 @@
+         {
+             if ( Abc_ObjIsCo(pObj) )
+             {
+-                Abc_SclObjDupFanin( p, pObj );
++                Abc_SclObjTimeCo( p, pObj );
+                 Vec_FltWriteEntry( p->vTimesOut, pObj->iData, Abc_SclObjTimeMax(p, pObj) );
+                 Vec_QueUpdate( p->vQue, pObj->iData );
+                 continue;
+@@ -677,6 +735,54 @@
+             assert( p->pPiDrive->n_inputs == 1 );
+         }
+     }
++    // boundary environment (SC_Bnd on the frame): per-PO load and virtual
++    // downstream delay, per-PI driving cell and arrival. Index = PI/PO position.
++    {
++        SC_Bnd * pBnd = (SC_Bnd *)Abc_FrameReadBnd();
++        Abc_Obj_t * pObj; int i;
++        if ( pBnd == NULL )
++            return;
++        if ( pBnd->vPoLoad )
++            Abc_NtkForEachPo( pNtk, pObj, i )
++            {
++                float Load = i < Vec_FltSize(pBnd->vPoLoad) ? Vec_FltEntry(pBnd->vPoLoad, i) : -1;
++                if ( Load >= 0 )
++                {
++                    SC_Pair * pLoad = Abc_SclObjLoad( p, pObj );
++                    pLoad->rise = pLoad->fall = Load;
++                }
++            }
++        if ( pBnd->vPoDelay )
++        {
++            p->vCoDelay = Vec_FltStart( Abc_NtkCoNum(pNtk) );
++            Abc_NtkForEachPo( pNtk, pObj, i )
++            {
++                float Delay = i < Vec_FltSize(pBnd->vPoDelay) ? Vec_FltEntry(pBnd->vPoDelay, i) : -1;
++                if ( Delay > 0 )
++                    Vec_FltWriteEntry( p->vCoDelay, pObj->iData, Delay );
++            }
++        }
++        if ( pBnd->vPiCell )
++        {
++            p->vPiDrive = Vec_PtrStart( Abc_NtkCiNum(pNtk) );
++            Abc_NtkForEachPi( pNtk, pObj, i )
++            {
++                SC_Cell * pCell = i < Vec_PtrSize(pBnd->vPiCell) ? (SC_Cell *)Vec_PtrEntry(pBnd->vPiCell, i) : NULL;
++                if ( pCell != NULL && pCell->n_inputs >= 1 && pCell->n_outputs >= 1 )
++                    Vec_PtrWriteEntry( p->vPiDrive, pObj->iData, pCell );
++            }
++        }
++        if ( pBnd->vPiArr )
++        {
++            p->vPiArr = Vec_FltStart( Abc_NtkCiNum(pNtk) );
++            Abc_NtkForEachPi( pNtk, pObj, i )
++            {
++                float Arr = i < Vec_FltSize(pBnd->vPiArr) ? Vec_FltEntry(pBnd->vPiArr, i) : -1;
++                if ( Arr > 0 )
++                    Vec_FltWriteEntry( p->vPiArr, pObj->iData, Arr );
++            }
++        }
++    }
+ }
+  
+ /**Function*************************************************************

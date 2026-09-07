@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // `lhd synth`: the one-shot synthesis flow.
 //
-//   compile -> pass.color reduce -> pass.color synth -> pass.abc -> pass.opentimer
+//   compile -> optional pass.color reduce -> pass.color synth -> pass.abc -> pass.opentimer
 //
-// over ONE in-memory design. The same five steps run by hand are
+// over ONE in-memory design. Reduction is experimental and disabled by default.
+// The steps, including optional reduction, run by hand as
 //
 //   lhd compile cpu.prp --top Cpu --emit-dir lg:L --workdir W
 //   lhd pass color reduce --top Cpu.Cpu lg:L --workdir W
@@ -132,7 +133,7 @@ void synth_command(Options& opts, Result& res) {
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
   const std::string liberty    = resolve_liberty(opts);
   const bool        run_sta    = truthy(synth_set(opts, "opentimer", "true"));
-  const bool        run_reduce = truthy(synth_set(opts, "reduce", "true"));
+  const bool        run_reduce = truthy(synth_set(opts, "reduce", "false"));
   const std::string sdc        = synth_set(opts, "sdc", "");
   const std::string spef       = synth_set(opts, "spef", "");
   {

@@ -154,9 +154,44 @@ void Pass_abc::setup() {
                        "area candidate against. Empty = untimed (logic-depth mapping, no sizing)",
                        "");
   m.add_label_optional("load", "{L} substitution in flow", "");
+  m.add_label_optional("boundary",
+                       "size every region against what lies beyond its partition boundary (true|false): a static estimate of "
+                       "the consumer pins per output bit and a stand-in driver per input while it maps, then -- once every "
+                       "region exists -- the exact driver cells and Liberty sink capacitances read off the stitched netlist, "
+                       "against which each region is re-sized in place (needs an NLDM Liberty; the exact re-size also needs "
+                       "`delay`). Buffers a region input's fanout inside the sink region (`buffer -p`)",
+                       "true");
+  m.add_label_optional("boundary_buffer",
+                       "with boundary=true, also tree a region input's fanout inside the sink region when it exceeds "
+                       "max_fanout (`buffer -p`, the same fanout rule internal nets follow); false leaves crossing inputs "
+                       "unbuffered and relies on the exact re-size to upsize the driver",
+                       "true");
+  m.add_label_optional("boundary_drive",
+                       "stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary "
+                       "input, a flop, a memory or child output, every input under the estimate): empty = the library's "
+                       "smallest buffer, `none` = an ideal zero-slew driver",
+                       "");
+  m.add_label_optional("boundary_rounds",
+                       "rounds of the exact boundary re-size: each round sizes every region under the loads and drivers as "
+                       "they stand plus the arrival/required budgets the previous round propagated across the hierarchy (a "
+                       "path through k regions needs k rounds)",
+                       "3");
+  m.add_label_optional("io_load",
+                       "load in fF on a primary output of the design (a port of --top), and on any port whose sink cannot "
+                       "be resolved; negative = one typical input pin of the library (the mean input capacitance over its "
+                       "smallest cells)",
+                       "-1");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
-  m.add_label_optional("adder", "combinational adder architecture for Sum/comparators: rca|cska|cla", "rca");
+  m.add_label_optional("ware",
+                       "try alternative implementations only on stitched critical paths; keep a lower mapped-cell depth (including "
+                       "fewer tied worst endpoints). Explicit ware selectors disable their search",
+                       "true");
+  m.add_label_optional(
+      "adder",
+      "auto|rca|cska|cla: auto starts with RCA and trials alternatives on critical paths, including inlined arithmetic",
+      "auto");
+  m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("memory_budget_mb",
                        "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
@@ -164,15 +199,16 @@ void Pass_abc::setup() {
                        "16384");
   m.add_label_optional("time_budget_ms",
                        "soft wall-time limit for one mapped color in milliseconds (0 disables); a completed "
-                       "oversize color fails with its name so color.max_ge can be reduced",
+                       "oversize color fails with its name so color.max_gate can be reduced",
                        "0");
   m.add_label_optional("allow_oversize",
                        "true|false skip memory admission and map the region regardless. It may exhaust "
                        "physical memory and be killed by the OS",
                        "false");
   m.add_label_optional("multiplier",
-                       "combinational multiplier architecture for Mult: array (partial-product adds use 'adder')",
-                       "array");
+                       "auto|array|tree: partial-product summation; auto trials a balanced tree on critical paths. An explicit "
+                       "multiplier locks its internal adder too",
+                       "auto");
   m.add_label_optional("qor",
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
                        "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
@@ -192,7 +228,7 @@ void Pass_abc::setup() {
   m.add_label_optional("region_opts",
                        "per-region option overrides as JSON keyed by color id, e.g. "
                        "'{\"1\":{\"flow\":\"strash; resyn2; &get -n; &nf {D}; &put\",\"delay\":\"2\"},\"4\":{\"adder\":\"cla\"}}'. "
-                       "Overridable per region: flow|delay|load|adder|block_size|multiplier. "
+                       "Overridable per region: flow|delay|load|adder|block_size|multiplier|barrel. "
                        "Wins over a \"region_opts\" member embedded in the graph's coloring_info (the block-attribute channel); "
                        "unknown keys or malformed values are hard errors",
                        "");
@@ -284,6 +320,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   int      tarea_won         = 0;  // regions where the area candidate replaced the delay flow's netlist
   int      tdelay_won        = 0;  // regions where the comparison ran and the delay flow stayed
   int      tdivbb            = 0;  // blackboxed div/mod cones (the score under-reports)
+  int      tboundary_bits    = 0;  // port bits that cross a partition (exact refinement)
+  int      tboundary_resized = 0;  // cells the boundary re-size changed
   uint64_t tinput_nodes      = 0;
   uint64_t tinput_ge         = 0;
   uint64_t tpred_aig         = 0;
@@ -299,17 +337,19 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (inst_of(qor[r]) > 0) {
       max_region_depth = std::max(max_region_depth, qor[r].logic_depth);
     }
-    tgates       += qor[r].gates;
-    tarea        += qor[r].area;
-    tbypassed    += qor[r].bypassed;
-    tarea_won    += qor[r].candidate == "area" ? 1 : 0;
-    tdelay_won   += qor[r].candidate == "delay" ? 1 : 0;
-    tgates_phys  += static_cast<uint64_t>(qor[r].gates) * inst_of(qor[r]);
-    tarea_phys   += qor[r].area * static_cast<double>(inst_of(qor[r]));
-    tdivbb       += qor[r].div_blackbox;
-    tinput_nodes += qor[r].input_nodes;
-    tinput_ge    += qor[r].input_ge;
-    tpred_aig     = livehd::graph_util::sat_add(tpred_aig, qor[r].pred_aig);
+    tgates            += qor[r].gates;
+    tarea             += qor[r].area;
+    tbypassed         += qor[r].bypassed;
+    tarea_won         += qor[r].candidate == "area" ? 1 : 0;
+    tdelay_won        += qor[r].candidate == "delay" ? 1 : 0;
+    tgates_phys       += static_cast<uint64_t>(qor[r].gates) * inst_of(qor[r]);
+    tarea_phys        += qor[r].area * static_cast<double>(inst_of(qor[r]));
+    tdivbb            += qor[r].div_blackbox;
+    tboundary_bits    += qor[r].boundary_bits;
+    tboundary_resized += qor[r].boundary_resized;
+    tinput_nodes      += qor[r].input_nodes;
+    tinput_ge         += qor[r].input_ge;
+    tpred_aig          = livehd::graph_util::sat_add(tpred_aig, qor[r].pred_aig);
     if (qor[r].resynth) {
       peak_rss_kb       = std::max(peak_rss_kb, qor[r].peak_rss_kb);
       color_peak_rss_kb = std::max(color_peak_rss_kb, qor[r].color_peak_rss_kb);
@@ -438,6 +478,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     // and loses" without opening every region row.
     j += std::format(",\"area_candidate_won\":{},\"delay_candidate_won\":{}", tarea_won, tdelay_won);
   }
+  if (opts.boundary) {
+    // The partition-boundary refinement's scoreboard: crossing port bits seen
+    // and cells whose drive strength it changed (0/0 when it could not run:
+    // no delay target or no NLDM Liberty).
+    j += std::format(",\"boundary\":{{\"bits\":{},\"resized\":{},\"rounds\":{}}}",
+                     tboundary_bits,
+                     tboundary_resized,
+                     opts.boundary_rounds);
+  }
   if (worst >= 0) {
     const auto& w  = qor[static_cast<size_t>(worst)];
     j             += std::format(",\"max_delay\":{:.4f},\"critical_region\":\"{}\"", w.delay, jesc(w.module));
@@ -493,6 +542,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (q.bypassed > 0) {
       j += std::format(",\"bypassed\":{}", q.bypassed);
     }
+    j += std::format(",\"ware_trials\":{},\"ware_selected\":\"{}\"", q.ware_trials, jesc(q.ware_selected));
     if (q.logic_depth >= 0) {
       j += std::format(",\"logic_depth\":{}", q.logic_depth);
     }
@@ -513,6 +563,17 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     if (q.area_flow_delay >= 0) {
       j += std::format(",\"area_flow\":{{\"delay\":{:.4f},\"area\":{:.4f}}}", q.area_flow_delay, q.area_flow_area);
+    }
+    if (q.boundary_delay_pre >= 0) {
+      // The exact-environment view of the region before the boundary
+      // re-size (its `delay`/`area` are the re-sized netlist's).
+      j += std::format(",\"boundary\":{{\"bits\":{},\"resized\":{},\"delay_pre\":{:.4f},\"area_pre\":{:.4f}}}",
+                       q.boundary_bits,
+                       q.boundary_resized,
+                       q.boundary_delay_pre,
+                       q.boundary_area_pre);
+    } else if (q.boundary_bits > 0) {
+      j += std::format(",\"boundary\":{{\"bits\":{}}}", q.boundary_bits);
     }
     if (!q.crit_output.empty()) {
       j += std::format(",\"critical_output\":\"{}\"", jesc(q.crit_output));
@@ -640,10 +701,15 @@ void Pass_abc::work(Eprp_var& var) {
   auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
   auto delay               = std::string{var.get("delay", "")};
   auto load                = std::string{var.get("load", "")};
+  bool boundary            = truthy(var.get("boundary", "true"));
+  auto boundary_drive      = std::string{var.get("boundary_drive", "")};
+  bool boundary_buffer     = truthy(var.get("boundary_buffer", "true"));
+  auto io_load_s           = std::string{var.get("io_load", "-1")};
+  auto boundary_rounds_s   = std::string{var.get("boundary_rounds", "3")};
   bool verbose             = truthy(var.get("verbose", "false"));
-  auto adder_s             = std::string{var.get("adder", "rca")};
+  auto adder_s             = std::string{var.get("adder", "auto")};
   auto bs_s                = std::string{var.get("block_size", "0")};
-  auto mult_s              = std::string{var.get("multiplier", "array")};
+  auto mult_s              = std::string{var.get("multiplier", "auto")};
   auto qor_path            = std::string{var.get("qor", "")};
   auto region_opts_s       = std::string{var.get("region_opts", "")};
   auto area_flow           = std::string{var.get("area_flow", "")};
@@ -662,14 +728,16 @@ void Pass_abc::work(Eprp_var& var) {
     region_opts = std::move(parsed.value());
   }
 
-  auto adder = livehd::abc::arith::parse_adder_kind(adder_s);
+  auto adder = livehd::abc::arith::parse_adder_kind(adder_s == "auto" ? "rca" : adder_s);
   if (!adder.has_value()) {
     livehd::diag::err("pass.abc", "bad-adder", "io").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
     return;
   }
-  auto multiplier = livehd::abc::arith::parse_mult_kind(mult_s);
+  auto multiplier = livehd::abc::arith::parse_mult_kind(mult_s == "auto" ? "array" : mult_s);
   if (!multiplier.has_value()) {
-    livehd::diag::err("pass.abc", "bad-multiplier", "io").msg("pass.abc: unknown multiplier '{}' (use array)", mult_s).fatal();
+    livehd::diag::err("pass.abc", "bad-multiplier", "io")
+        .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree)", mult_s)
+        .fatal();
     return;
   }
   int memory_budget_mb = 0;
@@ -824,8 +892,39 @@ void Pass_abc::work(Eprp_var& var) {
     }
   }
 
+  float io_load = -1.0f;
+  {
+    char*       end = nullptr;
+    const float v   = std::strtof(io_load_s.c_str(), &end);
+    if (io_load_s.empty() || end == io_load_s.c_str() || *end != '\0') {
+      livehd::diag::err("pass.abc", "bad-io-load", "io")
+          .msg("pass.abc: io_load must be a number in fF, got '{}'", io_load_s)
+          .fatal();
+      return;
+    }
+    io_load = v;
+  }
+
+  int boundary_rounds = 3;
+  {
+    auto* b      = boundary_rounds_s.data();
+    auto* e      = boundary_rounds_s.data() + boundary_rounds_s.size();
+    auto [p, ec] = std::from_chars(b, e, boundary_rounds);
+    if (ec != std::errc{} || p != e || boundary_rounds < 1 || boundary_rounds > 64) {
+      livehd::diag::err("pass.abc", "bad-boundary-rounds", "io")
+          .msg("pass.abc: boundary_rounds must be an integer in [1, 64], got '{}'", boundary_rounds_s)
+          .fatal();
+      return;
+    }
+  }
+
   livehd::abc::Map_options opts;
   opts.flow              = flow;
+  opts.boundary          = boundary;
+  opts.boundary_buffer   = boundary_buffer;
+  opts.boundary_rounds   = boundary_rounds;
+  opts.boundary_drive    = boundary_drive;
+  opts.io_load           = io_load;
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
   opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow         = area_flow;
@@ -843,11 +942,21 @@ void Pass_abc::work(Eprp_var& var) {
   opts.load              = load;
   opts.verbose           = verbose;
   opts.adder             = adder.value();
-  opts.block_size        = block_size;
-  opts.multiplier        = multiplier.value();
-  opts.memory_budget_mb  = memory_budget_mb;
-  opts.time_budget_ms    = time_budget_ms;
-  opts.allow_oversize    = allow_oversize;
+  opts.ware              = truthy(var.get("ware", "true"));
+  opts.auto_adder        = adder_s == "auto" && block_size == 0;
+  opts.auto_multiplier   = mult_s == "auto";
+  auto barrel            = std::string{var.get("barrel", "auto")};
+  if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
+    livehd::diag::err("pass.abc", "bad-barrel", "io").msg("barrel must be auto|log|reverse").fatal();
+    return;
+  }
+  opts.auto_barrel      = barrel == "auto";
+  opts.reverse_barrel   = barrel == "reverse";
+  opts.block_size       = block_size;
+  opts.multiplier       = multiplier.value();
+  opts.memory_budget_mb = memory_budget_mb;
+  opts.time_budget_ms   = time_budget_ms;
+  opts.allow_oversize   = allow_oversize;
   if (allow_oversize) {
     // Loud on purpose: this is the flag that lets a run take the machine down,
     // so it must be visible in the log of whatever ran afterwards.
@@ -1013,7 +1122,30 @@ void Pass_abc::work(Eprp_var& var) {
       flatten,
       /*want_pre_bodies=*/mapper.incremental());
 
-  mapper.stop();  // no-op for an all-hit incremental run
+  // Partition-boundary refinement (abc_boundary.cpp): every region re-sized
+  // against the exact loads and drivers beyond its ports. Skipped after a
+  // refusal (the frame is about to be torn down with a fatal), and on an
+  // ALL-HIT incremental run: every region identical to its cached body means
+  // the whole design -- hence every boundary environment -- is the one the
+  // cache was written under, and the cached bodies are the refined ones
+  // (save() runs after this), so ABC need not start at all.
+  const bool all_hit = incr && incr->misses() == 0 && incr->hits() > 0;
+  if (mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr && !all_hit) {
+    mapper.refine_boundaries(outlib, top);
+  }
+  if (incr) {
+    // Persist before reporting: a crash between the two loses a line of text,
+    // not the snapshot work. save() is a no-op when nothing was stored. The
+    // bodies it copies out of the output library are the REFINED ones, and
+    // refine_boundaries refreshed their rows' area/delay to match.
+    incr->save();
+  }
+  // Cache the independent baseline, never a context-selected winner: a later
+  // edit elsewhere can change criticality without changing this region's key.
+  if (mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr) {
+    mapper.optimize_ware(outlib, top);
+  }
+  mapper.stop();  // no-op when neither mapping nor ware trials need ABC
 
   // Instantiation counts from the netlist that was just emitted (see Abc_hier).
   Abc_hier hier;
@@ -1042,11 +1174,11 @@ void Pass_abc::work(Eprp_var& var) {
   if (const auto* refusal = mapper.admission_refusal()) {
     livehd::diag::err("pass.abc", "memory-oversize", "unsupported")
         .msg("{}", *refusal)
-        .hint(std::format("re-color into SMALLER regions with a tighter size window, then check them first: "
-                          "`lhd pass color synth --top {} lg:... --set color.max_ge=<smaller> --stats` "
-                          "(the region-splitting ceiling; lower it until the region fits). Under "
-                          "`--set color.synth_alg=cones` the knob is `color.max_gate` instead -- max_ge does not "
-                          "shape a cones coloring",
+        .hint(std::format("re-color into SMALLER regions with a tighter threshold, then check them first: "
+                          "`lhd pass color synth --top {} lg:... --set color.max_gate=<smaller> --stats` "
+                          "(lower it until the region fits). max_gate is the knob for the DEFAULT `cones` "
+                          "coloring; under `--set color.synth_alg=synth|pipe` the size window "
+                          "`color.max_ge` is what splits a region instead",
                           top))
         .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
         .hint(
@@ -1056,9 +1188,6 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   if (incr) {
-    // Persist before reporting: a crash between the two loses a line of text,
-    // not the snapshot work. save() is a no-op when nothing was stored.
-    incr->save();
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
@@ -1067,8 +1196,8 @@ void Pass_abc::work(Eprp_var& var) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)
         .hint(std::format("re-color into more, smaller regions: `lhd pass color synth --top {} lg:... "
-                          "--set color.max_ge=<smaller>` (or `--set color.max_gate=<smaller>` when the coloring used "
-                          "synth_alg=cones); full/cold may take longer, warm runs should reuse the extra colors",
+                          "--set color.max_gate=<smaller>` (or `--set color.max_ge=<smaller>` when the coloring used "
+                          "synth_alg=synth|pipe); full/cold may take longer, warm runs should reuse the extra colors",
                           top))
         .fatal();
   }

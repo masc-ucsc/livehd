@@ -75,7 +75,7 @@ compile_and_color() {  # $1 = lg dir tag
 abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
   # (<workdir>/abc_cache), on by default (lhd.incremental).
-  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" \
+  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" --set abc.ware=false \
       --workdir "$W/wabc" --stats
 }
 
@@ -93,19 +93,29 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
   echo "PASS: $3 is LEC-equivalent"
 }
 
+# Ware selection is independently tested in lhd_ware_test. This test pins
+# the baseline region cache without context-dependent re-mapping.
+#
+# EIGHT regions: the shipped `cones` coloring opens one per register cone, and
+# absorb=false keeps the three defs apart -- `dut.delayer` (1),
+# `dut.stage_unit__c1..c4`, `dut.top__c1/c2/c4` (color ids are first-wins and may
+# skip). What this test is actually about is the hit/miss split, so the numbers
+# below move whenever the coloring changes; the invariants are cold = all miss,
+# warm = all hit, and a one-def edit = exactly ONE miss.
+
 # --- 1. cold run: every region misses and is stored --------------------------
 compile_and_color lg0
 abc_incr lg0 net0
-expect_incr 0 3 "cold run"
-expect_resynth 3 3 "cold run"
+expect_incr 0 8 "cold run"
+expect_resynth 8 8 "cold run"
 [ "$(incr_field abc_started)" = 1 ] || fail "cold run did not start ABC"
 [ -f "$W/wabc/abc_cache/abc_cache.json" ] || fail "cache metadata not persisted under <workdir>/abc_cache"
 lec_gate net0 lg0 "cold mapping"
 
 # --- 2. NoChange: same design, fresh out dir => all hits, zero ABC ----------
 abc_incr lg0 net1
-expect_incr 3 0 "NoChange re-run"
-expect_resynth 3 0 "NoChange re-run"
+expect_incr 8 0 "NoChange re-run"
+expect_resynth 8 0 "NoChange re-run"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit run still started ABC/read Liberty"
 run compile lg:"$W/net1" --top "$TOP" --emit-dir verilog:"$W/net1v" --workdir "$W/w_nv1"
 diff -r "$W/net0v" "$W/net1v" >/dev/null || fail "warm clone differs from the cold mapping"
@@ -113,12 +123,12 @@ echo "PASS: NoChange run is all hits and byte-identical Verilog"
 
 # Pretty rendering is one physical line per color and carries the same
 # resynthesis decision as the JSON rows. This additional all-hit run is cheap.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" \
+"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" --set abc.ware=false \
     --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
     || fail "pretty stats run failed"
-[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 3 ] \
+[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 8 ] \
   || fail "pretty stats did not print exactly one line per color: $(cat "$W/pretty.out")"
-[ "$(grep -c 'resynth=0$' "$W/pretty.out")" = 3 ] \
+[ "$(grep -c 'resynth=0$' "$W/pretty.out")" = 8 ] \
   || fail "pretty all-hit rows did not all say resynth=0: $(cat "$W/pretty.out")"
 
 # --- 3. edit ONE def (top's combiner); children must still hit ---------------
@@ -127,28 +137,28 @@ sed 's/o = a + b/o = a + b + 1/' "$FIX" > "$W/dut.prp"
 grep -q "o = a + b + 1" "$W/dut.prp" || fail "edit did not apply"
 compile_and_color lg1
 abc_incr lg1 net2
-expect_incr 2 1 "top-only edit"
-expect_resynth 3 1 "top-only edit"
+expect_incr 7 1 "top-only edit"
+expect_resynth 8 1 "top-only edit"
 [ "$(incr_field abc_started)" = 1 ] || fail "one-miss edit did not start ABC"
-lec_gate net2 lg1 "edited design (2 cached + 1 fresh region)"
+lec_gate net2 lg1 "edited design (7 cached + 1 fresh region)"
 
 # --- 4. the edited design is now cached too ----------------------------------
 abc_incr lg1 net3
-expect_incr 3 0 "NoChange after the edit"
-expect_resynth 3 0 "NoChange after the edit"
+expect_incr 8 0 "NoChange after the edit"
+expect_resynth 8 0 "NoChange after the edit"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit edited run still started ABC/read Liberty"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
 # lhd.incremental=false: no cache is touched and the envelope carries no counters.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" \
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" --set abc.ware=false \
     --set lhd.incremental=false --workdir "$W/wabc" --stats
 [ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
-expect_resynth 3 3 "cache-disabled full run"
+expect_resynth 8 8 "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --stats
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --set abc.ware=false --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
-expect_resynth 3 3 "no-workdir full run"
+expect_resynth 8 8 "no-workdir full run"
 echo "PASS: lhd.incremental=false and no-workdir both disable cleanly"
 
 echo "PASS: all incremental pass.abc flows"

@@ -81,3 +81,14 @@ TEST(AbcMap, NativeBoundarySchedulesReverseOrderedSliceConsumers) {
   }
   EXPECT_EQ(drivers, 1);
 }
+
+TEST(AbcMap, WareAcceptsOnlyCriticalPathImprovements) {
+  using livehd::abc::ware_depth_better;
+  EXPECT_TRUE(ware_depth_better({100, 80}, {90, 85}));
+  EXPECT_TRUE(ware_depth_better({100, 100, 80}, {100, 90, 80}));
+  EXPECT_FALSE(ware_depth_better({100, 80}, {100, 70}));  // only a noncritical output improved
+  EXPECT_FALSE(ware_depth_better({100, 80}, {101, 70}));
+  EXPECT_FALSE(ware_depth_better({100, 80}, {100, 80}));
+  EXPECT_FALSE(ware_depth_better({100, 80}, {70}));  // losing an endpoint is not an optimization
+  EXPECT_FALSE(ware_depth_better({}, {}));
+}

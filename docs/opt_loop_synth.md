@@ -335,10 +335,10 @@ today, for the record:
 | `pass.abc.block_size` | `0` (auto) | `pass_abc.cpp:74` |
 | `pass.abc.multiplier` | `array` (only kind implemented) | `abc_map.hpp:44` |
 | `pass.abc.register` / `memory` | `true` / `true` (memories bit-blast to DFF cells up to `memory_max_bits`, default 65536) | `pass_abc.cpp` |
-| `pass.color.synth_alg` | `synth` (`pipe` \| `synth` \| `cones`) | `pass_color.cpp:56` |
-| `pass.color.min_ge` | `1000` GE | `pass_color.cpp:65` |
-| `pass.color.max_ge` | `25_000` synthesis GE (16 GiB / 15-min per-color calibration) | `pass_color.cpp:89` |
-| `pass.color.max_gate` | `30_000` PREDICTED AIG (`synth_alg=cones` only) | `pass_color.cpp:102` |
+| `pass.color.synth_alg` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp:56` |
+| `pass.color.min_ge` | `500` GE (still shapes `absorb` under `cones`) | `pass_color.cpp:66` |
+| `pass.color.max_ge` | `5000` synthesis GE (`synth_alg=synth` \| `pipe` only) | `pass_color.cpp:74` |
+| `pass.color.max_gate` | `5000` PREDICTED AIG (`synth_alg=cones` -- the shipped default) | `pass_color.cpp:91` |
 | `pass.color.absorb` | `true` | `pass_color.cpp:107` |
 | `pass.color.name_weight` | `4` | `pass_color.cpp:112` |
 
@@ -432,8 +432,8 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
   runtime correlates with mapped gates at r≈0.9 and with GE at only r≈0.31.
   Every `pass.abc` run now records both estimates per region (`input_ge` and
   `pred_aig` in `qor.json`, next to the mapped `gates`), so the predictor can be
-  recalibrated from any production run. Both algorithms are kept; `synth` stays
-  the default until the A/B says otherwise.
+  recalibrated from any production run. All three algorithms are kept; `cones`
+  is now the shipped default, so the A/B leg to run is `synth_alg=synth`.
 
   A/B recipe (from `../lhdsuite`, same sitting, same `-c opt` build; the
   `_incremental` targets are the ones that carry both a cold `full` leg and the

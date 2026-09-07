@@ -46,7 +46,12 @@ run pass opentimer --top "${TOP}" lg:"$W/net" "$LIB" --workdir "$W/wt"
 [ -f "$W/wt/timing.json" ] || fail "no timing.json under --workdir"
 grep -q '"kind":"sta"' "$W/wt/timing.json" || fail "timing.json missing kind:sta"
 grep -q '"max_delay":' "$W/wt/timing.json" || fail "timing.json missing max_delay"
-grep -q '"critical_pin":"g[0-9]*_[A-Za-z0-9_]*__n[0-9]*:' "$W/wt/timing.json" || fail "timing.json missing a gate critical_pin"
+# The critical pin is a mapped GATE pin, not a port. `<inst>.` prefix optional:
+# the mapped netlist is hierarchical whenever the coloring opens more than one
+# region in the def (the shipped `cones` default routinely does), and the pin
+# then reads `sub_16.g76_NAND2x1__n188:Y`.
+grep -q '"critical_pin":"\([A-Za-z0-9_.]*\.\)\{0,1\}g[0-9]*_[A-Za-z0-9_]*__n[0-9]*:' "$W/wt/timing.json" \
+  || fail "timing.json missing a gate critical_pin"
 grep -q '"critical_src":"[^"]*abc_comb.prp:[0-9]*"' "$W/wt/timing.json" || fail "critical path not source-attributed"
 grep -q '"endpoints":\[{' "$W/wt/timing.json" || fail "timing.json missing endpoints"
 grep -q '"qor":{"schema_version":1,"kind":"sta"' "$W/r.json" || fail "envelope missing the qor member"
@@ -126,7 +131,12 @@ pub mod ot_cross_region(a:s8, b:s8) -> (y:s8@[0]) {
 EOF
 XTOP=ot_cross_region.ot_cross_region
 run compile "$XPRP" --top ot_cross_region --emit-dir lg:"$W/xlg" --workdir "$W/xw1"
-run pass color synth --top "$XTOP" lg:"$W/xlg" --set color.max_ge=1 --set color.min_ge=0 --workdir "$W/xw2"
+# synth_alg=synth, not the shipped `cones` default: this case needs the design
+# SPLIT in two, and the GE size window (max_ge) is what forces that. max_ge does
+# not shape a cones coloring at all -- cones seeds per register cone, and this
+# fixture is purely combinational, so it would stay one region.
+run pass color synth --top "$XTOP" lg:"$W/xlg" --set color.synth_alg=synth \
+    --set color.max_ge=1 --set color.min_ge=0 --workdir "$W/xw2"
 run pass abc --top "$XTOP" lg:"$W/xlg" --emit-dir lg:"$W/xnet" --set synth.liberty="$LIB" --workdir "$W/xw3"
 grep -q '"regions":2' "$W/r.json" || fail "cross-region fixture did not split into two mapped regions"
 "$LHD" pass opentimer --top "$XTOP" lg:"$W/xnet" "$LIB" --workdir "$W/xwt" \

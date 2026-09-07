@@ -550,6 +550,17 @@ bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compa
   return true;
 }
 
+void Incr_cache::refresh_qor(std::string_view module, const Region_qor& q) {
+  auto it = rows_.find(std::string{module});
+  if (it == rows_.end() || !it->second.in_outlib) {
+    return;
+  }
+  it->second.area  = q.area;
+  it->second.delay = q.delay;
+  it->second.gates = q.gates;
+  dirty_           = true;
+}
+
 void Incr_cache::save() {
   if (!dirty_) {
     return;

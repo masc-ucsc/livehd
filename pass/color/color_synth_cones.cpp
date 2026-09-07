@@ -60,17 +60,15 @@ using livehd::graph_util::type_op_of;
 // this is the storage slot itself -- the tightest key available and the reason
 // every array below can be a plain vector instead of a hash map. Builtins
 // (INPUT_NODE / OUTPUT_NODE / CONST_NODE) occupy 0..3; user nodes start at 4.
-[[nodiscard]] inline uint32_t idx_of(const hhds::Node_class& n) {
-  return static_cast<uint32_t>(n.get_debug_nid() >> 2);
-}
+[[nodiscard]] inline uint32_t idx_of(const hhds::Node_class& n) { return static_cast<uint32_t>(n.get_debug_nid() >> 2); }
 
-constexpr uint8_t kPresent      = 1;    // a live node of this def's body
-constexpr uint8_t kPart         = 2;    // is_partitionable
-constexpr uint8_t kSeeded       = 4;    // a source-seeded (block-attr) node: a wall
-constexpr uint8_t kLoopBreak    = 8;    // flop / memory / latch / stateful sub
-constexpr uint8_t kArithCut     = 16;   // Mult/Div, Sum wider than 8: its own color
-constexpr uint8_t kConstMaskGet = 32;   // Get_mask with a CONSTANT mask
-constexpr uint8_t kRuntimeSra   = 64;   // SRA with a runtime amount (barrel)
+constexpr uint8_t kPresent      = 1;   // a live node of this def's body
+constexpr uint8_t kPart         = 2;   // is_partitionable
+constexpr uint8_t kSeeded       = 4;   // a source-seeded (block-attr) node: a wall
+constexpr uint8_t kLoopBreak    = 8;   // flop / memory / latch / stateful sub
+constexpr uint8_t kArithCut     = 16;  // Mult/Div, Sum wider than 8: its own color
+constexpr uint8_t kConstMaskGet = 32;  // Get_mask with a CONSTANT mask
+constexpr uint8_t kRuntimeSra   = 64;  // SRA with a runtime amount (barrel)
 
 // The register / memory sink pids this file decodes, spelled ONCE. Not asked of
 // Ntype::get_sink_pid: that lookup's fast path derives the pid from the leading
@@ -79,13 +77,13 @@ constexpr uint8_t kRuntimeSra   = 64;   // SRA with a runtime amount (barrel)
 // debug assert instead of returning invalid (the same reason
 // graph/predict_abc_size.hpp's `ctrl_pids` spells them out). Keep the two in
 // lockstep with graph/cell.cpp.
-constexpr uint32_t kPidDin    = 3;  // Flop/Latch/Fflop din, and a Memory port's din
-constexpr uint32_t kPidEnable = 4;  // Flop/Latch enable, and a Memory port's enable (Fflop has none)
-constexpr uint32_t kPidAddr   = 0;  // a Memory port's addr
+constexpr uint32_t kPidDin      = 3;  // Flop/Latch/Fflop din, and a Memory port's din
+constexpr uint32_t kPidEnable   = 4;  // Flop/Latch enable, and a Memory port's enable (Fflop has none)
+constexpr uint32_t kPidAddr     = 0;  // a Memory port's addr
 // Memory whole-array write: `update` / `update_enable`, offsets inside one
 // Memory_port_stride block rather than a per-port pin.
-constexpr uint32_t kPidUpdate    = 12;
-constexpr uint32_t kPidUpdateEn  = 13;
+constexpr uint32_t kPidUpdate   = 12;
+constexpr uint32_t kPidUpdateEn = 13;
 
 [[nodiscard]] constexpr bool is_mem_port_off(uint32_t off) { return off == kPidAddr || off == kPidDin || off == kPidEnable; }
 [[nodiscard]] constexpr bool is_mem_whole_array_off(uint32_t off) { return off == kPidUpdate || off == kPidUpdateEn; }
@@ -270,7 +268,6 @@ struct Cones {
     }
     return false;
   }
-
 
   [[nodiscard]] bool has_unowned_consumer(uint32_t n) const {
     for (uint32_t k = fout_start[n]; k < fout_start[n] + fout_cnt[n]; ++k) {
@@ -658,7 +655,7 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
       if (tt == survivor) {
         continue;  // an earlier target in this same candidate already absorbed it
       }
-      const int a = survivor;  // capture BEFORE merge: rg.merge picks the survivor
+      const int      a      = survivor;  // capture BEFORE merge: rg.merge picks the survivor
       // Two LOOKUPS, never two `operator[]`s inside one expression: `chain[a]`
       // and `chain[tt]` both INSERT, the operands of `+` are unsequenced, and a
       // rehash from the second call dangles the reference the first returned.
@@ -919,6 +916,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   o.continuous = false;
   // The GE size window does not shape cones: min_ge/max_ge keep their meaning
   // for absorb and for the `synth` algorithm, and max_gate replaces them here.
+  preserve_arith_cuts();
   const int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
 
   // Predicted size per WRITTEN color, for the --stats threshold summary. Read

@@ -73,8 +73,16 @@ fail() {
 metric() {  # metric <name> <json>: first "<name>":<number> in the file (the qor `total` block comes first)
   grep -o "\"$1\":[0-9]*" "$2" | head -1 | cut -d: -f2
 }
-cells() {  # cells <netlist.v>: standard-cell instance lines (one per instantiated Liberty cell)
-  grep -c "^\s*\(NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1\) " "$1"
+# Cell counts are taken over the WHOLE emitted netlist directory, never one
+# file: a region module (`<def>__c<id>.v`) is where the cells land as soon as the
+# coloring opens more than one region in a def, which the shipped `cones` default
+# routinely does. What the guards below are about is the mapped design, not which
+# file a cell was written to.
+cells() {  # cells <netlist-dir>: standard-cell instance lines (one per instantiated Liberty cell)
+  cat "$1"/*.v | grep -c "^\s*\(NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1\) "
+}
+dffs() {  # dffs <netlist-dir>: storage DFF cell instances
+  cat "$1"/*.v | grep -c "^\s*DFFx1 "
 }
 
 # map_design <dir> <src> <top> <slang -G...> [extra pass.abc --set ...]: compile
@@ -135,7 +143,7 @@ D="$W/tile32"
 map_design "$D" "$TILE" memtile -GN=32
 ! grep -q '"code":"memory-unlowered"' "$D/diag.jsonl" || fail "tile32: memory was NOT bit-blasted: $(grep memory-unlowered "$D/diag.jsonl")"
 ! grep -hq "cgen_memory\|_data\b" "$D/netv/"*.v || fail "tile32: a native memory instance survived memory=true"
-dff=$(grep -c "^\s*DFFx1 " "$D/netv/memtile.v")
+dff=$(dffs "$D/netv")
 [ "$dff" -eq 256 ] || fail "tile32: expected 256 storage DFF cells (32 x 8), got $dff"
 bits=256
 nodes=$(metric input_nodes "$D/abc.json")
@@ -145,7 +153,7 @@ gates=$(metric gates "$D/abc.json")
   || fail "tile32: $nodes ABC input nodes for $bits storage bits (> 2/bit): the per-(entry,port) fold grew back"
 [ "$gates" -le $((12 * bits)) ] \
   || fail "tile32: $gates mapped cells for $bits storage bits (> 12/bit): write path is no longer one mux per lane"
-ncells=$(cells "$D/netv/memtile.v")
+ncells=$(cells "$D/netv")
 [ "$ncells" -eq "$gates" ] || fail "tile32: netlist has $ncells cell instances but abc reported $gates gates"
 echo "PASS: 32x8 constant-index tile bit-blasts to $dff DFFs + $gates cells from $nodes ABC input nodes"
 
@@ -165,7 +173,7 @@ D="$W/memall"
 map_design "$D" "$MEMALL" memall ""
 ! grep -q '"code":"memory-unlowered"' "$D/diag.jsonl" || fail "memall: read_all memory was NOT bit-blasted: $(grep memory-unlowered "$D/diag.jsonl")"
 ! grep -hq "cgen_memory\|_data\b" "$D/netv/"*.v || fail "memall: a native array survived memory=true"
-dff=$(grep -c "^\s*DFFx1 " "$D/netv/memall.v")
+dff=$(dffs "$D/netv")
 [ "$dff" -eq 28 ] || fail "memall: expected 28 storage DFF cells (4 x 7), got $dff"
 # cvc5 bound 3: a 3-cycle bounded proof from reset already covers a write
 # followed by the whole-array read (0.2 s); the default bound 6 spends ~2 min on
@@ -206,8 +214,8 @@ endmodule
 EOF
 D="$W/eqt"
 map_design "$D" "$W/eqt.sv" eqt ""
-[ "$(cells "$D/netv/eqt.v")" -eq 0 ] || fail "eqt: a compare against a constant wider than its operand mapped to logic: $(grep -c '' "$D/netv/eqt.v") lines"
-[ "$(grep -c "_const0_ " "$D/netv/eqt.v")" -eq 2 ] || fail "eqt: expected both outputs driven by constant 0: $(cat "$D/netv/eqt.v")"
+[ "$(cells "$D/netv")" -eq 0 ] || fail "eqt: a compare against a constant wider than its operand mapped to logic: $(cat "$D/netv/"*.v)"
+[ "$(cat "$D/netv/"*.v | grep -c "_const0_ ")" -eq 2 ] || fail "eqt: expected both outputs driven by constant 0: $(cat "$D/netv/"*.v)"
 echo "PASS: x[3:0] == 8'd100 maps to constant 0"
 
 echo "PASS: pass.abc memory bit-blast (constant-address tile, read_all, memory_max_bits, const EQ)"

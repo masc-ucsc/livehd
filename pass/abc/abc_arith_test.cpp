@@ -303,3 +303,31 @@ TEST(abc_arith, eq_nary) {
   EXPECT_NE(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(7, 8)}), 0);  // n-ary all equal
   EXPECT_EQ(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(8, 8)}), 0);  // one differs
 }
+
+TEST(abc_arith, reverse_barrel_and_tree_multiplier) {
+  ByteOps ops;
+  for (int w : {1, 3, 4, 7, 8}) {
+    const uint64_t mask = (uint64_t{1} << w) - 1;
+    for (uint64_t a = 0; a <= mask; ++a) {
+      for (int sh = 0; sh < 32; ++sh) {
+        const auto amount = to_bits(sh, 5);
+        EXPECT_EQ(from_bits(build_shl(ops, to_bits(a, w), amount, w, true)), (a << sh) & mask);
+        for (int prefix = 0; prefix <= w; ++prefix) {
+          const auto pmask = (uint64_t{1} << prefix) - 1;
+          for (B fill : {B{0}, B{1}}) {
+            auto expected = sh >= w ? (fill ? mask : 0) : ((a >> sh) | (fill ? (mask ^ (mask >> sh)) : 0));
+            EXPECT_EQ(from_bits(build_shr_prefix(ops, to_bits(a, w), amount, fill, prefix, true)), expected & pmask);
+          }
+        }
+      }
+    }
+  }
+  for (int w : {1, 3, 5, 8}) {
+    const uint64_t mask = (uint64_t{1} << w) - 1;
+    for (uint64_t a = 0; a <= mask; ++a) {
+      for (uint64_t b = 0; b <= mask; ++b) {
+        EXPECT_EQ(from_bits(build_mul(Mult_kind::tree, Adder_kind::rca, 2, ops, to_bits(a, w), to_bits(b, w), w)), (a * b) & mask);
+      }
+    }
+  }
+}

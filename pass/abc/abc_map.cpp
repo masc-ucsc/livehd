@@ -32,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "abc_boundary.hpp"
 #include "abc_incr.hpp"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
@@ -117,7 +118,10 @@ constexpr std::string_view kCombFlow
 // margin when the region holds flops; empty without a target, so the tail
 // degrades to a bare `dnsize`): `dnsize -D` lets the down-sizing consume the
 // slack up to the budget instead of preserving the delay it started from.
-constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize {B}";
+// `{P}` is ` -p` under `boundary` (buffer a PI's fanout inside the sink region:
+// the sink side of buffering a crossing net as a whole; the driver side is the
+// PO load the boundary table hands the timer) and empty otherwise.
+constexpr std::string_view kBufferTail = "; buffer -N {F}{P}; dnsize {B}";
 
 // Bound SAT work in the area objective, as in the timing flow. Unbounded
 // FRAIG conflicts dominated small regions of beamformer/CPU/KOIOS designs.
@@ -127,7 +131,7 @@ constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize {B}";
 // that budget with less SCL area. The timing result wins every tie.
 constexpr std::string_view kAreaFlow
     = "strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o";
-constexpr std::string_view kAreaTail = "; buffer -N {F}; upsize {B}; dnsize {B}";
+constexpr std::string_view kAreaTail = "; buffer -N {F}{P}; upsize {B}; dnsize {B}";
 
 // The MAPPER step of both built-in flows, spelled once so map_region's
 // area-recovery pass can replay exactly it -- and nothing else -- after `&undo`.
@@ -176,6 +180,7 @@ static_assert(kCombFlow.find(kMapCmd) != std::string_view::npos);
 // register overhead.
 static_assert(kBufferTail.find("{B}") != std::string_view::npos && kBufferTail.find("{D}") == std::string_view::npos);
 static_assert(kAreaTail.find("{B}") != std::string_view::npos && kAreaTail.find("{D}") == std::string_view::npos);
+static_assert(kBufferTail.find("{P}") != std::string_view::npos && kAreaTail.find("{P}") != std::string_view::npos);
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -354,7 +359,10 @@ std::string Mapper::subst_flow(std::string f) const {
   // {B} is the region budget, already spelled as a flag (`-D <ps>`) or empty.
   f = subst(std::move(f), "{B}", budget_flag_);
   // {F} is the bare fanout NUMBER (buffer's -N takes it), not a flag.
-  return subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
+  f = subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
+  // {P}: buffer primary inputs too (the sink side of a crossing net) under
+  // `boundary`; spelled here so the recipe string carries the decision.
+  return subst(std::move(f), "{P}", opts_.boundary && opts_.boundary_buffer ? " -p" : "");
 }
 
 std::string Mapper::comb_flow() const {
@@ -456,7 +464,7 @@ std::string Mapper::resolve_recipe() const {
   // flop-less region still reads as a different recipe).
   return std::format(
       "native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}|genlib=unit|area={}|margin={}|"
-      "objective=budget",
+      "objective=budget|barrel={}",
       comb_flow(),
       seq_flow(),
       static_cast<int>(opts_.adder),
@@ -465,7 +473,8 @@ std::string Mapper::resolve_recipe() const {
       nldm_requested() ? 1 : 0,
       opts_.area_relax_pct,
       opts_.area_flow == "none" ? std::string{"none"} : area_flow(),
-      reg_margin_ps());
+      reg_margin_ps(),
+      opts_.reverse_barrel);
 }
 
 void Mapper::ensure_dff_cells() {
@@ -590,6 +599,7 @@ bool Mapper::start() {
     Abc_SclLibFree(scl);
     frame->pLibScl = nullptr;
   }
+  resolve_boundary_defaults();
 
   ensure_dff_cells();
   if (startup_opts_.map_register) {
@@ -611,7 +621,8 @@ bool Mapper::start() {
           dff_->clk_to_q_ps,
           dff_->setup_ps,
           startup_opts_.reg_margin,
-          reg_margin_ps());
+          reg_margin_ps(),
+          opts_.reverse_barrel);
     }
     if (!dff_.has_value()) {
       livehd::diag::warn("pass.abc", "no-dff-cell", "unsupported")
@@ -632,6 +643,8 @@ void Mapper::stop() {
     // (`lib_loaded_` deliberately survives -- work() reads abc_started() AFTER
     // stop() to report whether ABC ran at all.)
     scl_timing_ok_ = false;
+    scl_lib_ok_    = false;
+    drive_cell_    = nullptr;  // an SC_Cell of the library the frame just freed
 #if defined(__APPLE__)
     // Abc_Stop releases the frame's last networks to malloc, but Darwin may
     // retain those pages and their xzone reservations. A large final color can
@@ -683,13 +696,22 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
         return bad(std::format("unknown adder '{}' (use rca|cska|cla)", val.GetString()));
       }
       ro.adder = a.value();
+    } else if (key == "barrel") {
+      if (!val.IsString() || (std::string_view(val.GetString()) != "log" && std::string_view(val.GetString()) != "reverse")) {
+        return bad("barrel must be log|reverse");
+      }
+      ro.reverse_barrel = std::string_view(val.GetString()) == "reverse";
     } else if (key == "multiplier") {
       if (!val.IsString()) {
-        return bad("'multiplier' must be a string (array)");
+        return bad("'multiplier' must be a string (array|tree)");
       }
       auto m = arith::parse_mult_kind({val.GetString(), val.GetStringLength()});
       if (!m.has_value()) {
-        return bad(std::format("unknown multiplier '{}' (use array)", val.GetString()));
+        // No `auto` here, unlike the pass option: a region override IS the
+        // explicit pick (leaving the key out is what keeps the search on), and
+        // parse_mult_kind rejects the spelling -- advertising it made the
+        // message name a value this very call refuses.
+        return bad(std::format("unknown multiplier '{}' (use array|tree)", val.GetString()));
       }
       ro.multiplier = m.value();
     } else if (key == "block_size") {
@@ -698,7 +720,7 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
       }
       ro.block_size = val.GetInt();
     } else {
-      return bad(std::format("unknown option '{}' (use flow|delay|load|adder|block_size|multiplier)", key));
+      return bad(std::format("unknown option '{}' (use flow|delay|load|adder|block_size|multiplier|barrel)", key));
     }
   }
   return true;
@@ -764,13 +786,21 @@ bool Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
       opts_.load = *ro.load;
     }
     if (ro.adder.has_value()) {
-      opts_.adder = *ro.adder;
+      opts_.adder      = *ro.adder;
+      opts_.auto_adder = false;
     }
     if (ro.block_size.has_value()) {
       opts_.block_size = *ro.block_size;
+      opts_.auto_adder = false;
+    }
+    if (ro.reverse_barrel.has_value()) {
+      opts_.reverse_barrel = *ro.reverse_barrel;
+      opts_.auto_barrel    = false;
     }
     if (ro.multiplier.has_value()) {
-      opts_.multiplier = *ro.multiplier;
+      opts_.multiplier      = *ro.multiplier;
+      opts_.auto_multiplier = false;
+      opts_.auto_adder      = false;
     }
     std::print("[pass.abc] region '{}': color {} options override applied ({})\n", rb.module_name, rb.color, src);
   };
@@ -1077,7 +1107,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                                    mib(cost::physical_ram_bytes()),
                                                    mib(cost::reserve_bytes()));
   // Once earlier colors exist to blame, say so: their retained memory is the
-  // cost, and the caller's stock `color.max_ge=<smaller>` hint is then the
+  // cost, and the caller's stock `color.max_gate=<smaller>` hint is then the
   // wrong advice.
   const std::string cause = (over_growth || qor_.empty())
                                 ? std::string{}
@@ -1234,6 +1264,42 @@ void bypass_setmask_bit_reads(hhds::Graph* g) {
 }
 }  // namespace
 
+// One IO decl per Liberty cell in the output library (find-or-create), plus the
+// cell's pin names in Mio order -- the SAME construction for a cell first seen
+// by a region read-back and for a cell a boundary re-size swaps in
+// (abc_boundary.cpp): both must agree on port ids (pid k+1 = Mio pin k, then
+// the output) or a swapped Sub's existing pins would point at the wrong ports.
+Mapper::Cell_desc& Mapper::cell_desc_for(void* mio_gate) {
+  auto* g = static_cast<Mio_Gate_t*>(mio_gate);
+  if (auto it = cell_descs_.find(g); it != cell_descs_.end()) {
+    return it->second;
+  }
+  auto [it, inserted] = cell_descs_.try_emplace(g);
+  I(inserted);
+  auto& desc       = it->second;
+  desc.name        = Mio_GateReadName(g);
+  desc.output_name = Mio_GateReadOutName(g);
+  desc.io          = outlib_->find_io(desc.name);
+  const bool fresh = !desc.io;
+  if (fresh) {
+    desc.io = outlib_->create_io(desc.name);
+  }
+  hhds::Port_id pid = 1;
+  for (auto* pin = Mio_GateReadPins(g); pin != nullptr; pin = Mio_PinReadNext(pin)) {
+    desc.input_names.emplace_back(Mio_PinReadName(pin));
+    if (fresh) {
+      desc.io->add_input(desc.input_names.back(), pid);
+      desc.io->set_bits(desc.input_names.back(), 1);
+    }
+    ++pid;
+  }
+  if (fresh) {
+    desc.io->add_output(desc.output_name, pid);
+    desc.io->set_bits(desc.output_name, 1);
+  }
+  return desc;
+}
+
 void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // A refusal already happened: work() will make it fatal once the ABC frame is
   // torn down, so translating the remaining regions can only burn time and
@@ -1374,7 +1440,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
     }
   }
-  if (apply_region_overrides(rb)) {
+  if (!ware_trial_ && apply_region_overrides(rb)) {
     tool_owned_flow = false;
   }
   // The region's delay BUDGET: the target minus the register margin when the
@@ -1441,6 +1507,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // The effective per-region state mode is part of the cache recipe. The comb
   // and seq command strings can be identical, but their read-back semantics are
   // not: one carries flops through ABC and the other preserves native state.
+  if (!ware_trial_) {
+    remember_ware(rb);
+  }
   std::string recipe  = resolve_recipe();
   recipe             += opts_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
   hhds::Graph* pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
@@ -2132,6 +2201,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // Whole-design flatten can stack one such coercion per hierarchy level,
       // so trace the identity chain to the structural clock source.
       for (int guard = 0; guard < 64 && !f.clk_drv.is_invalid(); ++guard) {  // guard: cycle net, > any sane hierarchy depth
+        // Stop AT the partition boundary. A region input IS the structural
+        // clock source as far as this region is concerned (its port is what
+        // the read-back wires the DFF clk pin from), and peeling past it lands
+        // on a pin the region never sees -- which then fails the
+        // region_in_name test below and demoted every such register to a
+        // native flop. The shipped `cones` coloring routinely leaves a
+        // clock-carrying Sext in a neighbour region, so this is the common
+        // case, not a corner: without the break, a yosys-read design's only
+        // register stays native (lhd_macro_declarations_test).
+        if (region_in_name.contains(f.clk_drv)) {
+          break;
+        }
         auto m = f.clk_drv.get_master_node();
         if (gu::type_op_of(m) == Ntype_op::Sext && real_width(f.clk_drv) == 1) {
           // Yosys' signed clock-pin carrier preserves the single input bit.
@@ -3339,7 +3420,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           for (int i = 0; i < bw; ++i) {
             bv[i] = abc_bit(b_d, i);  // unsigned shift count
           }
-          sh = arith::build_shl(ops, av, bv, out_bits);
+          sh = arith::build_shl(ops, av, bv, out_bits, opts_.reverse_barrel);
         }
       }
       for (int b = 0; b < out_bits; ++b) {
@@ -3548,7 +3629,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                        bias);
           }
         } else {
-          res = arith::build_shr_prefix(ops, av, bv, fill, demand_w);
+          res = arith::build_shr_prefix(ops, av, bv, fill, demand_w, opts_.reverse_barrel);
         }
       }
       // result = low out_w bits of the cw-wide shift. The bit(s) above the
@@ -3820,6 +3901,29 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return;
   }
   trace_stage("translated");
+
+  // --- Phase A boundary environment (abc_boundary.hpp): what this region's
+  // ports see beyond the partition, estimated from the SOURCE graph, handed to
+  // ABC's SCL timer for every sizing/timing step of this region (the tail,
+  // the budget ladder, the area candidate, the QoR timer). PI/PO indices are
+  // the translation's creation order (`all_pi_order`, `po_order`), the same
+  // order the read-back pairs by. Lives to the end of map_region; the table
+  // uninstalls itself. Exact loads come later (refine_boundaries). ---
+  Boundary_table boundary_table(static_cast<size_t>(Abc_NtkPiNum(manNtk)), static_cast<size_t>(Abc_NtkPoNum(manNtk)));
+  int            boundary_bits = 0;
+  if (opts_.boundary && scl_lib_ok_) {
+    std::vector<int> pi_port(all_pi_order.size(), -1);
+    for (size_t i = 0; i < all_pi_order.size(); ++i) {
+      if (all_pi_order[i].kind == Pi_kind::region_input) {
+        pi_port[i] = static_cast<int>(pi_order[all_pi_order[i].index].first);
+      }
+    }
+    boundary_bits = fill_static_boundary(boundary_table, rb, region, pi_port, po_order);
+    boundary_table.install();
+    if (opts_.verbose) {
+      std::print("[pass.abc] region '{}': boundary estimate on {} crossing port bit(s)\n", rb.module_name, boundary_bits);
+    }
+  }
 
   // --- run the flow: logic -> optimize -> map ---
   auto* frame  = static_cast<Abc_Frame_t*>(pabc_);
@@ -4107,8 +4211,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         ++q.div_blackbox;  // unmapped cone: the region score is partial
       }
     }
-    q.budget    = budget;
-    q.candidate = candidate;
+    q.budget        = budget;
+    q.candidate     = candidate;
+    q.boundary_bits = boundary_bits;
     if (delay_flow_qor) {
       q.delay_flow_delay = delay_flow_qor->first;
       q.delay_flow_area  = delay_flow_qor->second;
@@ -4197,35 +4302,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
 
   // find-or-declare a 1-bit blackbox cell def (Liberty pins) in the out library
-  auto cell_desc = [&](Mio_Gate_t* g) -> Cell_desc& {
-    if (auto it = cell_descs_.find(g); it != cell_descs_.end()) {
-      return it->second;
-    }
-    auto [it, inserted] = cell_descs_.try_emplace(g);
-    I(inserted);
-    auto& desc       = it->second;
-    desc.name        = Mio_GateReadName(g);
-    desc.output_name = Mio_GateReadOutName(g);
-    desc.io          = outlib_->find_io(desc.name);
-    const bool fresh = !desc.io;
-    if (fresh) {
-      desc.io = outlib_->create_io(desc.name);
-    }
-    hhds::Port_id pid = 1;
-    for (auto* pin = Mio_GateReadPins(g); pin != nullptr; pin = Mio_PinReadNext(pin)) {
-      desc.input_names.emplace_back(Mio_PinReadName(pin));
-      if (fresh) {
-        desc.io->add_input(desc.input_names.back(), pid);
-        desc.io->set_bits(desc.input_names.back(), 1);
-      }
-      ++pid;
-    }
-    if (fresh) {
-      desc.io->add_output(desc.output_name, pid);
-      desc.io->set_bits(desc.output_name, 1);
-    }
-    return desc;
-  };
+  auto cell_desc = [&](Mio_Gate_t* g) -> Cell_desc& { return cell_desc_for(g); };
 
   // Select one bit as an explicit Get_mask with the one-hot `(1 << b)` mask.
   //

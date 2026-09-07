@@ -52,9 +52,11 @@ tree_sum() { (cd "$1" && find . -type f | LC_ALL=C sort | xargs shasum | shasum 
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 # The def names embed the FILE name (internal naming = file.entity).
 cp "$FIX" "$W/dut.prp"
-# absorb=false keeps the tiny fixture defs as their own regions (3 regions),
-# exactly as the pass.abc incremental test pins; it also proves that a pass
-# knob spelled under its pass namespace (`color.*`) reaches the fused step.
+# absorb=false keeps the tiny fixture defs as their own regions (8 regions under
+# the shipped `cones` coloring: one per register cone across top/stage_unit/
+# delayer, absorb=true would leave 5, all in `top`), exactly as the pass.abc
+# incremental test pins; it also proves that a pass knob spelled under its pass
+# namespace (`color.*`) reaches the fused step.
 SYNTH=(synth "$W/dut.prp" --top top --set synth.liberty="$LIB" --set color.absorb=false)
 
 # --- 1. one-shot with --workdir ---------------------------------------------
@@ -68,14 +70,15 @@ grep -qE "INVx1|NAND2x1|XOR2x1|DFFx1" "$W/net0.v" || fail "the Verilog is not th
 [ "$(jget "$W/r.json" qor.abc.kind)" = abc-map ] || fail "qor.abc is not the pass.abc report"
 [ "$(jget "$W/r.json" qor.sta.kind)" = sta ] || fail "qor.sta is not the pass.opentimer report"
 [ -n "$(jget "$W/r.json" qor.sta.designs)" ] || fail "sta report carries no designs"
-[ "$(jget "$W/r.json" qor.abc.total.regions)" = 3 ] || fail "expected 3 abc regions, got '$(jget "$W/r.json" qor.abc.total.regions)'"
+[ "$(jget "$W/r.json" qor.abc.total.regions)" = 8 ] || fail "expected 8 abc regions, got '$(jget "$W/r.json" qor.abc.total.regions)'"
 for p in pass.color pass.abc pass.opentimer lg.save; do has_phase "$W/r.json" $p || fail "phase $p missing from the envelope"; done
 [ "$(jget "$W/r.json" incremental.compile.enabled)" = true ] || fail "compile tier not enabled under a user --workdir"
 [ "$(jget "$W/r.json" qor.abc.incremental.hits)" = 0 ] || fail "cold run reported abc hits"
-[ "$(jget "$W/r.json" qor.abc.incremental.misses)" = 3 ] || fail "cold run: expected 3 abc misses"
+[ "$(jget "$W/r.json" qor.abc.incremental.misses)" = 8 ] || fail "cold run: expected 8 abc misses"
+grep -q 'pass.color [^"]*alg:reduce' "$W/r.json" && fail "default synthesis must skip experimental reduction"
 # the envelope's ONE `incremental` member carries both tiers (what a stats report builder reads)
-[ "$(jget "$W/r.json" incremental.abc.misses)" = 3 ] || fail "incremental.abc not mirrored into the envelope: $(head -c 600 "$W/r.json")"
-[ "$(jget "$W/r.json" incremental.abc.regions)" = 3 ] || fail "incremental.abc.regions wrong"
+[ "$(jget "$W/r.json" incremental.abc.misses)" = 8 ] || fail "incremental.abc not mirrored into the envelope: $(head -c 600 "$W/r.json")"
+[ "$(jget "$W/r.json" incremental.abc.regions)" = 8 ] || fail "incremental.abc.regions wrong"
 [ "$(jget "$W/r.json" incremental.abc.store_failed)" = 0 ] || fail "incremental.abc.store_failed wrong"
 [ -d "$W/w/abc_cache" ] || fail "abc region cache not created under --workdir"
 grep -q '"qor":{"schema_version":1,"kind":"synth"' "$W/r.json" || fail "qor member not embedded verbatim"
@@ -83,9 +86,9 @@ grep -q '"qor":{"schema_version":1,"kind":"synth"' "$W/r.json" || fail "qor memb
 "$LHD" "${SYNTH[@]}" --workdir "$W/w" --stats --diag-fmt pretty -q >"$W/pretty.out" || fail "pretty run failed"
 grep -q '^  qor: abc-map' "$W/pretty.out" || fail "pretty report lacks the abc-map line: $(cat "$W/pretty.out")"
 grep -q '^  sta: ' "$W/pretty.out" || fail "pretty report lacks the sta line: $(cat "$W/pretty.out")"
-[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 3 ] || fail "--stats did not print one abc row per region: $(cat "$W/pretty.out")"
+[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 8 ] || fail "--stats did not print one abc row per region: $(cat "$W/pretty.out")"
 grep -q '^  incremental\[stats\]: compile enabled=true' "$W/pretty.out" || fail "--stats lacks the compile-tier incremental row: $(cat "$W/pretty.out")"
-grep -q '^  incremental\[stats\]: abc enabled=true regions=3 hits=3 misses=0' "$W/pretty.out" || fail "--stats lacks the abc-tier incremental row: $(cat "$W/pretty.out")"
+grep -q '^  incremental\[stats\]: abc enabled=true regions=8 hits=8 misses=0' "$W/pretty.out" || fail "--stats lacks the abc-tier incremental row: $(cat "$W/pretty.out")"
 grep -q '^  phases\[stats\]: .*pass.abc=.*total=' "$W/pretty.out" || fail "--stats lacks the phases row: $(cat "$W/pretty.out")"
 echo "PASS: one-shot synth with --workdir (layout, qor member, phases, report)"
 
@@ -93,7 +96,7 @@ echo "PASS: one-shot synth with --workdir (layout, qor member, phases, report)"
 run "${SYNTH[@]}" --workdir "$W/w" --emit verilog:"$W/net1.v"
 [ "$(jget "$W/r.json" incremental.compile.misses)" = 0 ] || fail "warm run re-parsed a source unit"
 [ "$(jget "$W/r.json" incremental.compile.hits)" -ge 1 ] || fail "warm run did not reuse the compiled design"
-[ "$(jget "$W/r.json" qor.abc.incremental.hits)" = 3 ] || fail "warm run: expected 3 abc hits, got '$(jget "$W/r.json" qor.abc.incremental.hits)'"
+[ "$(jget "$W/r.json" qor.abc.incremental.hits)" = 8 ] || fail "warm run: expected 8 abc hits, got '$(jget "$W/r.json" qor.abc.incremental.hits)'"
 [ "$(jget "$W/r.json" qor.abc.incremental.misses)" = 0 ] || fail "warm run re-synthesized a region"
 cmp -s "$W/net0.v" "$W/net1.v" || fail "warm netlist differs from the cold mapping"
 echo "PASS: warm re-run is incremental at both tiers and byte-identical"
@@ -146,7 +149,7 @@ echo "PASS: no --workdir runs in scratch; emits and reports are the only artifac
 run compile "$W/dut.prp" --top top --emit-dir lg:"$W/lg_in" --workdir "$W/w_c"
 before=$(tree_sum "$W/lg_in")
 run synth lg:"$W/lg_in" --top top --set synth.liberty="$LIB" --set color.absorb=false --emit-dir lg:"$W/net_lg"
-[ "$(jget "$W/r.json" qor.abc.total.regions)" = 3 ] || fail "lg: input synth: expected 3 regions"
+[ "$(jget "$W/r.json" qor.abc.total.regions)" = 8 ] || fail "lg: input synth: expected 8 regions"
 [ "$(tree_sum "$W/lg_in")" = "$before" ] || fail "synth rewrote its lg: INPUT (the coloring must stay in memory)"
 echo "PASS: an lg: input is never rewritten"
 
@@ -203,5 +206,9 @@ echo "PASS: negative controls"
 "$LHD" describe synth | grep -q '"name":"synth"' || fail "lhd describe synth missing"
 "$LHD" list emit-kinds | grep -q '"report"' || fail "report: missing from the emit-kind vocabulary"
 echo "PASS: help surface"
+
+# Experimental extraction remains available through an explicit opt-in.
+run "${SYNTH[@]}" --set synth.reduce=true --set synth.opentimer=false --workdir "$W/reduce-opt-in"
+grep -q 'pass.color [^"]*alg:reduce' "$W/r.json" || fail "synth.reduce=true must enable extraction"
 
 echo "PASS: all lhd synth flows"

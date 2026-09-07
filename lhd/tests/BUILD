@@ -1404,6 +1404,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# Partition-boundary environment (pass/abc/abc_boundary.cpp): a region is sized
+# against the loads, drivers and timing budgets beyond its ports (NAND2x1 ->
+# NAND2x2 on the crossing driver), the refined netlist LECs against the
+# partition twin, boundary=false restores the load-free ports, and an all-hit
+# incremental run reuses the refined bodies without starting ABC.
+sh_test(
+    name = "lhd_abc_boundary_test",
+    size = "large",
+    srcs = ["lhd_abc_boundary_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic.
 sh_test(
@@ -1854,5 +1866,13 @@ sh_test(
     name = "lhd_abc_reduction_smoke",
     size = "large",
     srcs = ["lhd_abc_reduction_smoke.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# Critical-path ware trials, rollback, explicit selectors and mapped LEC.
+sh_test(
+    name = "lhd_ware_test",
+    size = "large",
+    srcs = ["lhd_ware_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )

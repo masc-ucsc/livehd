@@ -242,11 +242,8 @@ TEST(ColorSynth, WideSumOpensBoundary) {
   EXPECT_NE(node_color_of(head), node_color_of(wide)) << "a wide Sum opens a fresh synthesis boundary";
 }
 
-// With the window on, the cut rules still decide the SHAPE but no longer the
-// SIZE: the per-node regions `synth` opens for a chain of wide Sums (each its own
-// boundary) get merged up to min. This is the XSCore singleton story in
-// miniature.
-TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
+// Wide arithmetic remains replaceable independently, even below min_ge.
+TEST(ColorSynth, SizeWindowPreservesArithmeticBoundaries) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_synth_window");
   auto  gio = lib.create_io("synth_window");
   gio->add_input("a", 0);
@@ -289,7 +286,7 @@ TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
   Color_synth windowed(o, "synth");
   windowed.label(g.get());
 
-  EXPECT_LT(count_regions(), raw_regions) << "the window must merge the boundary singletons";
+  EXPECT_EQ(count_regions(), raw_regions) << "wide adders must remain independently replaceable";
 }
 
 // Source-seeded regions (the 2opt-freq block-attribute channel) are the user's,

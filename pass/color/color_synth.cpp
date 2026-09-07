@@ -58,9 +58,23 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
   if (op == Ntype_op::Mult || op == Ntype_op::Div) {
     return true;
   }
-  // A wide adder is its own synthesis boundary. driver_bits is 0 when bitwidth
-  // has not run, and an unknown width is not a boundary -- the region is merely
-  // larger, never wrong.
+  // Comparisons lower to subtraction later in ABC, so their operand width
+  // (not their one-bit result) decides the arithmetic boundary here.
+  if (op == Ntype_op::LT || op == Ntype_op::GT) {
+    for (const auto& e : node.inp_edges()) {
+      if (bits_of(e.driver) > 8) {
+        return true;
+      }
+    }
+  }
+  if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+    // Constant shifts remain wiring, not a ware module.
+    auto amount = graph_util::get_driver_of_sink_name(node, "b");
+    auto value  = graph_util::get_driver_of_sink_name(node, "a");
+    // Shifting a constant is a decoder/mask cone. Keep its consumers visible:
+    // extracting only the shift can expose an enormous unobserved mask bus.
+    return !value.is_const() && !amount.is_invalid() && !amount.is_const() && driver_bits(node) > 8;
+  }
   return op == Ntype_op::Sum && driver_bits(node) > 8;
 }
 
@@ -146,6 +160,38 @@ void Color_synth::merge_ids() {
   }
 }
 
+void Color_synth::preserve_arith_cuts() {
+  int id = 0;
+  for (const auto& [node, color] : flat_node2id) {
+    id = std::max(id, color);
+  }
+  // Iterate deterministically: hash-table order must not rename the modules.
+  std::vector<hhds::Node_class> cuts;
+  for (const auto& [node, color] : flat_node2id) {
+    if (is_arith_cut(node) && !is_seeded(node)) {
+      cuts.push_back(node);
+    }
+  }
+  std::sort(cuts.begin(), cuts.end(), [](const auto& a, const auto& b) {
+    return a.get_class_index().value < b.get_class_index().value;
+  });
+  for (auto n : cuts) {
+    const int cut_id = ++id;
+    flat_node2id[n]  = cut_id;
+    // Keep constant output slicing with its producer so ABC can see the
+    // demanded width when lowering a wide barrel shifter.
+    for (const auto& e : n.out_edges()) {
+      auto sink = e.sink.get_master_node();
+      if (type_op_of(sink) == Ntype_op::Get_mask && !is_seeded(sink)) {
+        auto mask = graph_util::get_driver_of_sink_name(sink, "mask");
+        if (mask.is_const()) {
+          flat_node2id[sink] = cut_id;
+        }
+      }
+    }
+  }
+}
+
 void Color_synth::label(hhds::Graph* g) {
   last_free_id = 1;
   flat_node2id.clear();
@@ -183,6 +229,9 @@ void Color_synth::label(hhds::Graph* g) {
     }
   }
 
+  if (mode != Mode::pipe) {
+    preserve_arith_cuts();
+  }
   int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
   if (opts.verbose) {
     std::print(stderr, "[color.synth] {} -> {} clusters\n", g->get_name(), n_colors);

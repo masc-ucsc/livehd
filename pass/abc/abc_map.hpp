@@ -10,7 +10,8 @@
 #include <utility>
 #include <vector>
 
-#include "abc_arith.hpp"  // arith::Adder_kind
+#include "abc_arith.hpp"     // arith::Adder_kind
+#include "abc_boundary.hpp"  // Boundary_table
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
@@ -30,7 +31,9 @@ class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
 //
 // Free and pure so the policy is testable without a Liberty: the QoR it produces
 // depends on the cell library, but the DECISION does not.
-int area_relax_percent(float target, float achieved, uint32_t cap);
+int  area_relax_percent(float target, float achieved, uint32_t cap);
+// Compare the same endpoints: improve worst depth, or remove tied worst paths.
+bool ware_depth_better(const std::vector<int>& baseline, const std::vector<int>& candidate);
 
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
@@ -47,7 +50,7 @@ struct Map_options {
   std::string       small_flow;
   uint64_t          small_min_ge = 0;
   uint64_t          small_ge     = 0;
-  // Indivisible wide operations can exceed color.max_ge by orders of
+  // Indivisible wide operations can exceed color.max_gate by orders of
   // magnitude. The default large tier skips ABC's unbounded structural-choice
   // synthesis and maps the already bit-blasted AIG directly. Empty or
   // large_ge==0 disables the tier; an explicit global/per-region flow wins.
@@ -103,10 +106,14 @@ struct Map_options {
   // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
   // CSKA/CLA block width (0 => auto from the operating width).
   arith::Adder_kind adder            = arith::Adder_kind::rca;
+  bool              ware             = true;
+  bool              auto_adder       = true;
+  bool              auto_multiplier  = true;
+  bool              auto_barrel      = true;
+  bool              reverse_barrel   = false;
   int               block_size       = 0;
   // Combinational multiplier architecture for Mult (partial-product adds use the
-  // `adder`/`block_size` above). Only `array` today; the enum is the extension
-  // point for Booth/Wallace-tree variants.
+  // `adder`/`block_size` above). Array adds rows serially; tree sums balanced pairs.
   arith::Mult_kind  multiplier       = arith::Mult_kind::array;
   // Memory admission (2opt-incr subtask 0). A region is bit-blasted into ABC,
   // which for a whole-design region means millions of gates and several network
@@ -117,6 +124,45 @@ struct Map_options {
   int               memory_budget_mb = 16384;
   uint64_t          time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
   bool              allow_oversize   = false;
+  // Partition-boundary environment (abc_boundary.cpp). A region's ports are
+  // ABC PIs/POs, and ABC's SCL timer used to see nothing beyond them: a PO
+  // drove no load, a PI came from an ideal driver, and `buffer -N` never treed
+  // a PI's fanout -- so the driver of a net crossing into five regions was
+  // sized for fanout ONE and every sink region assumed an infinitely strong
+  // source. With `boundary=true` (default) each region is sized against what
+  // lies beyond the partition: first a static estimate from the source graph
+  // (consumer pins per output bit, driver class per input), then -- once every
+  // region is mapped or restored -- the exact environment read off the
+  // stitched netlist (the real driver cell and the real sink pins' Liberty
+  // caps, joined through the wrapper), against which every region is re-sized
+  // in place (`upsize -D`/`dnsize -D` to its budget). Needs a Liberty with
+  // 2-D NLDM tables (the same gate as the buffering tail); the exact re-size
+  // additionally needs a `delay` target (there is no budget to size to
+  // without one). `buffer -p` trees a PI's fanout inside the sink region, so
+  // a crossing net is buffered on BOTH sides: the sink side by each region,
+  // the driver side by its real load.
+  bool              boundary         = true;
+  // Tree a region input's fanout inside the sink region when it exceeds
+  // `max_fanout` (`buffer -N {F} -p`): the sink side of buffering a crossing
+  // net as one net, the same fanout rule internal nets follow. Measured a
+  // no-op on picorv32 and the xs renametable (regions rarely fan a port out
+  // past the cap); false leaves crossing inputs unbuffered and lets the exact
+  // re-size upsize the driver instead.
+  bool              boundary_buffer  = true;
+  // Stand-in Liberty cell driving a region input whose real driver is not a
+  // mapped cell (a primary input, a native flop, a memory or child-instance
+  // output, and every input under the static estimate): empty = the
+  // library's smallest buffer, `none` = the ideal (zero-slew) driver.
+  std::string       boundary_drive;
+  // Load in fF on a PRIMARY output of the design (a port of --top) and on a
+  // port whose sink cannot be resolved; <0 = one typical input pin of the
+  // library (the average input capacitance over its smallest cells).
+  float             io_load         = -1.0f;
+  // Rounds of the exact re-size. Each round sizes every region under the
+  // loads/drivers as they stand plus the arrival and required-time budgets
+  // the previous round propagated across the hierarchy; a path through k
+  // regions needs k rounds to be seen whole.
+  int               boundary_rounds = 3;
 };
 
 // Per-region (color-keyed) overrides of the mapping options that vary per
@@ -131,6 +177,7 @@ struct Region_opts {
   std::optional<arith::Adder_kind> adder;
   std::optional<int>               block_size;
   std::optional<arith::Mult_kind>  multiplier;
+  std::optional<bool>              reverse_barrel;
 };
 using Region_opts_map = std::map<int, Region_opts>;
 
@@ -151,6 +198,8 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 struct Region_qor {
   std::string module;  // region module name (<top>__c<color>)
   int         color       = 0;
+  int         ware_trials = 0;
+  std::string ware_selected;
   uint64_t    input_nodes = 0;  // source-region nodes before bit blasting
   uint64_t    input_ge    = 0;  // graph_util synthesis-GE estimate before ABC
   // Predicted generic-AIG size of the same cone (graph/predict_abc_size.hpp),
@@ -182,22 +231,31 @@ struct Region_qor {
   // for each candidate at decision time (<0 = not run).
   float       budget = -1.0f;
   std::string candidate;
-  float       delay_flow_delay  = -1.0f;
-  double      delay_flow_area   = -1.0;
-  float       area_flow_delay   = -1.0f;
-  double      area_flow_area    = -1.0;
+  float       delay_flow_delay   = -1.0f;
+  double      delay_flow_area    = -1.0;
+  float       area_flow_delay    = -1.0f;
+  double      area_flow_area     = -1.0;
   // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
   // gates/area/delay under-report — the score is partial until the div is
   // strength-reduced away. Surfaced so an agent never trusts a blind score.
-  int         div_blackbox      = 0;
+  int         div_blackbox       = 0;
   // Where this region's wall time went, and whether the incremental cache was
   // able to take it. Without these two, "the cache hit 199 of 264 regions" says
   // nothing about whether the run got faster — the misses can hold all the time.
-  double      ms                = 0.0;   // wall ms this region spent in map_region
-  uint64_t    peak_rss_kb       = 0;     // whole-process high-water after this color; 0 = unavailable/cache hit
-  uint64_t    color_peak_rss_kb = 0;     // per-color peak growth over its entry RSS baseline
-  const char* cache             = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
-  bool        resynth           = true;  // this invocation rebuilt the region (false = incremental cache hit)
+  double      ms                 = 0.0;   // wall ms this region spent in map_region
+  uint64_t    peak_rss_kb        = 0;     // whole-process high-water after this color; 0 = unavailable/cache hit
+  uint64_t    color_peak_rss_kb  = 0;     // per-color peak growth over its entry RSS baseline
+  const char* cache              = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
+  bool        resynth            = true;  // this invocation rebuilt the region (false = incremental cache hit)
+  // Partition-boundary refinement (abc_boundary.cpp): how many of this region's
+  // port bits cross to another region or a primary IO, how many cells the
+  // exact re-size changed, and the SCL timer's view of the region BEFORE the
+  // re-size under the exact environment (<0 = the refinement did not run on
+  // it). `delay`/`area` above are updated to the re-sized netlist.
+  int         boundary_bits      = 0;
+  int         boundary_resized   = 0;
+  float       boundary_delay_pre = -1.0f;
+  double      boundary_area_pre  = -1.0;
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
@@ -218,6 +276,10 @@ public:
   bool start();
   void stop();  // Abc_Stop
   void map_region(const livehd::partition::Region_body& rb);
+
+  // Trial only colors on a stitched mapped-cell critical path. No physical
+  // flattening: the scorer keeps distinct occurrence contexts across modules.
+  void optimize_ware(hhds::GraphLibrary& outlib, std::string_view top);
 
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
 
@@ -252,8 +314,18 @@ public:
 
   // QoR rows accumulated by map_region, one per successfully mapped region.
   [[nodiscard]] const std::vector<Region_qor>& qor() const { return qor_; }
+
+  // Partition-boundary refinement (abc_boundary.cpp), run AFTER the whole
+  // decomposition has been built into `outlib` (every region mapped or
+  // restored from the cache): re-import each region's mapped netlist into
+  // ABC, join every port bit through the wrappers to its real driver cell and
+  // real sink pins, and re-size each region against that exact environment.
+  // Cell swaps are written back in place (same pins, same topology). A no-op
+  // without `boundary`, a delay target, or an NLDM Liberty; returns the number
+  // of cells whose drive strength changed. Must run before stop().
+  uint64_t           refine_boundaries(hhds::GraphLibrary& outlib, std::string_view top);
   // False only when every region was restored from the incremental cache.
-  [[nodiscard]] bool                           abc_started() const { return lib_loaded_; }
+  [[nodiscard]] bool abc_started() const { return lib_loaded_; }
 
   // Set when a region was refused by memory admission. map_region cannot throw
   // (a throw out of the region callback would skip stop(), leaking the ABC
@@ -263,8 +335,25 @@ public:
   [[nodiscard]] const std::string* time_refusal() const { return time_refusal_.empty() ? nullptr : &time_refusal_; }
 
 private:
-  std::string refusal_;
-  std::string time_refusal_;
+  struct Ware_region {
+    livehd::partition::Region_body rb;
+    std::vector<hhds::Node_class>  nodes;
+    std::shared_ptr<hhds::Graph>   source;
+    Map_options                    options;
+    bool                           add = false, mult = false, barrel = false;
+  };
+  struct Ware_score {
+    bool                             valid = false;
+    std::vector<int>                 endpoints;  // descending; tie-path improvements count
+    absl::flat_hash_set<std::string> critical_regions;
+  };
+  Ware_score               score_ware(hhds::GraphLibrary& outlib, std::string_view top);
+  void                     remember_ware(const livehd::partition::Region_body& rb);
+  std::vector<Ware_region> ware_regions_;
+  hhds::GraphLibrary       ware_shells_, ware_sources_;
+  bool                     ware_trial_ = false;
+  std::string              refusal_;
+  std::string              time_refusal_;
 
   // True (and fills refusal_) when the process has grown past the memory budget
   // while translating `region`. `blasted`/`total` describe how far the
@@ -274,6 +363,15 @@ private:
   // Startup uses the run-level options, not a region's temporary overrides
   // (notably register_max_bits can turn register mapping off for one region).
   Map_options                                   startup_opts_;
+  // Boundary environment (abc_boundary.cpp), resolved once in start() from the
+  // SCL library: the typical input-pin capacitance in fF (io_load's default and
+  // the static estimate's per-sink weight), the stand-in driving cell (SC_Cell*,
+  // opaque here), and whether the Liberty can size at all (lib_has_nldm_timing,
+  // the buffering tail's own predicate -- unlike scl_timing_ok_ it does not
+  // need a delay target).
+  float                                         typical_cap_ff_ = -1.0f;
+  void*                                         drive_cell_     = nullptr;
+  bool                                          scl_lib_ok_     = false;
   Map_options                                   opts_;
   bool                                          flat_          = false;
   void*                                         pabc_          = nullptr;  // Abc_Frame_t*
@@ -344,6 +442,7 @@ private:
     std::vector<std::string>       input_names;
   };
   absl::flat_hash_map<const void*, Cell_desc> cell_descs_;
+  Cell_desc&                                  cell_desc_for(void* mio_gate);  // abc_map.cpp
 
   // Inverting twins for the QN-cell read-back: every Liberty gate indexed by
   // (pin count, truth table) so a mapped D-cone root can be swapped for the
@@ -383,6 +482,17 @@ private:
   // first region's recipe is formed (ahead of the lazy start()), from
   // map_region.
   void                 ensure_dff_cells();
+
+  // abc_boundary.cpp. resolve_boundary_defaults: typical_cap_ff_ /
+  // drive_cell_ / scl_lib_ok_ from the frame's SCL library (start()).
+  // fill_static_boundary: the Phase A estimate for one region into `table`
+  // (PI i -> region input port `pi_port[i]` or -1; PO i -> `po_order[i]`
+  // (output port, bit) for i < po_order.size(), a blackbox input after);
+  // returns the number of port bits that cross the partition.
+  void resolve_boundary_defaults();
+  int  fill_static_boundary(Boundary_table& table, const livehd::partition::Region_body& rb,
+                            const absl::flat_hash_set<hhds::Node_class>& region, const std::vector<int>& pi_port,
+                            const std::vector<std::pair<size_t, int>>& po_order);
 
   // The resolved per-region ABC recipe, serialized VERBATIM for the incremental
   // cache's recipe gate: the pre-ABC lgraph does not encode it, so two regions

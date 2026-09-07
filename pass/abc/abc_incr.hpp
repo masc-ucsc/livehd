@@ -112,6 +112,12 @@ public:
   // nothing was stored. Must run while the output library is still alive.
   void save();
 
+  // The boundary refinement (abc_boundary.cpp) re-sized a region's body in the
+  // output library AFTER store() snapshotted its QoR: bring the row's
+  // area/delay in line with the body save() is about to copy. No-op for a
+  // module this run did not store.
+  void refresh_qor(std::string_view module, const Region_qor& q);
+
   [[nodiscard]] int hits() const { return hits_; }
   [[nodiscard]] int misses() const { return misses_; }
   void              note_miss() { ++misses_; }

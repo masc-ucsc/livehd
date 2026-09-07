@@ -185,7 +185,15 @@ run_qn() {
   local r="$d/r.json"
   qrun() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   qrun compile "lhd/tests/${fix}.prp" --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1"
-  qrun pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
+  # synth_alg=synth, not the shipped `cones` default: the DFF drive ladder sizes
+  # a register from the fanout of its Q net INSIDE the region ABC mapped, so a
+  # coloring that cuts between the register and its loads (cones puts the flop's
+  # own cone in one region and the 20 XORs it feeds in another) always sees
+  # fanout 1 and always picks the base rung. Cross-boundary drive is the
+  # partition-boundary environment's job (pass/abc/abc_boundary.cpp), and it
+  # does not re-pick a ladder rung today, so this test maps each fixture as ONE
+  # region -- which is what the ladder decision is about.
+  qrun pass color synth --set color.synth_alg=synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
   qrun pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w3"
   qrun pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$QLIB" --set abc.qor="$d/abc.json" \
     "$@" --workdir "$d/w4"

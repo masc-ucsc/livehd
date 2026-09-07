@@ -42,14 +42,13 @@ for ALG in acyclic synth; do
   run compile lg:"$D/lg2" --top "$TOP" --emit verilog:"$D/part.v" --workdir "$D/w4"
   # top module is always emitted; whether it splits depends on the coloring.
   grep -q "^module part_flat" "$D/part.v" || fail "$ALG: top module not emitted"
-  if [ "$ALG" = synth ]; then
-    # synth colors this design as ONE region -> emitted directly under its own
-    # name, no pointless part_flat__c wrapper (the single-region optimization).
-    grep -q "part_flat__c" "$D/part.v" && fail "$ALG: single-region design must not be wrapped in __c submodules"
-  else
-    # acyclic splits into several colors -> a real hierarchy of per-region modules.
-    grep -q "part_flat__c" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
-  fi
+  # Both colorings split this design into several colors -> a real hierarchy of
+  # per-region modules. (`synth` does too now: `cones`, the default, opens one
+  # region per register cone.) The single-region optimization -- a def that IS
+  # one region is emitted directly under its own name, with no pointless
+  # `part_flat__c` wrapper -- is pinned on the UNCOLORED (one color-0 region)
+  # design at the end of this file.
+  grep -q "part_flat__c" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original
   run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"

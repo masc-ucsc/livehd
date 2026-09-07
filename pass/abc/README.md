@@ -59,7 +59,8 @@ Per region (`Region_body` from the partition seam):
    `&st; &nf {D}; &put -o` for standard-cell mapping. Without a delay, the
    area default is the former baseline:
    `strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o`.
-   Both append `buffer -N {F}; dnsize {B}`. The LUT mapper uses unit levels,
+   Both append `buffer -N {F} -p; dnsize {B}` (`-p`, the primary-input
+   buffering, only under `boundary`). The LUT mapper uses unit levels,
    not ps, so it does not receive the physical `{D}` target. `&scorr` is omitted
    to preserve register correspondence (it was a no-op in the combinational
    mux sweep). Mapping uses the `read_lib -s` Liberty — its **unit-delay
@@ -255,6 +256,104 @@ region read-back stays index-aligned.
 ABC's frame is global: one `Abc_Start`/`Abc_Stop` per run, `read_lib` once before
 the region loop.
 
+### Partition boundaries: loads, drivers and budgets beyond the region (`boundary`, `abc_boundary.cpp`)
+
+A region is mapped as its own module, so inside ABC its ports are PIs and POs,
+and ABC's SCL timer -- the engine behind the `buffer`/`upsize`/`dnsize` tail,
+the budget ladder and the QoR timer -- used to see nothing beyond them: a PO
+drove no load, a PI came from an ideal zero-slew driver, and `buffer -N` never
+treed a PI's fanout. The driver of a net crossing into five regions was sized
+for fanout ONE, every sink region assumed an infinitely strong source, and a
+path through three regions got the whole period three times over. Measured
+before this landed: picorv32's worst region reported 4.2 ns while
+`pass.opentimer` found 9.6 ns on the stitched design; the xs renametable 4.7
+ns against 131 ns. This is the lesson every hierarchical flow (OpenROAD's
+hierarchically linked mode, the commercial tools) settled on: partition
+boundaries need port load annotations and arrival/required budgets, and a net
+crossing a boundary is buffered as a whole net, not as the stub inside one
+partition.
+
+The realization keeps the per-region modules (the incremental cache, the
+per-module LEC twin and the memory admission depend on them) and hands each
+region's ABC session a per-PI/PO **environment table** -- `SC_Bnd`, which the
+local `packages/abc.patch` teaches the SCL timer to honour (`map/scl/sclSize.[ch]`;
+the mappers never read it, so `&nf`'s unit-delay depth mapping is untouched):
+
+- per PO: the external load in fF, and a **virtual downstream delay** in ps
+  (the departure of everything the port feeds: a required time spelled as
+  extra path length, so every slack/window/max-delay reader of the timer sees
+  it without knowing about boundaries);
+- per PI: the **driving cell** (its load-dependent delay and output slew, any
+  input count -- the slowest input arc) and an **arrival time**.
+
+It is filled twice:
+
+1. **Phase A, the static estimate** (`Mapper::fill_static_boundary`, before
+   the region's flow runs). From the SOURCE graph: per output bit the number
+   of consumer pins outside the region times the library's *typical input
+   pin* (the mean input capacitance over the smallest cell of every
+   single-output class), plus `io_load` when the port feeds a graph output;
+   per input a stand-in driver (`boundary_drive`: the library's smallest
+   ordinary buffer, chosen by delay so a delay line never wins). A pure
+   function of the source graph and the Liberty -- cold and warm runs agree.
+   The buffering tail becomes `buffer -N {F} -p`: a PI whose fanout inside the
+   region exceeds the cap gets its tree there (the sink side of buffering a
+   crossing net whole; the driver side is the PO load).
+2. **Phase B, the exact refinement** (`Mapper::refine_boundaries`, once every
+   region is mapped or restored, before the cache is saved). Every def
+   reachable from `--top` -- region modules and wrappers alike -- is
+   **re-imported** from its mapped LGraph body into an ABC mapped netlist
+   (Liberty cells become mapped nodes, DFF cells latches, the read-back's
+   `Get_mask`/`Concat`/splitter glue is followed bit-wise by `core/pin_tracker`,
+   instances and native state become PI/PO cuts that remember what they stand
+   for). Every port bit is then **joined through the wrappers**: a PO's load
+   is the sum of the Liberty input caps of the pins it reaches in the sink
+   regions (recursively through child instances and feed-throughs; the max
+   over parents for a def instantiated several times; `io_load` at the top),
+   a PI's driver is the cell behind the crossing net (through feed-throughs;
+   the stand-in for a flop Q, a memory or a primary input). Each region is
+   re-sized in place against that table -- `upsize -D`/`dnsize -D` to its
+   budget, the same objective the ladder uses -- in **rounds**
+   (`boundary_rounds`, default 3): a round times every def, sizes it, and
+   records the arrival at each output driver and the departure at each input;
+   between rounds a def input inherits the arrival of its parent-side driver
+   and a def output the departure of every sink it feeds, so a path through k
+   regions is seen whole after k rounds. Cell swaps keep pins and topology
+   (a same-class Liberty cell with the same pin names, or the swap is
+   skipped), so the netlist is rewired in place and the partition LEC twin is
+   untouched -- `//lhd/tests:lhd_abc_boundary_test` proves the refined netlist
+   against it.
+
+The incremental cache stores the **refined** bodies (save runs after the
+refinement, `Incr_cache::refresh_qor` brings the row's area/delay in line),
+and an all-hit run skips the refinement: every region identical to its cached
+body means the whole design, hence every environment, is the one the cache was
+written under -- so it still starts no ABC. A partial-hit run re-imports and
+re-sizes everything (hits start from their refined bodies, misses from their
+fresh mapping); a chain of comb regions longer than `boundary_rounds` keeps
+its tail budgets estimated.
+
+`qor.json` reports it: `total.boundary = {bits, resized, rounds}` and per
+region `boundary = {bits, resized, delay_pre, area_pre}` -- the region under
+the exact environment BEFORE the re-size, next to its re-sized `delay`/`area`
+(`delay` now includes the arrivals and downstream delays, so it is the
+whole-path view the region has, not just its own cone). Measured on picorv32
+(sky130, `delay=5000`): `pass.opentimer` 9.58 -> 8.97 ns (-6.4%) at +0.6%
+area, with the re-size touching 79 cells; the remaining gap to the target is
+mapped logic depth across regions, which sizing cannot buy back. On the xs
+renametable (769 regions, 941k crossing bits, 18.6k cells re-sized) the
+propagated budgets make the worst region report the same 130 ns path the
+whole-design timer finds -- a chain through hundreds of shared `pat_*`
+instances that no sizing shortens (STA 130.9 -> 130.5 ns) -- while the
+estimate, by shrinking the slack the `&nf -R` area recovery trades away,
+costs +4.8% gates / +2.3% area there. What it needs:
+a Liberty with 2-D NLDM tables (the buffering tail's own gate) for Phase A, and
+a `delay` target on top for Phase B (there is no budget to size to without
+one). Not covered yet: a required time at a primary output or an arrival at a
+primary input (no SDC channel into pass.abc), re-mapping -- not just re-sizing
+-- a region whose propagated budget it cannot meet, and re-picking the DFF
+drive rung from the Q net's total fanout.
+
 ### Whole-design flatten (`flatten`)
 
 The decomposition is per-def by default: every module reachable from `--top`
@@ -288,14 +387,21 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `dff_cell` | explicit Liberty DFF cell for `register=true` (empty = the smallest-area plain posedge D-flop, QN cells included; an explicit name also disables the drive ladder) | `` |
 | `memory` | bit-blast a `Memory` into a DFF array + per-lane write muxes / read muxes (`true`, see above) vs keep it a native `cgen_memory_*` boundary instance (`false`) | `true` |
 | `memory_max_bits` | with `memory=true`, keep a memory whose `bits x size` exceeds this many bits native, with a one-line note naming it (`0` disables) | `65536` |
-| `adder` | comb adder architecture for `sum`/cmp (also the `mult` partial-product adds): `rca`/`cska`/`cla` | `rca` |
+| `ware` | trial alternative implementations on stitched critical paths, accepting a lower mapped-cell depth or fewer tied worst endpoints | `true` |
+| `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
+| `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
 | `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
-| `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
+| `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree` locks the multiplier and its internal adder | `auto` |
 | `delay` / `load` | the timing BUDGET in ps / the load: `{D}` / `{L}` expand to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC. `delay` is also the target the built-in objective sizes to and judges the area candidate against (see below); `{B}` is the per-region budget (`delay` minus `reg_margin` when the region holds flops) as `-D <ps>` | empty |
 | `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `200` |
 | `area_flow` | AREA command string: empty = the former baseline (`&fraig`/`dc2`/`&dch`/`&nf`); used without delay or as a second candidate after meeting a delay budget. Built-ins append `buffer -N {F}; dnsize {B}`, adding `upsize {B}` before `dnsize` for a timed candidate. `none` disables only the second candidate. Custom strings run verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended); explicit `flow` takes precedence | empty |
 | `reg_margin` | register overhead subtracted from `delay` to form a flop-bearing region's budget: `auto` = the mapped DFF cell's clk→Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 83.9 ps, sky130 dfxtp_1 528 ps), a number = that many ps, `0` = no margin — see below | `auto` |
+| `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists; also buffers a region input's fanout inside the sink region (`buffer -p`) | `true` |
+| `boundary_buffer` | with `boundary`, tree a region input's fanout inside the sink region when it exceeds `max_fanout` (`buffer -p`); false leaves crossing inputs unbuffered and relies on the exact re-size to upsize the driver (a measured no-op on picorv32 and the xs renametable) | `true` |
+| `boundary_drive` | stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a memory or child output, every input under the estimate): empty = the library's smallest ordinary buffer, `none` = an ideal driver | `` |
+| `boundary_rounds` | rounds of the exact re-size (a path through k regions needs k rounds) | `3` |
+| `io_load` | load in fF on a primary output of `--top` (and on a port whose sink cannot be resolved); negative = one typical input pin of the library | `-1` |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
 | `flatten` | whole-design flatten: `auto`/`true`/`false` — see below | `auto` |
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
@@ -628,10 +734,45 @@ implemented: per-region `flow` overrides (2opt-freq C). See
 `todo/livehd/2opt-freq.html`.
 
 
-Default synthesis partitions use a 500–5,000 GE window; cones mode uses a
-5,000 predicted-AIG-gate threshold. These smaller regions target incremental
-mapping within the 16 GiB per-color budget. Indivisible nodes and estimation
+Synthesis partitions come from `pass.color synth`, whose default mode is
+`cones`: one backward cone per register `din`/`enable`, merged under a 5,000
+predicted-AIG-gate threshold (`color.max_gate`). `--set color.synth_alg=synth`
+(or `pipe`) instead propagates one id forward and reshapes with the 500–5,000
+GE size window (`color.min_ge`/`color.max_ge`), which `cones` ignores. These
+smaller regions target incremental mapping within the 16 GiB per-color budget. Indivisible nodes and estimation
 errors can exceed the partition target. The process memory budget is capped
 at physical RAM minus max(2 GiB, 25%); an environment override can lower this
 ceiling but cannot raise it. The macOS address-space backstop includes allocator
 headroom, so physical-footprint admission remains a separate check.
+
+### Critical-path ware selection
+
+After baseline mapping and boundary sizing, `abc.ware=true` measures mapped-cell
+levels through the stitched occurrence hierarchy. Wide adders and comparisons,
+multipliers, and runtime barrel shifters retain their own synthesis colors;
+constant output slices stay with their producer. Arithmetic at or below the
+small-adder threshold can remain inlined: its containing color is the trial unit.
+
+Only a color on a current worst path is tried. Trials re-lower its original
+operators, run ABC, replace that module, and recount depth through the assembled
+design. A candidate is kept only if it lowers the worst depth or reduces the
+number of endpoints tied at that depth. Otherwise the previous body and QoR row
+are restored. Each eligible color is visited once, including colors that become
+critical after a prior replacement. Reports expose `ware_trials` and
+`ware_selected`; the step log records each candidate and its before/after depth.
+
+Explicit global or color/block `adder`, `block_size`, `multiplier`, and `barrel`
+selectors are authoritative. An explicit multiplier also fixes its internal
+adder. `--set abc.ware=false` disables trials. `large_ge` bounds trial admission;
+the depth scorer honors the ABC memory budget and skips incomplete combinational
+models or cycles. Native state is a path boundary.
+
+Selection currently uses **mapped-cell depth**, not physical STA delay. The normal
+OpenTimer pass still times the final selected netlist. Fewer levels can cost more
+area and do not guarantee a faster physical path. Multiplier `tree` is a balanced
+sum of partial products, not a carry-save Wallace/Dadda implementation.
+
+The persistent region cache stores the independent baseline before trials.
+Winners depend on the surrounding design, so a warm run reuses baseline mapping
+and repeats critical-path selection; it does not reuse a context-dependent
+winner under an unchanged local cache key.
