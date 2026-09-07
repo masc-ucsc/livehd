@@ -41,9 +41,9 @@ cat > "$W/h.prp" <<'EOF'
 mod leaf(clock:u1, reset:u1, en:u1) -> (value:u8@[]) {
   reg count:u8 = 0
   value = count
-  if reset {
+  if reset != 0 {
     count = 0
-  } elif en {
+  } elif en != 0 {
     wrap count += 1
   }
 }

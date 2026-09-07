@@ -22,7 +22,7 @@
 pub mod array_quoted_dotted_name::[timecheck=false](idx:u7, v:u1, en:u1) -> (o:u1@[], p:u1@[]) {
   mut `d.valid`:[128]u1 = 0
   `d.valid`[3] = v
-  if en {
+  if en != 0 {
     `d.valid`[idx] = v
   }
   o = `d.valid`[idx]

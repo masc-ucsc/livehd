@@ -1,0 +1,28 @@
+/*
+:name: latch_enable_attr
+:type: equiv
+:verilog_top: latch_enable_attr.gate
+:pyrope_top: gate
+:lec_top: gate
+:equiv_engine: cvc5
+*/
+
+// `enable=` on a LATCH means the same thing it means on a flop: it ANDs onto
+// the transparency condition the `if` already derives, so this latch is open
+// exactly while `g && en`.
+//
+// The attribute is sound here for the same reason it is on a flop, and NOT for
+// the reason `enable_high=false` is refused: AND-ing only NARROWS the
+// transparency window. tolg builds `din = cond ? d : q` from the SAME `cond`,
+// so wherever the narrowed enable is high `cond` is high and din is still `d`.
+// Inverting (which is what `enable_high=false` would do) is the case that
+// makes the latch write itself and never capture d — that one stays refused.
+//
+// The `_1` variant spells both guards as one `if` and must be the same design.
+pub mod gate(en:bool, g:u1, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true, enable=(g!=0)]
+  if en {
+    l = d
+  }
+  q = l
+}

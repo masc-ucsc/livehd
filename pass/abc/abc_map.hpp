@@ -42,11 +42,16 @@ struct Map_options {
   // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.
   // Nets driven by native (unblasted) nodes are outside ABC and keep their
   // fanout regardless. Default 16.
-  uint32_t          max_fanout = 16;
+  uint32_t          max_fanout          = 16;
   // Optional size-tiered flow. Regions in [`small_min_ge`, `small_ge`] use it;
   // explicit color-keyed region_opts still win. This lets large replicated
   // logic use a deliberately cheap mapper without sacrificing the QoR of
   // small timing-sensitive cones. Disabled when empty or small_ge == 0.
+  // ABC resets -T for each -I restart; one restart fits the two-second
+  // search allocation under the five-second whole-region backstop.
+  std::string       ctrl_flow           = "strash; &get -n; &deepsyn -I 1 -J 20 -T 2; &dch -f; &nf {D}; &put -o";
+  uint32_t          ctrl_area_relax     = 0;
+  uint64_t          ctrl_time_budget_ms = 5000;
   std::string       small_flow;
   uint64_t          small_min_ge = 0;
   uint64_t          small_ge     = 0;
@@ -138,16 +143,16 @@ struct Map_options {
   // in place (`upsize -D`/`dnsize -D` to its budget). Needs a Liberty with
   // 2-D NLDM tables (the same gate as the buffering tail); the exact re-size
   // additionally needs a `delay` target (there is no budget to size to
-  // without one). `buffer -p` trees a PI's fanout inside the sink region, so
-  // a crossing net is buffered on BOTH sides: the sink side by each region,
-  // the driver side by its real load.
+  // without one). A crossing net is buffered on BOTH sides: the sink side by
+  // each region (boundary_buffer), the driver side by its real load.
   bool              boundary         = true;
-  // Tree a region input's fanout inside the sink region when it exceeds
-  // `max_fanout` (`buffer -N {F} -p`): the sink side of buffering a crossing
-  // net as one net, the same fanout rule internal nets follow. Measured a
-  // no-op on picorv32 and the xs renametable (regions rarely fan a port out
-  // past the cap); false leaves crossing inputs unbuffered and lets the exact
-  // re-size upsize the driver instead.
+  // Tree every region input's fanout inside the region when it exceeds
+  // `max_fanout` -- the design's primary inputs and the sink side of crossing
+  // nets alike, the same fanout rule internal nets follow -- by declaring
+  // `boundary_drive` as ABC's driving cell: its `buffer` only trees an input
+  // that has a driver (`buffer -p` is inert in the current ABC). Independent
+  // of `boundary`. False leaves inputs unbuffered and lets the exact re-size
+  // upsize the driver instead.
   bool              boundary_buffer  = true;
   // Stand-in Liberty cell driving a region input whose real driver is not a
   // mapped cell (a primary input, a native flop, a memory or child-instance
@@ -198,6 +203,7 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 struct Region_qor {
   std::string module;  // region module name (<top>__c<color>)
   int         color       = 0;
+  bool        ctrl        = false;
   int         ware_trials = 0;
   std::string ware_selected;
   uint64_t    input_nodes = 0;  // source-region nodes before bit blasting

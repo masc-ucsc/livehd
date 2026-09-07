@@ -93,6 +93,19 @@ struct color_t {
 };
 inline constexpr color_t color{};
 
+// Space-separated control color memberships, including the owner. Written by
+// coloring, consumed by partition, and cleared on every recoloring.
+struct ctrl_members_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr ctrl_members_t ctrl_members{};
+struct ctrl_stats_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr ctrl_stats_t ctrl_stats{};
+
 // Region identity carried by a pass.abc mapped body. ABC synthesizes one
 // module per (definition, color); keeping the module name on the graph input
 // lets a later whole-design OpenTimer flatten recover that partition identity
@@ -312,6 +325,10 @@ inline constexpr Attr_kind attr_kind<pending_time_t> = Attr_kind::any_pin;
 template <>
 inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<ctrl_members_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<ctrl_stats_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<synth_region_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
@@ -360,6 +377,8 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(pin_delay)                      \
   X(pin_signed)                     \
   X(color)                          \
+  X(ctrl_members)                   \
+  X(ctrl_stats)                     \
   X(synth_region)                   \
   X(synth_region_id)                \
   X(resynth)                        \

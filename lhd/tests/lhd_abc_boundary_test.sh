@@ -57,7 +57,49 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.libe
 grep -q '"boundary"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
 run compile lg:"$W/net_off" --top "$TOP" --emit-dir verilog:"$W/v_off" --workdir "$W/wv_off"
 grep -q "NAND2x2" "$W/v_off/${TOP}__c1.v" && fail "boundary=false sized the crossing driver up"
-grep -q "buffer -N 16 -p" "$W/w_off/logs/"*_lhd_pass_abc.log && fail "boundary=false still buffers primary inputs"
+
+# 2b. a primary input's fanout is tree-buffered: ABC's `buffer` only trees an
+# input that has a driving cell, and pass.abc declares its stand-in as one
+# (boundary_buffer, independent of `boundary`). 64 sinks on `en` need >= 4
+# buffers under max_fanout=16; boundary_buffer=false leaves the port bare.
+PRP2=inou/prp/tests/pyrope/abc_pi_fanout.prp
+TOP2=abc_pi_fanout.abc_pi_fanout
+[ -f "$PRP2" ] || fail "missing fixture $PRP2"
+run compile "$PRP2" --top "$TOP2" --emit-dir lg:"$W/lg2" --workdir "$W/w2"
+run pass abc --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan" --set synth.liberty="$LIB" --workdir "$W/w_fan"
+run compile lg:"$W/net_fan" --top "$TOP2" --emit-dir verilog:"$W/v_fan" --workdir "$W/wv_fan"
+n=$(cat "$W/v_fan/"*.v | grep -cE '^\s*BUFx1\s')
+[ "$n" -ge 4 ] || fail "primary input with fanout 64 got $n buffer(s), expected a tree of >= 4"
+run pass abc --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan_off" --set synth.liberty="$LIB" \
+    --set abc.boundary_buffer=false --workdir "$W/w_fan_off"
+run compile lg:"$W/net_fan_off" --top "$TOP2" --emit-dir verilog:"$W/v_fan_off" --workdir "$W/wv_fan_off"
+cat "$W/v_fan_off/"*.v | grep -qE '^\s*BUFx1\s' && fail "boundary_buffer=false still buffered the primary input"
+
+# 2c. a Liberty cell marked dont_use never maps, and is reported ONCE per run
+python3 - "$LIB" "$W/du.lib" <<'PY' || fail "could not derive the dont_use library"
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r'cell\s*\(\s*BUFx1\s*\)\s*\{', text)
+assert m, "no BUFx1 in the fixture library"
+depth, i = 0, m.end() - 1
+while True:
+    depth += {'{': 1, '}': -1}.get(text[i], 0)
+    if depth == 0:
+        break
+    i += 1
+group = text[m.start():i + 1]
+twin = group.replace('BUFx1', 'BUFx1_du', 1).replace('{', '{\n    dont_use : true;', 1)
+close = text.rstrip().rfind('}')
+open(sys.argv[2], 'w').write(text[:close] + twin + '\n' + text[close:])
+PY
+run pass abc --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_du" --set synth.liberty="$W/du.lib" \
+    --emit diagnostics:"$W/du.jsonl" --workdir "$W/w_du"
+[ "$(grep -c '"code":"dont-use"' "$W/du.jsonl")" = 1 ] \
+  || fail "expected exactly one dont_use report, got: $(grep '"code":"dont-use"' "$W/du.jsonl" 2>/dev/null)"
+grep -q "ignored 1 Liberty cell(s) marked dont_use (e.g. BUFx1_du)" "$W/du.jsonl" \
+  || fail "dont_use report does not name the cell: $(grep '"code":"dont-use"' "$W/du.jsonl")"
+run compile lg:"$W/net_du" --top "$TOP2" --emit-dir verilog:"$W/v_du" --workdir "$W/wv_du"
+cat "$W/v_du/"*.v | grep -q "BUFx1_du" && fail "a dont_use cell was mapped"
 
 # 3. the refined netlist is LEC-equivalent to the partition twin
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w_re"

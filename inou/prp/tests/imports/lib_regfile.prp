@@ -5,6 +5,6 @@
 // declares no reg of its own.
 pub mod lib_regfile(clock:u1, wen:u1, wdata:u8) -> (rdata:u8@[]) {
   reg acc:u8 = 0
-  if wen { acc = wdata }
+  if wen != 0 { acc = wdata }
   rdata = acc
 }

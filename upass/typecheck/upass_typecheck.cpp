@@ -4,6 +4,7 @@
 
 #include <format>
 
+#include "decl_facts.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
@@ -45,7 +46,7 @@ int uPass_typecheck::eq_class(Kind k) {
   // not this coarse class — a var's type cannot change, even int↔tuple.)
   switch (k) {
     case Kind::integer:
-    case Kind::range:
+    case Kind::range  :
     case Kind::tuple  : return 0;
     case Kind::boolean: return 1;
     case Kind::string : return 2;
@@ -100,8 +101,27 @@ uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
   if (name.empty() || runner_st == nullptr) {
     return Kind::unknown;
   }
-  const auto b = runner_st->get_bundle(name);
-  return b ? kind_of_bundle(*b) : Kind::unknown;
+  if (const auto b = runner_st->get_bundle(name); b) {
+    if (const Kind k = kind_of_bundle(*b); k != Kind::unknown) {
+      return k;
+    }
+  }
+  // A module IO PORT is never a table-backed value: its declared type lives on
+  // the Lnast io_meta side-channel, so the bundle above reports `unknown` and
+  // `if en { … }` on a `u1` port used to slip through the condition check that
+  // the identical `mut en:u1` local trips. decl_facts is the single source of
+  // truth for "what was `name` declared as" — ask it before giving up.
+  const auto f = upass::decl_facts::lookup(*runner_st, lm ? lm->get_lnast().get() : nullptr, name);
+  if (!f) {
+    return Kind::unknown;
+  }
+  switch (upass::decl_facts::io_kind_from_num(f->kind, f->range_max || f->range_min)) {
+    case Io_kind::boolean: return Kind::boolean;
+    case Io_kind::string : return Kind::string;
+    case Io_kind::integer: return Kind::integer;
+    case Io_kind::none   : break;
+  }
+  return Kind::unknown;
 }
 
 void uPass_typecheck::set_dst_kind(Bundle& dst, Kind k) {

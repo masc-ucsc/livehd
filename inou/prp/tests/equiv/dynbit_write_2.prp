@@ -1,0 +1,26 @@
+/*
+:name: dynbit_write
+:type: equiv
+:verilog_top: dynbit_write.dynbit
+:pyrope_top: dynbit
+*/
+
+// Pyrope reference for dynbit_write.v: a RUNTIME-indexed single-bit write
+// (`valid_q#[waddr_i] = 1`) beside a constant-range one.
+//
+// The companion prp-v2prp2v-dynbit_write is the target that matters here: it
+// runs the golden `.v` THROUGH the Pyrope writer and back, and that is the leg
+// where the runtime-indexed write used to be dropped (write_set_mask only
+// understood a CONSTANT mask, so a `range` temp mask emitted the base copy
+// `valid_q = valid_q`). Both `x#[i] = v` and `x#[lo..=hi] = v` are writable
+// LHS forms; the writer now spells the runtime one out instead of losing it.
+pub mod dynbit::[timecheck=false](clk_i:u1, rst_ni:u1, wen_i:u1, waddr_i:u3, wdata_i:u4) -> (q_o:u8@[], r_o:u8@[]) {
+  reg valid_q:u8:[clock_pin=ref clk_i, reset_pin= ref rst_ni, negreset=true, enable= (wen_i!=0)]
+  reg nib_q:u8:[clock_pin=ref clk_i, reset_pin= ref rst_ni, negreset=true, enable= (wen_i!=0)]
+
+  valid_q#[waddr_i] = 1
+  nib_q#[3..=6]     = wdata_i
+
+  q_o = valid_q
+  r_o = nib_q
+}

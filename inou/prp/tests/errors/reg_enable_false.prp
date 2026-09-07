@@ -1,0 +1,18 @@
+/*
+:name: reg_enable_false
+:type: error
+:tolg: 1
+:error: can never update
+*/
+// `enable=false` is a register that can never be written. It cannot be honored:
+// cgen skips a CONST enable pin outright (cgen_verilog `!enable_dpin.is_const()`),
+// so a hard-0 enable would emit a flop that updates on every edge — the silent
+// drop the array refusal (mem_enable_attr) already rejects. Refuse it here instead.
+//
+// The companion positive case (`:[enable]` / `enable=true` = always update, the
+// Flop default) is reg_enable_const in tests/pyrope.
+pub mod enfalse(clk:u1, rst:u1, d:u8) -> (q:u8@[]) {
+  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable=false] = 0
+  r = d
+  q = r
+}

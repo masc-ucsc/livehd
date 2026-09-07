@@ -564,6 +564,7 @@ private:
   Lnast_nid                                   arm_value_def(Lnast_nid stmts_node, std::string expect, std::string& out_lhs) const;
   absl::flat_hash_map<std::string, std::pair<std::string, std::string>> range_lohi_;  // range-temp name -> "lo","hi"
   std::vector<Lnast_nid>                 get_mask_nodes_;                             // every get_mask, for range-mask resolution
+  std::vector<Lnast_nid>                 set_mask_nodes_;                             // every set_mask, same range-mask resolution
   std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index
   std::vector<std::pair<Lnast_nid, int>> store_nodes_;                                // every store + its pre-order index
   // Module-instance results (`mut inst = Mod(args)`), stripped names: their output

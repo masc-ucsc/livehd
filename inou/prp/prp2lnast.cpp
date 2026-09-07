@@ -1801,7 +1801,7 @@ uint64_t stable_source_fingerprint(std::string_view txt) {
       while (i + 1 < txt.size() && !(txt[i] == '*' && txt[i + 1] == '/')) {
         ++i;
       }
-      i = std::min(txt.size(), i + 2);
+      i          = std::min(txt.size(), i + 2);
       pending_ws = true;
       continue;
     }
@@ -4898,8 +4898,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // method body re-enter tuple lowering before the enclosing tuple has been
   // completed.  File/nested source definitions (which have no synthetic
   // hoist_name) can stream directly into their final sibling tree.
-  const bool stream_lambda = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
-                             && (kind == "comb" || kind == "pipe" || kind == "mod");
+  const bool                       stream_lambda       = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
+                                                         && (kind == "comb" || kind == "pipe" || kind == "mod");
   const auto                       outer_runtime_names = streamed_lexical_names_;
   absl::flat_hash_set<std::string> outer_hoisted_names;
   if (stream_lambda) {
@@ -5032,10 +5032,10 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // param-tuple scope — an EARLIER param is readable — and is self-contained).
   std::vector<std::pair<std::string, TSNode>> input_defaults;
   auto                                        collect_args = [&](TSNode                    container,
-                          const Lnast_nid&          parent_tup,
-                          std::vector<std::string>* names_out,
-                          std::vector<Param_attr>*  attrs_out,
-                          bool                      is_io_output) {
+                                                                 const Lnast_nid&          parent_tup,
+                                                                 std::vector<std::string>* names_out,
+                                                                 std::vector<Param_attr>*  attrs_out,
+                                                                 bool                      is_io_output) {
     TSNode pending_typed{};
     TSNode pending_def{};
     bool   pending_is_ref    = false;
@@ -5086,7 +5086,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         // is a compile error. (`ref self` methods expand locally via UFCS and
         // never expose the receiver as a port.) (2f-ref_wrap_sat B.)
         if (pending_is_ref && !is_io_output && kind != "comb") {
-          TSNode           rid = child_by_field(pending_typed, "identifier");
+          TSNode           rid   = child_by_field(pending_typed, "identifier");
           std::string_view rname = ts_node_is_null(rid) ? std::string_view{} : get_text(rid);
           if (rname != "self") {
             report_error(pending_typed,
@@ -5371,9 +5371,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // (per [[tree_sitter_pyrope_hidden_tokens]]), so ts_node_named_child
           // returns nothing — extract the width from the node's TEXT instead.
           // `u6` → strip leading `u` → "6"; `s12` → strip `s` → "12".
-          const auto alias_text = trim(get_text(t));
-          const bool signed_alias = tt == "expression_type" && alias_text.size() >= 2 && alias_text.front() == 'i'
-                                    && is_prim_type_token(alias_text);
+          const auto       alias_text = trim(get_text(t));
+          const bool       signed_alias
+              = tt == "expression_type" && alias_text.size() >= 2 && alias_text.front() == 'i' && is_prim_type_token(alias_text);
           if (tt == "uint_type" || tt == "sint_type" || signed_alias) {
             auto txt = trim(get_text(t));
             // A `constraint` tuple (`u6(max=3)`) extends the node text past
@@ -6210,7 +6210,11 @@ void Prp2lnast::process_enum_assignment(TSNode n) {
     // same-named enum ("redeclaration of variable in the same scope").
     prpparse::Ast* kept = clone_prp_subtree(retained_arena_, n.a);
     prpparse::link_parents(kept);
-    capture_stmt_order_.push_back(Capture_stmt{.is_enum = true, .name = {}, .node = TSNode{kept, prp_buf.get()}});
+    capture_stmt_order_.push_back(Capture_stmt{
+        .is_enum = true,
+        .name    = {},
+        .node    = TSNode{kept, prp_buf.get()}
+    });
   }
   TSNode etype  = child_by_field(n, "type");    // `enum Color2:Rgb = (…)` payload type
   TSNode values = child_by_field(n, "values");  // the entries tuple
@@ -7476,7 +7480,7 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   // prpparse can classify the signed-width alias iN as a named type. It is
   // reserved by the scalar type vocabulary, so lower it with the same bounds
   // as sN instead of leaving an unresolved type reference on a module port.
-  const auto type_text = trim(get_text(type_node));
+  const auto       type_text = trim(get_text(type_node));
   if (t == "expression_type" && type_text.size() >= 2 && type_text.front() == 'i' && is_prim_type_token(type_text)) {
     t = "sint_type";
   }
@@ -7671,6 +7675,19 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
                    "syntax",
                    std::format("attribute `{}` does not take a value — it marks a declared signal as a {}", name, name),
                    std::format("to pick a register's {0} use `{0}_pin=ref <wire>`", name));
+    }
+    // The INVERSE rule, for the pin family: each of these NAMES A SIGNAL, so a
+    // flag-only spelling says nothing. Without this the value defaults to the
+    // text `true` and the mistake only surfaces much later, as tolg's
+    // "reg 'r' names enable 'true' but 'top' has no such input/wire" — a
+    // message about a signal the user never wrote.
+    if (!has_value && (name == "enable" || name == "clock_pin" || name == "reset_pin")) {
+      report_error(
+          node,
+          "attr-needs-value",
+          "syntax",
+          std::format("attribute `{}` needs a value — it names the signal it binds, it is not a flag", name),
+          name == "enable" ? "write `enable=<condition>` (e.g. `enable=(wen != 0)`)" : std::format("write `{}=ref <wire>`", name));
     }
     return;
   }
@@ -8963,13 +8980,13 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           // relational node — they previously fell through to `eq`, silently
           // turning `< rhs` into `== rhs`. Operand order is (subject, rhs).
           auto compare_ntype = use_case             ? Lnast_ntype::create_func_case()
-                                     : use_does           ? Lnast_ntype::create_func_does()
-                                     : use_in             ? Lnast_ntype::create_func_in()
-                                     : pending_op == "<"  ? Lnast_ntype::create_lt()
-                                     : pending_op == "<=" ? Lnast_ntype::create_le()
-                                     : pending_op == ">"  ? Lnast_ntype::create_gt()
-                                     : pending_op == ">=" ? Lnast_ntype::create_ge()
-                                                          : Lnast_ntype::create_eq();
+                               : use_does           ? Lnast_ntype::create_func_does()
+                               : use_in             ? Lnast_ntype::create_func_in()
+                               : pending_op == "<"  ? Lnast_ntype::create_lt()
+                               : pending_op == "<=" ? Lnast_ntype::create_le()
+                               : pending_op == ">"  ? Lnast_ntype::create_gt()
+                               : pending_op == ">=" ? Lnast_ntype::create_ge()
+                                                    : Lnast_ntype::create_eq();
           auto idx           = builder.add_child(compare_ntype);
           auto ref           = builder.mint_tmp_ref();
           lnast->add_child(idx, ref);

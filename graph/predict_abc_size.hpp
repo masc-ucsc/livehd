@@ -91,10 +91,12 @@ struct Ctrl_pids {
 
 [[nodiscard]] inline Ctrl_pids ctrl_pids(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Flop :
-    case Ntype_op::Latch: return {4, 7};
-    case Ntype_op::Fflop: return {livehd::Port_invalid, 7};
-    default             : return {};
+    case Ntype_op::Mux   :
+    case Ntype_op::Hotmux: return {0, livehd::Port_invalid};
+    case Ntype_op::Flop  :
+    case Ntype_op::Latch : return {4, 7};
+    case Ntype_op::Fflop : return {livehd::Port_invalid, 7};
+    default              : return {};
   }
 }
 

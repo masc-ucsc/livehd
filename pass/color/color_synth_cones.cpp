@@ -40,12 +40,14 @@
 #include <cstdint>
 #include <print>
 #include <queue>
+#include <sstream>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "color_region_graph.hpp"
 #include "color_synth.hpp"
+#include "diag.hpp"
 #include "node_util.hpp"
 #include "predict_abc_size.hpp"
 
@@ -110,6 +112,36 @@ struct Cones {
   uint64_t     max_gate = 0;
   Forward_mode forward  = Forward_mode::off;
 
+  bool                               ctrl_cones    = false;
+  uint64_t                           ctrl_max_gate = 0, ctrl_min_gate = 0;
+  uint32_t                           ctrl_count = 0;
+  uint64_t                           ctrl_roots = 0, ctrl_empty = 0, ctrl_nodes = 0, ctrl_duplicates = 0;
+  uint64_t                           ctrl_largest = 0, ctrl_pred = 0, ctrl_dup_pred = 0, ctrl_subs = 0;
+  std::vector<std::vector<uint32_t>> memberships;
+
+  bool is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
+  bool control_cut(uint32_t n) const {
+    const auto type = static_cast<Ntype_op>(op[n]);
+    // Control closures include comparisons and runtime shifts even when the
+    // ordinary ware policy isolates them. Only the plan's large arithmetic
+    // operations are walls here, plus state (checked by the walker).
+    return type == Ntype_op::Mult || type == Ntype_op::Div || (type == Ntype_op::Sum && (flag[n] & kArithCut));
+  }
+  bool control_pin(uint32_t n, uint32_t pid) const {
+    const auto o = static_cast<Ntype_op>(op[n]);
+    if (o == Ntype_op::Mux || o == Ntype_op::Hotmux) {
+      return pid == 0;
+    }
+    if (o == Ntype_op::Flop || o == Ntype_op::Latch) {
+      return pid == kPidEnable;
+    }
+    if (o == Ntype_op::Memory) {
+      const auto off = pid % Ntype::Memory_port_stride;
+      return off == kPidEnable || off == kPidUpdateEn;
+    }
+    return false;
+  }
+
   std::vector<uint8_t>  flag;
   std::vector<uint8_t>  op;  // Ntype_op, so no phase after prepare() needs a node handle
   std::vector<uint64_t> pred;
@@ -167,7 +199,7 @@ struct Cones {
   }
 
   void record_pair(uint32_t a, uint32_t b, uint64_t w) {
-    if (a == 0 || b == 0 || a == b || w == 0) {
+    if (a == 0 || b == 0 || a == b || w == 0 || is_ctrl(a) || is_ctrl(b)) {
       return;
     }
     const uint64_t key = (static_cast<uint64_t>(std::min(a, b)) << 32) | std::max(a, b);
@@ -191,6 +223,9 @@ struct Cones {
         continue;
       }
       epoch[n] = cur_epoch;
+      if (is_ctrl(owner[n])) {
+        continue;
+      }
 
       if ((flag[n] & kLoopBreak) != 0) {
         continue;  // crossing a register/memory/stateful sub is not sharing logic
@@ -221,7 +256,9 @@ struct Cones {
       }
 
       for (uint32_t k = fin_start[n]; k < fin_start[n] + fin_cnt[n]; ++k) {
-        work.emplace_back(fin_drv[k]);
+        if (!ctrl_cones || !control_pin(n, fin_pid[k]) || !is_ctrl(owner[fin_drv[k]])) {
+          work.emplace_back(fin_drv[k]);
+        }
       }
     }
   }
@@ -258,11 +295,8 @@ struct Cones {
   // other consumer (ordinary logic, Memory, Sub, a graph output) qualifies on
   // any pin.
   [[nodiscard]] bool forward_edge_ok(uint32_t n, uint32_t m) const {
-    if (!is_register(m)) {
-      return true;
-    }
     for (uint32_t k = fin_start[m]; k < fin_start[m] + fin_cnt[m]; ++k) {
-      if (fin_drv[k] == n && fin_pid[k] == kPidDin) {
+      if (fin_drv[k] == n && (!is_register(m) || fin_pid[k] == kPidDin) && (!ctrl_cones || !control_pin(m, fin_pid[k]))) {
         return true;  // reached through din
       }
     }
@@ -288,6 +322,83 @@ struct Cones {
 // forward order emits cut nodes first, so a flop is reached BEFORE the cone that
 // feeds its din exists, and a walk started during the iteration would see an
 // empty graph of owners.
+void collect_control_roots(Cones& cn) {
+  if (!cn.ctrl_cones) {
+    return;
+  }
+  std::vector<uint8_t>  seen(cn.flag.size(), 0);
+  std::vector<uint32_t> members;
+  for (uint32_t sink : cn.forward_idx) {
+    std::vector<std::pair<uint32_t, uint32_t>> pins;
+    for (uint32_t k = cn.fin_start[sink]; k < cn.fin_start[sink] + cn.fin_cnt[sink]; ++k) {
+      if (cn.control_pin(sink, cn.fin_pid[k])) {
+        pins.emplace_back(cn.fin_pid[k], cn.fin_drv[k]);
+      }
+    }
+    std::sort(pins.begin(), pins.end());
+    for (const auto& [pid, root] : pins) {
+      (void)pid;
+      if (root >= seen.size() || seen[root]) {
+        continue;
+      }
+      seen[root] = 1;
+      ++cn.ctrl_roots;
+      ++cn.cur_epoch;
+      cn.work.assign(1, root);
+      members.clear();
+      uint64_t size = 0;
+      while (!cn.work.empty()) {
+        const uint32_t i = cn.work.back();
+        cn.work.pop_back();
+        if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i) || cn.epoch[i] == cn.cur_epoch) {
+          continue;
+        }
+        cn.epoch[i] = cn.cur_epoch;
+        members.push_back(i);
+        size = graph_util::sat_add(size, cn.pred[i]);
+        if (cn.ctrl_max_gate && size > cn.ctrl_max_gate) {
+          livehd::diag::err("pass.color", "ctrl-cone-oversize", "unsupported")
+              .msg("control root {} in '{}' exceeds ctrl_max_gate={} (predicted AIG {}); no truncated cone emitted",
+                   root,
+                   cn.g->get_name(),
+                   cn.ctrl_max_gate,
+                   size)
+              .fatal();
+          return;
+        }
+        for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+          cn.work.push_back(cn.fin_drv[k]);
+        }
+      }
+      if (members.empty()) {
+        ++cn.ctrl_empty;
+        continue;
+      }
+      if (size < cn.ctrl_min_gate) {
+        continue;
+      }
+      const auto c = cn.begin_root(0);
+      ++cn.ctrl_count;
+      cn.ctrl_largest = std::max(cn.ctrl_largest, size);
+      for (auto i : members) {
+        cn.memberships[i].push_back(c);
+        cn.flag[i] &= ~kArithCut;  // a selected control closure has priority over ware cuts
+        if (cn.owner[i] == 0) {
+          cn.owner[i] = c;
+          ++cn.ctrl_nodes;
+          cn.ctrl_pred += cn.pred[i];
+        } else {
+          ++cn.ctrl_duplicates;
+          cn.ctrl_dup_pred += cn.pred[i];
+          if (static_cast<Ntype_op>(cn.op[i]) == Ntype_op::Sub) {
+            ++cn.ctrl_subs;
+          }
+        }
+      }
+    }
+  }
+}
+
 void collect_roots(Cones& cn) {
   const auto stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
 
@@ -335,7 +446,7 @@ void collect_roots(Cones& cn) {
           has_en = true;
         }
       }
-      if (has_en) {
+      if (has_en && !cn.ctrl_cones) {
         cn.begin_root(0);
         ++cn.st.r_en;
         cn.push_seed(en_drv);
@@ -373,7 +484,7 @@ void collect_roots(Cones& cn) {
         ++cn.st.r_mem;
         for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
           const uint32_t off = cn.fin_pid[k] % stride;
-          if (cn.fin_pid[k] / stride == p && is_mem_port_off(off)) {
+          if (cn.fin_pid[k] / stride == p && is_mem_port_off(off) && (!cn.ctrl_cones || !cn.is_ctrl(cn.owner[cn.fin_drv[k]]))) {
             cn.push_seed(cn.fin_drv[k]);
           }
         }
@@ -383,7 +494,7 @@ void collect_roots(Cones& cn) {
         ++cn.st.r_mem;
         for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
           const uint32_t off = cn.fin_pid[k] % stride;
-          if (is_mem_whole_array_off(off)) {
+          if (is_mem_whole_array_off(off) && (!cn.ctrl_cones || !cn.is_ctrl(cn.owner[cn.fin_drv[k]]))) {
             cn.push_seed(cn.fin_drv[k]);
           }
         }
@@ -455,7 +566,7 @@ void place_state_and_sweep(Cones& cn) {
       // through the very boundary the algorithm exists to place, and forward
       // order means whether the upstream register happened to be placed first
       // would decide it.
-      if (cn.traversable(d) && cn.owner[d] != 0 && (cn.flag[d] & (kArithCut | kLoopBreak)) == 0) {
+      if (cn.traversable(d) && cn.owner[d] != 0 && !cn.is_ctrl(cn.owner[d]) && (cn.flag[d] & (kArithCut | kLoopBreak)) == 0) {
         placed = cn.owner[d];
       }
       break;
@@ -569,7 +680,7 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
     const int self = rg.find(static_cast<int>(cn.owner[reg]) - 1);
     for (uint32_t k = cn.fout_start[reg]; k < cn.fout_start[reg] + cn.fout_cnt[reg]; ++k) {
       const uint32_t m = cn.fout[k];
-      if (!cn.traversable(m) || cn.owner[m] == 0 || !cn.forward_edge_ok(reg, m)) {
+      if (!cn.traversable(m) || cn.owner[m] == 0 || cn.is_ctrl(cn.owner[m]) || !cn.forward_edge_ok(reg, m)) {
         continue;
       }
       const int c = rg.find(static_cast<int>(cn.owner[m]) - 1);
@@ -783,9 +894,12 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
 
 void Color_synth::label_cones(hhds::Graph* g) {
   Cones cn;
-  cn.g        = g;
-  cn.max_gate = opts.max_gate;
-  cn.forward  = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
+  cn.g             = g;
+  cn.ctrl_cones    = opts.ctrl_cones;
+  cn.ctrl_max_gate = opts.ctrl_max_gate;
+  cn.ctrl_min_gate = opts.ctrl_min_gate;
+  cn.max_gate      = opts.max_gate;
+  cn.forward       = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
 
   // ---- A1: preparation, one pass over the body ----------------------------
   uint32_t nmax = 4;
@@ -796,6 +910,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
   const size_t n = static_cast<size_t>(nmax) + 1;
   cn.flag.assign(n, 0);
+  cn.memberships.resize(n);
   cn.op.assign(n, static_cast<uint8_t>(Ntype_op::Invalid));
   cn.pred.assign(n, 0);
   cn.owner.assign(n, 0);
@@ -866,9 +981,10 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
 
   // ---- A2/A3/A4 -----------------------------------------------------------
+  collect_control_roots(cn);
   collect_roots(cn);
   const uint32_t n_primary = static_cast<uint32_t>(cn.root_start.size());
-  for (uint32_t c = 1; c <= n_primary; ++c) {
+  for (uint32_t c = cn.ctrl_count + 1; c <= n_primary; ++c) {
     cn.walk_root(c);
   }
   place_state_and_sweep(cn);
@@ -889,7 +1005,11 @@ void Color_synth::label_cones(hhds::Graph* g) {
   // keys apply_coloring wants, so it takes the fast order. Verified equivalent
   // in-process on all 171 minion defs: same nodes, same ids.
   absl::flat_hash_map<int, int> class2color;
-  std::vector<int>              final_color(cn.owner.size(), 0);
+  // Control ids precede data ids, including a cone with only secondary members.
+  for (uint32_t c = 1; c <= cn.ctrl_count; ++c) {
+    class2color.emplace(c, c);
+  }
+  std::vector<int> final_color(cn.owner.size(), 0);
   for (uint32_t i : cn.forward_idx) {
     if (!cn.traversable(i) || cn.owner[i] == 0) {
       continue;
@@ -917,7 +1037,64 @@ void Color_synth::label_cones(hhds::Graph* g) {
   // The GE size window does not shape cones: min_ge/max_ge keep their meaning
   // for absorb and for the `synth` algorithm, and max_gate replaces them here.
   preserve_arith_cuts();
+  // Arithmetic output masks may themselves compute a control root. Ownership
+  // of a control closure takes precedence over the output-slice heuristic.
+  for (auto node : g->body().nodes()) {
+    const auto i = idx_of(node);
+    if (cn.is_ctrl(cn.owner[i])) {
+      flat_node2id[node] = final_color[i];
+    }
+  }
   const int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
+
+  if (cn.ctrl_cones) {
+    int base = 0;
+    for (auto node : g->body().nodes()) {
+      const auto i = idx_of(node);
+      if (!cn.memberships[i].empty()) {
+        base = graph_util::node_color_of(node) - final_color[i];
+        break;
+      }
+    }
+    for (auto node : g->body().nodes()) {
+      std::string ms;
+      for (auto c : cn.memberships[idx_of(node)]) {
+        ms += std::to_string(c + base) + " ";
+      }
+      if (!ms.empty()) {
+        node.attr(livehd::attrs::ctrl_members).set(ms);
+      }
+    }
+    std::string ids;
+    for (uint32_t c = 1; c <= cn.ctrl_count; ++c) {
+      if (!ids.empty()) {
+        ids += ",";
+      }
+      ids += std::to_string(c + base);
+    }
+    uint64_t total_pred = 0;
+    for (auto p : cn.pred) {
+      total_pred += p;
+    }
+    auto info = std::format(
+        "\"ctrl_cones\":true,\"ctrl_colors\":[{}],\"ctrl_stats\":{{\"roots\":{},\"empty_roots\":{},\"nodes\":{},\"duplicated_"
+        "nodes\":{},\"duplicated_pred_aig\":{},\"largest_pred_aig\":{},\"owned_pred_aig\":{},\"total_pred_aig\":{},\"replicated_"
+        "subs\":{}}}",
+        ids,
+        cn.ctrl_roots,
+        cn.ctrl_empty,
+        cn.ctrl_nodes,
+        cn.ctrl_duplicates,
+        cn.ctrl_dup_pred,
+        cn.ctrl_largest,
+        cn.ctrl_pred,
+        total_pred,
+        cn.ctrl_subs);
+    g->get_input_node().attr(livehd::attrs::ctrl_stats).set(info);
+    if (opts.verbose || opts.sizes) {
+      std::print(stderr, "[color.ctrl] {} {}\n", g->get_name(), info);
+    }
+  }
 
   // Predicted size per WRITTEN color, for the --stats threshold summary. Read
   // back off the graph so the seeded-base shift apply_coloring applies is

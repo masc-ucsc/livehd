@@ -574,7 +574,28 @@ bool same_shape(const Dff_cell& a, const Dff_cell& b) {
 
 }  // namespace
 
-std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) {
+namespace {
+
+// A cell's own `dont_use : true` (nested pin/timing groups are masked off).
+// ABC's Liberty reader skips such a cell -- any `dont_use` attribute, in
+// fact: it never looks at the value -- so the register cell and its drive
+// ladder must never name one either, and pass.abc reports the skipped set
+// once per run.
+bool cell_is_dont_use(const std::string& body) {
+  std::string v = scalar_attr(top_level_only(body), "dont_use");
+  std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return v == "true";
+}
+
+struct Cell_scan {
+  std::vector<Dff_cell>    dffs;      // the flop cells, dont_use ones excluded
+  std::vector<std::string> dont_use;  // every cell marked `dont_use : true`, in file order
+};
+
+// One pass over the concatenated Liberty text: the flops (the register pick)
+// and the dont_use set (the one-time report) come from the same read, since
+// a full PDK library is tens of MB.
+Cell_scan scan_cells(const std::string& lib_files) {
   std::string text = strip_comments(read_files(lib_files));
   // `time_unit` is a library-header attribute; several files may be
   // concatenated here, so each cell takes the unit of the nearest header
@@ -603,24 +624,38 @@ std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) {
     }
     return ps;
   };
-  std::string           cell_args;
-  std::vector<Dff_cell> found;
+  Cell_scan   out;
+  std::string cell_args;
   for (size_t p = find_group(text, "cell", 0, cell_args); p != std::string::npos;
        p        = find_group(text, "cell", p + 1, cell_args)) {
     size_t cclose = match_brace(text, p);
     if (cclose == std::string::npos) {
       break;
     }
-    if (auto dff = parse_cell(unquote_trim(cell_args), text.substr(p + 1, cclose - (p + 1)), unit_at(p))) {
-      found.push_back(std::move(*dff));
+    const std::string name = unquote_trim(cell_args);
+    const std::string body = text.substr(p + 1, cclose - (p + 1));
+    if (cell_is_dont_use(body)) {
+      out.dont_use.push_back(name);
+      continue;
+    }
+    if (auto dff = parse_cell(name, body, unit_at(p))) {
+      out.dffs.push_back(std::move(*dff));
     }
   }
-  return found;
+  return out;
 }
+
+}  // namespace
+
+std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).dffs; }
+
+std::vector<std::string> scan_dont_use_cells(const std::string& lib_files) { return scan_cells(lib_files).dont_use; }
 
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer) {
   Dff_selection sel;
-  auto          cells = scan_dff_cells(lib_files);
+  auto          scan  = scan_cells(lib_files);
+  auto&         cells = scan.dffs;
+  sel.dont_use        = std::move(scan.dont_use);
   if (!prefer.empty()) {
     // Explicit request: take it as-is (the ladder is that one cell -- the user
     // named a drive strength, so no fanout-driven swap to a sibling).

@@ -5199,15 +5199,26 @@ void Lnast_prp_writer::write_set_mask() {
     val = render_value(cur, /*operand_ctx=*/true);
   }
   std::string mask_txt;
-  if (move_to_sibling()) {  // mask const
+  // A RUNTIME bit range arrives as a ref to a `range` temp: `q[addr] <= 1`
+  // lowers to `range(%r, addr, addr)` + `set_mask(q, q, %r, 1)`. scan_node
+  // recorded its bounds in range_lohi_ (the same table the READ side uses).
+  // mask_runs can never parse that ref NAME, so without this the write fell
+  // through to the "unparsable mask" arm below and was silently DROPPED.
+  const std::pair<std::string, std::string>* dyn_range = nullptr;
+  if (move_to_sibling()) {  // mask: a const, or a ref to a range temp
     mask_txt = std::string(current_text());
+    if (current_ntype() == Lnast_ntype::Lnast_ntype_ref) {
+      if (auto rit = range_lohi_.find(mask_txt); rit != range_lohi_.end()) {
+        dyn_range = &rit->second;
+      }
+    }
   }
   std::string ins;
   if (move_to_sibling()) {  // insert value — may be a single-use temp to inline
     // A single contiguous run consumes `ins` WHOLE (`dst#[lo..=hi] = ins`), so a
     // loose expression needs no parens there. Several runs each append a
     // `#[..]` slice to it, which does.
-    ins = render_value(cur, /*operand_ctx=*/mask_runs(mask_txt).size() != 1);
+    ins = render_value(cur, /*operand_ctx=*/dyn_range == nullptr && mask_runs(mask_txt).size() != 1);
   }
   move_to_parent();
 
@@ -5223,7 +5234,7 @@ void Lnast_prp_writer::write_set_mask() {
     // The copy is followed by one lane write per run, so the target is assigned
     // TWICE even though the LNAST defines it once — it must not be declared
     // `const` ("const `t` rebind (assigned 2 times)" on recompile).
-    if (!runs.empty()) {
+    if (!runs.empty() || dyn_range != nullptr) {
       multi_def_tmp_.insert(target);
       single_store_.erase(target);
     }
@@ -5231,6 +5242,24 @@ void Lnast_prp_writer::write_set_mask() {
     print(target);
     os << std::format(" = {}", val);
     need_sep = true;
+  }
+
+  if (dyn_range != nullptr) {
+    if (need_sep) {
+      os << "\n";
+      print_indent();
+    }
+    // `x#[i]` and `x#[lo..=hi]` are both writable LHS forms; a range temp whose
+    // two bounds are the same expression IS the single-bit spelling. The bounds
+    // are NAMES, so they go through strip_prefix like any other emitted ref.
+    const std::string lo = strip_prefix(dyn_range->first);
+    const std::string hi = strip_prefix(dyn_range->second);
+    if (lo == hi) {
+      os << std::format("{}#[{}] = {}", target, lo, ins);
+    } else {
+      os << std::format("{}#[{}..={}] = {}", target, lo, hi, ins);
+    }
+    return;
   }
 
   if (runs.empty()) {
@@ -5655,6 +5684,9 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
   }
   if (t == Lnast_ntype::Lnast_ntype_get_mask) {
     get_mask_nodes_.push_back(nid);
+  }
+  if (t == Lnast_ntype::Lnast_ntype_set_mask) {
+    set_mask_nodes_.push_back(nid);
   }
   if (t == Lnast_ntype::Lnast_ntype_tuple_get) {
     tuple_get_nodes_.emplace_back(nid, my_index);
@@ -6271,38 +6303,44 @@ void Lnast_prp_writer::analyze_folding() {
   scan_node(lnast->get_root(), index);
   build_stability_index();
 
-  // A range temp feeding a get_mask mask reconstructs a `src#[lo..=hi]` slice.
-  // Record its bounds, and (when the range is used only there) suppress the
-  // standalone range statement.
-  for (auto gm : get_mask_nodes_) {
-    auto src = lnast->get_child(gm);
-    if (src.is_invalid()) {
-      continue;
-    }
-    src = lnast->get_sibling_next(src);  // child1: src
-    if (src.is_invalid()) {
-      continue;
-    }
-    auto mask = lnast->get_sibling_next(src);  // child2: mask
-    if (mask.is_invalid() || lnast->get_type(mask) != Lnast_ntype::Lnast_ntype_ref) {
-      continue;
-    }
-    std::string mn(lnast->get_name(mask));
-    auto        it = fold_info_.find(mn);
-    if (it == fold_info_.end() || it->second.def_type != Lnast_ntype::Lnast_ntype_range) {
-      continue;
-    }
-    auto rlo = lnast->get_child(it->second.def_node);
-    if (rlo.is_invalid()) {
-      continue;
-    }
-    rlo             = lnast->get_sibling_next(rlo);  // child1: lo
-    auto        rhi = rlo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(rlo);
-    std::string lo  = rlo.is_invalid() ? std::string("0") : std::string(lnast->get_name(rlo));
-    std::string hi  = rhi.is_invalid() ? lo : std::string(lnast->get_name(rhi));
-    range_lohi_[mn] = {lo, hi};
-    if (it->second.use_count == 1) {
-      folded_node_.insert(it->second.def_node.get_class_index().value);  // range stmt inlined into the slice
+  // A range temp feeding a mask reconstructs a `#[lo..=hi]` slice: the READ
+  // `get_mask(dst, src, mask)` and the WRITE `set_mask(dst, val, mask, ins)`
+  // both hold it at child2. Record its bounds, and (when the range is used only
+  // there) suppress the standalone range statement. Without the set_mask half a
+  // RUNTIME-indexed bit write (`q[addr] <= 1`) had no parsable mask, and
+  // write_set_mask fell through to its "unparsable mask" arm — emitting the
+  // base copy `q = q` and DROPPING the write.
+  for (const auto* nodes : {&get_mask_nodes_, &set_mask_nodes_}) {
+    for (auto mn_node : *nodes) {
+      auto src = lnast->get_child(mn_node);
+      if (src.is_invalid()) {
+        continue;
+      }
+      src = lnast->get_sibling_next(src);  // child1: src (get) / val (set)
+      if (src.is_invalid()) {
+        continue;
+      }
+      auto mask = lnast->get_sibling_next(src);  // child2: mask
+      if (mask.is_invalid() || lnast->get_type(mask) != Lnast_ntype::Lnast_ntype_ref) {
+        continue;
+      }
+      std::string mn(lnast->get_name(mask));
+      auto        it = fold_info_.find(mn);
+      if (it == fold_info_.end() || it->second.def_type != Lnast_ntype::Lnast_ntype_range) {
+        continue;
+      }
+      auto rlo = lnast->get_child(it->second.def_node);
+      if (rlo.is_invalid()) {
+        continue;
+      }
+      rlo             = lnast->get_sibling_next(rlo);  // child1: lo
+      auto        rhi = rlo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(rlo);
+      std::string lo  = rlo.is_invalid() ? std::string("0") : std::string(lnast->get_name(rlo));
+      std::string hi  = rhi.is_invalid() ? lo : std::string(lnast->get_name(rhi));
+      range_lohi_[mn] = {lo, hi};
+      if (it->second.use_count == 1) {
+        folded_node_.insert(it->second.def_node.get_class_index().value);  // range stmt inlined into the slice
+      }
     }
   }
 
@@ -6698,7 +6736,13 @@ std::string Lnast_prp_writer::render_get_mask_rhs(Lnast_nid c0, bool operand_ctx
           }
           return fmt_bit_range(srctxt(true), static_cast<int>(*lo), static_cast<int>(*hi));  // tight
         }
-        return std::format("{}#[{}..={}]", srctxt(true), rit->second.first, rit->second.second);  // tight
+        // Non-literal bounds are NAMES: they must go through strip_prefix like
+        // every other emitted ref (`%3` -> `t3`, `x___ssa_1` -> `x__w1`), or the
+        // slice names something the recompile has never heard of.
+        return std::format("{}#[{}..={}]",
+                           srctxt(true),
+                           strip_prefix(rit->second.first),
+                           strip_prefix(rit->second.second));  // tight
       }
     } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
       std::string mt(lnast->get_name(mask));

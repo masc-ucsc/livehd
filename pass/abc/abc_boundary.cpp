@@ -176,7 +176,8 @@ void Mapper::resolve_boundary_defaults() {
   auto* scl   = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
   scl_lib_ok_ = lib_can_size(scl);
   drive_cell_ = nullptr;
-  if (!scl_lib_ok_ || !startup_opts_.boundary) {
+  Abc_FrameSetDrivingCell(nullptr);  // never a name left over from a previous library
+  if (!scl_lib_ok_) {
     return;
   }
   typical_cap_ff_  = typical_input_cap_ff(scl);
@@ -226,6 +227,17 @@ void Mapper::resolve_boundary_defaults() {
       }
     }
     drive_cell_ = best;
+  }
+  // ABC's `buffer` trees a primary input's fanout only when the frame names a
+  // driving cell (Abc_SclBufSize skips a CI without one; `buffer -p` belongs
+  // to the older buffering code and is inert there). Declare the stand-in, so
+  // every region's inputs -- the design's primary inputs and the sink side of
+  // crossing nets alike -- fan out through a buffer tree, the way yosys's
+  // `abc -constr` (set_driving_cell) flow gets them. The timer's per-CI table
+  // still wins wherever the exact driver is known (Phase B), and the estimate
+  // already assumed this very cell (Phase A).
+  if (drive_cell_ != nullptr && startup_opts_.boundary_buffer && startup_opts_.max_fanout != 0) {
+    Abc_FrameSetDrivingCell(Extra_UtilStrsav(static_cast<SC_Cell*>(drive_cell_)->pName));
   }
   if (startup_opts_.verbose) {
     std::print("[pass.abc] boundary: typical input pin {:.3f} fF, stand-in driver {}, io_load {:.3f} fF\n",

@@ -17,7 +17,7 @@ mod regs(din:u8) -> (q:u8@[1]) {
 mod ram(waddr:u3, wdata:u8, we:u1, raddr:u3) -> (rdata:u8@[0]) {
   reg mem:[8]u8 = 0
   rdata = mem[raddr]
-  if we {
+  if we != 0 {
     mem[waddr] = wdata
   }
 }

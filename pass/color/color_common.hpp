@@ -40,7 +40,7 @@ using livehd::graph_util::synthesis_ge_weight;
 // stack overflow, not a style preference.
 class Union_find {
 public:
-  hhds::Node_class find(const hhds::Node_class &n) {
+  hhds::Node_class find(const hhds::Node_class& n) {
     auto cur = n;
     parent_.try_emplace(cur, cur);
     while (true) {
@@ -53,7 +53,7 @@ public:
       cur          = gp;
     }
   }
-  void merge(const hhds::Node_class &a, const hhds::Node_class &b) {
+  void merge(const hhds::Node_class& a, const hhds::Node_class& b) {
     auto ra = find(a);
     auto rb = find(b);
     if (ra != rb) {
@@ -182,7 +182,10 @@ struct Color_opts {
   // 0 is INERT, the same contract min_ge/max_ge carry: RAW cones, no walk budget
   // and no merge at all. The shipped policy (30000) lives on the pass.color
   // label so a direct caller or unit test still gets what it asked for.
-  uint64_t max_gate = 0;
+  uint64_t max_gate      = 0;
+  bool     ctrl_cones    = false;
+  uint64_t ctrl_max_gate = 0;
+  uint64_t ctrl_min_gate = 0;
 
   // cones mode's PHASE-2 forward merge across the register: "", "pair" or
   // "all". Empty (the default, INERT like max_gate) leaves the backward cones
@@ -203,14 +206,14 @@ struct Color_opts {
   // the options so every algorithm reports without each one growing a
   // parameter; the driver re-points it per def and owns the cross-def
   // aggregation (an algorithm only ever sees one def).
-  Def_color_sizes *sizes = nullptr;
+  Def_color_sizes* sizes = nullptr;
 };
 
 // A node participates in partitioning iff it is a regular (non-builtin) node
 // that is neither a constant nor graph IO. INPUT/OUTPUT/CONST live on the HHDS
 // singleton nodes (nid < 4<<2, caught by is_builtin_node); legacy LiveHD
 // constants are CONST_NODE pool pins, never body nodes.
-[[nodiscard]] inline bool is_partitionable(const hhds::Node_class &n) {
+[[nodiscard]] inline bool is_partitionable(const hhds::Node_class& n) {
   if (n.is_invalid() || livehd::graph_util::is_builtin_node(n)) {
     return false;
   }
@@ -227,30 +230,30 @@ struct Color_opts {
 // algorithm=="block-attr", or "seeded":true carried by a later rebuild) win
 // over the algorithm: seeded nodes keep their color and algorithm ids shift
 // above the max seeded id.
-int apply_coloring(hhds::Graph *g, const Node2Id &node2id, const Color_opts &opts, Def_color_sizes *sizes = nullptr);
+int apply_coloring(hhds::Graph* g, const Node2Id& node2id, const Color_opts& opts, Def_color_sizes* sizes = nullptr);
 
 // True when g's active coloring carries source-seeded block regions.
-[[nodiscard]] bool has_seeded_coloring(hhds::Graph *g);
+[[nodiscard]] bool has_seeded_coloring(hhds::Graph* g);
 
 // Drop the active coloring on `g` (flat + hier color attrs on every node).
-void clear_coloring(hhds::Graph *g);
+void clear_coloring(hhds::Graph* g);
 
 // Active-coloring descriptor (ColoringInfo) persistence. Stored as a JSON blob
 // on the graph's INPUT_NODE (a stable builtin carrier that persists with the
 // body). One record per top graph.
-void set_coloring_info(hhds::Graph *g, const std::string &json);
-void del_coloring_info(hhds::Graph *g);
+void set_coloring_info(hhds::Graph* g, const std::string& json);
+void del_coloring_info(hhds::Graph* g);
 
 // Splice the source-seeded members ("seeded" + the block-attribute
 // "region_opts" pass.abc consumes) from g's CURRENT coloring_info into a
 // freshly built one, so a pass.color rebuild never drops the user's block
 // annotations. Identity when g carries no seeded coloring.
-[[nodiscard]] std::string preserve_seeded_info(hhds::Graph *g, std::string fresh_json);
+[[nodiscard]] std::string preserve_seeded_info(hhds::Graph* g, std::string fresh_json);
 
 // Build the serialized ColoringInfo for `g` from its active (flat) coloring:
 // schema_version, top, algorithm, params (verbatim JSON object string), and a
 // per-color {region_cnt, instance_cnt} map. `params_json` is inlined as-is.
-[[nodiscard]] std::string build_coloring_info_json(hhds::Graph *g, std::string_view top, std::string_view algorithm,
+[[nodiscard]] std::string build_coloring_info_json(hhds::Graph* g, std::string_view top, std::string_view algorithm,
                                                    std::string_view params_json);
 
 }  // namespace livehd::color

@@ -11,7 +11,7 @@ mod abc_block_attr(a:u8, b:u8, c:u8, s:u1) -> (x:u8@[0], y:u8@[0]) {
   x = (a & b) | (c ^ a)
   {::[abc='strash; &get -n; &dch -f; &nf {D}; &put', color=2]
     mut t = b & c
-    if s {
+    if s != 0 {
       t = a | b
     }
     y = t ^ c

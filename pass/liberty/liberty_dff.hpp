@@ -52,6 +52,9 @@ struct Dff_cell {
 // logic), no async clear/preset, exactly one data + one clock input, and a Q
 // (preferred) or QN output. File order; unranked.
 std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files);
+// The names of every cell marked `dont_use : true` (a separate full read;
+// resolve_dff_cells fills Dff_selection::dont_use from the same pass).
+std::vector<std::string> scan_dont_use_cells(const std::string& lib_files);
 
 // The register-mapping pick. With `prefer` empty the candidates are ranked
 // (area asc, n_out asc, non-inverted Q first, name asc): area is the one
@@ -76,6 +79,9 @@ std::vector<Dff_cell> find_dff_ladder(const std::string& lib_files, const Dff_ce
 struct Dff_selection {
   std::optional<Dff_cell> base;
   std::vector<Dff_cell>   ladder;
+  // Every cell marked `dont_use : true`, in file order: the set ABC's reader
+  // skips (so no rung above names one); pass.abc reports it once per run.
+  std::vector<std::string> dont_use;
 };
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer = "");
 

@@ -1232,6 +1232,21 @@ private:
       info.reset_pin_name = std::string(val);
     } else if ((key == "clock_pin")) {
       info.clock_pin_name = std::string(val);
+    } else if ((key == "enable")) {
+      // Explicit write-enable (`reg q:[enable=(wen!=0)]`): the state element
+      // updates (a latch: is transparent) only while it holds. It is ANDed onto
+      // the OR-of-write-conditions the branch machinery already derives, so an
+      // `if`-guarded write inside an `enable=`-qualified reg keeps BOTH guards.
+      // The value is a plain ref (prp2lnast hoists the expression into a temp
+      // ahead of the declare), so it is resolved in finalize_regs, once every
+      // producer has been walked.
+      info.enable_name     = std::string(val);
+      // …UNLESS the value is a CONSTANT: the flag-only spelling `:[enable]`
+      // (val defaults to "true" above), `enable=true/false`, `enable=1/0`. A
+      // const names no signal, so resolve_attr_signal would fail it with a
+      // nonsense "has no such input/wire". Remember which it is here — the
+      // node type is only visible at the attr_set.
+      info.enable_is_const = val_n.is_invalid() || Lnast_ntype::is_const(lnast_->get_type(val_n));
     } else if ((key == "posclk") || (key == "enable_high")) {
       // `enable_high` is the LATCH-facing spelling of the same pin (2f-latch
       // M2): on a latch, pid 6 is the ENABLE POLARITY, not a clock edge, so
@@ -1403,6 +1418,27 @@ private:
     return din;
   }
 
+  // Resolve a reg-attribute signal NAME (`clock_pin=`, `enable=`) to its
+  // driver pin. IO inputs FIRST (a port is not in pin_map_, while an unrelated
+  // same-named value might be, which is why a pin_map_-first lookup is wrong);
+  // then a 2c-wire's DRIVER rather than its passthrough buffer (cgen drops a
+  // buffer whose only consumer is a flop control pin); then any ordinary
+  // value/temp. Invalid = the module has no such input/wire/value.
+  [[nodiscard]] Pin resolve_attr_signal(const std::string& nm) {
+    if (g_->get_io()->has_input(nm)) {
+      return g_->get_input_pin(nm);
+    }
+    if (wire_names_.contains(nm)) {
+      if (auto dit = pin_map_.find(din_key(nm)); dit != pin_map_.end()) {
+        return dit->second;
+      }
+    }
+    if (auto it = pin_map_.find(nm); it != pin_map_.end()) {
+      return it->second;
+    }
+    return Pin{};
+  }
+
   // Wire each declared reg's din / enable / reset_pin / initial /
   // async / negreset after the whole body has been lowered (stores and attr
   // overrides arrive in any order relative to the declare).
@@ -1559,14 +1595,8 @@ private:
         // 2c-wire — a wire clock signal (a gated/derived clock): use its DRIVER
         // (din) directly, not the passthrough buffer (cgen drops a buffer whose
         // only consumer is a flop control pin).
-        std::string cn = info.clock_pin_name;
-        if (g_->get_io()->has_input(cn)) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(g_->get_input_pin(cn));
-        } else if (auto dit = wire_names_.contains(cn) ? pin_map_.find(din_key(cn)) : pin_map_.end(); dit != pin_map_.end()) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(dit->second);
-        } else if (pin_map_.contains(cn)) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(pin_map_.at(cn));
-        } else {
+        const auto cp = resolve_attr_signal(info.clock_pin_name);
+        if (cp.is_invalid()) {
           error_here(
               "upass.tolg: reg '{}' names clock_pin '{}' but '{}' has "
               "no such input/wire",
@@ -1575,6 +1605,7 @@ private:
               lnast_->get_top_module_name());
           continue;
         }
+        setup_sink_by_name(flop, "clock_pin").connect_driver(cp);
       } else if (!clock_name_.empty()) {
         setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
       } else {
@@ -1609,17 +1640,78 @@ private:
         mw_map_[name] = mw;
       }
 
+      // Explicit `:[enable=<ref>]`. Resolved HERE, not at the attr_set: prp2lnast
+      // hoists the attribute ahead of the declare, so the temp holding
+      // `(wen_i != 0)` is still undefined when lower_attr_set runs.
+      Pin attr_en;
+      if (!info.enable_name.empty()) {
+        if (info.enable_is_const) {
+          // A CONSTANT enable names no signal: `enable=true` is the
+          // constant-true CONDITION — "always update", no extra gate at all
+          // (an invalid attr_en), which is already the Flop default. Not a
+          // curiosity: a generic-parameterised `enable=(EN!=0)` folds to
+          // exactly this. Without this arm it fell into the resolve arm below
+          // and died with "names enable 'true' but … has no such input/wire".
+          // (The value-less `:[enable]`, which the attribute grammar also
+          // defaults to the text "true", is refused at the SOURCE by
+          // prp2lnast's attr-needs-value rule — a pin attribute names a
+          // signal, so a flag-only spelling says nothing. This arm still
+          // covers it for any other LNAST producer.)
+          const auto cv = Dlop::from_pyrope(info.enable_name);
+          if (!cv || cv->is_invalid()) {
+            error_here(
+                "upass.tolg: reg '{}' enable value '{}' is neither a signal "
+                "nor a compile-time constant",
+                name,
+                info.enable_name);
+            continue;
+          }
+          if (cv->is_known_false()) {
+            // A constant-0 enable CANNOT be emitted: cgen skips a const enable
+            // pin outright (cgen_verilog `!enable_dpin.is_const()`), so wiring
+            // one would compile to a register that updates every edge — the
+            // same silent-drop failure the `enable_high=false` arm refuses.
+            error_here(
+                "upass.tolg: reg '{}' has `enable=false`, a register that can "
+                "never update — drop the reg (use a const) or the attribute",
+                name);
+            continue;
+          }
+        } else {
+          attr_en = resolve_attr_signal(info.enable_name);
+          if (attr_en.is_invalid()) {
+            error_here(
+                "upass.tolg: reg '{}' names enable '{}' but '{}' has "
+                "no such input/wire",
+                name,
+                info.enable_name,
+                lnast_->get_top_module_name());
+            continue;
+          }
+          attr_en = nonzero1(attr_en);
+        }
+      }
+
       // enable: still the seeded false const => never written. For a Flop, the
-      // true const needs no pin (unconditional edge update is the default).
-      // For a Latch it MUST remain explicit: enable=true means always
-      // transparent, which lets cprop recognize that the cell stores nothing
-      // and replace it with its combinational din. Any other pin is the
-      // OR-of-conditions mux chain.
+      // true const needs no pin (unconditional edge update is the default)
+      // unless `enable=` adds one. For a Latch it MUST remain explicit:
+      // enable=true means always transparent, which lets cprop recognize that
+      // the cell stores nothing and replace it with its combinational din. Any
+      // other pin is the OR-of-conditions mux chain.
       if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
         const auto en       = eit->second;
-        const auto en_nid   = en.get_master_node().get_debug_nid();
-        const bool is_true  = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
-        const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
+        // Identity by VALUE, not by node. Every const pin shares ONE pooled
+        // master node (graph const pool), so comparing get_debug_nid() against
+        // the memoized en_const() pins answered TRUE for both questions at
+        // once: an unconditionally-written reg read as `is_false` (never
+        // written) as well. On a FLOP both answers happened to land on the same
+        // "wire no enable pin" outcome, which is why it hid; on a LATCH they do
+        // not — an always-written latch lost the explicit enable=true that
+        // cprop needs to collapse the always-open cell (latch_always_transparent),
+        // and an explicit `:[enable=…]` needs them apart on either cell.
+        const bool is_const = en.is_const();
+        const bool is_true  = is_const && livehd::graph_util::const_of(en).is_known_true();
+        const bool is_false = is_const && livehd::graph_util::const_of(en).is_known_false();
         if (!is_false) {
           if (info.is_latch) {
             // A latch has no clock to gate, so the transported instance
@@ -1630,10 +1722,28 @@ private:
             // which already include activation so din's hold mux and enable
             // remain structurally identical (the latch-contract proof relies
             // on that identity). Only an unconditional true needs gating here.
-            setup_sink_by_name(flop, "enable")
-                .connect_driver(is_true ? (active.is_invalid() ? en : active) : (valid_minted_ ? en : and2(en, active)));
-          } else if (!is_true) {
-            setup_sink_by_name(flop, "enable").connect_driver(en);
+            Pin        lat_en = is_true ? active : (valid_minted_ ? en : and2(en, active));
+            // `:[enable=…]` ANDs on top, exactly as it does for a Flop. Sound
+            // because it only NARROWS the transparency window and never
+            // inverts it: din is `cond ? d : q` built from the SAME cond, so
+            // wherever the narrowed enable is high, cond is high and din is
+            // still `d`. (Contrast `enable_high=false` below, which is REFUSED
+            // precisely because inverting makes the latch write itself.) Rule
+            // B's hold-mux exemption is structural on the DIN side — an
+            // operand that is directly this latch's q — so widening the enable
+            // cone leaves it intact.
+            lat_en            = and2(lat_en, attr_en);
+            if (lat_en.is_invalid()) {
+              lat_en = en;  // unconditionally transparent: keep the explicit true
+            }
+            setup_sink_by_name(flop, "enable").connect_driver(lat_en);
+          } else if (const Pin fin = is_true ? attr_en : and2(en, attr_en); !fin.is_invalid()) {
+            // `enable=` ANDs onto the OR-of-write-conditions shadow, so a reg
+            // that carries BOTH an attribute enable and a conditional write
+            // keeps both guards. An unconditionally-written reg with no
+            // attribute leaves the pin unwired (the Flop default already is
+            // "update every edge").
+            setup_sink_by_name(flop, "enable").connect_driver(fin);
           }
         }
       }
@@ -2295,13 +2405,15 @@ private:
     bool             is_signed = false;
     // Per-reg flop-attr overrides (04b-attributes.md): a per-reg `sync` beats
     // the upass.reset_style flag; `reset_pin=false` opts out of reset.
-    std::string      reset_pin_name;  // explicit reset_pin=NAME / "false"
-    std::string      clock_pin_name;  // explicit clock_pin=NAME (beats implicit clock)
-    bool             has_posclk = false;
-    bool             posclk_val = true;  // false = negedge clock
-    bool             has_sync   = false;
-    bool             sync_val   = true;
-    bool             negreset   = false;
+    std::string      reset_pin_name;           // explicit reset_pin=NAME / "false"
+    std::string      clock_pin_name;           // explicit clock_pin=NAME (beats implicit clock)
+    std::string      enable_name;              // explicit enable=REF (ANDed onto the write-condition shadow)
+    bool             enable_is_const = false;  // …and that REF is a const (`:[enable]`, `enable=false`), not a signal
+    bool             has_posclk      = false;
+    bool             posclk_val      = true;  // false = negedge clock
+    bool             has_sync        = false;
+    bool             sync_val        = true;
+    bool             negreset        = false;
     std::string      initial_txt;       // explicit initial=N (overrides init_txt)
     bool             is_latch = false;  // mode "latch": Ntype_op::Latch, wire din+enable only
     // Hierarchical naming (call-site `name=` on an inlined comb / `reg
@@ -2378,8 +2490,10 @@ private:
   // of nil, so a single writing arm needs no mux at all.
   [[nodiscard]] bool is_single_bind_net(std::string_view var) const { return is_wire_din(var) || is_unbound_const(var); }
 
-  // Cached 1/0 const pins for the enable shadow (node identity doubles as the
-  // "still unconditionally true/false" test in finalize_regs).
+  // Cached 1/0 const pins for the enable shadow. The cache is a minting
+  // shortcut ONLY: every constant pin in the graph shares the CONST_NODE
+  // master, so node identity says nothing about a value — finalize_regs tests
+  // `pin.is_const()` + `const_of(pin)` instead.
   [[nodiscard]] Pin en_const(bool v) {
     auto& pin   = v ? en_true_pin_ : en_false_pin_;
     auto& valid = v ? en_true_valid_ : en_false_valid_;
@@ -4465,6 +4579,24 @@ private:
         }
       }
 
+      // FAIL CLOSED on `:[enable=…]`, which finalize_regs lowers on a plain
+      // flop/latch but which NOTHING wires on an array/memory: the write
+      // enables come from the per-store conditions, so the attribute vanished
+      // without a word and the array was written on every cycle. Same rule as
+      // the latch refusal in finalize_regs — an attribute that silently
+      // evaporates is worse than not having it.
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+        if (pit->second.contains("enable")) {
+          error_here(
+              "upass.tolg: array/memory '{}' carries an `enable` attribute, "
+              "which the Memory cell path does not lower — the attribute would "
+              "be SILENTLY DROPPED. Guard the store with an `if` instead: a "
+              "memory write enable comes from the condition of the write, not "
+              "from an attribute",
+              name);
+        }
+      }
+
       // Clocked (non-array) memory clock wiring, deferred from
       // lower_mem_declare (the clock_pin/posclk attr_set arrives after the
       // declare). Mirrors the per-reg wiring in finalize_regs: an explicit
@@ -4484,17 +4616,12 @@ private:
         }
         setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
         if (!clock_pin_name.empty()) {
-          // Same resolution as the per-reg wiring above: a module input first,
-          // then an internal/derived wire (a gated clock — clock-gate cell
-          // output — clocking a reg array; use its DRIVER, not the
-          // passthrough buffer), then any plain named pin.
-          if (g_->get_io()->has_input(clock_pin_name)) {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(g_->get_input_pin(clock_pin_name));
-          } else if (auto dit = wire_names_.contains(clock_pin_name) ? pin_map_.find(din_key(clock_pin_name)) : pin_map_.end();
-                     dit != pin_map_.end()) {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(dit->second);
-          } else if (pin_map_.contains(clock_pin_name)) {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(pin_map_.at(clock_pin_name));
+          // Same resolution as the per-reg wiring: a module input first, then an
+          // internal/derived wire (a gated clock — clock-gate cell output —
+          // clocking a reg array; use its DRIVER, not the passthrough buffer),
+          // then any plain named pin.
+          if (const auto cp = resolve_attr_signal(clock_pin_name); !cp.is_invalid()) {
+            setup_sink_by_name(mi.node, "clock_pin").connect_driver(cp);
           } else {
             error_here(
                 "upass.tolg: memory '{}' names clock_pin '{}' but '{}' "
@@ -5599,17 +5726,8 @@ private:
   [[nodiscard]] Pin mem_clock_pin(std::string_view name) {
     if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
       if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end() && !cit->second.empty()) {
-        const auto& cn = cit->second;
-        if (g_->get_io()->has_input(cn)) {
-          return g_->get_input_pin(cn);
-        }
-        if (wire_names_.contains(cn)) {
-          if (auto dit = pin_map_.find(din_key(cn)); dit != pin_map_.end()) {
-            return dit->second;
-          }
-        }
-        if (auto pit2 = pin_map_.find(cn); pit2 != pin_map_.end()) {
-          return pit2->second;
+        if (const auto cp = resolve_attr_signal(cit->second); !cp.is_invalid()) {
+          return cp;
         }
       }
     }

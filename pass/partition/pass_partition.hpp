@@ -20,6 +20,7 @@ struct Region_body {
   hhds::Graph* body  = nullptr;  // fresh body to populate (IO pins materialized)
   hhds::Graph* src   = nullptr;  // original graph (read-only)
   int          color = 0;
+  bool         ctrl  = false;
   std::string  module_name;
   // Incremental synth: false when this region's boundary cannot be given
   // reproducible-across-recompiles port names (a crossing-input automorphism),

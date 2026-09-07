@@ -917,7 +917,7 @@ protected:
   // true) when the result is dropped or the output shape is one it cannot model,
   // so a too-strict skip surfaces as a clean no-overload, never a wrong dispatch.
   bool return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used);
-  // Scan the func_call's following siblings (cursor restored to `fcall_cursor`)
+  // Scan the func_call's following statements (cursor restored to `fcall_cursor`)
   // to learn how its result `dst_name` is consumed: each `tuple_get(dst_name,
   // 'field')` adds to `req_fields`; any OTHER reference to `dst_name` sets
   // `whole_used`. Cursor-neutral (saves/restores). Feeds return_matches.

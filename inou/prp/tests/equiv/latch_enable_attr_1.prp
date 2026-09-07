@@ -1,0 +1,14 @@
+/*
+:name: latch_enable_attr_1
+*/
+
+// The latch `enable=` attribute is not a new semantic: the same latch with both
+// guards spelled as one `if` must be the SAME design. LEC'd against
+// latch_enable_attr.prp by prp-lec-latch_enable_attr_1.
+pub mod gate(en:bool, g:u1, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true]
+  if g != 0 and en {
+    l = d
+  }
+  q = l
+}

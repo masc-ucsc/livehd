@@ -10,7 +10,7 @@ mod mem_duplicate_read_ports(waddr:u2, wdata:u8, we:u1, raddr:u2) -> (result:u8@
   const rd0 = mem[raddr]
   const rd1 = mem[raddr]
   result = rd0 ^ (rd1 << 1)
-  if we {
+  if we != 0 {
     mem[waddr] = wdata
   }
 }

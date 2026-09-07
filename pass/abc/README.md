@@ -59,8 +59,10 @@ Per region (`Region_body` from the partition seam):
    `&st; &nf {D}; &put -o` for standard-cell mapping. Without a delay, the
    area default is the former baseline:
    `strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o`.
-   Both append `buffer -N {F} -p; dnsize {B}` (`-p`, the primary-input
-   buffering, only under `boundary`). The LUT mapper uses unit levels,
+   Both append `buffer -N {F}; dnsize {B}`; that `buffer` also trees a primary
+   input's fanout, because pass.abc declares its stand-in driver
+   (`boundary_drive`) as ABC's driving cell -- ABC only buffers an input that
+   has one (`buffer -p` is inert). The LUT mapper uses unit levels,
    not ps, so it does not receive the physical `{D}` target. `&scorr` is omitted
    to preserve register correspondence (it was a no-op in the combinational
    mux sweep). Mapping uses the `read_lib -s` Liberty — its **unit-delay
@@ -296,9 +298,10 @@ It is filled twice:
    per input a stand-in driver (`boundary_drive`: the library's smallest
    ordinary buffer, chosen by delay so a delay line never wins). A pure
    function of the source graph and the Liberty -- cold and warm runs agree.
-   The buffering tail becomes `buffer -N {F} -p`: a PI whose fanout inside the
-   region exceeds the cap gets its tree there (the sink side of buffering a
-   crossing net whole; the driver side is the PO load).
+   The same stand-in is declared as ABC's driving cell (`set_driving_cell`
+   in yosys's `abc -constr` terms), which is what makes the `buffer -N {F}`
+   tail tree a PI whose fanout inside the region exceeds the cap (the sink
+   side of buffering a crossing net whole; the driver side is the PO load).
 2. **Phase B, the exact refinement** (`Mapper::refine_boundaries`, once every
    region is mapped or restored, before the cache is saved). Every def
    reachable from `--top` -- region modules and wrappers alike -- is
@@ -397,8 +400,8 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `200` |
 | `area_flow` | AREA command string: empty = the former baseline (`&fraig`/`dc2`/`&dch`/`&nf`); used without delay or as a second candidate after meeting a delay budget. Built-ins append `buffer -N {F}; dnsize {B}`, adding `upsize {B}` before `dnsize` for a timed candidate. `none` disables only the second candidate. Custom strings run verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended); explicit `flow` takes precedence | empty |
 | `reg_margin` | register overhead subtracted from `delay` to form a flop-bearing region's budget: `auto` = the mapped DFF cell's clk→Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 83.9 ps, sky130 dfxtp_1 528 ps), a number = that many ps, `0` = no margin — see below | `auto` |
-| `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists; also buffers a region input's fanout inside the sink region (`buffer -p`) | `true` |
-| `boundary_buffer` | with `boundary`, tree a region input's fanout inside the sink region when it exceeds `max_fanout` (`buffer -p`); false leaves crossing inputs unbuffered and relies on the exact re-size to upsize the driver (a measured no-op on picorv32 and the xs renametable) | `true` |
+| `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `true` |
+| `boundary_buffer` | tree every region input's fanout inside the region when it exceeds `max_fanout` -- the design's primary inputs and the sink side of crossing nets alike -- by declaring `boundary_drive` as ABC's driving cell (its `buffer` only trees an input that has a driver); independent of `boundary`; false leaves inputs unbuffered and relies on the exact re-size to upsize the driver | `true` |
 | `boundary_drive` | stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a memory or child output, every input under the estimate): empty = the library's smallest ordinary buffer, `none` = an ideal driver | `` |
 | `boundary_rounds` | rounds of the exact re-size (a path through k regions needs k rounds) | `3` |
 | `io_load` | load in fF on a primary output of `--top` (and on a port whose sink cannot be resolved); negative = one typical input pin of the library | `-1` |

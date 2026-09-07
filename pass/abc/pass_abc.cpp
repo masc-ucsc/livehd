@@ -113,6 +113,11 @@ void Pass_abc::setup() {
                        "mapped DFF cell's clk->Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 57 ps, "
                        "sky130 dfxtp_1 372 ps), a number = that many ps, 0 = no margin",
                        "auto");
+  m.add_label_optional("ctrl_flow",
+                       "control-region delay tier; explicit region_opts and large_flow take precedence",
+                       "strash; &get -n; &deepsyn -I 1 -J 20 -T 2; &dch -f; &nf {D}; &put -o");
+  m.add_label_optional("ctrl_area_relax", "control-region slack-for-area cap (default delay-only)", "0");
+  m.add_label_optional("ctrl_time_budget_ms", "control-region wall backstop including mapping and sizing (0 disables)", "5000");
   m.add_label_optional("small_flow",
                        "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
                        "[small_min_ge, small_ge]; "
@@ -159,12 +164,13 @@ void Pass_abc::setup() {
                        "the consumer pins per output bit and a stand-in driver per input while it maps, then -- once every "
                        "region exists -- the exact driver cells and Liberty sink capacitances read off the stitched netlist, "
                        "against which each region is re-sized in place (needs an NLDM Liberty; the exact re-size also needs "
-                       "`delay`). Buffers a region input's fanout inside the sink region (`buffer -p`)",
+                       "`delay`)",
                        "true");
   m.add_label_optional("boundary_buffer",
-                       "with boundary=true, also tree a region input's fanout inside the sink region when it exceeds "
-                       "max_fanout (`buffer -p`, the same fanout rule internal nets follow); false leaves crossing inputs "
-                       "unbuffered and relies on the exact re-size to upsize the driver",
+                       "tree every region input's fanout inside the region past max_fanout -- the design's primary inputs "
+                       "and the sink side of crossing nets alike -- by declaring boundary_drive as ABC's driving cell (its "
+                       "`buffer` only trees an input that has a driver); false leaves inputs unbuffered and relies on the "
+                       "exact re-size to upsize the driver",
                        "true");
   m.add_label_optional("boundary_drive",
                        "stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary "
@@ -527,6 +533,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
         inst_of(q),
         q.ms,
         q.resynth ? 1 : 0);
+    j += std::format(",\"ctrl\":{}", q.ctrl ? 1 : 0);
     if (q.peak_rss_kb != 0) {
       j += std::format(",\"peak_rss_kb\":{}", q.peak_rss_kb);
     }
@@ -919,33 +926,45 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   livehd::abc::Map_options opts;
-  opts.flow              = flow;
-  opts.boundary          = boundary;
-  opts.boundary_buffer   = boundary_buffer;
-  opts.boundary_rounds   = boundary_rounds;
-  opts.boundary_drive    = boundary_drive;
-  opts.io_load           = io_load;
-  opts.max_fanout        = static_cast<uint32_t>(max_fanout);
-  opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
-  opts.area_flow         = area_flow;
-  opts.reg_margin        = reg_margin;
-  opts.small_flow        = small_flow;
-  opts.small_min_ge      = small_min_ge;
-  opts.small_ge          = small_ge;
-  opts.large_flow        = large_flow;
-  opts.large_ge          = large_ge;
-  opts.map_register      = map_register;
-  opts.map_memory        = map_memory;
-  opts.register_max_bits = register_max_bits;
-  opts.dff_cell          = std::string{var.get("dff_cell", "")};
-  opts.delay             = delay;
-  opts.load              = load;
-  opts.verbose           = verbose;
-  opts.adder             = adder.value();
-  opts.ware              = truthy(var.get("ware", "true"));
-  opts.auto_adder        = adder_s == "auto" && block_size == 0;
-  opts.auto_multiplier   = mult_s == "auto";
-  auto barrel            = std::string{var.get("barrel", "auto")};
+  opts.flow            = flow;
+  opts.boundary        = boundary;
+  opts.boundary_buffer = boundary_buffer;
+  opts.boundary_rounds = boundary_rounds;
+  opts.boundary_drive  = boundary_drive;
+  opts.io_load         = io_load;
+  opts.max_fanout      = static_cast<uint32_t>(max_fanout);
+  opts.area_relax_pct  = static_cast<uint32_t>(area_relax_pct);
+  opts.area_flow       = area_flow;
+  opts.reg_margin      = reg_margin;
+  opts.ctrl_flow       = std::string{var.get("ctrl_flow", "strash; &get -n; &deepsyn -I 1 -J 20 -T 2; &dch -f; &nf {D}; &put -o")};
+  const auto ctrl_uint = [&](std::string_view key) -> uint64_t {
+    const auto s         = std::string{var.get(key, key == "ctrl_area_relax" ? "0" : "5000")};
+    uint64_t   v         = 0;
+    const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
+    if (ec != std::errc{} || end != s.data() + s.size() || v > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-ctrl-option", "io").msg("{} must be a nonnegative 32-bit integer", key).fatal();
+    }
+    return v;
+  };
+  opts.ctrl_area_relax     = static_cast<uint32_t>(ctrl_uint("ctrl_area_relax"));
+  opts.ctrl_time_budget_ms = ctrl_uint("ctrl_time_budget_ms");
+  opts.small_flow          = small_flow;
+  opts.small_min_ge        = small_min_ge;
+  opts.small_ge            = small_ge;
+  opts.large_flow          = large_flow;
+  opts.large_ge            = large_ge;
+  opts.map_register        = map_register;
+  opts.map_memory          = map_memory;
+  opts.register_max_bits   = register_max_bits;
+  opts.dff_cell            = std::string{var.get("dff_cell", "")};
+  opts.delay               = delay;
+  opts.load                = load;
+  opts.verbose             = verbose;
+  opts.adder               = adder.value();
+  opts.ware                = truthy(var.get("ware", "true"));
+  opts.auto_adder          = adder_s == "auto" && block_size == 0;
+  opts.auto_multiplier     = mult_s == "auto";
+  auto barrel              = std::string{var.get("barrel", "auto")};
   if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
     livehd::diag::err("pass.abc", "bad-barrel", "io").msg("barrel must be auto|log|reverse").fatal();
     return;
@@ -1070,6 +1089,22 @@ void Pass_abc::work(Eprp_var& var) {
   livehd::liberty::Dff_selection           dff_sel;
   if (map_register) {
     dff_sel = livehd::liberty::resolve_dff_cells(opts.library, opts.dff_cell);
+  }
+  // Liberty cells marked `dont_use : true` never reach ABC (its reader skips
+  // them, and the register pick above never names one). Say so once per
+  // synthesis -- a drive strength or buffer class missing from the netlist is
+  // otherwise a puzzle -- without listing the whole set.
+  {
+    std::vector<std::string> skipped = map_register ? dff_sel.dont_use : livehd::liberty::scan_dont_use_cells(opts.library);
+    if (!skipped.empty()) {
+      std::string eg;
+      for (size_t i = 0; i < skipped.size() && i < 3; ++i) {
+        eg += (i == 0 ? "" : ", ") + skipped[i];
+      }
+      livehd::diag::warn("pass.abc", "dont-use", "io")
+          .msg("pass.abc ignored {} Liberty cell(s) marked dont_use (e.g. {})", skipped.size(), eg)
+          .emit();
+    }
   }
   if (!cache_dir.empty()) {
     std::error_code ec;

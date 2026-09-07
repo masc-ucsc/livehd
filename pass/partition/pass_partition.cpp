@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <print>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -136,7 +137,7 @@ uint64_t producer_shape(const hhds::Pin_class& pin) {
 // value is op+width+sign ONLY: it is NOT a content signature, so two unrelated
 // ports can tie on it and the "tied outputs are interchangeable" premise in
 // name_ports stops holding. name_ports refuses region reuse on any such port.
-absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::vector<hhds::Pin_class>& roots,
+absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::vector<hhds::Pin_class>&   roots,
                                                                    absl::flat_hash_set<hhds::Pin_class>* coarse = nullptr) {
   absl::flat_hash_map<hhds::Pin_class, uint32_t> indegree;
   absl::flat_hash_map<hhds::Pin_class, uint64_t> resolved;
@@ -490,6 +491,7 @@ private:
   // hash map is exactly the shape that explodes on a multi-million-node def.
   std::vector<std::vector<hhds::Node_class>> region_nodes_;
   std::vector<int>                           region_color_;
+  std::vector<bool>                          region_ctrl_;
   // Per-region reuse eligibility for incremental synth: cleared when two
   // crossing inputs share a producer-cone signature (a genuine automorphism
   // whose by-name stitch is not reproducible across recompiles). Sized in
@@ -695,6 +697,49 @@ bool Partitioner::collect() {
     }
     region_nodes_[it->second].push_back(n);
   }
+  // Owner membership remains the sole external exporter. Secondary members
+  // are private copies: only their in-region edges use the local copy.
+  absl::flat_hash_map<int, uint32_t> color_region;
+  for (uint32_t r = 0; r < region_color_.size(); ++r) {
+    color_region[region_color_[r]] = r;
+  }
+  region_ctrl_.resize(region_nodes_.size(), false);
+  for (auto node : g_->body().nodes(hhds::Node_order::forward)) {
+    auto attr = node.attr(livehd::attrs::ctrl_members);
+    if (!attr.has()) {
+      continue;
+    }
+    std::istringstream colors(attr.get());
+    int                c;
+    while (colors >> c) {
+      auto [it, added] = color_region.try_emplace(c, region_nodes_.size());
+      if (added) {
+        region_nodes_.emplace_back();
+        region_color_.push_back(c);
+        region_ctrl_.push_back(true);
+      }
+      const auto r    = it->second;
+      region_ctrl_[r] = true;
+      if (c != node_color_of(node)) {
+        region_nodes_[r].push_back(node);
+      }
+    }
+  }
+  // The ABC bit-blaster consumes dependency order. Appending secondary members
+  // must not put a shared producer after an owned consumer.
+  absl::flat_hash_map<hhds::Node_class, uint32_t> rank;
+  uint32_t                                        ordinal = 0;
+  for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
+    rank[n] = ordinal++;
+  }
+  for (uint32_t r = 0; r < region_nodes_.size(); ++r) {
+    if (region_ctrl_[r]) {
+      std::sort(region_nodes_[r].begin(), region_nodes_[r].end(), [&](const auto& a, const auto& b) {
+        return rank.at(a) < rank.at(b);
+      });
+    }
+  }
+  rank.clear();
   const size_t nregions = region_nodes_.size();
   module_inputs_.resize(nregions);
   in_index_.resize(nregions);
@@ -703,40 +748,42 @@ bool Partitioner::collect() {
   const_edges_.resize(nregions);
   module_gio_.resize(nregions);
 
-  // Classify every edge feeding a region node (via inp_edges).
-  for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
-    if (!is_partitionable(n)) {
-      continue;
+  // Classify edges against full membership, not just single-color ownership.
+  for (uint32_t r = 0; r < nregions; ++r) {
+    absl::flat_hash_set<hhds::Node_class> local;
+    if (region_ctrl_[r]) {
+      local.insert(region_nodes_[r].begin(), region_nodes_[r].end());
     }
-    auto r = region_idx(n);
-    for (const auto& e : n.inp_edges()) {
-      auto dn   = e.driver.get_master_node();
-      auto spid = e.sink.get_port_id();
-      if (e.driver.is_const()) {
-        // internal_edges_/const_edges_ recreate connectivity for the classic
-        // (no-hook) rebuild AND the incremental pre-body (build_pre_): both feed
-        // the SAME construction, so a comment-only recompile yields a byte-stable
-        // pre-body. On the plain hook path they are dead (the hook fills the body
-        // itself) -- skip an O(flat-edges) table that peaks before the first
-        // region and is dead weight on the exact OOM (flatten) path.
-        if (!hook_ || build_pre_) {
-          const_edges_[r].push_back(ConstEdge{e.driver, n, spid});
-        }
-      } else if (gu::is_graph_input_pin(e.driver)) {
-        // pin_name_of resolves the graph input's declared port name directly.
-        ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(e.driver)});
-      } else if (is_partitionable(dn)) {
-        auto rd = region_idx(dn);
-        if (rd == r) {
-          if (!hook_ || build_pre_) {  // dead on the plain hook path (see const_edges_ above)
-            internal_edges_[r].push_back(IntEdge{e.driver, n, spid});
+    for (auto n : region_nodes_[r]) {
+      for (const auto& e : n.inp_edges()) {
+        auto dn   = e.driver.get_master_node();
+        auto spid = e.sink.get_port_id();
+        if (e.driver.is_const()) {
+          // internal_edges_/const_edges_ recreate connectivity for the classic
+          // (no-hook) rebuild AND the incremental pre-body (build_pre_): both feed
+          // the SAME construction, so a comment-only recompile yields a byte-stable
+          // pre-body. On the plain hook path they are dead (the hook fills the body
+          // itself) -- skip an O(flat-edges) table that peaks before the first
+          // region and is dead weight on the exact OOM (flatten) path.
+          if (!hook_ || build_pre_) {
+            const_edges_[r].push_back(ConstEdge{e.driver, n, spid});
           }
-        } else {
-          ensure_output_port(e.driver);
-          ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/false, std::string{});
+        } else if (gu::is_graph_input_pin(e.driver)) {
+          // pin_name_of resolves the graph input's declared port name directly.
+          ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(e.driver)});
+        } else if (is_partitionable(dn)) {
+          auto rd = region_idx(dn);
+          if (rd == r || local.contains(dn)) {
+            if (!hook_ || build_pre_) {  // dead on the plain hook path (see const_edges_ above)
+              internal_edges_[r].push_back(IntEdge{e.driver, n, spid});
+            }
+          } else {
+            ensure_output_port(e.driver);
+            ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/false, std::string{});
+          }
         }
+        // else: unexpected builtin driver — skip.
       }
-      // else: unexpected builtin driver — skip.
     }
   }
 
@@ -1263,6 +1310,7 @@ void Partitioner::build_module(uint32_t r) {
     rb.body           = body.get();
     rb.src            = g_;
     rb.color          = color;
+    rb.ctrl           = region_ctrl_[r];
     rb.module_name    = name;
     rb.reuse_eligible = (r < region_reuse_ok_.size()) ? (region_reuse_ok_[r] != 0) : true;
     for (auto& p : module_inputs_[r]) {

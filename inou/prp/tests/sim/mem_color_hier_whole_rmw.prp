@@ -13,7 +13,7 @@ mod hier_mem_leaf(en:u1) -> (q:u4@[0]) {
   const old = words[0]
   mut next:u16 = words
   wrap next#[0..=3] = old + 1
-  if en {
+  if en != 0 {
     words = next
   }
   q = words[0]

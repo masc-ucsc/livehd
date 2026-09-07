@@ -16,9 +16,12 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <mutex>
+#include <thread>
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 #elif defined(__GLIBC__)
@@ -118,10 +121,11 @@ constexpr std::string_view kCombFlow
 // margin when the region holds flops; empty without a target, so the tail
 // degrades to a bare `dnsize`): `dnsize -D` lets the down-sizing consume the
 // slack up to the budget instead of preserving the delay it started from.
-// `{P}` is ` -p` under `boundary` (buffer a PI's fanout inside the sink region:
-// the sink side of buffering a crossing net as a whole; the driver side is the
-// PO load the boundary table hands the timer) and empty otherwise.
-constexpr std::string_view kBufferTail = "; buffer -N {F}{P}; dnsize {B}";
+// A primary input's fanout is treed by this same `buffer`: ABC only does so
+// for an input that has a driving cell, which resolve_boundary_defaults
+// declares (the `boundary_drive` stand-in) -- out of band of this string, so
+// the cache recipe spells it (`|pi_drive=`).
+constexpr std::string_view kBufferTail = "; buffer -N {F}; dnsize {B}";
 
 // Bound SAT work in the area objective, as in the timing flow. Unbounded
 // FRAIG conflicts dominated small regions of beamformer/CPU/KOIOS designs.
@@ -131,7 +135,7 @@ constexpr std::string_view kBufferTail = "; buffer -N {F}{P}; dnsize {B}";
 // that budget with less SCL area. The timing result wins every tie.
 constexpr std::string_view kAreaFlow
     = "strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o";
-constexpr std::string_view kAreaTail = "; buffer -N {F}{P}; upsize {B}; dnsize {B}";
+constexpr std::string_view kAreaTail = "; buffer -N {F}; upsize {B}; dnsize {B}";
 
 // The MAPPER step of both built-in flows, spelled once so map_region's
 // area-recovery pass can replay exactly it -- and nothing else -- after `&undo`.
@@ -180,7 +184,6 @@ static_assert(kCombFlow.find(kMapCmd) != std::string_view::npos);
 // register overhead.
 static_assert(kBufferTail.find("{B}") != std::string_view::npos && kBufferTail.find("{D}") == std::string_view::npos);
 static_assert(kAreaTail.find("{B}") != std::string_view::npos && kAreaTail.find("{D}") == std::string_view::npos);
-static_assert(kBufferTail.find("{P}") != std::string_view::npos && kAreaTail.find("{P}") != std::string_view::npos);
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -359,10 +362,7 @@ std::string Mapper::subst_flow(std::string f) const {
   // {B} is the region budget, already spelled as a flag (`-D <ps>`) or empty.
   f = subst(std::move(f), "{B}", budget_flag_);
   // {F} is the bare fanout NUMBER (buffer's -N takes it), not a flag.
-  f = subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
-  // {P}: buffer primary inputs too (the sink side of a crossing net) under
-  // `boundary`; spelled here so the recipe string carries the decision.
-  return subst(std::move(f), "{P}", opts_.boundary && opts_.boundary_buffer ? " -p" : "");
+  return subst(std::move(f), "{F}", std::to_string(opts_.max_fanout));
 }
 
 std::string Mapper::comb_flow() const {
@@ -1418,31 +1418,57 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // invariant source-logic cost, unlike mapped gates, so cache recipes and
   // threshold decisions remain stable when the mapping flow changes.
   bool tool_owned_flow = opts_.flow.empty();
-  if (opts_.small_ge != 0 && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
-    // resolve_flow, not the raw string: the size TIERS are tool-chosen defaults
-    // like kCombFlow, so max_fanout's buffering tail applies to them too. Only
-    // an explicit user `flow` is left alone (it owns its command list and can
-    // place `{F}` itself). Without this a region over large_ge silently mapped
-    // with NO fanout cap -- minion kept a 3562-sink mapped net that way while
-    // dino, which has no such region, capped correctly at 16.
-    opts_.flow = resolve_flow(opts_.small_flow);
-    if (opts_.verbose) {
-      std::print("[pass.abc] region '{}': small_flow selected ({} <= {} GE <= {})\n",
-                 rb.module_name,
-                 opts_.small_min_ge,
-                 input_ge,
-                 opts_.small_ge);
+  if (rb.ctrl) {
+    opts_.area_relax_pct = opts_.ctrl_area_relax;
+    opts_.flow           = resolve_flow(opts_.ctrl_flow);
+    tool_owned_flow      = true;
+    // Large control cones still receive the protected inexpensive tier.
+    if (opts_.large_ge && input_ge >= opts_.large_ge && !opts_.large_flow.empty()) {
+      opts_.flow = resolve_flow(opts_.large_flow);
     }
-  }
-  if (opts_.flow.empty() && opts_.large_ge != 0 && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
-    opts_.flow = resolve_flow(opts_.large_flow);  // see the small_flow note above
-    if (opts_.verbose) {
-      std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
+  } else {
+    if (opts_.small_ge && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
+      opts_.flow = resolve_flow(opts_.small_flow);
+    }
+    if (opts_.flow.empty() && opts_.large_ge && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
+      opts_.flow = resolve_flow(opts_.large_flow);
     }
   }
   if (!ware_trial_ && apply_region_overrides(rb)) {
     tool_owned_flow = false;
   }
+  struct Control_deadline {
+    std::mutex              mu;
+    std::condition_variable cv;
+    bool                    done = false;
+    std::thread             worker;
+    Control_deadline(uint64_t ms, const std::string& name) {
+      if (!ms) {
+        return;
+      }
+      worker = std::thread([this, ms, name] {
+        std::unique_lock lock(mu);
+        if (!cv.wait_for(lock, std::chrono::milliseconds(ms), [this] { return done; })) {
+          std::fprintf(stderr,
+                       "[pass.abc] control region '%s' exceeded ctrl_time_budget_ms=%llu; stopping synthesis\n",
+                       name.c_str(),
+                       static_cast<unsigned long long>(ms));
+          std::fflush(stderr);
+          std::_Exit(6);
+        }
+      });
+    }
+    ~Control_deadline() {
+      {
+        std::lock_guard lock(mu);
+        done = true;
+      }
+      cv.notify_one();
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+  } ctrl_deadline(rb.ctrl ? opts_.ctrl_time_budget_ms : 0, rb.module_name);
   // The region's delay BUDGET: the target minus the register margin when the
   // region holds flops (mapped or native -- a native flop is mapped to the
   // same cell by whoever times the netlist, so its overhead is on the path
@@ -1511,6 +1537,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     remember_ware(rb);
   }
   std::string recipe  = resolve_recipe();
+  recipe             += rb.ctrl ? "|ctrl=1" : "|ctrl=0";
+  // The frame's driving cell (resolve_boundary_defaults) makes `buffer` tree
+  // every input's fanout out of band of the flow string: spell the decision.
+  // From the OPTIONS, not the frame -- an all-hit run never starts ABC, and
+  // the resolved cell is a function of the library (in the cache salt) and
+  // `boundary_drive` alone.
+  recipe             += "|pi_drive=";
+  recipe             += (opts_.boundary_buffer && opts_.max_fanout != 0) ? (opts_.boundary_drive.empty() ? "auto" : opts_.boundary_drive)
+                                                                          : "none";
   recipe             += opts_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
   hhds::Graph* pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
   // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
@@ -1527,6 +1562,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Region_qor q;
     q.module      = rb.module_name;
     q.color       = rb.color;
+    q.ctrl        = rb.ctrl;
     q.input_nodes = input_nodes;
     q.input_ge    = input_ge;
     q.pred_aig    = pred_aig;
@@ -1543,6 +1579,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         Region_qor q;
         q.module       = rb.module_name;
         q.color        = rb.color;
+        q.ctrl         = rb.ctrl;
         q.input_nodes  = input_nodes;
         q.input_ge     = input_ge;
         q.pred_aig     = pred_aig;
@@ -2116,6 +2153,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       Region_qor q;
       q.module      = rb.module_name;
       q.color       = rb.color;
+      q.ctrl        = rb.ctrl;
       q.input_nodes = input_nodes;
       q.input_ge    = input_ge;
       q.pred_aig    = pred_aig;
@@ -3945,10 +3983,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // that already dominates), it is switched off by `area_flow=none`, and it
   // skips the dummy-PO sentinel (nothing to compare on a region with no real
   // outputs).
-  const bool        ladder_on = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
-  const std::string area_cmd  = area_flow();
-  const bool        candidate_on
-      = ladder_on && builtin_flow && !area_cmd.empty() && !has_dummy_po && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
+  const bool        ladder_on    = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
+  const std::string area_cmd     = area_flow();
+  const bool        candidate_on = ladder_on && !rb.ctrl && builtin_flow && !area_cmd.empty() && !has_dummy_po
+                                   && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
   // The area candidate re-maps from the SAME pre-flow logic network, so keep a
   // copy of it before the frame takes ownership of `pLogic`: every
   // Abc_FrameReplaceCurrentNetwork below DELETES the network it replaces. The
@@ -3956,7 +3994,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // point two networks are alive at once -- the mapped result and this logic
   // dup -- which the RSS admission check after the flow sees as part of the
   // region's footprint.
-  Abc_Ntk_t* pre = candidate_on ? Abc_NtkDup(pLogic) : nullptr;
+  Abc_Ntk_t*        pre          = candidate_on ? Abc_NtkDup(pLogic) : nullptr;
   struct Pre_guard {
     Abc_Ntk_t** ntk;
     ~Pre_guard() {
@@ -4203,6 +4241,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Region_qor q;
     q.module      = rb.module_name;
     q.color       = rb.color;
+    q.ctrl        = rb.ctrl;
     q.input_nodes = input_nodes;
     q.input_ge    = input_ge;
     q.pred_aig    = pred_aig;
@@ -5684,6 +5723,7 @@ void Mapper::report_completion(const Region_qor& q) {
                                     {"completed", std::to_string(completed_regions_)},
                                     {"region", q.module},
                                     {"color", std::to_string(q.color)},
+                                    {"ctrl", q.ctrl ? "1" : "0"},
                                     {"resynth", q.resynth ? "1" : "0"},
                                     {"cache", std::string{cache}},
                                     {"input_nodes", std::to_string(q.input_nodes)},

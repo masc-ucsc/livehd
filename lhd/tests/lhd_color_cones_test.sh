@@ -164,3 +164,38 @@ fi
 echo "PASS: unknown synth_alg is refused"
 
 echo "PASS: all pass.color cones flows"
+
+# Control duplication uses the same partition/stitch seam in both hier fixtures.
+for FIX in hier_comb hier_seq; do
+  D="$W/ctrl_$FIX"; TOP="$FIX.top"; mkdir -p "$D"
+  run compile "inou/prp/tests/pyrope/$FIX.prp" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
+  run pass color synth lg:"$D/lg" --top "$TOP" --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w3"
+  run pass partition lg:"$D/lg" --top "$TOP" --emit-dir lg:"$D/part" --workdir "$D/w4"
+  run compile lg:"$D/part" --top "$TOP" --emit verilog:"$D/post.v" --workdir "$D/w5"
+  run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/lec"
+done
+D="$W/ctrl_shared"; mkdir -p "$D"
+cat > "$D/ref.v" <<'VERILOG'
+module ctrl_shared(input [31:0] a, b, input [7:0] d, e, output [7:0] y, z);
+ wire shared = (a < b);
+ wire s1 = shared ^ a[0];
+ wire s2 = shared ^ b[1];
+ assign y = s1 ? d : e;
+ assign z = s2 ? e : d;
+endmodule
+VERILOG
+run compile "$D/ref.v" --top ctrl_shared --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run pass color synth lg:"$D/lg" --top ctrl_shared --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w2"
+LC_ALL=C grep -raq '"duplicated_nodes":[1-9]' "$D/lg" || fail 'shared decode was not duplicated'
+run pass partition lg:"$D/lg" --top ctrl_shared --emit-dir lg:"$D/part" --workdir "$D/w3"
+run compile lg:"$D/part" --top ctrl_shared --emit verilog:"$D/post.v" --workdir "$D/w4"
+run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
+run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.ctrl_cones=true --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
+python3 - "$D/syn/synth/qor.json" <<'PY' || fail 'missing control-tier QoR rows'
+import json,sys
+q=json.load(open(sys.argv[1]));assert any(r['ctrl'] for r in q['regions'])
+PY
+run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/models-work"
+run lec --lib lg:"$D/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/mapped_lec"
+echo 'PASS: control closure duplication, partition and ABC remain equivalent'

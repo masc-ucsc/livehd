@@ -1,0 +1,27 @@
+/*
+:name: reg_enable_attr
+:type: equiv
+:verilog_top: reg_enable_attr.gate
+:pyrope_top: gate
+:lec_top: gate
+*/
+
+// `reg r:[enable=<cond>]` — the register-attribute spelling of a write enable
+// (04b-attributes.md). tolg used to DROP it: the attr_set fell through to the
+// `reg-attr-not-lowered` warning arm and the flop's `enable` pin was never
+// wired, so the emitted design updated EVERY edge. The `.v` golden and the
+// `_1` variant (the plain `if`-guarded spelling) pin both halves of the rule:
+//
+//   * the attribute alone gates the flop, and
+//   * it ANDs with the conditions of the `if`s that guard the writes — a reg
+//     carrying both keeps BOTH guards, which is why `g` and `s` are separate
+//     inputs here rather than one.
+//
+// Reset keeps priority over the enable (the golden's `if (rst) … else if`).
+pub mod gate(clk:u1, rst:u1, g:u1, s:u1, d:u8) -> (q:u8@[0]) {
+  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable=(g!=0)] = 0
+  if s != 0 {
+    r = d
+  }
+  q = r
+}

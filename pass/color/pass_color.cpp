@@ -53,6 +53,9 @@ void Pass_color::setup() {
   // `seed` label), not a per-pass --set option.
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
+  m.add_label_optional("ctrl_cones", "experimental: separate overlapping control cones (cones mode only)", "false");
+  m.add_label_optional("ctrl_max_gate", "fail if a control cone exceeds this predicted AIG size (0 unbounded)", "0");
+  m.add_label_optional("ctrl_min_gate", "leave control cones smaller than this predicted AIG size in data regions", "0");
   m.add_label_optional("synth_alg",
                        "synth: cones|synth|pipe boundary mode. cones (default) seeds one BACKWARD cone per register "
                        "din/enable and merges the most-sharing cones under `max_gate`; pipe/synth propagate one id "
@@ -179,13 +182,17 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   } else if (alg == "synth") {
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
-    const auto salg   = std::string{var.get("synth_alg", "cones")};
-    s                += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
-                                    salg,
-                                    opts.min_ge,
-                                    opts.max_ge,
-                                    opts.name_weight);
+    const auto salg  = std::string{var.get("synth_alg", "cones")};
+    s               += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
+                                   salg,
+                                   opts.min_ge,
+                                   opts.max_ge,
+                                   opts.name_weight);
     if (salg == "cones") {
+      s += std::format(",\"ctrl_cones\":{},\"ctrl_max_gate\":{},\"ctrl_min_gate\":{}",
+                       opts.ctrl_cones,
+                       opts.ctrl_max_gate,
+                       opts.ctrl_min_gate);
       s += std::format(",\"max_gate\":{},\"forward\":\"{}\"", opts.max_gate, opts.forward.empty() ? "false" : opts.forward);
     }
     // A color id MAY span several disconnected clouds. pass.partition keys its
@@ -301,17 +308,24 @@ void Pass_color::color(Eprp_var& var) {
   }
 
   Color_opts opts;
-  opts.hier         = parse_bool(var.get("hier", "true"));
-  opts.verbose      = parse_bool(var.get("verbose", "false"));
-  const bool stats  = parse_bool(var.get("stats", "false"));
-  opts.compact      = parse_bool(var.get("compact", "true"));
-  opts.continuous   = parse_bool(var.get("continuous", "false"));
-  opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
-  opts.min_ge       = parse_ge_bound(var, "min_ge", "500");
-  opts.max_ge       = parse_ge_bound(var, "max_ge", "5000");
-  opts.name_weight  = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
-  opts.max_gate     = parse_ge_bound(var, "max_gate", "5000");
-  opts.forward      = forward_on ? forward : std::string{};
+  opts.hier          = parse_bool(var.get("hier", "true"));
+  opts.verbose       = parse_bool(var.get("verbose", "false"));
+  const bool stats   = parse_bool(var.get("stats", "false"));
+  opts.compact       = parse_bool(var.get("compact", "true"));
+  opts.continuous    = parse_bool(var.get("continuous", "false"));
+  opts.keep_colored  = parse_bool(var.get("keep_colored", "false"));
+  opts.min_ge        = parse_ge_bound(var, "min_ge", "500");
+  opts.max_ge        = parse_ge_bound(var, "max_ge", "5000");
+  opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
+  opts.max_gate      = parse_ge_bound(var, "max_gate", "5000");
+  opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "false"));
+  opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
+  opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
+  if (opts.ctrl_cones && (alg != "synth" || synth_alg != "cones")) {
+    std::print(stderr, "[pass.color] ctrl_cones ignored outside synth_alg=cones\n");
+    opts.ctrl_cones = false;
+  }
+  opts.forward = forward_on ? forward : std::string{};
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
     livehd::diag::err("pass.color", "bad-size-window", "io")

@@ -5481,6 +5481,44 @@ bool uPass_runner::try_inline_func_call() {
       skip_default_stores.insert(io.inputs[i].name);
     }
   }
+  // The callee's TUPLE ports live in its io_meta as flattened leaves
+  // (`inst_ctrl.legal`), but its body still talks to the whole port: a field
+  // `store(inst_ctrl,'legal',v)` and a `tuple_get(t,inst_ctrl,'legal')`. When
+  // the callee runs as its own unit the streaming ABI rewrite
+  // (try_stream_tuple_port_{store,alias_store} / try_resolve_tuple_get) turns
+  // those into the dotted leaf; upass_ssa therefore leaves them alone
+  // (`streamable`). Splicing the body here must do the same — otherwise tolg is
+  // handed a multi-element store it cannot lower ("tuple/field store to
+  // 'inl1_inst_ctrl' has no hardware lowering"), which is what happens whenever
+  // the registry hands back a callee body that has not already been rewritten
+  // (an IMPORTED comb: it is staged by a different pass.upass invocation).
+  // Register the frame-tagged leaves for this body walk only.
+  std::vector<std::string> frame_port_leaves;   // leaf names this frame added
+  std::vector<std::string> frame_port_prefixes; // their proper prefixes
+  {
+    const auto add_leaf = [&](const std::string& raw_name, bool is_input) {
+      if (raw_name.find('.') == std::string::npos) {
+        return;  // scalar port — no field store/get to rewrite
+      }
+      const auto tagged = upass::Lnast_manager::make_inlined_name(tag, raw_name);
+      auto&      leaves = is_input ? stream_port_in_leaf_ : stream_port_out_leaf_;
+      if (leaves.insert(tagged).second) {
+        frame_port_leaves.push_back(tagged);
+      }
+      for (auto pos = tagged.find('.'); pos != std::string::npos; pos = tagged.find('.', pos + 1)) {
+        auto prefix = tagged.substr(0, pos);
+        if (stream_port_prefix_.insert(prefix).second) {
+          frame_port_prefixes.push_back(std::move(prefix));
+        }
+      }
+    };
+    for (const auto& e : io.inputs) {
+      add_leaf(e.name, /*is_input=*/true);
+    }
+    for (const auto& e : io.outputs) {
+      add_leaf(e.name, /*is_input=*/false);
+    }
+  }
   lm->push_source(callee, tag, salt);
   if (lm->move_to_child()) {
     if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_io) {
@@ -5511,6 +5549,15 @@ bool uPass_runner::try_inline_func_call() {
   inline_call_sites_.pop_back();
   active_inline_callees_.pop_back();
   hier_prefix_stack_.pop_back();
+  // Un-register this frame's callee-port ABI (only the names it actually added,
+  // so a nested frame that shares a prefix keeps its own).
+  for (const auto& leaf : frame_port_leaves) {
+    stream_port_in_leaf_.erase(leaf);
+    stream_port_out_leaf_.erase(leaf);
+  }
+  for (const auto& prefix : frame_port_prefixes) {
+    stream_port_prefix_.erase(prefix);
+  }
   // Drop this frame's var-arg gather (the tag is unique per call
   // site, so this only prunes stale state; nested frames used distinct tags).
   if (has_vararg) {
@@ -8767,19 +8814,31 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
   // sibling `tuple_get(tmp, dst, 'p1')` / `tuple_get(tmp, dst, 'p2')` picks
   // (see the parse dump); a whole bind `c = f()` lowers to `store(c, dst)` and
   // an operand use `c = f()+1` to `plus(c, dst, 1)`. So learn the result shape
-  // by walking the fcall's following siblings once: a tuple_get whose SRC (2nd
-  // child) is our dst contributes a required field; any other node that names
-  // dst as a child marks a whole-value use.
+  // by walking the fcall's following statements once: a tuple_get whose SRC
+  // (2nd child) is our dst contributes a required field; any other node that
+  // names dst as a child marks a whole-value use.
+  //
+  // The walk must DESCEND into nested statement blocks (if/match arms, loop and
+  // tick bodies), not just the fcall's straight-line siblings: a call hoisted to
+  // the top of a module whose result is only read inside a branch
+  // (`u = f(); if c { r = u.out.f }` — the shape every Verilog-imported instance
+  // has) would otherwise look unconsumed, and the epilogue would drop the lone
+  // TUPLE output's NAME (`u = (f=…)` instead of `u = (out=(f=…))`), making the
+  // branch read fail with `unknown field out`.
   const auto here = lm->save_cursor();
   lm->restore_cursor(fcall_cursor);  // cursor on the func_call node
   absl::flat_hash_set<std::string> result_aliases{std::string(dst_name)};
-  while (lm->move_to_sibling()) {
-    const bool is_tget  = Lnast_ntype::is_tuple_get(lm->get_raw_ntype());
-    const bool is_alias = Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->current_num_children() == 2;
+
+  // One statement (cursor on it, cursor-neutral). `self` recurses into the
+  // statement's nested blocks.
+  const auto scan_stmt = [&](const auto& self) -> void {
     const auto node     = lm->save_cursor();
+    const auto raw      = lm->get_raw_ntype();
+    const bool is_tget  = Lnast_ntype::is_tuple_get(raw);
+    const bool is_alias = Lnast_ntype::is_store(raw) && lm->current_num_children() == 2;
     if (!lm->move_to_child()) {
       lm->restore_cursor(node);
-      continue;
+      return;
     }
     // children in order: [dst, src/operand, field/operand, …]
     std::size_t idx        = 0;
@@ -8812,7 +8871,35 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
         result_aliases.insert(destination);
       }
     }
+
+    // A func_def body is a separate name scope (its `dst_name` is a different
+    // variable) — never descend into one.
+    if (!Lnast_ntype::is_func_def(raw) && !Lnast_ntype::is_comp_type_lambda(raw)) {
+      lm->restore_cursor(node);
+      if (lm->move_to_child()) {
+        do {
+          const auto craw = lm->get_raw_ntype();
+          if (Lnast_ntype::is_stmts(craw)) {
+            // Scoped block: if/match arm, for/while/tick body, rolled_for payload.
+            const auto blk = lm->save_cursor();
+            if (lm->move_to_child()) {
+              do {
+                self(self);
+              } while (lm->move_to_sibling());
+            }
+            lm->restore_cursor(blk);
+          } else if (Lnast_ntype::is_if_like(raw) && !Lnast_ntype::is_ref(craw) && !Lnast_ntype::is_const(craw)
+                     && !Lnast_ntype::is_type(craw)) {
+            self(self);  // flat when/unless: body statements are direct children
+          }
+        } while (lm->move_to_sibling());
+      }
+    }
     lm->restore_cursor(node);
+  };
+
+  while (lm->move_to_sibling()) {
+    scan_stmt(scan_stmt);
   }
   lm->restore_cursor(here);
 }

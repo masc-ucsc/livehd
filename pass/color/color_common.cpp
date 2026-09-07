@@ -78,6 +78,8 @@ int apply_coloring(hhds::Graph* g, const Node2Id& node2id_in, const Color_opts& 
   // id so region ids never collide. `keep_colored` keeps its explicit
   // meaning for the 2p iterative flow (preserve ANY pre-existing color on
   // nodes the algorithm leaves uncolored).
+  g->attr_clear(livehd::attrs::ctrl_members);
+  g->attr_clear(livehd::attrs::ctrl_stats);
   const bool seeded = has_seeded_coloring(g);
   int        base   = 0;
   if (seeded) {
@@ -159,6 +161,8 @@ void clear_coloring(hhds::Graph* g) {
   // reached from a class-context node handle, so clear the whole store
   // directly.
   g->attr_clear(livehd::attrs::hier_color);
+  g->attr_clear(livehd::attrs::ctrl_members);
+  g->attr_clear(livehd::attrs::ctrl_stats);
   del_coloring_info(g);
 }
 
@@ -264,7 +268,11 @@ std::string build_coloring_info_json(hhds::Graph* g, std::string_view top, std::
     int instcnt = color_node_cnt[id];
     out += std::format("\"{}\":{{\"name\":\"{}__c{}\",\"region_cnt\":{},\"instance_cnt\":{}}}", id, top, id, regions, instcnt);
   }
-  out += "}}";
+  out += "}";
+  if (auto ctrl = g->get_input_node().attr(livehd::attrs::ctrl_stats); ctrl.has()) {
+    out += "," + ctrl.get();
+  }
+  out += "}";
   return out;
 }
 
