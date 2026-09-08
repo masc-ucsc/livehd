@@ -255,10 +255,9 @@ private def mixTermAlts : List SAlt :=
               (.letN "u" (C "mixUArgsL"
                   [R "A", R "reqs", R "D", R "env", R "ps", R "ts"]) <|
                .letN "dts" (t2_ (R "u")) <|
-               .letN "kk"  (C "dynCountL" [R "ps"]) <|
                .letN "o2" (C "mixTerm"
                    [R "A", R "reqs", R "ps",
-                    C "inlineEnvL" [R "ps", t1_ (R "u"), R "kk", K 0],
+                    C "inlineEnvL" [R "ps", t1_ (R "u")],
                     C "funBody" [R "fd"]]) <|
                pair_ (rCode (C "wrapLetsL" [R "dts", C "toCode" [fst_ (R "o2")]]))
                      (C "appendL" [t3_ (R "u"), snd_ (R "o2")]))) ]
@@ -433,16 +432,16 @@ def mixS : SProgram where
           (cons_ (pDyn (R "j"))
                  (C "buildEnvL" [tl_ (R "params"), R "statics", add_ (R "j") (K 1)]))) }
 
-  -- inlining wraps `k` lets around the body, so the `j`-th dynamic argument
-  -- ends up at residual index `k-1-j`
-  , { name := "inlineEnvL", params := ["params", "rs", "k", "j"]
+  -- inlining wraps one let per dynamic argument, so the j-th of them ends up at
+  -- residual index k-1-j -- written as the number of dynamic parameters STILL
+  -- TO COME, which is the same number and is locally computable
+  , { name := "inlineEnvL", params := ["params", "rs"]
     , body := .ite (isNil_ (R "params")) nil_
         (.ite (eq_ (hd_ (R "params")) (K 0))
           (cons_ (pStat (C "presVal" [hd_ (R "rs")]))
-                 (C "inlineEnvL" [tl_ (R "params"), tl_ (R "rs"), R "k", R "j"]))
-          (cons_ (pDyn (sub_ (sub_ (R "k") (K 1)) (R "j")))
-                 (C "inlineEnvL" [tl_ (R "params"), tl_ (R "rs"), R "k",
-                                  add_ (R "j") (K 1)]))) }
+                 (C "inlineEnvL" [tl_ (R "params"), tl_ (R "rs")]))
+          (cons_ (pDyn (C "dynCountL" [tl_ (R "params")]))
+                 (C "inlineEnvL" [tl_ (R "params"), tl_ (R "rs")]))) }
 
   , { name := "wrapLetsL", params := ["es", "body"]
     , body := .ite (isNil_ (R "es")) (R "body")

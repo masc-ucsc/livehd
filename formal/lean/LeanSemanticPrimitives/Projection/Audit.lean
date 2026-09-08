@@ -39,6 +39,12 @@ namespace Projection
 #print axioms Compat_stat_lookup
 #print axioms Compat_dyn_lookup
 #print axioms buildEnv_Compat
+#print axioms mixTerm_complete
+#print axioms mixAlts_ok
+#print axioms mixUArgs_ok
+#print axioms mixTerms_ok
+#print axioms specOK_all
+#print axioms mixDriver_sound
 #print axioms generateFrom_spec
 #print axioms Val.eq_of_beq
 #print axioms indexOfReq_spec

@@ -183,22 +183,27 @@ def dynArgCodes : Div → List PRes → Except MixError (List Term)
 
 /-- The environment the inlined body is specialized under.
 
-`k` is the number of dynamic arguments.  Wrapping the body in `let e₀ in let e₁
-in … let e_{k-1} in ·` puts `e_{k-1}` at residual index 0, so the `j`-th dynamic
-argument lands at index `k-1-j`. -/
-def inlineEnv : Div → List PRes → Nat → Nat → Except MixError PEnv
-  | [], [], _, _ => .ok []
-  | .stat :: bs, .stat v :: rs, k, j =>
-      match inlineEnv bs rs k j with
+Wrapping the body in `let e₀ in let e₁ in … let e_{k-1} in ·` puts `e_{k-1}` at
+residual index 0, so the `j`-th dynamic argument lands at index `k-1-j`.
+
+That index is written as `dynCount bs` -- the number of dynamic parameters still
+to come -- rather than as `k-1-j` with a total and a counter threaded through.
+The two are equal, and the local form is the one the correctness proof can
+induct on: `k-1-j` mentions a total the recursion does not have in hand, so
+every step would have to relate an index into a scope that is not built yet. -/
+def inlineEnv : Div → List PRes → Except MixError PEnv
+  | [], [] => .ok []
+  | .stat :: bs, .stat v :: rs =>
+      match inlineEnv bs rs with
       | .ok rest => .ok (.stat v :: rest)
       | .error e => .error e
-  | .stat :: _, .code _ :: _, _, _ =>
+  | .stat :: _, .code _ :: _ =>
       .error (.notStatic "unfold: static parameter got residual code")
-  | .dyn :: bs, _ :: rs, k, j =>
-      match inlineEnv bs rs k (j + 1) with
-      | .ok rest => .ok (.dyn (k - 1 - j) :: rest)
+  | .dyn :: bs, _ :: rs =>
+      match inlineEnv bs rs with
+      | .ok rest => .ok (.dyn (dynCount bs) :: rest)
       | .error e => .error e
-  | _, _, _, _ => .error (.badArity "unfold: argument count does not match the division")
+  | _, _ => .error (.badArity "unfold: argument count does not match the division")
 
 /-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
 def wrapLets : List Term → Term → Term
@@ -234,6 +239,9 @@ is a real failure mode of offline partial evaluation, not a Lean artifact. -/
 
 mutual
 
+/-- Explicit `match` throughout rather than `do`.  `Except`'s bind does not
+expose a match, so `split at h` cannot see through it -- and every case of
+`mix_sound` is a `split` on exactly these branches. -/
 def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → ATerm →
     Except MixError MixOut
   | 0, _, _, _, _, _ => .error .outOfFuel
@@ -246,121 +254,156 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | some .dyn,  some (.dyn k)  => .ok (.code (.var k), [])
       | some _,     some _         => .error (.illAnnotated "var: division disagrees with the environment")
       | _,          _              => .error (.unboundVar i)
-    | .lift e => do
-      let (re, rq) ← mixTerm n A idx Δ env e
-      match re with
-      | .stat v => .ok (.code (.lit v), rq)
-      | .code _ => .error (.notStatic "lift: operand is not static")
-    | .letIn _ e body => do
-      let (re, rq₁) ← mixTerm n A idx Δ env e
-      match btOf Δ e, re with
-      -- static binding: `mix` keeps the value and emits NO residual binder, so
-      -- the residual indices already in scope do not move
-      | .stat, .stat v => do
-          let (rb, rq₂) ← mixTerm n A idx (.stat :: Δ) (.stat v :: env) body
-          .ok (rb, rq₁ ++ rq₂)
-      -- dynamic binding: one residual binder is created, so everything in scope
-      -- shifts by one and the bound variable becomes index 0
-      | .dyn, _ => do
-          let (rb, rq₂) ← mixTerm n A idx (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) body
-          match rb with
-          | .code b' => .ok (.code (.letIn re.toCode b'), rq₁ ++ rq₂)
-          | .stat _  => .error (.illAnnotated "letIn: dynamic binding with a static body")
-      | .stat, .code _ => .error (.notStatic "letIn: static binding produced code")
-    | .ite _ c a e => do
-      let (rc, rq₁) ← mixTerm n A idx Δ env c
-      match btOf Δ c, rc with
-      -- static condition: the untaken branch is never walked, so neither its
-      -- code nor its specialization requests are emitted.  This is where a
-      -- specialized interpreter loses its dispatch.
-      | .stat, .stat (.bool true)  => do
-          let (r, rq₂) ← mixTerm n A idx Δ env a
-          .ok (r, rq₁ ++ rq₂)
-      | .stat, .stat (.bool false) => do
-          let (r, rq₂) ← mixTerm n A idx Δ env e
-          .ok (r, rq₁ ++ rq₂)
-      | .stat, _ => .error (.notStatic "ite: static condition is not a Bool")
-      | .dyn, _ => do
-          let (ra, rq₂) ← mixTerm n A idx Δ env a
-          let (re, rq₃) ← mixTerm n A idx Δ env e
-          .ok (.code (.ite rc.toCode ra.toCode re.toCode), rq₁ ++ rq₂ ++ rq₃)
-    | .prim b p ts => do
-      let (rs, rq) ← mixTerms n A idx Δ env ts
-      match b with
-      | .stat => do
-          let vs ← allStatic rs
-          match evalPrim p vs with
-          | .ok v    => .ok (.stat v, rq)
-          | .error m => .error (.primFailed m)
-      | .dyn => .ok (.code (.prim p (rs.map PRes.toCode)), rq)
-    | .ctorT b k ts => do
-      let (rs, rq) ← mixTerms n A idx Δ env ts
-      match b with
-      | .stat => do
-          let vs ← allStatic rs
-          .ok (.stat (.ctor k vs), rq)
-      | .dyn => .ok (.code (.ctorT k (rs.map PRes.toCode)), rq)
-    | .caseT _ s alts => do
-      let (rsc, rq₁) ← mixTerm n A idx Δ env s
-      match btOf Δ s, rsc with
-      -- static scrutinee: select the alternative now and bind its fields as
-      -- static values.  No residual `caseT` survives.
-      | .stat, .stat (.ctor tag vs) =>
-        match findAAlt alts tag with
-        | none => .error (.illAnnotated s!"caseT: no alternative for tag {tag}")
-        | some a =>
-          if a.arity = vs.length then do
-            let (r, rq₂) ← mixTerm n A idx
-              (List.replicate a.arity .stat ++ Δ) (vs.map PVal.stat ++ env) a.body
-            .ok (r, rq₁ ++ rq₂)
-          else .error (.badArity "caseT: alternative arity does not match the value")
-      | .stat, _ => .error (.notStatic "caseT: static scrutinee is not a constructor")
-      | .dyn, _ => do
-          let (alts', rq₂) ← mixAlts n A idx Δ env alts
-          .ok (.code (.caseT rsc.toCode alts'), rq₁ ++ rq₂)
-    | .call b f ts => do
-      let (rs, rq₁) ← mixTerms n A idx Δ env ts
-      match A.fn f with
-      | none => .error (.unknownFun f)
-      | some fd =>
+    | .lift e =>
+      match mixTerm n A idx Δ env e with
+      | .error z          => .error z
+      | .ok (.stat v, rq) => .ok (.code (.lit v), rq)
+      | .ok (.code _, _)  => .error (.notStatic "lift: operand is not static")
+    | .letIn _ e body =>
+      match mixTerm n A idx Δ env e with
+      | .error z => .error z
+      | .ok (re, rq₁) =>
+        match btOf Δ e, re with
+        -- static binding: `mix` keeps the value and emits NO residual binder, so
+        -- the residual indices already in scope do not move
+        | .stat, .stat v =>
+          match mixTerm n A idx (.stat :: Δ) (.stat v :: env) body with
+          | .error z      => .error z
+          | .ok (rb, rq₂) => .ok (rb, rq₁ ++ rq₂)
+        -- dynamic binding: one residual binder is created, so everything in
+        -- scope shifts by one and the bound variable becomes index 0
+        | .dyn, _ =>
+          match mixTerm n A idx (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) body with
+          | .error z            => .error z
+          | .ok (.code b', rq₂) => .ok (.code (.letIn re.toCode b'), rq₁ ++ rq₂)
+          | .ok (.stat _, _)    => .error (.illAnnotated "letIn: dynamic binding with a static body")
+        | .stat, .code _ => .error (.notStatic "letIn: static binding produced code")
+    | .ite _ c a e =>
+      match mixTerm n A idx Δ env c with
+      | .error z => .error z
+      | .ok (rc, rq₁) =>
+        match btOf Δ c, rc with
+        -- static condition: the untaken branch is never walked, so neither its
+        -- code nor its specialization requests are emitted.  This is where a
+        -- specialized interpreter loses its dispatch.
+        | .stat, .stat (.bool true) =>
+          match mixTerm n A idx Δ env a with
+          | .error z     => .error z
+          | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+        | .stat, .stat (.bool false) =>
+          match mixTerm n A idx Δ env e with
+          | .error z     => .error z
+          | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+        | .stat, _ => .error (.notStatic "ite: static condition is not a Bool")
+        | .dyn, _ =>
+          match mixTerm n A idx Δ env a, mixTerm n A idx Δ env e with
+          | .ok (ra, rq₂), .ok (re, rq₃) =>
+              .ok (.code (.ite rc.toCode ra.toCode re.toCode), rq₁ ++ rq₂ ++ rq₃)
+          | .error z, _ => .error z
+          | _, .error z => .error z
+    | .prim b p ts =>
+      match mixTerms n A idx Δ env ts with
+      | .error z => .error z
+      | .ok (rs, rq) =>
         match b with
-        -- a static result cannot come out of a residual call, so unfold
         | .stat =>
-          if allStatDiv fd.params then do
-            let vs ← allStatic rs
-            let (r, rq₂) ← mixTerm n A idx fd.params (vs.map PVal.stat) fd.body
-            .ok (r, rq₁ ++ rq₂)
-          else .error (.illAnnotated "static call to a function with a dynamic parameter")
-        -- ask the driver for a specialized copy and emit a call to it
-        | .dyn => do
-            let (svs, dts) ← splitArgs fd.params rs
-            let req : SpecRequest := ⟨f, svs⟩
-            match idx req with
-            | none   => .error (.noSpec f)
-            | some k => .ok (.code (.call k dts), rq₁ ++ [req])
+          match allStatic rs with
+          | .error z => .error z
+          | .ok vs =>
+            match evalPrim p vs with
+            | .ok v      => .ok (.stat v, rq)
+            | .error msg => .error (.primFailed msg)
+        | .dyn => .ok (.code (.prim p (rs.map PRes.toCode)), rq)
+    | .ctorT b k ts =>
+      match mixTerms n A idx Δ env ts with
+      | .error z => .error z
+      | .ok (rs, rq) =>
+        match b with
+        | .stat =>
+          match allStatic rs with
+          | .error z => .error z
+          | .ok vs   => .ok (.stat (.ctor k vs), rq)
+        | .dyn => .ok (.code (.ctorT k (rs.map PRes.toCode)), rq)
+    | .caseT _ s alts =>
+      match mixTerm n A idx Δ env s with
+      | .error z => .error z
+      | .ok (rsc, rq₁) =>
+        match btOf Δ s, rsc with
+        -- static scrutinee: select the alternative now and bind its fields as
+        -- static values.  No residual `caseT` survives.
+        | .stat, .stat (.ctor tag vs) =>
+          match findAAlt alts tag with
+          | none => .error (.illAnnotated "caseT: no alternative for that tag")
+          | some a =>
+            if a.arity = vs.length then
+              match mixTerm n A idx (List.replicate a.arity .stat ++ Δ)
+                              (vs.map PVal.stat ++ env) a.body with
+              | .error z     => .error z
+              | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+            else .error (.badArity "caseT: alternative arity does not match the value")
+        | .stat, _ => .error (.notStatic "caseT: static scrutinee is not a constructor")
+        | .dyn, _ =>
+          match mixAlts n A idx Δ env alts with
+          | .error z         => .error z
+          | .ok (alts', rq₂) => .ok (.code (.caseT rsc.toCode alts'), rq₁ ++ rq₂)
+    | .call b f ts =>
+      match mixTerms n A idx Δ env ts with
+      | .error z => .error z
+      | .ok (rs, rq₁) =>
+        match A.fn f with
+        | none => .error (.unknownFun f)
+        | some fd =>
+          match b with
+          -- a static result cannot come out of a residual call, so unfold
+          | .stat =>
+            if allStatDiv fd.params then
+              match allStatic rs with
+              | .error z => .error z
+              | .ok vs =>
+                match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
+                | .error z     => .error z
+                | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+            else .error (.illAnnotated "static call to a function with a dynamic parameter")
+          -- ask the driver for a specialized copy and emit a call to it
+          | .dyn =>
+            match splitArgs fd.params rs with
+            | .error z => .error z
+            | .ok (svs, dts) =>
+              match idx ⟨f, svs⟩ with
+              | none   => .error (.noSpec f)
+              | some k => .ok (.code (.call k dts), rq₁ ++ [⟨f, svs⟩])
     | .ucall b f ts =>
       match A.fn f with
       | none => .error (.unknownFun f)
       | some fd =>
         match b with
-        | .stat => do
-          let (rs, rq₁) ← mixTerms n A idx Δ env ts
-          if allStatDiv fd.params then do
-            let vs ← allStatic rs
-            let (r, rq₂) ← mixTerm n A idx fd.params (vs.map PVal.stat) fd.body
-            .ok (r, rq₁ ++ rq₂)
-          else .error (.illAnnotated "static unfold of a function with a dynamic parameter")
+        | .stat =>
+          match mixTerms n A idx Δ env ts with
+          | .error z => .error z
+          | .ok (rs, rq₁) =>
+            if allStatDiv fd.params then
+              match allStatic rs with
+              | .error z => .error z
+              | .ok vs =>
+                match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
+                | .error z     => .error z
+                | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+            else .error (.illAnnotated "static unfold of a function with a dynamic parameter")
         -- inline into residual code.  Each dynamic argument is `let`-bound
         -- once, which is both what keeps `PVal.dyn` a plain index -- the body
         -- is specialized in a scope whose shape we chose -- and what stops an
         -- argument expression being duplicated at each of its uses.
-        | .dyn => do
-            let (rs', dts, rq₂) ← mixUArgs n A idx Δ env fd.params ts
-            let env' ← inlineEnv fd.params rs' dts.length 0
-            let (r, rq₃) ← mixTerm n A idx fd.params env' fd.body
-            match r with
-            | .code b' => .ok (.code (wrapLets dts b'), rq₂ ++ rq₃)
-            | .stat _  => .error (.illAnnotated "ucall: dynamic unfold with a static body")
+        | .dyn =>
+          match mixUArgs n A idx Δ env fd.params ts with
+          | .error z => .error z
+          | .ok (rs', dts, rq₂) =>
+            match inlineEnv fd.params rs' with
+            | .error z => .error z
+            | .ok env' =>
+              match mixTerm n A idx fd.params env' fd.body with
+              | .error z            => .error z
+              | .ok (.code b', rq₃) => .ok (.code (wrapLets dts b'), rq₂ ++ rq₃)
+              | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
 
 /-- Arguments of an UNFOLDED call, mixed left to right with the residual scope
 threaded.
@@ -383,40 +426,44 @@ mixing them one binder deeper produces the same value. -/
 def mixUArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → Div →
     List ATerm → Except MixError (List PRes × List Term × List SpecRequest)
   | _, _, _, _, _, [], [] => .ok ([], [], [])
-  | n, A, idx, Δ, env, .stat :: ps, t :: ts => do
-      let (r, rq₁)        ← mixTerm n A idx Δ env t
-      let (rs, dts, rq₂)  ← mixUArgs n A idx Δ env ps ts
-      .ok (r :: rs, dts, rq₁ ++ rq₂)
-  | n, A, idx, Δ, env, .dyn :: ps, t :: ts => do
-      let (r, rq₁)        ← mixTerm n A idx Δ env t
+  | n, A, idx, Δ, env, .stat :: ps, t :: ts =>
+      match mixTerm n A idx Δ env t, mixUArgs n A idx Δ env ps ts with
+      | .ok (r, rq₁), .ok (rs, dts, rq₂) => .ok (r :: rs, dts, rq₁ ++ rq₂)
+      | .error z, _ => .error z
+      | _, .error z => .error z
+  | n, A, idx, Δ, env, .dyn :: ps, t :: ts =>
       -- this argument becomes a residual binder, so everything after it is
       -- mixed one binder deeper
-      let (rs, dts, rq₂)  ← mixUArgs n A idx Δ (env.shiftBy 1) ps ts
-      .ok (r :: rs, r.toCode :: dts, rq₁ ++ rq₂)
+      match mixTerm n A idx Δ env t, mixUArgs n A idx Δ (env.shiftBy 1) ps ts with
+      | .ok (r, rq₁), .ok (rs, dts, rq₂) => .ok (r :: rs, r.toCode :: dts, rq₁ ++ rq₂)
+      | .error z, _ => .error z
+      | _, .error z => .error z
   | _, _, _, _, _, _, _ =>
       .error (.badArity "unfold: argument count does not match the division")
 
 def mixTerms : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → List ATerm →
     Except MixError (List PRes × List SpecRequest)
   | _, _, _, _, _, [] => .ok ([], [])
-  | n, A, idx, Δ, env, t :: ts => do
-      let (r, rq₁)  ← mixTerm n A idx Δ env t
-      let (rs, rq₂) ← mixTerms n A idx Δ env ts
-      .ok (r :: rs, rq₁ ++ rq₂)
+  | n, A, idx, Δ, env, t :: ts =>
+      match mixTerm n A idx Δ env t, mixTerms n A idx Δ env ts with
+      | .ok (r, rq₁), .ok (rs, rq₂) => .ok (r :: rs, rq₁ ++ rq₂)
+      | .error z, _ => .error z
+      | _, .error z => .error z
 
 def mixAlts : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → List AAlt →
     Except MixError (List Alt × List SpecRequest)
   | _, _, _, _, _, [] => .ok ([], [])
-  | n, A, idx, Δ, env, a :: as => do
+  | n, A, idx, Δ, env, a :: as =>
       -- the alternative binds `a.arity` residual fields, so the enclosing scope
       -- shifts by that much
-      let Δ'   := List.replicate a.arity .dyn ++ Δ
-      let env' := freshDyns a.arity ++ env.shiftBy a.arity
-      let (r, rq₁)   ← mixTerm n A idx Δ' env' a.body
-      let (as', rq₂) ← mixAlts n A idx Δ env as
-      match r with
-      | .code b' => .ok ((a.tag, a.arity, b') :: as', rq₁ ++ rq₂)
-      | .stat v  => .ok ((a.tag, a.arity, .lit v) :: as', rq₁ ++ rq₂)
+      match mixTerm n A idx (List.replicate a.arity .dyn ++ Δ)
+                    (freshDyns a.arity ++ env.shiftBy a.arity) a.body,
+            mixAlts n A idx Δ env as with
+      -- one arm, not two: a static body becomes `lit v` and residual code stays
+      -- as it is, which is exactly `PRes.toCode`
+      | .ok (r, rq₁), .ok (as', rq₂) => .ok ((a.tag, a.arity, r.toCode) :: as', rq₁ ++ rq₂)
+      | .error z, _ => .error z
+      | _, .error z => .error z
 
 end
 
@@ -478,10 +525,11 @@ def discover (stepFuel : Nat) : Nat → AProgram → List SpecRequest → List S
     Except MixError (List SpecRequest)
   | _,     _, [],          seen => .ok seen
   | 0,     _, _ :: _,      _    => .error .outOfFuel
-  | k + 1, A, req :: work, seen => do
-      let (_, rq) ← mixFun stepFuel A (fun _ => some 0) req
-      let fresh := addNew seen rq
-      discover stepFuel k A (work ++ fresh) (seen ++ fresh)
+  | k + 1, A, req :: work, seen =>
+      match mixFun stepFuel A (fun _ => some 0) req with
+      | .error z => .error z
+      | .ok (_, rq) =>
+          discover stepFuel k A (work ++ addNew seen rq) (seen ++ addNew seen rq)
 
 /-- Explicit recursion rather than `mapM`: `generate_spec` has to say that
 residual function `i` is the specialization of request `i`, and `List.mapM` over
@@ -501,10 +549,12 @@ def generateFrom (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option N
 
 /-- `mix`.  The entry request is discovered first, so it is residual function 0. -/
 def mixDriver (stepFuel wlFuel : Nat) (A : AProgram) (statics : List Val) :
-    Except MixError Program := do
-  let entryReq : SpecRequest := ⟨A.entry, statics⟩
-  let reqs ← discover stepFuel wlFuel A [entryReq] [entryReq]
-  let funs ← generate stepFuel A reqs
-  .ok ⟨funs, 0⟩
+    Except MixError Program :=
+  match discover stepFuel wlFuel A [⟨A.entry, statics⟩] [⟨A.entry, statics⟩] with
+  | .error z => .error z
+  | .ok reqs =>
+    match generate stepFuel A reqs with
+    | .error z  => .error z
+    | .ok funs => .ok ⟨funs, 0⟩
 
 end Projection
