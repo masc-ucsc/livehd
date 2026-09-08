@@ -11,7 +11,7 @@ mkdir -p "$OUT/LeanSemanticPrimitives/Projection"
 # Default: the whole Projection library, in dependency order.
 MODULES=(ObjectLanguage ObjectLanguageSemantics Encoding BindingTime
          PartialEvaluator Surface BTA MixProgram Demo Gate0
-         PartialEvaluatorCorrect Audit)
+         PartialEvaluatorCorrect SecondProjection Audit)
 if [ $# -gt 0 ]; then MODULES=("$@"); fi
 
 rc=0

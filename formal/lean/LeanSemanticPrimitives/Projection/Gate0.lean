@@ -60,6 +60,18 @@ def objTwoArg : EvalResult :=
 
 /-! ## (b) The second projection
 
+`SecondProjection.lean` now proves this for ALL designs:
+`secondProjection_correct` says the derived compiler, run on a design, computes
+exactly what `mixProgram` computes on (interpreter, design).  What the checks
+below add is that the side conditions that theorem takes -- that BTA succeeded,
+that `mixDriver` succeeded, that the entry's division is `[stat, dyn]` -- really
+do hold for this instance, and that the answer is the expected one.
+
+So the split is now: the CLAIM is a theorem, the INSTANTIATION is a check.  The
+one thing still resting entirely on checks is `objP == Demo.residual2P` in part
+(a), which needs `mixProgram_implements_mixHost` -- that `mixProgram` computes
+what the Lean specializer computes -- and that is not proved.
+
 `mix(mix, interp)` -- specialize the specializer to the interpreter.  What comes
 out should be a COMPILER: a program that takes a source program and emits the
 residual program, without an interpreter's dispatch anywhere in it. -/

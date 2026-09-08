@@ -14,6 +14,7 @@ import LeanSemanticPrimitives.Projection.Encoding
 import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics
 import LeanSemanticPrimitives.Projection.BTA
 import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
+import LeanSemanticPrimitives.Projection.SecondProjection
 
 namespace Projection
 
@@ -53,6 +54,9 @@ namespace Projection
 #print axioms mixDriver_complete
 #print axioms mixDriver_correct
 #print axioms mixDriver_iff
+#print axioms secondProjection_correct
+#print axioms secondProjection_correct_call
+#print axioms Eval_entry
 #print axioms evalFuel_mono
 #print axioms evalFuel_complete
 #print axioms generateFrom_spec
