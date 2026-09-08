@@ -2,24 +2,19 @@
   `mix_sound`: the residual program computes what the source computes.
 
   ############################################################################
-  STATUS.  BOTH DIRECTIONS ARE PROVED.  `mixDriver_correct` says the residual
-  entry and the source program compute the same thing:
+  STATUS.  `mix_sound` IS PROVED, in the form the plan states it:
 
-    forward  (`mixDriver_sound`)     whatever the source computes, the residual
-                                     computes -- indexed by SOURCE fuel
-    converse (`mixDriver_complete`)  and nothing else -- indexed by RESIDUAL fuel
+    mixDriver_iff :  Eval Pr ds fd.body v  ↔  Eval ⟦A⟧ ρs afd.body v
 
-  ONE PIECE OF POLISH REMAINS.  The hypothesis side is stated with `evalFuel`
-  rather than `Eval`, because that is where each half is indexed.  Turning it
-  into the plan's literal iff between two `Eval`s needs
-  `Eval P p t v → ∃ n, evalFuel n P p t = .value v`, the converse of
-  `evalFuel_sound`, which is not proved here.
+  an iff between two denotations, no fuel anywhere.  The two halves are indexed
+  by different fuels -- forward by SOURCE fuel (`mixDriver_sound`), backward by
+  RESIDUAL fuel (`mixDriver_complete`) -- and `evalFuel_complete` is what turns
+  "terminates at some fuel" back into `Eval` on both sides.
 
-  AND THE PROJECTIONS THEMSELVES ARE STILL ONLY CHECKED.  That `mixProgram`
-  computes what this specializer computes, and that the derived compiler's
-  output matches, are separate theorems (`mixProgram_implements_mixHost`,
-  `secondProjection_correct`).  Neither is written; Gate0's `#guard`s are the
-  only evidence for them.
+  WHAT IS STILL ONLY CHECKED: the PROJECTIONS.  That `mixProgram` computes what
+  this specializer computes, and that the derived compiler's output matches, are
+  separate theorems (`mixProgram_implements_mixHost`, `secondProjection_correct`).
+  Neither is written; Gate0's `#guard`s are the only evidence for them.
   ############################################################################
 
   THE STATEMENT IS ABOUT `erase A`, NOT ABOUT `A`.  Specialization is only
@@ -1760,5 +1755,29 @@ theorem mixDriver_correct {stepFuel wlFuel : Nat} {A : AProgram} {statics : List
              Eval (eraseProgram A) ρs (erase afd.body) v) :=
   ⟨fun m  => mixDriver_sound    h m  ds ρs v fd afd hpf haf hsa,
    fun mr => mixDriver_complete h mr ds ρs v fd afd hpf haf hsa⟩
+
+/-- **`mix_sound`**, in the form the plan states it: an iff between two
+denotations, with no fuel anywhere.
+
+`evalFuel_complete` is what bridges the gap -- each half of the proof is indexed
+by a different fuel, and this turns "terminates at some fuel" back into `Eval`
+on both sides.
+
+`srcArgs` is the combination: it interleaves the static arguments `mix` was
+given back with the dynamic ones the residual is called with, in the order the
+callee's division prescribes. -/
+theorem mixDriver_iff {stepFuel wlFuel : Nat} {A : AProgram} {statics : List Val}
+    {Pr : Program} (h : mixDriver stepFuel wlFuel A statics = .ok Pr)
+    (ds ρs : List Val) (v : Val) (fd : FunDef) (afd : AFunDef)
+    (hpf : Pr.fn Pr.entry = some fd) (haf : A.fn A.entry = some afd)
+    (hsa : srcArgs afd.params statics ds = some ρs) :
+    Eval Pr ds fd.body v ↔ Eval (eraseProgram A) ρs (erase afd.body) v := by
+  constructor
+  · intro hr
+    obtain ⟨mr, hmr⟩ := evalFuel_complete hr
+    exact mixDriver_complete h mr ds ρs v fd afd hpf haf hsa hmr
+  · intro hsrc
+    obtain ⟨m, hm⟩ := evalFuel_complete hsrc
+    exact mixDriver_sound h m ds ρs v fd afd hpf haf hsa hm
 
 end Projection

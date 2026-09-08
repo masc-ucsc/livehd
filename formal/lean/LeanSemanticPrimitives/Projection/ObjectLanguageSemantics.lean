@@ -369,4 +369,157 @@ theorem evalFuel_sound :
       rename_i har
       exact .call (hlist ρ ts vs hvs) hfd har (ih P vs fd.body v h)
 
+/-! ## Fuel monotonicity, and completeness against the denotation
+
+`evalFuel_sound` says the evaluator only ever reports true results.  These two
+say it reports ALL of them, given enough fuel -- which is what lets a theorem
+stated with `evalFuel` on the hypothesis side be restated with `Eval`.
+
+Monotonicity comes first because completeness combines sub-derivations that
+terminate at different fuels, and has to lift them all to one bound. -/
+
+theorem evalFuelList_mono_of (n m : Nat) (P : Program)
+    (h : ∀ ρ t v, evalFuel n P ρ t = .value v → evalFuel m P ρ t = .value v) :
+    ∀ ρ ts vs, evalFuelList n P ρ ts = .inl vs → evalFuelList m P ρ ts = .inl vs := by
+  intro ρ ts
+  induction ts with
+  | nil => intro vs hv; simpa [evalFuelList] using hv
+  | cons t ts ih =>
+      intro vs hv
+      simp only [evalFuelList] at hv ⊢
+      split at hv <;> try contradiction
+      rename_i v' hev
+      rw [h ρ t v' hev]
+      split at hv <;> try contradiction
+      rename_i vs' hvs
+      rw [ih vs' hvs]
+      exact hv
+
+theorem evalFuel_mono : ∀ (n m : Nat) (P : Program) (ρ : Env) (t : Term) (v : Val),
+    n ≤ m → evalFuel n P ρ t = .value v → evalFuel m P ρ t = .value v := by
+  intro n
+  induction n with
+  | zero => intro m P ρ t v _ h; simp [evalFuel] at h
+  | succ n ih =>
+      intro m P ρ t v hle h
+      cases m with
+      | zero => omega
+      | succ m' =>
+        have hstep : ∀ ρ t v, evalFuel n P ρ t = .value v → evalFuel m' P ρ t = .value v :=
+          fun ρ t v hh => ih m' P ρ t v (by omega) hh
+        have hlist := evalFuelList_mono_of n m' P hstep
+        cases t with
+        | lit w => simpa [evalFuel] using h
+        | var i => simpa [evalFuel] using h
+        | letIn e b =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i v₁ he
+            rw [hstep ρ e v₁ he]
+            exact hstep _ b v h
+        | ite c a b =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            · rename_i hcv; rw [hstep ρ c _ hcv]; exact hstep _ a v h
+            · rename_i hcv; rw [hstep ρ c _ hcv]; exact hstep _ b v h
+        | prim p ts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i vs hvs
+            rw [hlist ρ ts vs hvs]
+            exact h
+        | ctorT k ts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i vs hvs
+            rw [hlist ρ ts vs hvs]
+            exact h
+        | caseT s alts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i tag vs hs
+            split at h <;> try contradiction
+            rename_i a ha
+            split at h <;> try contradiction
+            rename_i har
+            -- collect every sub-fact first, then rewrite the goal in ONE `simp`:
+            -- rewriting one at a time exposes matches that must iota-reduce
+            -- before the next rewrite can match
+            simp only [hstep ρ s _ hs, ha, if_pos har]
+            exact hstep _ a.body v h
+        | call f ts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i vs hvs
+            split at h <;> try contradiction
+            rename_i fd hfd
+            split at h <;> try contradiction
+            rename_i har
+            simp only [hlist ρ ts vs hvs, if_pos har]
+            exact hstep _ fd.body v h
+
+mutual
+
+theorem evalFuel_complete {P : Program} : ∀ {ρ : Env} {t : Term} {v : Val},
+    Eval P ρ t v → ∃ n, evalFuel n P ρ t = .value v
+  | _, _, _, .lit => ⟨1, by simp [evalFuel]⟩
+  | _, _, _, .var hv => ⟨1, by simp [evalFuel, hv]⟩
+  | _, _, _, .letIn he hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete he
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      rw [evalFuel_mono n₁ _ _ _ _ _ (by omega) h₁]
+      exact evalFuel_mono n₂ _ _ _ _ _ (by omega) h₂
+  | _, _, _, .iteT hc ha => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete hc
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete ha
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      rw [evalFuel_mono n₁ _ _ _ _ _ (by omega) h₁]
+      exact evalFuel_mono n₂ _ _ _ _ _ (by omega) h₂
+  | _, _, _, .iteF hc hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete hc
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      rw [evalFuel_mono n₁ _ _ _ _ _ (by omega) h₁]
+      exact evalFuel_mono n₂ _ _ _ _ _ (by omega) h₂
+  | _, _, _, .prim hts hp => by
+      obtain ⟨n₁, h₁⟩ := evalFuelList_complete hts
+      exact ⟨n₁ + 1, by simp only [evalFuel, h₁, hp]⟩
+  | _, _, _, .ctorT hts => by
+      obtain ⟨n₁, h₁⟩ := evalFuelList_complete hts
+      exact ⟨n₁ + 1, by simp only [evalFuel, h₁]⟩
+  | _, _, _, .caseT hs hf har hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete hs
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      simp only [evalFuel_mono n₁ (max n₁ n₂) _ _ _ _ (Nat.le_max_left _ _) h₁, hf, if_pos har]
+      exact evalFuel_mono n₂ (max n₁ n₂) _ _ _ _ (Nat.le_max_right _ _) h₂
+  | _, _, _, .call hts hfd har hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuelList_complete hts
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      simp only [evalFuelList_mono_of n₁ (max n₁ n₂) _
+            (fun _ _ _ hh => evalFuel_mono n₁ (max n₁ n₂) _ _ _ _ (Nat.le_max_left _ _) hh) _ _ _ h₁,
+          hfd, if_pos har]
+      exact evalFuel_mono n₂ (max n₁ n₂) _ _ _ _ (Nat.le_max_right _ _) h₂
+
+theorem evalFuelList_complete {P : Program} : ∀ {ρ : Env} {ts : List Term} {vs : List Val},
+    EvalList P ρ ts vs → ∃ n, evalFuelList n P ρ ts = .inl vs
+  | _, _, _, .nil => ⟨0, by simp [evalFuelList]⟩
+  | _, _, _, .cons ht hts => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete ht
+      obtain ⟨n₂, h₂⟩ := evalFuelList_complete hts
+      refine ⟨max n₁ n₂, ?_⟩
+      simp only [evalFuelList]
+      simp only [evalFuel_mono n₁ (max n₁ n₂) _ _ _ _ (Nat.le_max_left _ _) h₁,
+          evalFuelList_mono_of n₂ (max n₁ n₂) _
+            (fun _ _ _ hh => evalFuel_mono n₂ (max n₁ n₂) _ _ _ _ (Nat.le_max_right _ _) hh) _ _ _ h₂]
+
+end
+
 end Projection
