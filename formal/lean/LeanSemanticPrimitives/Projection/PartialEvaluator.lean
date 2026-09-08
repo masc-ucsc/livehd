@@ -216,7 +216,12 @@ Checked rather than assumed.  A call whose RESULT is static must be unfolded in
 an environment `mix` fully knows, which is only possible if the callee has no
 dynamic parameter.  Well-annotatedness already guarantees it -- the congruence
 rule forces every operand of a static node static -- but checking here means
-`mix_sound` needs no `wfAProgram` hypothesis, and the cost is one `Bool`. -/
+`mix_sound` needs no `wfAProgram` hypothesis, and the cost is one `Bool`.
+
+The call sites pair this with an argument-COUNT test, for a reason specific to
+the converse direction: `mix_sound`'s forward half can read the count off the
+source's own arity test, but the converse starts from the residual and has no
+source in hand, so `mix` has to establish it itself. -/
 def allStatDiv : Div → Bool
   | []          => true
   | .stat :: bs => allStatDiv bs
@@ -357,12 +362,14 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
           -- a static result cannot come out of a residual call, so unfold
           | .stat =>
             if allStatDiv fd.params then
-              match allStatic rs with
-              | .error z => .error z
-              | .ok vs =>
-                match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
-                | .error z     => .error z
-                | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+              if fd.params.length = rs.length then
+                match allStatic rs with
+                | .error z => .error z
+                | .ok vs =>
+                  match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
+                  | .error z     => .error z
+                  | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+              else .error (.badArity "static call: argument count does not match the division")
             else .error (.illAnnotated "static call to a function with a dynamic parameter")
           -- ask the driver for a specialized copy and emit a call to it
           | .dyn =>
@@ -382,12 +389,14 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
           | .error z => .error z
           | .ok (rs, rq₁) =>
             if allStatDiv fd.params then
-              match allStatic rs with
-              | .error z => .error z
-              | .ok vs =>
-                match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
-                | .error z     => .error z
-                | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+              if fd.params.length = rs.length then
+                match allStatic rs with
+                | .error z => .error z
+                | .ok vs =>
+                  match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
+                  | .error z     => .error z
+                  | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+              else .error (.badArity "static unfold: argument count does not match the division")
             else .error (.illAnnotated "static unfold of a function with a dynamic parameter")
         -- inline into residual code.  Each dynamic argument is `let`-bound
         -- once, which is both what keeps `PVal.dyn` a plain index -- the body

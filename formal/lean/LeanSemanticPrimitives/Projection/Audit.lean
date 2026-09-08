@@ -45,6 +45,13 @@ namespace Projection
 #print axioms mixTerms_ok
 #print axioms specOK_all
 #print axioms mixDriver_sound
+#print axioms mixTerm_sound
+#print axioms mixAlts_sound
+#print axioms mixUArgs_sound
+#print axioms splitArgs_sound
+#print axioms specSound_all
+#print axioms mixDriver_complete
+#print axioms mixDriver_correct
 #print axioms generateFrom_spec
 #print axioms Val.eq_of_beq
 #print axioms indexOfReq_spec
