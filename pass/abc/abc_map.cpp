@@ -5597,7 +5597,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // name that the post-synthesis LEC's tier-1 state correspondence pairs on
       // — `id_q` then has no counterpart in the netlist and the def can only come
       // back inconclusive (every //bench:*_synth_lec_* target).
-      auto map_dff_cell = [&](int k, const std::string& owner = {}) {
+      // Scalar-replacement provenance for a bit-blasted register. `pass.semdiff`
+      // reassembles the group from these and pairs it with the ref's single wide
+      // flop; without them a mapped `q_0..q_7` faces a ref `q` that tier-1 cannot
+      // match one-to-many, the whole register lands in `tier-2 unpaired state`,
+      // and the flop-cut inductive miter then cuts only the flops that DID pair
+      // and returns PROVEN off an obligation set covering a fraction of the
+      // state (br_arb_weighted_rr: 18 cuts against 17 ref / 96 impl flops left
+      // unpaired, PROVEN while lgyosys held a real 7-cycle counterexample).
+      // Every attribute below is required by semdiff's valid_aggregate_group;
+      // a register whose bits do not ALL become cells simply fails its ordinal
+      // cover there and stays unpaired, exactly as before.
+      struct Blast_lane {
+        const std::string* root   = nullptr;
+        int32_t            lane   = 0;
+        int32_t            extent = 0;
+        int32_t            source = 0;
+      };
+      auto map_dff_cell = [&](int k, const std::string& owner = {}, const Blast_lane* lane = nullptr) {
         auto*       L    = lat[k];
         auto*       qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
         auto*       dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
@@ -5617,6 +5634,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         if (auto lclk = mapped_owner_clk(k); !lclk.is_invalid()) {
           lclk.connect_sink(sub.create_sink_pin(cell.clk_pin));
         }
+        if (lane != nullptr) {
+          sub.attr(livehd::attrs::aggregate_origin).set(*lane->root);
+          sub.attr(livehd::attrs::aggregate_extent).set(lane->extent);
+          sub.attr(livehd::attrs::aggregate_lane_ordinal).set(lane->lane);
+          sub.attr(livehd::attrs::aggregate_source_index).set(lane->source);
+          // One bit per lane, packed low-to-high, so the reassembled ranges are
+          // [b, b+1) and cover [0, bits) with no gap.
+          sub.attr(livehd::attrs::aggregate_bit_offset).set(lane->lane);
+          sub.attr(livehd::attrs::aggregate_bit_width).set(1);
+        }
         const bool crossed_inverted = k < static_cast<int>(latch_owner.size()) && latch_owner[k]->d_inverted;
         dff_recon.push_back({sub, dnet, &cell, cell.q_inverted && !crossed_inverted && !qn_absorbed.contains(dnet)});
       };
@@ -5624,8 +5651,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         init_dropped = true;
         build_native_flop(unique_flop_name(std::format("{}__rinit{}", rb.module_name, Abc_ObjId(lat[k]))), owner_clk(k), {k});
       };
+      // Distinguishes two registers that were blasted in the same region; the
+      // matcher only requires every lane of ONE group to agree on it.
+      int32_t blast_source_index = 0;
       if (!spans.empty()) {
         for (const auto& sp : spans) {
+          ++blast_source_index;
           bool native = false;
           bool cell   = false;
           for (int b = 0; b < sp.f->bits; ++b) {
@@ -5649,8 +5680,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
               // hand-flattened design uses, which canon_flop_name already folds.
               if (needs_native(k)) {
                 native_single(k);
+              } else if (sp.f->bits == 1) {
+                map_dff_cell(k, sp.f->root);  // pairs by name; nothing was blasted
               } else {
-                map_dff_cell(k, sp.f->bits == 1 ? sp.f->root : std::format("{}_{}", sp.f->root, b));
+                const Blast_lane lane{&sp.f->root, b, sp.f->bits, blast_source_index};
+                map_dff_cell(k, std::format("{}_{}", sp.f->root, b), &lane);
               }
             }
           }

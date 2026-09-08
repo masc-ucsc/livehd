@@ -104,6 +104,35 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(livehd::attrs::memory_async_reset); a.has()) {
     neo.attr(livehd::attrs::memory_async_reset).set(a.get());
   }
+  // Scalar-replacement provenance, or the spliced bits of a blasted register
+  // stop being recognizable as ONE register. pass.semdiff reassembles a mapped
+  // `q_0..q_15` into the ref's single wide `q` from exactly these five, and the
+  // LEC inlines the netlist's region defs into the top before it pairs state --
+  // so dropping them here is what left br_arb_weighted_rr with 96 unpaired impl
+  // flops, a flop-cut inductive miter built from the 18 that did pair, and a
+  // PROVEN that disagreed with a real lgyosys counterexample.
+  //
+  // `aggregate_origin` is a hierarchical NAME and follows the same prefixing
+  // rule the `name` attr does above; the ordinals are positions inside the
+  // register and are position-invariant, so they copy verbatim.
+  if (auto a = orig.attr(livehd::attrs::aggregate_origin); a.has() && !a.get().empty()) {
+    neo.attr(livehd::attrs::aggregate_origin).set(prefix_ + std::string{a.get()});
+  }
+  if (auto a = orig.attr(livehd::attrs::aggregate_source_index); a.has()) {
+    neo.attr(livehd::attrs::aggregate_source_index).set(a.get());
+  }
+  if (auto a = orig.attr(livehd::attrs::aggregate_lane_ordinal); a.has()) {
+    neo.attr(livehd::attrs::aggregate_lane_ordinal).set(a.get());
+  }
+  if (auto a = orig.attr(livehd::attrs::aggregate_bit_offset); a.has()) {
+    neo.attr(livehd::attrs::aggregate_bit_offset).set(a.get());
+  }
+  if (auto a = orig.attr(livehd::attrs::aggregate_bit_width); a.has()) {
+    neo.attr(livehd::attrs::aggregate_bit_width).set(a.get());
+  }
+  if (auto a = orig.attr(livehd::attrs::aggregate_extent); a.has()) {
+    neo.attr(livehd::attrs::aggregate_extent).set(a.get());
+  }
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
