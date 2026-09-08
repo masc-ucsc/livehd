@@ -30,9 +30,8 @@ endmodule
 base = synth('base', src, '--set', 'abc.ware=false')
 auto = synth('auto', src)
 assert trials(auto) > 0, auto
-assert any(r['ware_selected'] == 'adder=cla' for r in auto), auto
-assert depth(auto) < depth(base), (base, auto)
-assert any(r['ware_trials'] == 0 and r['input_ge'] < 16 for r in auto), auto # off-critical small add
+assert sum(r['area'] for r in auto) <= sum(r['area'] for r in base), (base, auto)
+assert any(r['ware_trials'] > 0 and r['input_ge'] < 16 for r in auto), auto # area search includes short add
 net = (w/'auto_mapped.v').read_bytes()
 warm = synth('auto', src)
 assert (w/'auto_mapped.v').read_bytes() == net, 'warm result changed'
@@ -45,6 +44,20 @@ region_fixed = synth('region_fixed', src, '--set', f'abc.region_opts={overrides}
 assert trials(region_fixed) == 0, region_fixed
 run('pass', 'liberty', 'gensim', lib, '--emit-dir', f'lg:{w}/models')
 run('lec', '--impl', f'lg:{w}/auto-net', '--ref', src, '--lib', f'lg:{w}/models', '--top', 'top', '--workdir', w/'lec')
+
+# Timing uses NLDM, including passthrough outputs and a short off-path adder.
+# This loose target is already met: the worst timed path still gets trials.
+old_lib = lib
+lib = str(pathlib.Path('inou/prp/tests/abc/timing.lib').resolve())
+timed = synth('timed', src, '--set', 'abc.delay=100000')
+assert trials(timed) > 0, timed
+assert any(r['ware_trials'] == 0 and r['input_ge'] < 16 for r in timed), timed
+logs = '\n'.join(p.read_text() for p in (w/'timed'/'logs').glob('*.log'))
+assert 'objective=timing' in logs and 'target=100000.000 ps met' in logs, logs
+assert 'QoR unavailable' not in logs, logs
+run('pass', 'liberty', 'gensim', lib, '--emit-dir', f'lg:{w}/timed-models')
+run('lec', '--impl', f'lg:{w}/timed-net', '--ref', src, '--lib', f'lg:{w}/timed-models', '--top', 'top', '--workdir', w/'lec-timed')
+lib = old_lib
 
 # Small adders stay inlined with surrounding logic, but still get trials.
 small=w/'small.v'
@@ -63,6 +76,24 @@ rows=synth('hier',hier,'--set','color.absorb=false','--set','compile.upass.inlin
 assert trials(rows)>0, rows
 run('lec','--impl',f'lg:{w}/hier-net','--ref',hier,'--lib',f'lg:{w}/models','--top','top','--workdir',w/'lec-hier')
 
+# Time repeated occurrences and a feedback register. The timer must cross
+# both instances but cut the sequential loop instead of rejecting a cycle.
+lib = str(pathlib.Path('inou/prp/tests/abc/timing.lib').resolve())
+rows = synth('hier-timed', hier, '--set', 'color.absorb=false', '--set', 'compile.upass.inline=false', '--set', 'abc.delay=1')
+assert trials(rows) > 0, rows
+logs = '\n'.join(p.read_text() for p in (w/'hier-timed'/'logs').glob('*.log'))
+assert 'objective=timing' in logs and 'missed (fastest measured retained)' in logs, logs
+assert 'QoR unavailable' not in logs, logs
+run('lec', '--impl', f'lg:{w}/hier-timed-net', '--ref', hier, '--lib', f'lg:{w}/timed-models', '--top', 'top', '--workdir', w/'lec-hier-timed')
+seq = w/'seq.v'
+seq.write_text('module top(input clk, input [15:0] a, output reg [15:0] q); always @(posedge clk) q <= q+a; endmodule\n')
+rows = synth('seq-timed', seq, '--set', 'abc.delay=1')
+assert trials(rows) > 0, rows
+logs = '\n'.join(p.read_text() for p in (w/'seq-timed'/'logs').glob('*.log'))
+assert 'objective=timing' in logs and 'QoR unavailable' not in logs, logs
+run('lec', '--impl', f'lg:{w}/seq-timed-net', '--ref', seq, '--lib', f'lg:{w}/timed-models', '--top', 'top', '--workdir', w/'lec-seq-timed')
+lib = old_lib
+
 # Multiplier and barrel alternatives both reach mapping, and their explicit
 # selectors suppress automatic trials of those blocks.
 for name, expr, knobs in [('mul','a*b',['abc.multiplier=tree']), ('shr','a>>b',['abc.barrel=reverse'])]:
@@ -72,5 +103,5 @@ for name, expr, knobs in [('mul','a*b',['abc.multiplier=tree']), ('shr','a>>b',[
     rows=synth(name+'-fixed',f,*[v for opt in knobs for v in ('--set',opt)])
     assert trials(rows)==0, rows
     run('lec','--impl',f'lg:{w}/{name}-fixed-net','--ref',f,'--lib',f'lg:{w}/models','--top','top','--workdir',w/f'lec-{name}')
-print('PASS: critical ware selection, off-path skip, explicit selectors, warm replay, inlining, hierarchy, and equivalence')
+print('PASS: area and timed ware selection, off-path policy, explicit selectors, warm replay, inlining, hierarchy, and equivalence')
 PY

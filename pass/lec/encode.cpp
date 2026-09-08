@@ -384,26 +384,9 @@ Term bv_extract(cvc5::TermManager& tm, const Term& t, int hi, int lo) {
   return tm.mkTerm(op, {t});
 }
 
-// Selector test for ONE arm of a Mux/Hotmux. Mux compares the selector against
-// the arm index; Hotmux tests that arm's one-hot bit.
-//
-// The hot bit is tested with EXTRACT rather than by comparing against a `1 << k`
-// constant. That constant is undefined behaviour for k >= 64 (the shift count is
-// masked mod 64 on arm64/x86, so arm 64 aliases arm 0) and is unrepresentable
-// through a uint64_t-valued bv_const in the first place. The result was that
-// EVERY arm above 63 silently fell through to the default arm — which both
-// false-REFUTES a correct design and, far worse, false-PROVES two designs that
-// differ only above arm 63. A 128-entry `match` (a ROM/decode table) is enough
-// to hit it. Returns a null Term if the arm index is past the selector width,
-// so a malformed graph degrades to UNKNOWN instead of dropping the arm.
-Term mux_arm_cond(cvc5::TermManager& tm, bool hotmux, const Term& sel, int sel_width, int k) {
-  if (!hotmux) {
-    return tm.mkTerm(Kind::EQUAL, {sel, bv_const(tm, sel_width, static_cast<uint64_t>(k))});
-  }
-  if (k >= sel_width) {
-    return Term();
-  }
-  return tm.mkTerm(Kind::EQUAL, {bv_extract(tm, sel, k, k), bv_const(tm, 1, 1)});
+// Selector test for one arm of an indexed Mux.
+Term mux_arm_cond(cvc5::TermManager& tm, const Term& sel, int sel_width, int k) {
+  return tm.mkTerm(Kind::EQUAL, {sel, bv_const(tm, sel_width, static_cast<uint64_t>(k))});
 }
 
 }  // namespace
@@ -2797,11 +2780,41 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           result = fit(pid(0)[0], W);
           break;
         }
-        case Ntype_op::Mux   :
         case Ntype_op::Hotmux: {
+          const auto inputs = gu::hotmux_inputs(node);
+          if (gu::bits_of(dpin) == 0) {
+            for (const auto& [p, values] : by_pid) {
+              if (!gu::is_hotmux_control(p, inputs.arms.size() * 2) && !values.empty()) {
+                W = std::max(W, values.front().width);
+              }
+            }
+          }
+          // Every (control, value) pid must have a driver. `hotmux_inputs` only
+          // debug-ASSERTS the contiguous pid layout, so a gapped cell reaching a
+          // release build must fail closed here rather than index pid()'s empty
+          // vector (the same guard every other arm in this switch carries).
+          for (size_t k = 0; k <= inputs.arms.size(); ++k) {
+            const bool last = k == inputs.arms.size();
+            if (last && inputs.fallback.is_invalid()) {
+              break;
+            }
+            if (pid(static_cast<hhds::Port_id>(2 * k)).empty() || (!last && pid(static_cast<hhds::Port_id>(2 * k + 1)).empty())) {
+              return fail("Hotmux missing a control/value driver");
+            }
+          }
+          result = inputs.fallback.is_invalid() ? tm_.mkBitVector(static_cast<uint32_t>(W), 0)
+                                                : fit(pid(static_cast<hhds::Port_id>(2 * inputs.arms.size()))[0], W);
+          for (size_t k = inputs.arms.size(); k-- > 0;) {
+            const auto& control = pid(static_cast<hhds::Port_id>(2 * k))[0];
+            auto        cond = tm_.mkTerm(Kind::DISTINCT, {control.term, tm_.mkBitVector(static_cast<uint32_t>(control.width), 0)});
+            result           = tm_.mkTerm(Kind::ITE, {cond, fit(pid(static_cast<hhds::Port_id>(2 * k + 1))[0], W), result});
+          }
+          break;
+        }
+        case Ntype_op::Mux: {
           // pid0 = selector; values on pid 1..N.
           if (pid(0).empty()) {
-            return fail("Mux/Hotmux missing selector");
+            return fail("Mux missing selector");
           }
           const Val&       sel = pid(0)[0];
           std::vector<Val> arms;
@@ -2813,7 +2826,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             arms.push_back(it->second.front());
           }
           if (arms.empty()) {
-            return fail("Mux/Hotmux has no arms");
+            return fail("Mux has no arms");
           }
           // The result pin is the Mux contract. A typed result may deliberately
           // be narrower than an arm, in which case selecting that arm truncates
@@ -2833,10 +2846,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // default else = last arm (covers in-range exactly + out-of-range det.)
           result = fit(arms.back(), W);
           for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
-            Term cond = mux_arm_cond(tm_, op == Ntype_op::Hotmux, sel.term, sel.width, k);
-            if (cond.isNull()) {
-              return fail_unsupported("Hotmux arm index past the selector width");
-            }
+            Term cond = mux_arm_cond(tm_, sel.term, sel.width, k);
             result = tm_.mkTerm(Kind::ITE, {cond, fit(arms[k], W), result});
           }
           break;
@@ -2863,7 +2873,25 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         if (any_undef) {
           auto zero_w = tm_.mkBitVector(static_cast<uint32_t>(W), 0);
           auto ones_w = tm_.mkTerm(Kind::BITVECTOR_NOT, {zero_w});
-          if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+          if (op == Ntype_op::Hotmux) {
+            const auto inputs = gu::hotmux_inputs(node);
+            auto       mask   = [&](hhds::Port_id p) {
+              auto m = fit_x_mask_to(tm_, pid(p)[0], W);
+              return m.isNull() ? zero_w : m;
+            };
+            Term u               = inputs.fallback.is_invalid() ? zero_w : mask(static_cast<hhds::Port_id>(2 * inputs.arms.size()));
+            Term unknown_control = tm_.mkBoolean(false);
+            for (size_t k = inputs.arms.size(); k-- > 0;) {
+              const auto& control = pid(static_cast<hhds::Port_id>(2 * k))[0];
+              auto        zero    = tm_.mkBitVector(static_cast<uint32_t>(control.width), 0);
+              auto        active  = tm_.mkTerm(Kind::DISTINCT, {control.term, zero});
+              u                   = tm_.mkTerm(Kind::ITE, {active, mask(static_cast<hhds::Port_id>(2 * k + 1)), u});
+              if (!control.x_mask.isNull()) {
+                unknown_control = tm_.mkTerm(Kind::OR, {unknown_control, tm_.mkTerm(Kind::DISTINCT, {control.x_mask, zero})});
+              }
+            }
+            out_val.x_mask = tm_.mkTerm(Kind::ITE, {unknown_control, ones_w, u});
+          } else if (op == Ntype_op::Mux) {
             const Val&       sel = pid(0)[0];
             std::vector<Val> arms;
             for (hhds::Port_id p = 1;; ++p) {
@@ -2884,10 +2912,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               };
               Term u = arm_xm(arms.back());
               for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
-                Term cond = mux_arm_cond(tm_, op == Ntype_op::Hotmux, sel.term, sel.width, k);
-                if (cond.isNull()) {
-                  return fail_unsupported("Hotmux arm index past the selector width");
-                }
+                Term cond = mux_arm_cond(tm_, sel.term, sel.width, k);
                 u = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
               }
               // A non-null selector plane is not necessarily asserted: it can

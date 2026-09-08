@@ -53,7 +53,9 @@ void Pass_color::setup() {
   // `seed` label), not a per-pass --set option.
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
-  m.add_label_optional("ctrl_cones", "experimental: separate overlapping control cones (cones mode only)", "false");
+  m.add_label_optional("ctrl_cones",
+                       "merge mux/select groups and overlapping enable groups (default in cones mode; false disables)",
+                       "true");
   m.add_label_optional("ctrl_max_gate", "fail if a control cone exceeds this predicted AIG size (0 unbounded)", "0");
   m.add_label_optional("ctrl_min_gate", "leave control cones smaller than this predicted AIG size in data regions", "0");
   m.add_label_optional("synth_alg",
@@ -318,11 +320,10 @@ void Pass_color::color(Eprp_var& var) {
   opts.max_ge        = parse_ge_bound(var, "max_ge", "5000");
   opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
   opts.max_gate      = parse_ge_bound(var, "max_gate", "5000");
-  opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "false"));
+  opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "true"));
   opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
   opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
   if (opts.ctrl_cones && (alg != "synth" || synth_alg != "cones")) {
-    std::print(stderr, "[pass.color] ctrl_cones ignored outside synth_alg=cones\n");
     opts.ctrl_cones = false;
   }
   opts.forward = forward_on ? forward : std::string{};

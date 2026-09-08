@@ -1,5 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <format>
 #include <print>
 
@@ -12,16 +14,33 @@
 namespace livehd::abc {
 namespace gu = livehd::graph_util;
 
-bool ware_depth_better(const std::vector<int>& baseline, const std::vector<int>& candidate) {
-  if (baseline.empty() || baseline.size() != candidate.size()) {
+float ware_delay_target(std::string_view value) {
+  const std::string text{value};
+  char*             end    = nullptr;
+  const float       target = std::strtof(text.c_str(), &end);
+  return end != text.c_str() && *end == '\0' && std::isfinite(target) && target > 0 ? target : 0.0f;
+}
+
+bool ware_qor_better(const Ware_qor& baseline, const Ware_qor& candidate, bool timing) {
+  if (!std::isfinite(baseline.area) || !std::isfinite(candidate.area) || candidate.area < 0.0) {
     return false;
   }
-  const int old_depth = *std::max_element(baseline.begin(), baseline.end());
-  const int new_depth = *std::max_element(candidate.begin(), candidate.end());
-  return new_depth < old_depth
-         || (new_depth == old_depth
-             && std::count(candidate.begin(), candidate.end(), new_depth)
-                    < std::count(baseline.begin(), baseline.end(), old_depth));
+  if (timing) {
+    if (baseline.delays.empty() || baseline.delays.size() != candidate.delays.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < baseline.delays.size(); ++i) {
+      if (!std::isfinite(baseline.delays[i]) || !std::isfinite(candidate.delays[i])) {
+        return false;
+      }
+    }
+    for (size_t i = 0; i < baseline.delays.size(); ++i) {
+      if (std::abs(candidate.delays[i] - baseline.delays[i]) > 0.001f) {
+        return candidate.delays[i] < baseline.delays[i];
+      }
+    }
+  }
+  return candidate.area < baseline.area - 1e-6;
 }
 
 void Mapper::remember_ware(const livehd::partition::Region_body& rb) {
@@ -77,9 +96,10 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
   if (ware_regions_.empty()) {
     return;
   }
-  auto score = score_ware(outlib, top);
+  const float global_target = ware_delay_target(startup_opts_.delay);
+  auto        score         = score_ware(outlib, top);
   if (!score.valid) {
-    std::print("[pass.abc] ware: stitched depth unavailable; retaining baseline implementations\n");
+    std::print("[pass.abc] ware: stitched QoR unavailable; retaining baseline implementations\n");
     return;
   }
   std::sort(ware_regions_.begin(), ware_regions_.end(), [](const auto& a, const auto& b) {
@@ -102,46 +122,71 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
   absl::flat_hash_set<std::string> visited;
   while (true) {
     auto next = std::find_if(ware_regions_.begin(), ware_regions_.end(), [&](const auto& w) {
-      return !visited.contains(w.rb.module_name) && score.critical_regions.contains(w.rb.module_name);
+      if (visited.contains(w.rb.module_name)) {
+        return false;
+      }
+      const float target = ware_delay_target(w.options.delay);
+      if (target <= 0) {
+        return true;
+      }
+      const auto it = score.region_path_delay.find(w.rb.module_name);
+      return it != score.region_path_delay.end() && !score.delays.empty()
+             && it->second >= std::min(target, score.delays.front()) - 0.001f;
     });
     if (next == ware_regions_.end()) {
       break;
     }
-    auto&       w    = *next;
-    const auto& name = w.rb.module_name;
+    auto&       w      = *next;
+    const auto& name   = w.rb.module_name;
+    const float target = ware_delay_target(w.options.delay);
+    const bool  timing = target > 0;
     visited.insert(name);
     auto row_it = std::find_if(qor_.begin(), qor_.end(), [&](const auto& q) { return q.module == name; });
     if (row_it == qor_.end()) {
       continue;
     }
-    const size_t row      = static_cast<size_t>(row_it - qor_.begin());
-    auto         selected = w.options;
+    const size_t row = static_cast<size_t>(row_it - qor_.begin());
     struct Candidate {
       Map_options options;
       std::string label;
     };
-    std::vector<Candidate> candidates;
+    // Enumerate the small local selector product (at most 3 * 2 * 2).
+    // Otherwise a later barrel/multiplier trial could discard a faster adder,
+    // or miss a combination that only pays off with a different adder.
+    std::vector<Candidate> candidates{
+        {w.options, ""}
+    };
     if (w.add || (w.mult && w.options.auto_adder)) {
       for (auto kind : {arith::Adder_kind::cla, arith::Adder_kind::cska}) {
-        auto o  = selected;
+        auto o  = w.options;
         o.adder = kind;
         candidates.push_back({o, kind == arith::Adder_kind::cla ? "adder=cla" : "adder=cska"});
       }
     }
+    const auto append = [](std::string label, std::string_view selector) {
+      if (!label.empty()) {
+        label += ",";
+      }
+      label += selector;
+      return label;
+    };
     if (w.mult) {
-      auto o       = selected;
-      o.multiplier = arith::Mult_kind::tree;
-      candidates.push_back({o, "multiplier=tree"});
-      if (w.options.auto_adder) {
-        o.adder = arith::Adder_kind::cla;
-        candidates.push_back({o, "multiplier=tree,adder=cla"});
+      const auto count = candidates.size();
+      for (size_t i = 0; i < count; ++i) {
+        auto o       = candidates[i].options;
+        o.multiplier = arith::Mult_kind::tree;
+        candidates.push_back({o, append(candidates[i].label, "multiplier=tree")});
       }
     }
     if (w.barrel) {
-      auto o           = selected;
-      o.reverse_barrel = !o.reverse_barrel;
-      candidates.push_back({o, o.reverse_barrel ? "barrel=reverse" : "barrel=log"});
+      const auto count = candidates.size();
+      for (size_t i = 0; i < count; ++i) {
+        auto o           = candidates[i].options;
+        o.reverse_barrel = !o.reverse_barrel;
+        candidates.push_back({o, append(candidates[i].label, o.reverse_barrel ? "barrel=reverse" : "barrel=log")});
+      }
     }
+    candidates.erase(candidates.begin());  // baseline already measured
     for (const auto& candidate : candidates) {
       hhds::GraphLibrary backup;
       if (!backup.copy_from(outlib, name)) {
@@ -182,25 +227,31 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
         qor_.resize(count);
       }
       auto       trial_score  = mapped ? score_ware(outlib, top) : Ware_score{};
-      const bool keep         = trial_score.valid && ware_depth_better(score.endpoints, trial_score.endpoints);
+      const bool keep         = trial_score.valid
+                                && ware_qor_better(score, trial_score, timing)
+                                // Area-only sections must not degrade another section's
+                                // constrained stitched paths.
+                                && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
       trial_q.ware_trials     = previous.ware_trials + 1;
       const double trial_ms   = mapped ? trial_q.ms : 0.0;
       trial_q.ms             += previous.ms;
       if (keep) {
         trial_q.ware_selected = candidate.label;
         qor_[row]             = std::move(trial_q);
-        selected              = candidate.options;
       } else {
         (void)outlib.replace_body_from(name, *backup.find_io(name)->get_graph());
         qor_[row] = previous;
         ++qor_[row].ware_trials;
         qor_[row].ms += trial_ms;
       }
-      std::print("[pass.abc] ware region='{}' {} stitched_depth={} -> {} {}\n",
+      std::print("[pass.abc] ware region='{}' {} objective={} delay_ps={:.3f}->{:.3f} area={:.6f}->{:.6f} {}\n",
                  name,
                  candidate.label,
-                 score.endpoints.empty() ? 0 : score.endpoints.front(),
-                 trial_score.endpoints.empty() ? -1 : trial_score.endpoints.front(),
+                 timing ? "timing" : "area",
+                 score.delays.empty() ? 0.0f : score.delays.front(),
+                 trial_score.delays.empty() ? -1.0f : trial_score.delays.front(),
+                 score.area,
+                 trial_score.valid ? trial_score.area : -1.0,
                  keep ? "keep" : "reject");
       if (keep) {
         score = std::move(trial_score);
@@ -210,6 +261,25 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
         refusal_.clear();
         time_refusal_.clear();
         break;
+      }
+    }
+  }
+  if (global_target > 0 && !score.delays.empty()) {
+    std::print("[pass.abc] ware: selected stitched delay={:.3f} ps target={:.3f} ps {}\n",
+               score.delays.front(),
+               global_target,
+               score.delays.front() <= global_target ? "met" : "missed (fastest measured retained)");
+  }
+  if (global_target <= 0) {
+    for (const auto& w : ware_regions_) {
+      const float target = ware_delay_target(w.options.delay);
+      const auto  it     = score.region_path_delay.find(w.rb.module_name);
+      if (target > 0 && it != score.region_path_delay.end()) {
+        std::print("[pass.abc] ware region='{}': selected stitched path={:.3f} ps target={:.3f} ps {}\n",
+                   w.rb.module_name,
+                   it->second,
+                   target,
+                   it->second <= target ? "met" : "missed (fastest measured retained)");
       }
     }
   }

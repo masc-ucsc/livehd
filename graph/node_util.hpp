@@ -18,6 +18,7 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -35,6 +36,52 @@ namespace livehd::graph_util {
 // decltype so it tracks hhds's choice (inline size, element type) and can never
 // drift out of sync with the accessor it must bind to.
 using Edge_vec = decltype(std::declval<hhds::Node_class>().inp_edges());
+
+// Hotmux has contiguous (one-bit control, value) pairs at p(2*i), p(2*i+1).
+// An optional trailing even pin is the default value when every control is
+// zero. Without a default the zero-control result is zero. Multiple active
+// controls violate the cell's one-hot-or-zero obligation.
+template <typename Pin>
+struct Hotmux_inputs {
+  std::vector<std::pair<Pin, Pin>> arms;
+  Pin                              fallback;
+};
+
+template <typename Node>
+[[nodiscard]] inline auto hotmux_inputs(const Node& node) {
+  auto                                                range = node.inp_edges();
+  std::vector<std::decay_t<decltype(*range.begin())>> edges;
+  for (const auto& edge : range) {
+    edges.push_back(edge);
+  }
+  std::sort(edges.begin(), edges.end(), [](const auto& a, const auto& b) { return a.sink.get_port_id() < b.sink.get_port_id(); });
+  Hotmux_inputs<std::decay_t<decltype(edges[0].driver)>> result;
+  for (size_t i = 0; i < edges.size(); ++i) {
+    I(edges[i].sink.get_port_id() == i);
+  }
+  for (size_t i = 0; i + 1 < edges.size(); i += 2) {
+    result.arms.emplace_back(edges[i].driver, edges[i + 1].driver);
+  }
+  if (edges.size() % 2) {
+    result.fallback = edges.back().driver;
+  }
+  return result;
+}
+
+// Exclusive upper bound for control pids, computed once per consumer sweep.
+template <typename Node>
+[[nodiscard]] inline size_t hotmux_control_end(const Node& node) {
+  size_t end = 0;
+  for (const auto& edge : node.inp_edges()) {
+    const auto pid = edge.sink.get_port_id();
+    if (pid % 2) {
+      end = std::max(end, static_cast<size_t>(pid) + 1);
+    }
+  }
+  return end;
+}
+
+[[nodiscard]] inline bool is_hotmux_control(hhds::Port_id pid, size_t control_end) { return pid % 2 == 0 && pid < control_end; }
 
 // Reserved sub-module name for the runtime range-select guard `a#[lo..=hi]`
 // emits (see upass_tolg lower_range_assert). It is a recognized PRIMITIVE: a

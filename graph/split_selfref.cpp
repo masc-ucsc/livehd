@@ -203,10 +203,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       // the result is always one of the DATA operands (port 0 is the
       // selector; an out-of-range selector yields 0) -> union of their bounds
+      const auto          control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(m) : 0;
       std::pair<int, int> u{0, 0};
       bool                any = false;
       for (auto e : m.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) == 0) {
+        if ((op == Ntype_op::Mux && e.sink.get_port_id() == 0)
+            || (op == Ntype_op::Hotmux && gu::is_hotmux_control(e.sink.get_port_id(), control_end))) {
           continue;  // selector
         }
         auto f = self(self, e.driver, depth + 1);

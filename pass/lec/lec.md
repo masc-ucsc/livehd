@@ -373,7 +373,7 @@ unsigned sign slot, so every encoder and mapped netlist uses `bits_of` directly.
 arithmetic (sign-preserving); there is **no** logical-rshift op. `SHL` — the `b`
 amount is **one-hot multi-driver**: `(v<<b0)|(v<<b1)|…`. `Get_mask(a,-1)` =
 zero-extend; contiguous mask = part-select. `Mux` — `sel` pid0, arm `i` chosen
-when `sel==i-1`; `Hotmux` — one-hot `sel`. `LT/GT` can be multi-input (all
+when `sel==i-1`; `Hotmux` — interleaved one-bit control/value pairs and an optional trailing default (zero if absent). `LT/GT` can be multi-input (all
 a-vs-b pairs ANDed). **Decomposed at tolg, so absent as primitives:** `Mod`,
 reduce-AND/XOR, popcount, `GE/LE/NE`, logical-rshift — they appear as
 `Ror/Not/And/Get_mask/SRA/EQ` compositions. `AttrSet` = no-op pass-through.

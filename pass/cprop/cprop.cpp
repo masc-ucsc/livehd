@@ -170,11 +170,14 @@ void enforce_lossless_carriers(hhds::Graph* g) {
       if (out.is_invalid()) {
         continue;
       }
+      const auto control_end   = op == Ntype_op::Hotmux ? livehd::graph_util::hotmux_control_end(node) : 0;
       const bool signed_output = !livehd::graph_util::is_unsign(out);
       int        required      = std::max(bits_of(out), 1);
       for (const auto& e : node.inp_edges()) {
         const auto pid = e.sink.get_port_id();
-        if ((op == Ntype_op::SHL && pid != 0) || ((op == Ntype_op::Mux || op == Ntype_op::Hotmux) && pid == 0)) {
+        if ((op == Ntype_op::SHL && pid != 0)
+            || ((op == Ntype_op::Mux && pid == 0)
+                || (op == Ntype_op::Hotmux && livehd::graph_util::is_hotmux_control(pid, control_end)))) {
           continue;  // shift count / selector widths are independent
         }
         int  input_bits   = bits_of(e.driver);
@@ -810,7 +813,7 @@ void sweep_dead_node(const hhds::Node_class& n) {
     auto cur = work.front();
     work.pop_front();
     if (cur.is_invalid() || Ntype::is_loop_last(type_op_of(cur)) || livehd::graph_util::is_builtin_node(cur)
-        || cur.has_out_edges()) {
+        || type_op_of(cur) == Ntype_op::Hotmux || cur.has_out_edges()) {
       continue;
     }
     for (const auto& e : cur.inp_edges()) {
@@ -1411,6 +1414,24 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
 // (rather than passing an existing operand) MUST check it and clean up the orphan
 // on false, or it leaks. Existing callers pass an existing pin, so a false there
 // is just a missed collapse (the node is left for later folds).
+namespace {
+// Do two driver pins carry the same value at the same width? Pin identity is the
+// common case, but the constant pool mints a node per CONST pin, so two arms
+// spelling the same literal are DIFFERENT pins with equal contents -- and an
+// identical-arm select written as two literals is the shape that shows up most.
+// same_repr (not is_known_eq) because a collapse rewires consumers straight to
+// this pin: the width and the unknown plane have to match, not just the value.
+[[nodiscard]] bool same_driver_value(const hhds::Pin_class& a, const hhds::Pin_class& b) {
+  if (a == b) {
+    return true;
+  }
+  if (!a.is_const() || !b.is_const()) {
+    return false;
+  }
+  return livehd::graph_util::const_of(a).same_repr(livehd::graph_util::const_of(b));
+}
+}  // namespace
+
 bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
   auto new_bits = bits_of(new_dpin);
   for (const auto& out : node.out_edges()) {  // read-only width check
@@ -1510,18 +1531,45 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, livehd::graph_util::Edg
   } else if (op == Ntype_op::Mult || op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
     collapse_forward_same_op(node, inp_edges_ordered);
   } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
-    // All data arms identical -> the selector is irrelevant (a Hotmux's
-    // zero/multi-hot error case stays a runtime property; cprop assumes the
-    // unique-if assume holds, same as folding a Mux assumes an in-range sel).
+    // Identical arms make the selector irrelevant, for a Hotmux as much as for a
+    // Mux: an overlap that cannot change the result is not worth a decode cone
+    // plus its own ABC region. (That shape is exactly an always-open latch
+    // enable -- `case(c) 2'd0: e<=1; default: e<=1;` -- and keeping the Hotmux
+    // alive to carry a one-hot obligation about it left the latch in the design
+    // on the reference side only.) The obligation is dropped with the cell.
     if (inp_edges_ordered.size() <= 1) {
       node.del_node();
       return;
     }
-    auto& a_pin = inp_edges_ordered[1].driver;
-    for (auto i = 2u; i < inp_edges_ordered.size(); ++i) {
-      if (a_pin != inp_edges_ordered[i].driver) {
+    if (op == Ntype_op::Mux) {
+      auto& a_pin = inp_edges_ordered[1].driver;
+      for (auto i = 2u; i < inp_edges_ordered.size(); ++i) {
+        if (!same_driver_value(a_pin, inp_edges_ordered[i].driver)) {
+          return;
+        }
+      }
+      collapse_forward_for_pin(node, a_pin);
+      return;
+    }
+    const auto inputs = livehd::graph_util::hotmux_inputs(node);
+    if (inputs.arms.empty()) {
+      return;
+    }
+    const auto a_pin = inputs.arms[0].second;
+    for (const auto& arm : inputs.arms) {
+      if (!same_driver_value(a_pin, arm.second)) {
         return;
       }
+    }
+    // The all-controls-zero result has to agree too. It is the trailing default
+    // when the cell has one, and a literal 0 when it does not -- so a Hotmux
+    // with no default port collapses only when the shared arm value IS zero.
+    if (inputs.fallback.is_invalid()) {
+      if (!a_pin.is_const() || !const_of(a_pin).is_known_zero()) {
+        return;
+      }
+    } else if (!same_driver_value(a_pin, inputs.fallback)) {
+      return;
     }
     collapse_forward_for_pin(node, a_pin);
   }
@@ -1566,41 +1614,23 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
 
     collapse_forward_for_pin(node, a_pin);
   } else if (op == Ntype_op::Hotmux) {
-    // Constant one-hot selector: collapse to the selected arm (bit i ->
-    // p(i+1)). A zero/multi-hot constant violates the unique-if assume; warn
-    // and keep the cell (cgen's case default models the runtime error).
-    auto& s_pin = inp_edges_ordered[0].driver;
-    if (!s_pin.is_const()) {
-      return;
-    }
-    const auto& s_const = const_of(s_pin);
-    if (s_const.has_unknowns() || !s_const.is_just_i64()) {
-      return;
-    }
-    auto sel = s_const.to_just_i64();
-    if (sel <= 0 || (sel & (sel - 1)) != 0) {
-      Pass::info("WARNING: hotmux selector:{} is not one-hot (unique-if assume violated); not folding\n", sel);
-      return;
-    }
-    size_t arm = 0;  // bit position of the hot bit
-    while ((sel >> arm) != 1) {
-      ++arm;
-    }
-
-    hhds::Pin_class a_pin;
-    for (auto& e : inp_edges_ordered) {
-      if (e.sink.get_port_id() == static_cast<hhds::Port_id>(arm + 1)) {
-        a_pin = e.driver;
-        break;
+    const auto      inputs = livehd::graph_util::hotmux_inputs(node);
+    hhds::Pin_class selected;
+    for (const auto& [control, value] : inputs.arms) {
+      if (!control.is_const() || const_of(control).has_unknowns()) {
+        return;
+      }
+      if (!const_of(control).is_known_zero()) {
+        if (!selected.is_invalid()) {
+          return;  // Preserve overlapping controls for pass.formal/runtime checks.
+        }
+        selected = value;
       }
     }
-    if (a_pin.is_invalid()) {
-#ifndef NDEBUG
-      Pass::info("WARNING: hotmux selector:{} for a disconnected pin in hotmux. Using zero\n", sel);
-#endif
-      a_pin = create_const(*current_graph, *Dlop::create_integer(0));
+    if (selected.is_invalid()) {
+      selected = inputs.fallback.is_invalid() ? create_const(*current_graph, *Dlop::create_integer(0)) : inputs.fallback;
     }
-    collapse_forward_for_pin(node, a_pin);
+    collapse_forward_for_pin(node, selected);
   } else if (op == Ntype_op::EQ) {
     // FIXME: 1- eq(X,0) = not(ror(x))
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
@@ -1936,37 +1966,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 
     replace_node(node, result);
   } else if (op == Ntype_op::Hotmux) {
-    // All-const Hotmux: the selector must be one-hot (bit i -> p(i+1)).
-    // A zero/multi-hot constant violates the unique-if assume; keep the cell
-    // so cgen's case default models the runtime error.
-    const auto& sel_const = const_of(inp_edges_ordered[0].driver);
-    I(sel_const.is_just_i64());
-
-    auto sel = sel_const.to_just_i64();
-    if (sel <= 0 || (sel & (sel - 1)) != 0) {
-      Pass::info("WARNING: hotmux:{} selector:{} is not one-hot (unique-if assume violated); not folding\n", debug_name(node), sel);
-      return;
-    }
-    size_t arm = 0;
-    while ((sel >> arm) != 1) {
-      ++arm;
-    }
-
-    Dlop result;
-    for (auto& e : inp_edges_ordered) {
-      if (e.sink.get_port_id() == static_cast<hhds::Port_id>(arm + 1)) {
-        result = const_of(e.driver);
-        break;
-      }
-    }
-    if (result.get_bits() == 0) {
-      result = Dlop::create_integer(0);
-#ifndef NDEBUG
-      Pass::info("WARNING: hotmux:{} selector:{} goes for disconnected pin in hotmux. Using zero\n", debug_name(node), sel);
-#endif
-    }
-
-    replace_node(node, result);
+    replace_part_inputs_const(node, inp_edges_ordered);
   } else if (op == Ntype_op::Mult) {
     Dlop result;
     result = Dlop::create_integer(1);
@@ -3566,7 +3566,7 @@ void Cprop::scalar_node(hhds::Node_class& node) {
     return;
   }
 
-  if (!node.has_out_edges()) {
+  if (!node.has_out_edges() && op != Ntype_op::Hotmux) {
     bwd_del_node(node);
     return;
   }
@@ -3918,7 +3918,7 @@ void Cprop::bwd_del_node(hhds::Node_class& node) {
       continue;
     }
 
-    if (!Ntype::is_loop_last(type_op_of(n)) && !n.has_out_edges()) {
+    if (!Ntype::is_loop_last(type_op_of(n)) && type_op_of(n) != Ntype_op::Hotmux && !n.has_out_edges()) {
       for (auto e : n.inp_edges()) {
         if (is_graph_input_pin(e.driver) || is_graph_output_pin(e.driver)) {
           continue;

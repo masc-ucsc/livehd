@@ -136,9 +136,9 @@ TEST(PredictAbcSize, MuxChainsAndHotmuxDoesNot) {
   md.connect_sink(g->get_output_pin("y"));
 
   auto hot = create_typed_node(*g, Ntype_op::Hotmux);
-  g->get_input_pin("s").connect_sink(hot.create_sink_pin(0));
-  for (hhds::Port_id arm = 1; arm <= 4; ++arm) {
-    g->get_input_pin("a").connect_sink(hot.create_sink_pin(arm));
+  for (hhds::Port_id arm = 0; arm < 4; ++arm) {
+    g->get_input_pin("s").connect_sink(hot.create_sink_pin(2 * arm));
+    g->get_input_pin("a").connect_sink(hot.create_sink_pin(2 * arm + 1));
   }
   set_bits(hot.create_driver_pin(0), 16);
 

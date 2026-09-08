@@ -38,7 +38,7 @@ TEST(CgenLlvm, VerifiesArbitraryWidthOperations) {
   wide                   = llvm.bitfield_insert(wide, llvm.input(1), 65, 113, 131, true);
   auto signed_wide       = llvm.sign_extend_from(wide, 96, 131, false);
   auto any               = llvm.reduce_or(signed_wide, 1, true);
-  auto selected          = llvm.indexed_mux(llvm.input(2), {wide, signed_wide, llvm.input(0)}, false, 131, true);
+  auto selected          = llvm.indexed_mux(llvm.input(2), {wide, signed_wide, llvm.input(0)}, 131, true);
   auto table             = llvm.constant(8, 0b10110100, true);
   auto address           = llvm.resize(llvm.input(2), 3, true);
   auto lut               = llvm.lut(table, address, 1, true);

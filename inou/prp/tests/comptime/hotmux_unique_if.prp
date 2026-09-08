@@ -1,14 +1,15 @@
 /*
 :name: hotmux_unique_if
 :type: comptime
-:verifier_pass: 8
+:verifier_pass: 10
 :verifier_fail: 0
 */
 
 // Corner cases beyond formux.prp:
 //   - `unique if` with no `elif` (single guarded arm), default fall-through
 //   - `unique if` with three arms and an `else` (explicit default)
-//   - __hotmux with single 1-hot bit set per sel value (covers each slot)
+//   - __hotmux with a single active control per call (covers each slot), plus
+//     the all-controls-zero case with and without a trailing default pin
 //   - __mux (not __hotmux) compared against unique-if to confirm both fold
 
 // Single-arm unique if (no elif). When cond is false, res keeps init.
@@ -39,6 +40,9 @@ cassert(code_three(c0=false, c1=true, c2=false, a=1, b=2, c=3, d=9) == 2)
 cassert(code_three(c0=false, c1=false, c2=true, a=1, b=2, c=3, d=9) == 3)
 cassert(code_three(c0=false, c1=false, c2=false, a=1, b=2, c=3, d=9) == 9)
 
-// Direct __hotmux walk: one-hot sel sweeps each slot.
-cassert(__hotmux(s=0sb001, p1=10, p2=20, p3=30) == 10)
-cassert(__hotmux(s=0sb100, p1=10, p2=20, p3=30) == 30)
+// Direct __hotmux walk: interleaved (control, value) pairs sweep each slot.
+cassert(__hotmux(p0=1, p1=10, p2=0, p3=20, p4=0, p5=30) == 10)
+cassert(__hotmux(p0=0, p1=10, p2=0, p3=20, p4=1, p5=30) == 30)
+// Every control zero: the trailing default pin, or 0 when there is none.
+cassert(__hotmux(p0=0, p1=10, p2=0, p3=20, p4=99) == 99)
+cassert(__hotmux(p0=0, p1=10, p2=0, p3=20) == 0)

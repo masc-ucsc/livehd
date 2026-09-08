@@ -1876,3 +1876,10 @@ sh_test(
     srcs = ["lhd_ware_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
+
+sh_test(
+    name = "lhd_hotmux_pairs_smoke",
+    size = "large",  # 3 compiles + 2 LECs + a slop AND an llvm simulator build
+    srcs = ["lhd_hotmux_pairs_smoke.sh"],
+    data = ["//lhd", "//inou/prp:equiv_tests"],
+)

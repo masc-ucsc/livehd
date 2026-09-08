@@ -546,7 +546,7 @@ void Pass_formal::work(Eprp_var& var) {
     const bool       is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
     formal::Prover   prover(g, opts);
 
-    // Built-in obligation: every Hotmux selector must be one-hot-or-zero. Collect
+    // Built-in obligation: a Hotmux's controls must be mutually exclusive. Collect
     // first so attribute writes never perturb the forward_class walk.
     std::vector<hhds::Node_class> hotmuxes;
     for (auto node : g->body().nodes(hhds::Node_order::forward)) {
@@ -555,28 +555,22 @@ void Pass_formal::work(Eprp_var& var) {
       }
     }
     for (auto& node : hotmuxes) {
-      hhds::Pin_class sel;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == 0) {  // pid 0 = selector
-          sel = e.driver;
-          break;
-        }
+      std::vector<hhds::Pin_class> controls;
+      for (const auto& [control, value] : gu::hotmux_inputs(node).arms) {
+        controls.push_back(control);
       }
-      if (sel.is_invalid()) {
-        continue;
-      }
-      auto out = prover.is_onehot0(sel);
+      auto out = prover.are_exclusive(controls);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalOnehot);  // one-hotness obligation discharged
       } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
                  && !downgrade_refute) {
-        // FAIL: a concrete assignment sets two or more selector bits at once, in
+        // FAIL: a concrete assignment activates two or more controls at once, in
         // a ROOT module (no missing top context). Record a (non-fatal) compile
         // error and continue; keep the runtime check and never elide it or expose
-        // the selector as a don't-care to pass.abc (a refuted property is unsound
+        // the controls as don't-cares to pass.abc (a refuted property is unsound
         // to optimize with).
         report_refuted("onehot-violated",
-                       "Hotmux selector can have two or more bits set at once (overlapping `unique if`/`match`)",
+                       "two or more Hotmux controls can be active at once (overlapping `unique if`/`match`)",
                        g->get_name(),
                        "",
                        "",
@@ -586,7 +580,7 @@ void Pass_formal::work(Eprp_var& var) {
         // Undecided, a non-top module ("not enough top"), or (fast) a stateful
         // refutation -> keep the runtime check + a loud DEFERRED warning.
         gu::set_runtime_check(node, gu::kFormalOnehot);
-        warn_deferred(warn_onehot, "onehot-deferred", "Hotmux selector one-hotness", g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(warn_onehot, "onehot-deferred", "Hotmux control exclusivity", g->get_name(), out, is_top, downgrade_refute);
       }
     }
 

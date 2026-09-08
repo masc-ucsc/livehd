@@ -2494,9 +2494,10 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
   // (consumed by pass.abc, which maps each color region separately). The
   // runner DCE keeps "__region" markers alive (dce_is_keepalive_attr_set);
   // the `%` target namespace skips scope/shadowing checks by construction.
-  int    region_id = 0;
-  TSNode abc_rv{};
-  if (!parse_scope_attributes(attrs, region_id, abc_rv)) {
+  int                                         region_id = 0;
+  TSNode                                      abc_rv{};
+  std::vector<std::pair<std::string, TSNode>> options;
+  if (!parse_scope_attributes(attrs, region_id, abc_rv, options)) {
     return;  // diag already emitted
   }
   auto sidx = builder.add_child(Lnast_ntype::create_stmts());
@@ -2518,6 +2519,14 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
       lnast->add_child(idx, Lnast_node::create_const("true"));
     }
   }
+  for (const auto& [key, value] : options) {
+    Pending_src pending_guard(*lnast, mint_src(value));
+    auto        idx = builder.add_child(Lnast_ntype::create_attr_set());
+    attach_loc(idx, value);
+    lnast->add_child(idx, Lnast_node::create_ref(std::format("%__region_{}_{}", region_id, region_marker_seq_++)));
+    lnast->add_child(idx, Lnast_node::create_const("__region_" + key));
+    lnast->add_child(idx, expr_to_node(value));
+  }
   walk_statement_block(n);
   builder.pop_stmts();
 }
@@ -2528,7 +2537,8 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
 // used as-is (two blocks with the same id become the same region group), a
 // string label is interned per file (same label => same region), and with no
 // `color` a fresh id is auto-allocated. Returns false after a diag.
-bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv) {
+bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv,
+                                       std::vector<std::pair<std::string, TSNode>>& options) {
   bool have_color = false;
   for (TSNode item : ts_node_named_children(attr_list_node)) {
     std::string_view it(ts_node_type(item));
@@ -2566,6 +2576,30 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
         return false;
       }
       abc_rv = rv;
+    } else if (key == "ware" || key == "delay") {
+      const auto txt = value_txt(rv);
+      if (key == "ware") {
+        if (txt != "true" && txt != "false") {
+          report_error(rv, "scope-attr-value", "syntax", "ware= takes true or false", "e.g. ware=true");
+          return false;
+        }
+      } else {
+        uint32_t ps          = 0;
+        const auto [ptr, ec] = std::from_chars(txt.data(), txt.data() + txt.size(), ps);
+        if (ec != std::errc{} || ptr != txt.data() + txt.size()) {
+          report_error(rv,
+                       "scope-attr-value",
+                       "syntax",
+                       "delay= takes a non-negative integer number of picoseconds",
+                       "delay=0 selects area; e.g. delay=500 selects timing");
+          return false;
+        }
+      }
+      if (std::any_of(options.begin(), options.end(), [&](const auto& o) { return o.first == key; })) {
+        report_error(lv, "scope-attr-value", "syntax", "duplicate synthesis scope option", "specify each option once");
+        return false;
+      }
+      options.emplace_back(std::string(key), rv);
     } else if (key == "color") {
       have_color = true;
       auto txt   = value_txt(rv);
@@ -2602,7 +2636,7 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
                    "scope-attr-unknown",
                    "syntax",
                    std::format("unknown scope attribute '{}'", key),
-                   "scope blocks accept only abc=\"…\" and color=…");
+                   "scope blocks accept abc=\"…\", color=…, ware=true|false, and delay=<ps>");
       return false;
     }
   }

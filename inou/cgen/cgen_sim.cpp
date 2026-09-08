@@ -882,9 +882,11 @@ bool Cgen_sim::proven_canonical_unsigned_result(const hhds::Node_class& node, co
       }
     }
   }
+  const auto control_end = op == Ntype_op::Hotmux ? livehd::graph_util::hotmux_control_end(node) : 0;
   if (needs_nonnegative_inputs || op == Ntype_op::SRA) {
     for (const auto& edge : node.inp_edges()) {
-      if ((op == Ntype_op::Mux || op == Ntype_op::Hotmux) && edge.sink.get_port_id() == 0) {
+      if ((op == Ntype_op::Mux && edge.sink.get_port_id() == 0)
+          || (op == Ntype_op::Hotmux && livehd::graph_util::is_hotmux_control(edge.sink.get_port_id(), control_end))) {
         continue;
       }
       if ((op == Ntype_op::SHL || op == Ntype_op::SRA) && edge.sink.get_port_id() != 0) {
@@ -906,7 +908,8 @@ bool Cgen_sim::proven_canonical_unsigned_result(const hhds::Node_class& node, co
   // needs the one mask. When every value input is unsigned, operand() presents
   // a canonical value and these operations preserve canonicality for free.
   for (const auto& edge : node.inp_edges()) {
-    if ((op == Ntype_op::Mux || op == Ntype_op::Hotmux) && edge.sink.get_port_id() == 0) {
+    if ((op == Ntype_op::Mux && edge.sink.get_port_id() == 0)
+        || (op == Ntype_op::Hotmux && livehd::graph_util::is_hotmux_control(edge.sink.get_port_id(), control_end))) {
       continue;  // selector, not a result value
     }
     if (op == Ntype_op::SHL && edge.sink.get_port_id() != 0) {
@@ -1481,8 +1484,42 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       int sw = std::max({wbits, frombit + 1, wbits_of(e[0].driver)});
       return absl::StrCat("Slop<", tw, ">{", operand(e[0].driver, sw, /*signed=*/1), ".sext_op(", std::to_string(frombit), ")}");
     }
-    case Ntype_op::Mux   :
     case Ntype_op::Hotmux: {
+      // Semantically `Slop<tw>::hotmux_op(c0, v0, c1, v1, ... [, default])` and
+      // MUST stay identical to it (hlop slop.hpp): control active on NON-ZERO,
+      // first-wins on a contract-violating overlap, all-zero reads the trailing
+      // default or 0. It is open-coded rather than called for the same reason
+      // the 2-arm Mux below is a ternary: a call evaluates EVERY arm, and under
+      // single-use forestation each arm is a whole inlined expression tree.
+      const auto  inputs = livehd::graph_util::hotmux_inputs(node);
+      std::string result = absl::StrCat("([&]() -> Slop<", tw, "> { int __hotmux_arm = -1;");
+      for (size_t i = 0; i < inputs.arms.size(); ++i) {
+        const auto& control = inputs.arms[i].first;
+        // `assert` is compiled out of a release simulator, so the arm must also
+        // be claimed FIRST-WINS rather than by the last matching control: that
+        // is the priority cgen_verilog's `unique case` and the SMT encoders use,
+        // and it keeps a (contract-violating) multi-hot run agreeing with them
+        // instead of silently reporting a different arm.
+        absl::StrAppend(&result,
+                        " if ((",
+                        raw_operand(control, std::max(wbits_of(control), 1)),
+                        ").is_known_true()) { assert(__hotmux_arm == -1 && \"hotmux controls overlap\");"
+                        " if (__hotmux_arm == -1) { __hotmux_arm = ",
+                        i,
+                        "; } }");
+      }
+      absl::StrAppend(&result, " switch (__hotmux_arm) {");
+      for (size_t i = 0; i < inputs.arms.size(); ++i) {
+        absl::StrAppend(&result, " case ", i, ": return Slop<", tw, ">{", operand(inputs.arms[i].second, wbits), "};");
+      }
+      absl::StrAppend(&result,
+                      " default: return ",
+                      inputs.fallback.is_invalid() ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
+                                                   : absl::StrCat("Slop<", tw, ">{", operand(inputs.fallback, wbits), "}"),
+                      "; } }())");
+      return result;
+    }
+    case Ntype_op::Mux: {
       if (e.size() < 3) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
@@ -1522,30 +1559,11 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                             ")");
       }
 
-      // Mux and Hotmux selectors have widths independent of their result. A
-      // Hotmux uses one selector bit per arm; a 3+-arm Mux uses the full integer
-      // index so an out-of-range high bit must not be truncated into range.
+      // Indexed Mux selectors keep their full width so an out-of-range
+      // high bit cannot be truncated into range.
       const int  sel_w = e[0].driver.is_const() ? std::max({wbits_of(e[0].driver), const_of(e[0].driver).get_bits(), 1})
                                                 : std::max(wbits_of(e[0].driver), 1);
       const auto sel   = operand(e[0].driver, sel_w, /*unsigned=*/-1);
-      if (op == Ntype_op::Hotmux && n_vals > 192) {
-        // A parameter-pack Hotmux instantiates one concept operand per arm;
-        // Clang's default expression-depth limit is 256. Do not replace it
-        // with an initializer-list array: that eagerly materializes every arm
-        // on every evaluation. A one-hot selector semantically names exactly
-        // one arm, so a switch is both constant-depth and lazy.
-        std::string result = absl::StrCat("([&]() -> Slop<",
-                                          tw,
-                                          "> { const auto __hotmux_sel = ",
-                                          sel,
-                                          "; assert(__hotmux_sel.popcount() == 1 && \"hotmux select must be one-hot\"); switch "
-                                          "(__hotmux_sel.get_first_bit_set()) {");
-        for (size_t i = 1; i < e.size(); ++i) {
-          absl::StrAppend(&result, " case ", i - 1, ": return Slop<", tw, ">{", operand(e[i].driver, wbits), "};");
-        }
-        absl::StrAppend(&result, " default: return Slop<", tw, ">::invalid(); } }())");
-        return result;
-      }
       std::string vals;
       for (size_t i = 1; i < e.size(); ++i) {
         if (!vals.empty()) {
@@ -1557,7 +1575,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // canonical value. Signed arms still sign-extend through operand().
         vals += operand(e[i].driver, wbits);
       }
-      return absl::StrCat("Slop<", tw, ">::", op == Ntype_op::Hotmux ? "hotmux_op" : "mux_op", "(", sel, ", ", vals, ")");
+      return absl::StrCat("Slop<", tw, ">::", "mux_op", "(", sel, ", ", vals, ")");
     }
     case Ntype_op::Clock_cell:
       // FAIL CLOSED, never fall into the pass-through below. A Clock_cell's
@@ -2048,10 +2066,8 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // down the hierarchy, refresh mixed-phase children's negedge state for the
 // next period. This preserves the established rise schedule while preventing
 // a nested negedge preview from retaining the prior cycle's input. Preserve a
-// Hotmux's full one-hot selector width independently of its result width. Let
+// Hotmux's control widths independently of its result width. Let
 // reset_cycle(bool) supply zero for otherwise-uninitialized state (sim.init_zero).
-// simgen-56: delegate mixed-selector-width Hotmux evaluation to HLOP's
-// Slop<ResultWidth>::hotmux_op instead of emitting a private helper.
 // simgen-57: hierarchical value mirrors are compile-time instrumentation.
 // A normal non-VCD/non-probe/non-query build has no observation boundary
 // slots, publication assignments, runtime observation branches, VCD storage,
@@ -10871,17 +10887,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               result = llvm_kernel.sign_extend_from(operands[0], sign_bit, result_width, result_unsign);
               break;
             }
-            case Ntype_op::Mux:
             case Ntype_op::Hotmux: {
+              result = llvm_kernel.hotmux(operands, result_width, result_unsign);
+              break;
+            }
+            case Ntype_op::Mux: {
               if (operands.size() < 2) {
                 return reject("mux has no data arms");
               }
               std::vector<Cgen_llvm::Value> arms(operands.begin() + 1, operands.end());
-              if (type_op_of(node) == Ntype_op::Mux && arms.size() == 2) {
+              if (arms.size() == 2) {
                 result = llvm_kernel.mux(operands[0], arms[0], arms[1], result_width, result_unsign);
               } else {
-                result
-                    = llvm_kernel.indexed_mux(operands[0], arms, type_op_of(node) == Ntype_op::Hotmux, result_width, result_unsign);
+                result = llvm_kernel.indexed_mux(operands[0], arms, result_width, result_unsign);
               }
               break;
             }

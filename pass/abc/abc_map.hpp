@@ -31,9 +31,15 @@ class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
 //
 // Free and pure so the policy is testable without a Liberty: the QoR it produces
 // depends on the cell library, but the DECISION does not.
-int  area_relax_percent(float target, float achieved, uint32_t cap);
-// Compare the same endpoints: improve worst depth, or remove tied worst paths.
-bool ware_depth_better(const std::vector<int>& baseline, const std::vector<int>& candidate);
+int area_relax_percent(float target, float achieved, uint32_t cap);
+// Area without a target; Liberty delay (then area) with a target. Endpoint
+// delays are sorted worst first, so improving a tied critical path counts.
+struct Ware_qor {
+  double             area = 0.0;
+  std::vector<float> delays;
+};
+bool  ware_qor_better(const Ware_qor& baseline, const Ware_qor& candidate, bool timing);
+float ware_delay_target(std::string_view value);
 
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
@@ -47,9 +53,9 @@ struct Map_options {
   // explicit color-keyed region_opts still win. This lets large replicated
   // logic use a deliberately cheap mapper without sacrificing the QoR of
   // small timing-sensitive cones. Disabled when empty or small_ge == 0.
-  // ABC resets -T for each -I restart; one restart fits the two-second
-  // search allocation under the five-second whole-region backstop.
-  std::string       ctrl_flow           = "strash; &get -n; &deepsyn -I 1 -J 20 -T 2; &dch -f; &nf {D}; &put -o";
+  // Control groups inherit the ordinary recipe by default. A custom ctrl_flow
+  // opts into the delay-only tier and its whole-region time backstop.
+  std::string       ctrl_flow           = "inherit";
   uint32_t          ctrl_area_relax     = 0;
   uint64_t          ctrl_time_budget_ms = 5000;
   std::string       small_flow;
@@ -176,6 +182,7 @@ struct Map_options {
 // coloring_info JSON (the block-attribute channel, 2opt-freq B), then the
 // --set pass.abc.region_opts CLI JSON.
 struct Region_opts {
+  std::optional<bool>              ware;
   std::optional<std::string>       flow;
   std::optional<std::string>       delay;
   std::optional<std::string>       load;
@@ -306,6 +313,8 @@ public:
   // CLI-level per-region overrides (--set pass.abc.region_opts). Graph-embedded
   // overrides (coloring_info "region_opts") are read per region in map_region.
   void set_region_opts(Region_opts_map m) { region_opts_cli_ = std::move(m); }
+  // Preload source attributes before the shared Liberty timing model starts.
+  void prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>& graphs);
 
   // Pre-resolved register-mapping cells (liberty::resolve_dff_cells on the
   // run-level library + dff_cell option). pass.abc resolves them ONCE up front
@@ -348,10 +357,10 @@ private:
     Map_options                    options;
     bool                           add = false, mult = false, barrel = false;
   };
-  struct Ware_score {
-    bool                             valid = false;
-    std::vector<int>                 endpoints;  // descending; tie-path improvements count
-    absl::flat_hash_set<std::string> critical_regions;
+  struct Ware_score : Ware_qor {
+    bool                                    valid = false;
+    absl::flat_hash_set<std::string>        critical_regions;
+    absl::flat_hash_map<std::string, float> region_path_delay;
   };
   Ware_score               score_ware(hhds::GraphLibrary& outlib, std::string_view top);
   void                     remember_ware(const livehd::partition::Region_body& rb);
@@ -415,6 +424,7 @@ private:
   std::vector<Region_qor>                       qor_;
   uint32_t                                      next_region_id_ = 1;  // report-only key stamped on mapped region graphs
   Region_opts_map                               region_opts_cli_;
+  std::map<std::string, float>                  region_delay_targets_;
   // coloring_info "region_opts" parse cache, one entry per source graph.
   std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;
   // rewrite_trivial_rems scans and rewrites a whole source def. A def is shared

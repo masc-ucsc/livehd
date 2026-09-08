@@ -774,7 +774,7 @@ protected:
   std::optional<Dlop>                     resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
 
-  // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.
+  // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(c0, v0, c1, v1, …)`, etc.
   // Maps cell names (without the `__` prefix) to Ntype_op kernels and folds
   // when all positional actuals are foldable constants. Returns true when
   // dst was assigned a result; false when the fname is not a recognized

@@ -534,9 +534,9 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
         onehot[en] = B.eq(p.addr, B.konst_i(en));
       }
       auto hm = B.mk(Ntype_op::Hotmux);
-      gu::setup_sink_by_name(hm, "s").connect_driver(B.pack(onehot, 1));
       for (int en = 0; en < size; ++en) {
-        gu::setup_sink_by_name(hm, std::format("p{}", en + 1)).connect_driver(data_q[en]);
+        hm.create_sink_pin(static_cast<hhds::Port_id>(2 * en)).connect_driver(onehot[en]);
+        hm.create_sink_pin(static_cast<hhds::Port_id>(2 * en + 1)).connect_driver(data_q[en]);
       }
       dmem = B.dw(hm, bits);
     }

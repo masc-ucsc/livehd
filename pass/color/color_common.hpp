@@ -183,6 +183,7 @@ struct Color_opts {
   // and no merge at all. The shipped policy (30000) lives on the pass.color
   // label so a direct caller or unit test still gets what it asked for.
   uint64_t max_gate      = 0;
+  // Raw callers keep the base coloring; the shipped CLI defaults to mux groups.
   bool     ctrl_cones    = false;
   uint64_t ctrl_max_gate = 0;
   uint64_t ctrl_min_gate = 0;

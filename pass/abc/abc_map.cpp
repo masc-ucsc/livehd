@@ -421,18 +421,18 @@ bool Mapper::nldm_requested() const {
   // it mid-run would delete the Mio library that cell_descs_ is keyed on. So a
   // delay target anywhere in the run-level options or the CLI region_opts must
   // be visible here, not just `opts_.delay` for the current region.
-  //
-  // Graph-embedded overrides (coloring_info "region_opts") are NOT visible at
-  // startup -- they are parsed from each source graph inside map_region -- so a
-  // delay target supplied only through that channel still resolves against the
-  // unit-delay GENLIB. Use --set pass.abc.delay / pass.abc.region_opts for a
-  // physical delay model.
-  if (!startup_opts_.delay.empty()) {
+  if (!startup_opts_.delay.empty() || !opts_.delay.empty()) {
     return true;
   }
-  return std::any_of(region_opts_cli_.begin(), region_opts_cli_.end(), [](const auto& kv) {
-    return kv.second.delay.has_value() && !kv.second.delay->empty();
-  });
+  const auto timed = [](const Region_opts_map& map) {
+    return std::any_of(map.begin(), map.end(), [](const auto& kv) {
+      return kv.second.delay.has_value() && !kv.second.delay->empty();
+    });
+  };
+  if (timed(region_opts_cli_)) {
+    return true;
+  }
+  return std::any_of(graph_region_opts_.begin(), graph_region_opts_.end(), [&](const auto& kv) { return timed(kv.second); });
 }
 
 std::string Mapper::resolve_recipe() const {
@@ -675,7 +675,12 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
   for (const auto& mem : v.GetObject()) {
     const std::string_view key{mem.name.GetString(), mem.name.GetStringLength()};
     const auto&            val = mem.value;
-    if (key == "flow" || key == "delay" || key == "load") {
+    if (key == "ware") {
+      if (!val.IsBool()) {
+        return bad("'ware' must be true or false");
+      }
+      ro.ware = val.GetBool();
+    } else if (key == "flow" || key == "delay" || key == "load") {
       if (!val.IsString()) {
         return bad(std::format("'{}' must be a string", key));
       }
@@ -720,7 +725,7 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
       }
       ro.block_size = val.GetInt();
     } else {
-      return bad(std::format("unknown option '{}' (use flow|delay|load|adder|block_size|multiplier|barrel)", key));
+      return bad(std::format("unknown option '{}' (use flow|delay|load|adder|block_size|multiplier|barrel|ware)", key));
     }
   }
   return true;
@@ -772,9 +777,32 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
   return m;
 }
 
+void Mapper::prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  for (const auto& g : graphs) {
+    if (!g || graph_region_opts_.contains(g.get())) {
+      continue;
+    }
+    Region_opts_map options;
+    if (auto info = g->get_input_node().attr(livehd::attrs::coloring_info); info.has()) {
+      rapidjson::Document doc;
+      const std::string   json{info.get()};
+      doc.Parse(json.data(), json.size());
+      if (!doc.HasParseError() && doc.IsObject()) {
+        if (auto it = doc.FindMember("region_opts"); it != doc.MemberEnd()) {
+          parse_region_opts_object(it->value, options, "coloring_info");
+        }
+      }
+    }
+    graph_region_opts_.emplace(g.get(), std::move(options));
+  }
+}
+
 bool Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
   bool flow_overridden = false;
   auto apply           = [&](const Region_opts& ro, std::string_view src) {
+    if (ro.ware.has_value()) {
+      opts_.ware = *ro.ware;
+    }
     if (ro.flow.has_value()) {
       opts_.flow      = *ro.flow;
       flow_overridden = !ro.flow->empty();
@@ -1417,26 +1445,55 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // a user naming one specific region always has the final say. `input_ge` is
   // invariant source-logic cost, unlike mapped gates, so cache recipes and
   // threshold decisions remain stable when the mapping flow changes.
-  bool tool_owned_flow = opts_.flow.empty();
-  if (rb.ctrl) {
+  bool       tool_owned_flow = opts_.flow.empty();
+  const bool control_tier    = rb.ctrl && opts_.ctrl_flow != "inherit";
+  //
+  // Every tier goes through resolve_flow, not the raw string: the size TIERS are
+  // tool-chosen defaults like kCombFlow, so max_fanout's buffering tail applies
+  // to them too. Only an explicit user `flow` is left alone (it owns its command
+  // list and can place `{F}` itself). Without this a region over large_ge
+  // silently mapped with NO fanout cap -- minion kept a 3562-sink mapped net
+  // that way while dino, which has no such region, capped correctly at 16.
+  //
+  // The `*_flow selected` lines are the only external evidence that a tier fired
+  // (lhd/tests/lhd_abc_test.sh greps for them); keep them on every branch that
+  // substitutes a recipe.
+  if (control_tier) {
     opts_.area_relax_pct = opts_.ctrl_area_relax;
     opts_.flow           = resolve_flow(opts_.ctrl_flow);
     tool_owned_flow      = true;
+    if (opts_.verbose) {
+      std::print("[pass.abc] region '{}': ctrl_flow selected ({} GE)\n", rb.module_name, input_ge);
+    }
     // Large control cones still receive the protected inexpensive tier.
     if (opts_.large_ge && input_ge >= opts_.large_ge && !opts_.large_flow.empty()) {
       opts_.flow = resolve_flow(opts_.large_flow);
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
+      }
     }
   } else {
     if (opts_.small_ge && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
       opts_.flow = resolve_flow(opts_.small_flow);
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': small_flow selected ({} <= {} GE <= {})\n",
+                   rb.module_name,
+                   opts_.small_min_ge,
+                   input_ge,
+                   opts_.small_ge);
+      }
     }
     if (opts_.flow.empty() && opts_.large_ge && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
       opts_.flow = resolve_flow(opts_.large_flow);
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
+      }
     }
   }
   if (!ware_trial_ && apply_region_overrides(rb)) {
     tool_owned_flow = false;
   }
+  region_delay_targets_[rb.module_name] = ware_delay_target(opts_.delay);
   struct Control_deadline {
     std::mutex              mu;
     std::condition_variable cv;
@@ -1468,7 +1525,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         worker.join();
       }
     }
-  } ctrl_deadline(rb.ctrl ? opts_.ctrl_time_budget_ms : 0, rb.module_name);
+  } ctrl_deadline(control_tier ? opts_.ctrl_time_budget_ms : 0, rb.module_name);
   // The region's delay BUDGET: the target minus the register margin when the
   // region holds flops (mapped or native -- a native flop is mapped to the
   // same cell by whoever times the netlist, so its overhead is on the path
@@ -1544,8 +1601,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // the resolved cell is a function of the library (in the cache salt) and
   // `boundary_drive` alone.
   recipe             += "|pi_drive=";
-  recipe             += (opts_.boundary_buffer && opts_.max_fanout != 0) ? (opts_.boundary_drive.empty() ? "auto" : opts_.boundary_drive)
-                                                                          : "none";
+  recipe
+      += (opts_.boundary_buffer && opts_.max_fanout != 0) ? (opts_.boundary_drive.empty() ? "auto" : opts_.boundary_drive) : "none";
   recipe             += opts_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
   hhds::Graph* pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
   // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
@@ -3098,7 +3155,49 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
         slots[b] = level.empty() ? abc_const_bit(false) : level.front();
       }
-    } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+    } else if (op == Ntype_op::Hotmux) {
+      const auto              inputs = gu::hotmux_inputs(n);
+      std::vector<Abc_Obj_t*> controls;
+      controls.reserve(inputs.arms.size());
+      for (const auto& [control, value] : inputs.arms) {
+        controls.push_back(abc_bit(control, 0));
+      }
+      auto* none = abc_const1();
+      if (!inputs.fallback.is_invalid()) {
+        // Build the default predicate only at mapping time, with balanced depth.
+        std::vector<Abc_Obj_t*> level;
+        for (auto* control : controls) {
+          level.push_back(abc_not(control));
+        }
+        while (level.size() > 1) {
+          std::vector<Abc_Obj_t*> next;
+          for (size_t i = 0; i < level.size(); i += 2) {
+            next.push_back(i + 1 < level.size() ? abc_bin(level[i], level[i + 1], '&') : level[i]);
+          }
+          level = std::move(next);
+        }
+        none = level.empty() ? abc_const1() : level.front();
+      }
+      for (int b = 0; b < out_bits; ++b) {
+        std::vector<Abc_Obj_t*> products;
+        for (size_t i = 0; i < inputs.arms.size(); ++i) {
+          if (controls[i] != abc_const0()) {
+            products.push_back(abc_bin(controls[i], abc_bit(inputs.arms[i].second, b), '&'));
+          }
+        }
+        if (!inputs.fallback.is_invalid() && none != abc_const0()) {
+          products.push_back(abc_bin(none, abc_bit(inputs.fallback, b), '&'));
+        }
+        while (products.size() > 1) {
+          std::vector<Abc_Obj_t*> next;
+          for (size_t i = 0; i < products.size(); i += 2) {
+            next.push_back(i + 1 < products.size() ? abc_bin(products[i], products[i + 1], '|') : products[i]);
+          }
+          products = std::move(next);
+        }
+        slots[b] = products.empty() ? abc_const0() : products.front();
+      }
+    } else if (op == Ntype_op::Mux) {
       hhds::Pin_class                       sel;
       absl::btree_map<int, hhds::Pin_class> data;  // pid-1 (value) -> driver; ordered so the OR-tree fed to ABC is deterministic
       int                                   max_v = -1;
@@ -3148,27 +3247,23 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         std::vector<Abc_Obj_t*> products;
         products.reserve(data.size());
         for (const auto& [v, drv] : data) {
-          Abc_Obj_t* hit = nullptr;  // selector matches value v
-          if (op == Ntype_op::Hotmux) {
-            hit = abc_bit(sel, v);  // one-hot: bit v of selector
-          } else {
-            std::vector<Abc_Obj_t*> literals;
-            literals.reserve(sel_bits);
-            for (int sb = 0; sb < sel_bits; ++sb) {
-              auto* sbit = abc_bit(sel, sb);
-              auto* lit  = ((v >> sb) & 1) ? sbit : abc_not(sbit);
-              literals.push_back(lit);
-            }
-            while (literals.size() > 1) {
-              std::vector<Abc_Obj_t*> next;
-              next.reserve((literals.size() + 1) / 2);
-              for (size_t i = 0; i < literals.size(); i += 2) {
-                next.push_back(i + 1 < literals.size() ? abc_bin(literals[i], literals[i + 1], '&') : literals[i]);
-              }
-              literals = std::move(next);
-            }
-            hit = literals.empty() ? abc_const_bit(true) : literals.front();
+          Abc_Obj_t*              hit = nullptr;  // selector matches value v
+          std::vector<Abc_Obj_t*> literals;
+          literals.reserve(sel_bits);
+          for (int sb = 0; sb < sel_bits; ++sb) {
+            auto* sbit = abc_bit(sel, sb);
+            auto* lit  = ((v >> sb) & 1) ? sbit : abc_not(sbit);
+            literals.push_back(lit);
           }
+          while (literals.size() > 1) {
+            std::vector<Abc_Obj_t*> next;
+            next.reserve((literals.size() + 1) / 2);
+            for (size_t i = 0; i < literals.size(); i += 2) {
+              next.push_back(i + 1 < literals.size() ? abc_bin(literals[i], literals[i + 1], '&') : literals[i]);
+            }
+            literals = std::move(next);
+          }
+          hit = literals.empty() ? abc_const_bit(true) : literals.front();
           // A constant-only selector can guard a syntactic self-reference
           // (generated RTL uses this for an invalid/X arm).  Form the guard
           // first: an unreachable arm must not recursively demand its data.
@@ -3985,7 +4080,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // outputs).
   const bool        ladder_on    = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
   const std::string area_cmd     = area_flow();
-  const bool        candidate_on = ladder_on && !rb.ctrl && builtin_flow && !area_cmd.empty() && !has_dummy_po
+  const bool        candidate_on = ladder_on && !control_tier && builtin_flow && !area_cmd.empty() && !has_dummy_po
                                    && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
   // The area candidate re-maps from the SAME pre-flow logic network, so keep a
   // copy of it before the frame takes ownership of `pLogic`: every

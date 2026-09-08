@@ -184,8 +184,10 @@ same-cycle forwarding model).
   to a don't-care (unreachable). Add an explicit `else` only for a real
   catch-all value or a `cassert(false)`. A bare value means `==`. Arms: `== v`,
   `in (2,3)`, `case (a=1)`, `< 5`, `else`. If two arms can match the same
-  value, the lowered `__hotmux` select is non-one-hot and the output is
-  **X** — for priority/overlapping conditions use `if/elif/else`. The selector
+  value, two `__hotmux` controls are active at once, which breaks the cell's
+  one-hot-or-zero obligation: `pass.formal` reports it, and every backend
+  resolves it to the FIRST active arm — for priority/overlapping conditions use
+  `if/elif/else`. The selector
   can declare locals: `match const t = f(); t { ... }`.
 * There are **no `when`/`unless` trailing gates** (removed from the
   language). All gating — comptime or runtime — uses an `if` block:

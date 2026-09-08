@@ -15,4 +15,4 @@ async_reset_enable 55 13
 comb_array_const_index_read 143 28
 assign_pattern 52 28
 packed_assign 29 5
-match_no_else 54 11
+match_no_else 50 7

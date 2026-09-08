@@ -82,13 +82,38 @@ TEST(AbcMap, NativeBoundarySchedulesReverseOrderedSliceConsumers) {
   EXPECT_EQ(drivers, 1);
 }
 
-TEST(AbcMap, WareAcceptsOnlyCriticalPathImprovements) {
-  using livehd::abc::ware_depth_better;
-  EXPECT_TRUE(ware_depth_better({100, 80}, {90, 85}));
-  EXPECT_TRUE(ware_depth_better({100, 100, 80}, {100, 90, 80}));
-  EXPECT_FALSE(ware_depth_better({100, 80}, {100, 70}));  // only a noncritical output improved
-  EXPECT_FALSE(ware_depth_better({100, 80}, {101, 70}));
-  EXPECT_FALSE(ware_depth_better({100, 80}, {100, 80}));
-  EXPECT_FALSE(ware_depth_better({100, 80}, {70}));  // losing an endpoint is not an optimization
-  EXPECT_FALSE(ware_depth_better({}, {}));
+TEST(AbcMap, WareUsesTimingOrAreaObjective) {
+  using livehd::abc::ware_qor_better;
+  EXPECT_TRUE(ware_qor_better(
+      {
+          10,
+          {100, 80}
+  },
+      {12, {90, 85}},
+      true));  // fastest, even larger
+  EXPECT_FALSE(ware_qor_better(
+      {
+          10,
+          {100, 80}
+  },
+      {9, {110, 70}},
+      true));
+  EXPECT_TRUE(ware_qor_better(
+      {
+          10,
+          {100, 100}
+  },
+      {12, {100, 90}},
+      true));                                                    // tied critical path
+  EXPECT_TRUE(ware_qor_better({10, {100}}, {9, {110}}, false));  // area without timing
+  EXPECT_FALSE(ware_qor_better({10, {100}}, {12, {90}}, false));
+  EXPECT_TRUE(ware_qor_better({10, {100}}, {9, {100}}, true));  // area breaks timing ties
+  EXPECT_FALSE(ware_qor_better(
+      {
+          10,
+          {100, 80}
+  },
+      {9, {70}},
+      true));  // endpoint loss
+  EXPECT_FALSE(ware_qor_better({10, {}}, {9, {}}, true));
 }

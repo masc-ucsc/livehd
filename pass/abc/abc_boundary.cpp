@@ -527,6 +527,19 @@ static bool import_def(Refine& R, Imp_def& d) {
     return {};
   };
 
+  // Enumerate driven pins from edges, including node-as-pin consumers (port
+  // zero). The pinned HHDS out_pins() omits a driver whose readers are all
+  // node-as-pin sinks, such as Q feeding Get_mask.a, leaving its slices opaque.
+  const auto driven_pins = [](const hhds::Node_class& node) {
+    std::vector<hhds::Pin_class> pins;
+    for (const auto& e : node.out_edges()) {
+      if (std::find(pins.begin(), pins.end(), e.driver) == pins.end()) {
+        pins.push_back(e.driver);
+      }
+    }
+    return pins;
+  };
+
   // 1. classify nodes; trackable glue is replayed in a deferral loop.
   std::vector<hhds::Node_class> pending;
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
@@ -628,7 +641,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
       // Native state: every output bit is an opaque source; din/enable/reset
       // (and every memory input) are cuts of unknown load.
-      for (const auto& out : node.out_pins()) {
+      for (const auto& out : driven_pins(node)) {
         mark_opaque(node, out, -1, "");
       }
       for (const auto& e : node.inp_edges()) {
@@ -646,7 +659,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     if (Ntype::is_pin_trackable(op)) {
       if (node.attr(livehd::attrs::native_comb_boundary).has()) {
         d.depth_complete = false;
-        for (const auto& out : node.out_pins()) {
+        for (const auto& out : driven_pins(node)) {
           mark_opaque(node, out, -1, "");
         }
         for (const auto& e : node.inp_edges()) {
@@ -666,7 +679,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     d.depth_complete = false;
     // Any other native node (an unmapped operator, a preserved SCC member):
     // an opaque box for the environment.
-    for (const auto& out : node.out_pins()) {
+    for (const auto& out : driven_pins(node)) {
       mark_opaque(node, out, -1, "");
     }
     for (const auto& e : node.inp_edges()) {
@@ -697,7 +710,7 @@ static bool import_def(Refine& R, Imp_def& d) {
         auto v = op == Ntype_op::Set_mask ? gu::get_driver_of_sink_name(node, "value") : hhds::Pin_class{};
         if (a.is_invalid() || b.is_invalid() || !b.is_const()) {
           d.depth_complete = false;
-          for (const auto& o : node.out_pins()) {
+          for (const auto& o : driven_pins(node)) {
             mark_opaque(node, o, -1, "");
           }
           progress = true;
@@ -735,7 +748,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       if (op == Ntype_op::Concat) {
         const auto lanes = gu::concat_lanes(node);
         if (lanes.empty() || !gu::concat_lane_violation(lanes).empty()) {
-          for (const auto& o : node.out_pins()) {
+          for (const auto& o : driven_pins(node)) {
             mark_opaque(node, o, -1, "");
           }
           progress = true;
@@ -765,7 +778,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       d.depth_complete = false;
       // And/Or glue (packed lane selects in native wiring): an opaque cut is
       // exact enough for a load model.
-      for (const auto& o : node.out_pins()) {
+      for (const auto& o : driven_pins(node)) {
         mark_opaque(node, o, -1, "");
       }
       for (const auto& e : node.inp_edges()) {
@@ -779,7 +792,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     if (!progress) {
       d.depth_complete = false;
       for (auto& node : deferred) {  // glue cycle: cut it
-        for (const auto& o : node.out_pins()) {
+        for (const auto& o : driven_pins(node)) {
           mark_opaque(node, o, -1, "");
         }
       }
@@ -1152,7 +1165,8 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
       delay_target = t;
     }
   }
-  if (delay_target <= 0.0f) {
+  if (delay_target <= 0.0f
+      && std::none_of(region_delay_targets_.begin(), region_delay_targets_.end(), [](const auto& kv) { return kv.second > 0; })) {
     return 0;  // nothing to size to
   }
   auto*  frame = static_cast<Abc_Frame_t*>(pabc_);
@@ -1388,13 +1402,15 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
       if (logic == nullptr) {
         continue;
       }
-      const float budget = region_budget(delay_target, d.latches > 0);
+      const auto  target_it = region_delay_targets_.find(d.name);
+      const float target    = target_it == region_delay_targets_.end() ? delay_target : target_it->second;
+      const float budget    = region_budget(target, d.latches > 0);
       table.install();
       Abc_FrameReplaceCurrentNetwork(frame, logic);
       const auto before   = time_ntk(R.scl, logic);
       const int  budget_i = static_cast<int>(std::floor(budget));
-      const auto cmd      = std::format("upsize -D {0}; dnsize -D {0}", budget_i);
-      if (Cmd_CommandExecute(frame, cmd.c_str()) != 0) {
+      const auto cmd      = target > 0 ? std::format("upsize -D {0}; dnsize -D {0}", budget_i) : std::string{};
+      if (!cmd.empty() && Cmd_CommandExecute(frame, cmd.c_str()) != 0) {
         livehd::diag::warn("pass.abc", "boundary-resize", "internal")
             .msg("pass.abc boundary: ABC sizing failed on module '{}': {}", d.name, cmd)
             .emit();
@@ -1579,10 +1595,15 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
   return resized;
 }
 
-// Bit-accurate mapped-cell depth through the stitched occurrence hierarchy.
-// It intentionally uses gate levels, not a sum of independent region delays.
+// Score occurrences, not definitions. Area includes each instantiated mapped
+// cell. With a timing target, stitch a temporary ABC network across every
+// combinational region boundary and time its actual fanout with Liberty NLDM.
+// State outputs/inputs cut paths; the persistent graph is never flattened.
 Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_view top) {
-  if (!start()) {
+  const float target = ware_delay_target(startup_opts_.delay);
+  const bool  timing
+      = std::any_of(region_delay_targets_.begin(), region_delay_targets_.end(), [](const auto& kv) { return kv.second > 0; });
+  if (!start() || (timing && (!scl_lib_ok_ || !scl_timing_ok_))) {
     return {};
   }
   const uint64_t memory_entry  = cost::process_footprint_bytes();
@@ -1598,7 +1619,7 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
   // ABC netlist objects plus per-occurrence DFS arrays. Admission is repeated
   // during import; this estimate avoids allocating an obviously overlarge score.
   if (budget && cells > budget / 1024) {
-    std::print("[pass.abc] ware: depth import estimate exceeds memory budget\n");
+    std::print("[pass.abc] ware: QoR import estimate exceeds memory budget\n");
     return {};
   }
   auto*  frame = static_cast<Abc_Frame_t*>(pabc_);
@@ -1711,9 +1732,10 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
   // Instantiate contexts, not graph bodies. Sharing a definition must not
   // conflate two serial occurrences and create a false combinational cycle.
   struct Context {
-    int                  def, parent = -1, instance = -1;
-    std::vector<int>     children, depth;
-    std::vector<uint8_t> state;
+    int                     def, parent = -1, instance = -1;
+    std::vector<int>        children;
+    std::vector<Abc_Obj_t*> mapped;
+    std::vector<uint8_t>    state;
   };
   std::vector<Context> contexts;
   contexts.push_back({0, -1, -1, {}, {}, {}});
@@ -1723,7 +1745,7 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
     }
     auto& d = *R.defs[contexts[c].def];
     contexts[c].children.assign(d.insts.size(), -1);
-    contexts[c].depth.assign(Abc_NtkObjNumMax(d.ntk), 0);
+    contexts[c].mapped.assign(Abc_NtkObjNumMax(d.ntk), nullptr);
     contexts[c].state.assign(Abc_NtkObjNumMax(d.ntk), 0);
     for (size_t i = 0; i < d.insts.size(); ++i) {
       if (d.insts[i].idx < 0) {
@@ -1740,8 +1762,22 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
       contexts.push_back({d.insts[i].idx, static_cast<int>(c), static_cast<int>(i), {}, {}, {}});
     }
   }
-  using Key = std::pair<int, int>;  // occurrence context, ABC object id
-  auto deps = [&](Key key) {
+  Ware_score score;
+  for (const auto& c : contexts) {
+    Abc_Obj_t* obj = nullptr;
+    int        i   = 0;
+    Abc_NtkForEachNode(R.defs[c.def]->ntk, obj, i) { score.area += Mio_GateReadArea(static_cast<Mio_Gate_t*>(obj->pData)); }
+  }
+  if (!timing) {
+    score.valid = R.unresolved_bits == 0;
+    return score;
+  }
+  std::unique_ptr<Abc_Ntk_t, decltype(&Abc_NtkDelete)> flat(Abc_NtkAlloc(ABC_NTK_LOGIC, ABC_FUNC_MAP, 1), &Abc_NtkDelete);
+  flat->pManFunc = R.mio;
+  std::vector<int> owners;
+  using Key     = std::pair<int, int>;  // occurrence context, ABC object id
+  bool stitched = true;
+  auto deps     = [&](Key key) {
     std::vector<Key> result;
     auto&            c   = contexts[key.first];
     auto&            d   = *R.defs[c.def];
@@ -1768,6 +1804,9 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
           result.emplace_back(c.parent, Abc_ObjId(Abc_NtkPo(parent.ntk, it->second)));
         }
       }
+      if (((t.inst >= 0 && c.children[t.inst] >= 0) || (t.port >= 0 && c.parent >= 0)) && result.empty()) {
+        stitched = false;
+      }
       return result;
     }
     Abc_Obj_t* fi = nullptr;
@@ -1775,21 +1814,20 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
     Abc_ObjForEachFanin(obj, fi, i) { result.emplace_back(key.first, Abc_ObjId(fi)); }
     return result;
   };
-  auto weight = [&](Key k) {
-    auto* obj = Abc_NtkObj(R.defs[contexts[k.first].def]->ntk, k.second);
-    return Abc_ObjIsNode(obj) && Abc_ObjFaninNum(obj) > 0 ? 1 : 0;
-  };
   struct Frame {
     Key              key;
     std::vector<Key> deps;
     size_t           next = 0;
-    int              best = 0;
   };
-  auto evaluate = [&](Key root) {
+  size_t score_steps = 0;
+  auto   evaluate    = [&](Key root) {
     std::vector<Frame> stack{
         {root, deps(root)}
     };
     while (!stack.empty()) {
+      if ((++score_steps % 4096 == 0 && !within_budget()) || !stitched) {
+        return false;
+      }
       auto& f = stack.back();
       auto& c = contexts[f.key.first];
       if (c.state[f.key.second] == 2) {
@@ -1807,11 +1845,28 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
           stack.push_back({k, deps(k)});
           continue;
         }
-        f.best = std::max(f.best, dc.depth[k.second]);
         ++f.next;
       } else {
-        c.depth[f.key.second] = f.best + weight(f.key);
-        c.state[f.key.second] = 2;
+        auto*      obj    = Abc_NtkObj(R.defs[c.def]->ntk, f.key.second);
+        Abc_Obj_t* mapped = nullptr;
+        if (Abc_ObjIsNode(obj)) {
+          mapped        = Abc_NtkCreateNode(flat.get());
+          mapped->pData = obj->pData;
+          for (auto k : f.deps) {
+            Abc_ObjAddFanin(mapped, contexts[k.first].mapped[k.second]);
+          }
+          owners.resize(Abc_NtkObjNumMax(flat.get()), -1);
+          owners[Abc_ObjId(mapped)] = c.def;
+        } else if (f.deps.size() == 1) {
+          auto k = f.deps.front();
+          mapped = contexts[k.first].mapped[k.second];
+        } else if (f.deps.empty() && (Abc_ObjIsPi(obj) || Abc_ObjIsBo(obj))) {
+          mapped = Abc_NtkCreatePi(flat.get());
+        } else {
+          return false;  // no guessed values for unresolved wiring
+        }
+        c.mapped[f.key.second] = mapped;
+        c.state[f.key.second]  = 2;
         stack.pop_back();
       }
     }
@@ -1834,42 +1889,87 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
       }
     }
   }
-  Ware_score score;
-  int        worst = 0;
-  for (auto k : endpoints) {
-    if (!evaluate(k)) {
-      std::print("[pass.abc] ware: combinational cycle in depth import\n");
+  // Include cells outside endpoint cones too: their pin capacitance still
+  // loads a shared driver in the actual mapped design.
+  for (size_t c = 0; c < contexts.size(); ++c) {
+    if (!within_budget()) {
       return {};
     }
-    int depth = contexts[k.first].depth[k.second];
-    score.endpoints.push_back(depth);
-    worst = std::max(worst, depth);
-  }
-  // Union of ALL tied critical paths, including both reconvergent fanins.
-  std::vector<Key> stack;
-  for (auto k : endpoints) {
-    if (contexts[k.first].depth[k.second] == worst) {
-      stack.push_back(k);
-    }
-  }
-  absl::flat_hash_set<Key> seen;
-  while (!stack.empty()) {
-    auto k = stack.back();
-    stack.pop_back();
-    if (!seen.insert(k).second) {
-      continue;
-    }
-    if (weight(k)) {
-      score.critical_regions.insert(R.defs[contexts[k.first].def]->name);
-    }
-    const int previous = contexts[k.first].depth[k.second] - weight(k);
-    for (auto dep : deps(k)) {
-      if (contexts[dep.first].depth[dep.second] == previous) {
-        stack.push_back(dep);
+    Abc_Obj_t* obj = nullptr;
+    int        i   = 0;
+    Abc_NtkForEachNode(R.defs[contexts[c].def]->ntk, obj, i) {
+      if (!evaluate({static_cast<int>(c), Abc_ObjId(obj)})) {
+        return {};
       }
     }
   }
-  std::sort(score.endpoints.begin(), score.endpoints.end(), std::greater<int>{});
+  for (auto k : endpoints) {
+    if (!evaluate(k)) {
+      std::print("[pass.abc] ware: cyclic or unresolved stitched timing input\n");
+      return {};
+    }
+    auto* po = Abc_NtkCreatePo(flat.get());
+    Abc_ObjAddFanin(po, contexts[k.first].mapped[k.second]);
+  }
+  // Import also retains dangling mapped cells (often unused constants).
+  // SCL requires a fanout on every node. Give only those nodes an unloaded
+  // artificial sink; it is excluded from endpoint scoring. Keeping them
+  // preserves their real input capacitance on any shared upstream driver.
+  Abc_Obj_t*              dangling   = nullptr;
+  int                     dangling_i = 0;
+  std::vector<Abc_Obj_t*> unloaded;
+  Abc_NtkForEachNode(flat.get(), dangling, dangling_i) {
+    if (Abc_ObjFanoutNum(dangling) == 0) {
+      unloaded.push_back(dangling);
+    }
+  }
+  for (auto* node : unloaded) {
+    Abc_ObjAddFanin(Abc_NtkCreatePo(flat.get()), node);
+  }
+  if (endpoints.empty() || !within_budget() || !Abc_SclCheckNtk(flat.get(), 0)) {
+    return {};
+  }
+  Boundary_table table(Abc_NtkPiNum(flat.get()), Abc_NtkPoNum(flat.get()));
+  for (int i = 0; i < Abc_NtkPiNum(flat.get()); ++i) {
+    table.set_pi(i, R.drive_cell, 0.0f);
+  }
+  for (size_t i = 0; i < endpoints.size(); ++i) {
+    auto       k       = endpoints[i];
+    auto&      d       = *R.defs[contexts[k.first].def];
+    const int  po      = d.po_of_obj[k.second];
+    const bool primary = k.first == 0 && po >= 0 && d.po[po].port >= 0;
+    table.set_po(i, primary ? R.io_load : R.typical_cap, 0.0f);
+  }
+  for (size_t i = endpoints.size(); i < static_cast<size_t>(Abc_NtkPoNum(flat.get())); ++i) {
+    table.set_po(i, 0.0f, 0.0f);
+  }
+  table.install();
+  auto*      man   = Abc_SclManStart(R.scl, flat.get(), 0, 1, 0.0f, 0);
+  float      worst = 0.0f;
+  Abc_Obj_t* obj   = nullptr;
+  int        i     = 0;
+  Abc_NtkForEachPo(flat.get(), obj, i) {
+    if (static_cast<size_t>(i) < endpoints.size()) {
+      const float delay = Abc_SclObjTimeMax(man, obj);
+      score.delays.push_back(delay);
+      worst = std::max(worst, delay);
+    }
+  }
+  // Explore every violating path. If timing already meets the target, retain
+  // the worst paths as candidates for further speed improvement.
+  const float required = std::min(target, worst);
+  Abc_NtkForEachNode(flat.get(), obj, i) {
+    const int owner = owners[Abc_ObjId(obj)];
+    if (owner >= 0) {
+      auto& delay = score.region_path_delay[R.defs[owner]->name];
+      delay       = std::max(delay, worst - Abc_SclObjGetSlack(man, obj, worst));
+    }
+    if (owner >= 0 && Abc_SclObjGetSlack(man, obj, required) <= 0.001f) {
+      score.critical_regions.insert(R.defs[owner]->name);
+    }
+  }
+  Abc_SclManFree(man);
+  std::sort(score.delays.begin(), score.delays.end(), std::greater<float>{});
   score.valid = R.unresolved_bits == 0;
   if (!score.valid) {
     std::print("[pass.abc] ware: {} unresolved imported bits\n", R.unresolved_bits);

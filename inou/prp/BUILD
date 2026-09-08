@@ -55,6 +55,7 @@ filegroup(
         "tests/abc/timing.lib",
         "tests/pyrope/abc_arith.prp",
         "tests/pyrope/abc_block_attr.prp",
+        "tests/pyrope/abc_ware_attr.prp",
         "tests/pyrope/abc_boundary.prp",
         "tests/pyrope/abc_pi_fanout.prp",
         "tests/pyrope/abc_comb.prp",

@@ -72,7 +72,7 @@ namespace predict_detail {
 // three separate questions would scan three times.
 struct Fanin_shape {
   uint64_t terms      = 0;  // drivers on the value sinks (multi-driver folds)
-  uint64_t arms       = 0;  // Mux/Hotmux: drivers on pid >= 1 (pid 0 is `s`)
+  uint64_t arms       = 0;  // Mux/Hotmux value inputs, including an explicit default
   uint64_t widest     = 0;  // widest driver width across all sinks
   bool     has_enable = false;
   bool     has_reset  = false;
@@ -120,6 +120,12 @@ struct Ctrl_pids {
     if (rp_pid != livehd::Port_invalid && pid == rp_pid) {
       sh.has_reset = true;
     }
+  }
+  if (op == Ntype_op::Hotmux) {
+    // (control, value) pairs plus an optional trailing default: the value
+    // inputs are exactly ceil(terms/2). Derived from `terms` rather than from a
+    // second inp_edges() walk -- ONE scan is this struct's whole reason to exist.
+    sh.arms = (sh.terms + 1) / 2;
   }
   return sh;
 }

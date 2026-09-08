@@ -83,8 +83,8 @@ enum class Ntype_op : uint8_t {
 
   LUT    = 34,  // LUT
   Mux    = 36,  // Multiplexor with many options
-  Hotmux = 38,  // One-hot select mux (sel is 1-hot encoded; runtime flags
-                // non-one-hot select as an error).
+  Hotmux = 38,  // Interleaved (control, value) pairs, optional trailing default.
+                // Controls are one-bit and mutually exclusive (one-hot-or-zero).
 
   IO = 39,  // Graph Input or Output  -- loop_last (first odd slot)
 

@@ -111,3 +111,37 @@ TEST(Prove, ConeMaxGateDefers) {
   auto           d = out_drv(g);
   EXPECT_EQ(p.is_true(d).verdict, Verdict::Unknown);
 }
+
+TEST(Prove, HotmuxPairsDefaultAndExclusivity) {
+  namespace gu = livehd::graph_util;
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("hotmux_pairs");
+  io->add_input("x", 0);
+  io->set_bits("x", 2);
+  io->set_unsign("x", true);
+  auto                         g = io->create_graph();
+  std::vector<hhds::Pin_class> controls;
+  for (int i = 0; i < 2; ++i) {
+    auto eq = gu::create_typed_node(*g, Ntype_op::EQ);
+    eq.create_sink_pin(0).connect_driver(g->get_input_pin("x"));
+    eq.create_sink_pin(0).connect_driver(gu::create_const(*g, *Dlop::create_integer(i)));
+    auto out = eq.create_driver_pin(0);
+    gu::set_ubits(out, 1);
+    controls.push_back(out);
+  }
+  auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux);
+  for (int i = 0; i < 2; ++i) {
+    hot.create_sink_pin(2 * i).connect_driver(controls[i]);
+    hot.create_sink_pin(2 * i + 1).connect_driver(gu::create_const(*g, *Dlop::create_integer(9)));
+  }
+  auto out = hot.create_driver_pin(0);
+  gu::set_ubits(out, 4);
+  auto           nine = gu::create_const(*g, *Dlop::create_integer(9));
+  formal::Prover p(g.get());
+  EXPECT_EQ(p.are_exclusive(controls).verdict, Verdict::Proven);
+  EXPECT_EQ(p.are_exclusive({controls[0], controls[0]}).verdict, Verdict::Refuted);
+  EXPECT_EQ(p.equal(out, nine).verdict, Verdict::Refuted);  // No active control returns zero.
+  hot.create_sink_pin(4).connect_driver(nine);
+  formal::Prover with_default(g.get());  // A fresh encoder after changing the graph.
+  EXPECT_EQ(with_default.equal(out, nine).verdict, Verdict::Proven);
+}

@@ -94,4 +94,4 @@ const m = match pc {                 // pc == 4
 }
 cassert(m == 30)
 cassert(__mux(s=2, p1=10, p2=20, p3=30, p4=40) == 30)    // mux  (index select)
-cassert(__hotmux(s=0sb100, p1=10, p2=20, p3=30) == 30)   // hotmux (one-hot bit 2)
+cassert(__hotmux(p0=0, p1=10, p2=0, p3=20, p4=1, p5=30) == 30)  // hotmux (arm 2 control set)

@@ -78,6 +78,15 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
   return op == Ntype_op::Sum && driver_bits(node) > 8;
 }
 
+bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
+  const auto op = type_op_of(node);
+  // Mux-inclusive control grouping keeps runtime shifters with their logic.
+  if (mode == Mode::cones && opts.ctrl_cones && (op == Ntype_op::SHL || op == Ntype_op::SRA)) {
+    return false;
+  }
+  return is_arith_cut(node);
+}
+
 bool Color_synth::is_cut(const hhds::Node_class& node) const {
   if (node.is_loop_break()) {
     return true;  // flop/mem/latch/stateful sub: the pipeline-stage boundary
@@ -85,7 +94,7 @@ bool Color_synth::is_cut(const hhds::Node_class& node) const {
   if (mode == Mode::pipe) {
     return false;  // "pipe": stages are cut at state only
   }
-  return is_arith_cut(node);
+  return is_arith_boundary(node);
 }
 
 // The id a cut node joins: the region of the data it registers, if it has a
@@ -168,7 +177,7 @@ void Color_synth::preserve_arith_cuts() {
   // Iterate deterministically: hash-table order must not rename the modules.
   std::vector<hhds::Node_class> cuts;
   for (const auto& [node, color] : flat_node2id) {
-    if (is_arith_cut(node) && !is_seeded(node)) {
+    if (is_arith_boundary(node) && !is_seeded(node)) {
       cuts.push_back(node);
     }
   }

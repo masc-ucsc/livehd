@@ -1406,6 +1406,7 @@ void Partitioner::build_module_as_top(uint32_t r) {
     rb.body           = body.get();
     rb.src            = g_;
     rb.color          = region_color_[r];
+    rb.ctrl           = region_ctrl_[r];
     rb.module_name    = top_;
     rb.reuse_eligible = (r < region_reuse_ok_.size()) ? (region_reuse_ok_[r] != 0) : true;
     for (const auto& p : module_inputs_[r]) {

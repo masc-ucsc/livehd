@@ -841,10 +841,11 @@ mod guarded(a:u8, b:u8) -> (o:u8@[0]) {
   } else {
     assert(a >= 8, "else")
   }
+  // match is a unique parallel conditional: its guards must be disjoint.
   match a {
-    == 1 { assert(a == 1, "match-eq") }
-    < 5  { assert(a != 1, "match-lt") }
-    else { assert(a >= 5, "match-else") }
+    == 5 { assert(a == 5, "match-eq") }
+    < 5  { assert(a != 5, "match-lt") }
+    else { assert(a > 5, "match-else") }
   }
 }
 EOF

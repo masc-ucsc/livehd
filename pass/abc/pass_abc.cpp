@@ -114,10 +114,12 @@ void Pass_abc::setup() {
                        "sky130 dfxtp_1 372 ps), a number = that many ps, 0 = no margin",
                        "auto");
   m.add_label_optional("ctrl_flow",
-                       "control-region delay tier; explicit region_opts and large_flow take precedence",
-                       "strash; &get -n; &deepsyn -I 1 -J 20 -T 2; &dch -f; &nf {D}; &put -o");
-  m.add_label_optional("ctrl_area_relax", "control-region slack-for-area cap (default delay-only)", "0");
-  m.add_label_optional("ctrl_time_budget_ms", "control-region wall backstop including mapping and sizing (0 disables)", "5000");
+                       "control recipe: inherit normal mapping, or custom delay tier; region_opts and large_flow take precedence",
+                       "inherit");
+  m.add_label_optional("ctrl_area_relax", "custom control-tier slack-for-area cap (inherit uses normal policy)", "0");
+  m.add_label_optional("ctrl_time_budget_ms",
+                       "custom control-tier wall backstop including mapping and sizing (0 disables; inherit uses normal policy)",
+                       "5000");
   m.add_label_optional("small_flow",
                        "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
                        "[small_min_ge, small_ge]; "
@@ -189,14 +191,14 @@ void Pass_abc::setup() {
                        "-1");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
-  m.add_label_optional("ware",
-                       "try alternative implementations only on stitched critical paths; keep a lower mapped-cell depth (including "
-                       "fewer tied worst endpoints). Explicit ware selectors disable their search",
-                       "true");
   m.add_label_optional(
-      "adder",
-      "auto|rca|cska|cla: auto starts with RCA and trials alternatives on critical paths, including inlined arithmetic",
-      "auto");
+      "ware",
+      "automatically compare implementations: with delay, prefer fastest stitched Liberty timing on critical paths; "
+      "without delay, minimize mapped area across all eligible regions. Explicit ware selectors disable their search",
+      "true");
+  m.add_label_optional("adder",
+                       "auto|rca|cska|cla: auto compares mapped area or critical-path timing, including inlined arithmetic",
+                       "auto");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("memory_budget_mb",
@@ -234,7 +236,7 @@ void Pass_abc::setup() {
   m.add_label_optional("region_opts",
                        "per-region option overrides as JSON keyed by color id, e.g. "
                        "'{\"1\":{\"flow\":\"strash; resyn2; &get -n; &nf {D}; &put\",\"delay\":\"2\"},\"4\":{\"adder\":\"cla\"}}'. "
-                       "Overridable per region: flow|delay|load|adder|block_size|multiplier|barrel. "
+                       "Overridable per region: flow|delay|load|adder|block_size|multiplier|barrel|ware. "
                        "Wins over a \"region_opts\" member embedded in the graph's coloring_info (the block-attribute channel); "
                        "unknown keys or malformed values are hard errors",
                        "");
@@ -936,7 +938,7 @@ void Pass_abc::work(Eprp_var& var) {
   opts.area_relax_pct  = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow       = area_flow;
   opts.reg_margin      = reg_margin;
-  opts.ctrl_flow       = std::string{var.get("ctrl_flow", "strash; &get -n; &deepsyn -I 1 -J 20 -T 2; &dch -f; &nf {D}; &put -o")};
+  opts.ctrl_flow       = std::string{var.get("ctrl_flow", "inherit")};
   const auto ctrl_uint = [&](std::string_view key) -> uint64_t {
     const auto s         = std::string{var.get(key, key == "ctrl_area_relax" ? "0" : "5000")};
     uint64_t   v         = 0;
@@ -1141,6 +1143,7 @@ void Pass_abc::work(Eprp_var& var) {
   mapper.set_outlib(&outlib);
   mapper.set_flat(flat_whole_design);
   mapper.set_region_opts(std::move(region_opts));
+  mapper.prepare_region_opts(resolve_graphs);
   if (map_register) {
     mapper.set_dff_cells(dff_sel);
   }

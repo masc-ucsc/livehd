@@ -469,18 +469,16 @@ void Bitwidth::process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-// Hotmux: sink 0 is a one-hot selector over the N data arms (p1..pN), so its
-// envelope is the unsigned N-bit range; the output unions the data arms like
-// Mux. One-hot-ness itself is a runtime property — never narrow on it.
+// Hotmux controls have independent one-bit widths; union only value arms.
 void Bitwidth::process_hotmux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
   Bitwidth_range bw;
 
+  // ONE spelling of the control/value split (the shared helper), never a local
+  // `edges/2*2`: a re-derivation classifies pins differently on a gapped cell.
+  const auto control_end = livehd::graph_util::hotmux_control_end(node);
   for (auto e : inp_edges) {
-    if (e.sink.get_port_id() == 0) {
-      auto    n_data  = inp_edges.size() - 1;
-      int64_t max_sel = (n_data >= 62) ? std::numeric_limits<int64_t>::max() : ((int64_t{1} << static_cast<int64_t>(n_data)) - 1);
-      adjust_bw(e.driver, Bitwidth_range(0, max_sel));
+    if (livehd::graph_util::is_hotmux_control(e.sink.get_port_id(), control_end)) {
       continue;
     }
     auto it = bwmap.find(e.driver.get_class_index());

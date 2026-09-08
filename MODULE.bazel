@@ -25,7 +25,6 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "apple_support", version = "2.8.1", repo_name = "build_bazel_apple_support")
-bazel_dep(name = "protobuf", version = "36.0.bcr.1", repo_name = "com_google_protobuf")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2", repo_name = "llvm_zlib")
 bazel_dep(name = "zstd", version = "1.5.7.bcr.1", repo_name = "llvm_zstd")
 
@@ -102,7 +101,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "fd3028fccd3b92e58445002a3b089024e5574e5a",  # packed-word transport for generated native-code ABIs
+    commit = "7557602b63fd7fe5affcf9d57f69ec7cca2bbd7d",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -130,33 +129,10 @@ http_archive(
     ],
 )
 
-#### Mockturtle packages
-
-http_archive(
-    name = "mockturtle",
-    url = "https://github.com/lsils/mockturtle/archive/refs/heads/master.zip",
-    strip_prefix = "mockturtle-master",
-    build_file = "//packages:mockturtle.BUILD",
-)
-
-http_archive(
-    name = "kitty",
-    url = "https://github.com/msoeken/kitty/archive/refs/heads/master.zip",
-    strip_prefix = "kitty-master",
-    build_file = "//packages:kitty.BUILD",
-)
-
-http_archive(
-    name = "parallel_hashmap",
-    url = "https://github.com/greg7mdp/parallel-hashmap/archive/refs/heads/master.zip",
-    strip_prefix = "parallel-hashmap-master",
-    build_file = "//packages:parallel_hashmap.BUILD",
-)
-
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "5e54a0d7772c20bc945edfc0bea92fef9f7be027",  # constant pool (Dlop by value on CONST pins)
+    commit = "57d14285aa983849bb9a2041996195c17eaccd7c",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:

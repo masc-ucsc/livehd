@@ -582,8 +582,31 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       result = lec::fit_to(tm_, pid(0)[0], W);
       break;
     }
-    case Ntype_op::Mux:
     case Ntype_op::Hotmux: {
+      const auto inputs = gu::hotmux_inputs(node);
+      // `hotmux_inputs` only debug-ASSERTS the contiguous (control, value) pid
+      // layout, so a gapped cell in a release build must degrade to UNKNOWN
+      // instead of indexing pid()'s empty vector.
+      for (size_t k = 0; k <= inputs.arms.size(); ++k) {
+        const bool last = k == inputs.arms.size();
+        if (last && inputs.fallback.is_invalid()) {
+          break;
+        }
+        if (pid(static_cast<hhds::Port_id>(2 * k)).empty() || (!last && pid(static_cast<hhds::Port_id>(2 * k + 1)).empty())) {
+          enc_unsupported_ = true;
+          return std::nullopt;
+        }
+      }
+      result = inputs.fallback.is_invalid() ? bv_const(W, 0)
+                                            : lec::fit_to(tm_, pid(static_cast<hhds::Port_id>(2 * inputs.arms.size()))[0], W);
+      for (size_t k = inputs.arms.size(); k-- > 0;) {
+        const auto& control = pid(static_cast<hhds::Port_id>(2 * k))[0];
+        auto        cond    = tm_.mkTerm(Kind::DISTINCT, {control.term, bv_const(control.width, 0)});
+        result = tm_.mkTerm(Kind::ITE, {cond, lec::fit_to(tm_, pid(static_cast<hhds::Port_id>(2 * k + 1))[0], W), result});
+      }
+      break;
+    }
+    case Ntype_op::Mux: {
       if (pid(0).empty()) {
         enc_unsupported_ = true;
         return std::nullopt;
@@ -603,20 +626,7 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       }
       result = lec::fit_to(tm_, arms.back(), W);
       for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
-        // Hotmux tests its one-hot bit via EXTRACT, never against a `1 << k`
-        // constant: that is UB for k >= 64 and unrepresentable in a uint64_t,
-        // which silently drops every arm above 63 (see the same fix and the
-        // full rationale in pass/lec/encode.cpp's mux_arm_cond).
-        Term cond;
-        if (op == Ntype_op::Mux) {
-          cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(sel.width, static_cast<uint64_t>(k))});
-        } else {
-          if (k >= sel.width) {
-            enc_unsupported_ = true;
-            return std::nullopt;
-          }
-          cond = tm_.mkTerm(Kind::EQUAL, {bv_extract(sel.term, k, k), bv_const(1, 1)});
-        }
+        auto cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(sel.width, static_cast<uint64_t>(k))});
         result = tm_.mkTerm(Kind::ITE, {cond, lec::fit_to(tm_, arms[k], W), result});
       }
       break;
@@ -744,6 +754,32 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   Term tb     = lec::fit_to(tm_, lec::Val{vb->term, wb, vb->is_signed}, w);
   Term refute = tm_.mkTerm(Kind::DISTINCT, {ta, tb});  // a != b falsifies "always equal"
   return solve(refute, n, st || enc_stateful_);
+}
+
+Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {
+  bool                                   st = false, unsup = false;
+  int                                    n = 0;
+  absl::flat_hash_set<hhds::Class_index> seen_pins;
+  for (const auto& control : controls) {
+    cone_walk(control, seen_pins, n, st, unsup);
+  }
+  if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
+    return {Verdict::Unknown, st, ""};
+  }
+  enc_unsupported_ = false;
+  enc_stateful_    = false;
+  auto seen        = tm_.mkBoolean(false);
+  auto overlap     = tm_.mkBoolean(false);
+  for (const auto& control : controls) {
+    auto value = val_of(control);
+    if (!value || enc_unsupported_) {
+      return {Verdict::Unknown, st || enc_stateful_, ""};
+    }
+    auto active = tm_.mkTerm(Kind::DISTINCT, {value->term, bv_const(value->width, 0)});
+    overlap     = tm_.mkTerm(Kind::OR, {overlap, tm_.mkTerm(Kind::AND, {seen, active})});
+    seen        = tm_.mkTerm(Kind::OR, {seen, active});
+  }
+  return solve(overlap, n, st || enc_stateful_);
 }
 
 Query_out Prover::is_onehot0(const hhds::Pin_class& sel) {

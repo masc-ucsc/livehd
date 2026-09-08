@@ -186,16 +186,76 @@ module ctrl_shared(input [31:0] a, b, input [7:0] d, e, output [7:0] y, z);
 endmodule
 VERILOG
 run compile "$D/ref.v" --top ctrl_shared --emit-dir lg:"$D/lg" --workdir "$D/w1"
-run pass color synth lg:"$D/lg" --top ctrl_shared --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w2"
-LC_ALL=C grep -raq '"duplicated_nodes":[1-9]' "$D/lg" || fail 'shared decode was not duplicated'
+run pass color synth lg:"$D/lg" --top ctrl_shared --set color.synth_alg=cones --set color.max_gate=40 --workdir "$D/w2"
+LC_ALL=C grep -raq '"mux_groups":1' "$D/lg" || fail 'overlapping mux selects were not merged'
+LC_ALL=C grep -raq '"duplicated_nodes":0' "$D/lg" || fail 'mux family duplicated shared decode'
+# The default enables groups, while the explicit opt-out remains available.
+cp -R "$D/lg" "$D/lg_off"
+run pass color synth lg:"$D/lg_off" --top ctrl_shared --set color.synth_alg=cones --set color.ctrl_cones=false --workdir "$D/off"
+LC_ALL=C grep -raq '"ctrl_cones":false' "$D/lg_off" || fail 'explicit ctrl_cones=false ignored'
 run pass partition lg:"$D/lg" --top ctrl_shared --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_shared --emit verilog:"$D/post.v" --workdir "$D/w4"
 run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
-run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.ctrl_cones=true --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
+run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
 python3 - "$D/syn/synth/qor.json" <<'PY' || fail 'missing control-tier QoR rows'
 import json,sys
 q=json.load(open(sys.argv[1]));assert any(r['ctrl'] for r in q['regions'])
 PY
 run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/models-work"
 run lec --lib lg:"$D/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/mapped_lec"
-echo 'PASS: control closure duplication, partition and ABC remain equivalent'
+echo 'PASS: merged mux groups, partition and ABC remain equivalent'
+
+
+# Shared mux/enable logic is copied once per family. The chained mux itself,
+# including PI-selected muxes, stays visible to ABC. Match flop state as well.
+D="$W/ctrl_families"; mkdir -p "$D"
+cat > "$D/ref.v" <<'VERILOG'
+module ctrl_families(input clk, input [3:0] a,b, input s,t,
+                     input [7:0] d,e, output [7:0] y, output reg [7:0] q,r);
+ wire shared = a < b;
+ wire first_sel = shared ^ s;
+ wire second_sel = shared ^ t;
+ wire [7:0] first = first_sel ? d : e;
+ assign y = second_sel ? first : (d ^ e);
+ always @(posedge clk) begin
+   if (first_sel) q <= d;
+   if (second_sel) r <= e;
+ end
+endmodule
+VERILOG
+run compile "$D/ref.v" --top ctrl_families --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run pass color synth lg:"$D/lg" --top ctrl_families --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w2"
+LC_ALL=C grep -raq '"duplicated_nodes":[1-9]' "$D/lg" || fail 'cross-family decode was not duplicated'
+run pass partition lg:"$D/lg" --top ctrl_families --emit-dir lg:"$D/part" --workdir "$D/w3"
+run compile lg:"$D/part" --top ctrl_families --emit verilog:"$D/post.v" --workdir "$D/w4"
+run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
+run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.ctrl_cones=true --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
+run lec --lib lg:"$W/ctrl_shared/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
+echo 'PASS: mux chains and cross-family enable duplication remain equivalent after partition and ABC'
+
+# Constant shifts between muxes are internal wiring of the same control group.
+# Check the normalizer shape that exposed the fmadd QoR regression through both
+# partitioning and mapped equivalence, using the default CLI control policy.
+D="$W/ctrl_normalizer"; mkdir -p "$D"
+cat > "$D/ref.v" <<'VERILOG'
+module ctrl_normalizer(input [15:0] a, output [15:0] y);
+  wire [15:0] stage [0:4];
+  assign stage[0] = a;
+  genvar s;
+  generate for (s = 0; s < 4; s = s + 1) begin : norm
+    localparam STEP = 1 << (3-s);
+    wire zero = ~(|stage[s][15 -: STEP]);
+    assign stage[s+1] = zero ? (stage[s] << STEP) : stage[s];
+  end endgenerate
+  assign y = stage[4];
+endmodule
+VERILOG
+run compile "$D/ref.v" --top ctrl_normalizer --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run pass color synth lg:"$D/lg" --top ctrl_normalizer --set color.synth_alg=cones --workdir "$D/w2"
+run pass partition lg:"$D/lg" --top ctrl_normalizer --emit-dir lg:"$D/part" --workdir "$D/w3"
+run compile lg:"$D/part" --top ctrl_normalizer --emit verilog:"$D/post.v" --workdir "$D/w4"
+run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
+run synth "$D/ref.v" --top ctrl_normalizer --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$D/mapped.v"
+run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/models-work"
+run lec --lib lg:"$D/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
+echo 'PASS: default mux groups preserve normalizer wiring through partition and ABC'

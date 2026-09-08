@@ -1806,33 +1806,24 @@ void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, const hhds::No
   }
 }
 
-// Hotmux: one-hot selector (sink 0), values on p1..pN. Emitted as a case
-// over the one-hot constants (arm i matches sel == 1<<i); a zero/multi-hot
-// selector violates the unique-if assume and falls to the 'hx default.
+// A parallel case on individual predicates preserves the one-hot contract.
 void Cgen_verilog::process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   note_src(fout, node);
-  auto ordered_inp = node.inp_edges();
-  sort_by_sink_pid(ordered_inp);
-  I(ordered_inp.size() > 2);  // selector + at least 2 values
-
-  auto sel_expr    = get_expression(ordered_inp[0].driver);
-  auto dpin_dest   = node.get_driver_pin(0);
-  auto dest_var_it = pin2var.find(dpin_dest.get_class_index());
+  const auto inputs      = livehd::graph_util::hotmux_inputs(node);
+  auto       dest_var_it = pin2var.find(node.get_driver_pin(0).get_class_index());
   I(dest_var_it != pin2var.end());
-  auto dest_var = dest_var_it->second;
-
-  const auto n_values = ordered_inp.size() - 1;
-  auto       sel_bits = bits_of(ordered_inp[0].driver);
-  if (sel_bits < static_cast<int32_t>(n_values)) {
-    sel_bits = static_cast<int32_t>(n_values);  // missing/short bw: widen the labels to cover every arm
+  const auto& dest_var = dest_var_it->second;
+  fout->append("   unique case (1'b1)\n");
+  for (const auto& [control, value] : inputs.arms) {
+    // `!= 1'b0`, never the bare expression: Verilog widens the case EXPRESSION
+    // and every case ITEM to the widest of them, so a control wider than one
+    // bit would be compared against 1 rather than tested for non-zero -- which
+    // is what the cell means and what every other backend (ABC, LLVM, the Slop
+    // simulator, the SMT encoders) implements. A one-bit control is unchanged.
+    fout->append("     (", get_expression(control), ") != 1'b0 : ", dest_var, " = ");
+    fout->append(get_expression(value), ";\n");
   }
-  fout->append("   case (", sel_expr, ")\n");
-  for (auto i = 1u; i < ordered_inp.size(); ++i) {
-    // One-hot label as a binary literal ("1" then i-1 zeros) — no 64-arm cap.
-    fout->append("     ", std::to_string(sel_bits), "'b1", std::string(i - 1, '0'));
-    fout->append(" : ", dest_var, " = ", get_expression(ordered_inp[i].driver), ";\n");
-  }
-  fout->append("       default: ", dest_var, " = 'hx;\n");
+  fout->append("     default: ", dest_var, " = ", inputs.fallback.is_invalid() ? "'h0" : get_expression(inputs.fallback), ";\n");
   fout->append("   endcase\n");
 }
 

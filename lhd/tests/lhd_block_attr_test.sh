@@ -83,3 +83,88 @@ if "$LHD" compile "$W/bad_quote.prp" --top "$TOP" --emit-dir lg:"$W/lgbad2" --wo
 fi
 
 echo "PASS: block-scoped synthesis attributes (LEC-invariant, own region + flow override, seeded precedence, netlist LEC, negative controls)"
+
+# Source ware/delay controls must match the corresponding ABC options. Keep
+# the same explicit color in every variant, so this compares policy rather
+# than partition changes. Use NLDM and prove every selected netlist equivalent.
+python3 - <<'PY' || fail "section ware/delay policy"
+import json, os, pathlib, subprocess
+w = pathlib.Path(os.environ['TEST_TMPDIR']) / 'section-ware'
+w.mkdir()
+lhd = str(pathlib.Path('lhd/lhd').resolve())
+lib = str(pathlib.Path('inou/prp/tests/abc/timing.lib').resolve())
+fixture = pathlib.Path('inou/prp/tests/pyrope/abc_ware_attr.prp').read_text()
+top = 'abc_ware_attr.abc_ware_attr'
+
+def run(*args):
+    result = w/'result.json'
+    p = subprocess.run([lhd, *map(str,args), '-q', '--result-json',str(result)], capture_output=True, text=True, timeout=120)
+    assert p.returncode == 0, (args, p.stdout, p.stderr, result.read_text())
+    return json.loads(result.read_text())
+
+def synth(name, attrs, *opts):
+    d = w/name; d.mkdir(exist_ok=True)
+    source = d/'abc_ware_attr.prp'
+    source.write_text(fixture.replace('color=2, ware=true, delay=500',attrs))
+    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
+            '--workdir',d/'work','--emit-dir',f'lg:{d}/net', '--emit',f'verilog:{d}/mapped.v',*opts)
+    rows = j['qor']['abc']['regions']
+    assert len(rows)==1 and rows[0]['color']==2, rows
+    logs = '\n'.join(p.read_text() for p in (d/'work/logs').glob('*.log'))
+    assert 'QoR unavailable' not in logs, logs
+    return rows[0], logs
+
+cases = {}
+for enabled in ('true','false'):
+    cases['attr_'+enabled] = synth('attr_'+enabled, f'color=2, ware={enabled}, delay=500')
+    cases['cli_'+enabled] = synth('cli_'+enabled,'color=2','--set',f'abc.ware={enabled}','--set','abc.delay=500')
+    a, b = cases['attr_'+enabled][0], cases['cli_'+enabled][0]
+    for key in ('ware_trials','ware_selected','gates','area','logic_depth','delay','budget'):
+        assert a[key] == b[key], (key,a,b)
+assert cases['attr_false'][0]['ware_trials']==0
+assert cases['attr_true'][0]['ware_trials']>0
+assert cases['attr_true'][0]['delay'] < cases['attr_false'][0]['delay']
+assert cases['attr_true'][0]['delay'] <= 500 < cases['attr_false'][0]['delay']
+assert 'objective=timing' in cases['attr_true'][1]
+# Zero clears timing and chooses area. CLI and source remain interchangeable.
+a, log = synth('attr_area','color=2, ware=true, delay=0')
+b, _ = synth('cli_area','color=2','--set','abc.ware=true')
+for key in ('ware_trials','ware_selected','gates','area','logic_depth','delay'):
+    assert a[key]==b[key], (key,a,b)
+assert 'objective=area' in log and a['area'] < cases['attr_true'][0]['area']
+# Clearing an inherited target still uses area as its objective.
+a, log = synth('clear_target','color=2, ware=true, delay=0','--set','abc.delay=500')
+assert 'objective=area' in log and 'objective=timing' not in log, log
+# Sibling sections retain independent switches. The disabled section's long
+# path must not prevent improving a tied endpoint in the enabled section.
+d = w/'mixed'; d.mkdir()
+source = d/'mixed.prp'
+source.write_text("""mod mixed(a:u64,b:u64,c:u64,d:u64) -> (y:u1@[0],z:u1@[0]) {
+  {::[color=2, ware=false, delay=500] y = a < b }
+  {::[color=3, ware=true, delay=500] z = c < d }
+}
+""")
+j=run('synth',source,'--top','mixed.mixed','--set',f'synth.liberty={lib}',
+      '--set','synth.opentimer=false','--workdir',d/'work','--emit-dir',f'lg:{d}/net')
+rows={r['color']:r for r in j['qor']['abc']['regions']}
+assert rows[2]['ware_trials']==0 and rows[3]['ware_trials']>0,rows
+assert rows[3]['delay'] < rows[2]['delay'],rows
+# Explicit region_opts overrides source attributes (global knobs are defaults).
+a, _ = synth('region_override','color=2, ware=true, delay=500','--set','abc.region_opts={"2":{"ware":false}}')
+assert a['ware_trials']==0
+# Warm replay retains source policy even when baseline mapping hits the cache.
+a, _ = synth('attr_true','color=2, ware=true, delay=500')
+assert a['ware_trials']==cases['attr_true'][0]['ware_trials']
+assert a['delay']==cases['attr_true'][0]['delay']
+run('pass','liberty','gensim',lib,'--emit-dir',f'lg:{w}/models')
+for name in ('attr_true','attr_false','attr_area'):
+    run('lec','--impl',f'lg:{w}/{name}/net','--ref',w/'cli_true/abc_ware_attr.prp','--top',top,
+        '--lib',f'lg:{w}/models','--workdir',w/('lec-'+name))
+# Reject malformed source values, not a silently ignored option.
+for i, attrs in enumerate(('ware=1','ware="true"','delay=-1','delay="500"','ware=true, ware=false')):
+    source = w/f'bad{i}.prp'
+    source.write_text(fixture.replace('color=2, ware=true, delay=500',attrs))
+    p = subprocess.run([lhd,'compile',str(source),'--workdir',str(w/f'badwork{i}'),'-q'],capture_output=True)
+    assert p.returncode!=0, attrs
+print('PASS: section ware/delay matches CLI, changes timing, preserves equivalence, and validates inputs')
+PY

@@ -39,3 +39,21 @@ just the directory orientation.
 
 > Per-pin `bits`/`sign` are HHDS attributes today; the native-storage campaign is
 > tracked in the TODO hub (`todo/livehd/hhds-pinentry.html`).
+
+## Hotmux ports
+
+`Hotmux` uses contiguous `(control, value)` pairs: `p0/p1`, `p2/p3`,
+and so on. Controls are one-bit predicates and must be mutually exclusive.
+A control is ACTIVE when it is NON-ZERO, not when it equals 1: nothing narrows
+a control carrier, so every consumer (`cgen_verilog`'s `(ctl) != 1'b0` case
+item, the SMT encoders' `DISTINCT(ctl, 0)`, `hlop`'s `Slop`/`Dlop::hotmux_op`)
+tests it that way.
+An optional trailing even port carries a default value, selected when all
+controls are zero; without that port the result is zero. The default is a
+value, not another predicate, and is excluded from the uniqueness check.
+
+For example, `hotmux(c0, a, c1, b, d)` selects `a` for `c0`, `b` for `c1`,
+and `d` when neither is active. Frontends preserve source-level fall-through
+and register holds through this default port. No packed selector or explicit
+none-of predicate is needed in the graph. Regenerate persisted graphs from
+builds that used the previous packed-selector Hotmux encoding.

@@ -114,12 +114,15 @@ struct Cones {
 
   bool                               ctrl_cones    = false;
   uint64_t                           ctrl_max_gate = 0, ctrl_min_gate = 0;
-  uint32_t                           ctrl_count = 0;
+  uint32_t                           ctrl_count = 0, ctrl_mux_groups = 0, ctrl_enable_groups = 0;
   uint64_t                           ctrl_roots = 0, ctrl_empty = 0, ctrl_nodes = 0, ctrl_duplicates = 0;
   uint64_t                           ctrl_largest = 0, ctrl_pred = 0, ctrl_dup_pred = 0, ctrl_subs = 0;
   std::vector<std::vector<uint32_t>> memberships;
 
   bool is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
+  bool is_mux(uint32_t n) const {
+    return n < op.size() && (static_cast<Ntype_op>(op[n]) == Ntype_op::Mux || static_cast<Ntype_op>(op[n]) == Ntype_op::Hotmux);
+  }
   bool control_cut(uint32_t n) const {
     const auto type = static_cast<Ntype_op>(op[n]);
     // Control closures include comparisons and runtime shifts even when the
@@ -129,7 +132,10 @@ struct Cones {
   }
   bool control_pin(uint32_t n, uint32_t pid) const {
     const auto o = static_cast<Ntype_op>(op[n]);
-    if (o == Ntype_op::Mux || o == Ntype_op::Hotmux) {
+    if (o == Ntype_op::Hotmux) {
+      return graph_util::is_hotmux_control(static_cast<hhds::Port_id>(pid), fin_cnt[n] / 2 * 2);
+    }
+    if (o == Ntype_op::Mux) {
       return pid == 0;
     }
     if (o == Ntype_op::Flop || o == Ntype_op::Latch) {
@@ -150,6 +156,8 @@ struct Cones {
 
   // Fan-in CSR, materialized from ONE inp_edges() call per node.
   std::vector<uint32_t> fin_start, fin_cnt, fin_drv, fin_pid;
+  std::vector<uint64_t> fin_dpid;
+  std::vector<uint8_t>  fin_const;
   // Fan-out CSR, derived from the fan-in by counting sort -- so the walk's
   // "does this node still have an uncolored consumer?" and the SRA group's
   // one forward hop never call out_edges() either.
@@ -322,77 +330,187 @@ struct Cones {
 // forward order emits cut nodes first, so a flop is reached BEFORE the cone that
 // feeds its din exists, and a walk started during the iteration would see an
 // empty graph of owners.
+// Each family visits a node's fanin once. A later root meeting it unions with
+// its existing component instead of walking/copying the same closure again.
+// Mux and enable families stay independent; only their intersection is copied.
 void collect_control_roots(Cones& cn) {
   if (!cn.ctrl_cones) {
     return;
   }
-  std::vector<uint8_t>  seen(cn.flag.size(), 0);
-  std::vector<uint32_t> members;
-  for (uint32_t sink : cn.forward_idx) {
-    std::vector<std::pair<uint32_t, uint32_t>> pins;
-    for (uint32_t k = cn.fin_start[sink]; k < cn.fin_start[sink] + cn.fin_cnt[sink]; ++k) {
-      if (cn.control_pin(sink, cn.fin_pid[k])) {
-        pins.emplace_back(cn.fin_pid[k], cn.fin_drv[k]);
+  for (bool mux_family : {true, false}) {
+    std::vector<uint32_t> member(cn.flag.size(), 0), parent{0};
+    const auto            find = [&](uint32_t c) {
+      while (parent[c] != c) {
+        parent[c] = parent[parent[c]];
+        c         = parent[c];
       }
-    }
-    std::sort(pins.begin(), pins.end());
-    for (const auto& [pid, root] : pins) {
-      (void)pid;
-      if (root >= seen.size() || seen[root]) {
-        continue;
-      }
-      seen[root] = 1;
-      ++cn.ctrl_roots;
-      ++cn.cur_epoch;
+      return c;
+    };
+    const auto join = [&](uint32_t a, uint32_t b) {
+      a                      = find(a);
+      b                      = find(b);
+      parent[std::max(a, b)] = std::min(a, b);
+    };
+    absl::flat_hash_map<uint64_t, uint32_t> select_roots;
+    std::vector<uint8_t>                    enable_seen(cn.flag.size(), 0);
+    const auto                              walk = [&](uint32_t root, uint32_t component) {
       cn.work.assign(1, root);
-      members.clear();
-      uint64_t size = 0;
       while (!cn.work.empty()) {
-        const uint32_t i = cn.work.back();
+        const auto i = cn.work.back();
         cn.work.pop_back();
-        if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i) || cn.epoch[i] == cn.cur_epoch) {
+        if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i)) {
           continue;
         }
-        cn.epoch[i] = cn.cur_epoch;
-        members.push_back(i);
-        size = graph_util::sat_add(size, cn.pred[i]);
-        if (cn.ctrl_max_gate && size > cn.ctrl_max_gate) {
+        if (member[i]) {
+          join(component, member[i]);
+          continue;
+        }
+        member[i] = component;
+        for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+          const auto d = cn.fin_drv[k];
+          // Mux data arms are region inputs, except for a direct mux chain.
+          // Every admitted mux contributes its own select closure.
+          if (!mux_family || !cn.is_mux(i) || cn.control_pin(i, cn.fin_pid[k]) || cn.is_mux(d)) {
+            cn.work.push_back(d);
+          }
+        }
+      }
+    };
+    for (auto sink : cn.forward_idx) {
+      if (mux_family) {
+        if (!cn.is_mux(sink) || !cn.traversable(sink)) {
+          continue;
+        }
+        ++cn.ctrl_roots;
+        const auto c = static_cast<uint32_t>(parent.size());
+        parent.push_back(c);
+        // Use full pin identity: built-in IO pins must not alias one another
+        // merely because their master/port representation is shared.
+        for (uint32_t k = cn.fin_start[sink]; k < cn.fin_start[sink] + cn.fin_cnt[sink]; ++k) {
+          if (cn.control_pin(sink, cn.fin_pid[k])) {
+            const uint64_t key = cn.fin_dpid[k];
+            auto [it, added]   = select_roots.try_emplace(key, c);
+            if (!added) {
+              join(c, it->second);
+            }
+          }
+        }
+        walk(sink, c);
+      } else if (!cn.is_mux(sink)) {
+        for (uint32_t k = cn.fin_start[sink]; k < cn.fin_start[sink] + cn.fin_cnt[sink]; ++k) {
+          const auto d = cn.fin_drv[k];
+          if (!cn.control_pin(sink, cn.fin_pid[k]) || d >= enable_seen.size() || enable_seen[d]) {
+            continue;
+          }
+          enable_seen[d] = 1;
+          ++cn.ctrl_roots;
+          if (!cn.traversable(d) || (cn.flag[d] & kLoopBreak) || cn.control_cut(d)) {
+            ++cn.ctrl_empty;
+            continue;
+          }
+          const auto c = static_cast<uint32_t>(parent.size());
+          parent.push_back(c);
+          walk(d, c);
+        }
+      }
+    }
+    if (mux_family) {
+      // Preserve bit identities across a group's own wiring. In a leading-one
+      // normalizer, mux -> constant shift -> mux is a wire connection, not an
+      // independent data input. Cutting it hides correlated bits from ABC.
+      // Admit only wiring whose nonconstant inputs all come from one existing
+      // group, and which leads back into that same group. Real data logic and
+      // PI-driven data arms remain boundaries; no new groups are joined here.
+      auto origin = member;
+      for (auto i : cn.forward_idx) {
+        if (member[i] || !cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.pred[i] != 0) {
+          continue;
+        }
+        const auto op = static_cast<Ntype_op>(cn.op[i]);
+        if (op != Ntype_op::Get_mask && op != Ntype_op::Set_mask && op != Ntype_op::Concat && op != Ntype_op::Sext
+            && op != Ntype_op::SHL && op != Ntype_op::SRA) {
+          continue;
+        }
+        uint32_t group      = 0;
+        bool     compatible = true;
+        for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+          if (cn.fin_const[k]) {
+            continue;
+          }
+          const auto d = cn.fin_drv[k];
+          if (d >= origin.size() || !origin[d]) {
+            compatible = false;
+            break;
+          }
+          const auto c = find(origin[d]);
+          if (group && group != c) {
+            compatible = false;
+            break;
+          }
+          group = c;
+        }
+        if (compatible) {
+          origin[i] = group;
+        }
+      }
+      for (auto it = cn.forward_idx.rbegin(); it != cn.forward_idx.rend(); ++it) {
+        const auto i = *it;
+        if (member[i] || !origin[i]) {
+          continue;
+        }
+        const auto c = find(origin[i]);
+        for (uint32_t k = cn.fout_start[i]; k < cn.fout_start[i] + cn.fout_cnt[i]; ++k) {
+          const auto m = cn.fout[k];
+          if (member[m] && find(member[m]) == c) {
+            member[i] = c;
+            break;
+          }
+        }
+      }
+    }
+    std::vector<uint64_t> sizes(parent.size(), 0);
+    std::vector<uint32_t> colors(parent.size(), 0);
+    for (auto i : cn.forward_idx) {
+      if (member[i]) {
+        member[i]        = find(member[i]);
+        sizes[member[i]] = graph_util::sat_add(sizes[member[i]], cn.pred[i]);
+      }
+    }
+    // Mint once per final component, in forward encounter order. No truncated
+    // closure: the optional safety limit applies to the full merged group.
+    for (auto i : cn.forward_idx) {
+      const auto component = member[i];
+      if (!component || sizes[component] < cn.ctrl_min_gate) {
+        continue;
+      }
+      if (!colors[component]) {
+        if (cn.ctrl_max_gate && sizes[component] > cn.ctrl_max_gate) {
           livehd::diag::err("pass.color", "ctrl-cone-oversize", "unsupported")
-              .msg("control root {} in '{}' exceeds ctrl_max_gate={} (predicted AIG {}); no truncated cone emitted",
-                   root,
+              .msg("{} control group in '{}' exceeds ctrl_max_gate={} (predicted AIG {}); no truncated group emitted",
+                   mux_family ? "mux" : "enable",
                    cn.g->get_name(),
                    cn.ctrl_max_gate,
-                   size)
+                   sizes[component])
               .fatal();
           return;
         }
-        for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
-          cn.work.push_back(cn.fin_drv[k]);
-        }
+        colors[component] = cn.begin_root(0);
+        ++cn.ctrl_count;
+        ++(mux_family ? cn.ctrl_mux_groups : cn.ctrl_enable_groups);
+        cn.ctrl_largest = std::max(cn.ctrl_largest, sizes[component]);
       }
-      if (members.empty()) {
-        ++cn.ctrl_empty;
-        continue;
-      }
-      if (size < cn.ctrl_min_gate) {
-        continue;
-      }
-      const auto c = cn.begin_root(0);
-      ++cn.ctrl_count;
-      cn.ctrl_largest = std::max(cn.ctrl_largest, size);
-      for (auto i : members) {
-        cn.memberships[i].push_back(c);
-        cn.flag[i] &= ~kArithCut;  // a selected control closure has priority over ware cuts
-        if (cn.owner[i] == 0) {
-          cn.owner[i] = c;
-          ++cn.ctrl_nodes;
-          cn.ctrl_pred += cn.pred[i];
-        } else {
-          ++cn.ctrl_duplicates;
-          cn.ctrl_dup_pred += cn.pred[i];
-          if (static_cast<Ntype_op>(cn.op[i]) == Ntype_op::Sub) {
-            ++cn.ctrl_subs;
-          }
+      const auto c = colors[component];
+      cn.memberships[i].push_back(c);
+      cn.flag[i] &= ~kArithCut;
+      if (!cn.owner[i]) {
+        cn.owner[i] = c;
+        ++cn.ctrl_nodes;
+        cn.ctrl_pred += cn.pred[i];
+      } else {
+        ++cn.ctrl_duplicates;
+        cn.ctrl_dup_pred += cn.pred[i];
+        if (static_cast<Ntype_op>(cn.op[i]) == Ntype_op::Sub) {
+          ++cn.ctrl_subs;
         }
       }
     }
@@ -910,7 +1028,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
   const size_t n = static_cast<size_t>(nmax) + 1;
   cn.flag.assign(n, 0);
-  cn.memberships.resize(n);
+  if (cn.ctrl_cones) {
+    cn.memberships.resize(n);
+  }
   cn.op.assign(n, static_cast<uint8_t>(Ntype_op::Invalid));
   cn.pred.assign(n, 0);
   cn.owner.assign(n, 0);
@@ -932,7 +1052,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
       if (node.is_loop_break()) {
         f |= kLoopBreak;
-      } else if (Color_synth::is_arith_cut(node)) {
+      } else if (is_arith_boundary(node)) {
         f |= kArithCut;
       }
       const auto op = type_op_of(node);
@@ -950,6 +1070,10 @@ void Color_synth::label_cones(hhds::Graph* g) {
     cn.fin_start[i] = static_cast<uint32_t>(cn.fin_drv.size());
     for (const auto& e : node.inp_edges()) {
       cn.fin_drv.emplace_back(idx_of(e.driver.get_master_node()));
+      if (cn.ctrl_cones) {
+        cn.fin_dpid.emplace_back(e.driver.get_class_index().value);
+        cn.fin_const.emplace_back(e.driver.is_const());
+      }
       cn.fin_pid.emplace_back(static_cast<uint32_t>(e.sink.get_port_id()));
     }
     cn.fin_cnt[i] = static_cast<uint32_t>(cn.fin_drv.size()) - cn.fin_start[i];
@@ -1090,6 +1214,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
         cn.ctrl_pred,
         total_pred,
         cn.ctrl_subs);
+    info += std::format(",\"ctrl_model\":\"mux-groups\",\"mux_groups\":{},\"enable_groups\":{}",
+                        cn.ctrl_mux_groups,
+                        cn.ctrl_enable_groups);
     g->get_input_node().attr(livehd::attrs::ctrl_stats).set(info);
     if (opts.verbose || opts.sizes) {
       std::print(stderr, "[color.ctrl] {} {}\n", g->get_name(), info);

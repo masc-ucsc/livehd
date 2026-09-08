@@ -349,7 +349,8 @@ protected:
   // of the block's attribute_sq into a region id (+ optional abc string
   // literal node). Region-id bookkeeping: string labels intern per file, auto
   // ids skip explicitly used ones.
-  bool                                  parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv);
+  bool                                  parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv,
+                                                               std::vector<std::pair<std::string, TSNode>>& options);
   int                                   alloc_region_id();
   absl::flat_hash_map<std::string, int> region_label_ids_;
   absl::flat_hash_set<int>              region_ids_used_;
@@ -570,9 +571,9 @@ protected:
   // lists, and a bare-name key let one scope's actuals ride the other's calls.
   absl::flat_hash_map<std::string, std::vector<std::string>> streamed_capture_actuals_;
   static std::string streamed_actuals_key(std::string_view scope_unit, std::string_view callee);
-  void append_streamed_capture_actuals(const Lnast_nid& fcall, std::string_view callee);
-  void patch_streamed_capture_calls(const std::shared_ptr<Lnast>& target, std::string_view callee,
-                                    const std::vector<std::string>& captures);
+  void               append_streamed_capture_actuals(const Lnast_nid& fcall, std::string_view callee);
+  void               patch_streamed_capture_calls(const std::shared_ptr<Lnast>& target, std::string_view callee,
+                                                  const std::vector<std::string>& captures);
 
   // `const NAME = <string | tuple literal>` → the RHS CST node, kept so an
   // `enum(...NAME, …)` spread can splice NAME (a string becomes a field name; a
@@ -598,14 +599,14 @@ protected:
     std::string name;    // const rvalue name (empty for an enum)
     TSNode      node{};  // retained enum declaration (unused for a const)
   };
-  std::vector<Capture_stmt>                capture_stmt_order_;
-  bool                                     replaying_capture_enum_{false};
+  std::vector<Capture_stmt> capture_stmt_order_;
+  bool                      replaying_capture_enum_{false};
   // Persistent arena holding the cloned `const_rvalue_nodes_` RHS subtrees. The
   // streaming parser recycles its own arena per construct (2f-stream), so any
   // CST node a later statement still needs is cloned here instead, keyed off the
   // same `prp_buf` bytes (which outlive the parse). Small: only const string /
   // tuple rvalues that an `enum(...)` spread might reference.
-  prpparse::Ast_arena                      retained_arena_;
+  prpparse::Ast_arena       retained_arena_;
 
   // Functions (comb/mod/pipe) declared with a `ref` parameter (e.g. `ref self`).
   // Such a call mutates the caller, so using its RESULT in a right-hand-side

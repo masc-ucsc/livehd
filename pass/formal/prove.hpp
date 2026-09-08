@@ -54,6 +54,7 @@ public:
   Query_out equal(const hhds::Pin_class& a, const hhds::Pin_class& b);
   // at-most-one-bit-set ((sel & (sel-1)) == 0): the Hotmux selector obligation.
   Query_out is_onehot0(const hhds::Pin_class& sel);
+  Query_out are_exclusive(const std::vector<hhds::Pin_class>& controls);
   // exactly-one-bit-set (onehot0 AND sel != 0).
   Query_out is_onehot(const hhds::Pin_class& sel);
 

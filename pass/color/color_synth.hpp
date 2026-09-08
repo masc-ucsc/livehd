@@ -80,6 +80,7 @@ private:
   // dead, while an arithmetic cut is a root of its own color that still records
   // contact overlap with the cones that reach it.
   [[nodiscard]] static bool is_arith_cut(const hhds::Node_class& node);
+  [[nodiscard]] bool        is_arith_boundary(const hhds::Node_class& node) const;
   [[nodiscard]] bool        is_seeded(const hhds::Node_class& node) const;
   [[nodiscard]] int         data_cone_id(const hhds::Node_class& node);
   void                      mark_ids(hhds::Graph* g);

@@ -390,7 +390,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `dff_cell` | explicit Liberty DFF cell for `register=true` (empty = the smallest-area plain posedge D-flop, QN cells included; an explicit name also disables the drive ladder) | `` |
 | `memory` | bit-blast a `Memory` into a DFF array + per-lane write muxes / read muxes (`true`, see above) vs keep it a native `cgen_memory_*` boundary instance (`false`) | `true` |
 | `memory_max_bits` | with `memory=true`, keep a memory whose `bits x size` exceeds this many bits native, with a one-line note naming it (`0` disables) | `65536` |
-| `ware` | trial alternative implementations on stitched critical paths, accepting a lower mapped-cell depth or fewer tied worst endpoints | `true` |
+| `ware` | automatically minimize stitched Liberty delay with a timing target, or mapped area without one | `true` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
 | `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
@@ -748,34 +748,78 @@ at physical RAM minus max(2 GiB, 25%); an environment override can lower this
 ceiling but cannot raise it. The macOS address-space backstop includes allocator
 headroom, so physical-footprint admission remains a separate check.
 
-### Critical-path ware selection
+### Automatic ware selection
 
-After baseline mapping and boundary sizing, `abc.ware=true` measures mapped-cell
-levels through the stitched occurrence hierarchy. Wide adders and comparisons,
-multipliers, and runtime barrel shifters retain their own synthesis colors;
-constant output slices stay with their producer. Arithmetic at or below the
-small-adder threshold can remain inlined: its containing color is the trial unit.
+After baseline mapping and boundary sizing, `abc.ware=true` compares alternative
+implementations of adders/comparisons, multipliers, and runtime barrel shifters.
+Arithmetic can remain inlined: its containing color is the trial unit. Explicit
+global or per-color `adder`, `block_size`, `multiplier`, and `barrel` selectors
+are authoritative. An explicit multiplier also fixes its internal adder.
 
-Only a color on a current worst path is tried. Trials re-lower its original
-operators, run ABC, replace that module, and recount depth through the assembled
-design. A candidate is kept only if it lowers the worst depth or reduces the
-number of endpoints tied at that depth. Otherwise the previous body and QoR row
-are restored. Each eligible color is visited once, including colors that become
-critical after a prior replacement. Reports expose `ware_trials` and
-`ware_selected`; the step log records each candidate and its before/after depth.
+With `abc.delay` set to a positive timing target in ps, trials use Liberty NLDM
+timing across the stitched occurrence hierarchy. Region ports are wiring in the
+temporary timing network, so actual mapped fanout crosses color boundaries.
+State inputs and outputs cut timing paths. Primary outputs use `io_load`; state
+and opaque boundaries use a typical pin load and the configured stand-in input
+driver. This is a pre-layout combinational timing estimate; final STA still
+checks the selected design and its clock constraints.
 
-Explicit global or color/block `adder`, `block_size`, `multiplier`, and `barrel`
-selectors are authoritative. An explicit multiplier also fixes its internal
-adder. `--set abc.ware=false` disables trials. `large_ge` bounds trial admission;
-the depth scorer honors the ABC memory budget and skips incomplete combinational
-models or cycles. Native state is a path boundary.
+Colors on violating paths are eligible. If the target is already met, colors on
+the worst paths remain eligible for speed improvement. The fastest measured
+candidate wins, even if it is larger. Sorted endpoint delays break ties between
+multiple critical paths; mapped area breaks timing ties. If no candidate meets
+the target, the fastest measured design is retained and the log reports the
+miss. Without a timing target, every eligible color is searched for lower mapped
+area, including colors outside the longest path. Area counts every occurrence
+of a shared definition.
 
-Selection currently uses **mapped-cell depth**, not physical STA delay. The normal
-OpenTimer pass still times the final selected netlist. Fewer levels can cost more
-area and do not guarantee a faster physical path. Multiplier `tree` is a balanced
-sum of partial products, not a carry-save Wallace/Dadda implementation.
+Trials re-lower the original operators, run ABC, and score the assembled design.
+Rejected trials restore the preceding body and QoR row. A color is visited once;
+the search is greedy across colors rather than an exhaustive whole-design
+combination search. Within a color, the selector combinations are enumerated (at most three
+adders times two multipliers times two barrel orders), so trying one operator
+does not miss a better combination with another. Reports expose
+`ware_trials` and `ware_selected`; logs record the objective, delay, area, and
+each acceptance decision.
+
+`--set abc.ware=false` disables trials. `large_ge` bounds trial admission, and
+the scorer honors the ABC memory budget. Incomplete combinational models,
+cycles, or unavailable Liberty timing retain the baseline with a diagnostic.
+Multiplier `tree` is a balanced sum of partial products, not a carry-save
+Wallace/Dadda implementation.
 
 The persistent region cache stores the independent baseline before trials.
 Winners depend on the surrounding design, so a warm run reuses baseline mapping
 and repeats critical-path selection; it does not reuse a context-dependent
 winner under an unchanged local cache key.
+
+### Pyrope section ware and timing attributes
+
+A synthesis section accepts `ware=true|false` and `delay=<integer ps>` alongside
+its existing `abc='<flow>'` and `color=…` attributes:
+
+```pyrope
+mod compare(a:u64, b:u64) -> (y:u1@[0]) {
+  {::[color=2, ware=true, delay=500]
+    y = a < b
+  }
+}
+```
+
+`ware=false` disables implementation trials for that section. `delay=500`
+requests a 500 ps mapping budget and timing-based ware selection. `delay=0`
+clears inherited timing and selects area. The timing scorer considers stitched
+paths through the section, including logic outside its boundaries; this is not
+a clock declaration or a new pipeline stage. In a design with timing targets,
+area trials also preserve the existing stitched timing of other sections.
+
+Global ABC options supply defaults. Section attributes override those defaults;
+explicit `abc.region_opts` entries override section attributes. For example,
+`--set abc.region_opts='{"2":{"ware":false}}'` disables the source example's
+search. Source attributes are preloaded before ABC chooses its Liberty timing
+model, so a source-only target has the same NLDM mapping behavior as an
+equivalent CLI target. Conflicting ware/delay settings on the same color and
+malformed attribute values are errors.
+
+The live `lhd_block_attr_test` compares both channels, ware on/off, timing/area,
+warm replay, and mapped equivalence using `abc_ware_attr.prp`.

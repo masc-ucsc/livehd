@@ -389,29 +389,57 @@ Cgen_llvm::Value Cgen_llvm::mux(Value select, Value when_false, Value when_true,
   return impl_->remember(impl_->builder.CreateSelect(condition, on_true, on_false), result_width, result_unsign);
 }
 
-Cgen_llvm::Value Cgen_llvm::indexed_mux(Value select, const std::vector<Value>& arms, bool one_hot, uint32_t result_width,
-                                        bool result_unsign) {
+Cgen_llvm::Value Cgen_llvm::hotmux(const std::vector<Value>& inputs, uint32_t result_width, bool result_unsign) {
+  if (result_width == 0) {
+    return {};
+  }
+  llvm::Value* result = llvm::ConstantInt::get(impl_->builder.getIntNTy(result_width), 0);
+  if (inputs.size() % 2) {
+    auto* fallback = impl_->get(inputs.back());
+    if (fallback == nullptr) {
+      return {};
+    }
+    result = cast_integer(impl_->builder, fallback, result_width, inputs.back().unsign);
+  }
+  llvm::Value*              seen    = llvm::ConstantInt::getFalse(impl_->context);
+  llvm::Value*              overlap = llvm::ConstantInt::getFalse(impl_->context);
+  std::vector<llvm::Value*> active;
+  active.reserve(inputs.size() / 2);
+  for (size_t i = 0; i + 1 < inputs.size(); i += 2) {
+    auto* control = impl_->get(inputs[i]);
+    if (control == nullptr) {
+      return {};
+    }
+    auto* a = impl_->builder.CreateICmpNE(control, llvm::ConstantInt::get(control->getType(), 0));
+    overlap = impl_->builder.CreateOr(overlap, impl_->builder.CreateAnd(seen, a));
+    seen    = impl_->builder.CreateOr(seen, a);
+    active.push_back(a);
+  }
+  // Fold from the LAST arm back so the FIRST active control wins -- the priority
+  // cgen_verilog's `unique case` and the SMT encoders use. Exclusive controls
+  // (the cell contract, enforced by the trap below) make the order unobservable;
+  // matching it keeps a contract violation from reading differently per backend.
+  for (size_t k = active.size(); k-- > 0;) {
+    auto* value = impl_->get(inputs[2 * k + 1]);
+    if (value == nullptr) {
+      return {};
+    }
+    value  = cast_integer(impl_->builder, value, result_width, inputs[2 * k + 1].unsign);
+    result = impl_->builder.CreateSelect(active[k], value, result);
+  }
+  impl_->trap_if(overlap, "hotmux.controls");
+  return impl_->remember(result, result_width, result_unsign);
+}
+
+Cgen_llvm::Value Cgen_llvm::indexed_mux(Value select, const std::vector<Value>& arms, uint32_t result_width, bool result_unsign) {
   auto* selector = impl_->get(select);
   if (selector == nullptr || arms.empty() || result_width == 0) {
     return {};
   }
-  if (one_hot) {
-    auto* zero     = llvm::ConstantInt::get(selector->getType(), 0);
-    auto* one      = llvm::ConstantInt::get(selector->getType(), 1);
-    auto* one_less = impl_->builder.CreateSub(selector, one);
-    auto* multiple = impl_->builder.CreateICmpNE(impl_->builder.CreateAnd(selector, one_less), zero);
-    auto* none     = impl_->builder.CreateICmpEQ(selector, zero);
-    auto* valid_bits
-        = llvm::ConstantInt::get(impl_->context,
-                                 llvm::APInt::getLowBitsSet(select.width, std::min<size_t>(select.width, arms.size())));
-    auto* outside = impl_->builder.CreateICmpNE(impl_->builder.CreateAnd(selector, impl_->builder.CreateNot(valid_bits)), zero);
-    impl_->trap_if(impl_->builder.CreateOr(impl_->builder.CreateOr(none, multiple), outside), "hotmux.select");
-  } else {
-    const unsigned arm_index_bits = llvm::APInt(64, arms.size()).getActiveBits();
-    if (arm_index_bits <= select.width) {
-      auto* limit = llvm::ConstantInt::get(selector->getType(), arms.size());
-      impl_->trap_if(impl_->builder.CreateICmpUGE(selector, limit), "mux.select");
-    }
+  const unsigned arm_index_bits = llvm::APInt(64, arms.size()).getActiveBits();
+  if (arm_index_bits <= select.width) {
+    auto* limit = llvm::ConstantInt::get(selector->getType(), arms.size());
+    impl_->trap_if(impl_->builder.CreateICmpUGE(selector, limit), "mux.select");
   }
   llvm::Value* result = llvm::ConstantInt::get(impl_->builder.getIntNTy(result_width), 0);
   for (size_t i = arms.size(); i-- > 0;) {
@@ -419,19 +447,9 @@ Cgen_llvm::Value Cgen_llvm::indexed_mux(Value select, const std::vector<Value>& 
     if (arm == nullptr) {
       return {};
     }
-    arm = cast_integer(impl_->builder, arm, result_width, arms[i].unsign);
-    llvm::Value* selected;
-    if (one_hot) {
-      if (i >= select.width) {
-        selected = llvm::ConstantInt::getFalse(impl_->context);
-      } else {
-        auto* shifted = i == 0 ? selector : impl_->builder.CreateLShr(selector, llvm::ConstantInt::get(selector->getType(), i));
-        selected      = impl_->builder.CreateTrunc(shifted, impl_->builder.getInt1Ty());
-      }
-    } else {
-      selected = impl_->builder.CreateICmpEQ(selector, llvm::ConstantInt::get(selector->getType(), i));
-    }
-    result = impl_->builder.CreateSelect(selected, arm, result);
+    arm            = cast_integer(impl_->builder, arm, result_width, arms[i].unsign);
+    auto* selected = impl_->builder.CreateICmpEQ(selector, llvm::ConstantInt::get(selector->getType(), i));
+    result         = impl_->builder.CreateSelect(selected, arm, result);
   }
   return impl_->remember(result, result_width, result_unsign);
 }

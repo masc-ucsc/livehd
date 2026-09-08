@@ -59,8 +59,8 @@ public:
   [[nodiscard]] Value sign_extend_from(Value value, uint32_t sign_bit, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value binary(Binary_op op, Value lhs, Value rhs, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value mux(Value select, Value when_false, Value when_true, uint32_t result_width, bool result_unsign);
-  [[nodiscard]] Value indexed_mux(Value select, const std::vector<Value>& arms, bool one_hot, uint32_t result_width,
-                                  bool result_unsign);
+  [[nodiscard]] Value hotmux(const std::vector<Value>& inputs, uint32_t result_width, bool result_unsign);
+  [[nodiscard]] Value indexed_mux(Value select, const std::vector<Value>& arms, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value lut(Value table, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value external_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value external_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);

@@ -177,7 +177,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       return "invalid";
       break;
     case Ntype_op::Mux:     // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
-    case Ntype_op::Hotmux:  // unlimited case: pid0 = one-hot sel, pid1..N = values
       if (pid == 0) {
         return "s";
       }
@@ -185,6 +184,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::IO:
     case Ntype_op::LUT:     // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:     // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Hotmux:     // (control, value) pairs, optional trailing default
     case Ntype_op::Concat:  // unlimited case: INTERLEAVED (value, width) pairs; lane i at 2i/2i+1
       assert(is_unlimited_sink(op));
       // p0..p15 -- the whole 0..Memory_port_stride-1 range that `sink_pid2name`

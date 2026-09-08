@@ -1624,11 +1624,11 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
         .span     = std::move(span),
         .hint     = std::format("a concat's destination must declare the {}-bit width its lanes add up to "
                                 "(e.g. `{}:u{}` or `{}:s{}`)",
-                            cit->second,
-                            dest_name,
-                            cit->second,
-                            dest_name,
-                            cit->second),
+                                cit->second,
+                                dest_name,
+                                cit->second,
+                                dest_name,
+                                cit->second),
     });
     return;
   }
@@ -2308,10 +2308,10 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
                 .category = "bitwidth",
                 .pass     = "upass.runner",
                 .message  = std::format("`{}` (value {}) does not fit its declared range [{}, {}]",
-                                       rn.dst_name,
-                                       e0.trivial.to_decimal_string(),
-                                       e0.bw_min.to_decimal_string(),
-                                       e0.bw_max.to_decimal_string()),
+                                        rn.dst_name,
+                                        e0.trivial.to_decimal_string(),
+                                        e0.bw_min.to_decimal_string(),
+                                        e0.bw_max.to_decimal_string()),
                 .span     = lm->current_span(),
                 .hint     = "widen the declared type, force fewer bits with a bit-select, or adjust the value",
             });
@@ -5493,8 +5493,8 @@ bool uPass_runner::try_inline_func_call() {
   // the registry hands back a callee body that has not already been rewritten
   // (an IMPORTED comb: it is staged by a different pass.upass invocation).
   // Register the frame-tagged leaves for this body walk only.
-  std::vector<std::string> frame_port_leaves;   // leaf names this frame added
-  std::vector<std::string> frame_port_prefixes; // their proper prefixes
+  std::vector<std::string> frame_port_leaves;    // leaf names this frame added
+  std::vector<std::string> frame_port_prefixes;  // their proper prefixes
   {
     const auto add_leaf = [&](const std::string& raw_name, bool is_input) {
       if (raw_name.find('.') == std::string::npos) {
@@ -6048,7 +6048,7 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
     // this shape. Named values still require an explicit non-reg mode so a
     // registered/typed array cannot be mistaken for a constant ROM tuple.
     const bool muxable_mode   = (!facts && std::string_view(src).starts_with("%"))
-                              || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
+                                || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
     if (is_array_typed || !muxable_mode) {
       return false;
     }
@@ -6398,7 +6398,7 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   const bool is_for     = Lnast_ntype::is_for(t);
   // Child 0 of a defining statement names its target, not a read.
   const bool defines    = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
-                       || Lnast_ntype::is_tuple_get(t);
+                          || Lnast_ntype::is_tuple_get(t);
 
   const auto target = ln.get_first_child(nid);
   const auto target_name
@@ -8841,9 +8841,9 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
       return;
     }
     // children in order: [dst, src/operand, field/operand, …]
-    std::size_t idx        = 0;
-    bool        names_dst  = false;  // dst_name appears as a non-leading child
-    std::size_t dst_at_idx = std::string::npos;
+    std::size_t       idx         = 0;
+    bool              names_dst   = false;  // dst_name appears as a non-leading child
+    std::size_t       dst_at_idx  = std::string::npos;
     // Only an alias store can extend the set, so only it needs the dst COPIED
     // (the cursor has moved on by the time it is inserted below).
     const std::string destination = is_alias ? std::string(lm->current_text()) : std::string{};
@@ -9930,47 +9930,47 @@ namespace {
 bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
   using N = Lnast_ntype;
   switch (t) {
-    case N::Lnast_ntype_store:  // store defines its first-child target (the unified write node)
-    case N::Lnast_ntype_dp_assign:
-    case N::Lnast_ntype_range:  // a comptime range whose for-loop unrolled away is dead scaffolding
-    case N::Lnast_ntype_tuple_add:
+    case N::Lnast_ntype_store       :  // store defines its first-child target (the unified write node)
+    case N::Lnast_ntype_dp_assign   :
+    case N::Lnast_ntype_range       :  // a comptime range whose for-loop unrolled away is dead scaffolding
+    case N::Lnast_ntype_tuple_add   :
     case N::Lnast_ntype_tuple_concat:
-    case N::Lnast_ntype_tuple_get:
-    case N::Lnast_ntype_plus:
-    case N::Lnast_ntype_minus:
-    case N::Lnast_ntype_mult:
-    case N::Lnast_ntype_div:
-    case N::Lnast_ntype_mod:
-    case N::Lnast_ntype_shl:
-    case N::Lnast_ntype_sra:
-    case N::Lnast_ntype_sext:
-    case N::Lnast_ntype_set_mask:
-    case N::Lnast_ntype_get_mask:
-    case N::Lnast_ntype_concat:
-    case N::Lnast_ntype_bit_and:
-    case N::Lnast_ntype_bit_or:
-    case N::Lnast_ntype_bit_xor:
-    case N::Lnast_ntype_bit_not:
-    case N::Lnast_ntype_red_and:
-    case N::Lnast_ntype_red_or:
-    case N::Lnast_ntype_red_xor:
-    case N::Lnast_ntype_popcount:
-    case N::Lnast_ntype_log_and:
-    case N::Lnast_ntype_log_or:
-    case N::Lnast_ntype_log_not:
-    case N::Lnast_ntype_eq:
-    case N::Lnast_ntype_ne:
-    case N::Lnast_ntype_lt:
-    case N::Lnast_ntype_le:
-    case N::Lnast_ntype_gt:
-    case N::Lnast_ntype_ge:
-    case N::Lnast_ntype_func_call:
-    case N::Lnast_ntype_func_does:
-    case N::Lnast_ntype_func_equals:
-    case N::Lnast_ntype_func_in:
-    case N::Lnast_ntype_func_has:
-    case N::Lnast_ntype_func_case:
-    case N::Lnast_ntype_attr_set:
+    case N::Lnast_ntype_tuple_get   :
+    case N::Lnast_ntype_plus        :
+    case N::Lnast_ntype_minus       :
+    case N::Lnast_ntype_mult        :
+    case N::Lnast_ntype_div         :
+    case N::Lnast_ntype_mod         :
+    case N::Lnast_ntype_shl         :
+    case N::Lnast_ntype_sra         :
+    case N::Lnast_ntype_sext        :
+    case N::Lnast_ntype_set_mask    :
+    case N::Lnast_ntype_get_mask    :
+    case N::Lnast_ntype_concat      :
+    case N::Lnast_ntype_bit_and     :
+    case N::Lnast_ntype_bit_or      :
+    case N::Lnast_ntype_bit_xor     :
+    case N::Lnast_ntype_bit_not     :
+    case N::Lnast_ntype_red_and     :
+    case N::Lnast_ntype_red_or      :
+    case N::Lnast_ntype_red_xor     :
+    case N::Lnast_ntype_popcount    :
+    case N::Lnast_ntype_log_and     :
+    case N::Lnast_ntype_log_or      :
+    case N::Lnast_ntype_log_not     :
+    case N::Lnast_ntype_eq          :
+    case N::Lnast_ntype_ne          :
+    case N::Lnast_ntype_lt          :
+    case N::Lnast_ntype_le          :
+    case N::Lnast_ntype_gt          :
+    case N::Lnast_ntype_ge          :
+    case N::Lnast_ntype_func_call   :
+    case N::Lnast_ntype_func_does   :
+    case N::Lnast_ntype_func_equals :
+    case N::Lnast_ntype_func_in     :
+    case N::Lnast_ntype_func_has    :
+    case N::Lnast_ntype_func_case   :
+    case N::Lnast_ntype_attr_set    :
     case N::Lnast_ntype_attr_get    : return true;
     default                         : return false;
   }
@@ -9996,7 +9996,8 @@ bool dce_is_keepalive_attr_set(const Lnast& staging, const Lnast_nid& node) {
   // opens a block-scoped partition region for tolg. Its %-target never has
   // readers by construction, so without this exemption DCE would silently
   // delete the user's block annotation.
-  if (staging.get_name(key) == "__region") {
+  if (staging.get_name(key) == "__region" || staging.get_name(key) == "__region_ware"
+      || staging.get_name(key) == "__region_delay") {
     return true;
   }
   if (staging.get_name(key) != "type") {
@@ -10908,8 +10909,8 @@ bool uPass_runner::try_detuple_store() {
     // a body write.
     const bool binds_shape = detuple_pending_decl_->shape_tmp && rest.size() == 1 && rest[0].is_ref()
                              && rest[0].get_name() == *detuple_pending_decl_->shape_tmp;
-    const bool binds_init = !detuple_pending_decl_->shape_tmp && detuple_pending_decl_->init_ref && rest.size() == 1
-                            && rest[0].is_ref() && rest[0].get_name() == *detuple_pending_decl_->init_ref;
+    const bool binds_init  = !detuple_pending_decl_->shape_tmp && detuple_pending_decl_->init_ref && rest.size() == 1
+                             && rest[0].is_ref() && rest[0].get_name() == *detuple_pending_decl_->init_ref;
     if ((binds_shape || binds_init) && !detuple_pending_decl_->fields.empty()) {
       auto pending = std::move(*detuple_pending_decl_);
       detuple_pending_decl_.reset();

@@ -15,13 +15,12 @@ comb code1(cond1:bool, cond2:bool, a:u32, b:u32, c:u32) -> (res:u32) {
 }
 
 comb code2(cond1:bool, cond2:bool, a:u32, c:u32, b:u32) -> (res:u32) {
-  // RTL equivalent — build the one-hot select bit-by-bit
-  mut sel:u3 = nil
-  sel#[0] = cond2 and !cond1
-  sel#[1] = cond1
-  sel#[2] = !cond1 and !cond2
-  mut res = __hotmux(s=sel, p1=c, p2=b, p3=a)
-  // Priority makes the select one-hot for all four condition combinations.
+  // RTL equivalent — one (control, value) pair per arm
+  const s0 = cond2 and !cond1
+  const s1 = cond1
+  const s2 = !cond1 and !cond2
+  mut res = __hotmux(p0=s0, p1=c, p2=s1, p3=b, p4=s2, p5=a)
+  // Priority makes the controls one-hot for all four condition combinations.
 }
 
 for cond1 in (true, false) {

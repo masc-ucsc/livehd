@@ -3278,11 +3278,11 @@ bool uPass_constprop::try_eval_sum_cell_call(std::string_view dst, const std::ve
 
 bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_view op, const std::vector<Call_actual>& actuals) {
   // Unlimited-sink multiplexer / LUT cells. Pins are named (`s` = selector for
-  // mux/hotmux, `p1`..`pN` = ordered values; `p0`/`p1` = table/addr for lut)
-  // or positional. Map every actual onto its pid, then delegate to the
-  // matching Dlop kernel — which itself handles unknown selector/address bits
-  // (three-valued ternary merge), so unknowns are passed through rather than
-  // pre-filtered.
+  // mux, `p1`..`pN` = ordered values; `p0`/`p1` = table/addr for lut; `p0`..`pN`
+  // = the interleaved (control, value) pairs of a hotmux) or positional. Map
+  // every actual onto its pid, then delegate to the matching Dlop kernel —
+  // which itself handles unknown selector/control/address bits (three-valued
+  // ternary merge), so unknowns are passed through rather than pre-filtered.
   const Ntype_op nop = Ntype::get_op(op);
 
   std::vector<const Dlop*> by_pid;  // indexed by sink pid (pid 0 = sel/table)
@@ -3319,8 +3319,21 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
       return false;
     }
     folded = Dlop::lut_op(*by_pid[0], *by_pid[1]);
+  } else if (op == "hotmux") {
+    // hotmux: EVERY pid is a cell pin — interleaved (control, value) pairs with
+    // an optional trailing default. The builtin therefore spells the cell it
+    // names, rather than the packed one-hot selector it used to take.
+    if (by_pid.size() < 2) {
+      return false;
+    }
+    std::vector<spool_ptr<Dlop>> pins;
+    pins.reserve(by_pid.size());
+    for (const auto* p : by_pid) {
+      pins.emplace_back(Dlop::clone(*p));
+    }
+    folded = Dlop::hotmux_op(std::span<const spool_ptr<Dlop>>(pins));
   } else {
-    // mux / hotmux: pid 0 is the selector, pid 1..N the ordered values.
+    // mux: pid 0 is the selector, pid 1..N the ordered values.
     if (by_pid.size() < 2) {
       return false;
     }
@@ -3329,8 +3342,7 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
     for (std::size_t i = 1; i < by_pid.size(); ++i) {
       values.emplace_back(Dlop::clone(*by_pid[i]));
     }
-    std::span<const spool_ptr<Dlop>> vspan(values);
-    folded = (op == "hotmux") ? Dlop::hotmux_op(*by_pid[0], vspan) : Dlop::mux_op(*by_pid[0], vspan);
+    folded = Dlop::mux_op(*by_pid[0], std::span<const spool_ptr<Dlop>>(values));
   }
 
   if (!folded || folded->is_invalid()) {
@@ -3762,7 +3774,7 @@ void uPass_constprop::process_func_call() {
     return;
   }
 
-  // Direct cell-op call: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, … —
+  // Direct cell-op call: `__sum(a, b)`, `__hotmux(c0, v0, c1, v1, …)`, … —
   // every Ntype_op cell can surface in Pyrope as `__name(...)` and gets
   // folded here when all actuals are comptime-known. See cell.hpp for the
   // canonical names.

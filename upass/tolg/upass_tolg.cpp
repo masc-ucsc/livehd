@@ -705,10 +705,11 @@ private:
   // non-zero gets livehd::attrs::color, which pass.partition/pass.abc turn
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
-  int32_t                        cur_color_ = 0;
-  std::map<int32_t, std::string> region_abc_;
-  absl::flat_hash_set<int32_t>   region_colors_marked_;
-  absl::flat_hash_set<int32_t>   region_colors_stamped_;
+  int32_t                                               cur_color_ = 0;
+  std::map<int32_t, std::string>                        region_abc_;
+  std::map<int32_t, std::map<std::string, std::string>> region_options_;
+  absl::flat_hash_set<int32_t>                          region_colors_marked_;
+  absl::flat_hash_set<int32_t>                          region_colors_stamped_;
 
   // Anchor priority shared by error_at/warn_at: the given nid's SourceId,
   // falling back to the current statement's (re-minted into the graph).
@@ -1179,7 +1180,8 @@ private:
     if (key_n.is_invalid()) {
       return;
     }
-    if (lnast_->get_name(key_n) == "__region") {
+    if (lnast_->get_name(key_n) == "__region" || lnast_->get_name(key_n) == "__region_ware"
+        || lnast_->get_name(key_n) == "__region_delay") {
       // Synthesis-region marker (2opt-freq B): attr_set(%__region_<id>,
       // "__region", <abc-string | true>) — first statement of an annotated
       // `{ ::[…] … }` block. The region id rides the target name; a quoted
@@ -1200,6 +1202,15 @@ private:
       region_colors_marked_.insert(id);
       if (auto val_n = lnast_->get_sibling_next(key_n); !val_n.is_invalid()) {
         std::string_view val = lnast_->get_name(val_n);
+        const auto       key = lnast_->get_name(key_n);
+        if (key != "__region") {
+          const std::string opt{key.substr(std::string_view{"__region_"}.size())};
+          const auto [it, inserted] = region_options_[id].try_emplace(opt, val);
+          if (!inserted && it->second != val) {
+            error_at(tgt, {"region-option-conflict", "syntax"}, "region color {} carries conflicting {}= options", id, opt);
+          }
+          return;
+        }
         if (val.size() >= 2 && ((val.front() == '\'' && val.back() == '\'') || (val.front() == '"' && val.back() == '"'))) {
           val                  = val.substr(1, val.size() - 2);
           auto [ait, inserted] = region_abc_.try_emplace(id, std::string(val));
@@ -1362,13 +1373,33 @@ private:
     j             += std::format("\"top\":\"{}\",", livehd::json_util::escape(lnast_->get_graph_name()));
     j             += "\"algorithm\":\"block-attr\",\"params\":{},\"colors\":{},"
                      "\"region_opts\":{";
-    bool first     = true;
-    for (const auto& [color, abc] : region_abc_) {
+    // Use ordered maps for stable metadata and cache recipes.
+    auto options   = region_options_;
+    for (const auto& [color, flow] : region_abc_) {
+      options[color]["flow"] = flow;
+    }
+    bool first = true;
+    for (const auto& [color, values] : options) {
       if (!first) {
         j += ",";
       }
-      first  = false;
-      j     += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, livehd::json_util::escape(abc));
+      first              = false;
+      j                 += std::format("\"{}\":{{", color);
+      bool first_option  = true;
+      for (const auto& [key, value] : values) {
+        if (!first_option) {
+          j += ",";
+        }
+        first_option  = false;
+        j            += std::format("\"{}\":", key);
+        if (key == "ware") {
+          j += value == "true" ? "true" : "false";
+        } else {
+          // Region_opts uses strings for delay; zero clears inherited timing.
+          j += std::format("\"{}\"", livehd::json_util::escape(key == "delay" && value == "0" ? "" : value));
+        }
+      }
+      j += "}";
     }
     j += "}}";
     g_->get_input_node().attr(livehd::attrs::coloring_info).set(j);
@@ -7536,11 +7567,9 @@ private:
   //
   // unique_if (the `unique if` / `match` chain) declares the conditions
   // mutually exclusive, so the per-variable merge is ONE Hotmux instead: a
-  // shared one-hot selector packs bit i = cond_i plus a final
-  // none-of-the-conds bit (the else / fall-through slot), and values ride
-  // p1..pN. The selector is one-hot by construction exactly when the
-  // uniqueness assume holds; a violation makes it multi-hot, which the
-  // Hotmux contract flags at runtime (cgen's case default).
+  // sequence of control/value pairs plus a default carrying the else or
+  // pre-if value. pass.formal checks exclusivity of the controls; simulation
+  // checks deferred obligations at runtime.
   struct Branch {
     bool     is_else{false};
     Pin      cond;
@@ -7792,43 +7821,11 @@ private:
     }
   }
 
-  // unique_if merge: one Hotmux per variable over a shared one-hot selector.
-  // Selector bit i (i < n_conds) is branches[i].cond; the top bit is
-  // "none of the conds" — the else / fall-through slot. Hotmux pins:
-  // 0 = one-hot selector, p(i+1) = arm i's value, p(n_conds+1) = else value
-  // (the variable's pre-if value when the arm / else doesn't write it).
+  // unique_if merge: direct control/value pairs plus a fall-through value.
   void lower_unique_merge(const std::vector<Branch>& branches, const std::vector<std::string>& all_vars, bool has_else,
                           const WriteMap& else_writes) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
-
-    // none = (OR of all conds) == 0: exactly one of {cond_0..cond_k, none}
-    // is set when the uniqueness assume holds. EQ (not Not) on purpose: a
-    // bitwise Not of a 1-bit bool carries infinite high bits (LSB-only by
-    // convention, safe under And but NOT under the SHL/Or packing below).
-    Pin or_all = branches[0].cond;
-    if (n_conds > 1) {
-      auto or_node = make_node(Ntype_op::Or);
-      for (int i = 0; i < n_conds; ++i) {
-        or_node.create_sink_pin(0).connect_driver(branches[i].cond);
-      }
-      or_all = or_node.create_driver_pin(0);
-      set_ubits(or_all, 1);
-    }
-    auto none_node = make_node(Ntype_op::EQ);
-    none_node.create_sink_pin(0).connect_driver(or_all);
-    none_node.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
-    const Pin none = none_node.create_driver_pin(0);
-    set_ubits(none, 1);
-
-    auto sel_node = make_node(Ntype_op::Or);
-    for (int i = 0; i < n_conds; ++i) {
-      sel_node.create_sink_pin(0).connect_driver(shl1_by(branches[i].cond, i));
-    }
-    sel_node.create_sink_pin(0).connect_driver(shl1_by(none, n_conds));
-    auto sel = sel_node.create_driver_pin(0);
-    // n_conds+1 one-hot positions require exactly n_conds+1 unsigned bits.
-    set_ubits(sel, n_conds + 1);
 
     for (const auto& var : all_vars) {
       auto       base    = pin_map_.find(var);
@@ -7950,16 +7947,16 @@ private:
       const auto mw = std::max<int32_t>(1, any_signed ? std::max(signed_mw, unsigned_mw > 0 ? unsigned_mw + 1 : 0) : unsigned_mw);
 
       auto hot = make_node(Ntype_op::Hotmux);
-      hot.create_sink_pin(0).connect_driver(sel);
       for (int i = 0; i < n_conds; ++i) {
         const Pin val = arm_values[i].is_invalid() ? create_const(*g_, *Dlop::unknown(mw)) : arm_values[i];
-        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
+        hot.create_sink_pin(static_cast<hhds::Port_id>(2 * i)).connect_driver(branches[i].cond);
+        hot.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1)).connect_driver(val);
       }
       // none-of slot: explicit else / pre value when present; otherwise an
       // exhaustive else-less match — drive the unreachable slot with a
       // width-matched don't-care (`mw`-bit 0sb?) so it adds no width pressure.
       const Pin none_val = (has_ev || has_pre) ? else_val : create_const(*g_, *Dlop::unknown(mw));
-      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(none_val);
+      hot.create_sink_pin(static_cast<hhds::Port_id>(2 * n_conds)).connect_driver(none_val);
       auto hot_out = hot.create_driver_pin(0);
       bind_result(var, hot_out, mw);
       if (any_signed) {
@@ -8877,11 +8874,16 @@ private:
     const bool                    is_mux      = type_op_of(node) == Ntype_op::Mux || type_op_of(node) == Ntype_op::Hotmux;
     TR                            mux_sel{0, 0, true};
     if (is_mux) {
-      skip_pids.insert(0);  // pid 0 = "s" — the select never adds path depth
+      const auto control_end = livehd::graph_util::hotmux_control_end(node);
       for (const auto& e : node.inp_edges()) {
-        if (!e.sink.is_invalid() && e.sink.get_port_id() == 0) {
-          mux_sel = pin_tr(e.driver);
-          break;
+        if (!e.sink.is_invalid()
+            && (type_op_of(node) == Ntype_op::Mux ? e.sink.get_port_id() == 0
+                                                  : livehd::graph_util::is_hotmux_control(e.sink.get_port_id(), control_end))) {
+          skip_pids.insert(e.sink.get_port_id());
+          const auto t = pin_tr(e.driver);
+          if (!t.any) {
+            mux_sel = mux_sel.any ? t : TR{std::min(mux_sel.min, t.min), std::max(mux_sel.max, t.max), false};
+          }
         }
       }
     }

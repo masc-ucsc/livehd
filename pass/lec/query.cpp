@@ -1691,7 +1691,13 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
       score_ctrl(graph_util::get_driver_of_sink_name(node, "b"), std::max(1, gu::real_width(node.get_driver_pin(0))));
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       ++dbg_mux;
-      score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, gu::real_width(node.get_driver_pin(0))) / 2 + 1);
+      if (op == Ntype_op::Hotmux) {
+        for (const auto& [control, value] : gu::hotmux_inputs(node).arms) {
+          score_ctrl(control, std::max(1, gu::real_width(node.get_driver_pin(0))) / 2 + 1);
+        }
+      } else {
+        score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, gu::real_width(node.get_driver_pin(0))) / 2 + 1);
+      }
     }
   }
   if (dbg) {

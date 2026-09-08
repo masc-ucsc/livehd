@@ -217,3 +217,97 @@ TEST(CpropCleanup, EnabledFlopDoesNotNeedItsDataHoldMux) {
     }
   }
 }
+
+TEST(CpropHotmux, ConstantControlsSelectValuesAndDefault) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hotmux");
+  for (int selected : {-1, 0, 1, 64}) {
+    for (bool fallback : {false, true}) {
+      auto io = lib.create_io("hotmux_" + std::to_string(selected + 1) + (fallback ? "_default" : "_zero"));
+      io->add_output("q", 1);
+      io->set_bits("q", 8);
+      auto g   = io->create_graph();
+      auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux, 8);
+      gu::set_ubits(hot.create_driver_pin(0), 8);
+      for (int i = 0; i < 65; ++i) {
+        hot.create_sink_pin(2 * i).connect_driver(gu::create_const(*g, *Dlop::create_integer(i == selected ? 1 : 0)));
+        hot.create_sink_pin(2 * i + 1).connect_driver(gu::create_const(*g, *Dlop::create_integer(i + 10)));
+      }
+      if (fallback) {
+        hot.create_sink_pin(130).connect_driver(gu::create_const(*g, *Dlop::create_integer(99)));
+      }
+      hot.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+      Cprop cp;
+      cp.do_trans(g);
+      auto edges = g->get_output_pin("q").inp_edges();
+      ASSERT_EQ(edges.size(), 1);
+      ASSERT_TRUE(edges[0].driver.is_const());
+      EXPECT_EQ(gu::const_of(edges[0].driver).to_just_i64(), selected >= 0 ? selected + 10 : fallback ? 99 : 0);
+    }
+  }
+}
+
+TEST(CpropHotmux, UnusedOverlapSurvivesForFormal) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hotmux_overlap");
+  auto  io     = lib.create_io("unused_overlap");
+  auto  g      = io->create_graph();
+  auto  hot    = gu::create_typed_node(*g, Ntype_op::Hotmux, 8);
+  for (int i = 0; i < 4; ++i) {
+    hot.create_sink_pin(i).connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
+  }
+  Cprop cp;
+  cp.do_trans(g);
+  EXPECT_FALSE(hot.is_invalid());
+}
+
+// RULING (2026-09-07): identical arms collapse for a Hotmux exactly as for a
+// Mux. When every arm value AND the all-controls-zero result are the same pin,
+// the controls cannot change the output, so the cell (and the one-hot obligation
+// riding on it) is dropped rather than kept alive as a decode cone plus its own
+// ABC region. Without a default port the zero-control result is a literal 0, so
+// that shape collapses only when the shared value IS zero.
+TEST(CpropHotmux, IdenticalArmsCollapse) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hotmux_identical");
+  // shared: 0 = the arms share a runtime value, 1 = they share the constant 0.
+  for (int shared : {0, 1}) {
+    for (bool fallback : {false, true}) {
+      auto io = lib.create_io(std::string{"identical_"} + (shared ? "zero" : "value") + (fallback ? "_default" : "_nodefault"));
+      io->add_input("c0", 1);
+      io->set_bits("c0", 1);
+      io->add_input("c1", 2);
+      io->set_bits("c1", 1);
+      io->add_input("v", 3);
+      io->set_bits("v", 8);
+      io->add_output("q", 4);
+      io->set_bits("q", 8);
+      auto g     = io->create_graph();
+      auto value = shared ? gu::create_const(*g, *Dlop::create_integer(0)) : g->get_input_pin("v");
+
+      auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux, 8);
+      gu::set_ubits(hot.create_driver_pin(0), 8);
+      hot.create_sink_pin(0).connect_driver(g->get_input_pin("c0"));
+      hot.create_sink_pin(1).connect_driver(value);
+      hot.create_sink_pin(2).connect_driver(g->get_input_pin("c1"));
+      hot.create_sink_pin(3).connect_driver(value);
+      if (fallback) {
+        hot.create_sink_pin(4).connect_driver(value);
+      }
+      hot.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+
+      Cprop cp;
+      cp.do_trans(g);
+
+      // No default port and a non-zero shared value: the zero-control case reads
+      // 0, which the arms do not, so the cell must SURVIVE.
+      const bool collapses = fallback || shared;
+      EXPECT_EQ(hot.is_invalid(), collapses);
+      auto edges = g->get_output_pin("q").inp_edges();
+      ASSERT_EQ(edges.size(), 1);
+      if (collapses) {
+        EXPECT_TRUE(edges[0].driver == value);
+      }
+    }
+  }
+}
