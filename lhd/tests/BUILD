@@ -1883,3 +1883,18 @@ sh_test(
     srcs = ["lhd_hotmux_pairs_smoke.sh"],
     data = ["//lhd", "//inou/prp:equiv_tests"],
 )
+
+sh_test(
+    name = "lhd_synth_parallel_smoke",
+    size = "large",
+    srcs = ["lhd_synth_parallel_smoke.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_boundary_parallel_smoke",
+    size = "large",
+    srcs = ["lhd_abc_boundary_test.sh"],
+    env = {"ABC_TEST_THREADS": "2"},
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)

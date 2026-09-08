@@ -2,6 +2,9 @@
 
 #include "cprop.hpp"
 
+#include <functional>
+#include <unordered_map>
+
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hlop/dlop.hpp"
@@ -311,3 +314,346 @@ TEST(CpropHotmux, IdenticalArmsCollapse) {
     }
   }
 }
+
+namespace {
+namespace gu      = livehd::graph_util;
+using Test_pin    = hhds::Pin_class;
+using Test_values = std::unordered_map<uint64_t, int64_t>;
+
+// Independent integer evaluator for the small combinational transition cones
+// below. Inputs and current state are supplied explicitly; memoization preserves
+// DAG sharing. Unsupported operators fail rather than supplying a golden value.
+int64_t mux_eval(Test_pin pin, Test_values& values) {
+  if (pin.is_const()) {
+    return gu::const_of(pin).to_just_i64();
+  }
+  auto key = static_cast<uint64_t>(pin.get_class_index().value);
+  if (auto it = values.find(key); it != values.end()) {
+    return it->second;
+  }
+  auto node = pin.get_master_node();
+  auto op   = gu::type_op_of(node);
+  auto at   = [&](int pid) {
+    auto ds = node.get_sink_pin(pid).get_driver_pins();
+    EXPECT_EQ(ds.size(), 1);
+    return ds.empty() ? int64_t{0} : mux_eval(ds.front(), values);
+  };
+  int64_t result = 0;
+  if (op == Ntype_op::Mux) {
+    result = at(at(0) != 0 ? 2 : 1);
+  } else if (op == Ntype_op::Hotmux) {
+    auto inputs = gu::hotmux_inputs(node);
+    bool found  = false;
+    for (const auto& [control, value] : inputs.arms) {
+      if (mux_eval(control, values) != 0) {
+        EXPECT_FALSE(found) << "a rewritten Hotmux must remain one-hot";
+        found  = true;
+        result = mux_eval(value, values);
+      }
+    }
+    if (!found && !inputs.fallback.is_invalid()) {
+      result = mux_eval(inputs.fallback, values);
+    }
+  } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Ror || op == Ntype_op::EQ) {
+    result           = op == Ntype_op::And ? -1 : 0;
+    bool    first    = true;
+    int64_t previous = 0;
+    for (const auto& e : node.inp_edges()) {
+      auto value = mux_eval(e.driver, values);
+      if (op == Ntype_op::And) {
+        result &= value;
+      } else if (op == Ntype_op::Or || op == Ntype_op::Ror) {
+        result |= value;
+      } else {
+        if (first) {
+          result = 1;
+        } else {
+          result &= previous == value;
+        }
+        previous = value;
+        first    = false;
+      }
+    }
+    if (op == Ntype_op::Ror) {
+      result = result != 0;
+    }
+  } else {
+    ADD_FAILURE() << "unbound input/state or unsupported evaluator op " << gu::debug_name(node);
+  }
+  values.emplace(key, result);
+  return result;
+}
+
+struct Mux_graph {
+  std::shared_ptr<hhds::Graph> graph;
+  int                          width;
+  bool                         signed_data;
+  std::vector<Test_pin>        controls;
+  Test_pin                     a, b, en, clock;
+
+  Mux_graph(const std::string& name, int count, int bits = 32, bool sign = false, bool wide_control = false)
+      : width(bits), signed_data(sign) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_cprop_mux_sharing");
+    auto  io  = lib.create_io(name);
+    for (int i = 0; i < count; ++i) {
+      const auto s = "c" + std::to_string(i);
+      io->add_input(s, i + 1);
+      io->set_bits(s, wide_control ? 8 : 1);
+    }
+    io->add_input("a", count + 1);
+    io->set_bits("a", bits);
+    io->add_input("b", count + 2);
+    io->set_bits("b", bits);
+    io->add_input("en", count + 3);
+    io->set_bits("en", 1);
+    io->add_input("clock", count + 4);
+    io->set_bits("clock", 1);
+    io->add_output("out", count + 5);
+    io->set_bits("out", bits);
+    io->add_output("observe", count + 6);
+    io->set_bits("observe", bits);
+    graph = io->create_graph();
+    for (int i = 0; i < count; ++i) {
+      controls.push_back(graph->get_input_pin("c" + std::to_string(i)));
+    }
+    a     = graph->get_input_pin("a");
+    b     = graph->get_input_pin("b");
+    en    = graph->get_input_pin("en");
+    clock = graph->get_input_pin("clock");
+    if (sign) {
+      gu::set_sbits(a, bits);
+      gu::set_sbits(b, bits);
+    }
+  }
+  Test_pin         constant(int64_t value) { return gu::create_const(*graph, *Dlop::create_integer(value)); }
+  hhds::Node_class node(Ntype_op op, int bits = 0) {
+    auto n = gu::create_typed_node(*graph, op, bits ? bits : width);
+    if (signed_data && !bits) {
+      gu::set_sbits(n.create_driver_pin(0), width);
+    } else {
+      gu::set_ubits(n.create_driver_pin(0), bits ? bits : width);
+    }
+    return n;
+  }
+  Test_pin mux(Test_pin s, Test_pin f, Test_pin t) {
+    auto n = node(Ntype_op::Mux);
+    n.create_sink_pin(0).connect_driver(s);
+    n.create_sink_pin(1).connect_driver(f);
+    n.create_sink_pin(2).connect_driver(t);
+    return n.create_driver_pin(0);
+  }
+  Test_pin eq(Test_pin selector, int64_t value) {
+    auto n = node(Ntype_op::EQ, 1);
+    n.create_sink_pin(0).connect_driver(selector);
+    n.create_sink_pin(0).connect_driver(constant(value));
+    return n.create_driver_pin(0);
+  }
+  Test_pin output() { return graph->get_output_pin("out").get_driver_pins().front(); }
+  size_t   count(Ntype_op op) {
+    size_t result = 0;
+    for (auto n : graph->body().nodes()) {
+      result += gu::type_op_of(n) == op;
+    }
+    return result;
+  }
+  Test_values inputs(uint64_t mask, int64_t av, int64_t bv, bool enabled = true, bool wide = false) {
+    Test_values result;
+    auto        put = [&](Test_pin p, int64_t v) { result.emplace(p.get_class_index().value, v); };
+    put(a, av);
+    put(b, bv);
+    put(en, enabled);
+    put(clock, 0);
+    for (size_t i = 0; i < controls.size(); ++i) {
+      put(controls[i], mask & (uint64_t{1} << (i % 64)) ? (wide ? 32 : 1) : 0);
+    }
+    return result;
+  }
+};
+
+TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
+  for (bool sign : {false, true}) {
+    Mux_graph f(sign ? "priority_signed" : "priority_unsigned", 6, 32, sign, true);
+    auto      root = f.b;
+    for (int i = 5; i >= 0; --i) {
+      root = f.mux(f.controls[i], root, i % 2 ? f.b : f.a);
+    }
+    root.connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    EXPECT_EQ(f.count(Ntype_op::Mux), 0);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+    EXPECT_EQ(gu::bits_of(f.output()), 32);
+    EXPECT_EQ(gu::is_unsign(f.output()), !sign);
+    for (uint64_t mask = 0; mask < 64; ++mask) {
+      for (int64_t av : {0, 1, 127}) {
+        const int64_t bv       = sign ? -117 : 219;
+        int64_t       expected = bv;
+        for (int i = 0; i < 6; ++i) {
+          if (mask & (uint64_t{1} << i)) {
+            expected = i % 2 ? bv : av;
+            break;
+          }
+        }
+        auto values = f.inputs(mask, av, bv, true, true);
+        EXPECT_EQ(mux_eval(f.output(), values), expected) << mask;
+      }
+    }
+    Cprop{}.do_trans(f.graph);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+  }
+}
+
+TEST(CpropMuxSharing, HotmuxGroupsOnlyEstablishedExclusiveControls) {
+  for (int proof : {0, 1, 2, 3}) {
+    for (bool fallback : {false, true}) {
+      Mux_graph f("hot_group_" + std::to_string(proof) + (fallback ? "_default" : "_zero"), 4);
+      auto      n = f.node(Ntype_op::Hotmux);
+      for (int i = 0; i < 4; ++i) {
+        // Proof 1 is a decode; proof 2 is an existing formal certificate;
+        // proof 3 deliberately repeats a decoded constant and must be refused.
+        auto c = proof == 1 || proof == 3 ? f.eq(f.a, proof == 3 ? i % 2 : i) : f.controls[i];
+        n.create_sink_pin(2 * i).connect_driver(c);
+        n.create_sink_pin(2 * i + 1).connect_driver(i % 2 ? f.b : f.constant(17));
+      }
+      if (fallback) {
+        n.create_sink_pin(8).connect_driver(f.constant(99));
+      }
+      if (proof == 2) {
+        gu::set_proven(n, gu::kFormalOnehot);
+      }
+      n.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+      Cprop{}.do_trans(f.graph);
+      const auto arms = gu::hotmux_inputs(f.output().get_master_node());
+      EXPECT_EQ(arms.arms.size(), proof == 1 || proof == 2 ? 2 : 4);
+      if (proof == 0 || proof == 3) {
+        EXPECT_FALSE(gu::has_proven(n));
+        continue;
+      }
+      for (uint64_t selection = 0; selection < 5; ++selection) {
+        auto          values   = f.inputs(selection < 4 ? uint64_t{1} << selection : 0, selection, 211);
+        const int64_t expected = selection == 4 ? (fallback ? 99 : 0) : (selection % 2 ? 211 : 17);
+        EXPECT_EQ(mux_eval(f.output(), values), expected);
+      }
+    }
+  }
+}
+
+TEST(CpropMuxSharing, DistributedHoldExtractsEnableOnlyForSingleStagePrivateFlop) {
+  for (int variant : {0, 1, 2}) {
+    Mux_graph f("distributed_hold_" + std::to_string(variant), 6);
+    auto      flop = f.node(Ntype_op::Flop);
+    auto      q    = flop.create_driver_pin(0);
+    gu::setup_sink_by_name(flop, "enable").connect_driver(f.en);
+    gu::setup_sink_by_name(flop, "clock_pin").connect_driver(f.clock);
+    gu::setup_sink_by_name(flop, "posclk").connect_driver(f.constant(1));
+    gu::setup_sink_by_name(flop, "reset_pin").connect_driver(f.controls[5]);
+    gu::setup_sink_by_name(flop, "initial").connect_driver(f.constant(37));
+    if (variant == 1) {
+      gu::setup_sink_by_name(flop, "pipe_min").connect_driver(f.constant(2));
+    }
+    auto root = q;
+    for (int i = 4; i >= 0; --i) {
+      root = f.mux(f.controls[i], root, i % 2 ? q : f.a);
+    }
+    root.connect_sink(gu::setup_sink_by_name(flop, "din"));
+    if (variant == 2) {
+      root.connect_sink(f.graph->get_output_pin("observe"));
+    }
+    q.connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    const auto enable = gu::get_driver_of_sink_name(flop, "enable");
+    const auto data   = gu::get_driver_of_sink_name(flop, "din");
+    EXPECT_EQ(enable == f.en, variant != 0);
+    EXPECT_EQ(gu::get_driver_of_sink_name(flop, "reset_pin"), f.controls[5]);
+    EXPECT_EQ(gu::const_of(gu::get_driver_of_sink_name(flop, "initial")).to_just_i64(), 37);
+    for (uint64_t mask = 0; mask < 64; ++mask) {
+      for (bool enabled : {false, true}) {
+        auto values                       = f.inputs(mask, 73, 211, enabled);
+        values[q.get_class_index().value] = 149;
+        int64_t expected                  = 149;
+        if (enabled) {
+          for (int i = 0; i < 5; ++i) {
+            if (mask & (uint64_t{1} << i)) {
+              expected = i % 2 ? 149 : 73;
+              break;
+            }
+          }
+        }
+        // The single-stage transition includes reset, whose priority must stay
+        // outside the newly derived enable. For a pipeline compare the input
+        // and enable separately, rather than pretending its last Q is stage 1.
+        const auto actual = mux_eval(enable, values) ? mux_eval(data, values) : 149;
+        EXPECT_EQ(actual, expected);
+        if (variant == 0) {
+          EXPECT_EQ(mask & 32 ? 37 : actual, mask & 32 ? 37 : expected);
+        }
+      }
+    }
+  }
+}
+
+TEST(CpropMuxSharing, SharedSubconeRemainsAnOpaqueTerminal) {
+  Mux_graph f("shared_boundary", 6);
+  auto      shared = f.mux(f.controls[0], f.a, f.b);
+  shared.connect_sink(f.graph->get_output_pin("observe"));
+  auto root = shared;
+  for (int i = 5; i >= 1; --i) {
+    root = f.mux(f.controls[i], root, i % 2 ? shared : f.a);
+  }
+  root.connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_FALSE(shared.is_invalid());
+  EXPECT_EQ(gu::type_op_of(shared.get_master_node()), Ntype_op::Mux);
+  for (uint64_t mask = 0; mask < 64; ++mask) {
+    auto values          = f.inputs(mask, 71, 193);
+    auto expected_shared = mask & 1 ? 193 : 71;
+    auto expected        = expected_shared;
+    for (int i = 1; i < 6; ++i) {
+      if (mask & (uint64_t{1} << i)) {
+        expected = i % 2 ? expected_shared : 71;
+        break;
+      }
+    }
+    EXPECT_EQ(mux_eval(f.output(), values), expected);
+    EXPECT_EQ(mux_eval(shared, values), expected_shared);
+  }
+}
+
+TEST(CpropMuxSharing, DeepPriorityChainHasLinearGeneratedSize) {
+  // A path-literal implementation would copy roughly depth^2/2 predicates.
+  // This exercises the iterative traversal and checks the generated graph,
+  // rather than putting a flaky wall-clock threshold in a regression.
+  constexpr int depth = 2048;
+  Mux_graph     f("deep_chain", depth);
+  auto          root = f.b;
+  for (int i = depth - 1; i >= 0; --i) {
+    root = f.mux(f.controls[i], root, i % 2 ? f.b : f.a);
+  }
+  root.connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  size_t nodes = 0, edges = 0;
+  for (auto n : f.graph->body().nodes()) {
+    ++nodes;
+    edges += n.inp_edges().size();
+  }
+  EXPECT_EQ(f.count(Ntype_op::Mux), 0);
+  EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+  EXPECT_LT(nodes, 5 * depth);
+  EXPECT_LT(edges, 12 * depth);
+}
+
+TEST(CpropMuxSharing, NarrowAndColoredMuxesAreNotExpanded) {
+  for (bool colored : {false, true}) {
+    Mux_graph f(colored ? "colored_mux" : "narrow_mux", 6, colored ? 32 : 1);
+    auto      root = f.b;
+    for (int i = 5; i >= 0; --i) {
+      root = f.mux(f.controls[i], root, i % 2 ? f.b : f.a);
+      if (colored) {
+        gu::set_color(root.get_master_node(), 7);
+      }
+    }
+    root.connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+  }
+}
+}  // namespace

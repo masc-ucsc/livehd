@@ -1,9 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,6 +14,7 @@
 
 #include "abc_arith.hpp"     // arith::Adder_kind
 #include "abc_boundary.hpp"  // Boundary_table
+#include "abc_parallel.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
@@ -133,6 +136,7 @@ struct Map_options {
   // reproducible hosts/CI (0 => physical RAM minus an OS reserve);
   // `allow_oversize` acknowledges the risk and disables the guard.
   int               memory_budget_mb = 16384;
+  unsigned          threads          = 1;  // 0: available CPUs; synth defaults to automatic
   uint64_t          time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
   bool              allow_oversize   = false;
   // Partition-boundary environment (abc_boundary.cpp). A region's ports are
@@ -284,11 +288,18 @@ public:
   explicit Mapper(const Map_options& opts) : startup_opts_(opts), opts_(opts) {}
   ~Mapper() { stop(); }
 
-  // Idempotent lazy initialization: Abc_Start + read_lib on the first miss.
+  // Idempotent lazy initialization: a private ABC frame + read_lib on the first miss.
   // The destructor is a backstop for diagnostics that unwind a region callback.
   bool start();
-  void stop();  // Abc_Stop
+  void stop();  // destroy this mapper's private frame
   void map_region(const livehd::partition::Region_body& rb);
+  void map_regions(std::span<const livehd::partition::Region_body> regions);
+  void finish_parallel() {
+    for (auto& worker : parallel_mappers_) {
+      worker->stop();
+    }
+  }
+  [[nodiscard]] const Parallel_stats& parallel_stats() const { return parallel_stats_; }
 
   // Trial only colors on a stitched mapped-cell critical path. No physical
   // flattening: the scorer keeps distinct occurrence contexts across modules.
@@ -350,6 +361,12 @@ public:
   [[nodiscard]] const std::string* time_refusal() const { return time_refusal_.empty() ? nullptr : &time_refusal_; }
 
 private:
+  Parallel_stats                       parallel_stats_;
+  std::mutex                           graph_mutex_;
+  Mapper*                              coordinator_ = nullptr;
+  std::atomic<unsigned>                active_abc_{0};
+  // Reuse private sessions across bounded partition batches.
+  std::vector<std::unique_ptr<Mapper>> parallel_mappers_;
   struct Ware_region {
     livehd::partition::Region_body rb;
     std::vector<hhds::Node_class>  nodes;
@@ -363,7 +380,7 @@ private:
     absl::flat_hash_map<std::string, float> region_path_delay;
   };
   Ware_score               score_ware(hhds::GraphLibrary& outlib, std::string_view top);
-  void                     remember_ware(const livehd::partition::Region_body& rb);
+  void                     remember_ware(const livehd::partition::Region_body& rb, const Map_options& options);
   std::vector<Ware_region> ware_regions_;
   hhds::GraphLibrary       ware_shells_, ware_sources_;
   bool                     ware_trial_ = false;

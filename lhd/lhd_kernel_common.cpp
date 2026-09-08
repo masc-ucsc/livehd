@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -863,6 +864,15 @@ void check_known_set_passes(const Options& opts) {
                         std::format("the synth.* namespace takes: {}; pass tuning rides the pass namespaces (abc.*, color.*, "
                                     "opentimer.*)",
                                     known)};
+      }
+      if (opt->kind == Synth_set_option::Kind::integer) {
+        unsigned parsed      = 0;
+        const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+        if (ec != std::errc{} || end != value.data() + value.size()) {
+          throw Lhd_error{"usage",
+                          std::format("--set/--config synth.{} expects a non-negative integer, got '{}'", flag, value),
+                          ""};
+        }
       }
       if (opt->kind == Synth_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
           && value != "on" && value != "off") {

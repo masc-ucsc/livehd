@@ -131,3 +131,10 @@ cc_test(
 )
 
 exports_files(["abc_arith.hpp"])
+
+cc_test(
+    name = "abc_parallel_test",
+    srcs = ["abc_parallel_test.cpp", "abc_parallel.cpp", "abc_parallel.hpp"],
+    copts = COPTS,
+    deps = ["@googletest//:gtest_main"],
+)

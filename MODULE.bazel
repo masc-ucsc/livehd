@@ -247,10 +247,10 @@ http_archive(
 new_git_repository(
     name = "abc",
     build_file = "//packages:abc.BUILD",  # relative to external path
-    commit = "bcfdf592289a408cd67ec19260f8a60a37b085b6",
+    commit = "fbaae01487b05982739a5636df30687f41a10a2d",
     patches = ["//packages:abc.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
-    shallow_since = "1554534526 -1000",
+    shallow_since = "1788673176 -0700",
 )
 
 # Yosys main, including its built-in read_slang frontend. sv-elab and

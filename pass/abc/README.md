@@ -20,6 +20,38 @@ become constant; dynamic sites retain reuse. The body-builder hook
 replaces each region body with an ABC-mapped netlist instead of the original
 logic.
 
+## Parallel synthesis
+
+`lhd synth` defaults to `--set synth.threads=0`: use the machine's available
+logical CPUs as the maximum worker count. A positive value caps that count;
+`1` selects serial mapping. Standalone `lhd pass abc` keeps its serial default
+and exposes the same policy through `--set abc.threads=N`.
+
+Independent regions within a definition can optimize concurrently in private
+ABC sessions. Graph translation, netlist read-back, cache access and graph
+library updates are serialized. Partition-boundary refinement and ware trials
+run after every region is complete. Source/pre-body storage is held in bounded
+batches, and parsed worker libraries are reused across those batches.
+
+Before launching a worker, the scheduler checks aggregate process physical
+footprint, outstanding reservations for running jobs, and the next region's
+projected memory against **half of installed RAM** (or a smaller configured
+process budget). The projection uses the existing AIG-size predictor plus an
+allowance for a private ABC session and its Liberty tables. Reservations cover
+workers that have not allocated yet; actual footprint takes precedence when
+it exceeds the projection. Insufficient headroom waits for running jobs; when
+no worker can be admitted, the caller maps serially under the existing memory
+limits. Unknown host memory also selects serial execution. `allow_oversize`
+does not bypass the parallel admission gate.
+
+`qor.json` includes `parallel.requested`, `limit`, `peak_workers`, `peak_abc`,
+`memory_limit_bytes`, and `memory_waits`. `peak_abc` counts overlapping ABC
+optimization phases. Process peak RSS remains meaningful with threads;
+`color_peak_rss_kb` is omitted for concurrently scheduled regions because a
+process-wide sample cannot attribute memory to an individual thread. Region
+reports keep partition order, and changing the thread cap does not invalidate
+otherwise reusable region-cache entries.
+
 ## Flow
 
 ```
@@ -393,6 +425,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `ware` | automatically minimize stitched Liberty delay with a timing target, or mapped area without one | `true` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
+| `threads` | maximum ABC workers (`0` = available CPUs); `lhd synth` sets this through `synth.threads`, which defaults to `0` | `1` |
 | `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree` locks the multiplier and its internal adder | `auto` |

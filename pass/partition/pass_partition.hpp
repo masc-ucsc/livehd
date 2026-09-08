@@ -71,7 +71,11 @@ struct Region_body {
 };
 
 // Called once per region. If unset, partition recreates the original logic.
-using Body_builder = std::function<void(const Region_body&)>;
+using Body_builder       = std::function<void(const Region_body&)>;
+// A synchronous batch of independent regions from one definition. All source,
+// body, node-span and pre-body storage remains alive until the callback returns.
+// Graph-library mutations still require serialization inside a parallel builder.
+using Body_batch_builder = std::function<void(std::span<const Region_body>)>;
 
 // Whole-design flatten policy for build_decomposition. `automatic` flattens
 // exactly when the top's active coloring was produced by `pass.color flat`
@@ -131,6 +135,7 @@ public:
   // classic/flatten paths); the flatten as-top region never gets one.
   static bool build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                   std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
-                                  livehd::partition::Flatten_mode flatten         = livehd::partition::Flatten_mode::off,
-                                  bool                            want_pre_bodies = false);
+                                  livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off,
+                                  bool want_pre_bodies = false, const livehd::partition::Body_batch_builder& batch_hook = {},
+                                  size_t batch_size = 64);
 };

@@ -3853,6 +3853,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] boo
   // created twin from the hash-cons.
   cse_pass(stable_nodes(current_graph));
   enforce_lossless_carriers(current_graph);
+  mux_share_pass();
   // The front ends sometimes spell an unconditional latch write as a
   // tautological enable cone (for example, a full case/default). The sweep
   // above reduces that cone to a constant; revisit the latches so the now

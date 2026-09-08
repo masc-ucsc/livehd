@@ -283,9 +283,13 @@ void synth_command(Options& opts, Result& res) {
     fs::remove_all(net_dir, ec);  // pass abc's rule: the out library is rebuilt every run
     ensure_dir(net_dir);
     Eprp_var::Eprp_dict labels;
-    labels["top"] = top;
-    labels["out"] = net_dir;
-    labels["qor"] = qor_path;
+    labels["top"]     = top;
+    labels["out"]     = net_dir;
+    labels["qor"]     = qor_path;
+    // BEFORE merge_sets: unlike `library`, `pass.abc.threads` is a legal user
+    // knob, so synth.threads is the DEFAULT an explicit `--set abc.threads=N`
+    // still overrides rather than a value that silently discards it.
+    labels["threads"] = synth_set(opts, "threads", "0");
     merge_sets(opts, "pass.abc", labels);
     labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
     if (opts.stats) {

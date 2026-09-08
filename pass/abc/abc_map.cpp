@@ -19,6 +19,8 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -52,6 +54,7 @@
 #include "predict_abc_size.hpp"
 #include "rapidjson/document.h"
 #include "synthesis_cost.hpp"
+#include "worker_pool.hpp"
 
 // clang-format off
 // ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
@@ -496,15 +499,16 @@ void Mapper::ensure_dff_cells() {
 
 bool Mapper::start() {
   if (pabc_ != nullptr) {
+    Abc_FrameEnter(static_cast<Abc_Frame_t*>(pabc_));
     return lib_loaded_;
   }
-  Abc_Start();
-  pabc_ = Abc_FrameGetGlobalFrame();
+  pabc_ = Abc_FrameCreate();
   if (pabc_ == nullptr) {
     livehd::diag::err("pass.abc", "abc-frame", "internal").msg("could not initialize the ABC frame").fatal();
     return false;
   }
   auto* frame = static_cast<Abc_Frame_t*>(pabc_);
+  Abc_FrameEnter(frame);
   // Install the abc.rc synthesis-script aliases (resyn2, compress2rs, ...) so a
   // user `--set pass.abc.flow="resyn2"` resolves. Best-effort: a malformed alias
   // would only fail later when used in `flow`, so do not abort the run here.
@@ -635,9 +639,20 @@ bool Mapper::start() {
   return true;
 }
 
+// Releases only THIS mapper's frame. It must not cascade into
+// parallel_mappers_: map_regions calls stop() to drop a serial session before a
+// batch, and tearing the workers' parsed Liberty down there would re-read the
+// library once per worker per batch. finish_parallel() (and, as a backstop,
+// ~Mapper destroying the unique_ptrs) owns the workers' sessions.
 void Mapper::stop() {
   if (pabc_ != nullptr) {
-    Abc_Stop();
+    auto* frame = static_cast<Abc_Frame_t*>(pabc_);
+    if (Abc_FrameReadGlobalFrame() == frame) {
+      Abc_FrameLeave(nullptr);
+    }
+    Abc_FrameDestroy(frame);
+    cell_descs_.clear();
+    twin_index_.clear();
     pabc_          = nullptr;
     // The frame owned the parsed SCL library; a later start() must re-decide.
     // (`lib_loaded_` deliberately survives -- work() reads abc_started() AFTER
@@ -1109,11 +1124,20 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // against the process-wide PHYSICAL budget instead. On Darwin RLIMIT_AS has
   // separate VA-only allocator headroom (host_mem.cpp); admission must not count
   // that as physical capacity. A zero budget still means "unenforceable".
-  const uint64_t total_ceiling  = cost::configured_budget_bytes();
-  const bool     over_growth    = grown > budget;                             // this region alone
-  const bool     over_total     = total_ceiling != 0 && rss > total_ceiling;  // the process is at the hard limit
-  const bool     over_now       = over_growth || over_total;
-  const bool     over_projected = grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
+  uint64_t total_ceiling = cost::configured_budget_bytes();
+  if (coordinator_ && coordinator_->parallel_stats_.memory_limit != 0) {
+    total_ceiling = total_ceiling ? std::min(total_ceiling, coordinator_->parallel_stats_.memory_limit)
+                                  : coordinator_->parallel_stats_.memory_limit;
+  }
+  // Concurrent colors share the process reading; their growth cannot be
+  // attributed to one region. Keep the aggregate allowance under the absolute
+  // process ceiling above.
+  const uint64_t growth_budget = gu::sat_mul(budget, coordinator_ ? coordinator_->parallel_stats_.limit : 1U);
+  const bool     over_growth   = grown > growth_budget;
+  const bool     over_total    = total_ceiling != 0 && rss > total_ceiling;
+  const bool     over_now      = over_growth || over_total;
+  const bool     over_projected
+      = coordinator_ == nullptr && grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
   if (!over_now && !over_projected) {
     return false;
   }
@@ -1124,7 +1148,14 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // verbatim and no reserve is subtracted, so quoting a reserve there would be
   // a second such invention.
   const std::string budget_desc
-      = (!over_growth && over_total)
+      = coordinator_
+            ? (over_total ? std::format("parallel process physical-memory ceiling {} MiB (half of physical RAM or the smaller "
+                                        "configured process budget)",
+                                        mib(total_ceiling))
+                          : std::format("aggregate worker growth budget {} MiB ({} workers; process-wide growth since color entry)",
+                                        mib(growth_budget),
+                                        coordinator_->parallel_stats_.limit))
+        : (!over_growth && over_total)
             ? std::format(
                   "process physical-memory ceiling {} MiB (LIVEHD_MEMORY_BUDGET_MB, else physical minus reserve; Darwin "
                   "RLIMIT_AS has separate VA-only allocator headroom) -- the whole-PROCESS footprint, not this color's growth",
@@ -1137,18 +1168,19 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // Once earlier colors exist to blame, say so: their retained memory is the
   // cost, and the caller's stock `color.max_gate=<smaller>` hint is then the
   // wrong advice.
-  const std::string cause = (over_growth || qor_.empty())
+  const std::string cause = (coordinator_ || over_growth || qor_.empty())
                                 ? std::string{}
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-      "(was {} MiB, color added {} MiB){}, {}{}",
+      "(was {} MiB, {} added {} MiB){}, {}{}",
       region,
       blasted,
       total,
       100.0 * fraction,
       mib(rss),
       mib(rss_before),
+      coordinator_ ? "process" : "color",
       mib(grown),
       over_now ? std::string{} : std::format(", projected color growth {} MiB", mib(projected_growth)),
       budget_desc,
@@ -1328,7 +1360,249 @@ Mapper::Cell_desc& Mapper::cell_desc_for(void* mio_gate) {
   return desc;
 }
 
+namespace {
+uint64_t parallel_memory_limit() {
+  const auto half       = cost::physical_ram_bytes() / 2;
+  const auto configured = cost::configured_budget_bytes();
+  return configured && half ? std::min(half, configured) : half;
+}
+}  // namespace
+
+void Mapper::map_regions(std::span<const livehd::partition::Region_body> regions) {
+  if (!refusal_.empty() || !time_refusal_.empty()) {
+    return;
+  }
+  const auto     ware_begin    = ware_regions_.size();
+  const unsigned limit         = synthesis_thread_limit(opts_.threads, std::thread::hardware_concurrency());
+  parallel_stats_.limit        = limit;
+  parallel_stats_.memory_limit = parallel_memory_limit();
+  if (limit == 1 || regions.size() < 2 || parallel_stats_.memory_limit == 0) {
+    for (const auto& rb : regions) {
+      map_region(rb);
+    }
+    return;
+  }
+
+  // The partitioner owns every span/pre-body until this synchronous batch
+  // returns. Workers share graph storage only while holding graph_mutex_.
+  if (pabc_) {
+    stop();  // release THIS mapper's serial session; the workers keep theirs
+  }
+  const uint64_t        baseline = cost::process_footprint_bytes();
+  std::error_code       ec;
+  const auto            library_size  = std::filesystem::file_size(opts_.library, ec);
+  const uint64_t        liberty_bytes = ec ? 0 : library_size;
+  std::vector<uint64_t> projections;
+  for (const auto& rb : regions) {
+    uint64_t aig = 0;
+    for (const auto& node : rb.nodes) {
+      aig = gu::sat_add(aig, gu::predict_abc_size(node));
+    }
+    projections.push_back(projected_abc_memory(aig, liberty_bytes));
+  }
+  const uint32_t first_id  = next_region_id_;
+  next_region_id_         += static_cast<uint32_t>(regions.size());
+  struct Lane {
+    Mapper*              mapper = nullptr;
+    // NOT std::async/std::thread: Darwin gives a secondary thread 512 KiB and
+    // both ABC's recursive DFS/mapping helpers and the HHDS read-back walk
+    // overflow that in -c dbg (see core/worker_pool.hpp kWorkerStackBytes).
+    livehd::Async_worker result;
+    size_t               job        = 0;
+    uint64_t             projection = 0;
+  };
+  std::vector<Lane> lanes(std::min<size_t>(limit, regions.size()));
+  for (size_t i = 0; i < lanes.size() && i < parallel_mappers_.size(); ++i) {
+    lanes[i].mapper = parallel_mappers_[i].get();
+  }
+  std::vector<std::optional<Region_qor>> results(regions.size());
+  std::exception_ptr                     failure;
+  size_t                                 next     = 0;
+  unsigned                               active   = 0;
+  uint64_t                               reserved = 0;
+  std::mutex                             done_mutex;
+  std::condition_variable                done;
+  // A refusal is a ROOT CAUSE, so the one the run reports must be the FIRST
+  // region's in partition order -- not whichever lane happened to finish first.
+  size_t                                 refusal_job = regions.size();
+  std::string                            first_refusal, first_time_refusal;
+  auto                                   note_refusal = [&](size_t job, const std::string& refusal, const std::string& timeout) {
+    if ((refusal.empty() && timeout.empty()) || job >= refusal_job) {
+      return;
+    }
+    refusal_job        = job;
+    first_refusal      = refusal;
+    first_time_refusal = timeout;
+  };
+  // Even a failed thread creation must join existing jobs before their captured
+  // result buffers, condition variable and region views are destroyed.
+  struct Drain {
+    std::vector<Lane>& lanes;
+    ~Drain() {
+      for (auto& lane : lanes) {
+        lane.result.join();
+      }
+    }
+  } drain{lanes};
+
+  auto harvest = [&] {
+    for (auto& lane : lanes) {
+      if (!lane.result.ready()) {
+        continue;
+      }
+      try {
+        lane.result.get();
+      } catch (...) {
+        if (!failure) {
+          failure = std::current_exception();
+        }
+      }
+      --active;
+      reserved -= lane.projection;
+      note_refusal(lane.job, lane.mapper->refusal_, lane.mapper->time_refusal_);
+    }
+  };
+
+  // Nothing is running and no worker fits: there is no allocation to wait for,
+  // so map this region on the caller's thread under the existing per-color and
+  // process memory limits instead of spinning on the admission gate.
+  auto map_serially = [&](size_t job) {
+    const auto saved_id = next_region_id_;
+    next_region_id_     = first_id + static_cast<uint32_t>(job);
+    const auto n        = qor_.size();
+    map_region(regions[job]);
+    if (qor_.size() != n) {
+      results[job] = std::move(qor_.back());
+      qor_.pop_back();
+    }
+    next_region_id_ = saved_id;
+    note_refusal(job, refusal_, time_refusal_);
+  };
+
+  while (next < regions.size() || active != 0) {
+    harvest();
+    if (failure || refusal_job != regions.size()) {
+      next = regions.size();  // drain running work without launching more
+    }
+    bool launched = false;
+    if (next < regions.size()) {
+      for (auto& lane : lanes) {
+        if (lane.result.valid()) {
+          continue;
+        }
+        const uint64_t actual     = cost::process_footprint_bytes();
+        const auto     projection = projections[next];
+        if (!admit_abc_worker(parallel_stats_.memory_limit, actual, baseline, reserved, projection)) {
+          ++parallel_stats_.memory_waits;
+          if (active == 0) {
+            map_serially(next++);
+            launched = true;
+          }
+          break;
+        }
+        if (!lane.mapper) {
+          std::lock_guard lock(graph_mutex_);
+          auto            worker     = std::make_unique<Mapper>(startup_opts_);
+          worker->coordinator_       = this;
+          worker->outlib_            = outlib_;
+          worker->flat_              = flat_;
+          worker->incr_              = incr_;
+          worker->region_opts_cli_   = region_opts_cli_;
+          worker->graph_region_opts_ = graph_region_opts_;
+          worker->dff_               = dff_;
+          worker->dff_ladder_        = dff_ladder_;
+          worker->dff_preset_        = dff_preset_;
+          lane.mapper                = worker.get();
+          parallel_mappers_.push_back(std::move(worker));
+        }
+        // Creating the worker's graph state may have waited for translation
+        // under graph_mutex_. Recheck actual memory immediately before launch.
+        if (!admit_abc_worker(parallel_stats_.memory_limit, cost::process_footprint_bytes(), baseline, reserved, projection)) {
+          ++parallel_stats_.memory_waits;
+          if (active == 0) {
+            map_serially(next++);
+            launched = true;
+          }
+          break;
+        }
+        // Nothing is committed until the thread actually starts: a failed
+        // pthread_create must not leave a phantom reservation behind.
+        lane.job                     = next;
+        lane.projection              = projection;
+        lane.mapper->next_region_id_ = first_id + static_cast<uint32_t>(lane.job);
+        lane.result.start([&, worker = lane.mapper, job = lane.job] {
+          struct Notify {
+            std::mutex&              mu;
+            std::condition_variable& cv;
+            ~Notify() {
+              {
+                const std::lock_guard lock(mu);  // close the lost-wakeup window
+              }
+              cv.notify_one();
+            }
+          } notify{done_mutex, done};
+          worker->map_region(regions[job]);
+          if (!worker->qor_.empty()) {
+            results[job] = std::move(worker->qor_.back());
+            worker->qor_.clear();
+          }
+        });
+        ++next;
+        reserved += projection;
+        ++active;
+        parallel_stats_.peak_workers = std::max(parallel_stats_.peak_workers, active);
+        launched                     = true;
+        break;  // resample actual memory before each additional admission
+      }
+    }
+    if (!launched && active != 0) {
+      std::unique_lock lock(done_mutex);
+      done.wait_for(lock, std::chrono::milliseconds(20));
+    }
+  }
+
+  // All workers are joined: publish in partition order, independent of timing.
+  // No ABC-owned pointer crosses sessions. Boundary refinement gets its own
+  // session; only graph snapshots, options and plain QoR values are merged.
+  for (auto& lane : lanes) {
+    if (!lane.mapper) {
+      continue;
+    }
+    auto& worker  = *lane.mapper;
+    lib_loaded_  |= worker.lib_loaded_;
+    region_delay_targets_.insert(worker.region_delay_targets_.begin(), worker.region_delay_targets_.end());
+    worker.region_delay_targets_.clear();
+  }
+  if (refusal_job != regions.size()) {
+    refusal_      = first_refusal;  // the lowest-index region's, whoever mapped it
+    time_refusal_ = first_time_refusal;
+  }
+  for (auto& row : results) {
+    if (row) {
+      qor_.push_back(std::move(*row));
+    }
+  }
+  const auto order = [&](std::string_view module) {
+    return std::find_if(regions.begin(), regions.end(), [&](const auto& rb) { return rb.module_name == module; }) - regions.begin();
+  };
+  std::stable_sort(ware_regions_.begin() + static_cast<std::ptrdiff_t>(ware_begin),
+                   ware_regions_.end(),
+                   [&](const auto& a, const auto& b) { return order(a.rb.module_name) < order(b.rb.module_name); });
+  if (failure) {
+    std::rethrow_exception(failure);
+  }
+}
+
 void Mapper::map_region(const livehd::partition::Region_body& rb) {
+  std::unique_lock graph_lock(coordinator_ ? coordinator_->graph_mutex_ : graph_mutex_);
+  if (!coordinator_) {
+    parallel_stats_.limit        = synthesis_thread_limit(opts_.threads, std::thread::hardware_concurrency());
+    parallel_stats_.memory_limit = parallel_memory_limit();
+  }
+  struct Frame_restore {
+    Abc_Frame_t* previous = Abc_FrameReadGlobalFrame();
+    ~Frame_restore() { Abc_FrameLeave(previous); }
+  } frame_restore;
   // A refusal already happened: work() will make it fatal once the ABC frame is
   // torn down, so translating the remaining regions can only burn time and
   // overwrite the FIRST refusal -- the one that is the actual root cause.
@@ -1591,7 +1865,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // and seq command strings can be identical, but their read-back semantics are
   // not: one carries flops through ABC and the other preserves native state.
   if (!ware_trial_) {
-    remember_ware(rb);
+    // One ware list per run: a worker records into the coordinator (still under
+    // graph_lock, so the appends stay serialized) with ITS region's options.
+    (coordinator_ ? *coordinator_ : *this).remember_ware(rb, opts_);
   }
   std::string recipe  = resolve_recipe();
   recipe             += rb.ctrl ? "|ctrl=1" : "|ctrl=0";
@@ -1664,7 +1940,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // already folded the Liberty content and run-level mapping modes, while the
   // exact pre-body comparison authorized the reused result. Only a real miss
   // needs the mapper process and parsed library.
-  if (!start()) {
+  // Session initialization and Liberty parsing touch only this worker's ABC
+  // frame. Let them overlap too; large timing libraries dominate small colors.
+  if (coordinator_) {
+    graph_lock.unlock();
+  }
+  bool abc_ready = false;
+  try {
+    abc_ready = start();
+  } catch (...) {
+    if (!graph_lock.owns_lock()) {
+      graph_lock.lock();
+    }
+    throw;
+  }
+  if (!graph_lock.owns_lock()) {
+    graph_lock.lock();
+  }
+  if (!abc_ready) {
     return;  // diagnostic already emitted
   }
 
@@ -2766,7 +3059,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // or reset data cone, by contrast, IS genuine logic and crosses as a PO.
   // Convert the trivially-mappable remainders BEFORE the boundary scan, so the
   // refusal below only fires for a shape that genuinely has no gate translation.
-  if (rems_rewritten_graphs_.insert(rb.src).second) {
+  auto& rewritten = coordinator_ ? coordinator_->rems_rewritten_graphs_ : rems_rewritten_graphs_;
+  if (rewritten.insert(rb.src).second) {
     rewrite_trivial_rems(rb.src);
   }
 
@@ -4058,6 +4352,30 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
+  // Only private ABC objects are accessed in this interval. HHDS graph reads,
+  // mutation, cache operations and result publication stay under graph_lock.
+  struct Graph_pause {
+    std::unique_lock<std::mutex>& lock;
+    Mapper*                       owner;
+    bool                          paused = false;
+    Graph_pause(std::unique_lock<std::mutex>& l, Mapper* o) : lock(l), owner(o) {
+      if (owner) {
+        const auto active               = owner->active_abc_.fetch_add(1) + 1;
+        owner->parallel_stats_.peak_abc = std::max(owner->parallel_stats_.peak_abc, active);
+        paused                          = true;
+        lock.unlock();
+      }
+    }
+    void resume() {
+      if (paused) {
+        owner->active_abc_.fetch_sub(1);
+        lock.lock();
+        paused = false;
+      }
+    }
+    ~Graph_pause() { resume(); }
+  } graph_pause(graph_lock, coordinator_);
+
   // --- run the flow: logic -> optimize -> map ---
   auto* frame  = static_cast<Abc_Frame_t*>(pabc_);
   auto* pLogic = Abc_NtkToLogic(manNtk);
@@ -4326,6 +4644,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (!opts_.allow_oversize && over_budget(rb.module_name, rss_before, blast_total, blast_total)) {
     return;  // mapper.stop() owns the current ABC network; work() raises refusal_
   }
+
+  graph_pause.resume();
 
   // --- QoR read-back (2opt-freq A): critical delay/area/gates from the Liberty
   // pin-to-pin data while the flow's result is still a mapped LOGIC network
@@ -5742,7 +6062,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // avoids attributing an early large color's retained HWM to every later tiny
   // color while still capturing peaks at the end of ABC's blocking flow.
   const uint64_t color_peak     = process_peak > process_peak_before ? process_peak : sampled_peak_rss;
-  qor_.back().color_peak_rss_kb = color_peak > rss_entry ? (color_peak - rss_entry) >> 10 : 0;
+  qor_.back().color_peak_rss_kb = coordinator_ == nullptr && color_peak > rss_entry ? (color_peak - rss_entry) >> 10 : 0;
   Abc_NtkDelete(mapped);
   // &get/&dc4/&dch/&nf leave GIA managers in the global frame even after
   // &put.  A large region then poisons the next tiny job (Rob's 438-node
@@ -5799,6 +6119,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 }
 
 void Mapper::report_completion(const Region_qor& q) {
+  if (coordinator_) {
+    // The run-level heartbeat is the coordinator's, but the Darwin pressure-scan
+    // rate limiter in map_region reads THIS mapper's counter -- leaving it at 0
+    // pinned `relief_due` false after the worker's very first color.
+    ++completed_regions_;
+    coordinator_->report_completion(q);
+    return;
+  }
+
   ++completed_regions_;
   const std::string_view cache = q.cache == nullptr || q.cache[0] == '\0' ? "none" : q.cache;
   std::string line = std::format("PROGRESS pass.abc completed={} region='{}' color={} resynth={} cache={} ge={} gates={} ms={:.1f}",

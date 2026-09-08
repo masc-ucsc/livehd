@@ -1618,7 +1618,7 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
   }
   // ABC netlist objects plus per-occurrence DFS arrays. Admission is repeated
   // during import; this estimate avoids allocating an obviously overlarge score.
-  if (budget && cells > budget / 1024) {
+  if (budget && cells > budget / kAbcImportNodeBytes) {
     std::print("[pass.abc] ware: QoR import estimate exceeds memory budget\n");
     return {};
   }

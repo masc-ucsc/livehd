@@ -508,7 +508,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
 // `lhd synth --help` options block. Pass-level tuning still rides the pass
 // namespaces (`--set abc.adder=cla`, `--set color.absorb=false`, ...).
 struct Synth_set_option {
-  enum class Kind { boolean, file };
+  enum class Kind { boolean, file, integer };
   std::string_view name;
   std::string_view default_value;
   Kind             kind;
@@ -521,22 +521,26 @@ struct Synth_set_option {
 inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
+    {  "threads",
+     "0", Synth_set_option::Kind::integer,
+     "maximum concurrent ABC workers: 0 selects the machine's available CPUs; 1 maps serially. "
+     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"            },
     {  "liberty",
      "",    Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
      "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
-     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                     },
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                       },
     {"opentimer",
      "true", Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"                                                                             },
+     "report). false stops after the ABC map"                                                                               },
     {   "reduce",
      "false", Synth_set_option::Kind::boolean,
      "experimental: can reduce synthesis time but degrade QoR (area and depth). Extract repeated one- and two-node "
-     "combinational cones into shared definitions before coloring; disabled by default"                                   },
-    {      "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
-    {     "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
+     "combinational cones into shared definitions before coloring; disabled by default"                                     },
+    {      "sdc", "",    Synth_set_option::Kind::file,   "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {     "spef", "",    Synth_set_option::Kind::file,          "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of

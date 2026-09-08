@@ -10,9 +10,11 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "cell.hpp"
+#include "cprop.hpp"
 #include "encode.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
@@ -498,4 +500,100 @@ TEST(WorkerFrame, TruncationIsNotAResult) {
   // Trailing garbage (two children's writes interleaved) is not a result either.
   EXPECT_FALSE(livehd::lec::unframe_blob(framed + "junk", got));
   EXPECT_TRUE(livehd::lec::unframe_blob(framed, got));
+}
+
+// Prove the cprop rewrite against an untouched graph, with every data bit and
+// control symbolic. Induction covers both arbitrary old state and initialization;
+// reset is free to toggle, including while the original enable is false.
+TEST(LecState, CpropMuxSharingPreservesTransition) {
+  namespace gu = graph_util;
+  for (bool decoded : {false, true}) {
+    for (bool signed_data : {false, true}) {
+      hhds::GraphLibrary ref_lib;
+      auto               io = ref_lib.create_io("mux_sharing");
+      for (int i = 0; i < 6; ++i) {
+        auto name = "c" + std::to_string(i);
+        io->add_input(name, i);
+        io->set_bits(name, 8);  // binary Mux tests nonzero, not only bit zero
+        io->set_unsign(name, false);
+      }
+      for (const auto& [name, pid, bits] : std::vector<std::tuple<std::string, int, int>>{
+               {       "a",  6, 16},
+               {       "b",  7, 16},
+               {"selector",  8,  3},
+               {   "clock",  9,  1},
+               {   "reset", 10,  1},
+               {      "en", 11,  1}
+      }) {
+        io->add_input(name, pid);
+        io->set_bits(name, bits);
+        io->set_unsign(name, name == "a" || name == "b" ? !signed_data : true);
+      }
+      io->add_output("out", 12);
+      io->set_bits("out", 16);
+      io->set_unsign("out", !signed_data);
+      auto ref      = io->create_graph();
+      auto constant = [&](int64_t k) { return gu::create_const(*ref, *Dlop::create_integer(k)); };
+      auto make     = [&](Ntype_op op) {
+        auto node = gu::create_typed_node(*ref, op, 16);
+        if (signed_data) {
+          gu::set_sbits(node.create_driver_pin(0), 16);
+        } else {
+          gu::set_ubits(node.create_driver_pin(0), 16);
+        }
+        return node;
+      };
+      auto flop = make(Ntype_op::Flop);
+      flop.set_name("state");
+      auto q = flop.create_driver_pin(0);
+      q.connect_sink(ref->get_output_pin("out"));
+      gu::setup_sink_by_name(flop, "enable").connect_driver(ref->get_input_pin("en"));
+      gu::setup_sink_by_name(flop, "clock_pin").connect_driver(ref->get_input_pin("clock"));
+      gu::setup_sink_by_name(flop, "reset_pin").connect_driver(ref->get_input_pin("reset"));
+      gu::setup_sink_by_name(flop, "posclk").connect_driver(constant(1));
+      gu::setup_sink_by_name(flop, "initial").connect_driver(constant(signed_data ? -3 : 37));
+      auto data = q;
+      if (decoded) {
+        auto hot = make(Ntype_op::Hotmux);
+        for (int i = 0; i < 6; ++i) {
+          auto eq = gu::create_typed_node(*ref, Ntype_op::EQ, 1);
+          gu::set_ubits(eq.create_driver_pin(0), 1);
+          eq.create_sink_pin(0).connect_driver(ref->get_input_pin("selector"));
+          eq.create_sink_pin(0).connect_driver(constant(i));
+          hot.create_sink_pin(2 * i).connect_driver(eq.create_driver_pin(0));
+          hot.create_sink_pin(2 * i + 1).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
+        }
+        hot.create_sink_pin(12).connect_driver(q);
+        data = hot.create_driver_pin(0);
+      } else {
+        for (int i = 5; i >= 0; --i) {
+          auto mux = make(Ntype_op::Mux);
+          mux.create_sink_pin(0).connect_driver(ref->get_input_pin("c" + std::to_string(i)));
+          mux.create_sink_pin(1).connect_driver(data);
+          mux.create_sink_pin(2).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
+          data = mux.create_driver_pin(0);
+        }
+      }
+      data.connect_sink(gu::setup_sink_by_name(flop, "din"));
+      hhds::GraphLibrary impl_lib;
+      ASSERT_TRUE(impl_lib.copy_from(ref_lib, "mux_sharing"));
+      auto impl = impl_lib.find_io("mux_sharing")->get_graph();
+      Cprop{}.do_trans(impl);
+      size_t muxes = 0;
+      for (auto n : impl->body().nodes()) {
+        muxes += gu::type_op_of(n) == Ntype_op::Mux;
+        if (gu::type_op_of(n) == Ntype_op::Flop) {
+          EXPECT_NE(gu::get_driver_of_sink_name(n, "enable"), impl->get_input_pin("en"));
+        }
+      }
+      EXPECT_EQ(muxes, 0);
+      lec::Lec_options options;
+      options.engine  = "ind";
+      options.cones   = "false";
+      options.phase   = "free_toreset";
+      options.timeout = 20;
+      auto result     = lec::prove_equal(ref.get(), impl.get(), options);
+      EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail << " decoded=" << decoded << " signed=" << signed_data;
+    }
+  }
 }

@@ -13,6 +13,7 @@
 #include <print>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -201,6 +202,7 @@ void Pass_abc::setup() {
                        "auto");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
+  m.add_label_optional("threads", "maximum concurrent ABC workers (0 = available CPUs); admission uses half of physical RAM", "1");
   m.add_label_optional("memory_budget_mb",
                        "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
                        "default 16384 MiB (16 GiB soft target); 0 uses physical RAM minus max(2 GiB, 25%) reserve",
@@ -304,7 +306,7 @@ absl::flat_hash_map<std::string, uint64_t> physical_instances(const Abc_hier& hi
 
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
               const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started, const Abc_hier& hier,
-              const livehd::liberty::Dff_selection& dff_sel) {
+              const livehd::liberty::Dff_selection& dff_sel, const livehd::abc::Parallel_stats& parallel) {
   // PHYSICAL totals: a region's gates times the number of times its module is
   // instantiated (a replicated loop body N times, a shared `tap` 64 times).
   // The per-module sums are kept beside them as module_gates/module_area —
@@ -516,6 +518,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
                      miss_ms,
                      abc_started ? 1 : 0);
   }
+  j += std::format(
+      ",\"parallel\":{{\"requested\":{},\"limit\":{},\"peak_workers\":{},\"peak_abc\":{},\"memory_limit_bytes\":{},\"memory_"
+      "waits\":{}}}",
+      opts.threads,
+      parallel.limit,
+      parallel.peak_workers,
+      parallel.peak_abc,
+      parallel.memory_limit,
+      parallel.memory_waits);
   j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
     const auto& q = qor[r];
@@ -749,6 +760,17 @@ void Pass_abc::work(Eprp_var& var) {
         .fatal();
     return;
   }
+  unsigned threads = 1;
+  {
+    const auto text      = std::string{var.get("threads", "1")};
+    const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), threads);
+    if (ec != std::errc{} || end != text.data() + text.size()) {
+      livehd::diag::err("pass.abc", "bad-threads", "io")
+          .msg("pass.abc: threads must be a non-negative integer, got '{}'", text)
+          .fatal();
+      return;
+    }
+  }
   int memory_budget_mb = 0;
   {
     auto* b      = mem_budget_s.data();
@@ -976,6 +998,7 @@ void Pass_abc::work(Eprp_var& var) {
   opts.block_size       = block_size;
   opts.multiplier       = multiplier.value();
   opts.memory_budget_mb = memory_budget_mb;
+  opts.threads          = threads;
   opts.time_budget_ms   = time_budget_ms;
   opts.allow_oversize   = allow_oversize;
   if (allow_oversize) {
@@ -1158,7 +1181,12 @@ void Pass_abc::work(Eprp_var& var) {
       dbg,
       [&mapper](const livehd::partition::Region_body& rb) { mapper.map_region(rb); },
       flatten,
-      /*want_pre_bodies=*/mapper.incremental());
+      /*want_pre_bodies=*/mapper.incremental(),
+      threads == 1 ? livehd::partition::Body_batch_builder{}
+                   : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
+      2 * livehd::abc::synthesis_thread_limit(threads, std::thread::hardware_concurrency()));
+
+  mapper.finish_parallel();
 
   // Partition-boundary refinement (abc_boundary.cpp): every region re-sized
   // against the exact loads and drivers beyond its ports. Skipped after a
@@ -1229,7 +1257,7 @@ void Pass_abc::work(Eprp_var& var) {
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started(), hier, dff_sel);
+  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started(), hier, dff_sel, mapper.parallel_stats());
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

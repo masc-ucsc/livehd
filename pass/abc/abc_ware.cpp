@@ -43,8 +43,11 @@ bool ware_qor_better(const Ware_qor& baseline, const Ware_qor& candidate, bool t
   return candidate.area < baseline.area - 1e-6;
 }
 
-void Mapper::remember_ware(const livehd::partition::Region_body& rb) {
-  if (!opts_.ware || rb.nodes.empty()) {
+// `options` are the REGION's resolved options (map_region's per-region overlay),
+// which is not this mapper's opts_ when a parallel worker records into the
+// coordinator -- pass them explicitly rather than swapping a shared member.
+void Mapper::remember_ware(const livehd::partition::Region_body& rb, const Map_options& options) {
+  if (!options.ware || rb.nodes.empty()) {
     return;
   }
   Ware_region w;
@@ -52,11 +55,11 @@ void Mapper::remember_ware(const livehd::partition::Region_body& rb) {
   for (auto n : rb.nodes) {
     ge       += gu::synthesis_ge_weight(n);
     auto op   = gu::type_op_of(n);
-    w.add    |= opts_.auto_adder && (op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT);
-    w.mult   |= opts_.auto_multiplier && op == Ntype_op::Mult;
-    w.barrel |= opts_.auto_barrel && (op == Ntype_op::SHL || op == Ntype_op::SRA);
+    w.add    |= options.auto_adder && (op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT);
+    w.mult   |= options.auto_multiplier && op == Ntype_op::Mult;
+    w.barrel |= options.auto_barrel && (op == Ntype_op::SHL || op == Ntype_op::SRA);
   }
-  if ((!w.add && !w.mult && !w.barrel) || (opts_.large_ge && ge >= opts_.large_ge)) {
+  if ((!w.add && !w.mult && !w.barrel) || (options.large_ge && ge >= options.large_ge)) {
     return;
   }
   w.rb          = rb;
@@ -85,7 +88,7 @@ void Mapper::remember_ware(const livehd::partition::Region_body& rb) {
     }
     w.rb.src = w.source.get();
   }
-  w.options = opts_;
+  w.options = options;
   if (!ware_shells_.copy_from(*outlib_, rb.module_name)) {
     return;
   }

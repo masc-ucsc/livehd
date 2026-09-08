@@ -67,6 +67,8 @@ protected:
   void canonicalize_and_mask(hhds::Node_class& node);
   // Hash-cons identical pure combinational nodes (same op, same input pins).
   void cse_pass(const std::vector<hhds::Node_class>& order);
+  // Expected-linear mux sharing over disjoint, single-consumer regions.
+  void mux_share_pass();
   void scalar_node(hhds::Node_class& node);
 
 public:
