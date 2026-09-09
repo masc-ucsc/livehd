@@ -43,9 +43,12 @@
 #      refuse ("unmodeled memory output"). Must lower (no memory-unlowered
 #      diagnostic, no native array in the netlist) and LEC with both solvers,
 #      which pins the bit layout (entry 0 in the low bits).
-#   3. memory=false must still keep the memory a native cgen_memory instance,
-#      and memory_max_bits must keep an over-limit memory native with the
-#      one-line `memory-max-bits` note (and 0 must disable the guard).
+#   3. The three `pass.abc.memory` modes: `false` must still keep the memory a
+#      native cgen_memory instance; `auto` (the default) must keep an
+#      over-memory_max_bits memory native with the one-line `memory-max-bits`
+#      note UNLESS it has more than 3 ports (no macro has those, so the tile
+#      folds anyway with a `memory-ports` note); `true` must fold whatever the
+#      threshold says. `memory_max_bits=0` = no size limit.
 #   4. The all-constant EQ width bug the tile exposed, in isolation:
 #      `x[3:0] == 8'd100` (and `== 8'd20`, whose low 5 bits are 4) must map to
 #      constant 0 -- it used to map to NOR4(x0,x1,!x2,x3) = (x == 4) because the
@@ -196,26 +199,63 @@ lec_both "$D" memall 3
 echo "PASS: whole-array read_all memory bit-blasts and is LEC-equivalent (cvc5 + lgyosys)"
 
 # ---------------------------------------------------------------------------
-# 3. memory=false and memory_max_bits keep a memory native
+# 3. the three memory modes and the auto thresholds
 # ---------------------------------------------------------------------------
 D="$W/tile8_off"
 map_design "$D" "$TILE" memtile -GN=8 --set pass.abc.memory=false
 grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory=false: memory was not kept as a native instance"
 echo "PASS: memory=false keeps the memory a native instance"
 
+# A 2-port memory is the shape an SRAM macro CAN have, so `auto` decides it on
+# size alone: native above memory_max_bits, folded below.
+cat > "$W/mem1r1w.sv" <<'EOF'
+module mem1r1w (
+  input  logic       clk,
+  input  logic       we,
+  input  logic [2:0] waddr,
+  input  logic [7:0] wdata,
+  input  logic [2:0] raddr,
+  output logic [7:0] rdata
+);
+  logic [7:0] mem[8];                            // 8 x 8 = 64 storage bits
+  always_ff @(posedge clk) if (we) mem[waddr] <= wdata;
+  assign rdata = mem[raddr];
+endmodule
+EOF
+D="$W/mem_auto_over"
+map_design "$D" "$W/mem1r1w.sv" mem1r1w "" --set pass.abc.memory=auto --set pass.abc.memory_max_bits=63
+grep -q '"code":"memory-max-bits"' "$D/diag.jsonl" || fail "auto/max_bits=63: no memory-max-bits note for a 64-bit memory: $(cat "$D/diag.jsonl")"
+grep -q "8 x 8 = 64 bits" "$D/diag.jsonl" || fail "memory-max-bits note does not name the memory size: $(grep memory-max-bits "$D/diag.jsonl")"
+grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "auto/max_bits=63: the 64-bit memory was bit-blasted anyway"
+D="$W/mem_auto_under"
+map_design "$D" "$W/mem1r1w.sv" mem1r1w "" --set pass.abc.memory=auto --set pass.abc.memory_max_bits=64
+! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "auto/max_bits=64: a memory within the limit was kept native"
+# ...and `true` folds it whatever the threshold says.
+D="$W/mem_true_over"
+map_design "$D" "$W/mem1r1w.sv" mem1r1w "" --set pass.abc.memory=true --set pass.abc.memory_max_bits=63
+! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory=true consulted memory_max_bits"
+echo "PASS: auto folds within memory_max_bits and keeps a larger memory native; true ignores the threshold"
+
+# The 34-port tile is over the same threshold, but no macro has 34 ports, so
+# `auto` folds it anyway and says why.
 D="$W/tile32_max"
-map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory_max_bits=255
-grep -q '"code":"memory-max-bits"' "$D/diag.jsonl" || fail "memory_max_bits=255: no memory-max-bits note for a 256-bit memory: $(cat "$D/diag.jsonl")"
-grep -q "32 x 8 = 256 bits" "$D/diag.jsonl" || fail "memory_max_bits note does not name the memory size: $(grep memory-max-bits "$D/diag.jsonl")"
-grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory_max_bits=255: 256-bit memory was bit-blasted anyway"
+map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory=auto --set pass.abc.memory_max_bits=255
+grep -q '"code":"memory-ports"' "$D/diag.jsonl" || fail "auto: no memory-ports note for the 34-port tile: $(cat "$D/diag.jsonl")"
+! grep -hq '`include.*cgen_memory\|reg .*\[.*:.*\].*\[' "$D/netv/"*.v || fail "auto: the 34-port tile was kept native"
+echo "PASS: auto folds an over-3-port memory whatever its size"
+
 D="$W/tile32_max0"
-map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory_max_bits=0
-! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory_max_bits=0 must disable the guard"
+map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory=auto --set pass.abc.memory_max_bits=0
+! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory_max_bits=0 must lift the size limit"
 if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net" --set synth.liberty="$LIB" \
     --set pass.abc.memory_max_bits=lots --workdir "$W/bad_w" -q --result-json "$W/bad.json" 2>/dev/null; then
   fail "pass.abc accepted memory_max_bits=lots"
 fi
-echo "PASS: memory_max_bits keeps an over-limit memory native with a note; 0 disables; malformed rejected"
+if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net2" --set synth.liberty="$LIB" \
+    --set pass.abc.memory=maybe --workdir "$W/bad_w2" -q --result-json "$W/bad2.json" 2>/dev/null; then
+  fail "pass.abc accepted memory=maybe"
+fi
+echo "PASS: memory_max_bits=0 lifts the size limit; malformed memory/memory_max_bits rejected"
 
 # ---------------------------------------------------------------------------
 # 4. all-constant / wide-constant EQ maps to constant 0
@@ -232,4 +272,4 @@ map_design "$D" "$W/eqt.sv" eqt ""
 [ "$(cat "$D/netv/"*.v | grep -c "_const0_ ")" -eq 2 ] || fail "eqt: expected both outputs driven by constant 0: $(cat "$D/netv/"*.v)"
 echo "PASS: x[3:0] == 8'd100 maps to constant 0"
 
-echo "PASS: pass.abc memory bit-blast (constant-address tile, read_all, memory_max_bits, const EQ)"
+echo "PASS: pass.abc memory bit-blast (constant-address tile, read_all, memory modes + thresholds, const EQ)"

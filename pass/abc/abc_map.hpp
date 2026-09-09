@@ -19,6 +19,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 #include "liberty_dff.hpp"     // livehd::liberty::Dff_cell
+#include "memory_module.hpp"   // livehd::abc::Memory_fold
 #include "pass_partition.hpp"  // livehd::partition::Region_body
 #include "satopt.hpp"
 
@@ -76,12 +77,14 @@ struct Map_options {
   // a register is one DFF cell per bit, a memory bit-blasts into a whole DFF
   // array + address decode). register=true maps flops to Liberty DFF cells (falls
   // back to native flops when the library has none); false keeps them native
-  // (cgen emits `always @(posedge clk)`). memory=false preserves a native
-  // memory instance by default. memory=true lowers the emitted memory RTL
-  // inside a separate module, then maps that body. memory_max_bits keeps
-  // oversized memories native in either mode.
+  // (cgen emits `always @(posedge clk)`). memory=false preserves a native memory
+  // instance; memory=true lowers the emitted memory RTL inside a separate module
+  // and maps that body; memory=auto (the default) folds only the memories no
+  // macro could be -- see Memory_fold in memory_module.hpp.
   bool              map_register      = true;
-  bool              map_memory        = false;
+  Memory_fold       memory_fold       = Memory_fold::Auto;
+  // The `auto` storage threshold in bits (0 = no limit); pass.abc.memory_max_bits.
+  uint64_t          memory_max_bits   = 1024;
   // Keep an oversized register payload native even when map_register is true.
   // ABC represents every bit as a separate latch and some generated blocks put
   // thousands of state bits in one color; 0 (the default) disables the

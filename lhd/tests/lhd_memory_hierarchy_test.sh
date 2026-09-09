@@ -41,16 +41,18 @@ assert ids['default']==ids['false']==ids['true'],ids
 assert len(ids['true'])==2,ids
 names=[bytes.fromhex(s).decode() for s in ids['true']]
 assert any('left' in s for s in names) and any('right' in s for s in names),names
-for m in ('default','false'):
-    assert 'cgen_memory_1rd_1wr #' in texts[m]
-    assert '_lowered_' not in texts[m]
-assert re.search(r'module cgen_memory_.*_lowered_',texts['true'])
-assert not re.search(r'`include.*cgen_memory',texts['true'])
-assert 'DFFx1 ' in texts['true'] or 'always @(posedge' in texts['true']
+assert 'cgen_memory_1rd_1wr #' in texts['false']
+assert '_lowered_' not in texts['false']
+# `default` is memory=auto: each bank is 4 x 8 = 32 bits over 2 ports, well
+# within memory_max_bits, so it folds exactly like memory=true.
+for m in ('default','true'):
+    assert re.search(r'module cgen_memory_.*_lowered_',texts[m]),m
+    assert not re.search(r'`include.*cgen_memory',texts[m]),m
+    assert 'DFFx1 ' in texts[m] or 'always @(posedge' in texts[m],m
 for m in texts:
     r=json.loads((w/f'{m}-lec.json').read_text())['lec']
     assert r['verdict']=='proven',(m,r)
-print('PASS: stable memory instance identities across both modes and parent flatten; bounded LEC proven')
+print('PASS: stable memory instance identities across all three modes and parent flatten; bounded LEC proven')
 PY
 
 # Exercise initialization before the first edge, followed by a longer sequence

@@ -248,7 +248,7 @@ instance histogram under `"dff"`; the incremental cache is salted with the
 resolved cell (`name:d:clk:q:inverted`), and `pass/liberty/liberty_dff.*` is
 part of the code salt.
 
-### Memory modules (`memory=false` by default)
+### Memory modules (`memory=auto` by default)
 
 Every memory retains a named instance boundary. With `memory=false`, ordinary
 memories instantiate the appropriate `ware/rtl/cgen_memory_*` implementation.
@@ -268,9 +268,15 @@ body. The runtime ports remain declared. LEC can use the instance correspondence
 and separately check the native and lowered memory implementations; a matching
 name alone is not an equivalence proof.
 
-`memory_max_bits` (default 65536, `0` disables) retains oversized memories as
-native instances and reports their storage size. `register` controls whether
-flops inside a lowered memory are mapped to Liberty cells.
+`memory=auto` (the default) picks per memory: fold the ones no macro could be,
+keep the rest native. A memory folds when its storage is within `memory_max_bits`
+(default 1024, `0` = no size limit) **or** when it has more than 3 ports — no SRAM
+compiler or standard-cell library offers such a macro, so flops plus decode is the
+only realization it has, whatever its size. Either outcome is reported per memory
+as a one-line note naming it, so raising the limit (or forcing `memory=true`) is a
+deliberate step. `memory=true` and `memory=false` are the unconditional overrides
+and do not consult `memory_max_bits`. `register` controls whether flops inside a
+lowered memory are mapped to Liberty cells.
 
 ### Blackbox boundaries (memories + hierarchical `Sub`)
 
@@ -415,8 +421,8 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `register` | map flops to Liberty DFF cells (`true`; falls back to native flops when the library has none) vs keep them native `always @(posedge)` (`false`) | `true` |
 | `register_max_bits` | with `register=true`, keep a region's flops native when their total Q width exceeds this many bits (`register-kept-native` diagnostic; `0` disables — the default, since a bit-blasted 64x64 memory alone is 4096 bits and a native register is one the downstream normalize maps instead of pass.abc) | `0` |
 | `dff_cell` | explicit Liberty DFF cell for `register=true` (empty = the smallest-area plain posedge D-flop, QN cells included; an explicit name also disables the drive ladder) | `` |
-| `memory` | lower memory RTL and ABC-map its body in a separate module (`true`) vs preserve its native implementation (`false`); both retain the memory instance boundary | `false` |
-| `memory_max_bits` | with `memory=true`, keep a memory whose `bits x size` exceeds this many bits native, with a one-line note naming it (`0` disables) | `65536` |
+| `memory` | lower memory RTL and ABC-map its body in a separate module (`true`), preserve its native implementation (`false`), or decide per memory (`auto`: fold within `memory_max_bits`, or over 3 ports whatever the size); every mode retains the memory instance boundary | `auto` |
+| `memory_max_bits` | with `memory=auto`, fold a memory whose `bits x size` is within this many bits and keep a larger one native, with a one-line note naming it (`0` = no size limit); `true`/`false` ignore it | `1024` |
 | `ware` | automatically minimize stitched Liberty delay with a timing target, or mapped area without one | `true` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |

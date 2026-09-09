@@ -655,7 +655,8 @@ void Incr_cache::save() {
   livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls
 }
 
-uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory, std::string_view dff_desc) {
+uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, Memory_fold memory_fold,
+                               uint64_t memory_max_bits, std::string_view dff_desc) {
   // The generated source salt automatically covers mapper/read-back and ABC
   // revision changes. Keep the schema tag for persistent on-disk shape changes
   // that older readers cannot parse; stale bodies must never survive either.
@@ -697,7 +698,13 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   } else {
     h = combine64(h, fnv1a64(library_path));
   }
-  h = combine64(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(map_memory));
+  h = combine64(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(memory_fold == Memory_fold::Always));
+  if (memory_fold == Memory_fold::Auto) {
+    // Only `auto` reads the threshold, and only `auto` adds an item: the
+    // explicit true/false salts stay exactly what they were before the mode
+    // existed, so a cache written under them survives.
+    h = combine64(h, memory_max_bits);
+  }
   h = combine64(h, fnv1a64(dff_desc));
   return h;
 }

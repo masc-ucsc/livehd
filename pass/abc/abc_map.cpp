@@ -3488,7 +3488,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   auto* pLogic = Abc_NtkToLogic(manNtk);
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
-  auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
+  auto flow = (opts_.map_register || opts_.memory_fold != Memory_fold::Never) ? seq_flow() : comb_flow();
   if (opts_.verbose) {
     std::print("[pass.abc] region '{}': resolved flow: {}\n", rb.module_name, flow);
   }
@@ -5311,7 +5311,7 @@ void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::
              top,
              opts.library,
              opts.map_register,
-             opts.map_memory);
+             memory_fold_name(opts.memory_fold));
   struct Op_stats {
     uint64_t nodes  = 0;
     uint64_t ge     = 0;

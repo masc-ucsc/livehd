@@ -275,8 +275,8 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
 }
 }  // namespace
 
-std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool lower,
-                                                               uint64_t max_bits) {
+std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
+                                                               Memory_fold mode, uint64_t max_bits) {
   std::vector<std::shared_ptr<hhds::Graph>> modules;
   std::unique_ptr<Scratch>                  scratch;
   fs::path                                  rtl;
@@ -297,8 +297,14 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       }
       uint64_t bits = 0, size = 0;
       bool     inline_array = false;
+      // Every read/write port block carries exactly one address pin (offset 0
+      // of its Memory_port_stride block), so counting those edges counts ports.
+      uint64_t ports = 0;
       for (const auto& e : mem.inp_edges()) {
         auto off = e.sink.get_port_id() % Ntype::Memory_port_stride;
+        if (off == 0) {
+          ++ports;
+        }
         if (off == 1 && e.driver.is_const()) {
           bits = gu::const_of(e.driver).to_just_i64();
         }
@@ -317,18 +323,41 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
           inline_array = true;
         }
       }
-      const bool oversized = max_bits && bits && size > max_bits / bits;
-      if (lower && oversized) {
-        diag::warn("pass.abc", "memory-max-bits", "unsupported")
-            .msg("memory '{}': {} x {} = {} bits exceeds memory_max_bits={}; keeping its native instance",
-                 gu::default_instance_name(mem),
-                 size,
-                 bits,
-                 size * bits,
-                 max_bits)
-            .emit();
+      // The division form never overflows; an unknown `bits` is not oversized.
+      const bool oversized  = max_bits && bits && size > max_bits / bits;
+      const bool many_ports = ports > kAutoFoldPortsAbove;
+      bool       map        = mode == Memory_fold::Always;
+      if (mode == Memory_fold::Auto) {
+        map = !oversized || many_ports;
+        if (map && oversized) {
+          // Folded on port count alone. Say so: the storage is above the
+          // threshold the user set, and this is the reason it folded anyway.
+          diag::info("pass.abc", "memory-ports", "unsupported")
+              .msg("memory '{}': {} ports (over {}) has no macro realization; bit-blasting its {} x {} = {} bits despite "
+                   "memory_max_bits={}",
+                   gu::default_instance_name(mem),
+                   ports,
+                   kAutoFoldPortsAbove,
+                   size,
+                   bits,
+                   size * bits,
+                   max_bits)
+              .emit();
+        } else if (!map) {
+          // The documented `auto` outcome, so a note and not a warning -- the
+          // user just needs to see WHICH memory it was to raise the limit (or
+          // pass memory=true) deliberately.
+          diag::info("pass.abc", "memory-max-bits", "unsupported")
+              .msg("memory '{}': {} x {} = {} bits exceeds memory_max_bits={}; keeping its native instance (memory=true folds "
+                   "it anyway)",
+                   gu::default_instance_name(mem),
+                   size,
+                   bits,
+                   size * bits,
+                   max_bits)
+              .emit();
+        }
       }
-      const bool map = lower && !oversized;
       if (!map && !inline_array) {
         continue;
       }

@@ -10,7 +10,9 @@
 #                            the QN-only DFFNx1 + DFFNx2 drive ladder in test_qn.lib)
 #   pass.abc.register=false  flops kept native (`always @(posedge)`)
 #   pass.abc.memory=true     memory RTL lowered and mapped inside a child module
-#   pass.abc.memory=false    memory kept as a native boundary instance (default)
+#   pass.abc.memory=false    memory kept as a native boundary instance
+#   pass.abc.memory=auto     (the default) per memory: fold within memory_max_bits
+#                            (1024) or over 3 ports, keep the rest native
 #
 # Registers cross into ABC as 1-bit latches (so ABC can optimize the
 # surrounding logic) with a synchronous reset folded into D (`rst ? rval :
@@ -59,16 +61,24 @@ fail() {
 
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
-# run_abc_lec <fix> <top> <register> <memory> [register_max_bits]: tech-map with the given knobs,
-# build the original-logic twin + gensim models, and prove the netlist equivalent.
-# <memory> = true|false is passed explicitly; `default` leaves pass.abc.memory
+# run_abc_lec <fix> <top> <register> <memory> [register_max_bits] [extra pass.abc --set ...]:
+# tech-map with the given knobs, build the original-logic twin + gensim models,
+# and prove the netlist equivalent.
+# <memory> = true|false|auto is passed explicitly; `default` leaves pass.abc.memory
 # unset so the run exercises whatever the pass defaults to.
-# Leaves the netlist verilog dir in the global NETV for the caller's structural asserts.
+# Leaves the netlist verilog dir in the global NETV and the pass.abc diagnostics
+# stream in ABCDIAG for the caller's structural asserts.
 NETV=""
+ABCDIAG=""
 run_abc_lec() {
   local fix="$1" top="$2" reg="$3" mem="$4" reg_max="${5:-0}"
+  shift $(( $# > 5 ? 5 : $# ))
   local prp="inou/prp/tests/pyrope/${fix}.prp"
-  local d="$W/${fix}_r${reg}_m${mem}_x${reg_max}"
+  # The extra --set values are part of the run identity: two runs that differ
+  # only in them must not share a workdir.
+  local extra_tag=""
+  [ $# -eq 0 ] || extra_tag="_$(printf '%s' "$*" | tr -c 'A-Za-z0-9' '_')"
+  local d="$W/${fix}_r${reg}_m${mem}_x${reg_max}${extra_tag}"
   mkdir -p "$d"
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
@@ -78,9 +88,10 @@ run_abc_lec() {
   [ -f "$prp" ] || fail "missing fixture $prp"
   run compile "$prp" --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1"
   run pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
+  ABCDIAG="$d/diag.jsonl"
   run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
       --set pass.abc.register="$reg" --set pass.abc.register_max_bits="$reg_max" \
-      ${memset[@]+"${memset[@]}"} --workdir "$d/w3"
+      ${memset[@]+"${memset[@]}"} "$@" --emit diagnostics:"$ABCDIAG" --workdir "$d/w3"
   # the original-logic twin (same module structure)
   run pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
   run pass liberty gensim "$LIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
@@ -348,10 +359,24 @@ has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem memory=true: lowered memo
 ! has "$NETV" '`include.*cgen_memory' || fail "abc_mem memory=true: native memory survived"
 echo "PASS: memory=true bit-blasts the memory to gates (abc_mem)"
 
-# The default keeps the memory native, including small memories.
+# The default (`auto`) folds this 8 x 8 = 64-bit memory: it is well within
+# memory_max_bits, so flops are the realization a 64-bit array would have anyway.
 run_abc_lec abc_mem abc_mem.abc_mem true default
-has "$NETV" "cgen_memory" || fail "abc_mem default memory mode: native memory missing"
-! has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem default memory mode: unexpectedly lowered"
-echo "PASS: the default memory mode preserves the native memory (abc_mem)"
+has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem default (auto): a 64-bit memory was not folded"
+! has "$NETV" '`include.*cgen_memory' || fail "abc_mem default (auto): native memory survived"
+echo "PASS: the default memory mode folds a small memory (abc_mem)"
+
+# ...and `auto` keeps the SAME memory native once it is over memory_max_bits,
+# with the one-line note naming it. memory=true ignores the threshold entirely.
+run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.abc.memory_max_bits=63
+has "$NETV" '`include.*cgen_memory' || fail "abc_mem auto/max_bits=63: memory was folded anyway"
+! has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem auto/max_bits=63: unexpectedly lowered"
+grep -q '"code":"memory-max-bits"' "$ABCDIAG" \
+  || fail "abc_mem auto/max_bits=63: no memory-max-bits note: $(cat "$ABCDIAG")"
+echo "PASS: auto keeps an over-memory_max_bits memory native with a note (abc_mem)"
+
+run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.abc.memory_max_bits=63
+has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem memory=true: memory_max_bits was consulted"
+echo "PASS: memory=true folds regardless of memory_max_bits (abc_mem)"
 
 echo "PASS: pass.abc register/memory tech-map LEC-equivalent (DFF cells, native flops, memory bit-blast + boundary)"

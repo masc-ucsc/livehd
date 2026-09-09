@@ -153,12 +153,13 @@ MSRC=inou/prp/tests/pyrope/abc_mem.prp
 MTOP=abc_mem.abc_mem
 if [ -f "$MSRC" ]; then
   # `abc.memory=false`: this section is about the array-vs-array cut, so the
-  # Memory must SURVIVE mapping as a native instance. pass.abc's default flipped
-  # to memory=true (bit-blast: `mem__mem<i>` storage flops), under which the
-  # impl has no array at all -- the memory<->storage-bank bridge pairs the flops
-  # with the ref array and cvc5 discharges those per-entry cuts, so "every cut
-  # discharged by the cone pass" is the wrong expectation there (see the
-  # memory=true pair below for that shape).
+  # Memory must SURVIVE mapping as a native instance. pass.abc defaults to
+  # memory=auto, which folds a memory this small (bit-blast: `mem__mem<i>`
+  # storage flops); under a fold the impl has no array at all -- the
+  # memory<->storage-bank bridge pairs the flops with the ref array and cvc5
+  # discharges those per-entry cuts, so "every cut discharged by the cone pass"
+  # is the wrong expectation there (see the memory=true pair below for that
+  # shape).
   mnetlist() {  # $1=name $2=src [$3=extra pass.abc --set]
     "$LHD" compile "$2" --emit-dir lg:"$WORK/$1.lg" > "$WORK/$1.build" 2>&1 \
       && "$LHD" pass color flat --top "$MTOP" lg:"$WORK/$1.lg" >> "$WORK/$1.build" 2>&1 \

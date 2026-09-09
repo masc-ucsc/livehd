@@ -148,13 +148,15 @@ void Pass_abc::setup() {
                        "bits)",
                        "0");
   m.add_label_optional("memory",
-                       "true|false lower memory RTL and ABC-map its body in a separate module (true), or keep the "
-                       "native memory instance (false). Both preserve the memory instance boundary",
-                       "false");
+                       "true|false|auto lower memory RTL and ABC-map its body in a separate module (true, whatever its "
+                       "size), keep the native memory instance (false), or (auto) fold only a memory no macro could be: "
+                       "storage within memory_max_bits, or over 3 ports. Every mode preserves the instance boundary",
+                       "auto");
   m.add_label_optional("memory_max_bits",
-                       "with memory=true, keep a Memory whose storage (bits x size) exceeds this many bits as a native "
-                       "instance and say which (0 disables the guard)",
-                       "65536");
+                       "with memory=auto, fold a Memory whose storage (bits x size) is within this many bits and keep a "
+                       "larger one native, saying which (0 = no size limit, fold every memory). memory=true/false do not "
+                       "consult it",
+                       "1024");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",
                        "");
@@ -415,11 +417,14 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += "\"schema_version\":1,\"kind\":\"abc-map\",";
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
-  j += std::format("\"register\":{},\"memory\":{},", opts.map_register ? "true" : "false", opts.map_memory ? "true" : "false");
+  j += std::format("\"register\":{},\"memory\":\"{}\",", opts.map_register ? "true" : "false", memory_fold_name(opts.memory_fold));
   // The per-region register guard (0 = every flop maps), so a QoR reader can
   // tell "kept native by limit" from "kept native by contract" (an
   // asynchronous reset) without the diagnostics stream.
   j += std::format("\"register_max_bits\":{},", opts.register_max_bits);
+  // The `auto` fold threshold, so a QoR reader can tell a memory kept native by
+  // size from one kept native by contract (memory=false) without the diagnostics.
+  j += std::format("\"memory_max_bits\":{},", opts.memory_max_bits);
   if (opts.map_register && dff_sel.base.has_value()) {
     // The register cell(s) the netlist was written with, and how many of each
     // it holds (PHYSICAL, weighted by instantiation like `gates`): counted off
@@ -719,8 +724,8 @@ void Pass_abc::work(Eprp_var& var) {
   auto large_flow          = std::string{var.get("large_flow", "")};
   auto large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool map_register        = truthy(var.get("register", "true"));
-  bool map_memory          = truthy(var.get("memory", "false"));
-  auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "65536")};
+  auto memory_s            = std::string{var.get("memory", "auto")};
+  auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
   auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
   auto delay               = std::string{var.get("delay", "")};
   auto load                = std::string{var.get("load", "")};
@@ -901,7 +906,14 @@ void Pass_abc::work(Eprp_var& var) {
       return;
     }
   }
-  uint64_t memory_max_bits = 65536;
+  const auto memory_fold = livehd::abc::parse_memory_fold(memory_s);
+  if (!memory_fold.has_value()) {
+    livehd::diag::err("pass.abc", "bad-memory", "io")
+        .msg("pass.abc: memory must be true|false|auto, got '{}'", memory_s)
+        .fatal();
+    return;
+  }
+  uint64_t memory_max_bits = 1024;
   {
     auto* b      = memory_max_bits_s.data();
     auto* e      = memory_max_bits_s.data() + memory_max_bits_s.size();
@@ -981,7 +993,8 @@ void Pass_abc::work(Eprp_var& var) {
   opts.large_flow          = large_flow;
   opts.large_ge            = large_ge;
   opts.map_register        = map_register;
-  opts.map_memory          = map_memory;
+  opts.memory_fold         = *memory_fold;
+  opts.memory_max_bits     = memory_max_bits;
   opts.satopt = var.get("satopt", "true") != "false" && var.get("satopt", "true") != "0" && var.get("satopt", "true") != "off";
   opts.register_max_bits = register_max_bits;
   opts.dff_cell          = std::string{var.get("dff_cell", "")};
@@ -1099,7 +1112,7 @@ void Pass_abc::work(Eprp_var& var) {
   }
   // Extract before partitioning: a lowered memory remains a named instance,
   // even when its parent is flattened. The child body comes from cgen RTL.
-  auto memory_modules = livehd::abc::build_memory_modules(scratch_graphs, map_memory, memory_max_bits);
+  auto memory_modules = livehd::abc::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
@@ -1155,7 +1168,7 @@ void Pass_abc::work(Eprp_var& var) {
     const std::string dff_desc = dff_sel.base.has_value() ? livehd::liberty::dff_descriptor(*dff_sel.base) : opts.dff_cell;
     incr                       = std::make_unique<livehd::abc::Incr_cache>(
         cache_dir,
-        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, dff_desc));
+        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc));
   }
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one

@@ -32,6 +32,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
+#include "memory_module.hpp"   // livehd::abc::Memory_fold
 #include "pass_partition.hpp"  // livehd::partition::Region_body
 
 namespace livehd::abc {
@@ -132,8 +133,8 @@ public:
   // names its DFF Sub decl and reads its QN pin as Q, so a different pick must
   // be a different key), plus a schema tag bumped when the mapper's read-back
   // or the cache shape changes.
-  [[nodiscard]] static uint64_t make_salt(std::string_view library_path, bool map_register, bool map_memory,
-                                          std::string_view dff_desc);
+  [[nodiscard]] static uint64_t make_salt(std::string_view library_path, bool map_register, Memory_fold memory_fold,
+                                          uint64_t memory_max_bits, std::string_view dff_desc);
 
 private:
   std::string         dir_;
