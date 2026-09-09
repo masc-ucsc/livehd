@@ -80,6 +80,9 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
 
 bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
   const auto op = type_op_of(node);
+  if (!opts.stop_arith && (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div)) {
+    return false;
+  }
   // Mux-inclusive control grouping keeps runtime shifters with their logic.
   if (mode == Mode::cones && opts.ctrl_cones && (op == Ntype_op::SHL || op == Ntype_op::SRA)) {
     return false;

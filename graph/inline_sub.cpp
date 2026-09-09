@@ -7,6 +7,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
@@ -118,21 +119,14 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(livehd::attrs::aggregate_origin); a.has() && !a.get().empty()) {
     neo.attr(livehd::attrs::aggregate_origin).set(prefix_ + std::string{a.get()});
   }
-  if (auto a = orig.attr(livehd::attrs::aggregate_source_index); a.has()) {
-    neo.attr(livehd::attrs::aggregate_source_index).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::aggregate_lane_ordinal); a.has()) {
-    neo.attr(livehd::attrs::aggregate_lane_ordinal).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::aggregate_bit_offset); a.has()) {
-    neo.attr(livehd::attrs::aggregate_bit_offset).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::aggregate_bit_width); a.has()) {
-    neo.attr(livehd::attrs::aggregate_bit_width).set(a.get());
-  }
-  if (auto a = orig.attr(livehd::attrs::aggregate_extent); a.has()) {
-    neo.attr(livehd::attrs::aggregate_extent).set(a.get());
-  }
+  // The ordinals carry no policy, so they go through the ONE table-driven copy
+  // (graph/attr_carry.hpp) rather than yet another hand-kept if-chain -- that
+  // header exists because these chains drift.
+  carry_attr<livehd::attrs::aggregate_source_index_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_lane_ordinal_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_bit_offset_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_bit_width_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_extent_t>(orig, neo);
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cones synthesis QoR optimization</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">All tasks</a></nav>
+<main>
+<h1>Cones synthesis QoR optimization</h1>
+<p><strong>lhdtrack complete; LogikBench refresh underway, 2026-09-09.</strong>
+Run <code>20260909T075240-cones-primary-final</code> completed all 1,032 synthesis
+slots: 172 designs, three flows, two PDKs. There are 885 passing rows, 111
+OpenTimer/OpenSTA correlation failures, 36 skips, and no missing depths or
+synthesis-flow failures. Coverage, settings, region-size and report audits pass;
+all 664 retained baseline depths are available. The 16 representative Verilog
+candidates and 16 final Pyrope netlists pass CVC5. This is focused validation,
+not whole-corpus equivalence. LogikBench adapter tests and all six smoke jobs pass. Its initial refresh exposed a Yosys runtime-script lookup error on macro-backed
+RAMs. The lookup repair passes its relocated-binary and existing LEC regressions;
+all six replacement smoke jobs pass. The full 500-job refresh has restarted
+with frozen compiler and runtime hashes. At 22 completed jobs it yielded to an
+independent lhdtrack sweep, then resumed from its checkpoint once the batch
+finished. At 35 jobs, a separate Minion mapping job caused another interlock. A read-only
+profile exposed repeated per-port fanin scans in the ABC scoring importer. The
+one-node cache repair builds and passes its 4,096-port graph regression; mapper
+and runtime regressions are queued before another full refresh. The old binary
+and both partial runs remain retained.
+The requested report is <code>../lhdtrack/target/results-masca1.html</code>;
+its actual host identity remains <code>mascm1</code>.</p>
+
+<h2>Algorithm and defaults</h2>
+<p>CLI defaults are <code>pass.color.synth_alg=cones</code>,
+<code>pass.color.ctrl_cones=true</code>, <code>pass.color.forward=all</code>,
+<code>pass.color.max_gate=30000</code>, <code>pass.color.stop_mux=true</code>
+and <code>pass.color.stop_arith=true</code>. The benchmark profiles explicitly
+record these settings, with <code>stop_mux=false</code> for Sky130.</p>
+<p>Mux/select and register/memory-enable cones share control colors whenever
+they overlap; overlapping data cones merge separately. Shared zero-cost wiring
+and primary-input pins count as overlap without acquiring an artificial cost.
+Distinct primary-input pins do not alias merely because they share the builtin
+input node. Input sharing remains node/pin-granular, like the coloring model.
+Control and data use separate ownership maps.</p>
+<p>Shared control nodes have one owner, eliminating copies between control
+families. Overlap merges prioritize shared logic before zero-cost contacts.
+Primary-input contacts retain a star and a chain, allowing later groups to
+pack after the first reaches its budget without a quadratic fanout clique.
+Oversized control components split into budgeted colors; data walks and register
+attachment check size before adding nodes. An indivisible operation can exceed
+the soft estimate alone; an explicit tighter control cap rejects such a node.</p>
+<p>The mux boundary switch controls ownership: enabled puts muxes in control
+groups; disabled places muxes in data groups while select/enable logic stays
+separate. Internal constant masks and shifts that start and end within a mux
+group remain visible to ABC. External variable data arms remain outside that
+control group. Large adders, multipliers and dividers retain boundaries in all
+benchmark runs; the independent arithmetic switch is tested.</p>
+
+<h2>Gray-to-binary diagnosis and budget selection</h2>
+<p>The retained w32 gray2bin graph has 321 nodes and 21,177 predicted AIG gates.
+The 5,000 budget truncated its single output walk and left 30 colors. The
+algorithm also excluded primary-input-only overlap. Correcting input overlap
+reduces this to five colors at 5,000; at 30,000, the graph is one color.
+A final color-only invocation confirms one color with default color options.</p>
+<table>
+<thead><tr><th>Gray2bin configuration</th><th>Colors</th><th>ASAP7 cells / depth</th><th>Sky130 cells / depth</th></tr></thead>
+<tbody>
+<tr><td>Preserved baseline</td><td>30</td><td>537 / 9</td><td>457 / 8</td></tr>
+<tr><td>Input-overlap fix, 5,000</td><td>5</td><td>316 / 9</td><td>269 / 9</td></tr>
+<tr><td>Input-overlap fix, 30,000</td><td>1</td><td>132 / 6</td><td>118 / 5</td></tr>
+</tbody>
+</table>
+<p>All four candidate netlists are CVC5-proven. The serial 44-design budget sweep
+completed 176 measurements with no flow errors. Per PDK, 42 designs are unchanged,
+gray2bin improves, and one large FIFO has a small cell-count tradeoff. On that
+FIFO, ASAP7 changes 11,680 to 11,872 cells at depth 24 (763.42 to 760.96 ps);
+Sky130 changes 8,524 to 8,531 cells at depth 33. The 30,000 default was selected
+from this comparison. The process-tree memory guard remains independent.</p>
+
+<h2>Selected PDK profiles</h2>
+<p>Before the input-overlap correction, 258 measurements compared both mux
+policies over 43 designs and both PDKs, plus depth-focused ABC variants on ASAP7.
+ASAP7 retains <code>stop_mux=true</code>, <code>pass.abc.area_relax=0</code>, and
+<code>pass.abc.area_flow=none</code>; Sky130 uses <code>stop_mux=false</code> and
+the normal budgeted area recipe. The subsequent 44-design sweep used these
+same PDK policies with the input-overlap correction. Both front ends and
+netlist LEC share one profile helper.</p>
+<p>ASAP7 priorities are depth, delay, then cells; Sky130 priorities are cells,
+depth, then delay. Larger colors do not guarantee better ABC results: counter,
+population count, some FIFOs and transfer logic retain tradeoffs. Gray2bin's
+Sky130 cell count remains above Yosys (118 versus 79), despite lower depth.
+No universal superiority over Yosys is claimed.</p>
+<table>
+<thead><tr><th>PDK</th><th>Selected Verilog sample</th><th>Regions</th><th>Cells</th><th>Depth</th><th>Delay</th></tr></thead>
+<tbody>
+<tr><td>asap7</td><td>br_enc_gray2bin</td><td>1</td><td>132</td><td>6</td><td>220.2991 ps</td></tr>
+<tr><td>asap7</td><td>br_enc_onehot2bin</td><td>2</td><td>34</td><td>3</td><td>84.9267 ps</td></tr>
+<tr><td>asap7</td><td>br_fifo_shared_dynamic_ctrl</td><td>32</td><td>2410</td><td>20</td><td>744.8282 ps</td></tr>
+<tr><td>asap7</td><td>br_tracker_freelist</td><td>3</td><td>189</td><td>7</td><td>400.3943 ps</td></tr>
+<tr><td>asap7</td><td>br_counter_incr</td><td>3</td><td>103</td><td>12</td><td>385.2791 ps</td></tr>
+<tr><td>asap7</td><td>br_enc_countones</td><td>1</td><td>151</td><td>9</td><td>278.6931 ps</td></tr>
+<tr><td>asap7</td><td>add</td><td>1</td><td>43</td><td>4</td><td>111.4558 ps</td></tr>
+<tr><td>asap7</td><td>icmp</td><td>1</td><td>69</td><td>5</td><td>140.1722 ps</td></tr>
+<tr><td>sky130</td><td>br_enc_gray2bin</td><td>1</td><td>118</td><td>5</td><td>1.9544 ns</td></tr>
+<tr><td>sky130</td><td>br_enc_onehot2bin</td><td>2</td><td>37</td><td>3</td><td>0.7412 ns</td></tr>
+<tr><td>sky130</td><td>br_fifo_shared_dynamic_ctrl</td><td>27</td><td>1923</td><td>35</td><td>9.3542 ns</td></tr>
+<tr><td>sky130</td><td>br_tracker_freelist</td><td>4</td><td>103</td><td>12</td><td>3.8380 ns</td></tr>
+<tr><td>sky130</td><td>br_counter_incr</td><td>5</td><td>53</td><td>8</td><td>1.8292 ns</td></tr>
+<tr><td>sky130</td><td>br_enc_countones</td><td>1</td><td>116</td><td>8</td><td>2.1544 ns</td></tr>
+<tr><td>sky130</td><td>add</td><td>1</td><td>24</td><td>8</td><td>2.2803 ns</td></tr>
+<tr><td>sky130</td><td>icmp</td><td>1</td><td>46</td><td>5</td><td>0.9151 ns</td></tr>
+</tbody>
+</table>
+
+<h2>Validation and measurement contract</h2>
+<ul>
+<li>All 13 optimized C++ targets pass: ten color targets, partition, ABC mapping
+and ABC incremental tests. The CLI-options test also passes with the 30,000 default.</li>
+<li>CVC5 proves all 32 representative netlists: gray2bin, onehot encoder,
+counter, delay, deserializer, FIFO, freelist and shifter, both frontends and
+both PDKs. This is focused equivalence validation, not whole-corpus proof.</li>
+<li>All 226 selected graph control summaries have no color over 30,000 predicted
+gates; the single-overlap model puts every node in exactly one control color, so
+duplication is structurally impossible rather than measured. Data summaries also
+have no oversized colors.</li>
+<li>The final add/gray2bin end-to-end smoke passes all 12 rows, including both
+LiveHD front ends and Yosys. Both front ends reproduce gray2bin's one-color metrics.
+Corpus validation, Python lint, C++ formatting and whitespace checks pass.</li>
+<li>Depth counts mapped combinational cell levels, including buffers, and resets
+at sequential outputs. The helper rejects unknown cells, cycles and multiple
+drivers, and ignores portless Yosys scope metadata.</li>
+<li>Delay is whole-design OpenSTA in the Liberty time unit: ps for ASAP7, ns for
+Sky130. Legacy field names may end in <code>_ns</code>; <code>time_unit</code>
+controls interpretation. OpenTimer correlation failures remain failures and
+are displayed with their measured values.</li>
+<li>Tools and libraries come from lhdtrack's staged toolchain. Matched endpoints
+and SDCs use zero external input/output delays and no explicit output load.
+These are idealized synthesis comparisons, not post-route frequency estimates.</li>
+<li>Synthesis is serial. The guard monitors the owned process tree and limits
+RSS to the smaller of 16 GiB and three quarters of RAM.</li>
+</ul>
+
+<h2>Full refresh and evidence</h2>
+<p>Exact retained-baseline comparisons across matched measured rows (including
+STA-gated rows) show ASAP7 depth reductions of 14.8% for Verilog and 15.5% for
+Pyrope; delay improves 4.9% and 6.5%, respectively. Sky130 cells improve 6.3%
+and 8.7%. Ratios use positive metric pairs and are separate from the report's
+headline population. Yosys still leads most designs in cells and logic depth;
+the refreshed LHD flows have lower geometric-mean OpenSTA delay.</p>
+<p>Of the 111 correlation failures, 82 recur, 26 previously passed, and three
+were previously incomparable due to native timing cuts. Nineteen previous
+correlation failures now pass. Gates remain unchanged. The requested report is
+pinned to this full synthesis run; later independent ledger observations do not replace this synthesis snapshot. Nine report/ledger regressions, corpus checks and lint pass.</p>
+<p>Run <code>20260909T075240-cones-primary-final</code> freezes the staged executable and source recipes.
+Its manifest records binary/recipe hashes, the full job plan and toolchain.
+Every completed batch validates the actual command settings before appending
+to the ledger. The final audit requires all 1,032 unique slots, no missing depth,
+and two 172-row synthesis tables with 20 columns each. Reports show settings
+recorded with each measurement rather than projecting current defaults onto
+historical rows. Visual browser preview was unavailable; structure is checked
+programmatically.</p>
+<p>The preserved comparison is <code>report-mascm1-tofix.html</code>. Intermediate
+run <code>20260909T045800-cones</code> completed with forwarding off: 895 passed,
+101 STA-gate failures, 36 skips. All 664 recorded LiveHD commands kept
+<code>ctrl_cones=true</code>. Run <code>20260909T071548-cones-final</code> was stopped
+at 138 checkpointed rows after the gray2bin correction request; those rows remain
+in the ledger. Neither is the final deliverable.</p>
+<ul>
+<li><a href="../../repros/cones-qor-20260909/selected-policy.json">Final policy and default check</a>,
+<a href="../../repros/cones-qor-20260909/selected-proofs.json">16 proofs</a>,
+<a href="../../repros/cones-qor-20260909/selected-color-audit.json">color audit</a>,
+and <a href="../../repros/cones-qor-20260909/final-profile-smoke.json">12-row smoke</a>.</li>
+<li>The final full run reproduces all 88 selected focused Verilog measurements
+exactly in cells, depth and delay
+(<a href="../../repros/cones-qor-20260909/full-vs-focus-check.json">comparison</a>).
+Its 16 representative structural netlists are byte-identical to those from the
+proven focused candidates
+(<a href="../../repros/cones-qor-20260909/proven-netlist-reproduction.json">SHA-256 evidence</a>).</li>
+<li><a href="../../repros/cones-qor-20260909/input-overlap-budget-44.json">176 budget measurements</a>,
+<a href="../../repros/cones-qor-20260909/gray2bin-input-overlap.json">gray2bin candidates</a>,
+and <a href="../../repros/cones-qor-20260909/mux-policy-43.json">historical mux-policy comparison</a>.</li>
+<li>Full scratch evidence: <code>/private/tmp/cones-qor/</code>. Final run evidence:
+<code>../lhdtrack/var/runs/20260909T075240-cones-primary-final/</code>.</li>
+<li>A later read-only audit confirms the pinned report still has all 1,032 rows
+after 172 newer ledger overlays. All 32 retained CVC5 proof envelopes and
+candidate netlist hashes recheck successfully: <a href="../../repros/cones-qor-20260909/final-coverage-recheck.json">coverage recheck</a> and
+<a href="../../repros/cones-qor-20260909/final-proof-recheck.json">proof recheck</a>.</li>
+<li>Completed evidence: <a href="../../repros/cones-qor-20260909/final-coverage.json">coverage</a>,
+<a href="../../repros/cones-qor-20260909/final-exact-comparison.json">exact comparisons</a>,
+<a href="../../repros/cones-qor-20260909/final-region-audit.json">664 region audits</a>,
+and <a href="../../repros/cones-qor-20260909/final-pyrope-proofs.json">16 final Pyrope proofs</a>.</li>
+<li>Refreshing <code>../logikbench</code> designs/results after lhdtrack validation.
+Discovery confirms
+250 designs in nine groups (500 LHD/PDK jobs). Existing results and adapter
+provenance are preserved under <code>/private/tmp/cones-qor/logikbench-before-refresh/</code>.
+The local <code>logikbench_refresh.py</code> runner is prepared, with serial
+per-job memory guards, frozen input hashes, archived netlists and libraries,
+and fresh-result snapshots. It checks <code>abc.threads=1</code> as well as the
+selected coloring policy, matching the lhdtrack backend. The adapter now uses
+the selected profiles, converts the PDK clock to ABC picoseconds and honors
+explicit option overrides without duplicate conflicting flags. All 28 adapter
+tests and all six smoke jobs pass (1.61 GiB peak guarded memory). The initial run under <code>../logikbench/build/cones-refresh-20260909T002411/</code>
+is retained after 66 recorded jobs and one final completed guarded job. Four RAM
+rows failed before mapping because Yosys script discovery ignored
+<code>RUNFILES_DIR</code>. The generic lookup repair passes the relocated-binary
+smoke and existing Yosys-backed LEC regression. All six RAM/gray2bin smoke jobs pass, including both former RAM failures on
+both PDKs; gray2bin exactly reproduces its prior cells/depth/frequency. The full
+replacement sweep is running under <code>/Users/renau/projs/logikbench/build/cones-refresh-v2-20260909T005317</code>. Its source and runtime
+files are frozen, and its results remain separate from the interrupted run. Dashboard
+provenance/settings regressions also pass (four checks).</li>
+</ul>
+</main>
+</body>
+</html>

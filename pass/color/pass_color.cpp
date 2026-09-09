@@ -54,9 +54,18 @@ void Pass_color::setup() {
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
   m.add_label_optional("ctrl_cones",
-                       "merge mux/select groups and overlapping enable groups (default in cones mode; false disables)",
+                       "merge overlapping mux/select and enable cones together, separately from data and within max_gate "
+                       "(default in cones mode; false disables)",
                        "true");
-  m.add_label_optional("ctrl_max_gate", "fail if a control cone exceeds this predicted AIG size (0 unbounded)", "0");
+  m.add_label_optional("stop_mux",
+                       "cones: stop data colors at muxes and place muxes with control; false puts muxes in data colors "
+                       "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true",
+                       "true");
+  m.add_label_optional("stop_arith", "keep large adders, multipliers and dividers at color boundaries", "true");
+  m.add_label_optional("ctrl_max_gate",
+                       "optional tighter control-color size bound (predicted AIG); 0 uses max_gate. "
+                       "An indivisible node above this explicit bound fails",
+                       "0");
   m.add_label_optional("ctrl_min_gate", "leave control cones smaller than this predicted AIG size in data regions", "0");
   m.add_label_optional("synth_alg",
                        "synth: cones|synth|pipe boundary mode. cones (default) seeds one BACKWARD cone per register "
@@ -86,15 +95,16 @@ void Pass_color::setup() {
   // actually build. Over 1930 lhdsuite regions, synthesis GE predicted mapped
   // gates with a median error of 1.8x and a p90 of 5.6x in both directions --
   // runtime shifts 24x over (its x6 is an ABC TIME factor), Sum ~5x under,
-  // register-file arrays 8-11x under. The 5k default aims for smaller incremental
-  // regions, not a claim that 5k is universally safe: the threshold is
-  // SOFT (it shapes granularity), and pass.abc's own RSS/time guards remain the
-  // admission backstop.
+  // register-file arrays 8-11x under. A 5k limit fragments even gray2bin's
+  // small reduction network (21,177 predicted AIG nodes before optimization).
+  // The 30k default keeps that cone whole; the 44-design comparison changes
+  // only gray2bin and one large FIFO. This is a SOFT granularity heuristic,
+  // and pass.abc's own RSS/time guards remain the admission backstop.
   m.add_label_optional("max_gate",
                        "synth: cones mode -- soft bound on a color's PREDICTED AIG size; merge the most-sharing cones "
                        "while their union stays under it, and stop a cone's walk past it. 0 = raw cones, no merge. "
                        "Distinct from max_ge, which is the GE size window of the synth/pipe modes",
-                       "5000");
+                       "30000");
   // Phase 2 of cones' merge. A FLAT leaf, like max_gate: the kernel splits a
   // --set key at the LAST dot, so `pass.color.forward` is expressible and
   // `pass.color.synth.forward` is not (it would read as a pass named
@@ -104,8 +114,8 @@ void Pass_color::setup() {
                        "across its Q into the colors it drives (through `din` only, never enable/clock/reset), smallest "
                        "combined size first, while it still fits under max_gate. `pair` takes one consumer color at a "
                        "time; `all` takes the whole qualifying Q fanout as one all-or-nothing candidate. "
-                       "false = off (default)",
-                       "false");
+                       "all = default in cones mode; false = off",
+                       "");
   m.add_label_optional("absorb",
                        "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
                        "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
@@ -190,12 +200,24 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
                                    opts.min_ge,
                                    opts.max_ge,
                                    opts.name_weight);
+    // `stop_arith` is not a cones knob: is_arith_boundary feeds `synth`'s is_cut
+    // and its preserve_arith_cuts too, so recording it only under cones would
+    // leave a `synth_alg=synth --set color.stop_arith=false` partition claiming
+    // the default arithmetic policy. `pipe` cuts at state alone and ignores it.
+    if (salg != "pipe") {
+      s += std::format(",\"stop_arith\":{}", opts.stop_arith);
+    }
     if (salg == "cones") {
       s += std::format(",\"ctrl_cones\":{},\"ctrl_max_gate\":{},\"ctrl_min_gate\":{}",
                        opts.ctrl_cones,
                        opts.ctrl_max_gate,
                        opts.ctrl_min_gate);
       s += std::format(",\"max_gate\":{},\"forward\":\"{}\"", opts.max_gate, opts.forward.empty() ? "false" : opts.forward);
+      // Only the control walk reads it; without ctrl_cones there is no mux
+      // policy to report, and printing one would claim a decision nothing made.
+      if (opts.ctrl_cones) {
+        s += std::format(",\"stop_mux\":{}", !opts.mux_in_data);
+      }
     }
     // A color id MAY span several disconnected clouds. pass.partition keys its
     // same-color anchor union off this flag; without it the component split
@@ -286,13 +308,10 @@ void Pass_color::color(Eprp_var& var) {
         .fatal();
   }
 
-  // Same rule for the cones phase-2 knob, and `true` is deliberately NOT
-  // accepted while the pair-vs-all question is still an open measurement: it
-  // would have to guess which one the user meant. Asking for it under a mode
-  // that cannot honor it is refused for the same reason a typo is: `cones` is
-  // the only reader, so accepting it anywhere else would report a forward merge
-  // that never ran.
-  const auto forward    = std::string{var.get("forward", "false")};
+  // Resolve the default here because only cones implements forward merging.
+  // Leave the registered default empty so an omitted option remains distinct
+  // from explicitly requesting a forward merge under synth/pipe.
+  const auto forward    = std::string{var.get("forward", alg == "synth" && synth_alg == "cones" ? "all" : "false")};
   const bool forward_on = forward == "pair" || forward == "all";
   if (alg == "synth" && !forward_on && forward != "false" && forward != "off" && forward != "0") {
     livehd::diag::err("pass.color", "bad-forward", "unsupported")
@@ -319,8 +338,10 @@ void Pass_color::color(Eprp_var& var) {
   opts.min_ge        = parse_ge_bound(var, "min_ge", "500");
   opts.max_ge        = parse_ge_bound(var, "max_ge", "5000");
   opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
-  opts.max_gate      = parse_ge_bound(var, "max_gate", "5000");
+  opts.max_gate      = parse_ge_bound(var, "max_gate", "30000");
   opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "true"));
+  opts.mux_in_data   = !parse_bool(var.get("stop_mux", "true"));
+  opts.stop_arith    = parse_bool(var.get("stop_arith", "true"));
   opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
   opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
   if (opts.ctrl_cones && (alg != "synth" || synth_alg != "cones")) {

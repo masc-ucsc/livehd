@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "abc_fanin_lookup.hpp"
 #include "abc_incr.hpp"
 #include "abc_map.hpp"
 #include "absl/container/flat_hash_map.h"
@@ -518,14 +519,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     opaque_port[out] = std::string{port};
     (void)node;
   };
-  const auto driver_of_pid = [&](const hhds::Node_class& node, hhds::Port_id pid) -> hhds::Pin_class {
-    for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_port_id() == pid) {
-        return e.driver;
-      }
-    }
-    return {};
-  };
+  Fanin_lookup driver_of_pid;
 
   // Enumerate driven pins from edges, including node-as-pin consumers (port
   // zero). The pinned HHDS out_pins() omits a driver whose readers are all

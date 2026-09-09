@@ -49,7 +49,7 @@ echo "$out" | grep -q '"name":"pass.opentimer.top"' && fail "pass.opentimer.top 
 echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
 # Incremental partition defaults and the separate per-color memory target.
-for entry in 'pass.color.min_ge:500' 'pass.color.max_ge:5000' 'pass.color.max_gate:5000' 'pass.abc.memory_budget_mb:16384'; do
+for entry in 'pass.color.min_ge:500' 'pass.color.max_ge:5000' 'pass.color.max_gate:30000' 'pass.abc.memory_budget_mb:16384'; do
   flag=${entry%:*}
   expected=${entry##*:}
   description=$("$LHD" describe "$flag") || fail "cannot describe $flag"

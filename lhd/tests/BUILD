@@ -16,6 +16,12 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
 sh_test(
+    name = "lhd_yosys_runfiles_smoke",
+    srcs = ["lhd_yosys_runfiles_smoke.sh"],
+    data = ["//lhd", "//inou/yosys:inou_yosys_scripts"],
+)
+
+sh_test(
     name = "lhd_comb_blocks_test",
     size = "large",
     srcs = ["lhd_comb_blocks_test.sh"],

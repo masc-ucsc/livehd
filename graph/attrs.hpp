@@ -93,8 +93,8 @@ struct color_t {
 };
 inline constexpr color_t color{};
 
-// Space-separated control color memberships, including the owner. Written by
-// coloring, consumed by partition, and cleared on every recoloring.
+// Space-separated control color memberships. Coloring writes exactly one (the
+// owner); the partition reader parses a list. Cleared on every recoloring.
 struct ctrl_members_t {
   using value_type = std::string;
   using storage    = hhds::flat_storage;

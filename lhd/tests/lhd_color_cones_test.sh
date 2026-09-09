@@ -83,9 +83,9 @@ for entry in "${DESIGNS[@]}"; do
 done
 
 # Phase 2, the forward merge across Q. Both modes must reach pass.partition and
-# stay LEC-equivalent; `forward` is inert by default, so the runs above already
-# covered the off case.
-for MODE in pair all; do
+# stay LEC-equivalent. `all` is what the CLI picks when `forward` is omitted --
+# the runs above -- so `false` is spelled out here to keep the off path covered.
+for MODE in false pair all; do
   D="$W/fwd_$MODE"
   mkdir -p "$D"
   run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
@@ -186,9 +186,22 @@ module ctrl_shared(input [31:0] a, b, input [7:0] d, e, output [7:0] y, z);
 endmodule
 VERILOG
 run compile "$D/ref.v" --top ctrl_shared --emit-dir lg:"$D/lg" --workdir "$D/w1"
+# The MERGE assertion needs a cap the merged group fits under: a control group
+# above max_gate is partitioned into several colors, which is the budget
+# property, not the overlap property. This closure is 228 predicted AIG and
+# splits at any cap <= 227, so keep real headroom above it -- a predict_abc_size
+# retune must not turn the overlap assertion red. Colour a copy so the
+# partition/ABC/LEC leg below keeps its deliberately tiny cap.
+cp -R "$D/lg" "$D/lg_merged"
+run pass color synth lg:"$D/lg_merged" --top ctrl_shared --set color.synth_alg=cones --set color.max_gate=5000 --workdir "$D/w2m"
+LC_ALL=C grep -raq '"mux_groups":1,' "$D/lg_merged" || fail 'overlapping mux selects were not merged'
 run pass color synth lg:"$D/lg" --top ctrl_shared --set color.synth_alg=cones --set color.max_gate=40 --workdir "$D/w2"
-LC_ALL=C grep -raq '"mux_groups":1' "$D/lg" || fail 'overlapping mux selects were not merged'
-LC_ALL=C grep -raq '"duplicated_nodes":0' "$D/lg" || fail 'mux family duplicated shared decode'
+# The same closure under a cap far below it must PARTITION into two or more
+# control colors. Nothing here can assert "the split copied no node": a node
+# carries exactly one control color by construction, so the old duplication
+# counter was structurally 0. The partition/compile/LEC leg below is what
+# proves the split is correct.
+LC_ALL=C grep -raqE '"ctrl_colors":\[[0-9]+,' "$D/lg" || fail 'max_gate=40 did not split the oversized control group'
 # The default enables groups, while the explicit opt-out remains available.
 cp -R "$D/lg" "$D/lg_off"
 run pass color synth lg:"$D/lg_off" --top ctrl_shared --set color.synth_alg=cones --set color.ctrl_cones=false --workdir "$D/off"
@@ -206,8 +219,10 @@ run lec --lib lg:"$D/models" --set formal.solver=lgyosys --impl verilog:"$D/mapp
 echo 'PASS: merged mux groups, partition and ABC remain equivalent'
 
 
-# Shared mux/enable logic is copied once per family. The chained mux itself,
-# including PI-selected muxes, stays visible to ABC. Match flop state as well.
+# Mux and enable closures that touch the same decode share ONE overlap group --
+# they are no longer two families with the intersection copied into both, so no
+# control node is duplicated. The chained mux itself, including PI-selected
+# muxes, stays visible to ABC. Match flop state as well.
 D="$W/ctrl_families"; mkdir -p "$D"
 cat > "$D/ref.v" <<'VERILOG'
 module ctrl_families(input clk, input [3:0] a,b, input s,t,
@@ -224,14 +239,19 @@ module ctrl_families(input clk, input [3:0] a,b, input s,t,
 endmodule
 VERILOG
 run compile "$D/ref.v" --top ctrl_families --emit-dir lg:"$D/lg" --workdir "$D/w1"
+# 88 predicted AIG of control: cap above it, so the budget split does not hide
+# the property under test (see ctrl_shared above).
+cp -R "$D/lg" "$D/lg_merged"
+run pass color synth lg:"$D/lg_merged" --top ctrl_families --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=5000 --workdir "$D/w2m"
+LC_ALL=C grep -raq '"mux_groups":1,' "$D/lg_merged" || fail 'mux and enable closures did not share one control group'
+LC_ALL=C grep -raq '"enable_groups":0' "$D/lg_merged" || fail 'the enable closure minted a second group instead of joining'
 run pass color synth lg:"$D/lg" --top ctrl_families --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w2"
-LC_ALL=C grep -raq '"duplicated_nodes":[1-9]' "$D/lg" || fail 'cross-family decode was not duplicated'
 run pass partition lg:"$D/lg" --top ctrl_families --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_families --emit verilog:"$D/post.v" --workdir "$D/w4"
 run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
 run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.ctrl_cones=true --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
 run lec --lib lg:"$W/ctrl_shared/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
-echo 'PASS: mux chains and cross-family enable duplication remain equivalent after partition and ABC'
+echo 'PASS: mux chains and shared mux/enable control groups remain equivalent after partition and ABC'
 
 # Constant shifts between muxes are internal wiring of the same control group.
 # Check the normalizer shape that exposed the fmadd QoR regression through both

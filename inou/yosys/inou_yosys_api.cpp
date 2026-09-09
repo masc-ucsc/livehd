@@ -8,6 +8,7 @@
 
 // #include <ext/stdio_filebuf.h>
 #include <algorithm>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -66,11 +67,29 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
       do_read_str = "inou_yosys_write.ys";
     }
 
-    for (const auto& e : alt_paths) {
-      auto test = main_path + e + do_read_str;
-      if (access(test.c_str(), R_OK) != -1) {
-        script_file = test;
-        break;
+    // A staged binary can live outside its runfiles tree (notably when
+    // LiveHD is a dependency of lhdtrack). Honor that tree before probing
+    // executable-relative installation layouts. Explicit scripts still win.
+    for (const char* env : {"RUNFILES_DIR", "TEST_SRCDIR"}) {
+      const char* root = std::getenv(env);
+      if (!root || !*root || !script_file.empty()) {
+        continue;
+      }
+      for (const char* workspace : {"livehd+", "livehd", "_main", ""}) {
+        auto test = std::string(root) + "/" + workspace + "/inou/yosys/" + do_read_str;
+        if (access(test.c_str(), R_OK) == 0) {
+          script_file = std::move(test);
+          break;
+        }
+      }
+    }
+    if (script_file.empty()) {
+      for (const auto& e : alt_paths) {
+        auto test = main_path + e + do_read_str;
+        if (access(test.c_str(), R_OK) != -1) {
+          script_file = test;
+          break;
+        }
       }
     }
   } else {

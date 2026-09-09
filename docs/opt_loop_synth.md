@@ -5,6 +5,13 @@
 Every number quoted below was read out of the source or measured on this box;
 none is a target.
 
+**2026-09-09 update:** the defaults quoted here describe the August audit.
+The current cones defaults are `synth_alg=cones`, `ctrl_cones=true`,
+`forward=all`, `max_gate=30000`, `stop_mux=true`, and `stop_arith=true`.
+Primary-input sharing now counts as cone overlap. See the
+[lhdtrack cones QoR task](../todo/livehd/2d-cones-qor.html) for the measurements
+and the selected per-PDK benchmark profiles, including `stop_mux=false` for Sky130.
+
 **Deliverable of this document:** a repeatable loop, not a fixed feature list.
 Sections 4–6 are one-time setup (a trustworthy measurement contract); sections
 7–8 are the loop that runs indefinitely afterwards.

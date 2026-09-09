@@ -29,6 +29,7 @@ filegroup(
         exclude = [
             "abc_salt.hpp",
             "*test*.cpp",
+            "*_smoke.cpp",
         ],
     ),
 )
@@ -59,7 +60,7 @@ cc_library(
     name = "pass_abc",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = ["*test*.cpp", "*_smoke.cpp"],
     ),
     hdrs = glob(
         ["*.hpp"],
@@ -84,6 +85,19 @@ cc_library(
         "@rapidjson",
     ],
     alwayslink = True,  # static Pass_plugin registration
+)
+
+# Graph-only coverage for the scoring importer's per-port lookup.
+cc_test(
+    name = "abc_fanin_lookup_smoke",
+    srcs = ["abc_fanin_lookup.hpp", "abc_fanin_lookup_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        "//graph",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
 )
 
 # The incremental-synthesis region digest (2opt-incr A): the cache-key

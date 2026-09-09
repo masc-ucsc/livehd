@@ -183,14 +183,19 @@ struct Color_opts {
   // and no merge at all. The shipped policy (30000) lives on the pass.color
   // label so a direct caller or unit test still gets what it asked for.
   uint64_t max_gate      = 0;
-  // Raw callers keep the base coloring; the shipped CLI defaults to mux groups.
+  // Raw callers keep the base coloring; the CLI enables shared mux/enable groups.
   bool     ctrl_cones    = false;
+  // Select/enable logic remains control; optionally let mux data paths merge.
+  bool     mux_in_data   = false;
+  // Keep large adders/multipliers/dividers at color boundaries unless disabled.
+  bool     stop_arith    = true;
+  // A nonzero bound further limits control merging; otherwise use max_gate.
   uint64_t ctrl_max_gate = 0;
   uint64_t ctrl_min_gate = 0;
 
   // cones mode's PHASE-2 forward merge across the register: "", "pair" or
-  // "all". Empty (the default, INERT like max_gate) leaves the backward cones
-  // exactly as they were.
+  // "all". Empty (the raw API default, INERT like max_gate) leaves the backward
+  // cones exactly as they were. The pass.color CLI defaults to "all" in cones mode.
   //
   // It runs only AFTER the backward overlap merge, so the cones ABC actually
   // optimizes get first claim on the max_gate budget and forward merging spends
@@ -200,7 +205,7 @@ struct Color_opts {
   // enable/clock/reset, which would re-weld the control cone the walk split off.
   //
   // "pair" ranks one consumer color at a time; "all" ranks the whole qualifying
-  // Q fanout as one all-or-nothing candidate. Which wins is an open measurement.
+  // Q fanout as one all-or-nothing candidate.
   std::string forward;
 
   // `--stats` sink for the def currently being colored, or nullptr. It rides on
