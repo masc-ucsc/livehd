@@ -225,6 +225,14 @@ struct runtime_check_t {
 };
 inline constexpr runtime_check_t runtime_check{};
 
+// On a memory implementation graph's input node. Synthesis preserves this
+// module boundary; consumers such as STA may explicitly flatten its body.
+struct memory_module_t {
+  using value_type = uint8_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr memory_module_t memory_module{};
+
 // A whole-array Memory node whose active-high `reset` condition is
 // asynchronous. Memory's 16-pin ABI is full, so this reset-style bit lives on
 // the node rather than being overloaded onto an unrelated config pin.
@@ -349,6 +357,8 @@ inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<memory_module_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<memory_async_reset_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<aggregate_origin_t> = Attr_kind::node;
@@ -389,6 +399,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(match)                          \
   X(proven)                         \
   X(runtime_check)                  \
+  X(memory_module)                  \
   X(memory_async_reset)             \
   X(aggregate_origin)               \
   X(aggregate_source_index)         \

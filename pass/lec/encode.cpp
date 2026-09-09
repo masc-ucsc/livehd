@@ -1187,6 +1187,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                                                  // equalities) OR a seeded current-state symbol
                                                  // (type==1 sync, threaded via next_read).
     std::vector<hhds::Occurrence_pin> rd_addr;
+    std::vector<hhds::Occurrence_pin> rd_enable;
     std::vector<std::string>          rd_key;    // "<key>:rd<N>" per read port (sync threading)
     std::vector<Term>                 rd_xmask;  // per read port: deferred X bit-plane symbol (null = fully known)
     std::vector<Term>                 rd_xcur;   // sync (type==1) only: the plane threaded IN from last cycle (null = none)
@@ -1479,10 +1480,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
       }
+      // Disabled reads have an X base value in the RTL; forwarding may still
+      // define individual lanes. Attach this plane before consumers are encoded.
+      if (x_dontcare_ && xm.isNull() && !dout_dpin.is_invalid() && !p.en.is_invalid() && !p.en.is_known_true()) {
+        xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
+        pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
+      }
       mc.rd_xmask.push_back(xm);
       mc.rd_xcur.push_back(sync_threaded ? carried_xm : Term{});
       mc.rd_fresh.push_back(fresh);
       mc.rd_addr.push_back(p.addr);
+      mc.rd_enable.push_back(p.en);
       mc.rd_key.push_back(rk);
       ++n_rd_pos;
     }
@@ -2847,7 +2855,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           result = fit(arms.back(), W);
           for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
             Term cond = mux_arm_cond(tm_, sel.term, sel.width, k);
-            result = tm_.mkTerm(Kind::ITE, {cond, fit(arms[k], W), result});
+            result    = tm_.mkTerm(Kind::ITE, {cond, fit(arms[k], W), result});
           }
           break;
         }
@@ -2913,7 +2921,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               Term u = arm_xm(arms.back());
               for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
                 Term cond = mux_arm_cond(tm_, sel.term, sel.width, k);
-                u = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
+                u         = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
               }
               // A non-null selector plane is not necessarily asserted: it can
               // be a data-dependent ITE which is zero on this path. Smearing
@@ -4381,6 +4389,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                                {plane, tm_.mkTerm(Kind::BITVECTOR_AND, {rung, tm_.mkTerm(Kind::BITVECTOR_NOT, {claimed})})});
           }
           claimed = tm_.mkTerm(Kind::BITVECTOR_OR, {claimed, rung});
+        }
+        if (!mc.rd_enable[k].is_invalid()) {
+          Val ev = driver_val(mc.rd_enable[k], ok);
+          if (!ok) {
+            return fail("memory read enable not encodable");
+          }
+          Term disabled = tm_.mkTerm(Kind::EQUAL, {ev.term, bv_const(tm_, ev.width, 0)});
+          Term base_x   = tm_.mkTerm(Kind::ITE, {disabled, tm_.mkTerm(Kind::BITVECTOR_NOT, {claimed}), zero});
+          plane         = tm_.mkTerm(Kind::BITVECTOR_OR, {plane, base_x});
         }
         out.equalities.emplace_back(mc.rd_xmask[k], plane);
       }

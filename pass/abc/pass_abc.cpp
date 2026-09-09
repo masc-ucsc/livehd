@@ -24,11 +24,12 @@
 #include "json_util.hpp"
 #include "liberty_dff.hpp"
 #include "loop_cleanup.hpp"
-#include "mem_lower.hpp"
+#include "memory_module.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
+#include "satopt_memory.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
@@ -38,6 +39,7 @@ void Pass_abc::setup() {
   Eprp_method m("pass.abc", "Technology-map each colored region to a standard-cell netlist (ABC)", &Pass_abc::work);
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
+  m.add_label_optional("satopt", "Prove cross-region mux and memory simplifications before ABC mapping", "true");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
@@ -146,9 +148,9 @@ void Pass_abc::setup() {
                        "bits)",
                        "0");
   m.add_label_optional("memory",
-                       "true|false bit-blast a Memory into a DFF-cell array + read/write mux logic (true) vs keep it as a "
-                       "native memory instance (false)",
-                       "true");
+                       "true|false lower memory RTL and ABC-map its body in a separate module (true), or keep the "
+                       "native memory instance (false). Both preserve the memory instance boundary",
+                       "false");
   m.add_label_optional("memory_max_bits",
                        "with memory=true, keep a Memory whose storage (bits x size) exceeds this many bits as a native "
                        "instance and say which (0 disables the guard)",
@@ -562,6 +564,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (q.bypassed > 0) {
       j += std::format(",\"bypassed\":{}", q.bypassed);
     }
+    j += std::format(",\"satopt_facts\":{}", q.satopt_facts);
     j += std::format(",\"ware_trials\":{},\"ware_selected\":\"{}\"", q.ware_trials, jesc(q.ware_selected));
     if (q.logic_depth >= 0) {
       j += std::format(",\"logic_depth\":{}", q.logic_depth);
@@ -716,7 +719,7 @@ void Pass_abc::work(Eprp_var& var) {
   auto large_flow          = std::string{var.get("large_flow", "")};
   auto large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool map_register        = truthy(var.get("register", "true"));
-  bool map_memory          = truthy(var.get("memory", "true"));
+  bool map_memory          = truthy(var.get("memory", "false"));
   auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "65536")};
   auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
   auto delay               = std::string{var.get("delay", "")};
@@ -979,16 +982,17 @@ void Pass_abc::work(Eprp_var& var) {
   opts.large_ge            = large_ge;
   opts.map_register        = map_register;
   opts.map_memory          = map_memory;
-  opts.register_max_bits   = register_max_bits;
-  opts.dff_cell            = std::string{var.get("dff_cell", "")};
-  opts.delay               = delay;
-  opts.load                = load;
-  opts.verbose             = verbose;
-  opts.adder               = adder.value();
-  opts.ware                = truthy(var.get("ware", "true"));
-  opts.auto_adder          = adder_s == "auto" && block_size == 0;
-  opts.auto_multiplier     = mult_s == "auto";
-  auto barrel              = std::string{var.get("barrel", "auto")};
+  opts.satopt = var.get("satopt", "true") != "false" && var.get("satopt", "true") != "0" && var.get("satopt", "true") != "off";
+  opts.register_max_bits = register_max_bits;
+  opts.dff_cell          = std::string{var.get("dff_cell", "")};
+  opts.delay             = delay;
+  opts.load              = load;
+  opts.verbose           = verbose;
+  opts.adder             = adder.value();
+  opts.ware              = truthy(var.get("ware", "true"));
+  opts.auto_adder        = adder_s == "auto" && block_size == 0;
+  opts.auto_multiplier   = mult_s == "auto";
+  auto barrel            = std::string{var.get("barrel", "auto")};
   if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
     livehd::diag::err("pass.abc", "bad-barrel", "io").msg("barrel must be auto|log|reverse").fatal();
     return;
@@ -1053,7 +1057,11 @@ void Pass_abc::work(Eprp_var& var) {
         top_g = g.get();
       }
     }
-    if (top_g != nullptr && livehd::partition::flatten_is_whole_design(top_g, flatten)) {
+    // ONE unit, not merely "flattened": a virtual-flat coloring (pass.color
+    // synth) also flattens, but into many `max_gate`-bounded regions that
+    // Mapper::over_budget already guards one at a time -- refusing the whole
+    // design there would reject a run that is fine.
+    if (top_g != nullptr && livehd::partition::flatten_is_single_module(top_g, flatten)) {
       const uint64_t nodes = livehd::graph_util::flat_node_count(top_g, [&](hhds::Gid gid) -> hhds::Graph* {
         auto it = gid2graph.find(gid);
         return it == gid2graph.end() ? nullptr : it->second;
@@ -1083,17 +1091,16 @@ void Pass_abc::work(Eprp_var& var) {
   }
   opts.library = library;
 
-  // memory=true (the default): bit-blast every Memory into native flops + comb
-  // BEFORE partitioning, so the normal flow tech-maps the resulting muxes/flops.
-  // Deleted Memory nodes never reach the boundary code; any memory left native
-  // (an unsupported shape, or storage above memory_max_bits) still cuts as a
-  // boundary (the memory=false behavior).
-  if (map_memory) {
-    // Whole scratch library, not just the `var.graphs`-named subset: flatten
-    // inlines closure-only callees into the top, so a Memory left native inside
-    // one would reach the mapper as a boundary in a memory=true run.
-    livehd::abc::lower_memories(scratch_graphs, memory_max_bits);
+  // Prove memory simplifications in the parent context before extracting
+  // memory implementations into separate modules.
+  if (opts.satopt) {
+    livehd::abc::optimize_memories(scratch_graphs,
+                                   var.get("cache_dir", "").empty() ? "" : std::string(var.get("cache_dir")) + "/../satopt_cache");
   }
+  // Extract before partitioning: a lowered memory remains a named instance,
+  // even when its parent is flattened. The child body comes from cgen RTL.
+  auto memory_modules = livehd::abc::build_memory_modules(scratch_graphs, map_memory, memory_max_bits);
+  resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
 
@@ -1153,12 +1160,14 @@ void Pass_abc::work(Eprp_var& var) {
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one
   // module; the mapper drops its shared helper defs in that mode (set_flat).
+  // Virtual flattening (pass.color synth) flattens too but emits a wrapper plus
+  // one module per color, so it must NOT take this path.
   bool flat_whole_design = false;
   for (const auto& g : resolve_graphs) {
     if (!g || (!top.empty() && g->get_name() != top)) {
       continue;
     }
-    flat_whole_design = livehd::partition::flatten_is_whole_design(g.get(), flatten);
+    flat_whole_design = livehd::partition::flatten_is_single_module(g.get(), flatten);
     break;
   }
 

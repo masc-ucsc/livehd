@@ -279,3 +279,18 @@ TEST(AbcAreaRelax, DisabledAndDegenerateInputs) {
   EXPECT_EQ(livehd::abc::area_relax_percent(0.0f, 1200.0f, 200), 0);    // no target
   EXPECT_EQ(livehd::abc::area_relax_percent(20000.0f, 0.0f, 200), 0);   // untimed network
 }
+
+TEST(AbcIncr, CrossRegionFactsGateReuse) {
+  auto&                          out = livehd::Hhds_graph_library::instance("lgdb_satopt_out");
+  auto                           f   = make_region("lgdb_satopt_src", out, "top__c1");
+  Incr_cache                     cache("lgdb_satopt_cache", 17);
+  Region_qor                     q;
+  const std::vector<std::string> first{"port:select != 0 => port:data[0] == 0"};
+  const std::vector<std::string> changed{"port:select != 0 => port:data[0] == 1"};
+  ASSERT_TRUE(cache.store(f.rb, *f.slib, f.src_name, q, "R", &out, first));
+  cache.save();
+  Incr_cache loaded("lgdb_satopt_cache", 17);
+  EXPECT_TRUE(loaded.lookup_compare(f.rb, f.src.get(), "R", first).hit);
+  EXPECT_FALSE(loaded.lookup_compare(f.rb, f.src.get(), "R", changed).hit);
+  EXPECT_FALSE(loaded.lookup_compare(f.rb, f.src.get(), "R").hit);
+}

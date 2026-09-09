@@ -46,8 +46,9 @@ struct Region_qor;  // abc_map.hpp
 class Incr_cache {
 public:
   struct Row {
-    std::string              module;   // cache-lib name of the mapped body (== module_name)
-    std::string              pre;      // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::string              module;  // cache-lib name of the mapped body (== module_name)
+    std::string              pre;     // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::vector<std::string> satopt_facts;
     std::string              recipe;   // verbatim resolved ABC recipe (the recipe gate)
     std::vector<std::string> in, out;  // cached module port names (existence-checked on reuse)
     int                      gates       = 0;
@@ -79,7 +80,7 @@ public:
   // is structurally identical to `pre_body` (semdiff::structural_identical,
   // matching_names), and every cached port name still exists on the fresh region.
   [[nodiscard]] Compare_result lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
-                                              std::string_view recipe);
+                                              std::string_view recipe, std::span<const std::string> facts = {});
 
   // Snapshot a freshly mapped region: add the metadata row and copy `pre_body`
   // (in `pre_lib`, under `pre_name`) into the cache's pre library -- `pre_lib`
@@ -94,13 +95,13 @@ public:
   // instead, and same-run reuse reads it straight out of `outlib` (see
   // Row::in_outlib). Best-effort; returns false on failure.
   bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name, const Region_qor& q,
-             std::string_view recipe, hhds::GraphLibrary* outlib);
+             std::string_view recipe, hhds::GraphLibrary* outlib, std::span<const std::string> facts = {});
 
   // Diagnostic (ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
   // (no mapped body, no ABC), so a second compare-only run can exercise the
   // rebuild/copy/save/load/compare path without paying for ABC.
   bool store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                 std::string_view recipe);
+                 std::string_view recipe, std::span<const std::string> facts = {});
 
   // Fill rb.body (the freshly-partitioned region shell in `outlib`) IN PLACE from
   // the cached mapped body -- no clone, no port stitch, name-hash gid preserved.

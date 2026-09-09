@@ -20,6 +20,7 @@
 #include "hhds/graph.hpp"
 #include "liberty_dff.hpp"     // livehd::liberty::Dff_cell
 #include "pass_partition.hpp"  // livehd::partition::Region_body
+#include "satopt.hpp"
 
 namespace livehd::abc {
 
@@ -45,6 +46,7 @@ bool  ware_qor_better(const Ware_qor& baseline, const Ware_qor& candidate, bool 
 float ware_delay_target(std::string_view value);
 
 struct Map_options {
+  bool              satopt = true;
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
   // Cap on the fanout of any net ABC MAPS, enforced by appending
@@ -74,14 +76,12 @@ struct Map_options {
   // a register is one DFF cell per bit, a memory bit-blasts into a whole DFF
   // array + address decode). register=true maps flops to Liberty DFF cells (falls
   // back to native flops when the library has none); false keeps them native
-  // (cgen emits `always @(posedge clk)`). memory=true bit-blasts a Memory into a
-  // register array + read/write mux logic (the default since the constant-
-  // address / per-lane mem_lower rework: 0.83x the area and 0.57x the period of
-  // a native-boundary memory on ASAP7 over lhdtrack's 27 memory tests); false
-  // keeps it as a native instance. Memories above pass.abc.memory_max_bits stay
-  // native either way (mem_lower.hpp).
+  // (cgen emits `always @(posedge clk)`). memory=false preserves a native
+  // memory instance by default. memory=true lowers the emitted memory RTL
+  // inside a separate module, then maps that body. memory_max_bits keeps
+  // oversized memories native in either mode.
   bool              map_register      = true;
-  bool              map_memory        = true;
+  bool              map_memory        = false;
   // Keep an oversized register payload native even when map_register is true.
   // ABC represents every bit as a separate latch and some generated blocks put
   // thousands of state bits in one color; 0 (the default) disables the
@@ -212,6 +212,7 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 // crossing region/blackbox boundaries are invisible here (pass.opentimer is
 // the whole-design scorer).
 struct Region_qor {
+  uint64_t    satopt_facts = 0;
   std::string module;  // region module name (<top>__c<color>)
   int         color       = 0;
   bool        ctrl        = false;
@@ -361,12 +362,13 @@ public:
   [[nodiscard]] const std::string* time_refusal() const { return time_refusal_.empty() ? nullptr : &time_refusal_; }
 
 private:
-  Parallel_stats                       parallel_stats_;
-  std::mutex                           graph_mutex_;
-  Mapper*                              coordinator_ = nullptr;
-  std::atomic<unsigned>                active_abc_{0};
+  absl::flat_hash_map<hhds::Graph*, std::shared_ptr<const Satopt_result>> satopt_results_;
+  Parallel_stats                                                          parallel_stats_;
+  std::mutex                                                              graph_mutex_;
+  Mapper*                                                                 coordinator_ = nullptr;
+  std::atomic<unsigned>                                                   active_abc_{0};
   // Reuse private sessions across bounded partition batches.
-  std::vector<std::unique_ptr<Mapper>> parallel_mappers_;
+  std::vector<std::unique_ptr<Mapper>>                                    parallel_mappers_;
   struct Ware_region {
     livehd::partition::Region_body rb;
     std::vector<hhds::Node_class>  nodes;

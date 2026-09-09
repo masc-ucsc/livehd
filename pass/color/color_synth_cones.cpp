@@ -1073,8 +1073,10 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
 }
 
 void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
-  // 0 means RAW cones, not an unlimited merge cap: without a threshold there is
-  // nothing to merge under.
+  // 0 means RAW cones -- no walk budget and NO merge, backward or forward. Both
+  // phases size their result against `max_gate`, so without it there is nothing
+  // to merge under; this is the documented debugging escape hatch (Color_opts),
+  // and pass.color warns when `forward` was asked for anyway.
   if (cn.max_gate == 0 || n_colors == 0) {
     return;
   }

@@ -746,6 +746,12 @@ std::string leaf_match_hint(std::string_view flag) {
 
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
+    if (key == "pass.satopt") {
+      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+        throw Lhd_error{"usage", "--set pass.satopt expects true|false", ""};
+      }
+      continue;
+    }
     auto pos = key.rfind('.');
     if (pos == std::string::npos) {
       throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};

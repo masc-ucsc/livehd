@@ -1329,7 +1329,12 @@ TEST(ColorSynthCones, MuxChainsMergeButDataArmsAndDistinctPiSelectsStayOutside) 
   EXPECT_EQ(uncolored_count(g.get()), 0);
 }
 
-TEST(ColorSynthCones, ControlModeKeepsShifterWithDataButPreservesAdderBoundary) {
+// The runtime-shifter boundary is `stop_shift`'s to decide and NOTHING else's.
+// It used to be tied to `ctrl_cones`, which made control grouping do double
+// duty: turning it OFF (asking for LESS structure -- no separate control
+// colors, no stopping at muxes) silently ARMED the barrel-shifter cut and
+// produced MORE colors than leaving it on. Orthogonality is the contract now.
+TEST(ColorSynthCones, ShiftBoundaryFollowsStopShiftNotCtrlCones) {
   auto& lib = livehd::Hhds_graph_library::instance("lg_ctrl_shift");
   auto  io  = lib.create_io("ctrl_shift");
   io->add_input("a", 32);
@@ -1356,14 +1361,73 @@ TEST(ColorSynthCones, ControlModeKeepsShifterWithDataButPreservesAdderBoundary) 
     return x;
   };
   auto shifted = use(shift, "y"), added = use(sum, "z");
-  auto opts       = capped_opts(1000000);
+  auto opts = capped_opts(1000000);
+
+  // Default: a runtime shifter is a ware module and gets its own color, exactly
+  // as `stop_arith` gives the adder its own.
   opts.ctrl_cones = true;
   Color_synth(opts, "cones").label(g.get());
-  EXPECT_EQ(node_color_of(shift), node_color_of(shifted));
-  EXPECT_NE(node_color_of(sum), node_color_of(added));
+  EXPECT_NE(node_color_of(shift), node_color_of(shifted)) << "stop_shift must isolate a runtime shifter";
+  EXPECT_NE(node_color_of(sum), node_color_of(added)) << "stop_arith must isolate the adder";
+
+  // ORTHOGONALITY, both directions: dropping control grouping must not change
+  // where the shifter goes.
   opts.ctrl_cones = false;
   Color_synth(opts, "cones").label(g.get());
-  EXPECT_NE(node_color_of(shift), node_color_of(shifted));
+  EXPECT_NE(node_color_of(shift), node_color_of(shifted)) << "ctrl_cones=false must not change the shift boundary";
+
+  // stop_shift=false is what puts the shifter back with the logic that consumes
+  // it, and it leaves the adder boundary alone.
+  opts.stop_shift = false;
+  opts.ctrl_cones = true;
+  Color_synth(opts, "cones").label(g.get());
+  EXPECT_EQ(node_color_of(shift), node_color_of(shifted)) << "stop_shift=false must keep the shifter with its data";
+  EXPECT_NE(node_color_of(sum), node_color_of(added)) << "stop_shift must not move the adder";
+
+  opts.ctrl_cones = false;
+  Color_synth(opts, "cones").label(g.get());
+  EXPECT_EQ(node_color_of(shift), node_color_of(shifted)) << "ctrl_cones=false must not re-arm the shift boundary";
+}
+
+// The same contract for wide comparisons. is_arith_cut isolates an LT/GT with an
+// operand over 8 bits because it lowers to a subtraction; `stop_cmp` is how a
+// design says it would rather have the one-bit result merged into the cone that
+// consumes it, without moving real adders.
+TEST(ColorSynthCones, StopCmpMergesWideComparisonButLeavesAdderBoundary) {
+  auto& lib = livehd::Hhds_graph_library::instance("lg_stop_cmp");
+  auto  io  = lib.create_io("stop_cmp");
+  io->add_input("a", 32);
+  io->add_input("b", 32);
+  io->add_output("y", 32);
+  io->add_output("z", 32);
+  auto g = io->create_graph();
+  for (auto name : {"a", "b"}) {
+    set_bits(g->get_input_pin(name), 32);
+  }
+  auto cmp = create_typed_node(*g, Ntype_op::LT, 1);
+  g->get_input_pin("a").connect_sink(cmp.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(cmp.create_sink_pin(1));
+  auto sum = create_typed_node(*g, Ntype_op::Sum, 32);
+  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(sum.create_sink_pin(0));
+  auto use = [&](hhds::Node_class n, const char* out) {
+    auto x = create_typed_node(*g, Ntype_op::Or, 32);
+    n.create_driver_pin(0).connect_sink(x.create_sink_pin(0));
+    g->get_input_pin("b").connect_sink(x.create_sink_pin(0));
+    x.create_driver_pin(0).connect_sink(g->get_output_pin(out));
+    return x;
+  };
+  auto cmp_use = use(cmp, "y"), added = use(sum, "z");
+
+  auto opts       = capped_opts(1000000);
+  opts.ctrl_cones = false;  // no control grouping, so nothing else can claim cmp
+  Color_synth(opts, "cones").label(g.get());
+  EXPECT_NE(node_color_of(cmp), node_color_of(cmp_use)) << "stop_cmp must isolate a wide comparison";
+
+  opts.stop_cmp = false;
+  Color_synth(opts, "cones").label(g.get());
+  EXPECT_EQ(node_color_of(cmp), node_color_of(cmp_use)) << "stop_cmp=false must merge the comparison into its consumer";
+  EXPECT_NE(node_color_of(sum), node_color_of(added)) << "stop_cmp must not move the adder";
 }
 
 TEST(ColorSynthCones, HotmuxAllControlsJoinAndDefaultStaysData) {

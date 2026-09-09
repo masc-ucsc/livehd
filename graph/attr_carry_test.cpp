@@ -57,6 +57,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::proven).set(uint32_t{3});
   src.attr(la::runtime_check).set(uint32_t{5});
   src.attr(la::memory_async_reset).set(uint32_t{1});
+  src.attr(la::memory_module).set(uint8_t{1});
   src.attr(la::aggregate_origin).set(std::string{"origin"});
   src.attr(la::aggregate_source_index).set(uint32_t{2});
   src.attr(la::aggregate_lane_ordinal).set(uint32_t{4});
@@ -66,7 +67,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::lut).set(std::string{"1010"});
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 22, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 23, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -84,6 +85,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::proven).get(), 3u);
   EXPECT_EQ(dst.attr(la::runtime_check).get(), 5u);
   EXPECT_EQ(dst.attr(la::memory_async_reset).get(), 1u);
+  EXPECT_EQ(dst.attr(la::memory_module).get(), 1u);
   EXPECT_EQ(dst.attr(la::aggregate_origin).get(), "origin");
   EXPECT_EQ(dst.attr(la::aggregate_source_index).get(), 2u);
   EXPECT_EQ(dst.attr(la::aggregate_lane_ordinal).get(), 4u);

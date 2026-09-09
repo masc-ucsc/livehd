@@ -611,9 +611,14 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"pyrope lsp","description":"Pyrope LSP server (task 1n): JSON-RPC over stdio, Content-Length framed. Drives prp2lnast + pass.upass + core/diag per buffer; .prp only, ephemeral, no lgdb. stdio belongs to the protocol, so no result JSON is written","args":{},"examples":["lhd pyrope lsp"]})json");
     return 0;
   }
+  if (name == "pass satopt") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"pass satopt","description":"Prepare combinational mux and memory proofs for ABC. Original graphs are preserved. Reuse under the same --workdir; lhd.incremental controls persistent caching.","inputs":["lg"],"outputs":[],"examples":["lhd pass satopt --top m lg:dir --workdir W","lhd compile m.prp --set pass.satopt=true --workdir W"]})json");
+    return 0;
+  }
   if (name == "pass") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","abc","opentimer","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","opentimer","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "lnast-dump") {
@@ -752,7 +757,8 @@ void print_general_help() {
       "               lhd pyrope fmt -i foo.prp         # reformat in place\n"
       "               lhd pyrope fmt foo.prp            # print formatted source to stdout\n"
       "               lhd pyrope lsp                    # Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-      "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | opentimer | liberty gensim | semdiff\n"
+      "  pass       run one graph pass over lg: inputs: color <alg> | partition | satopt | abc | opentimer | liberty gensim | "
+      "semdiff\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
       "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
       "  list       steps | emit-kinds | error-classes | options [REGEX]\n"
@@ -977,6 +983,23 @@ int help_pass(const std::string& sub) {
         "  lhd pass single_edge --top m lg:dir --emit-dir lg:norm\n");
     return print_options_section({"pass.single_edge."});
   }
+  if (sub == "satopt") {
+    std::print(
+        "lhd pass satopt — prepare combinational proofs for ABC\n\n"
+        "usage: lhd pass satopt [--top M] lg:DIR --workdir W\n"
+        "Compile-time opt-in: --set pass.satopt=true (default false).\n"
+        "ABC runs this analysis by default: --set pass.abc.satopt=false disables it.\n"
+        "A prior analysis is reused when the definition is unchanged.\n"
+        "Proofs live in W/satopt_cache and follow lhd.incremental.\n\n"
+        "flags:\n"
+        "  --top M       analyze M and its reachable definitions\n"
+        "  --workdir W   store proofs for later ABC invocations\n"
+        "  --set lhd.incremental=false  disable persistent proof caching\n\n"
+        "examples:\n"
+        "  lhd pass satopt --top m lg:dir --workdir W\n"
+        "  lhd compile m.prp --set pass.satopt=true --workdir W\n");
+    return 0;
+  }
   if (sub == "abc") {
     std::print(
         "lhd pass abc — combinational ABC tech-map (bit-blast -> AIG -> Liberty blackboxes)\n"
@@ -1107,9 +1130,10 @@ int help_pass(const std::string& sub) {
     return print_options_section({"pass.semdiff."});
   }
   if (!sub.empty()) {
-    std::print(stderr,
-               "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n",
-               sub);
+    std::print(
+        stderr,
+        "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | satopt | abc | opentimer | liberty | semdiff)\n",
+        sub);
     return 1;
   }
   std::print(
@@ -1121,6 +1145,7 @@ int help_pass(const std::string& sub) {
       "  color <alg>          acyclic|synth|path|mincut|flat coloring; reduce = repeated-\n"
       "                       cone extraction into shared pat_* defs (all in place)\n"
       "  partition            region -> module Sub split (-> new lg:)\n"
+      "  satopt               prepare combinational proofs for later ABC mapping\n"
       "  abc                  combinational ABC tech-map (-> new lg:)\n"
       "  opentimer            OpenTimer STA on a tech-mapped module (-> timing.json)\n"
       "  liberty gensim FILE  Liberty -> simulation models (-> new lg:)\n"
@@ -1151,7 +1176,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | satopt | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion);
 }
 
@@ -1272,6 +1297,9 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassSingleEdge);
       return 0;
     }
+    if (sub == "satopt") {
+      return describe_as("pass satopt");
+    }
     if (sub == "abc") {
       print_json_line(kJsonPassAbc);
       return 0;
@@ -1284,9 +1312,10 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassLiberty);
       return 0;
     }
-    std::print(stderr,
-               "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n",
-               sub);
+    std::print(
+        stderr,
+        "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | satopt | abc | opentimer | liberty | semdiff)\n",
+        sub);
     return 1;
   }
   // `formal` is a family: the record follows the SUBCOMMAND, so
@@ -1680,7 +1709,7 @@ int help_command(const Options& opts) {
                "  --stats                    the per-color rows (see report:)\n"
                "  --reader                   the Verilog front end (slang by default)\n"
                "  --set synth.flag=value     the flow knobs (below); pass tuning rides the pass namespaces:\n"
-               "                             --set abc.adder=cla  --set color.absorb=false  --set opentimer.hier=false\n"
+               "                             --set abc.adder=cla  --set color.hier=false  --set opentimer.hier=false\n"
                "  --set lhd.incremental=false  cold run (no compile-cache / abc_cache reuse)\n"
                "\n"
                "examples:\n"

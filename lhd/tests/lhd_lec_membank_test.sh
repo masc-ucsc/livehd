@@ -4,7 +4,7 @@
 # pass/lec memory <-> storage-flop bank bridge (pass/lec/query.cpp
 # find_mem_entry_bank + the BMC / inductive twins): a resetless 1rd/1wr register
 # file (lhd/tests/lec_membank.sv, 8 x 8) compiled from Verilog, bit-blasted by
-# pass.abc memory=true (the default) and mapped through gensim cell models, must
+# pass.abc memory=true (explicitly enabled) and mapped through gensim cell models, must
 # PROVE against the compiled design with cvc5 -- UNBOUNDED, the inductive
 # flop-cut miter pairs every storage cell with its array entry -- in the three
 # shapes the mapped netlist can take:
@@ -15,6 +15,8 @@
 #   3. whole bits-wide native flops `mem__mem<i>` (register_max_bits=1 keeps the
 #      region's registers native, so mem_lower's storage flops survive as
 #      `always @(posedge)` registers).
+# Storage lives inside the named memory module as _mem<i>[_<b>]; the
+# canonical hierarchy name is the legacy <memory>__mem<i>[_<b>] bank key.
 # Before the bridge every one of these refuted at checked step 1 on a read of a
 # never-written entry (rd_data ref=all-ones impl=all-ones-but-one: two free
 # power-on symbols). The negative control is the SAME bank shape with a
@@ -27,7 +29,7 @@
 
 set -u
 
-LHD=lhd/lhd
+LHD="${LHD:-lhd/lhd}"
 LIB=inou/prp/tests/abc/test.lib
 QLIB=inou/prp/tests/abc/test_qn.lib
 SRC=lhd/tests/lec_membank.sv
@@ -52,14 +54,14 @@ compile_design() {
       -q --result-json "$d/r.json" -- "$gparam" || fail "compile $gparam -> $(cat "$d/r.json" 2>/dev/null)"
 }
 # map_design <dir> <lib> [extra pass.abc --set ...]: color + pass.abc (memory=true
-# default) -> lg:<dir>/net, plus the gensim models of <lib> -> lg:<dir>/models.
+# enabled) -> lg:<dir>/net, plus the gensim models of <lib> -> lg:<dir>/models.
 map_design() {
   local d="$1" lib="$2"
   shift 2
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   run pass color synth --top membank.membank lg:"$d/lg" --workdir "$d/w2"
-  run pass abc --top membank.membank lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$lib" \
+  run pass abc --top membank.membank lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$lib" --set pass.abc.memory=true \
       --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" "$@"
   ! grep -q '"code":"memory-unlowered"' "$d/diag.jsonl" || fail "$d: memory was NOT bit-blasted: $(grep memory-unlowered "$d/diag.jsonl")"
   run pass liberty gensim "$lib" --emit-dir lg:"$d/models" --workdir "$d/w5"
@@ -93,7 +95,7 @@ ncell() { cat "$1/netv/"*.v | grep -c "^\s*$2 "; }
 nhas() { cat "$1/netv/"*.v | grep -q "$2"; }
 
 [ "$(ncell "$D" DFFx1)" -eq 64 ] || fail "q: expected 64 DFFx1 storage cells (8 x 8), got $(ncell "$D" DFFx1)"
-nhas "$D" "mem__mem3_5" || fail "q: storage cells are not named mem__mem<i>_<b>: $(cat "$D/netv/"*.v | grep -m3 DFFx1)"
+nhas "$D" "_mem3_5" || fail "q: storage cells lack local _mem<i>_<b> entry names: $(cat "$D/netv/"*.v | grep -m3 DFFx1)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "q: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "q: cvc5 did not PROVE the bit-blasted register file: $(verdict "$D/lec.json")"
@@ -111,6 +113,15 @@ cat "$D/refv/"*.v > "$D/ref.v"
   || fail "q: lgyosys lec failed: $(cat "$D/lec_yosys.json" 2>/dev/null)"
 ! grep -q '"verdict":"refuted"' "$D/lec_yosys.json" || fail "q: lgyosys REFUTED the bit-blasted register file"
 echo "PASS: lgyosys does not refute the mapped register file"
+
+# cgen's encoded memory instance and generated region/cell-model wrappers
+# must retain the same total storage-bank pairing after an RTL round trip.
+"$LHD" lec --set formal.solver=cvc5 --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
+    --workdir "$D/wv5" -q --result-json "$D/lec_verilog.json" > "$D/lec_verilog.log" 2>&1 \
+  || fail "q: cvc5 Verilog LEC failed: $(cat "$D/lec_verilog.json" 2>/dev/null)"
+grep -q '"verdict":"proven"' "$D/lec_verilog.json" || fail "q: Verilog round trip did not prove"
+grep -q '"bounded":false' "$D/lec_verilog.json" || fail "q: Verilog proof is only bounded"
+echo "PASS: emitted Verilog retains the memory-bank correspondence and proves unbounded"
 
 # ---------------------------------------------------------------------------
 # 2. the same cells on a QN-only cell: the Flop(Not(D)) model keeps state == pin
@@ -132,7 +143,7 @@ D="$W/native"
 mkdir -p "$D" && cp -r "$GOOD/lg" "$D/lg"
 map_design "$D" "$LIB" --set pass.abc.register_max_bits=1
 [ "$(ncell "$D" DFFx1)" -eq 0 ] || fail "native: register_max_bits=1 still mapped DFF cells"
-nhas "$D" "mem__mem3\b\|mem__mem3 " || fail "native: no whole storage register mem__mem<i> in the netlist: $(cat "$D/netv/"*.v | grep -m3 posedge)"
+nhas "$D" "_mem3\b\|_mem3 " || fail "native: no whole storage register _mem<i> in the netlist: $(cat "$D/netv/"*.v | grep -m3 posedge)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "native: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "native: cvc5 did not PROVE the native storage flops: $(verdict "$D/lec.json")"
@@ -152,6 +163,14 @@ grep -q '"verdict":"refuted"' "$BAD/lec.json" || fail "bad: expected REFUTED for
 grep -q '"class":"equiv_fail"' "$BAD/lec.json" || fail "bad: refutation is not an equiv_fail: $(cat "$BAD/lec.json")"
 echo "PASS: a netlist with a corrupted write address in the same bank shape is REFUTED (the tie hides nothing)"
 
+cat "$BAD/netv/"*.v "$W/q/modelsv/"*.v > "$BAD/impl.v"
+"$LHD" lec --set formal.solver=cvc5 --impl verilog:"$BAD/impl.v" --ref verilog:"$W/q/ref.v" --top membank \
+    --workdir "$BAD/wv5" -q --result-json "$BAD/lec_verilog.json" > "$BAD/lec_verilog.log" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] || fail "bad: Verilog correspondence hid the corrupted write address"
+grep -q '"verdict":"refuted"' "$BAD/lec_verilog.json" || fail "bad: Verilog mutant did not refute"
+echo "PASS: the corrupted write address still refutes after the Verilog round trip"
+
 # ---------------------------------------------------------------------------
 # 5. two same-shaped source memories, each lowered to its named DFF bank
 # ---------------------------------------------------------------------------
@@ -162,7 +181,7 @@ mrun compile "$MULTI_SRC" --reader slang --top membank_multi \
     --emit-dir lg:"$M/lg" --workdir "$M/w1"
 mrun pass color synth --top membank_multi.membank_multi lg:"$M/lg" --workdir "$M/w2"
 mrun pass abc --top membank_multi.membank_multi lg:"$M/lg" --emit-dir lg:"$M/net" \
-    --set synth.liberty="$LIB" --workdir "$M/w3"
+    --set synth.liberty="$LIB" --set pass.abc.memory=true --workdir "$M/w3"
 mrun pass liberty gensim "$LIB" --emit-dir lg:"$M/models" --workdir "$M/w4"
 "$LHD" lec --impl lg:"$M/net" --ref lg:"$M/lg" --lib lg:"$M/models" \
     --top membank_multi.membank_multi --set formal.solver=cvc5 --workdir "$M/wlec" \

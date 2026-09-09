@@ -125,7 +125,7 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
   if (doc.HasParseError() || !doc.IsObject()) {
     return;
   }
-  if (auto s = doc.FindMember("schema"); s == doc.MemberEnd() || !s->value.IsInt() || s->value.GetInt() != 3) {
+  if (auto s = doc.FindMember("schema"); s == doc.MemberEnd() || !s->value.IsInt() || s->value.GetInt() != 4) {
     return;
   }
   const std::string want = std::format("{:016x}", salt_);
@@ -160,6 +160,7 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
     row.recipe = gets("recipe");
     arr("in", row.in);
     arr("out", row.out);
+    arr("satopt_facts", row.satopt_facts);
     if (auto m = v.FindMember("gates"); m != v.MemberEnd() && m->value.IsInt()) {
       row.gates = m->value.GetInt();
     }
@@ -197,7 +198,7 @@ hhds::GraphLibrary& Incr_cache::lib() { return livehd::Hhds_graph_library::insta
 hhds::GraphLibrary& Incr_cache::cached_pre_lib() { return livehd::Hhds_graph_library::instance(pre_dir_); }
 
 Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
-                                                      std::string_view recipe) {
+                                                      std::string_view recipe, std::span<const std::string> facts) {
   Compare_result res;
   auto           dbg = [&](const char* why) {
     if (incr_debug()) {
@@ -238,7 +239,7 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
   for (const Row* candidate : candidates) {
     const Row& row        = *candidate;
     const bool cross_name = row.module != rb.module_name;
-    if (row.recipe != recipe) {
+    if (row.recipe != recipe || !std::equal(row.satopt_facts.begin(), row.satopt_facts.end(), facts.begin(), facts.end())) {
       continue;
     }
     // Same-name reuse predates the digest and remains governed by the exact
@@ -411,7 +412,8 @@ void Incr_cache::copy_mapped_children(std::string_view module_name, hhds::GraphL
 }
 
 bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                       const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib) {
+                       const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib,
+                       std::span<const std::string> facts) {
   // The pre-abc body (in pre_lib under pre_name) is copied NOW, into the
   // SEPARATE pre-body library: `pre_lib` is a per-region throwaway the
   // partitioner destroys the moment this callback returns. The two cache
@@ -435,6 +437,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.module = rb.module_name;
   row.pre    = std::string{pre_name};
   row.recipe = std::string{recipe};
+  row.satopt_facts.assign(facts.begin(), facts.end());
   row.in.reserve(rb.inputs.size());
   row.out.reserve(rb.outputs.size());
   for (const auto& p : rb.inputs) {
@@ -467,7 +470,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
 }
 
 bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                           std::string_view recipe) {
+                           std::string_view recipe, std::span<const std::string> facts) {
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
@@ -476,6 +479,7 @@ bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Graph
   row.module = rb.module_name;
   row.pre    = std::string{pre_name};
   row.recipe = std::string{recipe};
+  row.satopt_facts.assign(facts.begin(), facts.end());
   const auto digest
       = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
   row.digest0      = digest.h0;
@@ -596,7 +600,7 @@ void Incr_cache::save() {
   }
   std::sort(keys.begin(), keys.end(), [](const auto* a, const auto* b) { return *a < *b; });
 
-  std::string out   = std::format("{{\"schema\":3,\"salt\":\"{:016x}\",\"regions\":{{", salt_);
+  std::string out   = std::format("{{\"schema\":4,\"salt\":\"{:016x}\",\"regions\":{{", salt_);
   bool        first = true;
   for (const auto* k : keys) {
     const auto& r = rows_.at(*k);
@@ -611,6 +615,10 @@ void Incr_cache::save() {
                          json_util::escape(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.in[i]));
+    }
+    out += "],\"satopt_facts\":[";
+    for (size_t i = 0; i < r.satopt_facts.size(); ++i) {
+      out += std::format("{}\"{}\"", i ? "," : "", json_util::escape(r.satopt_facts[i]));
     }
     out += "],\"out\":[";
     for (size_t i = 0; i < r.out.size(); ++i) {
@@ -670,7 +678,21 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   h          = combine64(h, kAbcSrcSalt);
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {
-    std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    // Size-then-read, never istreambuf_iterator: the iterator form goes through
+    // the streambuf one character at a time, which on the 46 MB merged ASAP7
+    // Liberty costs 143 ms against 9 ms here. Measured A/B end to end, that is
+    // 175 ms off the fixed floor of EVERY pass.abc run (0.753 s -> 0.578 s of
+    // non-mapping time on a 1-cell design). Same bytes, so the salt is unchanged
+    // and existing caches stay valid.
+    f.seekg(0, std::ios::end);
+    const auto len = f.tellg();
+    f.seekg(0, std::ios::beg);
+    std::string bytes;
+    if (len > 0) {
+      bytes.resize(static_cast<size_t>(len));
+      f.read(bytes.data(), len);
+      bytes.resize(static_cast<size_t>(f.gcount()));
+    }
     h = combine64(h, fnv1a64(bytes));
   } else {
     h = combine64(h, fnv1a64(library_path));

@@ -16,6 +16,9 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        # Virtual flattening: the synth algorithms color the FLAT view of the
+        # hierarchy so a region can cross module boundaries.
+        "//pass/partition:flatten",
         "//pass/common:pass",
         "//third_party/viecut",
         "@rapidjson",
@@ -42,6 +45,5 @@ cc_library(
     "color_mincut_test",
     "color_flat_test",
     "color_size_test",
-    "color_absorb_test",
     "color_reduce_test",
 ]]

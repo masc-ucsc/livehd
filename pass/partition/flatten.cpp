@@ -13,7 +13,6 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
-#include "pass_partition.hpp"
 
 namespace gu = livehd::graph_util;
 
@@ -61,16 +60,21 @@ struct Ictx {
 
 class Flattener {
 public:
-  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib) : top_(top), lib_(lib) {}
+  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_memories)
+      : top_(top), lib_(lib), preserve_memories_(preserve_memories), origin_(origin) {}
 
   std::shared_ptr<hhds::Graph> run(std::string_view flat_name);
 
 private:
-  hhds::Graph*        top_;
-  hhds::GraphLibrary* lib_;
-  hhds::Graph*        flat_ = nullptr;
-  std::deque<Ictx>    arena_;  // stable pointers
-  bool                failed_ = false;
+  hhds::Graph*                        top_;
+  hhds::GraphLibrary*                 lib_;
+  hhds::Graph*                        flat_ = nullptr;
+  std::deque<Ictx>                    arena_;  // stable pointers
+  bool                                failed_            = false;
+  bool                                preserve_memories_ = false;
+  // Optional flat-node -> (def, source node) sink. Filled at the single site
+  // that mints a clone, so it cannot drift from node_map.
+  livehd::partition::Flat_origin_map* origin_            = nullptr;
 
   // Defs on the current instantiation path — a def re-entered while still open
   // is a recursive hierarchy (would recurse forever / overflow the stack).
@@ -260,7 +264,8 @@ void Flattener::create_nodes(Ictx* ctx) {
       failed_ = true;
       return;
     }
-    if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr) {
+    if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr
+        && !(preserve_memories_ && n.get_subnode_graph()->get_input_node().attr(livehd::attrs::memory_module).has())) {
       // Design instance: recurse — its internals become flat nodes with a
       // longer prefix; the Sub itself dissolves (edges hop through it in
       // resolve_driver). The child shared_ptr is owned by the source library
@@ -307,6 +312,9 @@ void Flattener::create_nodes(Ictx* ctx) {
       }
     }
     ctx->node_map[n] = neo;
+    if (origin_ != nullptr) {
+      origin_->emplace(neo, livehd::partition::Flat_origin{.def_gid = ctx->src->get_gid(), .src_node = n});
+    }
     carry_node_attrs(ctx, n, neo);
   }
 }
@@ -361,7 +369,7 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
       }
       // No edge: the parent left the port unconnected — stay invalid.
     }
-  } else if (gu::type_op_of(dn) == Ntype_op::Sub && dn.get_subnode_graph() != nullptr) {
+  } else if (gu::type_op_of(dn) == Ntype_op::Sub && ctx->child_ctx.contains(dn)) {
     // Hop DOWN: the driver is a design instance's output — resolve to the
     // child-internal driver of that output port.
     if (auto cit = ctx->child_ctx.find(dn); cit != ctx->child_ctx.end()) {
@@ -554,8 +562,39 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
 
 namespace livehd::partition {
 
-std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name) {
-  Flattener f(top, lib);
+std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst) {
+  auto child = inst.get_subnode_io();
+  if (!child) {
+    return nullptr;
+  }
+  if (auto out_child = outlib->find_io(child->get_name())) {
+    return out_child;
+  }
+  if (inst.get_subnode_graph() != nullptr) {
+    return nullptr;  // has a body: children-first ordering should have partitioned it already
+  }
+  // Body-less black-box def: clone the IO decl so the instance stays opaque.
+  auto io = outlib->create_io(std::string{child->get_name()});
+  for (const auto& d : child->get_input_pin_decls()) {
+    io->add_input(d.name, d.port_id, d.loop_break);
+    if (d.bits != 0) {
+      io->set_bits(d.name, d.bits);
+    }
+    io->set_unsign(d.name, d.unsign);
+  }
+  for (const auto& d : child->get_output_pin_decls()) {
+    io->add_output(d.name, d.port_id, d.loop_break);
+    if (d.bits != 0) {
+      io->set_bits(d.name, d.bits);
+    }
+    io->set_unsign(d.name, d.unsign);
+  }
+  return io;
+}
+
+std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
+                                               Flat_origin_map* origin, bool preserve_memories) {
+  Flattener f(top, lib, origin, preserve_memories);
   return f.run(flat_name);
 }
 

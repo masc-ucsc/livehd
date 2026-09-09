@@ -21,6 +21,7 @@ load("//tools:copt_default.bzl", "COPTS")
 # globbing a generated header back in as a source is a cycle.
 filegroup(
     name = "mapper_srcs",
+    visibility = ["//visibility:public"],
     srcs = glob(
         [
             "*.cpp",
@@ -39,10 +40,14 @@ genrule(
     srcs = [
         ":mapper_srcs",
         "//graph",  # private occurrence expansion and inlining
+        "//ware:cgen_memory_rtl",
+        "//inou/cgen:memory_generator_srcs",
+        "//inou/yosys:memory_import_srcs",
         "//pass/cprop:pass_cprop",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/color:pass_color",  # shared pattern identity
         "//pass/liberty:liberty_dff_srcs",
+        "//pass/formal:formal",  # memory proof semantics
         "//pass/partition:partition_srcs",
         "//:MODULE.bazel",
         "//packages:abc.patch",
@@ -80,6 +85,7 @@ cc_library(
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
         "//pass/semdiff:semdiff",
+        "//pass/formal:formal",
         "@abc",
         "@abseil-cpp//absl/container:node_hash_map",
         "@rapidjson",
@@ -151,4 +157,30 @@ cc_test(
     srcs = ["abc_parallel_test.cpp", "abc_parallel.cpp", "abc_parallel.hpp"],
     copts = COPTS,
     deps = ["@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "satopt_test",
+    srcs = ["satopt_test.cpp"],
+    copts = COPTS,
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "//graph",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "satopt_memory_test",
+    srcs = ["satopt_memory_test.cpp"],
+    copts = COPTS,
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "//graph",
+        "//pass/formal:formal",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
 )

@@ -18,6 +18,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "kernel/celltypes.h"
+#include "kernel/ffinit.h"
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
 
@@ -1859,6 +1860,8 @@ static void process_connect_outputs(RTLIL::Module* mod, hhds::Graph* g) {
 }
 
 static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
+  SigMap     sigmap(mod);
+  FfInitVals initvals(&sigmap, mod);
   for (auto cell : mod->cells()) {
     if (cell->type == "$print" || cell->type == "$check") {
       continue;  // effect-only debug cells, dropped in process_cell_drivers_intialization()
@@ -2280,6 +2283,15 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         setup_sink_by_name(exit_node, "async").connect_driver(create_const(*g, *Dlop::create_integer(1)));
       }
 
+      // memory_map and proc put power-on values on Q wires, rather than
+      // on the DFF cell. Resolve aliases and slices through FfInitVals.
+      // With reset, the initial sink already describes the RESET value.
+      if (!cell->hasPort(ID::SRST) && !cell->hasPort(ID::ARST) && !cell->hasPort(ID::ALOAD) && cell->hasPort(ID::Q)) {
+        const auto init = initvals(cell->getPort(ID::Q));
+        if (!init.is_fully_undef()) {
+          setup_sink_by_name(exit_node, "initial").connect_driver(create_const(*g, *Dlop::from_pyrope("0ub" + init.as_string())));
+        }
+      }
       setup_sink_by_name(exit_node, "clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));
       auto flop_dpin = get_dpin(g, cell, ID::D);
       setup_sink_by_name(exit_node, "din").connect_driver(flop_dpin);

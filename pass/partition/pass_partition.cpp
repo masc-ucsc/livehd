@@ -1338,11 +1338,17 @@ void Partitioner::build_module(uint32_t r) {
     // Incremental synth: rebuild the region's ORIGINAL logic into a throwaway
     // library via the SAME construction (emit_region_body), so the abc cache's
     // structural compare sees a byte-stable pre-body across recompiles. `pre_lib`
-    // must outlive the synchronous hook_. Skipped when flattening: the as-top
-    // path owns the single whole-design region and the edge tables would peak at
-    // hundreds of MB with nothing to reuse incrementally.
+    // must outlive the synchronous hook_.
+    //
+    // NOT gated on `flatten_`. The "flattening has nothing to reuse" argument is
+    // about the SINGLE whole-design region, whose edge tables peak at hundreds
+    // of MB -- and that region goes to build_module_as_top, which still skips it.
+    // Reaching HERE means run() found several regions, which is the normal shape
+    // under pass.color synth's virtual flattening: many `max_gate`-bounded
+    // regions over a flattened hierarchy, every one of them worth caching.
+    // Gating it here made the abc cache miss on every region of every run.
     auto pre_lib = std::make_unique<hhds::GraphLibrary>();
-    if (build_pre_ && !flatten_ && rb.reuse_eligible) {
+    if (build_pre_ && rb.reuse_eligible) {
       rb.pre_name = "p_" + name;
       rb.pre_body = build_pre_body_into(r, *pre_lib, rb.pre_name, rnodes);
       rb.pre_lib  = pre_lib.get();
@@ -1436,9 +1442,11 @@ void Partitioner::build_module_as_top(uint32_t r) {
     // Same span-lifetime rule as build_module's hook branch.
     auto rnodes = std::move(region_nodes_[r]);
     rb.nodes    = rnodes;
-    // Incremental pre-body (see build_module). Skipped when flattening: the single
-    // whole-design region has nothing to reuse and its edge tables are the largest
-    // transient. `pre_lib` must outlive the synchronous hook_.
+    // Incremental pre-body (see build_module). Skipped when flattening, and only
+    // here: this path is taken when the def collapsed to ONE region, so under
+    // `flatten_` that region is the whole design -- nothing to reuse, and its
+    // edge tables are the largest transient in the run. `pre_lib` must outlive
+    // the synchronous hook_.
     hhds::GraphLibrary pre_lib;
     if (build_pre_ && !flatten_ && rb.reuse_eligible) {
       rb.pre_name = "p_" + top_;
@@ -1896,10 +1904,17 @@ bool coloring_packed(hhds::Graph* g) {
   return false;
 }
 
-// Resolve Flatten_mode::automatic against g's active coloring: a
-// `pass.color flat` coloring means whole-design synthesis. Same substring
-// probe as color_common's has_seeded_coloring — the blob is machine-written
-// by build_coloring_info_json.
+// Resolve Flatten_mode::automatic against g's active coloring. Two colorings
+// ask to be flattened, for opposite reasons:
+//
+//   "algorithm":"flat" -- one color for everything: whole-design synthesis, and
+//     the flat design comes out as exactly ONE module.
+//   "hier_flat":true   -- pass.color synth's VIRTUAL FLATTENING: the colors were
+//     computed over the flat view of the hierarchy, so a color spans defs and
+//     only means what it says once the hierarchy is inlined again. MANY modules.
+//
+// Same substring probe as color_common's has_seeded_coloring -- the blob is
+// machine-written by build_coloring_info_json.
 bool flatten_resolved(hhds::Graph* g, livehd::partition::Flatten_mode mode) {
   if (mode == livehd::partition::Flatten_mode::on) {
     return true;
@@ -1908,46 +1923,37 @@ bool flatten_resolved(hhds::Graph* g, livehd::partition::Flatten_mode mode) {
     return false;
   }
   if (auto a = g->get_input_node().attr(livehd::attrs::coloring_info); a.has()) {
-    return std::string_view{a.get()}.find("\"algorithm\":\"flat\"") != std::string_view::npos;
+    const std::string_view info{a.get()};
+    return info.find("\"algorithm\":\"flat\"") != std::string_view::npos
+           || info.find("\"hier_flat\":true") != std::string_view::npos;
   }
   return false;
+}
+
+// Of the two, only the first yields a SINGLE module. Callers that specialize on
+// "the flat design is one region" (pass.abc's Mapper::set_flat, which drops the
+// shared helper defs, and its whole-design size refusal) must ask this and not
+// flatten_resolved -- a virtual-flat coloring flattens into many bounded
+// regions, each already guarded region-by-region.
+//
+// No coloring at all also means one region: every node is color 0.
+bool flatten_single_module(hhds::Graph* g, livehd::partition::Flatten_mode mode) {
+  if (!flatten_resolved(g, mode)) {
+    return false;
+  }
+  auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
+  if (!a.has()) {
+    return true;
+  }
+  const std::string_view info{a.get()};
+  return info.find("\"algorithm\":\"flat\"") != std::string_view::npos;
 }
 
 }  // namespace
 
 namespace livehd::partition {
 
-bool flatten_is_whole_design(hhds::Graph* g, Flatten_mode mode) { return flatten_resolved(g, mode); }
-
-std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst) {
-  auto child = inst.get_subnode_io();
-  if (!child) {
-    return nullptr;
-  }
-  if (auto out_child = outlib->find_io(child->get_name())) {
-    return out_child;
-  }
-  if (inst.get_subnode_graph() != nullptr) {
-    return nullptr;  // has a body: children-first ordering should have partitioned it already
-  }
-  // Body-less black-box def: clone the IO decl so the instance stays opaque.
-  auto io = outlib->create_io(std::string{child->get_name()});
-  for (const auto& d : child->get_input_pin_decls()) {
-    io->add_input(d.name, d.port_id, d.loop_break);
-    if (d.bits != 0) {
-      io->set_bits(d.name, d.bits);
-    }
-    io->set_unsign(d.name, d.unsign);
-  }
-  for (const auto& d : child->get_output_pin_decls()) {
-    io->add_output(d.name, d.port_id, d.loop_break);
-    if (d.bits != 0) {
-      io->set_bits(d.name, d.bits);
-    }
-    io->set_unsign(d.name, d.unsign);
-  }
-  return io;
-}
+bool flatten_is_single_module(hhds::Graph* g, Flatten_mode mode) { return flatten_single_module(g, mode); }
 
 }  // namespace livehd::partition
 
@@ -1966,6 +1972,28 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
   }
 
   if (flatten_resolved(g, flatten)) {
+    for (auto* def : order) {
+      if (def == g || !def->get_input_node().attr(livehd::attrs::memory_module).has()) {
+        continue;
+      }
+      if (auto existing = outlib->find_io(def->get_name()); existing && existing->get_graph()) {
+        continue;  // a nested preserved memory was emitted with its parent
+      }
+      // Flatten only INSIDE the memory. A previously mapped memory can itself
+      // contain region/helper definitions, which must be emitted too.
+      if (!build_decomposition(graphs,
+                               outlib,
+                               def->get_name(),
+                               debug_color,
+                               hook,
+                               livehd::partition::Flatten_mode::on,
+                               want_pre_bodies,
+                               batch_hook,
+                               batch_size)) {
+        return false;
+      }
+      outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
+    }
     // Inline the hierarchy into a scratch def in the output library, run ONE
     // Partitioner on it (top's own name), then drop the scratch def — it must
     // never persist or be emitted. A hierarchy-less top skips the clone.
@@ -1974,7 +2002,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     std::string                  flat_name;
     if (order.size() > 1) {
       flat_name   = top + "__flatten_tmp";
-      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name);
+      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name, nullptr, true);
       if (!flat_holder) {
         return false;  // diag already emitted
       }
@@ -1991,6 +2019,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   batch_hook,
                   batch_size);
     bool        ok = p.run();
+    if (ok && g->get_input_node().attr(livehd::attrs::memory_module).has()) {
+      outlib->find_io(top)->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
+    }
     if (flat_holder) {
       outlib->delete_graph(flat_holder);
       outlib->delete_graphio(flat_name);
@@ -2012,6 +2043,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   batch_size);
     if (!p.run()) {
       return false;
+    }
+    if (def->get_input_node().attr(livehd::attrs::memory_module).has()) {
+      outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
     }
   }
   return true;

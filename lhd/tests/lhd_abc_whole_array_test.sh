@@ -58,14 +58,14 @@ endmodule
 SV
 run compile "$W/partial.v" --reader slang --emit-dir lg:"$W/partial" --emit verilog:"$W/partial-compiled.v" \
   --workdir "$W/partial-compile"
-run synth "$W/source.v" --reader slang --top whole_array --set synth.liberty="$LIB" --set synth.opentimer=false \
+run synth "$W/source.v" --reader slang --top whole_array --set synth.liberty="$LIB" --set synth.opentimer=false --set pass.abc.memory=true \
   --emit-dir lg:"$W/mapped" --emit verilog:"$W/mapped.v" --emit diagnostics:"$W/diagnostics.jsonl" --workdir "$W/synth"
 # An ABSENCE check is only a check while the file exists (grep's exit 2 is
 # swallowed by the `if` under `set -e`).
 [ -f "$W/diagnostics.jsonl" ] || { echo 'FAIL: no diagnostics emitted -- the absence check below would be vacuous'; exit 1; }
 [ -s "$W/mapped.v" ] || { echo 'FAIL: no mapped verilog emitted'; exit 1; }
 if grep -q 'memory-unlowered' "$W/diagnostics.jsonl"; then cat "$W/diagnostics.jsonl"; exit 1; fi
-if grep -q 'cgen_memory\|always @(\|initial ' "$W/mapped.v"; then echo 'FAIL: whole-array state was not mapped'; exit 1; fi
+if grep -q '`include.*cgen_memory\|always @(\|initial ' "$W/mapped.v"; then echo 'FAIL: whole-array state was not mapped'; exit 1; fi
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --emit verilog:"$W/models.v" --workdir "$W/models-work"
 for design in mapped partial; do
   top=whole_array
@@ -110,7 +110,7 @@ iverilog -g2012 -s tb -o "$W/sim" "$W/mapped.v" "$W/models.v" "$W/partial-compil
 vvp "$W/sim"
 # The cross-front QoR suspect must contain all 24 bits as mapped DFF cells.
 run synth inou/prp/tests/equiv/comb_array_const_index_read.v --reader slang \
-  --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$W/array.v" --workdir "$W/array"
+  --set synth.liberty="$LIB" --set synth.opentimer=false --set pass.abc.memory=true --emit verilog:"$W/array.v" --workdir "$W/array"
 python3 - "$W/result.json" <<'PY'
 import json,sys
 q=json.load(open(sys.argv[1]))['qor']['abc']; assert sum(q['dff']['cells'].values())==24,q

@@ -72,14 +72,14 @@ hier=w/'hier.v'
 hier.write_text('''module add(input [15:0] a,b, output [15:0] y); assign y=a+b; endmodule
 module top(input [15:0] a,b,c, output [15:0] y); wire [15:0] mid; add x(a,b,mid); add z(mid,c,y); endmodule
 ''')
-rows=synth('hier',hier,'--set','color.absorb=false','--set','compile.upass.inline=false')
+rows=synth('hier',hier,'--set','compile.upass.inline=false')
 assert trials(rows)>0, rows
 run('lec','--impl',f'lg:{w}/hier-net','--ref',hier,'--lib',f'lg:{w}/models','--top','top','--workdir',w/'lec-hier')
 
 # Time repeated occurrences and a feedback register. The timer must cross
 # both instances but cut the sequential loop instead of rejecting a cycle.
 lib = str(pathlib.Path('inou/prp/tests/abc/timing.lib').resolve())
-rows = synth('hier-timed', hier, '--set', 'color.absorb=false', '--set', 'compile.upass.inline=false', '--set', 'abc.delay=1')
+rows = synth('hier-timed', hier, '--set', 'compile.upass.inline=false', '--set', 'abc.delay=1')
 assert trials(rows) > 0, rows
 logs = '\n'.join(p.read_text() for p in (w/'hier-timed'/'logs').glob('*.log'))
 assert 'objective=timing' in logs and 'missed (fastest measured retained)' in logs, logs

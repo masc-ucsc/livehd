@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# pass.abc memory bit-blast (`pass.abc.memory=true`, the default; pass/abc/
+# pass.abc memory bit-blast (`pass.abc.memory=true`, explicitly enabled; pass/abc/
 # mem_lower.cpp) on the shapes that were wrong or refused before the
 # constant-address / per-lane rework:
 #
@@ -55,7 +55,7 @@
 
 set -u
 
-LHD=lhd/lhd
+LHD="${LHD:-lhd/lhd}"
 LIB=inou/prp/tests/abc/test.lib
 TILE=lhd/tests/abc_memtile.sv
 MEMALL=lhd/tests/abc_memall.sv
@@ -86,13 +86,17 @@ dffs() {  # dffs <netlist-dir>: storage DFF cell instances
 }
 
 # map_design <dir> <src> <top> <slang -G...> [extra pass.abc --set ...]: compile
-# through slang, color, tech-map with the DEFAULT memory mode, emit the netlist
+# through slang, color, tech-map with memory lowering enabled, emit the netlist
 # Verilog. Leaves abc.json (result + qor) and diag.jsonl in <dir>.
 map_design() {
   local d="$1" src="$2" top="$3" gparam="$4"
   shift 4
   mkdir -p "$d"
   local r="$d/r.json"
+  local memory_flag=(--set pass.abc.memory=true)
+  for option in "$@"; do
+    case "$option" in pass.abc.memory=*) memory_flag=() ;; esac
+  done
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   # `-- -G<param>=<value>` hands the override to slang; everything after `--`
   # is slang's, so lhd's own -q/--result-json must come BEFORE it.
@@ -102,7 +106,7 @@ map_design() {
       -q --result-json "$r" ${gargs[@]+"${gargs[@]}"} || fail "compile $src $gparam -> $(cat "$r" 2>/dev/null)"
   run pass color synth --top "$top.$top" lg:"$d/lg" --workdir "$d/w2"
   run pass abc --top "$top.$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
-      --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" "$@"
+      --emit diagnostics:"$d/diag.jsonl" --workdir "$d/w3" ${memory_flag[@]+"${memory_flag[@]}"} "$@"
   cp "$r" "$d/abc.json"
   run compile lg:"$d/net" --top "$top.$top" --emit-dir verilog:"$d/netv" --workdir "$d/w6"
 }
@@ -142,15 +146,25 @@ lec_both() {
 D="$W/tile32"
 map_design "$D" "$TILE" memtile -GN=32
 ! grep -q '"code":"memory-unlowered"' "$D/diag.jsonl" || fail "tile32: memory was NOT bit-blasted: $(grep memory-unlowered "$D/diag.jsonl")"
-! grep -hq "cgen_memory\|_data\b" "$D/netv/"*.v || fail "tile32: a native memory instance survived memory=true"
+! grep -hq '`include.*cgen_memory\|reg .*\[.*:.*\].*\[' "$D/netv/"*.v || fail "tile32: a native memory instance survived memory=true"
 dff=$(dffs "$D/netv")
 [ "$dff" -eq 256 ] || fail "tile32: expected 256 storage DFF cells (32 x 8), got $dff"
 bits=256
-nodes=$(metric input_nodes "$D/abc.json")
+# The memory now has its own module. Apply the lowering-size guard to that
+# body; parent control/data regions remain outside its preserved boundary.
+# The gate-count guard below still covers the complete emitted design.
+nodes=$(python3 - "$D/abc.json" <<'PYCODE'
+import json,sys
+regions=json.load(open(sys.argv[1]))['qor']['regions']
+memories=[r for r in regions if r['module'].startswith('cgen_memory_')]
+assert memories, 'no memory implementation region was mapped'
+print(sum(r['input_nodes'] for r in memories))
+PYCODE
+)
 gates=$(metric gates "$D/abc.json")
 [ -n "$nodes" ] && [ -n "$gates" ] || fail "tile32: no qor in $(cat "$D/abc.json")"
 [ "$nodes" -le $((2 * bits)) ] \
-  || fail "tile32: $nodes ABC input nodes for $bits storage bits (> 2/bit): the per-(entry,port) fold grew back"
+  || fail "tile32: $nodes ABC input nodes for $bits storage bits (> 2/bit): the memory implementation grew beyond its node budget"
 [ "$gates" -le $((12 * bits)) ] \
   || fail "tile32: $gates mapped cells for $bits storage bits (> 12/bit): write path is no longer one mux per lane"
 ncells=$(cells "$D/netv")
@@ -162,7 +176,7 @@ echo "PASS: 32x8 constant-index tile bit-blasts to $dff DFFs + $gates cells from
 # ---------------------------------------------------------------------------
 D="$W/tile8"
 map_design "$D" "$TILE" memtile -GN=8
-! grep -hq "cgen_memory" "$D/netv/"*.v || fail "tile8: a native memory instance survived memory=true"
+! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "tile8: a native memory instance survived memory=true"
 lec_both "$D" memtile
 echo "PASS: 8x8 constant-index tile is LEC-equivalent to its source memory (cvc5 + lgyosys)"
 
@@ -172,7 +186,7 @@ echo "PASS: 8x8 constant-index tile is LEC-equivalent to its source memory (cvc5
 D="$W/memall"
 map_design "$D" "$MEMALL" memall ""
 ! grep -q '"code":"memory-unlowered"' "$D/diag.jsonl" || fail "memall: read_all memory was NOT bit-blasted: $(grep memory-unlowered "$D/diag.jsonl")"
-! grep -hq "cgen_memory\|_data\b" "$D/netv/"*.v || fail "memall: a native array survived memory=true"
+! grep -hq '`include.*cgen_memory\|reg .*\[.*:.*\].*\[' "$D/netv/"*.v || fail "memall: a native array survived memory=true"
 dff=$(dffs "$D/netv")
 [ "$dff" -eq 28 ] || fail "memall: expected 28 storage DFF cells (4 x 7), got $dff"
 # cvc5 bound 3: a 3-cycle bounded proof from reset already covers a write
@@ -196,7 +210,7 @@ grep -q "32 x 8 = 256 bits" "$D/diag.jsonl" || fail "memory_max_bits note does n
 grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory_max_bits=255: 256-bit memory was bit-blasted anyway"
 D="$W/tile32_max0"
 map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory_max_bits=0
-! grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory_max_bits=0 must disable the guard"
+! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory_max_bits=0 must disable the guard"
 if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net" --set synth.liberty="$LIB" \
     --set pass.abc.memory_max_bits=lots --workdir "$W/bad_w" -q --result-json "$W/bad.json" 2>/dev/null; then
   fail "pass.abc accepted memory_max_bits=lots"

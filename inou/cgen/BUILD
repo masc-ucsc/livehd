@@ -136,3 +136,9 @@ sh_test(
         "//lhd",
     ],
 )
+
+filegroup(
+    name = "memory_generator_srcs",
+    srcs = ["cgen_verilog.cpp", "cgen_verilog.hpp", "inou_cgen.cpp"],
+    visibility = ["//visibility:public"],
+)

@@ -23,6 +23,9 @@ namespace lhd {
 // check_known_set_passes still emits the standard unknown-pass error. Uses
 // only the constexpr kSetPasses table, so it is safe before init_engine().
 std::string canonical_set_key(std::string_view key, std::string_view ctx) {
+  if (key == "pass.satopt") {
+    return std::string{key};
+  }
   // `<channel>.log=<level>` is the developer-logging namespace (livehd::log),
   // orthogonal to the pass-flag registry — a channel name (e.g. `upass`,
   // `cprop`) is NOT a pass name, so it must never collect a command-path
@@ -97,6 +100,10 @@ void init_engine() {
 std::vector<Set_option> list_set_options() {
   init_engine();
   std::vector<Set_option> out;
+  out.push_back(Set_option{"pass.satopt",
+                           "pass.satopt",
+                           "false",
+                           "Run satopt during compilation, independently of synthesis; ABC consumes the proven facts later"});
   const auto is_formal_common = [](std::string_view flag) {
     for (const auto& f : kFormalCommonFlags) {
       if (f == flag) {
@@ -248,8 +255,9 @@ void warn_no_artifacts(const Options& opts) {
   livehd::diag::warn("lhd", "no-artifacts", "io")
       .msg("`lhd {}` was given neither --workdir nor an --emit/--emit-dir output: it runs, but nothing it builds is kept",
            opts.command)
-      .hint("--emit-dir lg:DIR (or verilog:DIR) keeps the result; --workdir DIR additionally keeps the intermediates and the "
-            "per-pass logs")
+      .hint(
+          "--emit-dir lg:DIR (or verilog:DIR) keeps the result; --workdir DIR additionally keeps the intermediates and the "
+          "per-pass logs")
       .emit();
 }
 

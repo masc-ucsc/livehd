@@ -32,11 +32,6 @@ public:
 
   [[nodiscard]] bool empty() const { return partitions_.empty(); }
 
-  // Defs the absorb pass inlined away (below-min defs folded into their
-  // parents). Reported alongside the window, since a def that vanished is why
-  // its partitions are missing from the table.
-  void set_absorbed_defs(uint64_t n) { absorbed_defs_ = n; }
-
   // Human report on STDERR. Not stdout: run_step dup2()s fd 1 into the pass log
   // for the whole pass body (lhd/lhd_kernel_common.cpp), so a stdout report is
   // invisible unless --verbose. fd 2 is never redirected.
@@ -73,7 +68,6 @@ private:
   uint64_t               total_uncolored_ = 0;
   uint64_t               flat_nodes_      = 0;  // sum of nodes * instances
   uint64_t               total_ge_        = 0;
-  uint64_t               absorbed_defs_   = 0;
 
   // Partition sizes, largest first. Sorted by (size, def, color) so the report
   // does not inherit hash-iteration order. `by_ge` sorts on gate equivalents

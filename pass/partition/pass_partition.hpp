@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "flatten.hpp"
 #include "hhds/graph.hpp"
 #include "pass.hpp"
 
@@ -89,12 +90,18 @@ enum class Flatten_mode { off, on, automatic };
 // anything else is a fatal diag under `pass` and returns off.
 [[nodiscard]] Flatten_mode parse_flatten_mode(std::string_view v, std::string_view pass);
 
-// Whether build_decomposition will inline `g`'s whole hierarchy into a single
-// flat def (vs. the per-def decomposition). `on`/`off` are literal; `automatic`
-// resolves against g's active coloring (flat coloring => whole-design). Lets a
-// caller (e.g. pass.abc's size gate) tell, before running, whether it is about
-// to bit-blast the entire flattened design as one unit.
-[[nodiscard]] bool flatten_is_whole_design(hhds::Graph* g, Flatten_mode mode);
+// Whether build_decomposition will inline `g`'s whole hierarchy and emit it as a
+// SINGLE module. `on`/`off` are literal; `automatic` resolves against g's active
+// coloring. Lets a caller (e.g. pass.abc's size gate) tell, before running,
+// whether it is about to bit-blast the entire flattened design as one unit.
+//
+// True only for a flatten whose result is ONE module (a `pass.color flat`
+// coloring, or none at all). pass.color synth's VIRTUAL flattening also makes
+// pass.partition flatten, but into many `max_gate`-bounded regions -- callers
+// that specialize on "the design is one region" must ask this, not "did we
+// flatten". (It replaces flatten_is_whole_design, whose name promised the
+// former while returning the latter.)
+[[nodiscard]] bool flatten_is_single_module(hhds::Graph* g, Flatten_mode mode);
 
 // Resolve a sub-instance's child def inside `outlib`: an already-partitioned
 // def resolves by name; a BODY-LESS def (a black box — a liberty cell or tie
@@ -103,7 +110,9 @@ enum class Flatten_mode { off, on, automatic };
 // re-partitioned / re-synthesized like any other lg. Returns nullptr when the
 // def has a body but is missing from `outlib` (a children-first ordering bug —
 // the caller reports it).
-std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst);
+// resolve_or_clone_subdef now lives in flatten.hpp (included above) so the
+// flattener can be a leaf library; re-exported here because every historical
+// caller reaches it through this header.
 
 }  // namespace livehd::partition
 

@@ -88,7 +88,7 @@ struct Reduce_stats {
 
 // True for a def name this pass MINTED: `pat_` + the 32 hex digits of the
 // pattern identity. The single source of truth for "is this a shared pattern
-// body" -- color_reduce refuses to re-mine one, color_absorb refuses to inline
+// body" -- color_reduce refuses to re-mine one, the flattener refuses to inline
 // one away, and neither may loosen it to a bare prefix (a user module called
 // `pat_foo` is not ours).
 [[nodiscard]] bool is_pattern_def_name(std::string_view name);

@@ -106,3 +106,9 @@ YOSYS_COMPILE_TESTS = [
 ) for t in YOSYS_COMPILE_TESTS]
 
 exports_files(ALL_VERILOG_TESTS)
+
+filegroup(
+    name = "memory_import_srcs",
+    srcs = ["lgyosys_tolg.cpp", "inou_yosys_api.cpp"],
+    visibility = ["//visibility:public"],
+)

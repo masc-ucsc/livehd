@@ -506,7 +506,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
 // not pass labels). Same contract as kSimSetOptions: this array is the single
 // source of truth for --set validation, `lhd list options`, and the
 // `lhd synth --help` options block. Pass-level tuning still rides the pass
-// namespaces (`--set abc.adder=cla`, `--set color.absorb=false`, ...).
+// namespaces (`--set abc.adder=cla`, `--set color.hier=false`, ...).
 struct Synth_set_option {
   enum class Kind { boolean, file, integer };
   std::string_view name;

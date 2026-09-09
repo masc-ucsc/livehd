@@ -23,7 +23,7 @@ module reference(input clock, en, input [3:0] addr, output [7:0] comb, output re
   always @(posedge clock) if (en) q <= comb;
 endmodule
 SV
-run synth "$W/rom.v" --reader slang --top rom --set synth.liberty="$LIB" --set synth.opentimer=false \
+run synth "$W/rom.v" --reader slang --top rom --set synth.liberty="$LIB" --set synth.opentimer=false --set pass.abc.memory=true \
   --emit-dir lg:"$W/mapped" --emit verilog:"$W/mapped.v" --emit diagnostics:"$W/diagnostics.jsonl" --workdir "$W/synth"
 # An ABSENCE check is only a check while the file exists: a renamed emit kind
 # would otherwise make grep exit 2, the `if` would swallow it under `set -e`,
@@ -33,7 +33,7 @@ run synth "$W/rom.v" --reader slang --top rom --set synth.liberty="$LIB" --set s
 if grep -q 'memory-unlowered\|memory-max-bits' "$W/diagnostics.jsonl"; then
   cat "$W/diagnostics.jsonl"; exit 1
 fi
-if grep -q 'cgen_memory\|initial ' "$W/mapped.v"; then
+if grep -q '`include.*cgen_memory\|initial ' "$W/mapped.v"; then
   echo 'FAIL: constant ROM storage survived mapping'; exit 1
 fi
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --emit verilog:"$W/models.v" --workdir "$W/models-work"

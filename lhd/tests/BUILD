@@ -1222,15 +1222,15 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
-# 2c-color-size subtask D: `pass.color synth` ABSORBS every def below the size
-# window's `min` (structural inline, so its logic can share an ABC region with
-# its neighbours -- a Sub is a blackbox to ABC). Absorb rewrites the netlist, so
-# the test that matters is the one only an end-to-end run gives: the absorbed
-# design is still LEC-equivalent to the original.
+# `pass.color synth` colours the FLAT view of the hierarchy (virtual
+# flattening), so a colour can span module boundaries. It rewrites nothing --
+# the flat def is scratch -- and instead records "hier_flat":true, which is what
+# makes pass.partition / pass.abc flatten downstream. Only an end-to-end run can
+# see that handoff, and that the flattened result is still LEC-equivalent.
 sh_test(
-    name = "lhd_color_absorb_test",
+    name = "lhd_color_hier_flat_test",
     size = "large",
-    srcs = ["lhd_color_absorb_test.sh"],
+    srcs = ["lhd_color_hier_flat_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
@@ -1272,6 +1272,21 @@ sh_test(
     size = "large",
     srcs = ["lhd_abc_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_satopt_test",
+    size = "large",
+    srcs = ["lhd_satopt_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_satopt_noctrl_test",
+    size = "large",
+    srcs = ["lhd_satopt_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    env = {"CTRL_CONES": "false"},
 )
 
 sh_test(
@@ -1459,7 +1474,7 @@ sh_test(
     ],
 )
 
-# pass.abc memory=true (the default) bit-blast, on the shapes the constant-
+# pass.abc memory=true (explicitly enabled) bit-blast, on the shapes the constant-
 # address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
 # (32x8 guards on ABC input nodes + mapped cells; 8x8 LEC'd with cvc5 AND
 # lgyosys against the source memory through gensim cell models), a whole-array
@@ -1903,4 +1918,11 @@ sh_test(
     srcs = ["lhd_abc_boundary_test.sh"],
     env = {"ABC_TEST_THREADS": "2"},
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_memory_hierarchy_test",
+    size = "large",
+    srcs = ["lhd_memory_hierarchy_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests", "//ware:cgen_memory_rtl"],
 )

@@ -189,6 +189,15 @@ struct Color_opts {
   bool     mux_in_data   = false;
   // Keep large adders/multipliers/dividers at color boundaries unless disabled.
   bool     stop_arith    = true;
+  // The same policy, spelled per operation family, because the three families
+  // behave nothing alike under ABC and a design tuning one rarely wants the
+  // others moved. `stop_arith` covers Sum/Mult/Div, `stop_cmp` the wide
+  // comparisons (LT/GT, which lower to a subtraction) and `stop_shift` the
+  // RUNTIME shifters (SHL/SRA with a non-constant amount -- a barrel). All
+  // three are independent of `ctrl_cones`: turning control grouping off must
+  // never introduce a boundary that having it on did not have.
+  bool     stop_cmp      = true;
+  bool     stop_shift    = true;
   // A nonzero bound further limits control merging; otherwise use max_gate.
   uint64_t ctrl_max_gate = 0;
   uint64_t ctrl_min_gate = 0;

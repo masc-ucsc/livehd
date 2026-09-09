@@ -12,7 +12,6 @@
 #include <string_view>
 #include <system_error>
 
-#include "color_absorb.hpp"
 #include "color_acyclic.hpp"
 #include "color_cgen.hpp"
 #include "color_common.hpp"
@@ -23,6 +22,7 @@
 #include "color_stats.hpp"
 #include "color_synth.hpp"
 #include "diag.hpp"
+#include "flatten.hpp"
 #include "node_util.hpp"
 #include "str_tools.hpp"
 
@@ -62,6 +62,15 @@ void Pass_color::setup() {
                        "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true",
                        "true");
   m.add_label_optional("stop_arith", "keep large adders, multipliers and dividers at color boundaries", "true");
+  m.add_label_optional("stop_cmp",
+                       "keep wide comparisons (LT/GT with an operand over 8 bits, which lower to a subtraction) at "
+                       "color boundaries. false merges them into the cone that consumes them",
+                       "true");
+  m.add_label_optional("stop_shift",
+                       "keep RUNTIME shifters (SHL/SRA with a non-constant amount and a result over 8 bits -- a "
+                       "barrel) at color boundaries. Constant shifts are wiring and are never cut. Independent of "
+                       "`ctrl_cones`: turning control grouping off never arms this on its own",
+                       "true");
   m.add_label_optional("ctrl_max_gate",
                        "optional tighter control-color size bound (predicted AIG); 0 uses max_gate. "
                        "An indivisible node above this explicit bound fails",
@@ -77,15 +86,24 @@ void Pass_color::setup() {
   // Sub instances count ~1 -- their logic is weighed in their own def), not
   // nodes: ABC's memory scales with the BIT-BLASTED gate count, so a 200k-node
   // region of wide datapath passes any node gate and still exhausts the host.
-  m.add_label_optional("min_ge",
-                       "synth: merge a region below this many gate-equivalents into its best-connected "
-                       "neighbour (0 => no lower bound). Kills singleton regions",
-                       "500");
+
   // Small incremental regions target a 16 GiB per-color memory budget. The
   // former 25k-GE window still produced expensive wide-datapath regions in
   // the full benchmark sweep. Start with 5k GE; this remains a soft estimate,
   // since an indivisible node can exceed the window. ABC admission and the
   // process-wide physical-memory ceiling remain independent backstops.
+  // min_ge no longer has ANYTHING to do with the hierarchy. It used to double as
+  // the `absorb` threshold -- inline every def below it so its logic could reach
+  // a neighbour across a module boundary -- and absorb is gone: the synth
+  // algorithms colour the flat view now, so crossing that boundary is the
+  // default, not a size-triggered rewrite. What is left is the size window's
+  // ordinary lower half, which only `synth`/`pipe` honour and which is still the
+  // only thing that merges away their singleton regions.
+  m.add_label_optional("min_ge",
+                       "synth/pipe: merge a region below this many gate-equivalents into its best-connected "
+                       "neighbour (0 => no lower bound). Kills singleton regions. Not honoured by `cones`, which "
+                       "uses max_gate instead",
+                       "500");
   m.add_label_optional("max_ge",
                        "synth: split a region above this many synthesis gate-equivalents (0 => no upper bound). "
                        "Default 5k synthesis GE, targeting small incremental regions and a 16 GiB per-color budget",
@@ -116,11 +134,6 @@ void Pass_color::setup() {
                        "time; `all` takes the whole qualifying Q fanout as one all-or-nothing candidate. "
                        "all = default in cones mode; false = off",
                        "");
-  m.add_label_optional("absorb",
-                       "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
-                       "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
-                       "it). Rewrites the design; needs min_ge>0 and hier=true. false leaves tiny defs their own regions",
-                       "true");
   m.add_label_optional("name_weight",
                        "synth: in the size window, bind a region N x tighter across an ANONYMOUS crossing (one that "
                        "pass.partition would name `<op>_<nid>` -- a Mult/Div/mask intermediate) so the merge swallows it "
@@ -183,7 +196,7 @@ uint64_t parse_count(const Eprp_var& var, std::string_view label, std::string_vi
 }
 
 // JSON object string of the algorithm parameters (for the metadata blob).
-std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var) {
+std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var, bool hier_flat) {
   std::string s  = "{";
   s             += std::format("\"hier\":{},", opts.hier);
   s             += std::format("\"compact\":{},", opts.compact);
@@ -200,12 +213,20 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
                                    opts.min_ge,
                                    opts.max_ge,
                                    opts.name_weight);
+    // The marker pass.partition / pass.abc key `flatten=auto` off: these colors
+    // describe the FLAT design and only mean what they say once the hierarchy is
+    // inlined again downstream. Recorded only when the flat coloring ACTUALLY
+    // ran -- a single-def top, or `hier=false`, colors one body and its ids need
+    // no re-flatten downstream.
+    if (hier_flat) {
+      s += ",\"hier_flat\":true";
+    }
     // `stop_arith` is not a cones knob: is_arith_boundary feeds `synth`'s is_cut
     // and its preserve_arith_cuts too, so recording it only under cones would
     // leave a `synth_alg=synth --set color.stop_arith=false` partition claiming
     // the default arithmetic policy. `pipe` cuts at state alone and ignores it.
     if (salg != "pipe") {
-      s += std::format(",\"stop_arith\":{}", opts.stop_arith);
+      s += std::format(",\"stop_arith\":{},\"stop_cmp\":{},\"stop_shift\":{}", opts.stop_arith, opts.stop_cmp, opts.stop_shift);
     }
     if (salg == "cones") {
       s += std::format(",\"ctrl_cones\":{},\"ctrl_max_gate\":{},\"ctrl_min_gate\":{}",
@@ -244,6 +265,55 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   // `reduce` never reaches here: it neither writes colors nor coloring_info.
   s += "}";
   return s;
+}
+
+// Can the whole `top` hierarchy be inlined into one flat def? The flattener
+// REFUSES two shapes, and pass.color must not turn either into a hard failure:
+// colouring the flat view is a QoR choice, and a design that cannot be
+// flattened simply falls back to the per-def colouring it always had.
+//
+//   * a REPLICATED (loop) Sub -- it stands for `count` occurrences and splicing
+//     one body copy would silently drop the rest (graph/inline_sub.cpp refuses
+//     for the same reason). Every rolled design has one.
+//   * a RECURSIVE hierarchy -- inlining would not terminate.
+//
+// Both are cheap to see from the structure alone: this walks unique defs, never
+// node edges, so it costs the hierarchy's size and not the design's.
+bool hierarchy_is_flattenable(hhds::Graph* top, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& gid2graph, std::string* why) {
+  absl::flat_hash_set<hhds::Gid> done;
+  absl::flat_hash_set<hhds::Gid> on_path;
+  const auto                     walk = [&](auto&& self, hhds::Graph* g) -> bool {
+    if (g == nullptr) {
+      return true;
+    }
+    if (!on_path.insert(g->get_gid()).second) {
+      *why = std::format("'{}' is instantiated recursively", g->get_name());
+      return false;
+    }
+    if (!done.insert(g->get_gid()).second) {
+      on_path.erase(g->get_gid());
+      return true;  // already cleared through another parent
+    }
+    for (auto n : g->body().nodes()) {
+      if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+        continue;
+      }
+      auto it = gid2graph.find(n.get_subnode_gid());
+      if (it == gid2graph.end() || it->second == nullptr) {
+        continue;  // body-less black box: stays an opaque instance, always fine
+      }
+      if (n.is_loop_subnode()) {
+        *why = std::format("'{}' instantiates '{}' as a replicated (loop) Sub", g->get_name(), it->second->get_name());
+        return false;
+      }
+      if (!self(self, it->second)) {
+        return false;
+      }
+    }
+    on_path.erase(g->get_gid());
+    return true;
+  };
+  return walk(walk, top);
 }
 
 // Each algorithm hands apply_coloring its own Node2Id, so the per-def sizes are
@@ -342,12 +412,23 @@ void Pass_color::color(Eprp_var& var) {
   opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "true"));
   opts.mux_in_data   = !parse_bool(var.get("stop_mux", "true"));
   opts.stop_arith    = parse_bool(var.get("stop_arith", "true"));
+  opts.stop_cmp      = parse_bool(var.get("stop_cmp", "true"));
+  opts.stop_shift    = parse_bool(var.get("stop_shift", "true"));
   opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
   opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
   if (opts.ctrl_cones && (alg != "synth" || synth_alg != "cones")) {
     opts.ctrl_cones = false;
   }
   opts.forward = forward_on ? forward : std::string{};
+  // `max_gate=0` is RAW cones: no merge at all, so the forward phase never runs
+  // either. Say so rather than let a `--set color.forward=all` sit there doing
+  // nothing -- the two knobs read as independent and are not.
+  if (opts.max_gate == 0 && forward_on && !var.get("forward", "").empty()) {
+    livehd::diag::warn("pass.color", "forward-inert", "unsupported")
+        .msg("forward '{}' is inert with max_gate=0: raw cones do not merge, in either direction", forward)
+        .hint("set a nonzero color.max_gate to enable the backward overlap merge and the forward merge across registers")
+        .emit();
+  }
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
     livehd::diag::err("pass.color", "bad-size-window", "io")
@@ -487,25 +568,125 @@ void Pass_color::color(Eprp_var& var) {
     return;
   }
 
-  // Absorb runs BEFORE anything is colored and BEFORE the instance counts below
-  // are taken: it removes defs from the hierarchy, so a count taken first would
-  // describe a design that no longer exists.
+  // Declared here because the virtual-flatten path below fills both: it colors
+  // ONE graph (the scratch flat def) and must fold its outcome into the same
+  // aggregate the per-def path uses, and it must build the descriptor while the
+  // flat def still exists.
+  Color_stats stats_acc;
+  std::string flat_info;
+
+  // ---- VIRTUAL FLATTENING -------------------------------------------------
   //
-  // Only `synth` honors the window, so only `synth` absorbs -- and only with a
-  // floor to measure against. This is the one thing pass.color does that rewrites
-  // the design rather than annotating it, which is why it has its own off switch.
-  Absorb_stats absorbed;
-  if (alg == "synth" && opts.hier && opts.min_ge != 0 && parse_bool(var.get("absorb", "true")) && top_g != nullptr) {
-    if (!absorb_small_defs(top_g, gid2graph, opts.min_ge, &absorbed)) {
-      return;  // diag already emitted; the library is half-transformed
+  // `synth` colors the FLAT VIEW of the hierarchy, never one def at a time.
+  //
+  // Why. A color is the unit ABC optimizes, and a per-def coloring can never
+  // put logic from two defs in one region no matter what the knobs say -- so
+  // every module boundary was silently also a region boundary. Worse, it
+  // disabled the cross-register (`forward`) merge in exactly the place it was
+  // needed: in a leaf module a pipeline register's Q drives an output PORT, the
+  // port is a builtin outside the body walk, so the register looked like it had
+  // NO fan-out and never became a forward-merge candidate. Measured on
+  // logikbench `hft`: 5 defs, and every one of the 20 registers in the four leaf
+  // modules was skipped for that reason.
+  //
+  // How. Inline the hierarchy into a SCRATCH def, color that once, and write the
+  // colors back onto the original defs' nodes through the flattener's
+  // node-origin map. Nothing about the live design changes -- the scratch def is
+  // deleted before this returns, which is what makes it VIRTUAL. Downstream,
+  // pass.partition and pass.abc see `"hier_flat":true` in the coloring
+  // descriptor and flatten again (their `flatten=auto`), so a color that spans
+  // modules becomes one region.
+  //
+  // The one lossy case is a def instantiated MORE THAN ONCE: the flat view holds
+  // one clone per instance and they may land in different colors, but `color` is
+  // per-def storage, so the first clone in flat forward order wins and the other
+  // instances follow it. That is still a valid partition (a region is just a set
+  // of nodes) -- it only means those instances share a region rather than the
+  // ones cones picked. Counted and reported rather than silently absorbed.
+  bool virtual_flat = false;
+  if (alg == "synth" && opts.hier && top_g != nullptr && gid2graph.size() > 1) {
+    auto*       lib = top_g->get_io() ? top_g->get_io()->get_library() : nullptr;
+    std::string why;
+    if (lib != nullptr && !hierarchy_is_flattenable(top_g, gid2graph, &why)) {
+      // Not an error: colour per def, exactly as before, and say why the regions
+      // will stop at module boundaries.
+      livehd::diag::warn("pass.color", "hier-flat-skipped", "unsupported")
+          .msg("colouring each def separately: the hierarchy under '{}' cannot be flattened -- {}", top_g->get_name(), why)
+          .hint("regions will not cross module boundaries, so a cone that spans defs stays split")
+          .emit();
+      lib = nullptr;
     }
-    if (opts.verbose && absorbed.defs_absorbed != 0) {
-      std::print(stderr,
-                 "[color.absorb] {} def(s) below {} GE inlined at {} site(s); {} GE duplicated\n",
-                 absorbed.defs_absorbed,
-                 opts.min_ge,
-                 absorbed.sites_inlined,
-                 absorbed.ge_duplicated);
+    if (lib != nullptr) {
+      const std::string                  flat_name = std::string{top_g->get_name()} + "__color_flat_tmp";
+      livehd::partition::Flat_origin_map origin;
+      auto                               flat = livehd::partition::flatten_hierarchy(top_g, lib, flat_name, &origin);
+      if (!flat) {
+        return;  // diag already emitted (recursive hierarchy, replicated Sub, ...)
+      }
+      Def_color_sizes flat_sizes;
+      Color_opts      o = opts;
+      o.sizes           = stats ? &flat_sizes : nullptr;
+      run_one(alg, flat.get(), o, var);
+
+      // Colors are only meaningful as the flat coloring, so the descriptor is
+      // built from the FLAT graph (accurate region/instance counts per color)
+      // while it still exists.
+      flat_info = build_coloring_info_json(flat.get(), top_g->get_name(), alg, params_json(alg, opts, var, /*hier_flat=*/true));
+
+      // Write back. Clear first: a def node whose flat clone was dropped (dead
+      // logic the flattener did not reach) must not keep a stale color from an
+      // earlier run, and a stale color is a region membership downstream.
+      for (const auto& [gid, def] : gid2graph) {
+        (void)gid;
+        for (auto n : def->body().nodes()) {
+          livehd::graph_util::del_color(n);
+        }
+      }
+      uint64_t written = 0, conflicts = 0;
+      for (auto fn : flat->body().nodes(hhds::Node_order::forward)) {
+        const auto c = livehd::graph_util::node_color_of(fn);
+        if (c == NO_COLOR) {
+          continue;
+        }
+        auto it = origin.find(fn);
+        if (it == origin.end()) {
+          continue;  // a node the flattener minted itself (never happens today)
+        }
+        auto& src = it->second.src_node;
+        if (livehd::graph_util::has_color(src) && livehd::graph_util::color_of(src) != NO_COLOR) {
+          conflicts += livehd::graph_util::color_of(src) != c ? 1 : 0;
+          continue;  // first clone in flat forward order wins
+        }
+        livehd::graph_util::set_color(src, c);
+        ++written;
+      }
+      lib->delete_graph(flat);
+      lib->delete_graphio(flat_name);
+      virtual_flat = true;
+      if (stats) {
+        stats_acc.add(top_g->get_name(), flat_sizes, 1);
+      }
+      if (opts.verbose) {
+        std::print(stderr,
+                   "[color.hier] {} colored over the FLAT view of {} def(s): {} node(s) written, {} multi-instance "
+                   "conflict(s) resolved first-wins\n",
+                   top_g->get_name(),
+                   gid2graph.size(),
+                   written,
+                   conflicts);
+      }
+      if (conflicts != 0) {
+        livehd::diag::warn("pass.color", "hier-color-conflict", "unsupported")
+            .msg(
+                "{} node(s) of a def instantiated more than once got different colors per instance; the first "
+                "instance's color wins, so every instance joins that one's regions",
+                conflicts)
+            .hint("`color` is per-def storage, so one def cannot carry a different color per instance")
+            .hint(
+                "those regions hold one copy of the def's logic per instance and can exceed `max_gate` by that "
+                "factor; pass.abc's own memory and time guards remain the backstop")
+            .emit();
+      }
     }
   }
 
@@ -523,8 +704,7 @@ void Pass_color::color(Eprp_var& var) {
     }
   }
 
-  Color_stats stats_acc;
-  auto        color_def = [&](hhds::Graph* g) {
+  auto color_def = [&](hhds::Graph* g) {
     Def_color_sizes sizes;
     Color_opts      o = opts;
     o.sizes           = stats ? &sizes : nullptr;
@@ -535,7 +715,10 @@ void Pass_color::color(Eprp_var& var) {
     }
   };
 
-  if (top_g != nullptr && opts.hier) {
+  if (virtual_flat) {
+    // Already colored, over the flat view. Re-running the per-def algorithm here
+    // would overwrite every color that was just written back.
+  } else if (top_g != nullptr && opts.hier) {
     // Top-driven hierarchical walk: color the top plus every unique sub-def
     // reachable through the instance hierarchy (hhds hier_range yields one
     // Hier_instance per subnode at every depth). Each unique def is colored
@@ -562,13 +745,11 @@ void Pass_color::color(Eprp_var& var) {
   }
 
   if (stats) {
-    stats_acc.set_absorbed_defs(absorbed.defs_absorbed);
     // cones does not run apply_size_window, so min_ge/max_ge bound NOTHING about
     // the regions it produced: reporting "N region(s) under min, M over max" plus
     // "OVER-MAX regions remain -- pass.abc admission may refuse this design"
     // would claim a bound nothing enforced (the same reason the window is not
     // printed under `acyclic`). max_gate is its threshold and gets its own line.
-    // `min_ge` still shaped the INPUT through absorb, which reports separately.
     const bool cones = alg == "synth" && synth_alg == "cones";
     stats_acc.report(alg, opts.verbose, cones ? 0 : opts.min_ge, cones ? 0 : opts.max_ge, cones ? opts.max_gate : 0);
   }
@@ -576,10 +757,16 @@ void Pass_color::color(Eprp_var& var) {
   if (top_g != nullptr) {
     // preserve_seeded_info keeps the block-attribute members ("seeded",
     // "region_opts") alive across this rebuild (2opt-freq B).
+    // Under virtual flattening the per-color region/instance counts describe the
+    // FLAT design, so they were captured off the scratch def before it was
+    // deleted; top_g's own body holds only the top's share of each color and
+    // would under-report every one of them.
     set_coloring_info(
         top_g,
         preserve_seeded_info(
             top_g,
-            build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var))));
+            flat_info.empty()
+                ? build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var, false))
+                : flat_info));
   }
 }

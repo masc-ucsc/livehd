@@ -32,9 +32,12 @@ struct Prove_options {
   // budget_k * (#driver pins in the property cone). cvc5's rlimit is a
   // machine-/wall-clock-independent internal counter, so the same config yields
   // the same verdict everywhere. 0 disables the limit.
-  int budget_k = 256;
+  int  budget_k                 = 256;
   // Pre-solve gate: a cone larger than this skips the solver entirely -> Unknown.
-  int cone_max = 50000;
+  int  cone_max                 = 50000;
+  // Synthesis queries cut each memory dout to an independent free word.
+  bool memory_as_symbols        = false;
+  bool reject_unknown_constants = false;
 };
 
 struct Query_out {
@@ -57,6 +60,11 @@ public:
   Query_out are_exclusive(const std::vector<hhds::Pin_class>& controls);
   // exactly-one-bit-set (onehot0 AND sel != 0).
   Query_out is_onehot(const hhds::Pin_class& sel);
+  Query_out equal_when(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
+                       int address_bits = 0);
+  Query_out never_collide(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
+                          int address_bits = 0);
+  Query_out constant_bit(const hhds::Pin_class& pin, int bit, bool value);
 
   // Register a hypothesis (an assume condition's driver pin): every later query
   // assumes cond != 0. Returns false if the assume cone is unsupported.
@@ -83,10 +91,12 @@ private:
   // Counts unique driver pins reachable backward from `pin`; sets `stateful`
   // (cone cuts a Flop/Memory) and `unsupported` (cone hits an op the encoder
   // cannot handle: Memory/Sub/Fflop/Latch).
-  int cone_info(const hhds::Pin_class& pin, bool& stateful, bool& unsupported);
+  int  cone_info(const hhds::Pin_class& pin, bool& stateful, bool& unsupported);
   void cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Class_index>& seen, int& n, bool& stateful,
                  bool& unsupported);
 
+  Query_out  address_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
+                              bool equal, int address_bits);
   cvc5::Term bv_const(int width, uint64_t val);
   cvc5::Term bv_extract(const cvc5::Term& t, int hi, int lo);
   cvc5::Term pred_to_bv(const cvc5::Term& b);

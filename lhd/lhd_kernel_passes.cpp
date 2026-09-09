@@ -621,9 +621,10 @@ void harvest_sta_incremental(Result& res, std::string_view sta_json) {
 void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
-    throw Lhd_error{"usage",
-                    "pass requires a subcommand: color <alg> | partition | abc | opentimer | liberty gensim | semdiff | analyze",
-                    "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
+    throw Lhd_error{
+        "usage",
+        "pass requires a subcommand: color <alg> | partition | satopt | abc | opentimer | liberty gensim | semdiff | analyze",
+        "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
   }
   const std::string sub = opts.files[0];
 
@@ -717,6 +718,17 @@ void pass_command(Options& opts, Result& res) {
   check_ir_body_magic(lg_in, "graph_", kHhdsGraphBodyMagic, "lg:");
   res.inputs.push_back(lg_in);
 
+  if (sub == "satopt") {
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    Eprp_var::Eprp_dict labels;
+    set_top_label(opts, var, labels, "pass.satopt");
+    if (opts.incremental && !opts.workdir.empty() && !opts.workdir_scratch) {
+      labels["cache_dir"] = opts.workdir + "/satopt_cache";
+    }
+    run_step("pass.satopt", var, labels, opts, res);
+    return;
+  }
   if (sub == "color") {
     std::string alg = opts.files.size() > 1 ? opts.files[1] : std::string{"acyclic"};
     if (alg == "reduce" && find_slot(opts.emit_dirs, "lg") != nullptr) {
@@ -997,7 +1009,7 @@ void pass_command(Options& opts, Result& res) {
   } else {
     throw Lhd_error{"usage",
                     std::format("unknown pass subcommand '{}'", sub),
-                    "use: color <alg> | partition | single_edge | abc | opentimer | formal | liberty gensim | semdiff "
+                    "use: color <alg> | partition | single_edge | satopt | abc | opentimer | formal | liberty gensim | semdiff "
                     "| analyze"};
   }
   finish_graph_output();

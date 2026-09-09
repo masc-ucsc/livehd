@@ -1534,6 +1534,18 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
                     "the compile cache left the graph library incomplete while overlaying validated clean bodies",
                     "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
   }
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "pass.satopt" && value != "false" && value != "0" && value != "off") {
+      Eprp_var::Eprp_dict labels;
+      set_top_label(opts, var, labels, "pass.satopt");
+      if (opts.incremental && !opts.workdir.empty() && !opts.workdir_scratch) {
+        labels["cache_dir"] = opts.workdir + "/satopt_cache";
+      }
+      run_step("pass.satopt", var, labels, opts, res);
+      break;
+    }
+  }
+
   // Closes the window the compile cache carries (Result::compile_cache_diag_mark).
   // Everything below is EMITS, which a warm restore re-runs — and whose targets
   // are not part of the cache key — so their records must not ride along.

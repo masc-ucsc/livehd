@@ -78,13 +78,30 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
   return op == Ntype_op::Sum && driver_bits(node) > 8;
 }
 
+// The three stop_* knobs are ORTHOGONAL to each other and to `ctrl_cones`.
+// Orthogonality is the contract: `ctrl_cones=false` asks for LESS structure
+// (no separate control colors, no stopping at muxes), so it must never be the
+// thing that turns a node INTO a boundary. Tying the runtime-shifter exemption
+// to it did exactly that -- disabling control grouping silently re-armed the
+// barrel-shifter cut and produced MORE colors than leaving it on.
 bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
   const auto op = type_op_of(node);
   if (!opts.stop_arith && (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div)) {
     return false;
   }
-  // Mux-inclusive control grouping keeps runtime shifters with their logic.
-  if (mode == Mode::cones && opts.ctrl_cones && (op == Ntype_op::SHL || op == Ntype_op::SRA)) {
+  // Wide comparisons: is_arith_cut isolates them because they lower to a
+  // subtraction, which is the same ware-module argument `stop_arith` makes for
+  // Sum -- but a comparator is a one-bit result feeding control, so a design
+  // routinely wants it merged while real adders stay split.
+  if (!opts.stop_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)) {
+    return false;
+  }
+  // Runtime shifters (barrels). NOT tied to ctrl_cones: when control grouping is
+  // on it already claims the shifters it wants -- collect_control_roots clears
+  // kArithCut on every node its closure mints, and label_cones re-stamps those
+  // members after preserve_arith_cuts -- so the ownership question is settled
+  // downstream and this only has to answer the policy question.
+  if (!opts.stop_shift && (op == Ntype_op::SHL || op == Ntype_op::SRA)) {
     return false;
   }
   return is_arith_cut(node);

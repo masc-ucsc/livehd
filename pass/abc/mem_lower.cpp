@@ -13,6 +13,7 @@
 #include "diag.hpp"
 #include "dlop.hpp"
 #include "node_util.hpp"
+#include "satopt_memory.hpp"
 
 namespace gu = livehd::graph_util;
 
@@ -189,7 +190,7 @@ std::optional<int64_t> const_addr(const hhds::Pin_class& a) {
 // Lower one Memory node into flops + comb. Returns false (node left intact) for
 // shapes not handled here (async reset, negedge, writable type==2 arrays) and for
 // a memory above `max_bits` storage bits (0 = no limit).
-bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
+bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, const Memory_satopt* facts) {
   int                 bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
   spool_ptr<Dlop>     fwd;  // per-(read,write) matrix; arbitrary precision
   hhds::Pin_class     init_drv;
@@ -472,6 +473,29 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
     lane = B.mux(sel, lane, din_l, masksize);
   };
 
+  const std::set<std::pair<int, int>>* independent = nullptr;
+  if (facts != nullptr) {
+    auto it = facts->independent.find({std::string(g.get_name()), static_cast<uint64_t>(mem.get_debug_nid())});
+    if (it != facts->independent.end()) {
+      independent = &it->second;
+    }
+  }
+  // Contiguous independent groups preserve priority relative to every group
+  // before/after them. Within a group, only one port can touch this entry.
+  std::vector<std::vector<int>> write_groups;
+  for (int w = 0; w < n_wr; ++w) {
+    bool append = !write_groups.empty() && independent != nullptr;
+    if (append) {
+      for (int previous : write_groups.back()) {
+        append &= independent->contains({previous, w});
+      }
+    }
+    if (!append) {
+      write_groups.emplace_back();
+    }
+    write_groups.back().push_back(w);
+  }
+
   // write next-state: for each entry, fold the write ports in ASCENDING order so
   // the highest-numbered enabled port wins a same-address collision (cgen). A
   // constant-address port is folded into ITS entry only — the others never see
@@ -489,17 +513,39 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
       lane[l] = B.getlane(base_value, l, masksize, bits);
     }
     bool touched = false;
-    for (int ji = 0; ji < n_wr; ++ji) {
-      if (wr_caddr[ji] && *wr_caddr[ji] != en) {
-        continue;  // a constant address elsewhere (or out of range) never touches this entry
+    for (const auto& group : write_groups) {
+      std::vector<hhds::Pin_class> selects;
+      std::vector<int>             active;
+      for (int ji : group) {
+        if (wr_caddr[ji] && *wr_caddr[ji] != en) {
+          continue;
+        }
+        hhds::Pin_class match;
+        if (!wr_caddr[ji]) {
+          match = B.eq(wr[ji].addr, B.konst_i(en));
+        }
+        active.push_back(ji);
+        selects.push_back(match);
       }
-      hhds::Pin_class match;  // invalid = matches at build time (constant address == en)
-      if (!wr_caddr[ji]) {
-        match = B.eq(wr[ji].addr, B.konst_i(en));  // waddr == en
-      }
-      touched = true;
+      touched |= !active.empty();
       for (int l = 0; l < wensize; ++l) {
-        fold_lane(lane[l], and_opt(wr_en_bit[ji][l], match), wr_din_lane[ji][l]);
+        if (active.size() < 2) {
+          if (!active.empty()) {
+            fold_lane(lane[l], and_opt(wr_en_bit[active[0]][l], selects[0]), wr_din_lane[active[0]][l]);
+          }
+          continue;
+        }
+        auto cover = B.mk(Ntype_op::Hotmux);
+        for (size_t k = 0; k < active.size(); ++k) {
+          auto control = and_opt(wr_en_bit[active[k]][l], selects[k]);
+          if (control.is_invalid()) {
+            control = B.konst_i(1);
+          }
+          control.connect_sink(cover.create_sink_pin(static_cast<hhds::Port_id>(2 * k)));
+          wr_din_lane[active[k]][l].connect_sink(cover.create_sink_pin(static_cast<hhds::Port_id>(2 * k + 1)));
+        }
+        lane[l].connect_sink(cover.create_sink_pin(static_cast<hhds::Port_id>(2 * active.size())));
+        lane[l] = B.dw(cover, masksize);
       }
     }
     // An entry without a per-port write keeps the bulk update or its old Q.
@@ -610,7 +656,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits) {
 
 }  // namespace
 
-int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, uint64_t max_bits) {
+int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, uint64_t max_bits, const Memory_satopt* facts) {
   int lowered = 0;
   for (const auto& gp : graphs) {
     if (!gp) {
@@ -623,7 +669,7 @@ int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, uint
       }
     }
     for (const auto& m : mems) {
-      if (lower_one(*gp, m, max_bits)) {
+      if (lower_one(*gp, m, max_bits, facts)) {
         ++lowered;
       }
     }

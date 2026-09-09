@@ -64,7 +64,7 @@ struct Size_window_stats {
 //     `left_over` rather than silently dropped.
 //   * no region is under min_ge  -- UNLESS the def's ENTIRE partitionable body
 //     weighs less than min (all leftovers pack into one last under-min bin:
-//     `left_under`). That case is what the cross-hierarchy absorb pass exists
+//     `left_under`). Virtual flattening (pass_color.cpp) is what makes that case
 //     to fix; nothing def-local can.
 //   * NOT maintained: an acyclic region quotient graph. Merging freely can put a
 //     formerly cross-region comb cycle inside one region, or create a cycle

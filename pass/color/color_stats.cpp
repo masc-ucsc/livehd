@@ -183,7 +183,7 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
       if (under != 0) {
         std::print(stderr,
                    "color[stats]:           under-min leftovers are def-bound: a def whose whole body is "
-                   "below min has no neighbour to merge with (absorb folds those into their parents)\n");
+                   "below min has no neighbour to merge with\n");
       }
       if (over != 0) {
         std::print(stderr,
@@ -218,8 +218,8 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
   // are a separate line -- the GE report above still describes the same regions
   // in the unit pass.abc's tiers and Region_qor::input_ge use.
   if (max_gate != 0) {
-    uint64_t   pmax = 0, ptotal = 0;
-    ptrdiff_t  over = 0;
+    uint64_t  pmax = 0, ptotal = 0;
+    ptrdiff_t over = 0;
     for (const auto& p : partitions_) {
       pmax    = std::max(pmax, p.pred);
       ptotal += p.pred;
@@ -234,9 +234,6 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
                pmax,
                partitions_.empty() ? 0.0 : static_cast<double>(ptotal) / static_cast<double>(partitions_.size()),
                ptotal);
-  }
-  if (absorbed_defs_ != 0) {
-    std::print(stderr, "color[stats]: absorb    {} def(s) inlined into their parents (below min)\n", absorbed_defs_);
   }
 
   if (per_def) {

@@ -9,9 +9,8 @@
 #   pass.abc.register=true   flops -> library DFF cells (DFFx1 in the test lib;
 #                            the QN-only DFFNx1 + DFFNx2 drive ladder in test_qn.lib)
 #   pass.abc.register=false  flops kept native (`always @(posedge)`)
-#   pass.abc.memory=true     memory bit-blasted into a DFF array + mux gates (the
-#                            default since the mem_lower constant-address rework)
-#   pass.abc.memory=false    memory kept as a native boundary instance
+#   pass.abc.memory=true     memory RTL lowered and mapped inside a child module
+#   pass.abc.memory=false    memory kept as a native boundary instance (default)
 #
 # Registers cross into ABC as 1-bit latches (so ABC can optimize the
 # surrounding logic) with a synchronous reset folded into D (`rst ? rval :
@@ -48,7 +47,7 @@
 
 set -u
 
-LHD=lhd/lhd
+LHD="${LHD:-lhd/lhd}"
 LIB=inou/prp/tests/abc/test.lib
 W="${TEST_TMPDIR:-/tmp/lhd_abc_seq_$$}"
 mkdir -p "$W"
@@ -337,21 +336,22 @@ has "$NETV" "posedge" || fail "abc_seq register_max_bits: oversized register pay
 ! has "$NETV" "DFFx1 " || fail "abc_seq register_max_bits: oversized register payload still entered ABC"
 echo "PASS: register_max_bits keeps only oversized state regions native (abc_seq)"
 
-# memory=false (must be EXPLICIT now that true is the default): the memory stays
+# memory=false: the memory stays
 # a native boundary instance (not bit-blasted).
 run_abc_lec abc_mem abc_mem.abc_mem true false
 has "$NETV" "cgen_memory" || fail "abc_mem memory=false: memory not preserved as a native instance"
 echo "PASS: memory=false keeps the memory as a native instance (abc_mem)"
 
-# memory=true: the memory is bit-blasted into gates -- no memory instance remains.
+# memory=true: the instance remains, with mapped gates inside its module.
 run_abc_lec abc_mem abc_mem.abc_mem true true
-! has "$NETV" "cgen_memory" || fail "abc_mem memory=true: memory was not bit-blasted"
+has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem memory=true: lowered memory module missing"
+! has "$NETV" '`include.*cgen_memory' || fail "abc_mem memory=true: native memory survived"
 echo "PASS: memory=true bit-blasts the memory to gates (abc_mem)"
 
-# The DEFAULT is memory=true: with the knob unset the memory must be bit-blasted
-# too (an 8x8 = 64-bit memory, far below the memory_max_bits default of 65536).
+# The default keeps the memory native, including small memories.
 run_abc_lec abc_mem abc_mem.abc_mem true default
-! has "$NETV" "cgen_memory" || fail "abc_mem default memory mode: memory was not bit-blasted (default should be memory=true)"
-echo "PASS: the default memory mode bit-blasts the memory (abc_mem)"
+has "$NETV" "cgen_memory" || fail "abc_mem default memory mode: native memory missing"
+! has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem default memory mode: unexpectedly lowered"
+echo "PASS: the default memory mode preserves the native memory (abc_mem)"
 
 echo "PASS: pass.abc register/memory tech-map LEC-equivalent (DFF cells, native flops, memory bit-blast + boundary)"

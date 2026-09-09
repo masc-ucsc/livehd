@@ -2552,6 +2552,9 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
 }
 
 std::string Cgen_verilog::sub_instance_name(const hhds::Node_class& node) {
+  if (auto child = node.get_subnode_graph(); child && child->get_input_node().attr(livehd::attrs::memory_module).has()) {
+    return memory_instance_name(node);
+  }
   if (auto it = sub_instance_names_.find(node.get_class_index()); it != sub_instance_names_.end()) {
     return it->second;
   }

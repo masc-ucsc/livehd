@@ -20,6 +20,24 @@ become constant; dynamic sites retain reuse. The body-builder hook
 replaces each region body with an ABC-mapped netlist instead of the original
 logic.
 
+## SAT simplification
+
+ABC enables `--set pass.abc.satopt=true` by default. It proves combinational
+facts across color boundaries, then simplifies mux bits while translating the
+region and memory ports on the private synthesis copy. Inputs, flop Q and
+memory read data are free symbols. Unproved facts leave the original logic.
+
+Compile-time preparation is separately opt-in: `--set pass.satopt=true`
+(default false), or `lhd pass satopt lg:DIR --workdir W`. A later ABC invocation
+reuses unchanged definitions under the same workdir. `W/satopt_cache` follows
+`lhd.incremental`; each mapped cache row also records the precise cross-region
+facts it consumed. Region QoR reports expose their count as `satopt_facts`.
+Use whole-design LEC for mapped designs that consume these facts: a region
+alone lacks the upstream relation that justified the simplification.
+
+See [satopt.md](../../satopt.md) for memory compatibility rules, proof budgets,
+and validation. Set `pass.abc.satopt=false` to compare mapping without this pass.
+
 ## Parallel synthesis
 
 `lhd synth` defaults to `--set synth.threads=0`: use the machine's available
@@ -225,57 +243,29 @@ instance histogram under `"dff"`; the incremental cache is salted with the
 resolved cell (`name:d:clk:q:inverted`), and `pass/liberty/liberty_dff.*` is
 part of the code salt.
 
-### Memory bit-blast (`memory=true`, `mem_lower.cpp`)
+### Memory modules (`memory=false` by default)
 
-`memory=true` (the default) lowers every `Memory` cell IN PLACE — before
-partitioning, so the result maps like any other flop+comb logic — into one
-`bits`-wide native flop per entry (`<mem>__mem<i>`, power-on init from the cell's
-`init` pin) plus:
+Every memory retains a named instance boundary. With `memory=false`, ordinary
+memories instantiate the appropriate `ware/rtl/cgen_memory_*` implementation.
+Whole-array/update forms, whose RTL was previously emitted inline, are enclosed
+in a specialized memory module too.
 
-- **write next-state** per entry: the write ports folded in ascending order
-  (the highest-numbered enabled port wins a same-address collision, as cgen /
-  cgen_sim / lec order it) with ONE `masksize`-wide `Mux` per write-enable lane
-  (`bits/wensize`; a single bits-wide mux when `wensize==1`), never a per-bit
-  chain. A port with a **constant address** is folded into its entry only — no
-  `EQ`, no mux anywhere else; out of range it is dropped (what cgen's inline
-  array emission does).
-- **read ports**: a runtime address is a `Hotmux` over the one-hot decode
-  (measured a wash against a binary tree once mapped, both become AND-OR
-  covers); a constant address is a plain wire onto that entry's Q (out of
-  range: 0, what the Hotmux yields when no arm hits). A non-constant read
-  enable gates the data to 0 (cgen: x). Forwarding follows the per-(read,write)
-  `fwd` matrix with the same per-lane muxes; a const/const address pair is
-  decided at build time (unequal never collides, equal collides whenever
-  enabled). `type==1` adds the one read-latency register (`<mem>__rdlat<port>`).
-- **`read_all`** (the reserved whole-array driver): the `Concat` of the entry
-  flops, entry 0 in the low bits — the `init`/`update` layout of
-  `graph/cell.cpp`, cgen's `assign ra = <array>` and the lec encoder's
-  `CONCAT(SELECT(a_cur, i))` — reading the COMMITTED contents (cgen refuses a
-  read_all memory with a non-zero fwd/undef matrix, so no forwarding applies).
+With `memory=true`, `memory_module.cpp` generates the same memory RTL, elaborates
+and lowers its storage to flops inside a specialized
+`cgen_memory_<R>rd_<W>wr_lowered_<id>` module, and hands that body's logic to ABC.
+The parent retains the original memory instance name, using cgen's reversible
+identifier encoding in Verilog. Parent synthesis flattening preserves this
+boundary. Other consumers, such as whole-design STA, can flatten the body.
 
-Why this shape: the previous fold built `EQ + bits x (getbit + and2 + mux)`
-per (entry, port) — 97 nodes per 32-bit pair, 122k ABC input nodes for one
-32x32 tile — and fed all-constant `EQ`s to the mapper for constant-address
-ports (the bedrock multi-write tiles drive `wr_addr_k = k`); with the EQ width
-bug those compares selected every same-parity entry (23,107 cells / 2,385 um2
-/ 5.7 ns on `br_fifo_shared_dynamic_flops`, ASAP7 @400 ps, against yosys+abc's
-8,472 / 1,002 um2 / 2.34 ns). The EQ fix alone brought that to 9,934 cells /
-1,222 um2 / 0.84 ns (ABC folded the constant chains away); this fold then cuts
-what ABC is handed from 122,239 to 3,723 input nodes (pre-strash AIG 187k ->
-31k) for the same mapped result (9,905 cells / 1,222 um2, `pass abc` 3.4 -> 2.4
-s), and lets the `read_all` memory of `br_tracker_linked_list_ctrl` bit-blast
-(sky130 7,736 -> 7,396 um2).
+Module identities derive deterministically from the containing definition and
+memory name. Constant configuration and constant-address ports specialize the
+body. The runtime ports remain declared. LEC can use the instance correspondence
+and separately check the native and lowered memory implementations; a matching
+name alone is not an equivalence proof.
 
-What stays a native instance (a `memory-unlowered` warning names the memory):
-whole-array cells (`update`/`reset` bus), `type==2` arrays, negedge clocks,
-non-uniform write masks, a ROM (init contents and no write port: cgen emits a
-flop init only under a reset, so the data would power on as X), and — as a
-one-line `memory-max-bits` note — any memory whose `bits x size` exceeds
-`memory_max_bits` (default 65536: one DFF per bit is the wrong realization of an
-SRAM-class array). A memory with `ordering="none"` is bit-blasted but its
-undefined collision window is REFINED to the committed value
-(`memory-undef-refined`: sound only with the netlist as the lec IMPL side).
-`memory=false` keeps every memory native (below).
+`memory_max_bits` (default 65536, `0` disables) retains oversized memories as
+native instances and reports their storage size. `register` controls whether
+flops inside a lowered memory are mapped to Liberty cells.
 
 ### Blackbox boundaries (memories + hierarchical `Sub`)
 
@@ -420,7 +410,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `register` | map flops to Liberty DFF cells (`true`; falls back to native flops when the library has none) vs keep them native `always @(posedge)` (`false`) | `true` |
 | `register_max_bits` | with `register=true`, keep a region's flops native when their total Q width exceeds this many bits (`register-kept-native` diagnostic; `0` disables — the default, since a bit-blasted 64x64 memory alone is 4096 bits and a native register is one the downstream normalize maps instead of pass.abc) | `0` |
 | `dff_cell` | explicit Liberty DFF cell for `register=true` (empty = the smallest-area plain posedge D-flop, QN cells included; an explicit name also disables the drive ladder) | `` |
-| `memory` | bit-blast a `Memory` into a DFF array + per-lane write muxes / read muxes (`true`, see above) vs keep it a native `cgen_memory_*` boundary instance (`false`) | `true` |
+| `memory` | lower memory RTL and ABC-map its body in a separate module (`true`) vs preserve its native implementation (`false`); both retain the memory instance boundary | `false` |
 | `memory_max_bits` | with `memory=true`, keep a memory whose `bits x size` exceeds this many bits native, with a one-line note naming it (`0` disables) | `65536` |
 | `ware` | automatically minimize stitched Liberty delay with a timing target, or mapped area without one | `true` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
@@ -758,7 +748,7 @@ Sequential mapping (`seq=true`) — flops↔latches with name preservation +
 single-root remap, and memory/`Sub` blackbox boundaries — is complete and
 LEC-verified (`//lhd/tests:lhd_abc_seq_test`: flops, memory in both modes, and
 a 3-level hierarchy) and is the default (`seq=true`). The memory bit-blast
-(`memory=true`, above) is the default too: constant-address ports, per-lane
+(`memory=true`, above) is opt-in: constant-address ports, per-lane
 muxes, const/const forwarding and `read_all` are LEC-verified by
 `//lhd/tests:lhd_abc_memlower_test` (a 32x8 constant-index multi-writer tile
 through slang, proven with both lgyosys and cvc5, plus a gate-count guard) and

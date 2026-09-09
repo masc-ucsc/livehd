@@ -106,29 +106,36 @@ if "$LHD" pass color synth --top hier_seq.top --set color.synth_alg=cones --set 
 fi
 echo "PASS: unknown forward mode is refused"
 
-# max_gate=0 is RAW cones: no merge at all, so it must produce at least as many
-# colors as a capped run. This is the contract Color_opts documents (0 = inert),
-# and the one a user reaches for when debugging a partition.
+# max_gate=0 is RAW cones: no merge at all, in either direction, so it must
+# produce at least as many colors as a capped run. This is the contract
+# Color_opts documents (0 = inert), and the one a user reaches for when debugging
+# a partition.
+#
+# The oracle is the --stats partition count, NOT `tool cat` on the top def:
+# colouring is hierarchical (virtual flattening), so most colours live on nodes
+# of the CHILD defs and a top-only dump cannot see them -- and a design Sub
+# dissolves in the flat view, so hier_seq.top keeps exactly one coloured node
+# either way. The stats line counts the whole design.
 D="$W/raw"
 mkdir -p "$D"
-run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
-cp -R "$D/lg" "$D/lg_capped"
-run pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate=0 \
-    lg:"$D/lg" --workdir "$D/w2"
-run pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate=1000000 \
-    lg:"$D/lg_capped" --workdir "$D/w3"
-count_colors() {
-  "$LHD" tool --diag-fmt pretty cat --top hier_seq.top lg:"$1" 2>/dev/null | grep -o 'color=[0-9]*' | sort -u | wc -l | tr -d ' '
+run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg0" --workdir "$D/w1"
+count_colors() {  # $1 = max_gate
+  rm -rf "$D/lg_$1"
+  cp -R "$D/lg0" "$D/lg_$1"
+  "$LHD" pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate="$1" --stats \
+      lg:"$D/lg_$1" -q --result-json "$D/r_$1.json" 2>&1 \
+    | grep -o -- '-- [0-9]* partition' | grep -o '[0-9]*'
 }
-RAW=$(count_colors "$D/lg")
-CAP=$(count_colors "$D/lg_capped")
+RAW=$(count_colors 0)
+CAP=$(count_colors 1000000)
 # `RAW >= CAP` alone is an IDENTITY, not an observation: merging only ever
 # coarsens and max_gate=0 short-circuits merge_colors entirely, so it holds even
-# if merging silently stopped working -- and a `tool cat` that stops printing
-# `color=` (renamed field, truncated output, hard failure) makes both sides 0,
-# which also passes. Two extra assertions turn it into a real check: the oracle
-# counted something, and the capped run is STRICTLY coarser, i.e. at least one
-# pair actually merged under the cap.
+# if merging silently stopped working -- and an oracle that stops printing the
+# stats line (renamed field, truncated output, hard failure) makes both sides
+# empty, which also passes. Two extra assertions turn it into a real check: the
+# oracle counted something, and the capped run is STRICTLY coarser, i.e. at
+# least one pair actually merged under the cap.
+[ -n "$RAW" ] && [ -n "$CAP" ] || fail "count_colors read no partition count at all -- the oracle broke, not the coloring"
 [ "$CAP" -gt 0 ] || fail "count_colors read no colors at all -- the oracle broke, not the coloring"
 [ "$RAW" -ge "$CAP" ] || fail "raw cones ($RAW colors) must not be coarser than a capped merge ($CAP)"
 [ "$RAW" -gt "$CAP" ] || fail "a 1M max_gate merged NOTHING on hier_seq (raw $RAW == capped $CAP) -- the merge is inert"
@@ -141,7 +148,7 @@ mkdir -p "$D"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 "$LHD" synth "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --workdir "$D/w" \
    --set synth.liberty="$LIB" --set color.synth_alg=cones --set color.max_gate=40 \
-   --set synth.opentimer=false --set color.absorb=false \
+   --set synth.opentimer=false \
    -q --result-json "$D/r.json" || fail "lhd synth with cones -> $(cat "$D/r.json" 2>/dev/null)"
 grep -q '"regions":' "$D/w/synth/qor.json" || fail "lhd synth --set color.synth_alg=cones produced no abc regions"
 python3 - "$D/w/synth/qor.json" <<'EOF' || fail "lhd synth cones qor.json has no mapped regions"

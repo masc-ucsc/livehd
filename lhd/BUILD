@@ -45,6 +45,7 @@ genrule(
         "lhd_prp_import.hpp",
         "//core",
         "//core:file_name",
+        "//pass/abc:mapper_srcs",
         "//graph",
         "//inou/prp:inou_prp",
         "//lnast",
@@ -158,6 +159,7 @@ cc_binary(
     ],
     copts = COPTS,
     data = [
+        "//ware:cgen_memory_rtl",
         ":sim_runtime_hdrs",
         "//inou/cgen:llvm_sim_link",
         "//inou/yosys:scripts",

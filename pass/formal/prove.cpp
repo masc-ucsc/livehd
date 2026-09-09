@@ -63,6 +63,7 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     return;
   }
   if (pin.is_const()) {
+    unsupported |= opts_.reject_unknown_constants && gu::const_of(pin).has_unknowns();
     return;  // constants are leaves, resolved on demand
   }
   auto ci = pin.get_class_index();
@@ -80,8 +81,8 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     return;
   }
   if (op == Ntype_op::Memory) {
-    stateful    = true;
-    unsupported = true;  // memory reads not modeled yet -> Unknown
+    stateful     = true;
+    unsupported |= !opts_.memory_as_symbols;  // synthesis can use a free-word cut
     return;
   }
   if (op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
@@ -107,7 +108,11 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     return std::nullopt;
   }
   if (dpin.is_const()) {
-    Dlop c     = gu::const_of(dpin);
+    Dlop c = gu::const_of(dpin);
+    if (opts_.reject_unknown_constants && c.has_unknowns()) {
+      enc_unsupported_ = true;
+      return std::nullopt;
+    }
     int  width = std::max(1, c.get_bits());
     bool sgn   = c.is_negative();
     Term t;
@@ -167,6 +172,14 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     memo_[ci] = v;
     return v;
   }
+  if (op == Ntype_op::Memory && opts_.memory_as_symbols) {
+    const int w    = std::max(1, gu::real_width(dpin));
+    auto      term = tm_.mkConst(tm_.mkBitVectorSort(w), std::format("memory_{}_{}", node.get_debug_nid(), dpin.get_port_id()));
+    Val       value{term, w, !gu::is_unsign(dpin)};
+    memo_[ci]     = value;
+    enc_stateful_ = true;
+    return value;
+  }
   if (op == Ntype_op::Memory) {
     enc_stateful_    = true;
     enc_unsupported_ = true;
@@ -217,7 +230,7 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
   Term result;
   switch (op) {
     case Ntype_op::And:
-    case Ntype_op::Or:
+    case Ntype_op::Or :
     case Ntype_op::Xor: {
       Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
       // Verilog sign rule: a bitwise op is signed only if EVERY operand is signed;
@@ -627,7 +640,7 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       result = lec::fit_to(tm_, arms.back(), W);
       for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
         auto cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(sel.width, static_cast<uint64_t>(k))});
-        result = tm_.mkTerm(Kind::ITE, {cond, lec::fit_to(tm_, arms[k], W), result});
+        result    = tm_.mkTerm(Kind::ITE, {cond, lec::fit_to(tm_, arms[k], W), result});
       }
       break;
     }
@@ -754,6 +767,62 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   Term tb     = lec::fit_to(tm_, lec::Val{vb->term, wb, vb->is_signed}, w);
   Term refute = tm_.mkTerm(Kind::DISTINCT, {ta, tb});  // a != b falsifies "always equal"
   return solve(refute, n, st || enc_stateful_);
+}
+
+Query_out Prover::address_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
+                                   bool equal, int address_bits) {
+  absl::flat_hash_set<hhds::Class_index> seen;
+  int                                    nodes    = 0;
+  bool                                   stateful = false, unsupported = false;
+  cone_walk(a, seen, nodes, stateful, unsupported);
+  cone_walk(b, seen, nodes, stateful, unsupported);
+  for (const auto& enable : enables) {
+    cone_walk(enable, seen, nodes, stateful, unsupported);
+  }
+  if (unsupported || (opts_.cone_max > 0 && nodes > opts_.cone_max)) {
+    return {Verdict::Unknown, stateful, {}};
+  }
+  enc_unsupported_ = false;
+  enc_stateful_    = false;
+  auto va = val_of(a), vb = val_of(b);
+  if (!va || !vb || enc_unsupported_) {
+    return {Verdict::Unknown, stateful, {}};
+  }
+  const int w = address_bits > 0 ? address_bits : std::max(va->width, vb->width);
+  // Memory indices zero-extend before truncation, regardless of source sign.
+  auto      fit_address
+      = [&](const lec::Val& v) { return lec::fit_to(tm_, lec::Val{v.term, v.width, address_bits > 0 ? false : v.is_signed}, w); };
+  auto refute = tm_.mkTerm(equal ? Kind::DISTINCT : Kind::EQUAL, {fit_address(*va), fit_address(*vb)});
+  for (const auto& enable : enables) {
+    auto v = val_of(enable);
+    if (!v || enc_unsupported_) {
+      return {Verdict::Unknown, stateful, {}};
+    }
+    refute = tm_.mkTerm(Kind::AND, {refute, tm_.mkTerm(Kind::DISTINCT, {v->term, bv_const(v->width, 0)})});
+  }
+  return solve(refute, nodes, stateful || enc_stateful_);
+}
+Query_out Prover::equal_when(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
+                             int address_bits) {
+  return address_relation(a, b, enables, true, address_bits);
+}
+Query_out Prover::never_collide(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
+                                int address_bits) {
+  return address_relation(a, b, enables, false, address_bits);
+}
+Query_out Prover::constant_bit(const hhds::Pin_class& pin, int bit, bool value) {
+  bool stateful = false, unsupported = false;
+  int  nodes = cone_info(pin, stateful, unsupported);
+  if (bit < 0 || unsupported || (opts_.cone_max > 0 && nodes > opts_.cone_max)) {
+    return {Verdict::Unknown, stateful, {}};
+  }
+  enc_unsupported_ = false;
+  enc_stateful_    = false;
+  auto v           = val_of(pin);
+  if (!v || enc_unsupported_ || bit >= v->width) {
+    return {Verdict::Unknown, stateful, {}};
+  }
+  return solve(tm_.mkTerm(Kind::DISTINCT, {bv_extract(v->term, bit, bit), bv_const(1, value)}), nodes, stateful || enc_stateful_);
 }
 
 Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {

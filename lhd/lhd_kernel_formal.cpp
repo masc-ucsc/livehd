@@ -3840,10 +3840,8 @@ static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
 //
 // Two producers do this to a netlist. `pass color flat` fuses the WHOLE
 // hierarchy into ONE abc region, so the impl is a single graph while the ref
-// keeps every child; `pass color synth` (and `lhd synth`) ABSORBS every def
-// below the region window into its parents (color.absorb), so the impl keeps
-// the big defs (dino: ALU, the register file, StageReg_6) and flattens the
-// small ones (the issue unit, Control, the other StageRegs) into the top. In
+// keeps every child; `pass color synth` (and `lhd synth`) colors a flat view
+// and partitions its logic into regions that can span source definitions. In
 // both shapes the ref top owns only its own flops (dino: pc, cycleCount) while
 // the impl top owns `pipeA_if_id.reg_0` and friends, so those are impl-only
 // unpaired state, no flop bijection exists, the flop-cut inductive miter is

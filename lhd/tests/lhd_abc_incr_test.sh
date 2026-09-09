@@ -67,9 +67,7 @@ cp "$FIX" "$W/dut.prp"
 
 compile_and_color() {  # $1 = lg dir tag
   run compile "$W/dut.prp" --top "$TOP" --emit-dir lg:"$W/$1" --workdir "$W/w_c$1"
-  # absorb=false: the tiny fixture defs would otherwise inline away and the
-  # per-def region reuse this test pins would have nothing to bite on.
-  run pass color synth --top "$TOP" --set color.absorb=false lg:"$W/$1" --workdir "$W/w_k$1"
+  run pass color synth --top "$TOP" lg:"$W/$1" --workdir "$W/w_k$1"
 }
 
 abc_incr() {  # $1 = input lg tag, $2 = out tag
@@ -96,26 +94,28 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
 # Ware selection is independently tested in lhd_ware_test. This test pins
 # the baseline region cache without context-dependent re-mapping.
 #
-# EIGHT regions: the shipped `cones` coloring opens one per register cone, and
-# absorb=false keeps the three defs apart -- `dut.delayer` (1),
-# `dut.stage_unit__c1..c4`, `dut.top__c1/c2/c4` (color ids are first-wins and may
-# skip). What this test is actually about is the hit/miss split, so the numbers
-# below move whenever the coloring changes; the invariants are cold = all miss,
-# warm = all hit, and a one-def edit = exactly ONE miss.
+# HOW MANY regions the shipped coloring opens is a QoR choice that moves
+# whenever the coloring is tuned (colouring the flat view of the hierarchy took
+# this fixture from 8 regions to 2). What this test is about is the hit/miss
+# SPLIT, so `N` is read from the cold run and every later count is expressed
+# against it. The invariants: cold = all miss, warm = all hit, and a one-def
+# edit = exactly ONE miss.
 
 # --- 1. cold run: every region misses and is stored --------------------------
 compile_and_color lg0
 abc_incr lg0 net0
-expect_incr 0 8 "cold run"
-expect_resynth 8 8 "cold run"
+N=$(region_count)
+[ -n "$N" ] && [ "$N" -ge 2 ] || fail "cold run reported $N region(s); this test needs several to tell hits from misses"
+expect_incr 0 "$N" "cold run"
+expect_resynth "$N" "$N" "cold run"
 [ "$(incr_field abc_started)" = 1 ] || fail "cold run did not start ABC"
 [ -f "$W/wabc/abc_cache/abc_cache.json" ] || fail "cache metadata not persisted under <workdir>/abc_cache"
 lec_gate net0 lg0 "cold mapping"
 
 # --- 2. NoChange: same design, fresh out dir => all hits, zero ABC ----------
 abc_incr lg0 net1
-expect_incr 8 0 "NoChange re-run"
-expect_resynth 8 0 "NoChange re-run"
+expect_incr "$N" 0 "NoChange re-run"
+expect_resynth "$N" 0 "NoChange re-run"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit run still started ABC/read Liberty"
 run compile lg:"$W/net1" --top "$TOP" --emit-dir verilog:"$W/net1v" --workdir "$W/w_nv1"
 diff -r "$W/net0v" "$W/net1v" >/dev/null || fail "warm clone differs from the cold mapping"
@@ -126,9 +126,9 @@ echo "PASS: NoChange run is all hits and byte-identical Verilog"
 "$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" --set abc.ware=false \
     --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
     || fail "pretty stats run failed"
-[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 8 ] \
+[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = "$N" ] \
   || fail "pretty stats did not print exactly one line per color: $(cat "$W/pretty.out")"
-[ "$(grep -c 'resynth=0$' "$W/pretty.out")" = 8 ] \
+[ "$(grep -c 'resynth=0$' "$W/pretty.out")" = "$N" ] \
   || fail "pretty all-hit rows did not all say resynth=0: $(cat "$W/pretty.out")"
 
 # --- 3. edit ONE def (top's combiner); children must still hit ---------------
@@ -137,15 +137,15 @@ sed 's/o = a + b/o = a + b + 1/' "$FIX" > "$W/dut.prp"
 grep -q "o = a + b + 1" "$W/dut.prp" || fail "edit did not apply"
 compile_and_color lg1
 abc_incr lg1 net2
-expect_incr 7 1 "top-only edit"
-expect_resynth 8 1 "top-only edit"
+expect_incr "$((N - 1))" 1 "top-only edit"
+expect_resynth "$N" 1 "top-only edit"
 [ "$(incr_field abc_started)" = 1 ] || fail "one-miss edit did not start ABC"
-lec_gate net2 lg1 "edited design (7 cached + 1 fresh region)"
+lec_gate net2 lg1 "edited design ($((N - 1)) cached + 1 fresh region)"
 
 # --- 4. the edited design is now cached too ----------------------------------
 abc_incr lg1 net3
-expect_incr 8 0 "NoChange after the edit"
-expect_resynth 8 0 "NoChange after the edit"
+expect_incr "$N" 0 "NoChange after the edit"
+expect_resynth "$N" 0 "NoChange after the edit"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit edited run still started ABC/read Liberty"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
@@ -153,12 +153,12 @@ expect_resynth 8 0 "NoChange after the edit"
 run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" --set abc.ware=false \
     --set lhd.incremental=false --workdir "$W/wabc" --stats
 [ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
-expect_resynth 8 8 "cache-disabled full run"
+expect_resynth "$N" "$N" "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true.
 run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --set abc.ware=false --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
-expect_resynth 8 8 "no-workdir full run"
+expect_resynth "$N" "$N" "no-workdir full run"
 echo "PASS: lhd.incremental=false and no-workdir both disable cleanly"
 
 echo "PASS: all incremental pass.abc flows"

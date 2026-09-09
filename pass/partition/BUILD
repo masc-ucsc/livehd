@@ -16,17 +16,38 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# The hierarchy flattener, as a LEAF library. pass.color needs it (virtual
+# flattening: cones colors the flat view so its regions can cross module
+# boundaries) and pass.partition already depends on pass.color, so this cannot
+# live in :pass_partition without a dependency cycle.
+cc_library(
+    name = "flatten",
+    srcs = ["flatten.cpp"],
+    hdrs = ["flatten.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core",
+        "//graph",
+    ],
+)
+
 cc_library(
     name = "pass_partition",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "flatten.cpp",
+        ],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":flatten",
         "//graph",
         "//pass/color:pass_color",
         "//pass/common:pass",

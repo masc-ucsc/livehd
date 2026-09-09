@@ -23,7 +23,7 @@ for fixture in mem_comptime_init mem_init_tuple mem_multidim_init mem_pending_re
   else
     run compile "inou/prp/tests/equiv/$fixture.prp" --top "$top" --emit-dir lg:"$d/source" --workdir "$d/compile"
   fi
-  run synth lg:"$d/source" --top "$top" --set synth.liberty="$LIB" --set synth.opentimer=false \
+  run synth lg:"$d/source" --top "$top" --set synth.liberty="$LIB" --set synth.opentimer=false --set pass.abc.memory=true \
     --emit-dir lg:"$d/mapped" --emit verilog:"$d/mapped.v" --workdir "$d/synth"
   for engine in cvc5 lgyosys; do
     run lec --impl lg:"$d/mapped" --ref lg:"$d/source" --lib lg:"$W/models" --top "$top" \
