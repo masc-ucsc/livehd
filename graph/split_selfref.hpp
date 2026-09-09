@@ -59,6 +59,11 @@ int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_ca
 // Returns the number of inlined instances plus rewired packed reads.
 int repair_simulator_packed_cycles(hhds::Graph* g);
 
+// The same repair for a private formal-query copy. Pure-combinational instance
+// boundaries may be inlined; state identity is preserved. Real bit-level
+// cycles remain unresolved. Never apply this to a shared proof library.
+int repair_private_packed_cycles(hhds::Graph* g);
+
 // The comb nodes of `g` that sit on a WORD-LEVEL cycle, non-mutating.
 //
 // `strict` picks the scheduling model. FALSE cuts a `Sub` call and a `Memory`

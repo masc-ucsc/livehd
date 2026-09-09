@@ -2121,59 +2121,41 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 
 void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
   if (result.is_invalid() || result.is_nil()) {
-    // The fold produced no value (x / 0, x % 0, a shift by an illegal amount,
-    // a String arm through adjust_bits): keep the node. Folding it to 0 was a
-    // silent miscompile, not an optimization, and the constant pool refuses
-    // Nil/Invalid as values.
+    // Invalid/Nil are not values (division by zero, illegal shifts, etc.).
     return;
   }
-  auto dpin     = create_const(*current_graph, result);
-  auto new_bits = bits_of(dpin);
-
-  // Reconnect every consumer to the const, then bulk-delete the node (del_node
-  // drops all of node's edges with no per-edge del_edge lookup). Width-mismatched
-  // consumers need a freshly bit-adjusted const, but creating one mid-walk could
-  // realloc the node/pin tables and invalidate the live iterator — so defer those
-  // (rare) sinks and wire them after the walk. The deferred buffer is bounded by
-  // the number of mismatches, never the full fan-out.
-  absl::InlinedVector<std::pair<hhds::Pin_class, int32_t>, 2> mismatched;
+  auto                                                        dpin     = create_const(*current_graph, result);
+  const auto                                                  new_bits = bits_of(dpin);
+  // A collision can create a combined constant and relocate graph storage.
+  // Snapshot the sinks before reconnecting; no live iterator may span it.
+  absl::InlinedVector<std::pair<hhds::Pin_class, int32_t>, 4> consumers;
   for (const auto& out : node.out_edges()) {
-    auto out_bits = bits_of(out.driver);
-    // A NEGATIVE result must connect exactly: Dlop::adjust_bits is a plain
-    // both-planes truncation with no re-signing, so adjust_bits(-1, 8) reads
-    // back as +255 -- and under unlimited-precision signed semantics that is
-    // a different value (the Not/SRA folds and the Or annihilator produce
-    // negatives by construction). Constants are width-free leaves; consumers
-    // read the exact value. A NON-NUMERIC result (a String mux arm) has no
-    // width to adjust -- adjust_bits would yield nil, which is not a value.
-    if (new_bits == out_bits || out_bits == 0 || result.is_negative() || !result.is_numeric()) {
-      dpin.connect_sink(out.sink);
-    } else {
-      mismatched.emplace_back(out.sink, out_bits);
+    consumers.emplace_back(out.sink, bits_of(out.driver));
+  }
+  for (const auto& [sink, out_bits] : consumers) {
+    // Keep negative and nonnumeric values exact. adjust_bits truncates without
+    // re-signing, so adjusting -1 to eight bits would change its value to 255.
+    auto replacement = dpin;
+    if (new_bits != out_bits && out_bits != 0 && !result.is_negative() && result.is_numeric()) {
+      replacement = create_const(*current_graph, *result.adjust_bits(out_bits));
     }
+    livehd::graph_util::connect_folded_const(*current_graph, replacement, sink);
   }
-  for (const auto& [sink, out_bits] : mismatched) {
-    auto result2 = result.adjust_bits(out_bits);
-    auto dpin2   = create_const(*current_graph, *result2);
-    dpin2.connect_sink(sink);
-  }
-
   node.del_node();
 }
 
 void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
   if (result.is_invalid() || result.is_nil()) {
-    return;  // no value: keep the node (see replace_node)
+    return;
   }
-  // Create the shared const up front (NOT lazily mid-walk: a create_const there
-  // could realloc the node/pin tables and invalidate the live iterator), then
-  // reconnect every consumer and delete the node in one shot — del_node drops
-  // all of node's edges with no per-edge del_edge lookup.
-  auto dpin_0 = create_const(*current_graph, result);
+  auto                                    dpin = create_const(*current_graph, result);
+  absl::InlinedVector<hhds::Pin_class, 4> consumers;
   for (const auto& out : node.out_edges()) {
-    dpin_0.connect_sink(out.sink);
+    consumers.push_back(out.sink);
   }
-
+  for (const auto& sink : consumers) {
+    livehd::graph_util::connect_folded_const(*current_graph, dpin, sink);
+  }
   node.del_node();
 }
 

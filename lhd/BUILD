@@ -17,6 +17,8 @@ genrule(
     name = "formal_salt",
     srcs = [
         "//core:formal_srcs",  # canonical_entity_name / reset_name_polarity moved here; pairing + reset semantics must stay salted
+        "//graph:split_selfref.cpp",
+        "//graph:split_selfref.hpp",
         "//pass/lec:formal_srcs",
         "//pass/semdiff:formal_srcs",
         "//packages:cvc5_repo.bzl",

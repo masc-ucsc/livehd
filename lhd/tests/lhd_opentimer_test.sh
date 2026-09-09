@@ -268,6 +268,64 @@ run pass opentimer --top "$MTOP" lg:"$W/mnet" "$LIB" --workdir "$W/mw4"
 grep -q '"kind":"sta"' "$W/mw4/timing.json" \
   || fail "a design with a runtime bit-range select produced no STA report: $(cat "$W/mw4/timing.json" 2>/dev/null)"
 
+# Liberty buses retain all bits and inherit template axes and bus attributes.
+# The upper-bit output is connected through a separate scalar cell, which also
+# catches a tracker that incorrectly treats a macro Q bus as one Boolean pin.
+cat > "$W/macro.lib" <<'EOF'
+library(bus_test) {
+  time_unit : "1ns";
+  capacitive_load_unit(1,pf);
+  lu_table_template(t) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1("0.01,0.1"); index_2("0.01,0.1");
+  }
+  type(data) { base_type : array; data_type : bit; bit_width : 4; bit_from : 0; bit_to : 3; }
+  cell(MACRO) {
+    pin(clk) { direction : input; }
+    bus(A) { bus_type : data; direction : input; capacitance : 0.01;
+      pin(A[3:0]) { }
+    }
+    bus(Q) { bus_type : data; direction : output;
+      timing() { related_pin : clk; timing_sense : positive_unate;
+        cell_rise(t) { values("1,1","1,1"); }
+        cell_fall(t) { values("1,1","1,1"); }
+        rise_transition(t) { values("0.01,0.01","0.01,0.01"); }
+        fall_transition(t) { values("0.01,0.01","0.01,0.01"); }
+      }
+    }
+  }
+  cell(BUF) {
+    pin(A) { direction : input; capacitance : 0.01; }
+    pin(Y) { direction : output; function : "A";
+      timing() { related_pin : A; timing_sense : positive_unate;
+        cell_rise(t) { values("2,2","2,2"); }
+        cell_fall(t) { values("2,2","2,2"); }
+        rise_transition(t) { values("0.01,0.01","0.01,0.01"); }
+        fall_transition(t) { values("0.01,0.01","0.01,0.01"); }
+      }
+    }
+  }
+}
+EOF
+cat > "$W/macro.v" <<'EOF'
+module macro_top(input clk, input [3:0] a, output y);
+  wire [3:0] q;
+  MACRO memory(.clk(clk), .A(a), .Q(q));
+  BUF high_bit(.A(q[3]), .Y(y));
+endmodule
+EOF
+run compile "$W/macro.v" --reader yosys --top macro_top \
+  --set compile.yosys.macrolib="$W/macro.lib" --emit-dir lg:"$W/macrolg" --workdir "$W/macrocompile"
+run pass opentimer --top macro_top lg:"$W/macrolg" "$W/macro.lib" --workdir "$W/macrotimer"
+python3 - "$W/macrotimer/timing.json" <<'PYTEST'
+import json, sys
+report = json.load(open(sys.argv[1]))
+design = report['designs'][0]
+assert abs(design['max_delay'] - 3.0) < 0.01, design
+PYTEST
+[ $? -eq 0 ] || fail "macro bus upper bit lost its timing arc"
+
 # 5. negative control: a nonexistent --top must fail
 if "$LHD" pass opentimer --top "no.such_module" lg:"$W/net" "$LIB" --workdir "$W/wn2" -q --result-json "$W/rn2.json" 2>/dev/null; then
   fail "opentimer with a bogus --top passed; expected failure"

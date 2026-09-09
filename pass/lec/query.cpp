@@ -36,6 +36,7 @@
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "split_selfref.hpp"
 #include "str_tools.hpp"
 
 namespace livehd::lec {
@@ -1411,9 +1412,7 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   // timing, or a fast inconclusive looks identical to (and is easily mistaken
   // for) a hard query the solver actually spent its budget on.
   auto reason        = [](const Query_result& e) -> std::string {
-    if (e.detail.find("encode failed") != std::string::npos || e.detail.find("ENGINE CRASH") != std::string::npos
-        || e.detail.find("worker also died") != std::string::npos
-        || e.detail.find("terminated without a result") != std::string::npos) {
+    if (e.verdict == Verdict::Unknown && !e.detail.empty()) {
       return " [" + e.detail + "]";
     }
     return "";
@@ -9390,6 +9389,39 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // CHILD's deserialized stats while THIS process constructed no Solver at all,
   // so `res.cvc5 = acc` would erase the entire run's numbers.
   res.cvc5         += acc;
+  // A packed feedback word can be acyclic per bit: its control slice chooses
+  // the data written into another slice of that same word. Retry only a named
+  // structural refusal, on private copies, using the existing exact slice
+  // rewrites. Pure-combinational boundaries may be inlined; state identity is
+  // unchanged and the resulting comparison is proved again in full.
+  if (res.unsupported && res.detail.find("WORD-LEVEL CYCLE") != std::string::npos) {
+    const auto                                start = std::chrono::steady_clock::now();
+    hhds::GraphLibrary                        ref_scratch, impl_scratch;
+    std::shared_ptr<hhds::Graph>              ref_top, impl_top;
+    std::vector<std::shared_ptr<hhds::Graph>> ref_graphs, impl_graphs;
+    if (copy_loop_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        && copy_loop_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+      int rewired = 0;
+      for (const auto& graph : ref_graphs) {
+        rewired += gu::repair_private_packed_cycles(graph.get());
+      }
+      for (const auto& graph : impl_graphs) {
+        rewired += gu::repair_private_packed_cycles(graph.get());
+      }
+      if (rewired > 0) {
+        Cvc5_stats retry_stats;
+        auto       retry  = prove_equal_impl(ref_top.get(), impl_top.get(), opts, sub_lib, opts.stats ? &retry_stats : nullptr);
+        retry.cvc5       += retry_stats;
+        retry.cvc5       += res.cvc5;
+        retry.solve_ms   += res.solve_ms;
+        retry.elapsed_ms
+            = res.elapsed_ms
+              + std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        retry.detail = std::format("packed-cycle slice repair ({} rewrites, private graphs); {}", rewired, retry.detail);
+        return retry;
+      }
+    }
+  }
   return res;
 }
 

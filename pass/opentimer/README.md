@@ -37,6 +37,13 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 
 ## Incremental reuse (`<workdir>/sta_cache/`)
 
+Liberty macros retain their vector ports: every bus bit connects to its own
+timing pin, including upper bits consumed through slices. Bus-level attributes
+and timing arcs are inherited by member pins. Lookup tables can inherit their
+axes from a named template; malformed value counts are rejected before writing
+outside the allocated table. The OpenTimer dependency patch is included in the
+STA cache salt.
+
 With a user-named `--workdir` and `lhd.incremental` (default true) the pass
 keeps a **persistent STA result cache** — the third reuse tier next to the
 compile cache and `pass.abc`'s `abc_cache/`. It exists because

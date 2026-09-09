@@ -260,6 +260,63 @@ TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
   EXPECT_EQ(lec::canon_flop_name("csrMod\\_Mhpmevent10_0"), lec::canon_flop_name("csrMod_Mhpmevent10_0"));
 }
 
+TEST(CombEquiv, PackedFeedbackSlicesAreRepairedPrivately) {
+  hhds::GraphLibrary lib;
+  auto               build = [&](const std::string& name, bool packed, int invert, bool real_cycle = false) {
+    namespace gu = graph_util;
+    auto io      = lib.create_io(name);
+    io->add_input("a", 0);
+    io->set_bits("a", 2);
+    io->set_unsign("a", true);
+    io->add_output("out", 1);
+    io->set_bits("out", 4);
+    io->set_unsign("out", true);
+    auto g      = io->create_graph();
+    auto concat = gu::create_typed_node(*g, Ntype_op::Concat, 4);
+    auto word   = concat.create_driver_pin(0);
+    gu::set_ubits(word, 4);
+    auto lane = g->get_input_pin("a");
+    if (packed) {
+      auto slice = gu::create_typed_node(*g, Ntype_op::Get_mask, 2);
+      word.connect_sink(slice.create_sink_pin(0));
+      gu::create_const(*g, *Dlop::create_integer(real_cycle ? 3 : 12)).connect_sink(slice.create_sink_pin(2));
+      lane = slice.create_driver_pin(0);
+      gu::set_ubits(lane, 2);
+    }
+    auto flip = gu::create_typed_node(*g, Ntype_op::Xor, 2);
+    lane.connect_sink(flip.create_sink_pin(0));
+    gu::create_const(*g, *Dlop::create_integer(invert)).connect_sink(flip.create_sink_pin(0));
+    auto high = flip.create_driver_pin(0);
+    gu::set_ubits(high, 2);
+    g->get_input_pin("a").connect_sink(concat.create_sink_pin(0));
+    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(concat.create_sink_pin(1));
+    high.connect_sink(concat.create_sink_pin(2));
+    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(concat.create_sink_pin(3));
+    word.connect_sink(g->get_output_pin("out"));
+    return g;
+  };
+  auto             ref    = build("ref", false, 3);
+  auto             packed = build("packed", true, 3);
+  auto             wrong  = build("wrong", true, 1);
+  auto             cycle  = build("cycle", true, 3, true);
+  lec::Lec_options opts;
+  opts.engine = "ind";
+  auto good   = lec::prove_equal(ref.get(), packed.get(), opts);
+  EXPECT_EQ(good.verdict, Verdict::Proven) << good.detail;
+  EXPECT_NE(good.detail.find("packed-cycle slice repair"), std::string::npos) << good.detail;
+  auto bad = lec::prove_equal(ref.get(), wrong.get(), opts);
+  EXPECT_EQ(bad.verdict, Verdict::Refuted) << bad.detail;
+  auto unresolved = lec::prove_equal(ref.get(), cycle.get(), opts);
+  EXPECT_EQ(unresolved.verdict, Verdict::Unknown) << unresolved.detail;
+  EXPECT_TRUE(unresolved.unsupported);
+  // The shared input remains cyclic: normalization belongs to the query copy.
+  cvc5::TermManager tm;
+  lec::Encoder      encoder(tm);
+  auto              original = encoder.encode(packed.get());
+  EXPECT_FALSE(original.ok);
+  EXPECT_NE(original.error.find("WORD-LEVEL CYCLE"), std::string::npos) << original.error;
+}
+
 TEST(LecState, PartialUnknownInitialPreservesKnownBits) {
   hhds::GraphLibrary lib;
   auto               gio = lib.create_io("top");

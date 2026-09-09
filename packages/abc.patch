@@ -331,3 +331,38 @@ diff --git src/map/scl/sclSize.c src/map/scl/sclSize.c
  }
   
  /**Function*************************************************************
+diff --git src/map/if/ifDsd.c src/map/if/ifDsd.c
+--- src/map/if/ifDsd.c
++++ src/map/if/ifDsd.c
+@@ -234,14 +234,14 @@
+ ***********************************************************************/
+ static inline word ** If_ManDsdTtElems()
+ {
+-    static ABC_THREAD_LOCAL word TtElems[DAU_MAX_VAR+1][DAU_MAX_WORD], * pTtElems[DAU_MAX_VAR+1] = {NULL};
+-    if ( pTtElems[0] == NULL )
+-    {
+-        int v;
+-        for ( v = 0; v <= DAU_MAX_VAR; v++ )
+-            pTtElems[v] = TtElems[v];
+-        Abc_TtElemInit( pTtElems, DAU_MAX_VAR );
+-    }
++    // Managers survive frame migration and the thread that created them.
++    // The last table is writable result scratch, so it is manager-owned too.
++    word ** pTtElems = ABC_ALLOC( word *, DAU_MAX_VAR + 1 );
++    int v;
++    pTtElems[0] = ABC_ALLOC( word, (DAU_MAX_VAR + 1) * DAU_MAX_WORD );
++    for ( v = 1; v <= DAU_MAX_VAR; v++ )
++        pTtElems[v] = pTtElems[0] + v * DAU_MAX_WORD;
++    Abc_TtElemInit( pTtElems, DAU_MAX_VAR );
+     return pTtElems;
+ }
+ If_DsdObj_t * If_DsdObjAlloc( If_DsdMan_t * p, int Type, int nFans )
+@@ -355,6 +355,8 @@
+         if ( p->vIsops[v] )
+             Vec_WecFree( p->vIsops[v] );
+     }
++    ABC_FREE( p->pTtElems[0] );
++    ABC_FREE( p->pTtElems );
+     Vec_WrdFreeP( &p->vConfigs );
+     Vec_IntFreeP( &p->vTemp1 );
+     Vec_IntFreeP( &p->vTemp2 );

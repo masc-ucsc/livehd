@@ -1769,7 +1769,11 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_h
 }
 }  // namespace
 
-int repair_simulator_packed_cycles(hhds::Graph* g) {
+static int split_packed_cycle_slices(hhds::Graph* g);
+
+int repair_simulator_packed_cycles(hhds::Graph* g) { return repair_private_packed_cycles(g); }
+
+int repair_private_packed_cycles(hhds::Graph* g) {
   if (g == nullptr) {
     return 0;
   }
@@ -1786,10 +1790,19 @@ int repair_simulator_packed_cycles(hhds::Graph* g) {
     }
   }
 
-  // The caller owns a simulator-private library, so hierarchy is expendable
+  // The caller owns a private library, so combinational hierarchy is expendable
   // here. Expose a cross-instance false loop as ordinary logic first; stateful
   // callees remain boundaries because their closure fails the comb predicate.
   int repaired = flatten_false_loop_subs_body(g, nullptr, /*include_multiinstance_cycles=*/true);
+
+  return repaired + split_packed_cycle_slices(g);
+}
+
+static int split_packed_cycle_slices(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  int repaired = 0;
 
   // One splitter round at a time, always against a freshly computed residual
   // cycle. A blind whole-graph fixpoint keeps producing identity slices after

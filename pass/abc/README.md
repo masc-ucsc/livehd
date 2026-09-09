@@ -51,6 +51,11 @@ library updates are serialized. Partition-boundary refinement and ware trials
 run after every region is complete. Source/pre-body storage is held in bounded
 batches, and parsed worker libraries are reused across those batches.
 
+DSD truth tables and result scratch belong to each ABC manager. A cached
+session can therefore survive the thread that created it and be entered by a
+later worker. `abc_session_smoke` checks independent session results and reuse
+after worker-thread exit.
+
 Before launching a worker, the scheduler checks aggregate process physical
 footprint, outstanding reservations for running jobs, and the next region's
 projected memory against **half of installed RAM** (or a smaller configured

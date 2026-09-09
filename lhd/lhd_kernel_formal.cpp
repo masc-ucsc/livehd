@@ -2047,7 +2047,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         rf.cvc5       += r.cvc5;
         r              = std::move(rf);
       } else {
-        r.detail += "; flat retry (collapse cleared) also inconclusive";
+        r.detail += "; flat retry (collapse cleared) also inconclusive: " + rf.detail;
         r.cvc5   += rf.cvc5;  // here `rf` is the discarded side; the effort was still spent
       }
     }

@@ -3,6 +3,7 @@
 #include "cprop.hpp"
 
 #include <functional>
+#include <tuple>
 #include <unordered_map>
 
 #include "graph_library_singleton.hpp"
@@ -11,6 +12,46 @@
 #include "node_util.hpp"
 
 namespace {
+
+// A folded producer and an existing literal may intern to the same pin.
+// Their arithmetic multiplicity must survive, including a second collision
+// when 2 + 2 becomes an already-connected 4 (or 2 * 2 becomes 4).
+TEST(CpropConstants, FoldedConstantsPreserveOperandMultiplicity) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_multiplicity");
+  int   index  = 0;
+  for (const auto [op, pid, expected] : {
+           std::tuple{ Ntype_op::Xor, 0,  0},
+           std::tuple{ Ntype_op::Sum, 0,  8},
+           std::tuple{ Ntype_op::Sum, 1, -8},
+           std::tuple{Ntype_op::Mult, 0, 16},
+           std::tuple{  Ntype_op::LT, 0,  0},
+           std::tuple{  Ntype_op::GT, 0,  1}
+  }) {
+    auto io = lib.create_io("multiplicity_" + std::to_string(index++));
+    io->add_output("out", 1);
+    auto g        = io->create_graph();
+    auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
+    auto producer = gu::create_typed_node(*g, Ntype_op::SHL);
+    constant(1).connect_sink(producer.create_sink_pin(0));
+    constant(1).connect_sink(producer.create_sink_pin(1));
+    auto consumer = gu::create_typed_node(*g, op);
+    auto sink     = consumer.create_sink_pin(pid);
+    constant(2).connect_sink(sink);
+    producer.create_driver_pin(0).connect_sink(sink);
+    if (op == Ntype_op::Sum || op == Ntype_op::Mult) {
+      constant(4).connect_sink(sink);
+    } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
+      constant(3).connect_sink(consumer.create_sink_pin(1));
+    }
+    consumer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+    Cprop{}.do_trans(g, false);
+    auto edges = g->get_output_pin("out").inp_edges();
+    ASSERT_EQ(edges.size(), 1);
+    ASSERT_TRUE(edges.begin()->driver.is_const()) << index;
+    EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), expected) << index;
+  }
+}
 
 // The first latch sweep cannot know that `x | -1` is an always-open enable.
 // The scalar sweep exposes that constant, so the SECOND latch sweep removes

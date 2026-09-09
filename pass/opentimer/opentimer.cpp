@@ -729,6 +729,38 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     return is_cell;
   };
 
+  // A macro port can be a Liberty bus. Scalar standard cells retain their
+  // one-bit tracker semantics even when LGraph carries a padded pin width.
+  absl::flat_hash_map<std::string, std::vector<std::string>> liberty_port_memo;
+  const auto liberty_port = [&](const auto& node, const std::string& port) -> const std::vector<std::string>& {
+    auto key               = sub_type_name(node) + ":" + port;
+    auto [entry, inserted] = liberty_port_memo.try_emplace(key);
+    if (!inserted) {
+      return entry->second;
+    }
+    const auto& lib  = timer.celllib(ot::MAX);
+    const auto* cell = lib ? lib->cell(sub_type_name(node)) : nullptr;
+    if (!cell || cell->cellpin(port)) {
+      entry->second.push_back(port);
+      return entry->second;
+    }
+    std::vector<std::pair<int, std::string>> bits;
+    const auto                               prefix = port + "[";
+    for (const auto& [name, pin] : cell->cellpins) {
+      if (name.starts_with(prefix) && name.ends_with("]")) {
+        bits.emplace_back(std::stoi(name.substr(prefix.size(), name.size() - prefix.size() - 1)), name);
+      }
+    }
+    std::ranges::sort(bits);
+    for (const auto& [bit, name] : bits) {
+      entry->second.push_back(name);
+    }
+    if (entry->second.empty()) {
+      entry->second.push_back(port);  // the ordinary missing-pin diagnostic
+    }
+    return entry->second;
+  };
+
   // The boundary and gate phases below walk the same immutable leaf set. Reuse
   // one traversal result instead of recreating it independently for each.
   const auto nodes       = leaf_nodes(g);
@@ -834,7 +866,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   };
 
   auto is_resolved_const = [&](const auto& dpin) { return dpin.is_const(); };
-  auto operand_bits_of = [&](const hhds::Occurrence_node& owner, std::string_view sname, const auto& dpin) -> int32_t {
+  auto operand_bits_of   = [&](const hhds::Occurrence_node& owner, std::string_view sname, const auto& dpin) -> int32_t {
     if (const auto bits = tracked_bits_of(dpin); bits > 0) {
       return bits;
     }
@@ -885,7 +917,12 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     if (master.is_invalid() || type_op_of(master) != Ntype_op::Sub || !is_liberty_cell(master)) {
       return;
     }
-    pin_tracker.add_scalar_if_absent(trk_id(dpin), bits_of(dpin));
+    const auto& pins = liberty_port(master, driver_pin_name_of(master, dpin));
+    if (pins.size() > 1) {
+      pin_tracker.add_opaque(trk_id(dpin), static_cast<int32_t>(pins.size()));
+    } else {
+      pin_tracker.add_scalar_if_absent(trk_id(dpin), bits_of(dpin));
+    }
   };
   auto seed_operand = [&](const auto& dpin, int32_t bits) {
     if (is_resolved_const(dpin)) {
@@ -1135,7 +1172,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           const auto& mask_const = const_of(mask_dpin);
-          const auto a_bits     = operand_bits_of(node, "a", a_dpin);
+          const auto  a_bits     = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           seed_operand(value_dpin, static_cast<int32_t>(mask_const.get_bits()));
           pin_tracker.add_set_mask(wname, trk_id(a_dpin), a_bits, mask_const, trk_id(value_dpin));
@@ -1159,7 +1196,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           const auto& mask_const = const_of(mask_dpin);
-          const auto a_bits     = operand_bits_of(node, "a", a_dpin);
+          const auto  a_bits     = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           pin_tracker.add_get_mask(wname, trk_id(a_dpin), a_bits, mask_const);
         } else if (op == Ntype_op::SRA) {
@@ -1182,7 +1219,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           const auto& b_const = const_of(b_dpin);
-          auto a_bits  = operand_bits_of(node, "a", a_dpin);
+          auto        a_bits  = operand_bits_of(node, "a", a_dpin);
           if (a_bits <= 0 && is_resolved_const(a_dpin) && b_const.is_just_i64()) {
             const auto shift = b_const.to_just_i64();
             const auto out   = bits_of(node.get_driver_pin(0));
@@ -1226,7 +1263,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           const auto& b_const = const_of(b_dpin);
-          const auto a_bits  = operand_bits_of(node, "a", a_dpin);
+          const auto  a_bits  = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           pin_tracker.add_sext(wname, trk_id(a_dpin), a_bits, b_const);
         } else if (op == Ntype_op::SHL) {
@@ -1250,7 +1287,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           const auto& b_const = const_of(b_dpin);
-          const auto a_bits  = operand_bits_of(node, "a", a_dpin);
+          const auto  a_bits  = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           pin_tracker.add_shl(wname, trk_id(a_dpin), a_bits, b_const);
         } else if (op == Ntype_op::Concat) {
@@ -1462,10 +1499,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           // tracker's own add_input, so `<net>.k` resolves to a net that exists.
           timer.insert_net(wname);
         } else if (is_liberty_cell(node)) {
-          // ONE Boolean pin: exactly Pin_tracker::add_scalar's precondition,
-          // and the same predicate the 5th phase uses to insert this gate.
+          const auto& pins = liberty_port(node, driver_pin_name_of(node, dpin));
           timer.insert_net(wname);
-          pin_tracker.add_scalar(wname, bits_of(dpin));
+          if (pins.size() > 1) {
+            pin_tracker.add_opaque(wname, static_cast<int32_t>(pins.size()));
+            for (size_t bit = 1; bit < pins.size(); ++bit) {
+              timer.insert_net(std::format("{}.{}", wname, bit));
+            }
+          } else {
+            pin_tracker.add_scalar(wname, bits_of(dpin));
+          }
         } else if (is_tie_cell(node)) {
           // The 5th phase instantiates no gate for a tie; its net stays
           // driverless. Every bit is a real known constant — not "bit 0 is the
@@ -1664,22 +1707,34 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     // second connect of a pin that already has a net.
     absl::flat_hash_set<std::string> connected_pin;
     for (auto& dpin : dpins) {
-      auto pin_name = absl::StrCat(instance_name, ":", driver_pin_name_of(node, dpin));
-      if (!connected_pin.insert(pin_name).second) {
-        continue;
+      const auto& pins = liberty_port(node, driver_pin_name_of(node, dpin));
+      const auto  wire = driver_net_of(node, dpin);
+      for (size_t bit = 0; bit < pins.size(); ++bit) {
+        auto pin_name = absl::StrCat(instance_name, ":", pins[bit]);
+        if (connected_pin.insert(pin_name).second) {
+          timer.connect_pin(pin_name, bit == 0 ? wire : std::format("{}.{}", wire, bit));
+        }
       }
-      auto wire = driver_net_of(node, dpin);
-      timer.connect_pin(pin_name, wire);
     }
 
     // connect input pins
     for (auto& e : node.inp_edges()) {
-      I(!(is_graph_input_pin(e.driver) && bits_of(e.driver) > 2));
-
-      // Constants have zero arrival and all share the real driverless zero net.
-      auto       wire     = e.driver.is_const() ? std::string{kZeroNet} : get_driver_net_name(e.driver);
-      auto       pin_name = absl::StrCat(instance_name, ":", sink_pin_name_of(node, e.sink));
-      timer.connect_pin(pin_name, wire);
+      const auto& pins   = liberty_port(node, sink_pin_name_of(node, e.sink));
+      const auto& values = pin_tracker.get_pin_vector(trk_id(e.driver));
+      for (size_t bit = 0; bit < pins.size(); ++bit) {
+        std::string wire{kZeroNet};
+        if (!is_resolved_const(e.driver)) {
+          if (pins.size() == 1) {
+            wire = get_driver_net_name(e.driver);
+          } else if (bit < values.size() && values[bit].pos >= 0) {
+            wire = values[bit].pos == 0 ? values[bit].id() : std::format("{}.{}", values[bit].id(), values[bit].pos);
+          } else if (values.empty() && bit < static_cast<size_t>(std::max(bits_of(e.driver), 1))) {
+            const auto base = get_driver_net_name(e.driver);
+            wire            = bit == 0 ? base : std::format("{}.{}", base, bit);
+          }
+        }
+        timer.connect_pin(absl::StrCat(instance_name, ":", pins[bit]), wire);
+      }
     }
   }
 

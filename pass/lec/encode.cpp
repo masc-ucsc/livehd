@@ -3099,12 +3099,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // operand is not another undone node (an unmapped input-pin name, an
       // opaque driver, ...), print that operand.
       std::vector<std::string>      chain;
-      absl::flat_hash_set<uint64_t> seen;
+      absl::flat_hash_set<std::string> seen;
       auto                          cur       = node;
       bool                          diagnosed = false;
       std::string                   diag;
       while (!diagnosed) {
-        if (!seen.insert(static_cast<uint64_t>(cur.get_debug_nid())).second) {
+        if (!seen.insert(nodekey(cur)).second) {
           diag = "WORD-LEVEL CYCLE through: ";
           for (const auto& c : chain) {
             diag += c + " -> ";
@@ -3128,6 +3128,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             }
             continue;
           }
+          // Seeded state outputs are resolved even though state cells never
+          // enter `done`. Following their D inputs invents a combinational
+          // cycle through an ordinary register feedback path.
+          bool drv_ok = true;
+          (void)driver_val(drv, drv_ok);
+          if (drv_ok) {
+            continue;
+          }
           auto mn = drv.get_master_node();
           if (!done.contains(nodekey(mn))) {
             cur    = mn;
@@ -3142,8 +3150,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // hides the exact edge which crossed from the clock domain into the
           // data cone (and made Minion's intpipe_csr_file look like an
           // inexplicable deferred Mux/Or). Diagnose the missing pin directly.
-          bool drv_ok = true;
-          (void)driver_val(drv, drv_ok);
           if (!drv_ok) {
             diag  = "data input of '" + gu::debug_name(cur) + "' is driven by timing-only or unencoded pin '" + gu::debug_name(mn)
                     + "' (op " + std::string(Ntype::get_name(gu::type_op_of(mn))) + ", key " + missing_driver_key + ")";

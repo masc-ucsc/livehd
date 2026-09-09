@@ -265,6 +265,44 @@ const Dlop&                      const_of(const hhds::Occurrence_node&) = delete
 [[nodiscard]] inline bool is_type_const(const hhds::Node_class& node) { return node.get_debug_nid() == hhds::Graph::CONST_NODE; }
 [[nodiscard]] inline bool is_type_const(const hhds::Occurrence_node& node) { return is_type_const(node.base_node()); }
 
+// Add one folded constant operand. HHDS edges are unique, but arithmetic
+// operands are a multiset: redirecting a second 1 to an XOR must cancel it,
+// and redirecting a second 2 to a sum must contribute another 2. Combine a
+// collision using the sink's reduction, repeating if the result also exists.
+// This can create constant pins; callers must not hold live graph iterators.
+inline void connect_folded_const(hhds::Graph& graph, hhds::Pin_class value, const hhds::Pin_class& sink) {
+  const auto op = type_op_of(sink.get_master_node());
+  if (!Ntype::is_sink_single_driver(op, sink.get_port_id())
+      && (op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Mult || op == Ntype_op::Xor)) {
+    for (;;) {
+      hhds::Edge_class collision;
+      for (const auto& edge : sink.inp_edges()) {
+        if (edge.driver == value) {
+          collision = edge;
+          break;
+        }
+      }
+      if (collision.driver.is_invalid()) {
+        break;
+      }
+      const auto& operand = const_of(value);
+      Dlop        combined;
+      if (op == Ntype_op::Mult) {
+        combined = operand.mult_op(operand);
+      } else if (op == Ntype_op::Xor) {
+        combined = operand.xor_op(operand);
+      } else {
+        // Sum and both comparison sides sum their operands independently.
+        combined = operand.add_op(operand);
+      }
+      I(!combined.is_invalid() && !combined.is_nil());
+      collision.del_edge();
+      value = create_const(graph, combined);
+    }
+  }
+  value.connect_sink(sink);
+}
+
 [[nodiscard]] inline bool is_type_sub(const hhds::Node_class& node) { return type_op_of(node) == Ntype_op::Sub; }
 [[nodiscard]] inline bool is_type_sub(const hhds::Occurrence_node& node) { return type_op_of(node) == Ntype_op::Sub; }
 

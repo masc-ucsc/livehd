@@ -309,10 +309,14 @@ void Bitwidth::adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw) {
       auto cdpin = create_const(*current_graph, bw.get_min());
       bwmap.insert_or_assign(cdpin.get_class_index(), bw);
       bwmap.erase(dpin.get_class_index());
-      // Iterating the live out_edges while connecting is safe: connect_sink
-      // only grows cdpin/sink storage, never master's out-edge set.
+      // Combining duplicate constant operands can grow the constant pool;
+      // preserve sink handles before reconnecting and deleting the old cell.
+      absl::InlinedVector<hhds::Pin_class, 4> consumers;
       for (const auto& e : master.out_edges()) {
-        cdpin.connect_sink(e.sink);
+        consumers.push_back(e.sink);
+      }
+      for (const auto& sink : consumers) {
+        livehd::graph_util::connect_folded_const(*current_graph, cdpin, sink);
       }
       master.del_node();
       return;

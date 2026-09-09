@@ -160,6 +160,18 @@ cc_test(
 )
 
 cc_test(
+    name = "abc_session_smoke",
+    srcs = ["abc_session_smoke.cpp"],
+    copts = COPTS,
+    linkopts = ["-lz"],
+    deps = [
+        "//core",
+        "@abc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "satopt_test",
     srcs = ["satopt_test.cpp"],
     copts = COPTS,

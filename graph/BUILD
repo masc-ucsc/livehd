@@ -3,6 +3,8 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+exports_files(["split_selfref.cpp", "split_selfref.hpp"])
+
 # LiveHD-side graph helpers that ride on top of hhds::Graph:
 #   - cell.{hpp,cpp}  → Ntype_op enum + cell-type metadata (sink/driver names,
 #     loop_first/loop_last classification, multi-driver/sink predicates).

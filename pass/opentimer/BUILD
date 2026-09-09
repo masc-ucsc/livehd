@@ -1,7 +1,14 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
+
+cc_test(
+    name = "celllib_smoke",
+    srcs = ["tests/celllib_smoke.cpp"],
+    copts = COPTS,
+    deps = ["@opentimer", "@googletest//:gtest_main"],
+)
 
 # Timing-engine identity for the persistent STA reuse cache (sta_cache.hpp). Any
 # change to how this pass builds the timing graph, walks it, or renders the
@@ -31,6 +38,7 @@ genrule(
         ":timer_srcs",
         "//pass/partition:partition_srcs",
         "//:MODULE.bazel",
+        "//packages:opentimer.patch",
     ],
     outs = ["sta_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +

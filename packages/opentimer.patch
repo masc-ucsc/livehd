@@ -10,3 +10,201 @@ diff repo
 +#define OT_HOST_SYSTEM "unix"
 +#define OT_INSTALL_PREFIX "/invalid/local"
 +#define OT_TCLSH_PATH "/invalid/tclsh"
+diff --git ot/liberty/celllib.cpp ot/liberty/celllib.cpp
+--- ot/liberty/celllib.cpp
++++ ot/liberty/celllib.cpp
+@@ -58,13 +58,18 @@
+   // Parse the token.
+   const char *token {nullptr};
+   size_t len {0};
++  int bracket_depth = 0;
+ 
+   tokens.clear();
+ 
+   for(const char* itr = beg; itr != end && *itr != 0; ++itr) {
+     
+     // extract the entire quoted string as a token
+-    bool is_del = (dels.find(*itr) != std::string_view::npos);
++    if(*itr == '[') ++bracket_depth;
++    bool is_del = (dels.find(*itr) != std::string_view::npos)
++                  && *itr != '[' && *itr != ']'
++                  && !(*itr == ':' && bracket_depth);
++    if(*itr == ']') --bracket_depth;
+ 
+     if(std::isspace(*itr) || is_del) {
+       if(len > 0) {                            // Add the current token.
+@@ -354,6 +359,15 @@
+     }
+     else if(*itr == "values") {
+ 
++      // Liberty permits axes to be inherited from the named template.
++      if(lut.indices1.empty() && lut.lut_template) {
++        lut.indices1 = lut.lut_template->indices1;
++        size1 = std::max(size_t{1}, lut.indices1.size());
++      }
++      if(lut.indices2.empty() && lut.lut_template) {
++        lut.indices2 = lut.lut_template->indices2;
++        size2 = std::max(size_t{1}, lut.indices2.size());
++      }
+       if(lut.indices1.empty()) {
+         if(size1 != 1) {
+           OT_LOGF("empty indices1 in non-scalar lut ", lut.name);
+@@ -370,10 +384,12 @@
+ 
+       lut.table.resize(size1*size2);
+ 
+-      int id {0};
++      size_t id {0};
+       itr = on_next_parentheses(itr, end, [&] (auto& v) mutable {
++        OT_LOGF_IF(id >= lut.table.size(), "too many values in lut ", lut.name);
+         lut.table[id++] = std::strtof(v.data(), nullptr);
+       });
++      OT_LOGF_IF(id != lut.table.size(), "too few values in lut ", lut.name);
+     }
+     else if(*itr == "}") {
+       stack--;
+@@ -525,9 +541,11 @@
+ }
+ 
+ // Functoin: _extract_cellpin
+-Cellpin Celllib::_extract_cellpin(token_iterator& itr, const token_iterator end) {
+-
+-  Cellpin cellpin;
++Cellpin Celllib::_extract_cellpin(token_iterator& itr, const token_iterator end,
++                                const Cellpin* defaults, std::vector<Cellpin>* children) {
++
++  Cellpin cellpin = defaults ? *defaults : Cellpin{};
++  std::vector<token_iterator> nested_pins;
+   
+   if(itr=on_next_parentheses(
+     itr, 
+@@ -547,7 +565,18 @@
+   
+   while(stack && ++itr != end) {
+     
+-    if(*itr == "direction") {
++    if(*itr == "pin") {
++      nested_pins.push_back(itr);
++      itr = std::find(itr, end, "{");
++      OT_LOGF_IF(itr == end, "missing nested pin group");
++      int nesting = 1;
++      while(nesting && ++itr != end) {
++        if(*itr == "{") ++nesting;
++        if(*itr == "}") --nesting;
++      }
++      OT_LOGF_IF(itr == end, "unterminated nested pin group");
++    }
++    else if(*itr == "direction") {
+ 
+       if(++itr == end) {
+         OT_LOGF("can't get the direction in cellpin ", cellpin.name);
+@@ -628,7 +657,47 @@
+     OT_LOGF("can't find group brace '}' in cellpin ", cellpin.name);
+   }
+ 
++  if(children) {
++    for(auto nested : nested_pins) {
++      children->push_back(_extract_cellpin(nested, end, &cellpin));
++    }
++  }
+   return cellpin;
++}
++
++// Expand Liberty pin ranges without losing bus-level attributes and arcs.
++static void insert_bus_pin(Cell& cell, Cellpin pin) {
++  const auto left = pin.name.find('[');
++  const auto colon = pin.name.find(':', left);
++  const auto right = pin.name.find(']', left);
++  if(left == std::string::npos || colon == std::string::npos || right == std::string::npos) {
++    cell.cellpins[pin.name] = std::move(pin);
++    return;
++  }
++  const int first = std::stoi(pin.name.substr(left + 1, colon - left - 1));
++  const int last = std::stoi(pin.name.substr(colon + 1, right - colon - 1));
++  const auto base = pin.name.substr(0, left);
++  for(int bit = std::min(first, last); bit <= std::max(first, last); ++bit) {
++    pin.name = base + "[" + std::to_string(bit) + "]";
++    cell.cellpins[pin.name] = pin;
++  }
++}
++
++void Celllib::_extract_bus(token_iterator& itr, const token_iterator end, Cell& cell) {
++  auto start = itr;
++  std::vector<Cellpin> children;
++  auto bus = _extract_cellpin(itr, end, nullptr, &children);
++  if(!children.empty()) {
++    for(auto& pin : children) insert_bus_pin(cell, std::move(pin));
++    return;
++  }
++  auto type = std::find(start, itr, "bus_type");
++  OT_LOGF_IF(type == itr || ++type == itr, "missing bus_type for ", bus.name);
++  auto range = _bus_ranges.find(std::string{*type});
++  OT_LOGF_IF(range == _bus_ranges.end(), "unknown bus_type ", *type);
++  bus.name += "[" + std::to_string(range->second.first) + ":"
++                  + std::to_string(range->second.second) + "]";
++  insert_bus_pin(cell, std::move(bus));
+ }
+ 
+ // Function: _extract_cell
+@@ -666,7 +735,10 @@
+     }
+     else if(*itr == "pin") {                         // Read the cell pin group.
+       auto pin = _extract_cellpin(itr, end);
+-      cell.cellpins[pin.name] = std::move(pin);
++      insert_bus_pin(cell, std::move(pin));
++    }
++    else if(*itr == "bus") {
++      _extract_bus(itr, end, cell);
+     }
+     else if(*itr == "}") {
+       stack--;
+@@ -732,7 +804,28 @@
+   
+   while(stack && ++itr != end) {
+     
+-    if(*itr == "lu_table_template") {
++    if(*itr == "type") {
++      std::string name;
++      itr = on_next_parentheses(itr, end, [&](auto& v) { name = v; });
++      itr = std::find(itr, end, "{");
++      OT_LOGF_IF(itr == end, "missing bus type group");
++      int depth = 1, first = 0, last = 0;
++      while(depth && ++itr != end) {
++        if(*itr == "{") ++depth;
++        else if(*itr == "}") --depth;
++        else if(*itr == "bit_from") {
++          OT_LOGF_IF(++itr == end, "missing bit_from");
++          first = std::stoi(std::string{*itr});
++        }
++        else if(*itr == "bit_to") {
++          OT_LOGF_IF(++itr == end, "missing bit_to");
++          last = std::stoi(std::string{*itr});
++        }
++      }
++      OT_LOGF_IF(itr == end, "unterminated bus type group");
++      _bus_ranges[name] = {first, last};
++    }
++    else if(*itr == "lu_table_template") {
+       auto lut = _extract_lut_template(itr, end);
+       lut_templates[lut.name] = lut;
+     }
+diff --git ot/liberty/celllib.hpp ot/liberty/celllib.hpp
+--- ot/liberty/celllib.hpp
++++ ot/liberty/celllib.hpp
+@@ -73,12 +73,15 @@
+ 
+   private:
+ 
++    std::unordered_map<std::string, std::pair<int, int>> _bus_ranges;
++
+     std::optional<float> _extract_operating_conditions(token_iterator& itr, const token_iterator end);
+     void        _extract_bus         (token_iterator&, const token_iterator, Cell&);
+     LutTemplate   _extract_lut_template  (token_iterator&, const token_iterator);
+     Lut           _extract_lut           (token_iterator&, const token_iterator);
+     Cell          _extract_cell          (token_iterator&, const token_iterator);
+-    Cellpin       _extract_cellpin       (token_iterator&, const token_iterator);
++    Cellpin       _extract_cellpin       (token_iterator&, const token_iterator,
++                                         const Cellpin* = nullptr, std::vector<Cellpin>* = nullptr);
+     InternalPower _extract_internal_power(token_iterator&, const token_iterator);
+     Timing        _extract_timing        (token_iterator&, const token_iterator);
+ 

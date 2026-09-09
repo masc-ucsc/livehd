@@ -1,0 +1,35 @@
+/*
+:name: folded_rotate
+:type: equiv
+:pyrope_top: folded_rotate
+:verilog_top: folded_rotate
+:equiv_engine: cvc5
+*/
+// Inlining a one-bit count into this two-stage rotate makes the second
+// selector false. Its EQ folds to 1 feeding XOR 1: both operands must remain.
+pub comb rotate_helper::[timecheck=false](`in`:u4, right:u1, rotate:u1) -> (out:u4) {
+  mut stages:u12 = 0
+  stages = 0sb?
+  const real_rotate__w1 = rotate
+  mut _mux_1:u2 = if real_rotate__w1 == 0 { 0 } else { (4 - real_rotate__w1)#[0..=31]#[0..=2]#[0..=1] }
+  mut _mux_2:u2 = if right != 0 { _mux_1 } else { real_rotate__w1 }
+  const left_rotate__w1 = _mux_2
+  mut stages__w1 = stages
+  stages__w1#[0..=3] = `in`
+  mut _mux_3:u4 = if (left_rotate__w1 & 1) != 0 { (stages__w1#[0..=3]#[0..=2] << 1) | ((stages__w1#[0..=3] >> 3) & 1) } else { stages__w1#[0..=3] }
+  mut stages__w2 = stages__w1
+  stages__w2#[4..=7] = _mux_3
+  mut _mux_4:u4 = if ((left_rotate__w1 >> 1) & 1) != 0 { (stages__w2#[4..=7]#[0..=1] << 2) | stages__w2#[4..=7]#[2..=3] } else { stages__w2#[4..=7] }
+  mut stages__w3 = stages__w2
+  stages__w3#[8..=11] = _mux_4
+  out = stages__w3#[8..=11]
+}
+
+comb count_helper(value:u1) -> (count:u1) {
+  count = (0 + (value & 1)) & 1
+}
+
+pub comb folded_rotate(a:u4, valid:u4) -> (out:u4) {
+  mut n = count_helper(value=valid & 1)
+  out = rotate_helper(`in`=a, right=0, rotate=n)
+}
