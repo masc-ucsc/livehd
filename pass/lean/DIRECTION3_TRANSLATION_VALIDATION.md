@@ -936,3 +936,25 @@ value representation rather than dispatch, A2's typed `BitVec` targets the term
 that actually dominates.  The re-measurement of `denoteResidual` should happen
 before A2 is built at all, because 28.4 µs per node-cycle may already clear the
 bar the phase was created to reach.
+
+## What Part II did not measure
+
+Stated so the numbers above are not read as more than they are:
+
+* **`pruned` at n=256 and the `far`-shape time series were not run.**  The
+  benchmark was stopped once three points across two variants agreed on an
+  exponent near 1.9; more points would confirm the verdict, not change it.  The
+  `far` shape's behaviour is already established by its script size, which is
+  quadratic (16.4 MB at n=1024).
+* **The generated proof was exercised on synthetic designs only.**  The real
+  CVA6 module was carried end to end for the *reified definition* — emitted,
+  agreement-checked against `denoteResidual` on 50 inputs, and timed — but not
+  for the per-design proof, which would need the operand-read walk extended
+  from `rand` to all 21 constructors.  Since the criterion already failed
+  decisively on synthetic designs, that extension was not written.
+* **`#print axioms` on a generated per-design proof was therefore not run.**
+  The synthetic proofs use only `simp only`, `rw` and `rfl` over the committed
+  lemmas, so no new axiom is expected, but this is an expectation and not a
+  measurement.
+* The DINO extrapolation is from three points over one decade.  It supports an
+  order of magnitude, not an hour count.
