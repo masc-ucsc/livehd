@@ -721,10 +721,12 @@ no change to the slope.
 
 **The pre-committed criterion was `O(N^1.2)` out to 4,096 bindings with DINO
 scale under ten minutes.  The best variant reaches an exponent of about 1.9.
-The criterion is missed, and not marginally.**  Extrapolating 149 s at n=128 at
-that slope puts DINO's 4,772 bindings near **31 hours**, against the ten-minute
-bar and against the **0.8 s** the existing `native_decide` takes on the same
-design.
+The criterion is missed, and not marginally.**  Extrapolating the best variant's
+149 s at n=128 across the 37x to DINO's 4,772 bindings gives **35 h at exponent
+1.86 and 50 h at 1.96** — against a ten-minute bar, and against the **0.8 s**
+the existing `native_decide` takes on that same design.  (The extrapolation is
+from three points over one decade; treat the order of magnitude as the result,
+not the hour count.)
 
 ## Script size separates the two causes cleanly
 
@@ -766,7 +768,7 @@ What does not survive is the consequence anyone would want from it.
 | per-design theorems | 9,210 | 1 |
 | operator semantics | re-derived per design | shared, proved once |
 | what the per-design proof does | everything | compose bindings |
-| **measured cost** | hours at ~6k nodes | **~31 h extrapolated at 4.8k** |
+| **measured cost** | hours at ~6k nodes | **35-50 h extrapolated at 4.8k** |
 | ceiling | reached in practice | naive dies at n≈200 |
 
 Reducing what the per-design proof has to *say* did not reduce what it *costs*,
