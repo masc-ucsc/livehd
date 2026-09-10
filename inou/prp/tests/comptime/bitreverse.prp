@@ -20,7 +20,7 @@ comb sreverse(x:s6) -> (total:s6) {
   total = t
 }
 comb reverse(x) -> (total:u6) {
-  mut t:u6 = nil
+  mut t:u6 = 0 // zero-extend when the input is narrower than the result
   //cputs("reverse: x has {x:b}")
   for i in 0..<x.[bits] {
     t#[i] = x#[x.[bits]-1-i]

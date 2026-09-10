@@ -41,7 +41,7 @@ grep -Eq 'block_q <= .*3c' "$W/out.v" \
 # An explicit source reset remains authoritative. Its reset value is 0x11, not
 # the independent declaration-time power-on value 0x55, and it must not receive
 # the no-reset warning.
-grep -q 'reg reset_q:u8:\[init=17, reset_pin=ref rst, async=true\]' "$PRP" \
+grep -q 'reg reset_q:u8:\[initial=17, reset_pin=ref rst, async=true\]' "$PRP" \
   || fail "explicit reset value was not preserved"
 grep -Eq 'reset_q <= .*11' "$W/out.v" \
   || fail "explicit reset assignment was replaced by the declaration initializer"

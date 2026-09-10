@@ -446,7 +446,7 @@ void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
     return;
   }
   const bool         always_negative = amt.max < 0;
-  livehd::diag::Span span = lm->current_span();
+  livehd::diag::Span span            = lm->current_span();
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = always_negative ? livehd::diag::Severity::error : livehd::diag::Severity::warning,
       .code     = "negative-shift",
@@ -779,7 +779,8 @@ void uPass_bitwidth::process_func_call() {
     return;
   }
 
-  clear_range(current_text());  // call result is unknown unless another pass proves it
+  const std::string call_dst(current_text());
+  clear_range(call_dst);  // call result is unknown unless another pass proves it
   if (!move_to_sibling()) {
     move_to_parent();
     return;
@@ -789,7 +790,19 @@ void uPass_bitwidth::process_func_call() {
   // var whose declared envelope is intentionally overflowed; exempt it from
   // the does-not-fit check at its next write.
   const auto callee      = current_text();
-  const bool is_wrap_sat = callee == "wrap" || callee == "sat" || callee == "saturate";
+  const bool is_wrap_sat = callee == "wrap" || callee == "sat";
+  if (is_wrap_sat && runner_st != nullptr) {
+    // Attributes/constprop already computed a constant narrowing result.
+    // Retain its precise range so the following assignment and .[bw_max]
+    // observe the narrowed value instead of an unbounded call result.
+    if (auto value = runner_st->comptime_scalar(call_dst); value) {
+      if (auto number = const_to_i64(*value); number) {
+        if (auto bundle = runner_st->get_bundle_for_write(call_dst); bundle) {
+          write_bw(call_dst, *bundle, Lnast_range::constant(*number), /*replace=*/true);
+        }
+      }
+    }
+  }
 
   while (move_to_sibling()) {
     if (!is_type(Lnast_ntype::Lnast_ntype_store)) {
@@ -857,7 +870,7 @@ void uPass_bitwidth::process_type_spec() {
   // 0ub????` is [0,15]; one if-arm writing `x = v#[0..=2]` would otherwise
   // restamp [0,7] and a sibling arm's legal wider write then fails the
   // declared-fit check.
-  const auto old = range_from_entry(e.decl_max, e.decl_min);
+  const auto old  = range_from_entry(e.decl_max, e.decl_min);
   if (!old.is_unbounded()) {
     if (auto nmax = const_to_i64(*dmax); nmax && old.max > *nmax) {
       dmax = *Dlop::from_pyrope(std::to_string(old.max));

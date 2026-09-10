@@ -219,7 +219,7 @@ Each run has `exit_code=0` and `smtbmc.log` ending in `Status: PASSED`.
 | `hpdcache_fifo_reg_gate` | PASS | `generated/rebase_small_lec_20260621_postrebase2/hpdcache_fifo_reg_gate/lec_smtbmc_depth1/` |
 | `cva6_tlb_gate` | PASS | `generated/rebase_small_lec_20260621_postrebase2/cva6_tlb_gate/lec_smtbmc_depth1/` |
 
-Do not use `lhd lec --set lec.solver=lgyosys` as the authoritative memory/SRAM
+Do not use `lhd lec --set formal.solver=lgyosys` as the authoritative memory/SRAM
 LEC result for these wrappers yet: the current `lgcheck` path can leave
 `$aldff`/`$aldffe`/`$adff`/`$adffe` cells unsupported by Yosys `sat` and then
 continue with `-ignore_unknown_cells`, producing suspect X-driven

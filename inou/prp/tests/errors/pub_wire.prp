@@ -1,0 +1,7 @@
+/*
+:name: pub_wire
+:type: error
+:error: cannot export `pub wire`
+:help: pub const
+*/
+pub wire x:u8 = 1 // locate_error_here

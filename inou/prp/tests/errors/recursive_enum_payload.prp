@@ -1,0 +1,7 @@
+/*
+:name: recursive_enum_payload
+:type: error
+:error: recursive enum payloads are not supported
+:help: finite nested enum
+*/
+const Expr = enum(value:signed, add:(Expr,Expr))

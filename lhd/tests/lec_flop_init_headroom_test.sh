@@ -59,7 +59,7 @@ endmodule
 EOF
 cat >"$W/neg_wide.prp" <<'EOF'
 pub mod top(clock:u1, reset:u1, io_en:u1) -> (io_q:u1@[0]) {
-  reg cnt:u1:[init=0, reset_pin=ref reset, async=true]
+  reg cnt:u1:[initial=0, reset_pin=ref reset, async=true]
   if io_en != 0 {
     cnt = cnt + 1
   }

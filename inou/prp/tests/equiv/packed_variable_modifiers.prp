@@ -1,0 +1,15 @@
+/*
+:name: packed_variable_modifiers
+:type: equiv
+*/
+comb packed_variable_modifiers(a:s4, b:s4) -> (s:s8, high:s4, count:u4, parity:u1, any:u1, all:u1) {
+  mut p:[2]s4 = 0
+  p[0] = a
+  p[1] = b
+  s = p#sext[..]
+  high = p#sext[4..]
+  count = p#+[..]
+  parity = p#^[..]
+  any = p#|[..]
+  all = p#&[0..=7]
+}

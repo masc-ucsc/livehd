@@ -16,8 +16,8 @@ r#[3..=6] = a#[0..=3]
 cputs("r:{r}")
 cassert(r == 0ub1010_01_1)
 
-mut x:u7 = nil
-x#[0..+1] = c
+mut x:u10 = nil
+x#[0..+2] = c
 x#[2..+3] = b
 x#[5..+5] = a
 cassert(x == 0ub01010_001_01)

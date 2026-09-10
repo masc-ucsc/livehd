@@ -1434,7 +1434,9 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
 }
 
 void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
-  I(inp_edges.size() > 1);
+  // Constant folding can combine equal operands into a single constant row.
+  // Unary XOR is the identity and its range is valid in the loop below.
+  I(!inp_edges.empty());
   // TWO maxima, because the unsigned and signed answers are not the same
   // number: a literal uW operand needs W+1 bits once the RESULT has to be
   // signed. Taking the unsigned width into a signed range makes `s4(-8) ^

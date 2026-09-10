@@ -15,6 +15,20 @@ cc_library(
     deps = ["@hlop//hlop:hlop"],
 )
 
+# Header-only: THE attribute-name vocabulary (battr.hpp). Split out like
+# array_dim_hdr/range_bits_hdr so the Pyrope front end -- which does not link
+# the upass/core plugin -- can share the one list instead of hand-copying it.
+# That copy existed in Prp2lnast::reject_common_mistakes_attr_name and had
+# drifted apart in both directions; this target is what makes the single
+# source of truth enforceable by the compiler rather than by a comment.
+cc_library(
+    name = "battr_hdr",
+    hdrs = ["battr.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "upass",
     srcs = glob(
@@ -27,6 +41,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":array_dim_hdr",
+        ":battr_hdr",
         ":range_bits_hdr",
         "//core",
         "//lnast",

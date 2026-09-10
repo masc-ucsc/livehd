@@ -1330,7 +1330,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         mc.update_enable = e.driver;
       } else if (pn == "reset") {
         mc.reset = e.driver;
-      } else if (pn == "init") {
+      } else if (pn == "initial") {
         mc.init = e.driver;  // whole-array runtime reset-value bus
       } else if (pn == "type") {
         if (e.driver.is_const()) {
@@ -2223,6 +2223,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // Comparisons/reductions are 1-bit; default unknown width to that.
         W = 1;
       }
+      if (op == Ntype_op::Sum) {
+        // One integer sum can have independently sized output realizations.
+        // Encode at the largest observed width, then publish each low prefix.
+        for (const auto& e : node.out_edges()) {
+          W = std::max(W, gu::real_width(e.driver));
+        }
+      }
       bool out_signed = !gu::is_unsign(dpin);
 
       // Bucket input edges by sink port id, resolving every driver to a Val.
@@ -2506,7 +2513,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
           const Val& a = pid(0)[0];
           Term       acc;
-          for (const auto& b : pid(1)) {  // one-hot amounts, ORed
+          // `b` is a SINGLE-driver, self-determined unsigned amount (the runtime
+          // multi-driver one-hot form was removed; graph/cell.cpp). The loop is
+          // defensive: it also gives the zero-driver identity (no amount => `a`)
+          // that pass/abc/abc_blast.hpp shares.
+          for (const auto& b : pid(1)) {
             // A shift count is UNSIGNED (a bit position), so zero-extend it. Reading
             // it as signed would sign-extend a wrapped 3-bit amount like 7 (== -1)
             // to a huge value, overshifting `1 << amt` to 0 (e.g. RISC-V vlmax).
@@ -3043,7 +3054,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
       }
-      pin2val[pinkey(dpin)] = out_val;
+      if (op == Ntype_op::Sum && !node.out_edges().empty()) {
+        for (const auto& e : node.out_edges()) {
+          const int declared = gu::real_width(e.driver);
+          const int width    = declared > 0 ? declared : W;
+          Val       value{fit(out_val, width), width, declared > 0 ? !gu::is_unsign(e.driver) : out_val.is_signed};
+          value.x_mask              = fit_x_mask_to(tm_, out_val, width);
+          pin2val[pinkey(e.driver)] = value;
+        }
+      } else {
+        pin2val[pinkey(dpin)] = out_val;
+      }
       {
         static const std::set<uint64_t> dbg_nodes = [] {
           std::set<uint64_t> s;
@@ -3098,11 +3119,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // word-level cycle, print its members — or (b) a node whose blocking
       // operand is not another undone node (an unmapped input-pin name, an
       // opaque driver, ...), print that operand.
-      std::vector<std::string>      chain;
+      std::vector<std::string>         chain;
       absl::flat_hash_set<std::string> seen;
-      auto                          cur       = node;
-      bool                          diagnosed = false;
-      std::string                   diag;
+      auto                             cur       = node;
+      bool                             diagnosed = false;
+      std::string                      diag;
       while (!diagnosed) {
         if (!seen.insert(nodekey(cur)).second) {
           diag = "WORD-LEVEL CYCLE through: ";

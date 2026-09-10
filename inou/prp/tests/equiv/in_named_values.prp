@@ -1,0 +1,9 @@
+/*
+:name: in_named_values
+:type: equiv
+:verilog_top: in_named_values.p
+:pyrope_top: p
+*/
+pub comb p(x:u4, y:u4) -> (hit:bool) {
+  hit = x in (const a=1, y, const c=3)
+}

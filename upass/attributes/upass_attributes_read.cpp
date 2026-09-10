@@ -26,11 +26,11 @@
 #include <utility>
 
 #include "absl/strings/str_cat.h"
-#include "hlop/dlop.hpp"
-#include "range_bits.hpp"
 #include "decl_facts.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "range_bits.hpp"
 #include "upass_attributes.hpp"
 #include "upass_attributes_sticky.hpp"
 
@@ -289,9 +289,9 @@ std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std
       bool any          = false;
       bool all_comptime = true;
       for (const auto& tl : b->top_levels()) {
-        any = true;
+        any                   = true;
         const std::string seg = tl.name.empty() ? std::to_string(tl.pos) : std::string(tl.name);
-        std::string field_path;
+        std::string       field_path;
         field_path.reserve(base.size() + 1 + seg.size());
         field_path.assign(base);
         field_path.push_back('.');
@@ -312,6 +312,20 @@ std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std
 
 void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base,
                                          std::string_view attr) {
+  if (attr == "fields" && runner_st != nullptr) {
+    if (const auto b = runner_st->get_bundle(base); b) {
+      auto fields = std::make_shared<Bundle>(std::string(dst));
+      fields->set_value_kind(upass::Kind::tuple);
+      int pos = 0;
+      for (const auto& level : b->top_levels()) {
+        if (!level.name.empty()) {
+          fields->set(bundle_path::of_string(std::to_string(pos++)), *Dlop::from_string(level.name));
+        }
+      }
+      (void)runner_st->set(std::string(dst), fields);
+    }
+    return;
+  }
   std::optional<Dlop> result;
 
   // Sticky bucket presence — `_*` and `debug` reads return *Dlop::create_integer(1) when
@@ -388,7 +402,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_comptime(base, base_text);
     } else if (attr == "typename") {
       result = derive_aggregate_typename(base, base_text);
-    } else if (attr == "key") {
+    } else if (attr == "key" || attr == "id") {
       // `.[key]` on a tuple_get tmp returns the source field's name; on a
       // bare aggregate it returns the aggregate's own name. The
       // extraction origin comes from Symbol_table::tget_origin.
@@ -405,7 +419,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       if (!field_seg.empty()) {
         result = *Dlop::from_pyrope(std::string{"\'"} + field_seg + "\'");
       } else {
-        result = derive_aggregate_key(base, base_text);
+        result = attr == "id" ? std::optional<Dlop>{*Dlop::from_string(base_text)} : derive_aggregate_key(base, base_text);
       }
     } else if (auto v_inh = lookup_attr_with_inheritance(base, attr); v_inh) {
       // Phase 3 — cat-D aggregate→field inheritance: a tuple_get tmp's
@@ -467,11 +481,11 @@ void uPass_attributes::process_type_spec() {
     move_to_parent();
     return;
   }
-  Numeric_kind         kind = Numeric_kind::none;
-  uint32_t             bits = 0;
+  Numeric_kind        kind = Numeric_kind::none;
+  uint32_t            bits = 0;
   std::optional<Dlop> range_max;
   std::optional<Dlop> range_min;
-  bool                 is_real_type = false;
+  bool                is_real_type = false;
   if (move_to_sibling()) {
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
   }
@@ -552,13 +566,13 @@ void uPass_attributes::process_declare() {
     move_to_parent();
     return;
   }
-  Numeric_kind         kind = Numeric_kind::none;
-  uint32_t             bits = 0;
+  Numeric_kind        kind = Numeric_kind::none;
+  uint32_t            bits = 0;
   std::optional<Dlop> range_max;
   std::optional<Dlop> range_min;
-  bool                 is_real_type = false;
-  Decl_kind            decl         = Decl_kind::unknown;
-  bool                 comptime     = false;
+  bool                is_real_type = false;
+  Decl_kind           decl         = Decl_kind::unknown;
+  bool                comptime     = false;
   if (move_to_sibling()) {  // TYPE
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
     if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {  // mode

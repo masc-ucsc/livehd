@@ -61,7 +61,7 @@ void Pass_color::setup() {
                        "cones: stop data colors at muxes and place muxes with control; false puts muxes in data colors "
                        "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true",
                        "true");
-  m.add_label_optional("stop_arith", "keep large adders, multipliers and dividers at color boundaries", "true");
+  m.add_label_optional("stop_arith", "stop colors at large adders (>8 bits), multipliers and dividers", "true");
   m.add_label_optional("stop_cmp",
                        "keep wide comparisons (LT/GT with an operand over 8 bits, which lower to a subtraction) at "
                        "color boundaries. false merges them into the cone that consumes them",
@@ -71,6 +71,11 @@ void Pass_color::setup() {
                        "barrel) at color boundaries. Constant shifts are wiring and are never cut. Independent of "
                        "`ctrl_cones`: turning control grouping off never arms this on its own",
                        "true");
+  m.add_label_optional("ware_arith",
+                       "keep large (>8 bits) adders, multipliers and dividers as separate optimizable ware modules",
+                       "true");
+  m.add_label_optional("ware_cmp", "keep wide (>8 bits) comparisons (LT/GT) as separate optimizable ware modules", "true");
+  m.add_label_optional("ware_shift", "keep runtime shifters (SHL/SRA) as separate width-specialized ware modules", "true");
   m.add_label_optional("ctrl_max_gate",
                        "optional tighter control-color size bound (predicted AIG); 0 uses max_gate. "
                        "An indivisible node above this explicit bound fails",
@@ -202,6 +207,11 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   s             += std::format("\"compact\":{},", opts.compact);
   s             += std::format("\"continuous\":{},", opts.continuous);
   s             += std::format("\"keep_colored\":{}", opts.keep_colored);
+  s             += std::format(",\"ware_arith\":{},\"ware_cmp\":{},\"ware_shift\":{}",
+                               parse_bool(var.get("ware_arith", "true")),
+                               parse_bool(var.get("ware_cmp", "true")),
+                               parse_bool(var.get("ware_shift", "true")));
+
   if (alg == "acyclic") {
     s += std::format(",\"cutoff\":{},\"merge\":{}", var.get("cutoff", "1"), parse_bool(var.get("merge", "false")));
   } else if (alg == "synth") {

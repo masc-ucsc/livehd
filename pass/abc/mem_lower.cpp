@@ -371,7 +371,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, c
   Builder B{g, color, has_color};
 
   // A ROM's entries are constants. Writable storage uses one bits-wide flop
-  // per entry with the power-on contents from the `init` pin.
+  // per entry with the power-on contents from the `initial` pin.
   bool            has_init = init_drv.is_const() && reset_drv.is_invalid();
   Dlop            init_val = has_init ? gu::const_of(init_drv) : Dlop{};
   // The Memory carries a single shared clock on port 0 (pid 2); per-port clock

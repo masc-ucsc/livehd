@@ -73,7 +73,7 @@ compile_and_color() {  # $1 = lg dir tag
 abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
   # (<workdir>/abc_cache), on by default (lhd.incremental).
-  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" --set abc.ware=false \
+  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
       --workdir "$W/wabc" --stats
 }
 
@@ -99,7 +99,7 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
 # this fixture from 8 regions to 2). What this test is about is the hit/miss
 # SPLIT, so `N` is read from the cold run and every later count is expressed
 # against it. The invariants: cold = all miss, warm = all hit, and a one-def
-# edit = exactly ONE miss.
+# edit = exactly TWO misses (specialized adder plus its wrapper).
 
 # --- 1. cold run: every region misses and is stored --------------------------
 compile_and_color lg0
@@ -123,7 +123,7 @@ echo "PASS: NoChange run is all hits and byte-identical Verilog"
 
 # Pretty rendering is one physical line per color and carries the same
 # resynthesis decision as the JSON rows. This additional all-hit run is cheap.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" --set abc.ware=false \
+"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
     --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
     || fail "pretty stats run failed"
 [ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = "$N" ] \
@@ -131,16 +131,18 @@ echo "PASS: NoChange run is all hits and byte-identical Verilog"
 [ "$(grep -c 'resynth=0$' "$W/pretty.out")" = "$N" ] \
   || fail "pretty all-hit rows did not all say resynth=0: $(cat "$W/pretty.out")"
 
-# --- 3. edit ONE def (top's combiner); children must still hit ---------------
+# --- 3. edit top's combiner; sequential child logic must still hit ----------
+# Specializing the new constant changes the ware definition AND the wrapper's
+# callee identity. Both must miss; the unrelated sequential region must hit.
 # The recompile reallocates every nid; the child defs' regions must hit anyway.
 sed 's/o = a + b/o = a + b + 1/' "$FIX" > "$W/dut.prp"
 grep -q "o = a + b + 1" "$W/dut.prp" || fail "edit did not apply"
 compile_and_color lg1
 abc_incr lg1 net2
-expect_incr "$((N - 1))" 1 "top-only edit"
-expect_resynth "$N" 1 "top-only edit"
-[ "$(incr_field abc_started)" = 1 ] || fail "one-miss edit did not start ABC"
-lec_gate net2 lg1 "edited design ($((N - 1)) cached + 1 fresh region)"
+expect_incr "$((N - 2))" 2 "top-only edit"
+expect_resynth "$N" 2 "top-only edit"
+[ "$(incr_field abc_started)" = 1 ] || fail "adder edit did not start ABC"
+lec_gate net2 lg1 "edited design ($((N - 2)) cached + 2 fresh regions)"
 
 # --- 4. the edited design is now cached too ----------------------------------
 abc_incr lg1 net3
@@ -150,13 +152,13 @@ expect_resynth "$N" 0 "NoChange after the edit"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
 # lhd.incremental=false: no cache is touched and the envelope carries no counters.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" --set abc.ware=false \
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
     --set lhd.incremental=false --workdir "$W/wabc" --stats
 [ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
 expect_resynth "$N" "$N" "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --set abc.ware=false --stats
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
 expect_resynth "$N" "$N" "no-workdir full run"
 echo "PASS: lhd.incremental=false and no-workdir both disable cleanly"

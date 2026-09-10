@@ -1,0 +1,7 @@
+/*
+:name: nil_variable_cassert
+:type: error
+:error: comptime cassert is false
+*/
+const z = nil
+cassert(z == 5) // locate_error_here

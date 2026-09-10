@@ -74,7 +74,9 @@ public:
     std::string crit_output;
   };
 
-  Incr_cache(std::string dir, uint64_t salt);
+  // Scoped libraries release their bodies with the cache object. Used for
+  // one ware candidate at a time so variants do not accumulate in memory.
+  Incr_cache(std::string dir, uint64_t salt, bool scoped_libraries = false);
 
   // Miss (default result) unless ALL hold: rb.reuse_eligible, a row keyed by
   // rb.module_name exists, its recipe matches VERBATIM, the cached pre-abc body
@@ -125,6 +127,7 @@ public:
   void              note_miss() { ++misses_; }
 
   [[nodiscard]] const std::string& dir() const { return dir_; }
+  [[nodiscard]] uint64_t           salt() const { return salt_; }
 
   // Salt for the whole cache: the global inputs the per-region compare does not
   // see. Library CONTENT, sequential-mapping mode, the RESOLVED DFF cell
@@ -161,8 +164,10 @@ private:
   // partition-boundary names, pre = original def names), so merging them makes the
   // cached pre-body's Subs resolve to the wrong IO and the compare mismatches the
   // fresh side. Separate libs => both compare sides resolve the body-less decls.
-  [[nodiscard]] hhds::GraphLibrary& lib();
-  [[nodiscard]] hhds::GraphLibrary& cached_pre_lib();
+  bool                                scoped_libraries_ = false;
+  std::unique_ptr<hhds::GraphLibrary> scoped_mapped_, scoped_pre_;
+  [[nodiscard]] hhds::GraphLibrary&   lib();
+  [[nodiscard]] hhds::GraphLibrary&   cached_pre_lib();
 
   // Copy the pre-body's body-less Sub child decls into cached_pre_lib() next to the
   // pre-body, so the cached copy is self-contained (its Subs resolve

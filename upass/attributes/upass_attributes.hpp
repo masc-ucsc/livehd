@@ -29,7 +29,7 @@
 // handlers live in sibling files:
 //
 //   * upass_attributes_sticky.cpp   — `_*` / `debug` sticky propagation
-//   * upass_attributes_wrap_sat.cpp — category-A wrap / saturate / const
+//   * upass_attributes_wrap_sat.cpp — category-A wrap / sat / const
 //   * upass_attributes_wiring.cpp   — category-B LGraph-wiring attrs
 //   * upass_attributes_read.cpp     — `.[attr]` read evaluation
 //   * upass_attributes_tuple.cpp    — aggregate (tuple/array) shape tracking

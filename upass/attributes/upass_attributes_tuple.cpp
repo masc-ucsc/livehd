@@ -207,14 +207,20 @@ void uPass_attributes::process_tuple_get() {
 }
 
 std::optional<Dlop> uPass_attributes::derive_aggregate_size(std::string_view base) const {
-  // Size = the binding's top-level cardinality (aliases share the
-  // slot; constprop materializes closed integer ranges as tuple bundles, so
-  // ranges resolve here too).
+  // Tuple size counts positional entries only. Named fields are exposed
+  // separately by .[fields]; a named-only or empty tuple has size zero.
   if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b) {
-      const size_t n = b->named_top_count() + b->unnamed_top_count();
-      if (n > 0 && !(n == 1 && b->is_scalar())) {
-        return *Dlop::create_integer(static_cast<int64_t>(n));
+      const auto& start = b->get_attr("rng_s");
+      const auto& end   = b->get_attr("rng_e");
+      const auto& step  = b->get_attr("rng_step");
+      if (start.is_integer() && end.is_integer() && step.is_integer() && !start.has_unknowns() && !end.has_unknowns()
+          && !step.has_unknowns() && !step.is_negative() && !step.is_known_zero()) {
+        const Dlop span = *end.sub_op(start);
+        return span.is_negative() ? *Dlop::create_integer(0) : *span.div_op(step)->add_op(*Dlop::create_integer(1));
+      }
+      if (!b->is_scalar() || b->get_value_kind() == upass::Kind::tuple) {
+        return *Dlop::create_integer(static_cast<int64_t>(b->unnamed_top_count()));
       }
     }
   }
@@ -282,9 +288,8 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_typename(std::string_view
   // The field typename rides the container binding's field attr
   // (set_binding_attr echoes extraction-tmp attr_sets to the source field;
   // aliases share the slot, so no alias hop / sibling-tmp scan).
-  auto field_typename = [&](const std::string& container) -> std::optional<Dlop> {
-    return lookup_attr_value(container + "." + field, "typename");
-  };
+  auto field_typename
+      = [&](const std::string& container) -> std::optional<Dlop> { return lookup_attr_value(container + "." + field, "typename"); };
   // 1. The field typename recorded directly on `parent`'s bundle.
   if (auto v = field_typename(parent); v) {
     return v;

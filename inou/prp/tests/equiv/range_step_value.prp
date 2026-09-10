@@ -1,0 +1,10 @@
+/*
+:name: range_step_value
+:type: equiv
+:verilog_top: range_step_value.p
+:pyrope_top: p
+*/
+pub comb p(x:u4) -> (y:u4) {
+  const r = 0..<10 step 3
+  y = (x + r[1] + r[2])#[0..=3]
+}

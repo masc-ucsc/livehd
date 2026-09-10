@@ -109,7 +109,9 @@ def synth(name, attrs, *opts):
     j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
             '--workdir',d/'work','--emit-dir',f'lg:{d}/net', '--emit',f'verilog:{d}/mapped.v',*opts)
     rows = j['qor']['abc']['regions']
-    assert len(rows)==1 and rows[0]['color']==2, rows
+    assert len(rows)==2 and all(r['color']==2 for r in rows), rows
+    rows=[r for r in rows if r['module'].startswith('__ware_lt_')]
+    assert len(rows)==1, rows
     logs = '\n'.join(p.read_text() for p in (d/'work/logs').glob('*.log'))
     assert 'QoR unavailable' not in logs, logs
     return rows[0], logs
@@ -117,7 +119,7 @@ def synth(name, attrs, *opts):
 cases = {}
 for enabled in ('true','false'):
     cases['attr_'+enabled] = synth('attr_'+enabled, f'color=2, ware={enabled}, delay=500')
-    cases['cli_'+enabled] = synth('cli_'+enabled,'color=2','--set',f'abc.ware={enabled}','--set','abc.delay=500')
+    cases['cli_'+enabled] = synth('cli_'+enabled,'color=2','--set','abc.region_opts='+json.dumps({'2': {'ware':enabled=='true'}}),'--set','abc.delay=500')
     a, b = cases['attr_'+enabled][0], cases['cli_'+enabled][0]
     for key in ('ware_trials','ware_selected','gates','area','logic_depth','delay','budget'):
         assert a[key] == b[key], (key,a,b)
@@ -128,7 +130,7 @@ assert cases['attr_true'][0]['delay'] <= 500 < cases['attr_false'][0]['delay']
 assert 'objective=timing' in cases['attr_true'][1]
 # Zero clears timing and chooses area. CLI and source remain interchangeable.
 a, log = synth('attr_area','color=2, ware=true, delay=0')
-b, _ = synth('cli_area','color=2','--set','abc.ware=true')
+b, _ = synth('cli_area','color=2','--set','abc.region_opts='+json.dumps({'2': {'ware':True}}))
 for key in ('ware_trials','ware_selected','gates','area','logic_depth','delay'):
     assert a[key]==b[key], (key,a,b)
 assert 'objective=area' in log and a['area'] < cases['attr_true'][0]['area']
@@ -146,7 +148,7 @@ source.write_text("""mod mixed(a:u64,b:u64,c:u64,d:u64) -> (y:u1@[0],z:u1@[0]) {
 """)
 j=run('synth',source,'--top','mixed.mixed','--set',f'synth.liberty={lib}',
       '--set','synth.opentimer=false','--workdir',d/'work','--emit-dir',f'lg:{d}/net')
-rows={r['color']:r for r in j['qor']['abc']['regions']}
+rows={r['color']:r for r in j['qor']['abc']['regions'] if r['module'].startswith('__ware_lt_')}
 assert rows[2]['ware_trials']==0 and rows[3]['ware_trials']>0,rows
 assert rows[3]['delay'] < rows[2]['delay'],rows
 # Explicit region_opts overrides source attributes (global knobs are defaults).

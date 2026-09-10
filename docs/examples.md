@@ -97,7 +97,7 @@ lg: anyway so the abc/QoR steps reuse the same compiled tree:
 ```
 ./bazel-bin/lhd/lhd compile xs_core_prp/Alu.prp --top Alu.Alu --emit-dir lg:alu_lg_edited --workdir alu_w2
 ./bazel-bin/lhd/lhd lec --impl lg:alu_lg_edited --ref lg:alu_lg --top Alu.Alu --workdir alu_w
-# exit 0 + PROVEN -> accept the edit; equiv_fail -> reject (alu_w/lecfail.json has the witness)
+# exit 0 + PROVEN -> accept the edit; equiv_fail -> reject (alu_w/simfail_<top>.json has the witness)
 ```
 
 Steering ABC without touching the source — per-region overrides keyed by color

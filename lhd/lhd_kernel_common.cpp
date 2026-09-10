@@ -657,7 +657,8 @@ void install_crash_reporter() {
 // labels — add_label_optional/required is the single registration point).
 // The set-name is the command-path namespace the option is reached under
 // (2h-set_path): standalone `lhd pass <sub>` commands take `pass.<sub>.*`,
-// `lhd lec` is a top-level command so it keeps `lec.*`, and the passes that
+// `lhd lec` (= `lhd formal lec`) roots at `formal.lec` (the shared knobs are
+// `formal.*`; the old `lec.*` namespace is REMOVED, see kRenamedSetPasses), and the passes that
 // only run inside `lhd compile` (upass/cprop/bitwidth/cgen/prp_writer — no
 // bare command word of their own) live under the `compile.*` namespace so the
 // option's owning command is always its leading segment. canonical_set_key()
@@ -906,6 +907,13 @@ void check_known_set_passes(const Options& opts) {
           known += known.empty() ? "" : ", ";
           known += s.name;
         }
+        // A flag DELETED outright gets its own reason (same table as the pass
+        // namespaces below), not the generic near-miss list.
+        for (const auto& [oldf, why] : kRemovedFlags) {
+          if (oldf == flag) {
+            throw Lhd_error{"usage", std::format("--set/--config 'sim.{}' was removed", flag), std::string{why}};
+          }
+        }
         if (flag == "vcdfakedelay") {
           throw Lhd_error{"usage",
                           "--set/--config 'sim.vcdfakedelay' was renamed",
@@ -964,6 +972,30 @@ void check_known_set_passes(const Options& opts) {
           }
           if (!common) {
             ns2 = "formal.lec";
+          }
+        }
+        // A leaf the new namespace does not register either gets the DELETED
+        // flag's own reason, not a rewrite into a second rejected spelling
+        // (`lec.cache` -> "use formal.lec.cache" -> "was removed": a two-step
+        // dead end). Only a leaf positively ABSENT from the target counts;
+        // `sim` has no eprp method, its vocabulary is kSimSetOptions.
+        bool known = true;
+        if (ns2 == "sim") {
+          known = false;
+          for (const auto& s : kSimSetOptions) {
+            if (s.name == f2) {
+              known = true;
+              break;
+            }
+          }
+        } else if (const auto* m2 = Pass::eprp.get_method(set_pass_method(ns2)); m2 != nullptr) {
+          known = m2->has_label(f2);
+        }
+        if (!known) {
+          for (const auto& [oldf, why] : kRemovedFlags) {
+            if (oldf == f2) {
+              throw Lhd_error{"usage", std::format("--set/--config '{}.{}' was removed", pass, flag), std::string{why}};
+            }
           }
         }
         throw Lhd_error{"usage",

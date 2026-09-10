@@ -254,14 +254,28 @@ void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
   // lanes; the odd ones are the window widths, which are `nil` until an upass
   // pass binds them -- so walking every operand would report that pending
   // `nil` as a nil-in-concat type error.
-  bool bad     = false;
-  bool has_nil = false;
+  //
+  // ONE EXCEPTION to "booleans stay errors": a SINGLE-lane concat is not a
+  // packing of several values, it is a reinterpret of ONE -- there is nothing
+  // to interop with. uPass_runner lowers the sanctioned bool->int cast
+  // `unsigned(b)`/`signed(b)` through a get_mask, and the bit-select handler
+  // wraps the value in exactly such a one-lane concat (upass_runner.cpp,
+  // "bitsel-pack"). Rejecting a boolean lane there made that cast IMPOSSIBLE to
+  // write: the hint below says «cast explicitly (e.g. `unsigned(b)`)», and the
+  // cast lands right back here -- a circular diagnostic. The runner already
+  // treats the case as legal ("a bool operand always fits") and emits a 1-bit
+  // mask for it. A MULTI-lane packing keeps the strict no-bool<->int rule.
+  const bool single_lane = src.size() <= 2;
+  bool       bad         = false;
+  bool       has_nil     = false;
   for (std::size_t i = 0; i < src.size(); i += 2) {
     const Kind k = kind_of_operand(src[i]);
     if (k == Kind::nil) {
       has_nil = true;
     } else if (k == Kind::unknown || k == Kind::integer || k == Kind::tuple) {
       // wildcard, a scalar lane, or a tuple lane awaiting the shape check — ok
+    } else if (k == Kind::boolean && single_lane) {
+      // one-lane reinterpret of a boolean: a 1-bit window (see above)
     } else {
       bad = true;
     }

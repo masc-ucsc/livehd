@@ -17,7 +17,7 @@ pub mod syncinit(raddr:u2) -> (q:u4@[1]) {
     const type      = 1,
     const wensize   = 1,
     const rdport    = (1),
-    const init      = (1, 2, 3, 4),
+    const initial   = (1, 2, 3, 4),
   )
   mut res = __memory(mem)
   q = res[0]

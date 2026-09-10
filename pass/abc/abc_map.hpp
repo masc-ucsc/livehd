@@ -123,7 +123,10 @@ struct Map_options {
   // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
   // CSKA/CLA block width (0 => auto from the operating width).
   arith::Adder_kind adder            = arith::Adder_kind::rca;
-  bool              ware             = true;
+  bool              ware             = true;  // source-section permission, not a global CLI option
+  bool              ware_arith       = true;
+  bool              ware_cmp         = true;
+  bool              ware_shift       = true;
   bool              auto_adder       = true;
   bool              auto_multiplier  = true;
   bool              auto_barrel      = true;
@@ -180,7 +183,7 @@ struct Map_options {
   // loads/drivers as they stand plus the arrival and required-time budgets
   // the previous round propagated across the hierarchy; a path through k
   // regions needs k rounds to be seen whole.
-  int               boundary_rounds = 3;
+  int               boundary_rounds = 1;
 };
 
 // Per-region (color-keyed) overrides of the mapping options that vary per
@@ -387,7 +390,7 @@ private:
   Ware_score               score_ware(hhds::GraphLibrary& outlib, std::string_view top);
   void                     remember_ware(const livehd::partition::Region_body& rb, const Map_options& options);
   std::vector<Ware_region> ware_regions_;
-  hhds::GraphLibrary       ware_shells_, ware_sources_;
+  hhds::GraphLibrary       ware_shells_, ware_sources_, ware_pre_;
   bool                     ware_trial_ = false;
   std::string              refusal_;
   std::string              time_refusal_;

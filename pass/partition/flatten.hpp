@@ -44,9 +44,9 @@ using Flat_origin_map = absl::flat_hash_map<hhds::Node_class, Flat_origin>;
 // feedthrough cycle threading module boundaries).
 // `origin`, when non-null, is filled with one entry per CLONED flat node giving
 // the def and the node it was cloned from (see Flat_origin).
-// With preserve_memories, definitions marked attrs::memory_module remain
-// instances. Their bodies must already exist in lib (children-first emission).
+// With preserve_modules, definitions marked attrs::memory_module or
+// attrs::ware_module remain instances. Their bodies must already exist in lib (children-first emission).
 [[nodiscard]] std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
-                                                             Flat_origin_map* origin = nullptr, bool preserve_memories = false);
+                                                             Flat_origin_map* origin = nullptr, bool preserve_modules = false);
 
 }  // namespace livehd::partition

@@ -60,7 +60,7 @@ everything the encoder needs.
 
 - **Combinational** (default for stateless cones): encode both designs sharing
   the primary-input symbols, miter the outputs, one `checkSat`.
-- **Sequential — inductive flop-cut miter** (`lec.engine=ind`):
+- **Sequential — inductive flop-cut miter** (`formal.engine=ind`):
   flops are **cut points** matched across designs by preserved name
   (`flop_state_key()` normalizes Yosys `$…$` decorations + SSA suffixes → a
   stable 1:1 state map). Assume the mapped current-state equal, prove next-state
@@ -72,14 +72,14 @@ everything the encoder needs.
   well be equivalent (a fail can still be a pass). This is ordinary k-induction
   incompleteness (the step case needs strengthening invariants), not just a
   don't-care resolved differently by two front-ends. `auto` therefore treats an
-  ind-Refute as a HINT and waits for bmc; `lec.engine=ind` alone reports it as a
+  ind-Refute as a HINT and waits for bmc; `formal.engine=ind` alone reports it as a
   FAIL — fast triage, but it can cry wolf.
   Exception: on a purely **combinational** pair the inductive miter IS the
   combinational miter, so an ind-Refute there is a genuine CEX (`auto` skips bmc).
-- **Sequential — BMC from reset** (`lec.engine=bmc`): start from the reset state
+- **Sequential — BMC from reset** (`formal.engine=bmc`): start from the reset state
   (each flop's constant `initial`, or a shared fresh symbol for a reset-less
   flop) and chain each design's own next-state forward `bound` cycles, so only
-  **reachable** states are checked. Reset-phase separation (`lec.phase`):
+  **reachable** states are checked. Reset-phase separation (`formal.phase`):
   `after_reset` (default; hold reset `reset_cycles` cycles to drive both into
   reset state, then deassert and miter the following cycles — free-running
   agreement), `just_reset` (hold every primary reset asserted each cycle and
@@ -87,8 +87,12 @@ everything the encoder needs.
   solver may still assert them, exploring odd reset patterns), `full` (require
   agreement in BOTH `just_reset` and `after_reset`). Primary resets are auto-detected (inputs that drive a
   flop `reset_pin`, plus canonical `rst`/`reset`/`*_n` names with polarity
-  inferred) or given explicitly via `lec.reset`.
-- **auto — parallel portfolio** (`lec.engine=auto`): race the inductive miter and
+  inferred) or given explicitly via `formal.reset` (`formal.reset=rst_ni,clr_i:hi`
+  when the heuristic mislabels an input; the asserted level follows the flop's
+  `negreset`, or an `_n`/`_ni` suffix for a name-detected input). The verdict
+  detail line reports the resolved phase and warns `no primary reset input
+  found` when nothing was detected.
+- **auto — parallel portfolio** (`formal.engine=auto`): race the inductive miter and
   the BMC-from-reset engine as **two forked worker processes** (cvc5 cross-instance
   thread-safety is unverified, so separate processes — free kill of the loser),
   and take the first **trustworthy** verdict. The pairing is complementary
@@ -100,10 +104,10 @@ everything the encoder needs.
   must never hard-fail the build); BMC bounded-**Proven** (no CEX ≤ bound) ⇒
   accepted as PASS by the bounded-proof policy (`try_bounded_proven`), disclosed
   as bounded — cycles beyond the bound stay unproven, and the bound is part of the
-  verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `lec.timeout`
+  verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `formal.timeout`
   bounds each worker, so a hard miter self-limits and the portfolio degrades to
   inconclusive rather than hanging.
-- **Register-cone decomposition** (`lec.cones`, default on): the classical
+- **Register-cone decomposition** (`formal.lec.cones`, default on): the classical
   compare-point method (van Eijk's register correspondence; "compare points" in
   Formality/Conformal). Cutting at name-matched registers already makes each
   next-state cut an *independent combinational miter* — so before cvc5 sees the
@@ -133,7 +137,7 @@ everything the encoder needs.
   conflicts, while the rewriting/fraiging that dominates a datapath cone runs
   unbounded — an 8-bit multiplier-reassociation miter of ~1k AIG nodes takes ~40s
   at *any* conflict limit), so the pass runs in a **forked child under a deadline**
-  carved out of `lec.timeout`, streaming each verdict back as it lands; a cone the
+  carved out of `formal.timeout`, streaming each verdict back as it lands; a cone the
   deadline cuts off simply stays with cvc5.
 - **The cone cache** (`--workdir`, with the verdict cache): each cone is keyed by
   `cone_digest` — a 128-bit structural hash of its obligation term — and every
@@ -176,13 +180,13 @@ everything the encoder needs.
   detail. `off` disables; `iand | sum | bitwise | bv` force that cvc5 mode from
   the first solve. Only what cvc5 solves is affected — the abc cone pre-pass
   above is bit-level by construction and untouched.
-- **Tier-2 uncertain state correspondence** (`lec.state_pairing`, default on):
+- **Tier-2 uncertain state correspondence** (`formal.lec.state_pairing`, default on):
   correspondence is name-first (tier-1: `canon_flop_name` + explicit
-  `lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the
+  `formal.lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the
   only unbounded-PROVEN engine — to Unknown. When unmatched state survives
   tier-1, the driver runs `pass/semdiff`'s full-match (SRP/ERP signature) pass
   per def-pair and injects the surviving pairs as **uncertain**
-  (`Lec_options::uncertain_match`; explicit `lec.match` pairs seed the
+  (`Lec_options::uncertain_match`; explicit `formal.lec.match` pairs seed the
   signatures as anchors; pairs must satisfy the reset/init-equality
   precondition, re-validated by `validate_uncertain_pairs`). `prove_equal`
   enforces the discipline itself: an unbounded inductive PROVEN is accepted —
@@ -265,7 +269,7 @@ everything the encoder needs.
   one-sided obligations, which BOTH engines gate to an incomplete
   correspondence: no Proven with unchecked obligations, no Refuted through an
   unjustified shared-box assumption — only INCONCLUSIVE.
-- **Proven-module collapse** (`lhd lec --collapse <def>` / `lec.collapse`): a def
+- **Proven-module collapse** (`lhd lec --collapse <def>` / `formal.lec.collapse`): a def
   the driver has already proven equivalent is **forced** to the blackbox path
   even when it could be flattened (so the parent stops re-solving its internals).
   A *stateless* leaf is **pairing-free** (`Comb_box`): each output is
@@ -292,7 +296,9 @@ everything the encoder needs.
   would descend into + the edge resolver would thread through) uses the hhds
   `Hier_opaque_scope` so the leaf is opaque to BOTH the walk and the
   cross-boundary edge resolution.
-- **Bottom-up hierarchical** (`lec.hier=true`): build the module-def
+- **Bottom-up hierarchical** (`formal.lec.hier=true` with
+  `formal.lec.hier_order=bottom_up`; the default `top_down` order is described in
+  [`README.md`](README.md)): build the module-def
   dependency DAG over the defs present BY NAME in both libraries, topo-order it
   **leaves-first**, and LEC each def under the `auto` portfolio. Record the proven
   set; for each parent, force-black-box its **proven** child instances (collapse,
@@ -301,13 +307,13 @@ everything the encoder needs.
   **not** collapsed: it stays flattened into the parent and is proven in context
   (the M5 CEGAR / un-black-box fallback). Correspondence is name-based, so no
   semdiff is needed when the call structures match.
-  A child the solver **REFUTED** is different (`lec.hier_refute`, default `fail`):
+  A child the solver **REFUTED** is different (`formal.lec.hier_refute=fail`, the debug mode):
   its parents are **skipped** and the block's counterexample becomes the run
   verdict. Flattening it instead would descend into logic already known to differ
   — a whole-design flat miter costing minutes of cvc5 for a verdict the block
   settled in milliseconds, and one that typically lands UNKNOWN (a witness-free
   UNKNOWN then exits 0, silently reporting a design with a known counterexample as
-  a PASS). `lec.hier_refute=escalate` restores the flatten, for the one case it
+  a PASS). `formal.lec.hier_refute=escalate` (the default) restores the flatten, for the one case it
   buys something: a block-boundary CEX can be UNREACHABLE in context, so only that
   mode can prove a top equivalent over a differing child. Either way a refuted
   block fails the run — a REFUTED def anywhere outranks an inconclusive top. A parent **REFUTED under a non-empty collapse
@@ -323,7 +329,7 @@ everything the encoder needs.
   line the instant it resolves; the TOP def's verdict is the result. (v1 walks
   the DAG sequentially; proving independent leaves in parallel is a later
   speedup.)
-- **Structural def-diff skip** (`lec.semdiff=structural`, M3): in the bottom-up
+- **Structural def-diff skip** (`formal.lec.semdiff=structural`, M3): in the bottom-up
   flow, run `pass/semdiff::structural_match` per module BEFORE the solver. A def
   whose ref/impl are **structurally identical** (no unmatched node on either side,
   flops anchored by name) **and whose children are all already proven** is dropped
@@ -370,8 +376,8 @@ unsigned sign slot, so every encoder and mapped netlist uses `bits_of` directly.
 
 **Op-semantics traps** (build the table from the real `Ntype_op`s, per
 `process_simple_node`): `Sum` — a-drivers add, **b-drivers subtract**. `SRA` —
-arithmetic (sign-preserving); there is **no** logical-rshift op. `SHL` — the `b`
-amount is **one-hot multi-driver**: `(v<<b0)|(v<<b1)|…`. `Get_mask(a,-1)` =
+arithmetic (sign-preserving); there is **no** logical-rshift op. `SHL` — `b` is a
+single-driver, self-determined unsigned amount. `Get_mask(a,-1)` =
 zero-extend; contiguous mask = part-select. `Mux` — `sel` pid0, arm `i` chosen
 when `sel==i-1`; `Hotmux` — interleaved one-bit control/value pairs and an optional trailing default (zero if absent). `LT/GT` can be multi-input (all
 a-vs-b pairs ANDed). **Decomposed at tolg, so absent as primitives:** `Mod`,
@@ -406,7 +412,7 @@ it for `type==1` only makes the miter stricter). Gated by
 
 ## `lhd lec` CLI & options
 
-`lhd lec` lives in `lhd_kernel.cpp::lec_command` and discharges via
+`lhd lec` lives in `lhd_kernel_formal.cpp::lec_command` and discharges via
 `lec::prove_equal` directly (clean `equiv_fail` error + witness). Sides take
 `--impl KIND:PATH` / `--ref KIND:PATH` (`verilog:`/`lg:`/`pyrope:`/`ln:` or a
 bare path; verilog elaborates through `--reader`, default slang). The top is
@@ -416,44 +422,65 @@ inline flattening.
 
 ```
 lhd lec --impl impl.prp --ref ref.v
-lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=bmc --set lec.phase=after_reset
-lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo   # yosys/lgcheck backend
+lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=bmc --set formal.phase=after_reset
+lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo   # yosys/lgcheck backend
+# Cross-front-end: read the same RTL through both readers and prove them equal.
+lhd compile dut.sv --reader slang       --top dut --emit-dir lg:i --workdir wi
+lhd compile dut.sv --reader yosys-slang --top dut --emit-dir lg:r --workdir wr
+lhd lec --impl lg:i --ref lg:r --top dut --workdir wl
 ```
 
-The `pass.lec` Eprp method's `add_label_optional(...)` calls **are** the `lec.*`
-switch registry (`lhd list options 'lec\..*'`, `lhd describe lec.<flag>` derive
-from them); `{"lec","pass.lec"}` in `kSetPasses[]` makes typos hard-error (never
-a silent no-op).
+Output: `PROVEN equivalent`, `REFUTED (not equivalent)` + a counterexample, or
+`UNKNOWN` + a reason (an unsupported op, a spent budget, …). Exit non-zero
+unless PROVEN.
+
+The `pass.lec` Eprp method's `add_label_optional(...)` calls **are** the switch
+registry, surfaced under TWO `--set` namespaces: a flag `lhd formal verify`
+shares (`kFormalCommonFlags`, `lhd/lhd_kernel_internal.hpp`) is `formal.<flag>`,
+everything LEC-only is `formal.lec.<flag>` (`lhd list options formal` /
+`lhd list options formal.lec` and `lhd describe formal.<flag>` derive from
+them). Both namespaces sit in `kSetPasses[]`, so a typo hard-errors (never a
+silent no-op); the old `lec.<flag>` spelling was REMOVED and is rejected with a
+pointer to the new name.
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `lec.engine` | discharge frame: `auto` (parallel portfolio) \| `bmc` \| `ind` (inductive flop-cut) \| `ic3`. Each engine is trustworthy in ONE direction, so a lone engine can report what `auto` would not: **`ind` can false-negative** (its `Refuted` is not a disproof — the step case starts from an arbitrary, possibly UNREACHABLE state, so a fail can still be a pass; only its `Proven` is definitive), and **`bmc`'s `Proven` is only bounded** (only its `Refuted` is definitive). Combinational pairs excepted: there ind-Refuted is genuine | `auto` |
-| `lec.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
-| `lec.bound` | BMC / induction depth bound `k` | `6` |
-| `lec.timeout` | per-query wall-clock seconds (`0` = none). ONE allowance for the whole query — **encode + every checkSat share it** (the encoders take what is left; each checkSat is re-armed to what remains). It is not charged per phase: before, encode and solve each took the full value, so a `120` cap cost ~250s of wall clock | `0` |
-| `lec.witness` | print the counterexample on `Refuted` (and gate the lecfail testbench below) | `true` |
+| `formal.engine` | discharge frame: `auto` (parallel portfolio) \| `bmc` \| `ind` (inductive flop-cut) \| `ic3`. Each engine is trustworthy in ONE direction, so a lone engine can report what `auto` would not: **`ind` can false-negative** (its `Refuted` is not a disproof — the step case starts from an arbitrary, possibly UNREACHABLE state, so a fail can still be a pass; only its `Proven` is definitive), and **`bmc`'s `Proven` is only bounded** (only its `Refuted` is definitive). Combinational pairs excepted: there ind-Refuted is genuine | `auto` |
+| `formal.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
+| `formal.bound` | BMC / induction depth bound `k` | `6` |
+| `formal.timeout` | SOFT TOTAL budget in seconds for the run (`0` = unbounded; a target, not a hard cap — `formal.min_timeout` is the per-unit floor that causes an overrun). ONE allowance for the whole query — **encode + every checkSat share it** (the encoders take what is left; each checkSat is re-armed to what remains) — and one TOTAL across units, not one per def. It is not charged per phase: before, encode and solve each took the full value, so a `120` cap cost ~250s of wall clock | `120` |
+| `formal.witness` | print the counterexample on `Refuted` (and gate the simfail testbench below) | `true` |
 | `formal.simfail` | with `--workdir`, write a self-contained Pyrope simulation test driving BOTH designs with the counterexample sequence. The filename is derived as `simfail_<resolved-top>.prp` | `true` |
 | `formal.simfail_run` | run the generated test through `lhd sim --set sim.vcd=true` to dump the waveform (same basename, `.vcd`) | `true` |
-| `lec.phase` | BMC reset phase: `after_reset` \| `just_reset` \| `free_toreset` \| `full` | `after_reset` |
-| `lec.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
-| `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
-| `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
-| `lec.hier` | bottom-up: LEC every def leaves-first under `lec.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
-| `lec.hier_refute` | what a REFUTED block means: `fail` (the block's counterexample is the run verdict; its parents are skipped — only a proven child collapses, so a parent over a refuted child would grind out a whole-design flat miter) \| `escalate` (flatten it and prove the parents anyway, so a top PROVEN over a differing block still passes) | `fail` |
-| `lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
-| `lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |
-| `lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
-| `lec.cones` | register-cone (compare-point) decomposition: bit-blast each per-cut obligation into an AIG and discharge it with abc, subtracting every cone abc proves from the cvc5 obligation. `auto` \| `true` (also report each cone's outcome) \| `false` | `auto` |
-| `lec.conelimit` | per-cone abc SAT conflict budget (`0` = abc's own default) | `10000` |
-| `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
+| `formal.phase` | BMC reset phase: `after_reset` \| `just_reset` \| `free_toreset` \| `full` | `after_reset` |
+| `formal.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
+| `formal.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
+| `formal.lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
+| `formal.lec.hier` | hierarchical decomposition (`formal.lec.hier_order`: `top_down`, the default, or the legacy `bottom_up` leaves-first order described above): LEC every def under `formal.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
+| `formal.lec.hier_refute` | what a REFUTED block means: `fail` (the block's counterexample is the run verdict; its parents are skipped — only a proven child collapses, so a parent over a refuted child would grind out a whole-design flat miter) \| `escalate` (flatten it and prove the parents anyway, so a top PROVEN over a differing block still passes) | `escalate` |
+| `formal.lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
+| `formal.lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |
+| `formal.lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
+| `formal.lec.cones` | register-cone (compare-point) decomposition: bit-blast each per-cut obligation into an AIG and discharge it with abc, subtracting every cone abc proves from the cvc5 obligation. `auto` \| `true` (also report each cone's outcome) \| `false` | `auto` |
+| `formal.lec.conelimit` | per-cone abc SAT conflict budget (`0` = abc's own default) | `10000` |
+| `formal.lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 
 The `lgyosys` solver shells out to `inou/yosys/lgcheck` (yosys `equiv`, the
 former `lhd check`) — the only backend that reads Verilog without a front-end
 reader, kept as a **bring-up cross-check oracle** and the path for gate-level
 netlists; the goal is to *replace* it (it does not scale past combinational
-logic). It is **never** on the production trust path.
+logic). It is **never** on the production trust path. Rule of thumb: the
+**cvc5** default for graphs, cross-front-end checks, and whenever the yosys SAT
+blows up (memory / register-file equivalence is SAT-hard for bit-blasting;
+cvc5 uses bit-vector + array reasoning and reachable-state unrolling);
+`formal.solver=lgyosys` for Verilog-in-hand and gate-level netlists. lgcheck
+runs `equiv_make` + `equiv_simple` + `equiv_induct`, then a **bounded miter**
+of `LGCHECK_BMC_STEPS` cycles (environment variable, default 5) whose
+counterexample lands in lgcheck's `lgcheck_bmc.log`; the per-step log is the
+`lec.lgcheck` entry under `--workdir`. Exit 0 = equivalent; non-zero =
+`equiv_fail` (or timeout).
 
-## The lecfail witness testbench (`lhd lec --workdir DIR`)
+## The simfail witness testbench (`lhd lec --workdir DIR`)
 
 When `--workdir` is set, a **REFUTED** verdict does more than print a
 counterexample string: it drops a runnable, self-contained Pyrope reproduction
@@ -461,13 +488,14 @@ into the workdir. `formal.simfail` writes `simfail_<resolved-top>.prp`, a single
 
 - **both designs** re-emitted as Pyrope (`lhd compile --emit-dir pyrope:`; the
   ref side's modules are prefixed `lecref_` on a name clash),
-- a wrapper `mod __lecfail_dut_pair` that instantiates BOTH and exposes their
+- a wrapper `mod __simfail_dut_pair` that instantiates BOTH and exposes their
   outputs as `impl_<o>` / `ref_<o>`, and
 - a `test` that drives the BMC counterexample's exact per-cycle input sequence
   (reset-hold prologue included) via `const _drv_<in> = [...]` arrays.
 
 `formal.simfail_run` (default true, active with `--workdir`) then runs `lhd sim
---set sim.vcd=true` on it, producing **one** VCD (`lecfail.vcd`) whose
+--set sim.vcd=true` on it, producing **one** VCD (`simfail_<resolved-top>.vcd`,
+beside `simfail_<resolved-top>.json` — the same trace, machine readable) whose
 `impl_*` vs `ref_*` traces show exactly where and how the two designs diverge —
 open it in a waveform viewer, or edit the `.prp` and re-run. The trace is the
 uncapped structured witness the BMC engine records (`Query_result::trace`); the
@@ -475,6 +503,46 @@ inductive engine's single-step CEX is not a reachable-from-reset sequence, so it
 produces no testbench (a plain `auto`/`bmc` REFUTE always does). Turn the whole
 thing off with `formal.witness=false` or `formal.simfail=false`; keep only the `.prp`
 with `formal.simfail_run=false`. Regression: `pass/lec/tests/lec_witness_prpfail_test.sh`.
+
+Two shapes matter when reading one:
+
+- **Import vs inline.** When both sides are `.prp` files with DISTINCT stems and
+  a `pub` top, the test `import`s the ORIGINALS, so fixing the bug and re-running
+  the SAME test picks the fix up — re-run it with both sources passed
+  positionally (the header line spells the command out). Nothing is re-emitted in
+  that case, so a construct `pass.prp_writer` cannot yet write does not cost you
+  the testbench. Otherwise (an `lg:`/Verilog side, a non-`pub` top —
+  `simfail-top-not-pub` warns — or colliding stems) each side is re-emitted as
+  Pyrope and inlined, with ref-side name clashes renamed to `lecref_*`; that form
+  is self-contained but cannot follow an edit to the original.
+- **Struct ports are driven per leaf.** A test can only poke a named top-level
+  port, so `io:(valid:u1, bits:(x:u4))` becomes the flat wrapper ports
+  `io__valid` / `io__bits__x`, rebuilt into the struct at each call site
+  (`io.bits.x = io__bits__x`). A leaf only one side declares appears on the
+  wrapper and is bound only on that side.
+
+`lhd formal verify` writes the same artifacts for a refuted obligation
+(`simfail_<formal-test>.prp`), wrapping a struct-ported DUT the same way and
+re-checking the violated statement in the test body so the replay FAILS on it.
+
+To read the replayed VALUES back without opening a waveform, re-run the test
+under [`lhd sim --query`](https://masc-ucsc.github.io/docs/pyrope/09b-simquery/)
+— the wrapper exposes the two sides as `_lec_dut.impl_<out>` /
+`_lec_dut.ref_<out>`, so `{"op":"changes","signal":"_lec_dut.impl_o", …}` gives
+the transitions and `{"op":"values","kind":"flop","at":{"cycle":N}}` gives the
+state cut. Mind the sampling rule: a flop reports its SETTLED end-of-period
+value while an output reports what it drove DURING the period, so the state a
+cycle-N output inherits is the flop read at cycle N-1.
+
+## Current limitations
+
+- `Fflop` is not encoded (`fail_unsupported` in `encode.cpp`); a `Latch` is
+  encoded only through the phase scheduler (`formal.lec.phase_sched`, default
+  on) and is refused the same way with it off. `--trust DEF` /
+  `formal.lec.trust` is the disclosed escape hatch for a def the encoder cannot
+  model; `formal.ignore_memory` the analogue for a memory.
+- **`ind` incompleteness** — a false REFUTE on an unreachable state (use `bmc`;
+  `auto` already treats an ind-Refute as a hint, see above).
 
 ## Build facts (cvc5)
 
@@ -505,7 +573,7 @@ cgen Verilog from the **same** graph and LEC them via `lgcheck` — any
 disagreement is an encoder bug caught before it can mask a real design diff.
 
 `cone_abc_test` applies the same idea to the cone bit-blaster, which is the
-soundness boundary of `lec.cones` (a proven cone is *subtracted* from the cvc5
+soundness boundary of `formal.lec.cones` (a proven cone is *subtracted* from the cvc5
 obligation): every case — hand-picked identities, the shift/compare/extend
 boundaries, and a randomized fuzz over the whole supported op set — asks cvc5 and
 abc the same question and fails on any disagreement. Using the SMT solver as the

@@ -1,0 +1,15 @@
+/*
+:name: unsigned_slice_zext
+:type: equiv
+*/
+// `unsigned(x)` of an already-unsigned x is the identity, and a bit window
+// wider than the value is a plain ZERO extension -- `a#[0..=7]` of a 2-bit 3
+// is still 3. `unsigned(s)` of a signed s keeps its bit pattern.
+comb unsigned_slice_zext(x:u3, s:s4) -> (y:u8, z:u8, w:u4) {
+  const a = 3
+  const b = a#[0..=7]
+  cassert(b == a)
+  y = unsigned(x)#[0..=7]
+  z = (unsigned(x)#[0..=7]) + 1
+  w = unsigned(s)#[0..=3]
+}

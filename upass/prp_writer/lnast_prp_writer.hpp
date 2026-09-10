@@ -286,6 +286,13 @@ private:
   // mask that selects every bit of one can be dropped as a no-op. Only `uN`: on
   // a signed `sN` the same mask REINTERPRETS the value, which is a real op.
   absl::flat_hash_map<std::string, int> port_bits_;
+  // ELEMENT width of a declared single-dimension `[N]uW` array, by array name.
+  // Kept apart from port_bits_ on purpose: port_bits_ answers "how wide is a
+  // read of this NAME", and for an array that is the whole packed value (N*W),
+  // so recording W there would let a whole-array mask be dropped as a no-op
+  // and silently narrow it. This map is consulted ONLY for a single-index
+  // element read (`arr[i]`), where every element is exactly one uW.
+  absl::flat_hash_map<std::string, int> array_elem_bits_;
   void                                  note_port_width(std::string_view name, std::string_view type_txt);
   bool                                  is_whole_width_mask(Lnast_nid src, int lo, int hi) const;
   static std::string                    fmt_bit_range(std::string_view s, int lo, int hi);
@@ -417,7 +424,7 @@ private:
   // Reg/memory flop attributes the slang reader emits as standalone `attr_set`
   // statements (`r.[initial]=N`, `r.[reset_pin]=rst`, `data.[fwd]=0`, …).
   // Pyrope only accepts attribute writes folded into the DECLARATION
-  // (`reg r:T:[init=N, reset_pin=rst]`), so write_module pre-collects them here
+  // (`reg r:T:[initial=N, reset_pin=rst]`), so write_module pre-collects them here
   // keyed by variable name (assembled "k=v, k=v" body) and write_declare emits
   // the `:[…]` suffix; the standalone attr_set statements are then skipped.
   absl::flat_hash_map<std::string, std::string>                      folded_attrs_;

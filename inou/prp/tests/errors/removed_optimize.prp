@@ -1,0 +1,7 @@
+/*
+:name: removed_optimize
+:type: error
+:error: undefined function.*optimize
+:help: check the spelling
+*/
+const x = optimize("x") // locate_error_here

@@ -35,6 +35,14 @@ struct Prove_options {
   int  budget_k                 = 256;
   // Pre-solve gate: a cone larger than this skips the solver entirely -> Unknown.
   int  cone_max                 = 50000;
+  // Wall-clock cap for ONE checkSat, in ms (cvc5 `tlimit-per`). 0 = none, and
+  // the deterministic `budget_k` rlimit alone bounds a query, so the same config
+  // yields the same verdict on every machine and build mode. A non-zero cap
+  // trades that reproducibility for a BOUNDED compile (pass.formal.timeout draws
+  // it down as its total budget drains). Degrading is sound either way: a
+  // time-out is `unknown` -> Verdict::Unknown -> the obligation stays a runtime
+  // check, never a wrong verdict.
+  int  timeout_ms               = 0;
   // Synthesis queries cut each memory dout to an independent free word.
   bool memory_as_symbols        = false;
   bool reject_unknown_constants = false;
@@ -81,6 +89,18 @@ public:
   // Drop every hypothesis (used after a confirmed contradiction: proving under an
   // impossible environment is worse than proving nothing).
   void clear_assumes() { assumes_.clear(); }
+
+  // Re-arm the per-query wall cap (Prove_options::timeout_ms) between queries, so
+  // a caller holding a TOTAL budget can hand each query only what is left of it.
+  void set_timeout_ms(int ms) { opts_.timeout_ms = ms; }
+
+  // Solver-free: does cond's cone cut a Flop/Memory? The same deterministic
+  // cone walk that classifies a query's `Query_out::stateful`, without
+  // encoding or solving, for a caller that skipped the query (e.g. out of
+  // budget) but still needs the classification. Conservative: a cone the
+  // encoder cannot handle (Sub/Fflop/Latch) answers true, since a Sub may
+  // hide state.
+  bool stateful_cone(const hhds::Pin_class& cond);
 
 private:
   // Demand-encode dpin's cone to a Val; nullopt if unsupported / over budget.

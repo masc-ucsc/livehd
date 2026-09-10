@@ -28,7 +28,13 @@
 // `lhd compile` defaults to fast; compile.formal.mode=none disables it; standalone
 // `lhd pass formal` defaults to normal. Set with --set compile.formal.mode=...
 // (or `lhd pass formal --set mode=...`). budget_k/cone_max are mode-independent
-// (0 = built-in default). The first built-in obligation is Hotmux selector
+// (0 = built-in default). `timeout` (default 10s, 0 = unbounded) is the pass's
+// own TOTAL wall-clock solver budget -- unrelated to `formal.timeout`, which
+// belongs to `lhd formal verify` / `lhd lec`. It exists because property
+// checking is otherwise unbounded compile time (measured on minion: 52.5 s of a
+// 55 s compile); an obligation left unsolved by it stays a runtime check, so the
+// degrade is sound, at the price of making WHICH properties get elided depend on
+// the machine. The first built-in obligation is Hotmux selector
 // one-hotness; user assert/assert_always/assume materialized in tolg are handled
 // here too. The add_label_optional registry below IS the pass.formal.* option
 // set. See todo/livehd/2f-verify.

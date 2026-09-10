@@ -1,0 +1,20 @@
+/*
+:name: range_step_value
+:type: parsing lnast comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+cassert((0..<30 step 10) == (0, 10, 20))
+cassert((0..=10 step 2) == (0, 2, 4, 6, 8, 10))
+cassert((3..+7 step 3) == (3, 6, 9))
+cassert((-4..=4 step 3) == (-4, -1, 2))
+const stride = 3
+const plain = 0..=5
+const stepped = plain step stride
+cassert(stepped == (0, 3))
+cassert(plain == (0, 1, 2, 3, 4, 5))
+cassert((2..<2 step 3) == ())
+cassert((4..=4 step 10) == (4,))
+mut total = 0
+for i in stepped { total += i }
+cassert(total == 3)

@@ -1847,7 +1847,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // a reset/init bus to hang the reset on. With per-entry writes alone the
       // reset is silently DROPPED — measured: PMAEntryHandleModule,
       // RegCacheAgeTimer_1 and RobEnqPtrWrapper all LEC-REFUTED that way, and a
-      // 4-line `reg m:[4]u8:[init=0, reset_pin=ref rst, async=true]` loses its
+      // 4-line `reg m:[4]u8:[initial=0, reset_pin=ref rst, async=true]` loses its
       // reset today with no diagnostic at all. Such arrays stay a flat flop bus,
       // which does reset correctly, until the memory lowering grows a reset for
       // the per-port shape.

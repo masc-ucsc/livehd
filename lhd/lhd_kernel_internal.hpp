@@ -47,8 +47,8 @@ struct Set_pass {
   enum class List : uint8_t {
     all,       // canonical namespace: list every label
     none,      // accepted alias (legacy spelling): list nothing
-    common,    // list only the labels in kFormalCommonFlags
-    specific,  // list only the labels NOT in kFormalCommonFlags
+    common,    // list only the pass.lec labels in kFormalCommonFlags
+    specific,  // list every label except pass.lec's kFormalCommonFlags
   } list = List::all;
 };
 
@@ -57,9 +57,10 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize",      "assume_check", "bound",       "engine", "hier_preflight", "jobs",   "mine",    "min_timeout",
-    "partitions",          "phase",        "report",      "reset",  "reset_cycles",   "retry",  "rlimit",  "solver",
-    "spec_mining_timeout", "simfail",      "simfail_run", "split",  "stats",          "strict", "timeout", "witness",
+    "allow_oversize", "assume_check",        "bound",   "engine",      "hard_timeout_mult", "ignore_memory", "jobs",   "mine",
+    "min_timeout",    "partitions",          "phase",   "report",      "reset",             "reset_cycles",  "retry",  "rlimit",
+    "solver",         "spec_mining_timeout", "simfail", "simfail_run", "split",             "stats",         "strict", "timeout",
+    "witness",
 };
 
 // REMOVED namespaces/flags (no back-compat): using one
@@ -108,6 +109,9 @@ inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] =
      "the budget scheduler is no longer a mode: accounting is ON whenever formal.timeout>0 and formal.rlimit==0, and "
      "the deterministic tier is selected by setting formal.rlimit (which owns the bound by itself). Drop the flag; use "
      "--set formal.rlimit=N for the old budget_mode=rlimit behavior"},
+    {     "absorb",
+     "the synth algorithms colour the flat view now, so crossing a module boundary is the default, not a size-triggered "
+     "inline; min_ge no longer doubles as the absorb threshold (pass.color.max_gate bounds a `cones` region instead)"},
 };
 
 inline constexpr Set_pass kSetPasses[] = {

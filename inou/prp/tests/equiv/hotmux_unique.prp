@@ -7,9 +7,10 @@
 
 // 1a-ops: `unique if` lowers to ONE Hotmux per merged variable (not a Mux
 // chain). The conditions decode distinct values of `x`, so they are provably
-// mutually exclusive and the packed selector (cond bits + none-of bit) is
-// one-hot by construction — LEC against the golden priority chain holds.
-// No `else` arm: the none-of slot falls through to the pre-if value (d).
+// mutually exclusive and the Hotmux control pins (one per cond, interleaved
+// with their values) are one-hot by construction — LEC against the golden
+// priority chain holds. No `else` arm: the pre-if value (d) is the trailing
+// default port, selected when no control is set.
 // `compile` additionally runs the O2 graph recipe (pass.cprop +
 // pass.bitwidth) over the Hotmux cell.
 pub comb dec(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {

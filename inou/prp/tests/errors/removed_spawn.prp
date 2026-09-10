@@ -1,0 +1,7 @@
+/*
+:name: removed_spawn
+:type: error
+:error: undefined function.*spawn
+:help: check the spelling
+*/
+const x = spawn("x") // locate_error_here

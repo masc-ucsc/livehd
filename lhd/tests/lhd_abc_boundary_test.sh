@@ -15,7 +15,20 @@
 #   incremental    : a second run is all hits, starts no ABC, and emits the
 #                    byte-identical (refined) netlist -- the cache holds the
 #                    refined bodies and the refinement is skipped
+#
+# The re-size runs in ROUNDS (`boundary_rounds`), and the two halves of the
+# environment arrive at different rounds. The exact loads and drivers are there
+# from round one; the arrival/required BUDGETS travel one region hop per round.
+# This fixture's upsize is entirely the second kind -- what makes the NAND
+# critical is the delay through region 2, which reaches region 1 only after the
+# budget has walked back through the wrapper -- so it needs THREE rounds, and
+# the runs that assert the upsize ask for them explicitly. The default is one
+# round (case 1b pins what that alone does), so a run without $ROUNDS below is
+# testing the default, not this contract.
 set -u
+
+# The rounds the propagated-budget contract needs; NOT the default (see above).
+ROUNDS="--set abc.boundary_rounds=3"
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/timing.lib
@@ -40,9 +53,10 @@ run() {
 
 run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 
-# 1. boundary on (the default): the driver region takes the stronger NAND
+# 1. boundary on: with the budget propagated back across the hierarchy, the
+# driver region takes the stronger NAND
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_on" --set synth.liberty="$LIB" \
-    --set abc.delay=25 --workdir "$W/w_on"
+    --set abc.delay=25 $ROUNDS --workdir "$W/w_on"
 python3 - "$W/w_on/qor.json" "$TOP" <<'PY' || fail "boundary=true qor.json has no boundary scoreboard"
 import json, sys
 q = json.load(open(sys.argv[1]))
@@ -55,6 +69,23 @@ run compile lg:"$W/net_on" --top "$TOP" --emit-dir verilog:"$W/v_on" --workdir "
 grep -q "NAND2x2" "$W/v_on/${TOP}__c1.v" || fail "boundary=true left the crossing driver on NAND2x1"
 grep -q "pass.abc boundary: .* cell(s) re-sized" "$W/w_on/logs/"*_lhd_pass_abc.log \
   || fail "no boundary refinement summary in the pass log"
+
+# 1b. the DEFAULT single round: the exact environment is still built (the
+# scoreboard reports the same crossing bits, and the region is timed under the
+# real loads -- delay_pre), but one round carries no budget across a region
+# hop, so this fixture's upsize does not fire. Pinning it keeps the two halves
+# of the mechanism apart: a future default that resizes here is a change worth
+# noticing, not a silent improvement.
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_1r" --set synth.liberty="$LIB" \
+    --set abc.delay=25 --workdir "$W/w_1r"
+python3 - "$W/w_1r/qor.json" "$TOP" <<'PY' || fail "the default single round lost the boundary environment"
+import json, sys
+q = json.load(open(sys.argv[1]))
+b = q["total"]["boundary"]
+assert b["bits"] > 0 and b["rounds"] == 1, b
+c1 = [r for r in q["regions"] if r["module"] == sys.argv[2] + "__c1"][0]
+assert c1["boundary"]["delay_pre"] > 0, c1
+PY
 
 # 2. boundary off: the old behaviour, load-free ports
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
@@ -121,10 +152,10 @@ echo "PASS: boundary-sized netlist is LEC-equivalent to the partition twin"
 I="$W/incr"
 mkdir -p "$I"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net1" --set synth.liberty="$LIB" \
-    --set abc.delay=25 --workdir "$I/w"
+    --set abc.delay=25 $ROUNDS --workdir "$I/w"
 run compile lg:"$I/net1" --top "$TOP" --emit-dir verilog:"$I/v1" --workdir "$I/wv1"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net2" --set synth.liberty="$LIB" \
-    --set abc.delay=25 --workdir "$I/w"
+    --set abc.delay=25 $ROUNDS --workdir "$I/w"
 grep -q '"incremental":{"hits":[1-9][0-9]*,"misses":0' "$I/w/qor.json" || fail "second run was not all hits: $(grep -o '"incremental":{[^}]*}' "$I/w/qor.json")"
 grep -q '"abc_started":0' "$I/w/qor.json" || fail "all-hit run started ABC"
 grep -q "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_abc.log && {

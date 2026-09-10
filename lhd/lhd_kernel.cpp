@@ -53,6 +53,19 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
       }
     }
   }
+  // A REMOVED namespace (kRenamedSetPasses: `lec.*`, `compile.sim.*`, ...) is
+  // kept verbatim so check_known_set_passes raises its directed "was removed"
+  // error. Without this, `lec.solver` under a `formal.lec` command path would
+  // collect the prefix and resolve to `formal.lec.solver` -- the deliberate
+  // removal diagnostic would silently disappear.
+  if (auto pos = key.rfind('.'); pos != std::string_view::npos) {
+    auto ns = key.substr(0, pos);
+    for (const auto& rn : kRenamedSetPasses) {
+      if (rn.old_ns == ns) {
+        return std::string{key};
+      }
+    }
+  }
   auto names_a_pass = [](std::string_view candidate) {
     auto pos = candidate.rfind('.');
     return pos != std::string_view::npos && !set_pass_method(candidate.substr(0, pos)).empty();
@@ -134,10 +147,14 @@ std::vector<Set_option> list_set_options() {
       if (attr.help.starts_with("DEPRECATED") || attr.help.starts_with("INTERNAL")) {
         continue;
       }
-      if (sp.list == Set_pass::List::common && !is_formal_common(flag)) {
+      // kFormalCommonFlags is a pass.lec vocabulary: the common/specific split
+      // keys on (method, flag), so a pass.formal label that merely SHARES a
+      // name with a pass.lec one (timeout, reset) is not hidden by collision.
+      const bool is_lec_common = sp.method == "pass.lec" && is_formal_common(flag);
+      if (sp.list == Set_pass::List::common && !is_lec_common) {
         continue;
       }
-      if (sp.list == Set_pass::List::specific && is_formal_common(flag)) {
+      if (sp.list == Set_pass::List::specific && is_lec_common) {
         continue;
       }
       out.push_back(Set_option{std::format("{}.{}", sp.set_name, flag), std::string{sp.method}, attr.default_value, attr.help});

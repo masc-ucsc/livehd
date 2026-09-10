@@ -334,20 +334,21 @@ today, for the record:
 
 | knob | default | source |
 |---|---|---|
-| `pass.abc.flow` (comb) | `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put` | `abc_map.cpp:61` |
-| `pass.abc.flow` (seq) | same string | `abc_map.cpp:75` |
-| `pass.abc.delay` `{D}` | **empty — i.e. `&nf` runs UNCONSTRAINED** | `pass_abc.cpp:70` |
-| `pass.abc.load` `{L}` | empty | `pass_abc.cpp:71` |
-| `pass.abc.adder` | **`rca`** (ripple-carry) | `pass_abc.cpp:73` |
-| `pass.abc.block_size` | `0` (auto) | `pass_abc.cpp:74` |
-| `pass.abc.multiplier` | `array` (only kind implemented) | `abc_map.hpp:44` |
-| `pass.abc.register` / `memory` | `true` / `true` (memories bit-blast to DFF cells up to `memory_max_bits`, default 65536) | `pass_abc.cpp` |
-| `pass.color.synth_alg` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp:56` |
-| `pass.color.min_ge` | `500` GE (still shapes `absorb` under `cones`) | `pass_color.cpp:66` |
-| `pass.color.max_ge` | `5000` synthesis GE (`synth_alg=synth` \| `pipe` only) | `pass_color.cpp:74` |
-| `pass.color.max_gate` | `5000` PREDICTED AIG (`synth_alg=cones` -- the shipped default) | `pass_color.cpp:91` |
-| `pass.color.absorb` | `true` | `pass_color.cpp:107` |
-| `pass.color.name_weight` | `4` | `pass_color.cpp:112` |
+| `pass.abc.flow` (comb) | empty => the built-in `kCombFlow`: `strash; &get -n; &sweep; &synch2 -K 6 -C 500; &if -m -K 6; &mfs; &save; &dch -C 500; &if -m -K 6; &mfs; &save; &load; &st; &sopb -R 10 -C 4; &synch2 -K 6 -C 500; &if -m -K 6; &mfs; &save; &dch -C 500; &if -m -K 6; &mfs; &save; &load; &st; &nf {D}; &put -o`. With the DEFAULT empty `delay` the mapper actually runs `kAreaFlow` (`strash; &get -n; &fraig -x -C 500; &put; dc2; strash; &get -n; &dch -f -C 500; &nf {D}; &put -o`); a built-in flow also gets the `kBufferTail` `; buffer -N {F}; dnsize {B}` when `max_fanout != 0` | `abc_map.cpp` (`kCombFlow`, `kAreaFlow`, `kBufferTail`) |
+| `pass.abc.flow` (seq) | same string (`kSeqFlow = kCombFlow`, and `seq_flow()` just returns `comb_flow()`) | `abc_map.cpp` (`kSeqFlow`) |
+| `pass.abc.delay` `{D}` | **empty — i.e. `&nf` runs UNCONSTRAINED** | `pass_abc.cpp` (`delay`) |
+| `pass.abc.load` `{L}` | empty | `pass_abc.cpp` (`load`) |
+| `pass.abc.adder` | **`auto`** (starts ripple-carry, trials `cla`/`cska`) | `pass_abc.cpp` (`adder`) |
+| `pass.abc.block_size` | `0` (auto) | `pass_abc.cpp` (`block_size`) |
+| `pass.abc.multiplier` | **`auto`** (serial partial-product addition, trials a balanced `tree`) | `pass_abc.cpp` (`multiplier`) |
+| `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
+| `pass.abc.memory` | `auto` (fold a memory within `memory_max_bits`, or over 3 ports whatever the size) | `pass_abc.cpp` (`memory`) |
+| `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |
+| `pass.color.synth_alg` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`synth_alg`) |
+| `pass.color.min_ge` | `500` GE (`synth`/`pipe` only; `cones` does not honour it) | `pass_color.cpp` (`min_ge`) |
+| `pass.color.max_ge` | `5000` synthesis GE (`synth_alg=synth` \| `pipe` only) | `pass_color.cpp` (`max_ge`) |
+| `pass.color.max_gate` | `30000` PREDICTED AIG (`synth_alg=cones` -- the shipped default) | `pass_color.cpp` (`max_gate`) |
+| `pass.color.name_weight` | `4` | `pass_color.cpp` (`name_weight`) |
 
 Known starting point (minion, 3-pass incremental, pre-PDK-change):
 
@@ -424,11 +425,14 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
   critical path (`crit_output` / `crit_src` are already recorded per region in
   `Region_qor`) back into the next partition so cuts prefer slack-rich nets.
   Larger change; hold until W1.1 has shown how much size alone buys.
-- **W1.3 `absorb` / `name_weight` interaction.** `absorb=true` structurally
-  inlines sub-`min_ge` defs; `name_weight=4` binds tighter across anonymous
+- **W1.3 `name_weight`.** `name_weight=4` binds tighter across anonymous
   crossings specifically to keep boundaries on names the incremental cache can
   reuse, and is documented "QoR-neutral at the default". Verify that claim — it
-  is a W4 (cache) knob sitting inside a W1 (QoR) mechanism.
+  is a W4 (cache) knob sitting inside a W1 (QoR) mechanism. (The `absorb` half
+  of this item is gone: `color.absorb` was removed — the synth algorithms
+  colour the flat view now, so crossing a module boundary is the default rather
+  than a size-triggered rewrite, and `min_ge` no longer doubles as an inline
+  threshold.)
 - **W1.4 `synth_alg=pipe` vs `synth` vs `cones`.** Measure; it is a one-flag
   experiment. `cones` (todo/livehd/2c-color-synthcones.html) decides region SIZE
   while it decides region SHAPE: one backward cone per register `din` and per
@@ -505,22 +509,24 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
 
 ### W2 — abc: recipe and arithmetic (delay)
 
-- **W2.1 `adder` architecture — the strongest single hypothesis in this plan.**
-  The default is **`rca`**, a ripple-carry adder: the *worst possible* delay
-  structure, shipped as the default under a delay-primary objective. `cska` and
-  `cla` are already implemented (`abc_arith.hpp`, unit-tested without an ABC
-  dependency). Sweep `adder` × `block_size` across all targets and pick a
-  shared default. Expect area cost — that is what the §4.4 guardrail is for.
-- **W2.2 Flow string.** Both comb and seq resolve to the same
-  `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`. Explore
+- **W2.1 `adder` architecture.** Largely overtaken: `adder` now defaults to
+  **`auto`**, which starts from ripple-carry and already trials `cla`/`cska`
+  per region (the ware trials in `abc_ware.cpp`). When this item was written the
+  default was a bare `rca`, the *worst possible* delay structure under a
+  delay-primary objective. What is left: sweep `block_size` across all targets,
+  and audit the `auto` selector's objective. Expect area cost — that is what
+  the §4.4 guardrail is for.
+- **W2.2 Flow string.** Both comb and seq resolve to the same built-in flow
+  (`kCombFlow` with a delay target, `kAreaFlow` without one — see §5). Explore
   the standard ABC alternatives already aliased in (`resyn2`, `compress2rs`,
   … installed at `abc_map.cpp` `kAbcAliases`), `&if` vs `&nf`, and repeating
   `&dch`. Each candidate is one shared string; measure delay, area **and**
   abc_ms — this stream trades directly against W-runtime.
 - **W2.3 `{L}` load constraint.** Unset today. Cheap to sweep alongside W2.1.
-- **W2.4 Multiplier architecture.** `array` is the only `Mult_kind`
-  implemented, and the header names the enum as the extension point for
-  Booth / Wallace-tree. A Wallace tree is a large delay win on any
+- **W2.4 Multiplier architecture.** `array` and a balanced `tree` exist
+  (`multiplier=auto` trials the tree); Booth / Wallace do not — `abc_arith.hpp`
+  says outright that `tree` is not a carry-save Wallace tree, and names the
+  enum as the extension point. A Wallace tree is a large delay win on any
   multiply-bound path. Implementation work, not a knob — schedule only if the
   ledger shows a multiplier on a critical path.
 - **W2.5 Sequential flow.** `seq_flow` is currently a copy of `comb_flow`;

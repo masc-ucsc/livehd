@@ -621,10 +621,9 @@ void harvest_sta_incremental(Result& res, std::string_view sta_json) {
 void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
-    throw Lhd_error{
-        "usage",
-        "pass requires a subcommand: color <alg> | partition | satopt | abc | opentimer | liberty gensim | semdiff | analyze",
-        "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
+    throw Lhd_error{"usage",
+                    std::format("pass requires a subcommand: {}", kPassSubcommands),
+                    "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
   }
   const std::string sub = opts.files[0];
 
@@ -1007,10 +1006,7 @@ void pass_command(Options& opts, Result& res) {
     merge_sets(opts, "pass.analyze", labels);
     run_step("pass.analyze", var, labels, opts, res);
   } else {
-    throw Lhd_error{"usage",
-                    std::format("unknown pass subcommand '{}'", sub),
-                    "use: color <alg> | partition | single_edge | satopt | abc | opentimer | formal | liberty gensim | semdiff "
-                    "| analyze"};
+    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), std::format("use: {}", kPassSubcommands)};
   }
   finish_graph_output();
 }

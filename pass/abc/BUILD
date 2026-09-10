@@ -196,3 +196,18 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "ware_module_test",
+    srcs = ["ware_module_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/prp:abc_tests"],
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "//graph",
+        "//pass/liberty:pass_liberty",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
+)

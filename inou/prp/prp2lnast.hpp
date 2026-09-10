@@ -104,7 +104,7 @@ protected:
 
   // True when `n` (the CST subtree of a statement-position expression) can have
   // an observable side effect — a function call, an assignment, an attribute
-  // write (`::[attr=…]`), a spawn, a lambda, or an embedded scope / control /
+  // write (`::[attr=…]`), a lambda, or an embedded scope / control /
   // if / match. A pure expression (arithmetic, reads, tuples, constants) has
   // none, so discarding its value at statement position is useless.
   [[nodiscard]] bool expr_has_side_effects(TSNode n) const;

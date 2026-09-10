@@ -1445,10 +1445,11 @@ void Partitioner::build_module_as_top(uint32_t r) {
     // Incremental pre-body (see build_module). Skipped when flattening, and only
     // here: this path is taken when the def collapsed to ONE region, so under
     // `flatten_` that region is the whole design -- nothing to reuse, and its
-    // edge tables are the largest transient in the run. `pre_lib` must outlive
+    // edge tables are the largest transient in the run. A ware specialization
+    // is a reusable primitive even when flattened internally. `pre_lib` must outlive
     // the synchronous hook_.
     hhds::GraphLibrary pre_lib;
-    if (build_pre_ && !flatten_ && rb.reuse_eligible) {
+    if (build_pre_ && (!flatten_ || g_->get_input_node().attr(livehd::attrs::ware_module).has()) && rb.reuse_eligible) {
       rb.pre_name = "p_" + top_;
       rb.pre_body = build_pre_body_as_top(r, pre_lib, rb.pre_name, rnodes);
       rb.pre_lib  = &pre_lib;
@@ -1973,13 +1974,15 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
 
   if (flatten_resolved(g, flatten)) {
     for (auto* def : order) {
-      if (def == g || !def->get_input_node().attr(livehd::attrs::memory_module).has()) {
+      if (def == g
+          || (!def->get_input_node().attr(livehd::attrs::memory_module).has()
+              && !def->get_input_node().attr(livehd::attrs::ware_module).has())) {
         continue;
       }
       if (auto existing = outlib->find_io(def->get_name()); existing && existing->get_graph()) {
-        continue;  // a nested preserved memory was emitted with its parent
+        continue;  // a nested preserved implementation was emitted with its parent
       }
-      // Flatten only INSIDE the memory. A previously mapped memory can itself
+      // Flatten only INSIDE the preserved implementation. A mapped body can itself
       // contain region/helper definitions, which must be emitted too.
       if (!build_decomposition(graphs,
                                outlib,
@@ -1992,7 +1995,11 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                batch_size)) {
         return false;
       }
-      outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
+      if (auto a = def->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
+        outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::ware_module).set(a.get());
+      } else {
+        outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
+      }
     }
     // Inline the hierarchy into a scratch def in the output library, run ONE
     // Partitioner on it (top's own name), then drop the scratch def — it must
@@ -2019,6 +2026,11 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   batch_hook,
                   batch_size);
     bool        ok = p.run();
+    if (ok) {
+      if (auto a = g->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
+        outlib->find_io(top)->get_graph()->get_input_node().attr(livehd::attrs::ware_module).set(a.get());
+      }
+    }
     if (ok && g->get_input_node().attr(livehd::attrs::memory_module).has()) {
       outlib->find_io(top)->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
     }
@@ -2043,6 +2055,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   batch_size);
     if (!p.run()) {
       return false;
+    }
+    if (auto a = def->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
+      outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::ware_module).set(a.get());
     }
     if (def->get_input_node().attr(livehd::attrs::memory_module).has()) {
       outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);

@@ -1,0 +1,18 @@
+/*
+:name: nil_variable_equality
+:type: parsing lnast comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+const z = nil
+const alias = z
+mut m = nil
+cassert(z == nil)
+cassert(alias == m)
+cassert(z != 5)
+cassert(6 != alias)
+cassert(not (m == 6))
+const a = 42
+cassert(a.[totally_made_up] == nil)
+cassert(a.[totally_made_up] != 12345)
+cassert(z != (1, 2))

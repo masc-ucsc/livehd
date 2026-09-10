@@ -60,8 +60,8 @@ struct Ictx {
 
 class Flattener {
 public:
-  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_memories)
-      : top_(top), lib_(lib), preserve_memories_(preserve_memories), origin_(origin) {}
+  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules)
+      : top_(top), lib_(lib), preserve_modules_(preserve_modules), origin_(origin) {}
 
   std::shared_ptr<hhds::Graph> run(std::string_view flat_name);
 
@@ -70,11 +70,11 @@ private:
   hhds::GraphLibrary*                 lib_;
   hhds::Graph*                        flat_ = nullptr;
   std::deque<Ictx>                    arena_;  // stable pointers
-  bool                                failed_            = false;
-  bool                                preserve_memories_ = false;
+  bool                                failed_           = false;
+  bool                                preserve_modules_ = false;
   // Optional flat-node -> (def, source node) sink. Filled at the single site
   // that mints a clone, so it cannot drift from node_map.
-  livehd::partition::Flat_origin_map* origin_            = nullptr;
+  livehd::partition::Flat_origin_map* origin_           = nullptr;
 
   // Defs on the current instantiation path — a def re-entered while still open
   // is a recursive hierarchy (would recurse forever / overflow the stack).
@@ -265,7 +265,9 @@ void Flattener::create_nodes(Ictx* ctx) {
       return;
     }
     if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr
-        && !(preserve_memories_ && n.get_subnode_graph()->get_input_node().attr(livehd::attrs::memory_module).has())) {
+        && !(preserve_modules_
+             && (n.get_subnode_graph()->get_input_node().attr(livehd::attrs::memory_module).has()
+                 || n.get_subnode_graph()->get_input_node().attr(livehd::attrs::ware_module).has()))) {
       // Design instance: recurse — its internals become flat nodes with a
       // longer prefix; the Sub itself dissolves (edges hop through it in
       // resolve_driver). The child shared_ptr is owned by the source library
@@ -593,8 +595,8 @@ std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outli
 }
 
 std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
-                                               Flat_origin_map* origin, bool preserve_memories) {
-  Flattener f(top, lib, origin, preserve_memories);
+                                               Flat_origin_map* origin, bool preserve_modules) {
+  Flattener f(top, lib, origin, preserve_modules);
   return f.run(flat_name);
 }
 

@@ -225,6 +225,15 @@ struct runtime_check_t {
 };
 inline constexpr runtime_check_t runtime_check{};
 
+// On an arithmetic ware graph's input node: canonical specialization
+// descriptor, including every port's width/sign and the section options.
+// Synthesis preserves this boundary; STA/LEC may flatten the implementation.
+struct ware_module_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr ware_module_t ware_module{};
+
 // On a memory implementation graph's input node. Synthesis preserves this
 // module boundary; consumers such as STA may explicitly flatten its body.
 struct memory_module_t {
@@ -357,6 +366,8 @@ inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<ware_module_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<memory_module_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<memory_async_reset_t> = Attr_kind::node;
@@ -399,6 +410,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(match)                          \
   X(proven)                         \
   X(runtime_check)                  \
+  X(ware_module)                    \
   X(memory_module)                  \
   X(memory_async_reset)             \
   X(aggregate_origin)               \

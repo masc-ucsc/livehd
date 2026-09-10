@@ -188,7 +188,13 @@ void Sticky_handler::mark(std::string_view var, std::string_view bucket) {
   const auto field = Bundle::get_all_but_first_level(var);
   auto       b     = st_->get_bundle_for_write(root);
   if (!b) {
-    return;  // unbound name (e.g. a tmp before its producer): nothing to carry
+    // Attributes run before the value producer. Keep a binding for the
+    // metadata so folding the fresh temporary can preserve its sticky state.
+    (void)st_->set(std::string(root), std::make_shared<Bundle>(std::string(root)));
+    b = st_->get_bundle_for_write(root);
+    if (!b) {
+      return;
+    }
   }
   // Explicit attr VALUES share the canonical sticky key
   // (`debug="trace"` and the propagation marker are both "_debug"): marking

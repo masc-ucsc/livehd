@@ -2603,7 +2603,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           undef_matrix = edge.driver;
         } else if (name == "update") {
           whole = true;
-        } else if (name == "update_enable" || name == "reset" || name == "init" || name == "bits" || name == "size"
+        } else if (name == "update_enable" || name == "reset" || name == "initial" || name == "bits" || name == "size"
                    || name == "wensize" || name == "posclk") {
           // Cell-global pins share the raw 0..15 block with port zero. Keep
           // them out of the per-port table before suffix matching: notably,
@@ -2667,7 +2667,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         const size_t port = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
         bool         used = false;
         if (whole && !registered && (consumer_site.output_port == Ntype::Memory_readall_pid || target != nullptr)) {
-          used = name == "update" || name == "update_enable" || name == "reset" || name == "init";
+          used = name == "update" || name == "update_enable" || name == "reset" || name == "initial";
         }
         if (target != nullptr && type != 1 && port < ports.size()) {
           const auto& shape        = ports[port];

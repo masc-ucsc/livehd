@@ -1,0 +1,8 @@
+/*
+:name: computed_width_call
+:type: error
+:error: a function call cannot be used as a type
+:help: explicit generic parameters
+*/
+const W = 8
+const a:u(W) = 3

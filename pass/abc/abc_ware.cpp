@@ -53,11 +53,12 @@ void Mapper::remember_ware(const livehd::partition::Region_body& rb, const Map_o
   Ware_region w;
   uint64_t    ge = 0;
   for (auto n : rb.nodes) {
-    ge       += gu::synthesis_ge_weight(n);
-    auto op   = gu::type_op_of(n);
-    w.add    |= options.auto_adder && (op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT);
-    w.mult   |= options.auto_multiplier && op == Ntype_op::Mult;
-    w.barrel |= options.auto_barrel && (op == Ntype_op::SHL || op == Ntype_op::SRA);
+    ge      += gu::synthesis_ge_weight(n);
+    auto op  = gu::type_op_of(n);
+    w.add   |= options.auto_adder
+               && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
+    w.mult  |= options.ware_arith && options.auto_multiplier && op == Ntype_op::Mult;
+    w.barrel |= options.ware_shift && options.auto_barrel && (op == Ntype_op::SHL || op == Ntype_op::SRA);
   }
   if ((!w.add && !w.mult && !w.barrel) || (options.large_ge && ge >= options.large_ge)) {
     return;
@@ -88,9 +89,22 @@ void Mapper::remember_ware(const livehd::partition::Region_body& rb, const Map_o
     }
     w.rb.src = w.source.get();
   }
+  // Small extracted primitives retain their original pre-map snapshot for
+  // candidate reuse. Inlined regions keep the bounded baseline-only policy.
+  if (rb.src->get_input_node().attr(attrs::ware_module).has() && rb.pre_body && rb.pre_lib
+      && ware_pre_.copy_from(*rb.pre_lib, rb.pre_name)) {
+    w.rb.pre_name = rb.pre_name;
+    w.rb.pre_lib  = &ware_pre_;
+    w.rb.pre_body = ware_pre_.find_io(rb.pre_name)->get_graph().get();
+  }
   w.options = options;
   if (!ware_shells_.copy_from(*outlib_, rb.module_name)) {
     return;
+  }
+  // The partitioner stamps preservation metadata after its callback returns.
+  // Trials restore this earlier shell, so carry the marker into it explicitly.
+  if (auto a = rb.src->get_input_node().attr(attrs::ware_module); a.has()) {
+    ware_shells_.find_io(rb.module_name)->get_graph()->get_input_node().attr(attrs::ware_module).set(a.get());
   }
   ware_regions_.push_back(std::move(w));
 }
@@ -223,21 +237,40 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
       opts_              = candidate.options;
       w.rb.nodes         = w.nodes;
       const size_t count = qor_.size();
+      incr_              = nullptr;
+      std::unique_ptr<Incr_cache> candidate_cache;
+      if (saved_cache && w.rb.pre_body) {
+        const auto& o   = candidate.options;
+        const auto  key = std::format("a{}_b{}_m{}_s{}",
+                                      static_cast<int>(o.adder),
+                                      o.block_size,
+                                      static_cast<int>(o.multiplier),
+                                      o.reverse_barrel);
+        candidate_cache = std::make_unique<Incr_cache>(saved_cache->dir() + "/ware/" + name + "/" + key, saved_cache->salt(), true);
+        incr_           = candidate_cache.get();
+      }
       map_region(w.rb);
+      // Persist the independent mapped candidate before selection/rollback.
+      // Criticality is re-scored against the current assembled design on every
+      // run; the cache never stores the context-dependent winning decision.
+      if (incr_) {
+        incr_->save();
+      }
       const bool mapped  = qor_.size() == count + 1 && refusal_.empty() && time_refusal_.empty();
       auto       trial_q = mapped ? qor_.back() : previous;
       if (qor_.size() > count) {
         qor_.resize(count);
       }
-      auto       trial_score  = mapped ? score_ware(outlib, top) : Ware_score{};
-      const bool keep         = trial_score.valid
-                                && ware_qor_better(score, trial_score, timing)
-                                // Area-only sections must not degrade another section's
-                                // constrained stitched paths.
-                                && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
-      trial_q.ware_trials     = previous.ware_trials + 1;
-      const double trial_ms   = mapped ? trial_q.ms : 0.0;
-      trial_q.ms             += previous.ms;
+      auto       trial_score      = mapped ? score_ware(outlib, top) : Ware_score{};
+      const bool keep             = trial_score.valid
+                                    && ware_qor_better(score, trial_score, timing)
+                                    // Area-only sections must not degrade another section's
+                                    // constrained stitched paths.
+                                    && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
+      trial_q.ware_trials         = previous.ware_trials + 1;
+      const bool   candidate_hit  = mapped && !trial_q.resynth;
+      const double trial_ms       = mapped ? trial_q.ms : 0.0;
+      trial_q.ms                 += previous.ms;
       if (keep) {
         trial_q.ware_selected = candidate.label;
         qor_[row]             = std::move(trial_q);
@@ -256,9 +289,13 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
                  score.area,
                  trial_score.valid ? trial_score.area : -1.0,
                  keep ? "keep" : "reject");
+      if (incr_) {
+        std::print("[pass.abc] ware candidate cache {}\n", candidate_hit ? "hit" : "miss");
+      }
       if (keep) {
         score = std::move(trial_score);
       }
+      incr_ = nullptr;  // candidate_cache releases its libraries at the end of this iteration
       if (!refusal_.empty() || !time_refusal_.empty()) {
         std::print("[pass.abc] ware: trial budget reached; retained previous module: {}{}\n", refusal_, time_refusal_);
         refusal_.clear();

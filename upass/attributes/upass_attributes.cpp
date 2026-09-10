@@ -461,9 +461,9 @@ void uPass_attributes::process_attr_set() {
         if (runner_st != nullptr) {
           // Decl_kind IS upass::Mode (same enum); the outer guard already
           // excluded unknown.
-          upass::Mode m = kind;
-          const auto root  = Bundle::get_first_level(target);
-          const auto fpath = Bundle::get_all_but_first_level(target);
+          upass::Mode m     = kind;
+          const auto  root  = Bundle::get_first_level(target);
+          const auto  fpath = Bundle::get_all_but_first_level(target);
           if (auto wb = runner_st->get_bundle_for_write(root); wb && m != upass::Mode::unknown) {
             if (fpath.empty()) {
               if (wb->get_mode() == upass::Mode::unknown) {
@@ -582,8 +582,8 @@ void uPass_attributes::process_attr_get() {
     move_to_parent();
     return;
   }
-  std::string base_text{current_text()};
-  auto        base = normalize_name(base_text);
+  std::string base_text{lm->current_raw_text()};
+  auto        base = normalize_name(current_text());
   std::string attr_name;
   if (move_to_sibling()) {
     attr_name = std::string{current_text()};

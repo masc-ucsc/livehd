@@ -27,7 +27,7 @@ src.write_text('''module top(input [63:0] a,b, input [3:0] c,d, output y, output
 assign y=a<b; assign short_sum=c+d; assign passthrough=a;
 endmodule
 ''')
-base = synth('base', src, '--set', 'abc.ware=false')
+base = synth('base', src, '--set', 'abc.adder=rca', '--set', 'abc.multiplier=array', '--set', 'abc.barrel=log')
 auto = synth('auto', src)
 assert trials(auto) > 0, auto
 assert sum(r['area'] for r in auto) <= sum(r['area'] for r in base), (base, auto)

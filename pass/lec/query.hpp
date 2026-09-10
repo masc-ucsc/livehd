@@ -666,37 +666,37 @@ inline constexpr int kLecMaxUnroll = 100000;
 // "" if bound/reset_cycles are in [0, kLecMaxUnroll], else a human message.
 inline std::string lec_options_range_error(const Lec_options& o) {
   if (o.bound < 0 || o.bound > kLecMaxUnroll) {
-    return "lec.bound out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.bound);
+    return "formal.bound out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.bound);
   }
   if (o.reset_cycles < 0 || o.reset_cycles > kLecMaxUnroll) {
-    return "lec.reset_cycles out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.reset_cycles);
+    return "formal.reset_cycles out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.reset_cycles);
   }
   if (o.phase != "after_reset" && o.phase != "just_reset" && o.phase != "free_toreset" && o.phase != "full") {
-    return "lec.phase unknown '" + o.phase + "' (after_reset | just_reset | free_toreset | full)";
+    return "formal.phase unknown '" + o.phase + "' (after_reset | just_reset | free_toreset | full)";
   }
   if (o.engine != "bmc" && o.engine != "ind" && o.engine != "ic3" && o.engine != "auto") {
-    return "lec.engine unknown '" + o.engine + "' (bmc | ind | ic3 | auto)";
+    return "formal.engine unknown '" + o.engine + "' (bmc | ind | ic3 | auto)";
   }
   if (o.semdiff != "none" && o.semdiff != "structural") {
-    return "lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
+    return "formal.lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
   }
   if (o.decompose != "auto" && o.decompose != "true" && o.decompose != "false" && o.decompose != "on" && o.decompose != "off"
       && o.decompose != "1" && o.decompose != "0") {
-    return "lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
+    return "formal.lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
   }
   if (o.cones != "auto" && o.cones != "true" && o.cones != "false" && o.cones != "on" && o.cones != "off" && o.cones != "1"
       && o.cones != "0") {
-    return "lec.cones unknown '" + o.cones + "' (auto | true | false)";
+    return "formal.lec.cones unknown '" + o.cones + "' (auto | true | false)";
   }
   if (o.conelimit < 0) {
-    return "lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
+    return "formal.lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
   }
   if (o.hard_timeout_mult < 0) {
     return "formal.hard_timeout_mult must be >= 0 (0 = disabled), got " + std::to_string(o.hard_timeout_mult);
   }
   if (o.int_blast != "auto" && o.int_blast != "off" && o.int_blast != "iand" && o.int_blast != "sum" && o.int_blast != "bitwise"
       && o.int_blast != "bv") {
-    return "lec.int_blast unknown '" + o.int_blast + "' (auto | off | iand | sum | bitwise | bv)";
+    return "formal.lec.int_blast unknown '" + o.int_blast + "' (auto | off | iand | sum | bitwise | bv)";
   }
   return {};
 }

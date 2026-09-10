@@ -51,19 +51,3 @@ def lhd_verilog(name, top, srcs, out, reader = "yosys-verilog", visibility = Non
         ),
         visibility = visibility,
     )
-
-def lhd_pyrope_lnast(name, srcs, outdir, visibility = None):
-    """Elaborate Pyrope sources into an `ln:` TreeArtifact (hhds Forest dir)."""
-    native.genrule(
-        name = name,
-        srcs = srcs + [_LHD],
-        outs = [outdir],
-        cmd = (
-            "$(location {lhd}) elaborate ".format(lhd = _LHD) +
-            _src_locations(srcs) +
-            " --workdir $(RULEDIR)/{name}.lhd_work".format(name = name) +
-            " --emit-dir ln:$(location {outdir})".format(outdir = outdir) +
-            " --quiet"
-        ),
-        visibility = visibility,
-    )

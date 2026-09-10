@@ -58,7 +58,7 @@ per-step logs land under `--workdir`. Examples:
 ```
 lhd compile foo.v --reader yosys-verilog --top foo --emit verilog:out.v
 lhd compile foo.prp --emit-dir lg:foo_lgs/ --emit-dir lnast-dump:dumps/
-lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo --set lec.solver=lgyosys
+lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo --set formal.solver=lgyosys
 lhd synth foo.prp --top foo --workdir W --stats   # compile -> color synth -> abc -> opentimer, one shot
 ```
 Graph compilation always runs constant propagation followed by bitwidth

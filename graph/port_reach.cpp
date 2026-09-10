@@ -458,7 +458,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
               }
             } else if (pn == "update") {
               update = e.driver;
-            } else if (pn == "update_enable" || pn == "reset" || pn == "init" || pn == "bits" || pn == "size"
+            } else if (pn == "update_enable" || pn == "reset" || pn == "initial" || pn == "bits" || pn == "size"
                        || pn == "wensize") {
             } else if (pn.ends_with("clock_pin")) {
               has_clock = true;

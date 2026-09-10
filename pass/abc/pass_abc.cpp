@@ -30,6 +30,7 @@
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
 #include "satopt_memory.hpp"
+#include "ware_module.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
@@ -188,7 +189,7 @@ void Pass_abc::setup() {
                        "rounds of the exact boundary re-size: each round sizes every region under the loads and drivers as "
                        "they stand plus the arrival/required budgets the previous round propagated across the hierarchy (a "
                        "path through k regions needs k rounds)",
-                       "3");
+                       "1");
   m.add_label_optional("io_load",
                        "load in fF on a primary output of the design (a port of --top), and on any port whose sink cannot "
                        "be resolved; negative = one typical input pin of the library (the mean input capacitance over its "
@@ -196,11 +197,6 @@ void Pass_abc::setup() {
                        "-1");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
-  m.add_label_optional(
-      "ware",
-      "automatically compare implementations: with delay, prefer fastest stitched Liberty timing on critical paths; "
-      "without delay, minimize mapped area across all eligible regions. Explicit ware selectors disable their search",
-      "true");
   m.add_label_optional("adder",
                        "auto|rca|cska|cla: auto compares mapped area or critical-path timing, including inlined arithmetic",
                        "auto");
@@ -733,7 +729,7 @@ void Pass_abc::work(Eprp_var& var) {
   auto boundary_drive      = std::string{var.get("boundary_drive", "")};
   bool boundary_buffer     = truthy(var.get("boundary_buffer", "true"));
   auto io_load_s           = std::string{var.get("io_load", "-1")};
-  auto boundary_rounds_s   = std::string{var.get("boundary_rounds", "3")};
+  auto boundary_rounds_s   = std::string{var.get("boundary_rounds", "1")};
   bool verbose             = truthy(var.get("verbose", "false"));
   auto adder_s             = std::string{var.get("adder", "auto")};
   auto bs_s                = std::string{var.get("block_size", "0")};
@@ -908,9 +904,7 @@ void Pass_abc::work(Eprp_var& var) {
   }
   const auto memory_fold = livehd::abc::parse_memory_fold(memory_s);
   if (!memory_fold.has_value()) {
-    livehd::diag::err("pass.abc", "bad-memory", "io")
-        .msg("pass.abc: memory must be true|false|auto, got '{}'", memory_s)
-        .fatal();
+    livehd::diag::err("pass.abc", "bad-memory", "io").msg("pass.abc: memory must be true|false|auto, got '{}'", memory_s).fatal();
     return;
   }
   uint64_t memory_max_bits = 1024;
@@ -951,7 +945,7 @@ void Pass_abc::work(Eprp_var& var) {
     io_load = v;
   }
 
-  int boundary_rounds = 3;
+  int boundary_rounds = 1;
   {
     auto* b      = boundary_rounds_s.data();
     auto* e      = boundary_rounds_s.data() + boundary_rounds_s.size();
@@ -1002,7 +996,6 @@ void Pass_abc::work(Eprp_var& var) {
   opts.load              = load;
   opts.verbose           = verbose;
   opts.adder             = adder.value();
-  opts.ware              = truthy(var.get("ware", "true"));
   opts.auto_adder        = adder_s == "auto" && block_size == 0;
   opts.auto_multiplier   = mult_s == "auto";
   auto barrel            = std::string{var.get("barrel", "auto")};
@@ -1112,6 +1105,18 @@ void Pass_abc::work(Eprp_var& var) {
   }
   // Extract before partitioning: a lowered memory remains a named instance,
   // even when its parent is flattened. The child body comes from cgen RTL.
+  livehd::abc::Ware_policy ware_policy;
+  for (const auto& graph : scratch_graphs) {
+    if (graph && graph->get_name() == top) {
+      ware_policy = livehd::abc::ware_policy(*graph);
+      break;
+    }
+  }
+  opts.ware_arith   = ware_policy.arith;
+  opts.ware_cmp     = ware_policy.cmp;
+  opts.ware_shift   = ware_policy.shift;
+  auto ware_modules = livehd::abc::build_ware_modules(scratch_graphs, ware_policy);
+  resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
   auto memory_modules = livehd::abc::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
 

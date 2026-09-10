@@ -3044,9 +3044,7 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     auto var0 = std::string(strip_prefix(lnast->get_name(var_nid)));
     folded_keys_.insert(var0 + "\x01" + key);  // record (var,orig-key) for write_attr_set skip
 
-    if (key == "initial") {
-      key = "init";
-    } else if (key == "sync") {
+    if (key == "sync") {
       key = "async";
       val = (val == "false" || val == "0") ? "true" : "false";
     }
@@ -4063,6 +4061,22 @@ std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_d
 
   auto c0 = lnast->get_child(n);
   switch (t) {
+    case N::Lnast_ntype_tuple_get: {
+      // `arr[i]` -- a SINGLE-key read of a declared `[N]uW` array is one uW
+      // element, whatever the index: unsigned, W bits. tuple_get children are
+      // (dst, base, key...). Exactly one key, or this is a nested / 2-D /
+      // named-field read, which is not an element of that array.
+      auto base = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0);
+      auto key  = base.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(base);
+      if (base.is_invalid() || key.is_invalid() || !lnast->get_sibling_next(key).is_invalid() || !N::is_ref(lnast->get_type(base))) {
+        return std::nullopt;
+      }
+      const auto it = array_elem_bits_.find(std::string(strip_prefix(lnast->get_name(base))));
+      if (it == array_elem_bits_.end()) {
+        return std::nullopt;
+      }
+      return it->second;
+    }
     case N::Lnast_ntype_get_mask: {
       // The emitted `s#[lo..=hi]` is an unsigned select of hi-lo+1 bits. A
       // ONE-bit select is excluded: its constant fold is the signed -1/0
@@ -4232,6 +4246,24 @@ std::optional<std::string> Lnast_prp_writer::const_lane_value(Lnast_nid n, int64
 }
 
 void Lnast_prp_writer::note_port_width(std::string_view name, std::string_view type_txt) {
+  // `[N]uW` (one dimension): record the ELEMENT width for element reads. The
+  // whole-array width is deliberately NOT entered in port_bits_ (see the
+  // array_elem_bits_ note in the header).
+  if (type_txt.size() > 3 && type_txt.front() == '[') {
+    const auto close = type_txt.find(']');
+    if (close != std::string_view::npos && close + 2 < type_txt.size() && type_txt[close + 1] == 'u') {
+      const auto dim = type_txt.substr(1, close - 1);
+      const auto wtx = type_txt.substr(close + 2);
+      const bool ok_dim = !dim.empty() && std::all_of(dim.begin(), dim.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+      const bool ok_w   = !wtx.empty() && std::all_of(wtx.begin(), wtx.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+      if (ok_dim && ok_w && wtx.size() <= 6) {
+        if (const int w = std::stoi(std::string(wtx)); w > 0) {
+          array_elem_bits_.emplace(std::string(name), w);
+        }
+      }
+    }
+    return;
+  }
   if (type_txt.size() < 2 || type_txt.front() != 'u') {
     return;
   }

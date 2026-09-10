@@ -1789,6 +1789,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# pass.formal's TOTAL wall-clock budget (compile.formal.timeout): property
+# checking is otherwise unbounded compile time. It must BIND (a tiny budget stops
+# discharging obligations) and DEGRADE SOUNDLY (an exhausted budget defers to
+# runtime checks and still compiles), read against the default-budget baseline.
+sh_test(
+    name = "formal_budget_test",
+    srcs = ["formal_budget_test.sh"],
+    data = ["//lhd"],
+)
+
 # Design-body assumptions constrain the existing hierarchical LEC translation.
 # Assumption-bearing child cones stay transparent until box-boundary contracts
 # exist; contradictory unchecked contracts are rejected as vacuous.
@@ -1925,4 +1935,11 @@ sh_test(
     size = "large",
     srcs = ["lhd_memory_hierarchy_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests", "//ware:cgen_memory_rtl"],
+)
+
+sh_test(
+    name = "lhd_ware_options_smoke",
+    size = "large",
+    srcs = ["lhd_ware_options_smoke.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )

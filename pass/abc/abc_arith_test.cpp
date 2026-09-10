@@ -331,3 +331,34 @@ TEST(abc_arith, reverse_barrel_and_tree_multiplier) {
     }
   }
 }
+
+TEST(abc_arith, nary_sum_mixed_width_signed_subtract) {
+  ByteOps  ops;
+  uint64_t rng = 918273;
+  for (auto kind : kKinds) {
+    for (int out_w : {1, 7, 13, 31, 63}) {
+      const uint64_t mask = (uint64_t{1} << out_w) - 1;
+      for (size_t count = 0; count <= 17; ++count) {
+        for (int trial = 0; trial < 40; ++trial) {
+          std::vector<Sum_operand<B>> operands;
+          uint64_t                    expected = 0;
+          for (size_t i = 0; i < count; ++i) {
+            rng                       = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+            const int      width      = 1 + (rng >> 32) % 32;
+            const bool     sign       = (rng >> 40) & 1;
+            const bool     sub        = (rng >> 41) & 1;
+            const uint64_t input_mask = (uint64_t{1} << width) - 1;
+            uint64_t       value      = rng & input_mask;
+            operands.push_back({to_bits(value, width), sign, sub});
+            if (sign && (value & (uint64_t{1} << (width - 1)))) {
+              value |= ~input_mask;
+            }
+            expected = sub ? expected - value : expected + value;
+          }
+          EXPECT_EQ(from_bits(build_sum(kind, 4, ops, operands, out_w)), expected & mask)
+              << "width=" << out_w << " operands=" << count;
+        }
+      }
+    }
+  }
+}

@@ -70,7 +70,7 @@ grep -qF 'reg rot:[4]u10:[ordering="old", reset_pin=ref rst_i, async=true] = (0,
 # ── and the one whose reset could not survive stays flat ────────────────────
 grep -q 'reg ptr:u40' "$prp" \
   || fail "array whose reset would be dropped did not stay a flat bus"
-grep -q 'init=0xc0200400' "$prp" || fail "flat reset pattern was not preserved"
+grep -q 'initial=0xc0200400' "$prp" || fail "flat reset pattern was not preserved"
 
 # ── and the whole module is still the same circuit ──────────────────────────
 [ -s "$W/out.v" ] || fail "Verilog was not emitted"

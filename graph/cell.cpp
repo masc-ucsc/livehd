@@ -1,4 +1,5 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for
+//  details.
 
 #include "cell.hpp"
 
@@ -58,9 +59,9 @@ Ntype::_init::_init() {
 
       sink_pid2name[pid][op] = pin_name;
 
-      auto [it, inserted] = name2pid.emplace(pin_name, pid);
+      auto [it, inserted] = name2pid[op].emplace(pin_name, pid);
       if (!inserted) {
-        I(it->second == pid);  // same name should always have same PID
+        I(it->second == pid);  // a name has one PID within its cell type
       }
 
       if (static_cast<Ntype_op>(op) != Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10) {
@@ -70,7 +71,7 @@ Ntype::_init::_init() {
       // First-claim-wins on the per-op first-char slot: two sink names of the
       // same op may share a leading char (Flop posclk/pipe_min/pipe_max all
       // start with 'p'); the later pins resolve through get_sink_pid's slow
-      // path (global name2pid + per-op verify) instead of this table.
+      // path (the cell type's name2pid map) instead of this table.
       if (sink_name2pid[pin_name[0]][op] == livehd::Port_invalid) {
         sink_name2pid[pin_name[0]][op] = pid;
       }
@@ -129,8 +130,8 @@ Ntype::_init::_init() {
 constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id pid) {
   switch (op) {
     case Ntype_op::Invalid: return "invalid"; break;
-    case Ntype_op::Sum:
-    case Ntype_op::LT:
+    case Ntype_op::Sum    :
+    case Ntype_op::LT     :
     case Ntype_op::GT:
       // a,b are multi-driver sinks (drivers folded: Sum sums, LT/GT reduce) ->
       // 's'-suffixed names. Keep in sync with Ntype::is_sink_single_driver.
@@ -142,10 +143,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       return "invalid";
       break;
     case Ntype_op::Mult:
-    case Ntype_op::And:
-    case Ntype_op::Or:
-    case Ntype_op::Xor:
-    case Ntype_op::Ror:
+    case Ntype_op::And :
+    case Ntype_op::Or  :
+    case Ntype_op::Xor :
+    case Ntype_op::Ror :
     case Ntype_op::EQ:
       // single multi-driver sink a -> "as".
       if (pid == 0) {
@@ -160,12 +161,13 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       return "invalid";
       break;
     case Ntype_op::Sext:
-    case Ntype_op::Div:
-    case Ntype_op::Rem:
-    case Ntype_op::SRA:
+    case Ntype_op::Div :
+    case Ntype_op::Rem :
+    case Ntype_op::SRA :
     case Ntype_op::SHL:
       // a,b are single-driver positional operands -> plain names. (SHL no longer
-      // folds multiple one-hot shift amounts on b; that runtime form was removed.)
+      // folds multiple one-hot shift amounts on b; that runtime form was
+      // removed.)
       if (pid == 0) {
         return "a";
       } else if (pid == 1) {
@@ -176,16 +178,18 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::Nconst:  // No drivers to Constants
       return "invalid";
       break;
-    case Ntype_op::Mux:     // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
+    case Ntype_op::Mux:  // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ?
+                         // pid2 : pid1
       if (pid == 0) {
         return "s";
       }
       [[fallthrough]];
-    case Ntype_op::IO:
-    case Ntype_op::LUT:     // unlimited case: 1,2,3,4,5....
-    case Ntype_op::Sub:     // unlimited case: 1,2,3,4,5....
-    case Ntype_op::Hotmux:     // (control, value) pairs, optional trailing default
-    case Ntype_op::Concat:  // unlimited case: INTERLEAVED (value, width) pairs; lane i at 2i/2i+1
+    case Ntype_op::IO    :
+    case Ntype_op::LUT   :  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Sub   :  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Hotmux:  // (control, value) pairs, optional trailing default
+    case Ntype_op::Concat:  // unlimited case: INTERLEAVED (value, width) pairs;
+                            // lane i at 2i/2i+1
       assert(is_unlimited_sink(op));
       // p0..p15 -- the whole 0..Memory_port_stride-1 range that `sink_pid2name`
       // can hold. It used to stop at p10, leaving 11..15 as "invalid": pid >= 16
@@ -210,7 +214,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 12: return "p12";
         case 13: return "p13";
         case 14: return "p14";
-        case 15: return "p15";  // >15 handled by the Memory_port_stride wrap in get_sink_name
+        case 15:
+          return "p15";  // >15 handled by the Memory_port_stride wrap in
+                         // get_sink_name
         default: return "invalid";
       }
       return "invalid";
@@ -223,42 +229,60 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 3: return "din";        // runtime  x n_ports
         case 4: return "enable";     // runtime  x n_ports
         case 5:
-          return "fwd";             // comptime x 1 -- per-(READ-port,WRITE-port) forwarding MATRIX: bit
-                                    // (r*n_wr + w) set => read port r sees write port w's new data on a
-                                    // same-cycle same-address collision (r/w = read/write ordinals, n_wr =
-                                    // the cell's TOTAL write-port count). A zero row => that read returns
-                                    // the committed contents. A 1-read-port memory encodes bit-identically
-                                    // to the old per-write-port mask. Built from the Pyrope `ordering`
-                                    // attr: "program" => row r is the PREFIX of writes preceding read r in
-                                    // program order; "fwd" => all ones; "none" => all zeros.
+          return "fwd";             // comptime x 1 -- per-(READ-port,WRITE-port) forwarding
+                                    // MATRIX: bit (r*n_wr + w) set => read port r sees write
+                                    // port w's new data on a same-cycle same-address collision
+                                    // (r/w = read/write ordinals, n_wr = the cell's TOTAL
+                                    // write-port count). A zero row => that read returns the
+                                    // committed contents. A 1-read-port memory encodes
+                                    // bit-identically to the old per-write-port mask. Built
+                                    // from the Pyrope `ordering` attr: "program" => row r is
+                                    // the PREFIX of writes preceding read r in program order;
+                                    // "fwd" => all ones; "none" => all zeros.
         case 6 : return "posclk";   // comptime x 1
         case 7 : return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
         case 8 : return "wensize";  // comptime x 1  -- number of Write Enable bits
         case 9 : return "size";     // comptime x 1
         case 10: return "rdport";   // comptime x n_ports (1 rd, 0 wr)
         case 11:
-          return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
-                          // restores it through a one-entry-per-cycle sweep write port (tolg). For a WHOLE-ARRAY cell (the `update`
-                          // pin is driven) `init` is RUNTIME-capable and carries the reset-value bus (entry 0 in the low `bits`).
-        // Whole-array pins (cell has these driven => one `update`/`read_all` bus instead of N per-entry ports).
-        case 12: return "update";         // runtime  x 1 -- whole-array next-state bus (size*bits, entry 0 low)
-        case 13: return "update_enable";  // runtime  x 1 -- optional bulk-update enable (absent => always-on)
-        case 14: return "reset";          // runtime  x 1 -- 1-bit reset condition (active high; tolg pre-inverts negreset)
+          return "initial";  // comptime x 1 -- contents (entry 0 in the low `bits`,
+                             // row-major); a reg array with a bound reset restores
+                             // it through a one-entry-per-cycle sweep write port
+                             // (tolg). For a WHOLE-ARRAY cell (the `update` pin is
+                             // driven) `initial` is RUNTIME-capable and carries the
+                             // reset-value bus (entry 0 in the low `bits`).
+        // Whole-array pins (cell has these driven => one `update`/`read_all` bus
+        // instead of N per-entry ports).
+        case 12:
+          return "update";  // runtime  x 1 -- whole-array next-state bus (size*bits,
+                            // entry 0 low)
+        case 13:
+          return "update_enable";  // runtime  x 1 -- optional bulk-update enable
+                                   // (absent => always-on)
+        case 14:
+          return "reset";  // runtime  x 1 -- 1-bit reset condition (active high;
+                           // tolg pre-inverts negreset)
         case 15:
-          return "undef";  // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED matrix, bit-identical
-                           // layout to `fwd`: bit (r*n_wr + w) set => read port r's data is UNDEFINED (x)
-                           // when write port w collides (same address, enabled) in the same cycle. `fwd`
-                           // and `undef` are MUTUALLY EXCLUSIVE per (r,w): fwd says "see the NEW data",
-                           // undef says "see nothing definite", both clear says "see the COMMITTED data".
-                           // That third state is why this pin exists -- a zero `fwd` row alone cannot tell
-                           // "defined old" from "undefined", which is yosys $mem_v2's
-                           // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built from the Pyrope
-                           // `ordering` attr: "none" => every USER write column set (restore/reset ports
-                           // never, exactly like `fwd`); "program"/"fwd"/"old" => all zeros.
-                           // Consumers: cgen passes it as the wrapper's UNDEF parameter (x on collision);
-                           // the cvc5 lec encoder turns it into a read-dout X bit-plane so the miter
-                           // treats the window as don't-care; every bit-blasting consumer (pass.abc,
-                           // cgen_sim) may REFINE it to any concrete value.
+          return "undef";  // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED
+                           // matrix, bit-identical layout to `fwd`: bit (r*n_wr + w)
+                           // set => read port r's data is UNDEFINED (x) when write
+                           // port w collides (same address, enabled) in the same
+                           // cycle. `fwd` and `undef` are MUTUALLY EXCLUSIVE per
+                           // (r,w): fwd says "see the NEW data", undef says "see
+                           // nothing definite", both clear says "see the COMMITTED
+                           // data". That third state is why this pin exists -- a
+                           // zero `fwd` row alone cannot tell "defined old" from
+                           // "undefined", which is yosys $mem_v2's
+                           // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built
+                           // from the Pyrope `ordering` attr: "none" => every USER
+                           // write column set (restore/reset ports never, exactly
+                           // like `fwd`); "program"/"fwd"/"old" => all zeros.
+                           // Consumers: cgen passes it as the wrapper's UNDEF
+                           // parameter (x on collision); the cvc5 lec encoder turns
+                           // it into a read-dout X bit-plane so the miter treats the
+                           // window as don't-care; every bit-blasting consumer
+                           // (pass.abc, cgen_sim) may REFINE it to any concrete
+                           // value.
         default: return "invalid";
       }
       break;

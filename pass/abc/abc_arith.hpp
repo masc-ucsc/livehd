@@ -196,6 +196,74 @@ inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, cons
   return rca_add(ops, a, b, cin);
 }
 
+// One independently sized operand of an n-input Sum. Subtract operands
+// contribute -value; signed operands extend from their own most significant bit.
+template <class Bit>
+struct Sum_operand {
+  std::vector<Bit> bits;
+  bool             is_signed = false;
+  bool             subtract  = false;
+};
+
+// A single modular n-input adder realization. Compress triples without carry
+// propagation, then use the selected architecture for the final two rows.
+// Width extension/truncation belongs here, so callers need not pad every input
+// to the largest source width. Each output realization requests its own width.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_sum(Adder_kind kind, int block_size, Ops& ops, const std::vector<Sum_operand<Bit>>& operands,
+                                  int out_w) {
+  if (out_w <= 0) {
+    return {};
+  }
+  std::vector<std::vector<Bit>> rows;
+  size_t                        negatives = 0;
+  for (const auto& operand : operands) {
+    Bit              fill = operand.is_signed && !operand.bits.empty() ? operand.bits.back() : ops.zero();
+    std::vector<Bit> row(out_w);
+    for (int i = 0; i < out_w; ++i) {
+      Bit bit = static_cast<size_t>(i) < operand.bits.size() ? operand.bits[i] : fill;
+      row[i]  = operand.subtract ? ops.inv(bit) : bit;
+    }
+    negatives += operand.subtract;
+    rows.push_back(std::move(row));
+  }
+  // The common binary subtract needs only a carry-in, not a third row.
+  if (rows.size() <= 2 && negatives <= 1) {
+    while (rows.size() < 2) {
+      rows.emplace_back(out_w, ops.zero());
+    }
+    return build_add(kind, block_size, ops, rows[0], rows[1], negatives ? ops.one() : ops.zero()).sum;
+  }
+  if (negatives) {
+    std::vector<Bit> correction(out_w, ops.zero());
+    for (int i = 0; i < out_w && negatives; ++i, negatives >>= 1) {
+      correction[i] = (negatives & 1) ? ops.one() : ops.zero();
+    }
+    rows.push_back(std::move(correction));
+  }
+  while (rows.size() > 2) {
+    std::vector<std::vector<Bit>> next;
+    size_t                        i = 0;
+    for (; i + 2 < rows.size(); i += 3) {
+      std::vector<Bit> sum(out_w), carry(out_w, ops.zero());
+      for (int bit = 0; bit < out_w; ++bit) {
+        Bit cout;
+        full_adder(ops, rows[i][bit], rows[i + 1][bit], rows[i + 2][bit], sum[bit], cout);
+        if (bit + 1 < out_w) {
+          carry[bit + 1] = cout;
+        }
+      }
+      next.push_back(std::move(sum));
+      next.push_back(std::move(carry));
+    }
+    for (; i < rows.size(); ++i) {
+      next.push_back(std::move(rows[i]));
+    }
+    rows = std::move(next);
+  }
+  return build_add(kind, block_size, ops, rows[0], rows[1], ops.zero()).sum;
+}
+
 // Restoring division. Operands have equal width; their signedness is
 // independent, so a mixed signed/unsigned expression keeps its numeric values.
 // Each step subtracts the divisor from the shifted partial remainder and keeps
@@ -301,9 +369,8 @@ inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std
 // as a barrel / log-shifter mirroring build_shl: one 2:1-mux level per amount bit
 // k conditionally shifts the running data DOWN by 2^k. A shift of 2^k >= W pulls
 // every bit past the MSB (=> all fill), so high amount bits correctly force an
-// all-fill result. The caller fits `a` and `amount` to the LEC's shift width
-// (cw = max(operand_width, output_width)) and truncates the result to the output
-// width, matching cvc5's BITVECTOR_LSHR / BITVECTOR_ASHR at cw. Needs only
+// all-fill result. Data and count vectors may have different widths: the caller
+// retains every count bit and requests only the observed output prefix. Needs only
 // zero/inv/and_/or_ from Ops (mux built inline).
 template <class Bit, class Ops>
 inline std::vector<Bit> build_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill, int out_w,

@@ -103,7 +103,7 @@ std::string const_to_verilog(const C& c, int width, bool unsign) {
   //
   // ONLY up to 64 bits: a sized Verilog literal is ZERO-extended to its declared
   // width, so spelling a 65-bit sink as `65'sh<64-bit two's complement>` turns
-  // -1 into +2^64-1 (and a whole-array memory `update`/`init` bus is routinely
+  // -1 into +2^64-1 (and a whole-array memory `update`/`initial` bus is routinely
   // size*bits wide). Past 64 bits fall through to the bit spelling, which
   // extends explicitly.
   if (!c.has_unknowns() && c.is_just_i64() && width <= 64) {
@@ -1175,8 +1175,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         return;
       }
       mem_undef_dpin = e.driver;
-    } else if (pin_name == "init") {
-      // For a plain memory `init` is the comptime power-on contents; for a
+    } else if (pin_name == "initial") {
+      // For a plain memory `initial` is the comptime power-on contents; for a
       // whole-array cell (the `update` pin is driven) it is the RUNTIME reset
       // value bus, so do not force a constant here — the const-consuming paths
       // (wrapper INIT param, type-2 default fill) only run when there is no update.

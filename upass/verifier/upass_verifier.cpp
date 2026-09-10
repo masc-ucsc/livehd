@@ -132,7 +132,13 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   std::optional<Dlop> val;
   std::string         operand_text;
   std::string         assert_msg;  // user-supplied message (cassert's 2nd arg), if any
-  bool                got_child = move_to_child();
+  // A plain `assert` emits NO `__fkind__` sentinel (prp2lnast.cpp:2413,
+  // slang_stmt.cpp:333), so the sentinel branch below never runs for one --
+  // it must therefore DEFAULT to a design assert (kept as a runtime check),
+  // exactly like tolg's `std::string kind = "assert";`.  Defaulting to true
+  // made an unknown-valued plain assert a hard error AND dropped the node.
+  bool                elaboration_assert = false;
+  bool                got_child          = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
@@ -151,7 +157,8 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     // skip must be guarded — walking off the end leaves the cursor invalid.
     bool have_msg_child = move_to_sibling();
     if (have_msg_child && current_text().rfind("__fkind__", 0) == 0) {
-      have_msg_child = move_to_sibling();
+      elaboration_assert = current_text() == "__fkind__cassert";
+      have_msg_child     = move_to_sibling();
     }
     if (have_msg_child) {
       std::optional<Dlop> mval;
@@ -166,6 +173,24 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     }
   }
   move_to_parent();
+
+  // A constant unknown is already resolved, but it cannot establish an
+  // elaboration assertion. Report this even in comptime-only flows, where
+  // no graph-lowering pass will revisit the surviving assertion.
+  const auto comptime_value = runner_st != nullptr ? runner_st->comptime_scalar(operand_text) : val;
+  if (elaboration_assert && comptime_value && comptime_value->has_unknowns()) {
+    ++unknown_count;
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "cassert-unknown",
+        .category = "type",
+        .pass     = "upass.verifier",
+        .message  = "cassert condition is unknown at compile time",
+        .span     = span_from_nid(lm, cassert_nid),
+        .hint     = "cassert must fold to true; inspect unknown bit patterns as text in comptime tests",
+    });
+    return upass::Emit_decision::drop();
+  }
 
   const bool known = val && !val->is_invalid() && !val->has_unknowns();
   if (!known) {
@@ -187,15 +212,11 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     return upass::Emit_decision::emit_node();  // keep for runtime
   }
 
-  // Comptime-resolved nil discharges the cassert per attributes_spec §Phase 2.
-  // An unset attribute reads as nil (`b.[unset]`, `!b.[unset]`, or any
-  // expression that propagated a nil through log_not / log_and). The user's
-  // assertion is structurally "this attribute has the expected (un)set state";
-  // resolving to nil means the upass observed no contradiction at compile time,
-  // so we treat it as a pass rather than a failure. Must come before
-  // `is_known_false`, since Type::Nil's empty bit-pattern is also `known_false`.
+  // Nil is a value, not proof of an assertion. Only a comparison such as
+  // `attr == nil` can establish the intended unset-attribute predicate.
   if (val->is_nil()) {
-    ++pass_count;
+    ++fail_count;
+    emit_false_cassert_diag(cassert_nid, operand_text, "nil", assert_msg);
     return upass::Emit_decision::drop();
   }
 

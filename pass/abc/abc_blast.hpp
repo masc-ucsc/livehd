@@ -467,68 +467,23 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       }
     }
   } else if (op == Ntype_op::Sum) {
-    // result = sum(A terms, pid 0) - sum(B terms, pid 1), at width out_bits
-    // (the bitwidth-resolved result width, wide enough for carry growth).
-    // Each operand is sign/zero-extended to that width by abc_bit; A terms
-    // accumulate (cin=0), B terms subtract via two's complement (~b + 1).
-    std::vector<hhds::Pin_class> a_drv;
-    std::vector<hhds::Pin_class> b_drv;
+    std::vector<arith::Sum_operand<Bit>> operands;
     for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() == 0) {
-        a_drv.push_back(e.driver);
-      } else if (e.sink.get_port_id() == 1) {
-        b_drv.push_back(e.driver);
+      if (e.sink.get_port_id() != 0 && e.sink.get_port_id() != 1) {
+        continue;
       }
-    }
-    int  bs     = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
-    auto extend = [&](const hhds::Pin_class& d) {
-      std::vector<Bit> v(out_bits);
-      for (int i = 0; i < out_bits; ++i) {
-        v[i] = abc_bit(d, i);
+      arith::Sum_operand<Bit> operand;
+      operand.is_signed = !gu::is_unsign(e.driver);
+      operand.subtract  = e.sink.get_port_id() == 1;
+      const int width   = e.driver.is_const() ? out_bits : std::min(real_width(e.driver), out_bits);
+      operand.bits.reserve(width);
+      for (int i = 0; i < width; ++i) {
+        operand.bits.push_back(abc_bit(e.driver, i));
       }
-      return v;
-    };
-    std::vector<std::vector<Bit>> level;
-    level.reserve(std::max(a_drv.size(), b_drv.size()));
-    // Fold each subtract operand into an ADD operand's adder (a + ~b + 1)
-    // rather than negating it on its own. A standalone `0 + ~b + 1` costs a
-    // whole extra adder, which would double the plain `a - b` cell -- by far
-    // the most common Sum shape -- for no depth benefit.
-    size_t bi = 0;
-    for (const auto& ad : a_drv) {
-      if (bi < b_drv.size()) {
-        level.push_back(
-            arith::build_add(opts_.adder, bs, ops, extend(ad), arith::bv_invert(ops, extend(b_drv[bi++])), abc_const_bit(true))
-                .sum);
-      } else {
-        level.push_back(extend(ad));
-      }
+      operands.push_back(std::move(operand));
     }
-    for (; bi < b_drv.size(); ++bi) {
-      std::vector<Bit> zero(out_bits, abc_const_bit(false));
-      level.push_back(
-          arith::build_add(opts_.adder, bs, ops, zero, arith::bv_invert(ops, extend(b_drv[bi])), abc_const_bit(true)).sum);
-    }
-    if (level.empty()) {
-      level.emplace_back(out_bits, abc_const_bit(false));
-    }
-    // A Sum cell is associative at its declared output width. Preserve that
-    // n-ary structure as a balanced tree; a source-order left fold makes a
-    // popcount or wide reduction N adders deep before ABC gets a chance to
-    // optimize it.
-    while (level.size() > 1) {
-      std::vector<std::vector<Bit>> next;
-      next.reserve((level.size() + 1) / 2);
-      for (size_t i = 0; i < level.size(); i += 2) {
-        if (i + 1 == level.size()) {
-          next.push_back(std::move(level[i]));
-        } else {
-          next.push_back(arith::build_add(opts_.adder, bs, ops, level[i], level[i + 1], abc_const_bit(false)).sum);
-        }
-      }
-      level = std::move(next);
-    }
-    const auto& acc = level.front();
+    const int bs  = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
+    auto      acc = arith::build_sum(opts_.adder, bs, ops, operands, out_bits);
     for (int b = 0; b < out_bits; ++b) {
       slots[b] = acc[b];
     }
@@ -657,10 +612,11 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // (single). Arithmetic (sign-replicating) when `a` is signed, logical
     // otherwise — mirroring Verilog `>>>` and the cvc5 LEC (BITVECTOR_ASHR vs
     // BITVECTOR_LSHR). A right shift pulls bits DOWN from higher positions, so
-    // the value must be at its FULL width before shifting: the LEC shifts at
-    // cw = max(operand_width, output_width) and truncates the result to W, so
-    // `a` is sign/zero extended (by abc_bit) to cw, the amount is read unsigned
-    // and fit to cw (bits at/above cw are dropped, matching the LEC's fit), and
+    // the value must be at its FULL width before shifting. Keep every amount
+    // bit: the count is self-determined, and high bits mean overshift rather
+    // than wrapping back to a small count. Unlike the SMT encoder, the bit
+    // builder can use different data/count widths, so only `a` is extended to
+    // cw = max(operand_width, output_width), and
     // the low out_bits become the result. A CONSTANT amount becomes pure bit
     // re-wiring; a RUNTIME amount a combinational barrel shifter (build_shr).
     hhds::Pin_class a_d;
@@ -745,20 +701,13 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         refuse_shift_amount(n, "sra", amt_c, b_d);  // see the SHL arm for why the two cases are reported apart
       } else {
         int64_t amt = amt_c.is_just_i64() ? amt_c.to_just_i64() : static_cast<int64_t>(cw);
-        // The LEC fits the amount to cw bits (BITVECTOR_ASHR/LSHR operands are
-        // same-width), so a count whose magnitude needs MORE than cw bits is read
-        // modulo 2^cw, not saturated. Mask to the low cw bits to match (cw>=63
-        // can't overflow an i64 amount, so it needs no mask).
-        if (cw < 63) {
-          amt &= (int64_t{1} << cw) - 1;
-        }
         res.resize(demand_w);
         for (int i = 0; i < demand_w; ++i) {
           res[i] = (amt < cw && i + amt < cw) ? av[static_cast<int>(i + amt)] : fill;  // amt >= cw => all fill
         }
       }
     } else {
-      int              nb = std::min(eff_width(b_d), cw);  // amount bits at/above its eff width or cw are 0 (LEC fit)
+      int              nb = eff_width(b_d);  // all self-determined amount bits participate in overshift detection
       std::vector<Bit> bv(nb);
       for (int i = 0; i < nb; ++i) {
         bv[i] = abc_bit(b_d, i);  // unsigned shift count (i < eff width, so the real bit)

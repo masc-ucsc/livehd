@@ -13,18 +13,18 @@ cassert(v1 == 0 and v2 == 0)
 v1 = 0sb?
 v2 = 0sb?
 
-cassert((v1 != 0) == 0sb?)
-cassert((v2 != 0) == 0sb?)
+cassert(string(v1 != 0) == "0ub?")
+cassert(string(v2 != 0) == "0ub?")
 
 const res1 = v1 + 0
 
-cassert((res1 != 0) == 0sb?)  // the unknown propagates through the arithmetic
+cassert(string(res1 != 0) == "0ub?")  // the unknown propagates through the arithmetic
 
 // `0sb?` is the WIDTH-TAKING wildcard: the `?` fills the DECLARED width of the
 // destination and stops there, so `v2:u32 = 0sb?` holds 32 unknown bits — the
 // same value as `0ub` followed by 32 `?`, not the 1 bit the literal is written
 // as. A destination with no declared width keeps the 1-bit signed unknown.
-cassert(v2 == 0ub????????????????????????????????)
+cassert("{v2:b}" == "????????????????????????????????")
 
 v2 = 100
 cassert((v2 + 1) == 101)

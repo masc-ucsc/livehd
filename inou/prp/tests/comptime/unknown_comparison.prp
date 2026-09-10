@@ -1,0 +1,26 @@
+/*
+:name: unknown_comparison
+:type: comptime
+:verifier_pass: 18
+:verifier_fail: 0
+*/
+const x = 0sb?
+const alias = x
+cassert(string(0sb? == 0sb?) == "0ub?")
+cassert(string(0sb? != 0sb?) == "0ub?")
+cassert(string(0sb? == 0) == "0ub?")
+cassert(string(0sb? != 0) == "0ub?")
+cassert(string(0sb? == nil) == "0ub?")
+cassert(string(0sb? != nil) == "0ub?")
+cassert(string(x == alias) == "0ub?")
+cassert(string(x != alias) == "0ub?")
+cassert(string((1, x) == (1, x)) == "0ub?")
+cassert(string((1, x) != (2, x)) == "0ub?")
+cassert(string(x < x) == "0ub?")
+cassert(string(x < 1) == "0ub?")
+cassert(string(x <= x) == "0ub?")
+cassert(string(x <= 1) == "0ub?")
+cassert(string(x > x) == "0ub?")
+cassert(string(x > 1) == "0ub?")
+cassert(string(x >= x) == "0ub?")
+cassert(string(x >= 1) == "0ub?")

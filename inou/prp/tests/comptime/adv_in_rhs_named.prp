@@ -1,0 +1,10 @@
+/*
+:name: adv_in_rhs_named
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// Named fields on the right contribute their values to membership.
+mut t = (const a = 1, const b = 2)
+const x = 2 in t
+cassert(x)

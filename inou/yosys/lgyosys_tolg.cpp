@@ -2854,7 +2854,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       setup_sink_by_name(exit_node, "size").connect_driver(create_const(*g, *Dlop::create_integer(depth)));
 
       // $mem_v2 INIT (memory_collect folds $meminit / initial blocks into
-      // it) → the Memory `init` sink: same packing (entry 0 in the low
+      // it) → the Memory `initial` sink: same packing (entry 0 in the low
       // WIDTH bits). Fully-undef = uninitialized; partial x bits load as 0.
       if (cell->hasParam(ID::INIT)) {
         const RTLIL::Const& iv = cell->getParam(ID::INIT);
@@ -2863,7 +2863,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           for (char c : iv.as_string()) {  // MSB first
             val += c == '1' ? '1' : '0';
           }
-          setup_sink_by_name(exit_node, "init").connect_driver(create_const(*g, *Dlop::from_pyrope(val)));
+          setup_sink_by_name(exit_node, "initial").connect_driver(create_const(*g, *Dlop::from_pyrope(val)));
         }
       }
 

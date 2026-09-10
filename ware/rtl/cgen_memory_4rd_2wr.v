@@ -59,7 +59,7 @@ localparam MASKSIZE = BITS/WENSIZE;
 
 (*ram_style = "block" *) reg [BITS-1:0] data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
 
-// Power-on contents (Memory cell `init` pin, entry 0 in the low BITS):
+// Power-on contents (Memory cell `initial` pin, entry 0 in the low BITS):
 // yosys lifts this into $meminit.
 generate
   if (INIT_EN) begin:BLOCK_INIT

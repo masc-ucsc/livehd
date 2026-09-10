@@ -547,19 +547,19 @@ int describe_command(const Options& opts) {
   }
   if (name == "lec" || name == "formal lec") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo"]})json");
+        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set formal.* / formal.lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo"]})json");
     return 0;
   }
   // `formal` names the FAMILY (a dispatcher); the runnable thing is the
   // subcommand, so each gets its own record. `formal lec` IS `lec`.
   if (name == "formal") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal","description":"Formal verification command family (2f-verify): a dispatcher, not a flow. `formal verify <design> [sidecar.prp ...] [BLOCK]` proves ONE design's assert/assert_always/assume obligations by BMC from reset — use it to answer \"does this design satisfy the properties I wrote?\". `formal lec --impl X --ref Y` is the equivalence check (an alias of `lhd lec`) — use it to answer \"are these two designs the same function?\". Both share the --set formal.* knob namespace (bound/timeout/solver/strict/...; legacy lec.* spellings stay accepted). Describe a subcommand for its own record: `lhd describe 'formal verify'` / `lhd describe lec`","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true}],"optional":[]},"subcommands":[{"name":"verify","summary":"prove one design's assert/assume obligations by BMC from reset"},{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl) (= lhd lec)"}],"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo","lhd formal verify ALU.prp ALU.verify.prp --list-tests","lhd formal lec --impl impl.prp --ref ref.v"]})json");
+        R"json({"schema_version":1,"name":"formal","description":"Formal verification command family (2f-verify): a dispatcher, not a flow. `formal verify <design> [sidecar.prp ...] [BLOCK]` proves ONE design's assert/assert_always/assume obligations by BMC from reset — use it to answer \"does this design satisfy the properties I wrote?\". `formal lec --impl X --ref Y` is the equivalence check (an alias of `lhd lec`) — use it to answer \"are these two designs the same function?\". Both share the --set formal.* knob namespace (bound/timeout/solver/strict/...; lec pairing machinery is formal.lec.*). Describe a subcommand for its own record: `lhd describe 'formal verify'` / `lhd describe lec`","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true}],"optional":[]},"subcommands":[{"name":"verify","summary":"prove one design's assert/assume obligations by BMC from reset"},{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl) (= lhd lec)"}],"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo","lhd formal verify ALU.prp ALU.verify.prp --list-tests","lhd formal lec --impl impl.prp --ref ref.v"]})json");
     return 0;
   }
   if (name == "formal verify") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...); legacy lec.* spellings stay accepted","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
+        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...)","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
     return 0;
   }
   if (name == "semdiff" || name == "pass semdiff") {
@@ -618,7 +618,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pass") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","opentimer","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), satopt (prepare combinational mux/memory proofs for ABC), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), formal (single-design property checks: proven obligations marked in place; `lhd describe \"pass formal\"`), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","opentimer","formal","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "lnast-dump") {
@@ -757,8 +757,7 @@ void print_general_help() {
       "               lhd pyrope fmt -i foo.prp         # reformat in place\n"
       "               lhd pyrope fmt foo.prp            # print formatted source to stdout\n"
       "               lhd pyrope lsp                    # Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-      "  pass       run one graph pass over lg: inputs: color <alg> | partition | satopt | abc | opentimer | liberty gensim | "
-      "semdiff\n"
+      "  pass       run one graph pass over lg: inputs: {}\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
       "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
       "  list       steps | emit-kinds | error-classes | options [REGEX]\n"
@@ -786,7 +785,8 @@ void print_general_help() {
       "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"
       "\n"
       "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"
-      "by contract.\n");
+      "by contract.\n",
+      kPassSubcommands);
 }
 
 // `lhd pyrope [SUB] --help` — the Pyrope developer tools. `sub` is the
@@ -1000,6 +1000,52 @@ int help_pass(const std::string& sub) {
         "  lhd compile m.prp --set pass.satopt=true --workdir W\n");
     return 0;
   }
+  if (sub == "formal") {
+    std::print(
+        "lhd pass formal — single-design formal property checks (verdict; marks in place)\n"
+        "\n"
+        "usage: lhd pass formal --top M lg:DIR\n"
+        "  Proves ONE design's own obligations on the cvc5 prover (pass.formal, the same\n"
+        "  pass `lhd compile` runs): Hotmux selector one-hotness plus the assert /\n"
+        "  assert_always / assume the sources materialized. A discharged obligation is\n"
+        "  MARKED proven in place (never deleted); an unproven one stays a runtime check.\n"
+        "  Only a refutation at the committed top boundary that does not rest on free\n"
+        "  register state fails the run (--set compile.formal.on_refute=warn downgrades\n"
+        "  it). Produces no lg: — --emit-dir lg: is refused.\n"
+        "\n"
+        "flags:\n"
+        "  --top M                          select the root module\n"
+        "  --set compile.formal.flag=value  pass options (listed below; `pass.formal.*` is\n"
+        "                                   the same namespace)\n"
+        "\n"
+        "examples:\n"
+        "  lhd pass formal --top m lg:dir\n"
+        "  lhd pass formal --top m lg:dir --set compile.formal.on_refute=warn\n"
+        "  lhd pass formal --top m lg:dir --set compile.formal.timeout=0   # deterministic budget only\n");
+    return print_options_section({"compile.formal."});
+  }
+  if (sub == "analyze") {
+    std::print(
+        "lhd pass analyze — read-only structural diagnosis of an lg: library\n"
+        "\n"
+        "usage: lhd pass analyze [--top M] lg:DIR\n"
+        "  Surveys a design the transforming passes may REFUSE and reports every finding\n"
+        "  in every definition as JSONL on stdout: it never fails fast and transforms\n"
+        "  nothing (--emit-dir lg: is refused). Three checks, all on by default —\n"
+        "  loops (combinational cycles, classified by what sits on the cycle), clocks\n"
+        "  (the clock endpoint of every state element) and colors (Color_acyclic\n"
+        "  partitioning validity); --set pass.analyze.checks=loops,clocks,colors picks\n"
+        "  a subset, --set pass.analyze.strict=true exits non-zero on any finding.\n"
+        "\n"
+        "flags:\n"
+        "  --top M                        select the root module\n"
+        "  --set pass.analyze.flag=value  pass options (listed below)\n"
+        "\n"
+        "examples:\n"
+        "  lhd pass analyze --top m lg:dir\n"
+        "  lhd pass analyze lg:dir --set pass.analyze.checks=loops --set pass.analyze.strict=true\n");
+    return print_options_section({"pass.analyze."});
+  }
   if (sub == "abc") {
     std::print(
         "lhd pass abc — combinational ABC tech-map (bit-blast -> AIG -> Liberty blackboxes)\n"
@@ -1132,8 +1178,9 @@ int help_pass(const std::string& sub) {
   if (!sub.empty()) {
     std::print(
         stderr,
-        "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | satopt | abc | opentimer | liberty | semdiff)\n",
-        sub);
+        "lhd help: unknown pass subcommand '{}' ({})\n",
+        sub,
+        kPassSubcommands);
     return 1;
   }
   std::print(
@@ -1145,11 +1192,14 @@ int help_pass(const std::string& sub) {
       "  color <alg>          acyclic|synth|path|mincut|flat coloring; reduce = repeated-\n"
       "                       cone extraction into shared pat_* defs (all in place)\n"
       "  partition            region -> module Sub split (-> new lg:)\n"
+      "  single_edge          latches + negedge state -> posedge flops (verification only; -> new lg:)\n"
       "  satopt               prepare combinational proofs for later ABC mapping\n"
       "  abc                  combinational ABC tech-map (-> new lg:)\n"
       "  opentimer            OpenTimer STA on a tech-mapped module (-> timing.json)\n"
+      "  formal               single-design property checks (obligations marked proven in place)\n"
       "  liberty gensim FILE  Liberty -> simulation models (-> new lg:)\n"
       "  semdiff              structural diff/match of two lg: (--ref/--impl; marked in place)\n"
+      "  analyze              read-only structural diagnosis: loops, clock endpoints, coloring (-> JSONL)\n"
       "\n"
       "examples:\n"
       "  lhd pass color acyclic --top m lg:dir\n"
@@ -1176,8 +1226,9 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | satopt | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
-      kVersion);
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: {}"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      kVersion,
+      kPassSubcommands);
 }
 
 std::string json_version() {
@@ -1206,6 +1257,12 @@ constexpr std::string_view kJsonPassOpentimer
 
 constexpr std::string_view kJsonPassLiberty
     = R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input; omit it to read --set synth.liberty); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true}],"optional":[{"name":"file","type":"path (.lib; omit => --set synth.liberty)","positional":true},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
+
+constexpr std::string_view kJsonPassFormal
+    = R"json({"schema_version":1,"name":"pass formal","description":"Single-design formal property checks on the cvc5 prover (pass.formal, the same pass `lhd compile` runs): proves ONE design's own obligations -- Hotmux selector one-hotness plus the assert/assert_always/assume the sources materialized -- and marks proven/runtime_check in place (a discharged obligation is never deleted). Only a refutation at the committed top boundary that does not rest on free register state fails the run (compile.formal.on_refute=warn downgrades it). Produces no lg: (--emit-dir lg: is refused). Knobs are the compile.formal.* namespace (mode=none|fast|normal, on_refute, bmc_bound, budget_k, cone_max, timeout, warn_*); `pass.formal.*` is the same namespace","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"compile.formal.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":[],"examples":["lhd pass formal --top m lg:dir","lhd pass formal --top m lg:dir --set compile.formal.on_refute=warn"]})json";
+
+constexpr std::string_view kJsonPassAnalyze
+    = R"json({"schema_version":1,"name":"pass analyze","description":"Read-only structural diagnosis over a whole lg: library: combinational loops (classified by what sits on the cycle), clock endpoints per state element, and Color_acyclic partitioning validity. Reports every finding in every definition as JSONL on stdout, never fails fast, transforms nothing (--emit-dir lg: is refused). --set pass.analyze.checks=loops,clocks,colors picks a subset; pass.analyze.strict=true exits non-zero on any finding; pass.analyze.verbose=true reports every state element","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.analyze.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":[],"examples":["lhd pass analyze --top m lg:dir","lhd pass analyze lg:dir --set pass.analyze.checks=loops --set pass.analyze.strict=true"]})json";
 
 constexpr std::string_view kJsonSimCommand
     = R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
@@ -1312,10 +1369,19 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassLiberty);
       return 0;
     }
+    if (sub == "formal") {
+      print_json_line(kJsonPassFormal);
+      return 0;
+    }
+    if (sub == "analyze") {
+      print_json_line(kJsonPassAnalyze);
+      return 0;
+    }
     std::print(
         stderr,
-        "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | satopt | abc | opentimer | liberty | semdiff)\n",
-        sub);
+        "lhd help: unknown pass subcommand '{}' ({})\n",
+        sub,
+        kPassSubcommands);
     return 1;
   }
   // `formal` is a family: the record follows the SUBCOMMAND, so
@@ -1430,7 +1496,7 @@ int help_command(const Options& opts) {
         "  --trust DEF        ASSUME DEF equivalent without proving it — disclosed, never silent\n"
         "                     (the escape hatch for a cell the encoder cannot model) (repeatable)\n"
         "  --stats            (= --set formal.stats=true) cvc5 solve insight, off by default\n"
-        "  --set formal.flag=value   engine knobs (the options block below; legacy lec.* accepted)\n"
+        "  --set formal.flag=value   engine knobs (the options block below)\n"
         "\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"
@@ -1479,7 +1545,7 @@ int help_command(const Options& opts) {
         "which one: `verify` answers \"does this design satisfy the properties I wrote?\"\n"
         "(one design + its asserts/assumes); `lec` answers \"are these two designs the\n"
         "same function?\" (two designs, no properties). Both share the --set formal.*\n"
-        "knob namespace (bound, timeout, solver, strict, ...; legacy lec.* accepted).\n"
+        "knob namespace (bound, timeout, solver, strict, ...; lec pairing knobs are formal.lec.*).\n"
         "\n"
         "examples:\n"
         "  lhd formal verify foo.prp --top foo            # prove foo's own obligations\n"
@@ -1544,7 +1610,7 @@ int help_command(const Options& opts) {
         "  --lib lg:DIR         cell-model libraries for instantiated cells (repeatable)\n"
         "  --workdir DIR        keep formal_report.json + the refutation artifacts here\n"
         "  --stats              (= --set formal.stats=true) cvc5 solve insight, off by default\n"
-        "  --set formal.flag=value   engine knobs (the options block below; legacy lec.* accepted)\n"
+        "  --set formal.flag=value   engine knobs (the options block below)\n"
         "\n"
         "  machine-readable feedback (agents): EVERY run writes formal_report.json into the\n"
         "  workdir (per-obligation verdicts/cycles/solve_ms, assume classes, the structured\n"

@@ -260,9 +260,11 @@ protected:
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
   inline static std::array<std::array<hhds::Port_id, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256> sink_name2pid;
-  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, Memory_port_stride> sink_pid2name;
-  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                           ntype2single_input;
-  inline static absl::flat_hash_map<std::string, hhds::Port_id>                                              name2pid;
+  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, Memory_port_stride>
+                                                                                   sink_pid2name;
+  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)> ntype2single_input;
+  inline static std::array<absl::flat_hash_map<std::string, hhds::Port_id>, static_cast<std::size_t>(Ntype_op::Last_invalid)>
+      name2pid;
 
   static constexpr std::string_view get_sink_name_slow(Ntype_op op, hhds::Port_id pid);
 
@@ -325,7 +327,7 @@ public:
   // livehd::Port_invalid when the name is not a valid sink for this op.
   // The per-op first-char table is the fast path; same-op sink names that
   // share a leading char (e.g. Flop posclk/pipe_min/pipe_max, all 'p')
-  // resolve through the global name2pid map with a per-op verify — the
+  // resolve through that cell type's name2pid map — the
   // first-char slot keeps the first-declared (lowest-pid) name.
   static inline hhds::Port_id get_sink_pid(Ntype_op op, std::string_view str) {
     auto c = str.front();
@@ -350,8 +352,9 @@ public:
       return pid;
     }
     // Slow path: first-char miss or a same-first-char sibling pin.
-    auto it = name2pid.find(str);
-    if (it != name2pid.end() && sink_pid2name[it->second][static_cast<std::size_t>(op)] == str) {
+    const auto& names = name2pid[static_cast<std::size_t>(op)];
+    auto        it    = names.find(str);
+    if (it != names.end()) {
       return it->second;
     }
     return livehd::Port_invalid;

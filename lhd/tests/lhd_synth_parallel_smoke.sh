@@ -16,7 +16,7 @@ PY
 run_synth() {
   "$LHD" synth "$W/parallel.prp" --top parallel --workdir "$W/$1" \
     --set synth.liberty="$LIB" --set synth.opentimer=false --set synth.threads="$2" \
-    --set abc.ware=false --set abc.boundary=false --emit verilog:"$W/$1.v" --result-json "$W/$1-result.json" -q
+    --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --set abc.boundary=false --emit verilog:"$W/$1.v" --result-json "$W/$1-result.json" -q
 }
 run_synth serial 1
 run_synth parallel 2
@@ -74,7 +74,7 @@ assert q['status'] == 'pass', q
 PY
 # A worker error must join the other workers before destroying region storage.
 if "$LHD" synth "$W/parallel.prp" --top parallel --set synth.liberty="$LIB" \
-    --set synth.opentimer=false --set synth.threads=2 --set abc.ware=false \
+    --set synth.opentimer=false --set synth.threads=2 --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
     --set abc.flow=invalid_parallel_test_command --workdir "$W/worker-error" \
     --result-json "$W/worker-error.json" -q; then
   echo 'invalid ABC command unexpectedly succeeded' >&2

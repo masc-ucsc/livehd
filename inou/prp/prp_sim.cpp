@@ -1049,12 +1049,12 @@ private:
 
   const std::string&                          src_;
   const std::map<std::string, Dut>&           duts_;
-  std::string                                 vcd_dir_;                        // empty = no VCD; else <vcd_dir>/<test>.vcd per test
-  std::string                                 file_;                           // source .prp path (for failing_assert file:line)
-  std::string                                 file_short_;                     // basename of file_ (the inline located message)
-  bool                                        runtime_support_on_    = true;   // checkpoint/probe/query generated control plane
-  bool                                        unknown_zero_          = false;  // sim.unknown_zero: `?` literal bits are 0, not random
-  bool                                        in_tick_               = false;  // inside a tick body (reject nested ticks)
+  std::string                                 vcd_dir_;                     // empty = no VCD; else <vcd_dir>/<test>.vcd per test
+  std::string                                 file_;                        // source .prp path (for failing_assert file:line)
+  std::string                                 file_short_;                  // basename of file_ (the inline located message)
+  bool                                        runtime_support_on_ = true;   // checkpoint/probe/query generated control plane
+  bool                                        unknown_zero_       = false;  // sim.unknown_zero: `?` literal bits are 0, not random
+  bool                                        in_tick_            = false;  // inside a tick body (reject nested ticks)
   bool                                        restart_block_emitted_ = false;  // --restart-cycle handled by the first tick
   std::set<std::string>                       locals_;                         // scalar driver vars
   std::map<std::string, int>                  local_w_;                        // ...and the Slop width each is declared at
@@ -1266,8 +1266,8 @@ private:
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
       fail("regref needs a signal: a dotted `acc.field` or a \"unit/field\" path");
     }
-    const bool writable = true;
-    TSNode      a0 = ts_node_named_child(args, 0);
+    const bool  writable = true;
+    TSNode      a0       = ts_node_named_child(args, 0);
     std::string base, fld;
     if (inst_dot(a0, base, fld)) {
       return field_access(base, fld, writable, w_out, signed_out);
@@ -1363,17 +1363,13 @@ private:
       }
     }
     if (fld.find('.') != std::string::npos) {
-      // Hierarchical state path `acc.sub[.sub...].leaf[idx]` (READ-only):
+      // Hierarchical state path `acc.sub[.sub...].leaf[idx]`:
       // each intermediate segment names a sub-instance member of the current
       // module; the leaf resolves to a flop member or a memory array (its
       // optional [index] is emitted verbatim as C++). The generated memory
       // member often loses its RTL name (`reg regs:[32]u64` -> `memory_60`),
       // so with exactly ONE array in the leaf module any indexed name
       // aliases to it.
-      if (write) {
-        fail("cannot write hierarchical path '" + var + "." + fld
-             + "' (reads at any depth work; writing below the top instance is not implemented yet -- see fixes_pyrope.md P10)");
-      }
       const Dut*  hd   = &duts_.at(inst_of_var.at(var));
       std::string cxx  = var;
       std::string rest = fld;
@@ -1505,7 +1501,7 @@ private:
   // Resolve a regref() hierarchical string path `"<unit>/<field>"` to a
   // field_access on the matching DUT instance (09-verification.md). `<unit>`
   // matches an instance-variable name (`mut dut = cnt` -> "dut") or a module name
-  // ("cnt"); one "unit/field" level is supported -- the common testbench probe.
+  // ("cnt"); field may include a dotted path through nested instances.
   std::string path_target(TSNode call, bool write, int* w_out = nullptr, bool* signed_out = nullptr) {
     TSNode args = field(call, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
@@ -2554,9 +2550,15 @@ private:
       return "";
     }
     static const std::map<std::string_view, std::string> table = {
-        {"assign_add", "+"},     {"assign_sub", "-"},     {"assign_mul", "*"},     {"assign_div", "/"},
-        {"assign_bit_or", "|"},  {"assign_bit_and", "&"}, {"assign_bit_xor", "^"}, {"assign_shl", "<<"},
-        {"assign_sra", ">>"},
+        {    "assign_add",  "+"},
+        {    "assign_sub",  "-"},
+        {    "assign_mul",  "*"},
+        {    "assign_div",  "/"},
+        { "assign_bit_or",  "|"},
+        {"assign_bit_and",  "&"},
+        {"assign_bit_xor",  "^"},
+        {    "assign_shl", "<<"},
+        {    "assign_sra", ">>"},
     };
     auto it = table.find(kind);
     if (it == table.end()) {
@@ -2566,9 +2568,9 @@ private:
   }
 
   void gen_assignment(std::ostringstream& o, TSNode n, int depth) {
-    std::string ind(depth * 2, ' ');
-    TSNode      lv = field(n, "lvalue");
-    TSNode      rv = field(n, "rvalue");
+    std::string       ind(depth * 2, ' ');
+    TSNode            lv      = field(n, "lvalue");
+    TSNode            rv      = field(n, "rvalue");
     // `x op= e` is `x = x op e` on every lvalue kind below (a poke, a write
     // through a ref, a test local).
     const std::string bop     = compound_binop(n);

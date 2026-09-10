@@ -1,0 +1,26 @@
+/*
+:name: inline_tuple_scope
+:type: equiv
+:pyrope_top: inline_tuple_scope
+:verilog_top: inline_tuple_scope
+*/
+
+comb inline_tuple_leaf(a:u8) -> (q:u8) {
+  wire io:(x:u8, y:u8, z:u8) = nil
+  io.x = a
+  io.y = (io.x + 1)#[0..=7]
+  io.z = io.y ^ 3
+  q = io.z
+}
+
+// The Verilog-to-Pyrope leg emits the leaf into an imported sibling file.
+// Its three-field `io` and both call sites must keep independent layouts
+// and values despite sharing the caller's two-field variable name.
+pub comb inline_tuple_scope(a:u8, b:u8) -> (q:u8) {
+  wire io:(a:u8, b:u8) = nil
+  io.a = a
+  io.b = b
+  const left = inline_tuple_leaf(io.a)
+  const right = inline_tuple_leaf(io.b)
+  q = left ^ right
+}

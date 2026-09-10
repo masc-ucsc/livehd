@@ -650,8 +650,10 @@ Options parse_args(int argc, char** argv) {
         // the pass.color / pass.abc / pass.opentimer steps, so its root is
         // `pass`: `--set abc.adder=cla` resolves to pass.abc exactly as it does
         // after `lhd pass abc` (the synth.* namespace itself never collects a
-        // prefix — canonical_set_key keeps it verbatim).
-        cmd_path     = (a == "synth") ? std::string{"pass"} : opts.command;
+        // prefix — canonical_set_key keeps it verbatim). `lec` is `formal lec`
+        // under its own command word, so its root is `formal.lec` too: `--set
+        // engine=ind` resolves identically after either spelling.
+        cmd_path     = (a == "synth") ? std::string{"pass"} : (a == "lec") ? std::string{"formal.lec"} : opts.command;
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
@@ -729,7 +731,7 @@ Options parse_args(int argc, char** argv) {
   load_config(opts);
 
   // Infer the source language from the file extensions when not given.
-  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "sim" || opts.command == "synth")
+  if ((opts.command == "compile" || opts.command == "sim" || opts.command == "synth")
       && opts.language.empty() && !opts.files.empty()) {
     bool any_prp = false;
     bool any_v   = false;
@@ -738,7 +740,7 @@ Options parse_args(int argc, char** argv) {
       any_v   |= ends_with(f, ".v") || ends_with(f, ".sv");
     }
     if (any_prp && any_v) {
-      throw Lhd_error{"usage", "cannot mix pyrope and verilog sources in one invocation", "split into two elaborates"};
+      throw Lhd_error{"usage", "cannot mix pyrope and verilog sources in one invocation", "split into two compiles"};
     }
     if (any_prp) {
       opts.language = "pyrope";
@@ -755,7 +757,7 @@ Options parse_args(int argc, char** argv) {
   // sources via the raw `--` args (e.g. `-- -F filelist.f`) instead of a
   // positional .v file, in which case there is no extension to infer from, so
   // pin the language to verilog.
-  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "synth") && opts.language.empty()
+  if ((opts.command == "compile" || opts.command == "synth") && opts.language.empty()
       && !opts.raw_args.empty() && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
     opts.language = "verilog";
   }

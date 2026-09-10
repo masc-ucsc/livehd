@@ -4957,7 +4957,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         std::string sg   = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key  = mem_state_key(sig, occ[sg]++);
-        auto        init = graph_util::get_driver_of_sink_name(node, "init");
+        auto        init = graph_util::get_driver_of_sink_name(node, "initial");
         if (init.is_invalid() || !init.is_const()) {
           continue;
         }

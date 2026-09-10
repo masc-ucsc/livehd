@@ -47,8 +47,9 @@ live_defs() {
 }
 
 run compile "$FIX" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
-run pass color flat --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
+run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
 
+# Ware preservation is disabled above to request a truly single-module netlist.
 # pass.abc: flatten=auto must fire on the flat coloring -> one netlist module.
 run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --workdir "$D/w3"
 NET_DEFS=$(live_defs "$D/net")
@@ -102,7 +103,7 @@ TOP2=abc_flat_names.top
 D2="$W/flatnames"
 mkdir -p "$D2"
 run compile "$FIX2" --top "$TOP2" --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
-run pass color flat --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
+run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
 run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --workdir "$D2/w3"
 run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
 run compile lg:"$D2/net" --top "$TOP2" --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
@@ -164,7 +165,7 @@ TOP3=abc_flat_const_port.top
 D3="$W/flatconst"
 mkdir -p "$D3"
 run compile "$FIX3" --top "$TOP3" --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
-run pass color flat --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
+run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
 run pass abc --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --workdir "$D3/w3"
 run pass partition --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
 run compile lg:"$D3/net" --top "$TOP3" --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"

@@ -84,4 +84,31 @@ rm -rf "$W/lg"; cp -r "$W/lg0" "$W/lg"
   || fail "--config [pass.color] failed: $(cat "$W/rcfg.json" 2>/dev/null)"
 echo "ok: --config [pass.color] table accepted"
 
+# `lhd lec` IS `lhd formal lec` under its own command word, so both establish
+# the same --set root (formal.lec): a bare `engine=bmc` resolves to the same
+# canonical key after either spelling (same input -> same run_id). Regression:
+# `lhd lec` used to root at `lec`, which names no pass, so the abbreviation
+# only worked after `formal lec`.
+LG0="lg:$W/lg0"
+"$LHD" lec --impl "$LG0" --ref "$LG0" --top "$TOP" --set engine=bmc -q --result-json "$W/rl1.json" >/dev/null 2>&1 \
+  || fail "lec --set engine=bmc (abbreviated) failed: $(cat "$W/rl1.json" 2>/dev/null)"
+"$LHD" formal lec --impl "$LG0" --ref "$LG0" --top "$TOP" --set engine=bmc -q --result-json "$W/rl2.json" >/dev/null 2>&1 \
+  || fail "formal lec --set engine=bmc (abbreviated) failed: $(cat "$W/rl2.json" 2>/dev/null)"
+idL1=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/rl1.json")
+idL2=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/rl2.json")
+[ -n "$idL1" ] && [ "$idL1" = "$idL2" ] || fail "lec vs formal lec must resolve --set engine=bmc identically: '$idL1' vs '$idL2'"
+echo "ok: lec / formal lec share the formal.lec --set root"
+
+# ...and that root must NOT re-open the REMOVED lec.* namespace: `lec.solver`
+# under either spelling keeps the directed "was removed" error instead of
+# silently collecting the prefix into formal.lec.solver.
+for cmd in "lec" "formal lec"; do
+  # shellcheck disable=SC2086  # $cmd is one or two command words on purpose
+  "$LHD" $cmd --impl "$LG0" --ref "$LG0" --top "$TOP" --set lec.solver=lgyosys -q --result-json "$W/rlr.json" >/dev/null 2>&1 \
+    && fail "$cmd --set lec.solver must fail (namespace removed)"
+  grep -q "use --set formal.solver=lgyosys instead" "$W/rlr.json" \
+    || fail "$cmd --set lec.solver must keep the removed-namespace hint: $(cat "$W/rlr.json" 2>/dev/null)"
+done
+echo "ok: removed lec.* namespace still refused under lec / formal lec"
+
 echo "PASS: lhd --set command-path namespace + context-relative abbreviation"

@@ -1,0 +1,14 @@
+/*
+:name: comb_print
+:type: equiv
+:pyrope_top: outer
+:verilog_top: comb_print.outer
+*/
+comb hello(x:u4) -> (y:u5) {
+  puts("hello {x}")
+  print("tail {x}")
+  y = x + 1
+}
+mod outer(x:u4) -> (y:u5@[0]) {
+  y = hello(x)
+}

@@ -1,0 +1,7 @@
+/*
+:name: removed_defer
+:type: error
+:error: undefined function.*defer
+:help: check the spelling
+*/
+const x = defer("x") // locate_error_here

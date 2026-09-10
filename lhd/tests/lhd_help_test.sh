@@ -39,7 +39,8 @@ json_ok() {  # $1 = candidate JSON text
 #     them via `lhd help X` is a describe courtesy, not a command help page.
 CMDS=("" compile lec formal scan tool pyrope pass sim synth list describe version \
       "tool cat" "tool grep" "tool diff" "tool tree" \
-      "pass color" "pass partition" "pass single_edge" "pass abc" "pass opentimer" "pass liberty" "pass semdiff" \
+      "pass color" "pass partition" "pass single_edge" "pass satopt" "pass abc" "pass opentimer" "pass formal" \
+      "pass liberty" "pass semdiff" "pass analyze" \
       "pyrope fmt" "pyrope lsp" "formal verify" "formal lec")
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,8 @@ done
 #    the generic `lhd pass` overview.
 # ---------------------------------------------------------------------------
 for pair in "tool cat" "tool grep" "tool diff" "tool tree" \
-            "pass color" "pass partition" "pass single_edge" "pass abc" "pass opentimer" "pass liberty" "pass semdiff" \
+            "pass color" "pass partition" "pass single_edge" "pass satopt" "pass abc" "pass opentimer" "pass formal" \
+            "pass liberty" "pass semdiff" "pass analyze" \
             "pyrope fmt" "pyrope lsp" "formal verify"; do
   # jsonl: the record's "name" is the two-word sub-command.
   "$LHD" $pair --help --diag-fmt jsonl 2>&1 | grep -qF "\"name\":\"$pair\"" \
@@ -107,8 +109,10 @@ done
 # with no --set namespace do not print an empty options section.
 OPTION_LEAVES=(compile lec "formal verify" "formal lec" sim \
                "pass color" "pass partition" "pass single_edge" "pass abc" \
-               "pass opentimer" "pass liberty" "pass semdiff")
-NO_OPTION_LEAVES=(scan "tool cat" "tool grep" "tool diff" "tool tree" \
+               "pass opentimer" "pass formal" "pass liberty" "pass semdiff" "pass analyze")
+# `pass satopt` is a bare bool (--set pass.satopt), not a pass.satopt.* namespace,
+# so its page has no options section.
+NO_OPTION_LEAVES=(scan "tool cat" "tool grep" "tool diff" "tool tree" "pass satopt" \
                   "pyrope fmt" "pyrope lsp" list describe version)
 for X in "${OPTION_LEAVES[@]}"; do
   page=$("$LHD" help $X --diag-fmt pretty 2>&1)

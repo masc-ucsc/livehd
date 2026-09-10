@@ -526,7 +526,7 @@ protected:
   bool try_inline_func_call();
 
   // Lower a RUNTIME `wrap`/`sat` narrowing call to primitive nodes. The call
-  // shape is func_call(dst, ref("wrap"|"sat"|"saturate"), store(ref("v"),
+  // shape is func_call(dst, ref("wrap"|"sat"), store(ref("v"),
   // value), store(ref("type"), ref(lhs))). When the value is a comptime
   // constant the attributes pass already folds it (and the drop path retires
   // the call), so this declines (returns false) for those. For a runtime
@@ -638,7 +638,7 @@ protected:
 
   std::optional<Detuple_pending_decl>                              detuple_pending_decl_;
   absl::flat_hash_map<std::string, Detuple_tuple_value>            detuple_tuple_values_;
-  absl::flat_hash_map<std::string, std::vector<std::string>>       detuple_shape_fields_;
+  absl::flat_hash_map<std::string, uPass_detuple_registry::Layout> detuple_shape_fields_;
   // Slang emits aggregate field type_specs before the bare aggregate declare
   // (`type_spec(io.a,T)...; declare(io,none,wire)`). Cache that already-seen
   // shape so the declaration can split immediately without looking ahead.
@@ -653,6 +653,7 @@ protected:
   bool                                               try_detuple_tuple_add();
   bool                                               try_detuple_tuple_get();
   bool                                               try_detuple_typespec();
+  std::string                                        detuple_text(const Lnast_nid& nid) const;
   std::string                                        detuple_registry_key(std::string_view type_name) const;
   void                                               detuple_commit_pending_split(const Detuple_pending_decl& pending);
   bool                                               detuple_finalize_pending_decl();
@@ -783,13 +784,13 @@ protected:
       const std::vector<bool>& param_set, std::size_t nbind, const std::vector<Generic_actual>& explicit_generics,
       const std::string& callee_name, const livehd::diag::Span& call_span);
 
-  bool                   maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
-                                                        const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
-                                                        std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
-                                                        const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
-                                                        const std::string& dst_name, const std::string& callee_name,
-                                                        const livehd::diag::Span&                             call_span,
-                                                        const absl::flat_hash_map<std::string, Generic_bind>& gbinds);
+  bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
+                                      const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
+                                      std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
+                                      const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
+                                      const std::string& dst_name, const std::string& callee_name,
+                                      const livehd::diag::Span&                             call_span,
+                                      const absl::flat_hash_map<std::string, Generic_bind>& gbinds);
   // Deep-copy `tmpl` verbatim into a fresh (TreeIO-backed) Lnast named
   // `mangled`, then inject a concrete prim_type_int / named-type child into
   // each untyped fixed input port per `inject`. Clears the template flag and
@@ -916,13 +917,15 @@ protected:
   // name leaves `tuple_get(scalar,'p1')` to fold to garbage. Permissive (returns
   // true) when the result is dropped or the output shape is one it cannot model,
   // so a too-strict skip surfaces as a clean no-overload, never a wrong dispatch.
-  bool return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used);
+  bool return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used,
+                      bool scalar_destination);
   // Scan the func_call's following statements (cursor restored to `fcall_cursor`)
   // to learn how its result `dst_name` is consumed: each `tuple_get(dst_name,
   // 'field')` adds to `req_fields`; any OTHER reference to `dst_name` sets
   // `whole_used`. Cursor-neutral (saves/restores). Feeds return_matches.
   void collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
-                                  absl::flat_hash_set<std::string>& req_fields, bool& whole_used);
+                                  absl::flat_hash_set<std::string>& req_fields, bool& whole_used,
+                                  bool* scalar_destination = nullptr);
   // >0 while a synthesized constructor call is being spliced.
   int  init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't
@@ -993,6 +996,8 @@ protected:
   // Emits `dst = get_mask(value, mask_text)` through the walk. `mask_text` is a
   // const bitmask in pyrope form (tolg's Get_mask requires a const/range mask).
   // Used by runtime `wrap` to keep the low N bits (zero-extended) of `value`.
+  void process_bit_selection();
+  bool try_lower_tuple_spread();
   void emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text);
 
   // Runtime `bool(x)` == `(x != 0)`: emit `ne(dst, value, 0)` so the passes run
@@ -1098,12 +1103,6 @@ protected:
   // (The recursion / inlinable / placeholder / sub-convertible sets these used
   // to sit beside now live in the shared uPass_function_registry — see reg().)
   bool                                          inlining_enabled_ = true;
-  // Result tmps of an inlined call that returned >1 LOGICAL output. Binding one
-  // of these WHOLE to a single user variable (`const inner = two_output_f()`) is
-  // an error — multiple outputs must be destructured (`const (o1,o2) = f()`).
-  // A destructure consumes the tmp via tuple_gets, never a whole store, so it is
-  // not flagged. (06-functions.md "Binding return values".)
-  absl::flat_hash_set<std::string>              multi_output_results_;
   // Higher-order / closure support: maps a function-valued param's RAW name
   // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
   // function it is bound to at this call site (e.g. `step_up`). Saved/restored

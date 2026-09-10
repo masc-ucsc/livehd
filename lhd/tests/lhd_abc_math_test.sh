@@ -4,7 +4,7 @@
 # End-to-end test for the pass.abc multiplier / right-shift bit-blast and the
 # division bit-blast (task 2a-abc follow-on): technology-map a colored
 # combinational design that uses `*`, `>>` and `/` to a standard-cell netlist and
-# prove every region equivalent to the original logic with `lhd lec` (the
+# prove the mapped hierarchy equivalent to the original logic with `lhd lec` (the
 # graph-native cvc5 engine).
 #
 #   prp -> lg -> pass color acyclic   (colors EVERY op, incl mult/div, into
@@ -13,7 +13,7 @@
 #   pass partition --emit-dir lg:re         (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models
 #   pass abc --emit-dir lg:net              (bit-blast mult/sra/div)
-#   lhd lec --impl lg:net --ref lg:re --lib lg:models   (per region)
+#   lhd lec --impl lg:net --ref lg:re --lib lg:models   (complete hierarchy)
 #
 # Coverage: unsigned + signed + n-ary multiply (array multiplier), logical +
 # arithmetic right shift (barrel shifter), and unsigned + signed division.
@@ -52,30 +52,26 @@ REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
 if grep -q '"code":"div-blackbox"' "$W/abc.err"; then fail "divider was not mapped"; fi
 ls "$W/net"/graph_* >/dev/null 2>&1 || fail "no mapped netlist emitted"
 
-# Prove every region of the mapped netlist equivalent to its original-logic twin.
-# lec flattens the netlist's blackbox standard-cell Subs inline against --lib; the
-# divider is bit-blasted too. Covers mapped mult/sra/div, signed and unsigned.
-for r in $REGIONS; do
-  run lec --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$r" --workdir "$W/wlec"
-done
+# Ware extraction introduces new native module boundaries, so anonymous color
+# port names can differ from the unextracted partition twin. Compare through
+# the public top interface, checking every arithmetic output and its wiring.
+# Cell models from --lib supply the mapped standard-cell implementations.
+run lec --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec"
 
 # The Yosys-backed solver consumes cgen Verilog rather than LGraphs.  --lib
 # must therefore materialize the cell-model modules into both sides; otherwise
 # lgcheck fails setup on the first mapped standard cell.
-one_region=$(echo "$REGIONS" | head -1)
 run lec --set formal.solver=lgyosys --impl lg:"$W/net" --ref lg:"$W/re" \
-  --lib lg:"$W/models" --top "$one_region" --workdir "$W/wlec_lgyosys"
+  --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_lgyosys"
 grep -q '"verdict":"proven"' "$W/r.json" \
-  || fail "lgyosys did not prove mapped region with --lib models: $(cat "$W/r.json")"
+  || fail "lgyosys did not prove mapped hierarchy with --lib models: $(cat "$W/r.json")"
 
 # A non-default adder still proves equivalent (the multiplier's partial-product
 # additions use pass.abc.adder).
 rm -rf "$W/net_cska"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
   --workdir "$W/w6"
-for r in $REGIONS; do
-  run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$r" --workdir "$W/wlec_cska"
-done
+run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_cska"
 
 # Negative control: the cell models are load-bearing. Without --lib the netlist's
 # blackbox cell Subs are unresolved, so lec must NOT prove equivalence — a sound
@@ -83,7 +79,7 @@ done
 # miter to INCONCLUSIVE (an incomplete correspondence can neither prove nor
 # refute), which exits 0 unless strict — so run the control strict, where any
 # non-Proven outcome is a hard failure exit.
-if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$one_region" \
+if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$TOP" \
     --set formal.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"

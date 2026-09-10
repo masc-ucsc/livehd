@@ -108,7 +108,8 @@ bool has_body_logic(const hhds::GraphIO& cio) {
 // Incr_cache
 // ---------------------------------------------------------------------------
 
-Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), pre_dir_(dir_ + "_pre"), salt_(salt) {
+Incr_cache::Incr_cache(std::string dir, uint64_t salt, bool scoped_libraries)
+    : dir_(std::move(dir)), pre_dir_(dir_ + "_pre"), salt_(salt), scoped_libraries_(scoped_libraries) {
   std::error_code ec;
   std::filesystem::create_directories(dir_, ec);
   std::filesystem::create_directories(pre_dir_, ec);
@@ -194,8 +195,24 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
   }
 }
 
-hhds::GraphLibrary& Incr_cache::lib() { return livehd::Hhds_graph_library::instance(dir_); }
-hhds::GraphLibrary& Incr_cache::cached_pre_lib() { return livehd::Hhds_graph_library::instance(pre_dir_); }
+namespace {
+hhds::GraphLibrary& scoped_library(std::unique_ptr<hhds::GraphLibrary>& holder, const std::string& path) {
+  if (!holder) {
+    holder = std::make_unique<hhds::GraphLibrary>();
+    if (std::filesystem::is_regular_file(std::filesystem::path(path) / "library.txt")) {
+      holder->load(path);
+    }
+  }
+  return *holder;
+}
+}  // namespace
+
+hhds::GraphLibrary& Incr_cache::lib() {
+  return scoped_libraries_ ? scoped_library(scoped_mapped_, dir_) : livehd::Hhds_graph_library::instance(dir_);
+}
+hhds::GraphLibrary& Incr_cache::cached_pre_lib() {
+  return scoped_libraries_ ? scoped_library(scoped_pre_, pre_dir_) : livehd::Hhds_graph_library::instance(pre_dir_);
+}
 
 Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
                                                       std::string_view recipe, std::span<const std::string> facts) {
@@ -651,12 +668,17 @@ void Incr_cache::save() {
   }
   std::rename(tmp.c_str(), path.c_str());
 
-  livehd::Hhds_graph_library::save(dir_);      // mapped bodies
-  livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls
+  if (scoped_libraries_) {
+    lib().save(dir_);
+    cached_pre_lib().save(pre_dir_);
+  } else {
+    livehd::Hhds_graph_library::save(dir_);      // mapped bodies
+    livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls
+  }
 }
 
-uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, Memory_fold memory_fold,
-                               uint64_t memory_max_bits, std::string_view dff_desc) {
+uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, Memory_fold memory_fold, uint64_t memory_max_bits,
+                               std::string_view dff_desc) {
   // The generated source salt automatically covers mapper/read-back and ABC
   // revision changes. Keep the schema tag for persistent on-disk shape changes
   // that older readers cannot parse; stale bodies must never survive either.

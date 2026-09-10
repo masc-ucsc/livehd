@@ -1,0 +1,9 @@
+/*
+:name: reduce_array
+:type: equiv
+*/
+comb reduce_array(a:u8) -> (z:u1) {
+  mut arr:[4]u8 = 0
+  for i in 0..<4 { arr[i] = a }
+  z = arr#^[0..=2]
+}

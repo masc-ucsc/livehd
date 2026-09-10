@@ -1277,9 +1277,11 @@ private:
       info.sync_val = val == "false" || val == "0";
     } else if ((key == "negreset")) {
       info.negreset = val != "false" && val != "0";
-    } else if ((key == "initial") || (key == "init")) {
-      // `init` is the Pyrope-source spelling; `initial` the importer's.  Both
-      // override the declare's reset value.
+    } else if ((key == "initial")) {
+      // `initial` is the ONE spelling: the LGraph Flop/Latch/Memory reset-value
+      // pin (graph/cell.cpp) and the Pyrope declaration attribute are the same
+      // name.  (`init` was the old Pyrope-only spelling; prp2lnast now reports
+      // it with a "use `initial`" hint.)  Overrides the declare's reset value.
       info.initial_txt = std::string(val);
     } else if ((key == "name")) {
       // Explicit local flop name (`reg x:[name="reg_x"]`) — overrides the
@@ -1543,7 +1545,7 @@ private:
         // FAIL CLOSED on an attr this branch cannot honor (2f-latch M0), now
         // narrowed to the ones M2 did NOT wire. Before M0 every one of these
         // was silently DISCARDED: a
-        // `reg l:u8:[latch=true, clock_pin=ck2, posclk=false, init=3]`
+        // `reg l:u8:[latch=true, clock_pin=ck2, posclk=false, initial=3]`
         // compiled exit 0, zero warnings, and emitted Verilog byte-identical to
         // a plain transparent-high latch. Authoring an attr that vanishes is
         // worse than not having it.
@@ -2585,7 +2587,7 @@ private:
     // `update` sink (size*elem_mw bus) instead of minting per-entry write
     // ports. A whole `x = mem` read materializes the async `read_all` driver
     // pin (cached so repeated reads share one output). For a registered array
-    // the reset value bus rides the (now runtime-capable) `init` sink + the
+    // the reset value bus rides the (now runtime-capable) `initial` sink + the
     // `reset` cond pin.
     bool                         has_update = false;  // an update bus is wired (whole-array memory)
     Pin                          read_all_pin{};      // cached async read_all driver pin
@@ -2986,7 +2988,7 @@ private:
   //    the reset-sweep FSM is a later slice).
   //  * mut/const → comb array (type=2, no clock, no cross-cycle
   //    persistence): the per-cycle default is the init contents (the
-  //    whole-array store wires the `init` pin); a const array with runtime
+  //    whole-array store wires the `initial` pin); a const array with runtime
   //    reads is a ROM (init + read ports only).
   void lower_mem_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& mode_nid, bool is_array) {
     auto name     = lnast_->get_name(name_nid);
@@ -3050,7 +3052,7 @@ private:
     }
     // reg initializer — same treatment as a mut array (reg and not-reg
     // initialize alike): a concrete value becomes POWER-ON contents on the
-    // `init` pin (a scalar broadcasts to every entry; a tuple literal packs
+    // `initial` pin (a scalar broadcasts to every entry; a tuple literal packs
     // per entry). nil / 0sb? = uninitialized. It is ALSO the RESET value of
     // every entry (the same statement `= <const>` makes on a scalar reg), so
     // the module has a reset by construction and finalize_mems() builds the
@@ -3228,7 +3230,7 @@ private:
     setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
     setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     if (reg_init) {
-      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
+      setup_sink_by_name(mem, "initial").connect_driver(create_const(*g_, *reg_init));
     }
     // Clock wiring (posclk + clock_pin) for a clocked (non-array) memory is
     // deferred to finalize_mems: the slang reader emits the clock_pin/posclk
@@ -3420,7 +3422,7 @@ private:
 
   // store(ref mem, rhs) — the whole-array form. For a mut/const array this
   // is its initializer: pack the recorded tuple consts into one wide const
-  // (entry 0 in the low `bits`, row-major) on the `init` sink. `= nil` means
+  // (entry 0 in the low `bits`, row-major) on the `initial` sink. `= nil` means
   // zero-filled (cgen's default).
   // store(mem, <value>) — the whole-array `update` write (runtime bus, const
   // broadcast, or comptime tuple literal). The size*elem_mw bus (entry 0 in the
@@ -3543,7 +3545,7 @@ private:
       for (int64_t i = 0; i < mi.size; ++i) {
         init = init->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
       }
-      setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *init));
+      setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *init));
       mi.init_wired = true;
       return;
     }
@@ -3556,7 +3558,7 @@ private:
     if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
       return;  // flatten_init_values reported
     }
-    setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
+    setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
     mi.init_wired = true;
   }
 
@@ -3671,14 +3673,14 @@ private:
 
     // Guardrail: cell pins verbatim — diagnose the old doc vocabulary.
     static constexpr std::string_view known[]
-        = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "undef", "posclk", "type", "wensize", "size", "rdport", "init"};
+        = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "undef", "posclk", "type", "wensize", "size", "rdport", "initial"};
     for (const auto& [k, v] : cfg.named) {
       if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
         error_here(
             "upass.tolg: unknown __memory config field '{}' — the "
             "vocabulary is the Memory cell pins verbatim "
             "(addr/bits/clock_pin/din/enable/fwd/undef/posclk/type/"
-            "wensize/size/rdport/init; no `latency`, no `clock`)",
+            "wensize/size/rdport/initial; no `latency`, no `clock`)",
             k);
         return true;
       }
@@ -3876,24 +3878,24 @@ private:
       // known. Materializing every sink (rather than one shared pid 2) lets
       // cgen select the multiclock wrapper and retain each read/write clock.
     }
-    if (auto it = cfg.named.find("init"); it != cfg.named.end()) {
+    if (auto it = cfg.named.find("initial"); it != cfg.named.end()) {
       spool_ptr<Dlop> init;
       if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
         init = Dlop::from_pyrope(lnast_->get_name(it->second));
       } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
         const std::vector<int64_t>   flat_dims{size};  // __memory is always flat
         std::vector<spool_ptr<Dlop>> entries;
-        if (flatten_init_values(lit->second, flat_dims, 0, "__memory init", static_cast<int32_t>(bits), entries)) {
+        if (flatten_init_values(lit->second, flat_dims, 0, "__memory initial", static_cast<int32_t>(bits), entries)) {
           init = pack_entries(entries, static_cast<int32_t>(bits));
         }
       }
       if (!init) {
         error_here(
-            "upass.tolg: __memory 'init' must be a comptime constant or "
+            "upass.tolg: __memory 'initial' must be a comptime constant or "
             "tuple literal");
         return true;
       }
-      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *init));
+      setup_sink_by_name(mem, "initial").connect_driver(create_const(*g_, *init));
     }
 
     int n_wr = 0;
@@ -4347,7 +4349,7 @@ private:
       // The array is therefore fully restored only after `size` cycles of
       // reset. (A bounded LEC still proves it against a one-cycle scalar reset
       // at the default 2, because it seeds a memory's cycle-0 state from the
-      // `init` pin — which the same `= <const>` set — and the sweep then only
+      // `initial` pin — which the same `= <const>` set — and the sweep then only
       // rewrites what is already there. Starting from an ARBITRARY array needs
       // `--set formal.reset_cycles=<size>`.) Every USER port's enable, and the
       // whole-array `update_enable`, is gated with !reset so program writes
@@ -4669,7 +4671,7 @@ private:
       }
 
       // Whole-array reset: a registered whole-array (`update` driven) loads its
-      // reset value on reset via the cell's `reset` + runtime `init` pins (cgen
+      // reset value on reset via the cell's `reset` + runtime `initial` pins (cgen
       // / cgen_sim / lec emit `if(reset) data[i] <= init[i]`). The slang reader
       // harvested the reset into `initial` (the reset-value bus const) +
       // `reset_pin` (+ `negreset`) attrs; consume them here. This is the
@@ -4687,14 +4689,11 @@ private:
             // Reset value bus -> init sink (overrides any declare-time const
             // init).
             // `initial` is the importer spelling; `init` is the canonical
-            // Pyrope declaration attribute emitted by prp_writer.  A
-            // Slang->Pyrope->LGraph round trip therefore reaches this path
-            // with `init=...`, even though a direct Slang->LGraph compile uses
-            // `initial=...`.  Accept both, exactly like finalize_regs().
+            // Pyrope declaration attribute emitted by prp_writer.  Both the
+            // Slang->Pyrope->LGraph round trip and a direct Slang->LGraph
+            // compile spell it `initial=...` (one name in both layers), so this
+            // is a single lookup -- exactly like finalize_regs().
             auto iit = attrs.find("initial");
-            if (iit == attrs.end()) {
-              iit = attrs.find("init");
-            }
             if (iit != attrs.end() && iit->second != "false") {
               if (auto iv = Dlop::from_pyrope(iit->second); !iv->is_invalid()) {
                 if (iv->is_nil()) {
@@ -4706,7 +4705,7 @@ private:
                     break;
                   }
                 }
-                setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *iv));
+                setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *iv));
               }
             }
             // Reset condition -> reset sink (active-high; pre-invert negreset).
@@ -9777,7 +9776,7 @@ void uPass_tolg::detect_lg_collisions(const Registry& registry) {
 }
 
 // A compiler-minted (`%`-named entity) unit — the comb a `test` block lowers
-// to, or a `spawn` block — is simulation-only: its body holds
+// to — is simulation-only: its body holds
 // `tick`/`step`/`assert` that the `lhd sim` driver (prp_sim) runs, never
 // synthesizable hardware. The front-end even drops the `tick` body (an
 // unhandled statement), so a value written only inside the loop stays nil and
@@ -9856,10 +9855,10 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast>& lnast, const 
 //
 //   * the FILE-SCOPE statement tree (empty io_meta — the top-level
 //     `mut`/`const`/`cassert` statements of the source file), and
-//   * a `%`-named SIM-ONLY unit (the comb a `test` / `spawn` block lowers to),
+//   * a `%`-named SIM-ONLY unit (the comb a `test` block lowers to),
 //     whose casserts inou.prp (prp_sim) would otherwise code-generate as
 //     RUNTIME checks that fail during `lhd sim` instead of at build time. The
-//     verifier is stripped for those spawned units, so even a comptime-FALSE
+//     verifier is stripped for those minted units, so even a comptime-FALSE
 //     one survives here undiagnosed.
 //
 // Both are CLOSED scopes: no call site is left that could bind a value and fold
@@ -9944,7 +9943,7 @@ void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_vi
     return;  // not a lowerable module (e.g. the empty file-root tree)
   }
   if (is_sim_only_unit(lnast)) {
-    return;  // testbench / spawn comb — never reserve a GraphIO for it
+    return;  // testbench comb — never reserve a GraphIO for it
   }
   // A deferred template (untyped/var-args/generic signature) emits no
   // LGraph: it is realized per call site (comb inlines, pipe/mod/fluid
@@ -9970,7 +9969,7 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   // whole LNAST->LGraph phase was a blank stretch in the trace.
   TRACE_EVENT("pass", "lnast.tolg", "unit", std::string(lnast->get_top_module_name()));
   if (is_sim_only_unit(lnast)) {
-    // Testbench / spawn comb — checked by `lhd sim`, not lowered to hardware.
+    // Testbench comb — checked by `lhd sim`, not lowered to hardware.
     // Its `assert`s stay for prp_sim; its `cassert`s are elaboration checks
     // that must be discharged here (nothing downstream can).
     check_unlowered_casserts(lnast);

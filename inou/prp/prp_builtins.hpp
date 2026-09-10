@@ -42,7 +42,7 @@ inline bool is_builtin_function(std::string_view name) {
       // compilation / directives
       "import",
       // overflow policies (also usable as `wrap x = …` statements)
-      "wrap", "sat", "saturate",
+      "wrap", "sat",
       // bit concatenation — `concat(a, b, c)`, argument 0 the MOST significant
       // lane. Call-shaped but never a real call: prp2lnast rewrites it into the
       // n-ary LNAST `concat` node (a func_call would lose the lane order, and
@@ -126,7 +126,7 @@ inline bool is_builtin_callee(std::string_view name) {
 // a definition-site error instead.
 //
 // Deliberately NOT reserved:
-//   * `wrap`/`sat`/`saturate` — statement-form overflow policies (`wrap x = …`),
+//   * `wrap`/`sat` — statement-form overflow policies (`wrap x = …`),
 //     not call-site interceptions; `mod wrap(...)` is a legal module name.
 //   * `__`-prefixed cell intrinsics — emitted by the cellmap/lowering libraries,
 //     which legitimately define them.

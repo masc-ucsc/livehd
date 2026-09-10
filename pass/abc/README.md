@@ -99,7 +99,7 @@ Per region (`Region_body` from the partition seam):
    selectable adder; sign/zero-extended to the magnitude width then multiplied
    mod 2^W, matching the LEC for signed and unsigned alike), `shl` (a constant
    amount becomes pure bit re-wiring, a runtime amount a combinational barrel/log
-   shifter; multi-driver one-hot amounts are ORed, matching the LEC), `sra` (right
+   shifter), `sra` (right
    shift: arithmetic for a signed operand, logical otherwise — a constant amount
    re-wires, a runtime amount is a barrel shifter), and constants. `div` uses
    restoring division with the selectable adder. Each operand retains its sign;
@@ -171,7 +171,7 @@ Per region (`Region_body` from the partition seam):
    PI→PO / PI→flop-D / flop-Q→PO / shared-gate→2 PO fixture (no `BUFx1`,
    `gates` == the one real cell).
 
-### Sequential (`seq=true`)
+### Sequential (`register=true`)
 
 Registers cross into ABC as 1-bit **latches** (`Abc_NtkCreateLatch` +
 `Bi`/`Bo`) so ABC can optimize the logic between them. Each flop's Q-net seeds
@@ -350,11 +350,15 @@ It is filled twice:
    the stand-in for a flop Q, a memory or a primary input). Each region is
    re-sized in place against that table -- `upsize -D`/`dnsize -D` to its
    budget, the same objective the ladder uses -- in **rounds**
-   (`boundary_rounds`, default 3): a round times every def, sizes it, and
+   (`boundary_rounds`, default 1): a round times every def, sizes it, and
    records the arrival at each output driver and the departure at each input;
    between rounds a def input inherits the arrival of its parent-side driver
    and a def output the departure of every sink it feeds, so a path through k
-   regions is seen whole after k rounds. Cell swaps keep pins and topology
+   regions is seen whole after k rounds. The default is ONE round -- the exact
+   loads and drivers are what buys nearly all of the re-size, and each further
+   round re-times and re-sizes every def again for the propagated budgets
+   alone. Raise it when a long comb chain across regions is the timing
+   problem. Cell swaps keep pins and topology
    (a same-class Liberty cell with the same pin names, or the swap is
    skipped), so the netlist is rewired in place and the partition LEC twin is
    untouched -- `//lhd/tests:lhd_abc_boundary_test` proves the refined netlist
@@ -374,7 +378,8 @@ region `boundary = {bits, resized, delay_pre, area_pre}` -- the region under
 the exact environment BEFORE the re-size, next to its re-sized `delay`/`area`
 (`delay` now includes the arrivals and downstream delays, so it is the
 whole-path view the region has, not just its own cone). Measured on picorv32
-(sky130, `delay=5000`): `pass.opentimer` 9.58 -> 8.97 ns (-6.4%) at +0.6%
+(sky130, `delay=5000`, at the then-default `boundary_rounds=3`):
+`pass.opentimer` 9.58 -> 8.97 ns (-6.4%) at +0.6%
 area, with the re-size touching 79 cells; the remaining gap to the target is
 mapped logic depth across regions, which sizing cannot buy back. On the xs
 renametable (769 regions, 941k crossing bits, 18.6k cells re-sized) the
@@ -399,11 +404,12 @@ inlined first (`pass/partition/flatten.cpp`: child bodies cloned per instance,
 node/wire names prefixed with the dotted instance path, srcids/colors carried)
 and ONE decomposition runs on the flat def. A single resulting region — the
 `pass.color flat` case — is emitted directly under the top's own name and port
-list: **one netlist module**, a drop-in replacement for the original def. All
+list. Preserved memory and arithmetic ware definitions remain child modules.
+For a single netlist module, disable the three `color.ware_*` options when
+coloring and use a design without preserved memory modules. All other
 cross-module `get_mask`/`set_mask` bus-packing glue disappears with the module
-boundaries (only true blackboxes — memories with `memory=false`, div cones,
-external IP — keep their PI/PO cuts), so `lhd pass opentimer` can time the
-whole design in its default single-module mode. `auto` flattens exactly when
+boundaries. STA can flatten preserved implementations for timing; native
+memories and external IP retain their opaque PI/PO cuts. `auto` flattens exactly when
 the active coloring came from `pass.color flat`; a multi-color coloring under
 `flatten=true` still produces the wrapper, with regions spanning the former
 hierarchy.
@@ -411,19 +417,16 @@ hierarchy.
 ## Options (`--set pass.abc.<flag>=value`)
 
 The option namespace matches the command path (`lhd pass abc`); after the
-`pass abc` words the key may be abbreviated (`--set library=…`), see 2h-set_path.
+`pass abc` words the key may be abbreviated (`--set adder=cla`), see 2h-set_path.
 
 | flag | meaning | default |
 |------|---------|---------|
-| `library` | Liberty `.lib` for `read_lib` | `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` |
 | `flow` | ABC command string (`{D}`/`{L}` substituted), run verbatim — see below | built-in comb/seq default |
-| `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) — a superset that also maps purely combinational regions, so it is the default | `true` |
 | `register` | map flops to Liberty DFF cells (`true`; falls back to native flops when the library has none) vs keep them native `always @(posedge)` (`false`) | `true` |
 | `register_max_bits` | with `register=true`, keep a region's flops native when their total Q width exceeds this many bits (`register-kept-native` diagnostic; `0` disables — the default, since a bit-blasted 64x64 memory alone is 4096 bits and a native register is one the downstream normalize maps instead of pass.abc) | `0` |
 | `dff_cell` | explicit Liberty DFF cell for `register=true` (empty = the smallest-area plain posedge D-flop, QN cells included; an explicit name also disables the drive ladder) | `` |
 | `memory` | lower memory RTL and ABC-map its body in a separate module (`true`), preserve its native implementation (`false`), or decide per memory (`auto`: fold within `memory_max_bits`, or over 3 ports whatever the size); every mode retains the memory instance boundary | `auto` |
 | `memory_max_bits` | with `memory=auto`, fold a memory whose `bits x size` is within this many bits and keep a larger one native, with a one-line note naming it (`0` = no size limit); `true`/`false` ignore it | `1024` |
-| `ware` | automatically minimize stitched Liberty delay with a timing target, or mapped area without one | `true` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
 | `threads` | maximum ABC workers (`0` = available CPUs); `lhd synth` sets this through `synth.threads`, which defaults to `0` | `1` |
@@ -437,12 +440,21 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `true` |
 | `boundary_buffer` | tree every region input's fanout inside the region when it exceeds `max_fanout` -- the design's primary inputs and the sink side of crossing nets alike -- by declaring `boundary_drive` as ABC's driving cell (its `buffer` only trees an input that has a driver); independent of `boundary`; false leaves inputs unbuffered and relies on the exact re-size to upsize the driver | `true` |
 | `boundary_drive` | stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a memory or child output, every input under the estimate): empty = the library's smallest ordinary buffer, `none` = an ideal driver | `` |
-| `boundary_rounds` | rounds of the exact re-size (a path through k regions needs k rounds) | `3` |
+| `boundary_rounds` | rounds of the exact re-size (a path through k regions needs k rounds) | `1` |
 | `io_load` | load in fF on a primary output of `--top` (and on a port whose sink cannot be resolved); negative = one typical input pin of the library | `-1` |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
 | `flatten` | whole-design flatten: `auto`/`true`/`false` — see below | `auto` |
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
 | `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |
+
+The Liberty `.lib` handed to `read_lib` is **not** a `pass.abc` option: there is
+one Liberty spelling for the whole CLI, `--set synth.liberty=…` (empty resolves
+to `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`), so `pass.abc`,
+`pass.opentimer` and `lhd synth` all read the same file. The kernel plumbs it
+into pass.abc's internal `library` label; `--set pass.abc.library=…` is refused.
+Automatic ware selection has no global flag either — it is per family
+(`color.ware_arith`, `color.ware_cmp`, `color.ware_shift`), per Pyrope
+synthesis section, or per color through `region_opts` (see below).
 
 When a delay target is requested (`delay`, or a `region_opts` `delay` supplied
 through `--set`) and the Liberty contains 2-D NLDM slew/load tables, the SCL
@@ -578,8 +590,10 @@ in the diagnostic while other regions still map.
 
 > Known limitation: `adder=cla` with the auto block width on a wide `mult`
 > produces an AIG that ABC's default `&dch` step aborts on (an ABC-internal
-> failure that exits without a diagnostic). Use the default `adder=rca` (or
-> `cska`, or a small `block_size`) for multiplier-heavy designs.
+> failure that exits without a diagnostic). Set `adder=rca` or `cska`
+> explicitly, or a small `block_size`, for multiplier-heavy designs: the
+> default `auto` trials `cla` at the auto block width on any region holding a
+> `mult` (`abc_ware.cpp:176`).
 
 ### The `flow` string and abc.rc scripts
 
@@ -628,7 +642,7 @@ per region goes to the step log, a `pass.abc qor:` summary follows the region
 loop, and with `qor=FILE` the whole thing is written as JSON:
 
 ```json
-{"schema_version":1, "top":…, "library":…, "seq":…, "delay_target":…,
+{"schema_version":1, "top":…, "library":…, "register":…, "delay_target":…,
  "total":{"regions":N,"input_nodes":IN,"input_ge":IGE,
           "gates":G,"area":A,"max_delay":D,
           "area_candidate_won":n,"delay_candidate_won":m,
@@ -752,14 +766,14 @@ false reuse.
 
 ## Status
 
-Combinational mapping (`seq=false`) is complete and LEC-verified
+Combinational mapping (`register=false`) is complete and LEC-verified
 (`//lhd/tests:lhd_abc_test`), with source-map carry-through (above) and the
 selectable `sum`/comparator bit-blast (`//lhd/tests:lhd_abc_arith_test`).
-Sequential mapping (`seq=true`) — flops↔latches with name preservation +
+Sequential mapping (`register=true`) — flops↔latches with name preservation +
 single-root remap, and memory/`Sub` blackbox boundaries — is complete and
-LEC-verified (`//lhd/tests:lhd_abc_seq_test`: flops, memory in both modes, and
-a 3-level hierarchy) and is the default (`seq=true`). The memory bit-blast
-(`memory=true`, above) is opt-in: constant-address ports, per-lane
+LEC-verified (`//lhd/tests:lhd_abc_seq_test`: flops, memory in every mode, and
+a 3-level hierarchy) and is the default (`register=true`). The memory bit-blast
+(`memory=true`, or `auto` above its thresholds) covers constant-address ports, per-lane
 muxes, const/const forwarding and `read_all` are LEC-verified by
 `//lhd/tests:lhd_abc_memlower_test` (a 32x8 constant-index multi-writer tile
 through slang, proven with both lgyosys and cvc5, plus a gate-count guard) and
@@ -772,7 +786,7 @@ implemented: per-region `flow` overrides (2opt-freq C). See
 
 
 Synthesis partitions come from `pass.color synth`, whose default mode is
-`cones`: one backward cone per register `din`/`enable`, merged under a 5,000
+`cones`: one backward cone per register `din`/`enable`, merged under a 30,000
 predicted-AIG-gate threshold (`color.max_gate`). `--set color.synth_alg=synth`
 (or `pipe`) instead propagates one id forward and reshapes with the 500–5,000
 GE size window (`color.min_ge`/`color.max_ge`), which `cones` ignores. These
@@ -784,8 +798,26 @@ headroom, so physical-footprint admission remains a separate check.
 
 ### Automatic ware selection
 
-After baseline mapping and boundary sizing, `abc.ware=true` compares alternative
-implementations of adders/comparisons, multipliers, and runtime barrel shifters.
+`color.ware_arith`, `color.ware_cmp`, and `color.ware_shift` default to true.
+They preserve large adders (>8 result bits), multipliers/dividers, wide LT/GT
+comparisons (>8 operand bits), and runtime SHL/SRA shifters (>8 result bits)
+as separate optimizable modules. Constant shifts remain wiring. Each control
+is independent of its `color.stop_*` counterpart: stopping a color does not
+require a ware module, and a ware module is preserved even with stopping off.
+The color pass persists the choices for a later standalone `pass abc` invocation.
+
+Ware definitions use native LGraph operators and GraphIO port declarations.
+Each input and output has its own width and signedness; Sum retains every
+positive/negative operand and output. Constants are specialized into the body.
+Equal realizations within a section share a definition. Finite output slices
+bound the requested result width; a right shifter retains its full input width.
+Shift counts retain all their bits, so an oversized count produces zero or sign
+fill instead of wrapping to a smaller count.
+The Sum builder compresses three operand rows at a time without propagating
+carry, then uses the selected RCA/CSKA/CLA for the final addition.
+
+After baseline mapping and boundary sizing, the enabled ware families compare
+alternative implementations of adders/comparisons, multipliers, and runtime barrel shifters.
 Arithmetic can remain inlined: its containing color is the trial unit. Explicit
 global or per-color `adder`, `block_size`, `multiplier`, and `barrel` selectors
 are authoritative. An explicit multiplier also fixes its internal adder.
@@ -816,16 +848,25 @@ does not miss a better combination with another. Reports expose
 `ware_trials` and `ware_selected`; logs record the objective, delay, area, and
 each acceptance decision.
 
-`--set abc.ware=false` disables trials. `large_ge` bounds trial admission, and
+`--set color.ware_arith=false`, `color.ware_cmp=false`, and
+`color.ware_shift=false` disable extraction and automatic trials for their
+respective families. The former global `abc.ware` option has been removed.
+Explicit architecture selectors still map through ABC. Pyrope section `ware`
+and `abc.region_opts` remain section-specific trial permissions.
+`large_ge` bounds trial admission, and
 the scorer honors the ABC memory budget. Incomplete combinational models,
 cycles, or unavailable Liberty timing retain the baseline with a diagnostic.
 Multiplier `tree` is a balanced sum of partial products, not a carry-save
 Wallace/Dadda implementation.
 
-The persistent region cache stores the independent baseline before trials.
-Winners depend on the surrounding design, so a warm run reuses baseline mapping
-and repeats critical-path selection; it does not reuse a context-dependent
-winner under an unchanged local cache key.
+The persistent region cache stores the independent baseline before trials,
+including width-specialized ware definitions flattened inside their boundary.
+Extracted ware candidates are cached separately under `abc_cache/ware/`, with
+architecture, source structure, recipe, Liberty, and mapper identity checked
+before reuse. `lhd.incremental=false` disables both baseline and candidate reuse.
+Winners depend on the surrounding design, so a warm run re-scores every eligible
+candidate against current stitched timing/area. Inlined-region trials are rebuilt.
+A context-dependent winning decision is never reused as a local cache entry.
 
 ### Pyrope section ware and timing attributes
 

@@ -3651,7 +3651,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         m.update_enable = e.driver;
       } else if (pn == "reset") {
         m.reset = e.driver;
-      } else if (pn == "init") {
+      } else if (pn == "initial") {
         m.init = e.driver;  // whole-array reset-value bus (runtime); plain mem: comptime, still assumed 0
       } else if (pn == "wensize") {
         m.wensize = static_cast<int>(const_of(e.driver).to_just_i64());
@@ -4568,7 +4568,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         memory.update_enable = edge.driver;
       } else if (name == "reset") {
         memory.reset = edge.driver;
-      } else if (name == "init") {
+      } else if (name == "initial") {
         memory.init = edge.driver;
       } else if (name == "wensize") {
         memory.wensize = static_cast<int>(const_of(edge.driver).to_just_i64());
@@ -10386,7 +10386,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               const MemPort* port       = port_group < memory->ports.size() ? &memory->ports[port_group] : nullptr;
               bool           required   = false;
               if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
-                required = memory->is_whole() && (name == "update" || name == "update_enable" || name == "init" || name == "reset");
+                required
+                    = memory->is_whole() && (name == "update" || name == "update_enable" || name == "initial" || name == "reset");
                 required |= port != nullptr && !port->rd
                             && (str_tools::ends_with(name, "addr") || str_tools::ends_with(name, "din")
                                 || (str_tools::ends_with(name, "enable") && name != "update_enable"));
@@ -10572,7 +10573,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                     reset     = llvm_kernel.reduce_or(reset, 1, true);
                     force     = reset;
                     auto init = memory->init.is_invalid() ? llvm_kernel.constant(whole_width, 0, memory->unsign)
-                                                          : memory_operand(std::nullopt, "init");
+                                                          : memory_operand(std::nullopt, "initial");
                     if (init.width == 0) {
                       return reject("whole-array memory update has no initial value");
                     }

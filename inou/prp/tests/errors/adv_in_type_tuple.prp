@@ -1,10 +1,9 @@
 /*
 :name: adv_in_type_tuple
 :type: error
-:error: different types
-:help: same type as the left operand
+:error: left operand of `in` must be a scalar
+:help: membership, not a tuple subset test
 */
-// A tuple left operand against scalar elements is a type mismatch: `(1,2)` is a
-// tuple, but each element of `(0,1,2,3,4)` is a scalar integer.
+// Membership has a scalar left operand; tuple subset tests are not supported.
 const x = (1, 2) in (0, 1, 2, 3, 4)
 cassert(x)

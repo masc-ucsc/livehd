@@ -56,7 +56,7 @@ generated code with `lhd` (last section).
 | `pipe[N]` | Fixed latency `N > 0`: every output lands exactly N cycles after its inputs; **never** a comb input→output path. A feedback `reg` is state (adds no latency); an unconditionally-written feedforward `reg` is a pipeline stage counted in N. A conditional write ⇒ state register. |
 | `pipe[A..=B]` / bare `pipe` | Latency range / fully flexible; the **caller** picks via `stage[N]`. `pipe` calls are only legal inside `mod`. |
 | `mod` | No constraints (Mealy, Moore, orchestrator). **Every output declares its landing cycle at the interface**: `-> (x:u8@[2], y:u8@[0])`. `@[0]` = comb feedthrough (legal in `mod`, forbidden in `pipe`); `@[]` = unconstrained opt-out; omitting `@[...]` is a compile error. |
-| `fluid` | Transactional valid/retry handshakes. (TBD: parses only, no lowering.) |
+| `fluid` | Transactional valid/stop handshakes. (TBD: parses only, no lowering.) |
 
 ```pyrope
 comb add(a:u8, b:u8) -> (r:u9) { r = a + b }
@@ -136,15 +136,15 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
   `cassert(x does T)`; convert with constructor calls: `u8(x)`, `int(s)`,
   `string(n)`. Type-shape operands write the bare type (`x does u8`).
 * Enums: `enum State = (Idle, Run, Done)` — one-hot encoding by default; any
-  explicit value (or an `:int` type) switches to sequential. **Always compare
+  explicit value (or a `:signed` type) switches to sequential. **Always compare
   against names** (`st == State.Idle`), never raw integers. Casts:
   `string(E.a)`, `E("a")`, and `E.a#[..]` for the bits. Hierarchical enums
-  (`Animal.bird.eagle`) DO work. A variant taking a named constant
-  (`const c=1; enum(a=c, b)`) MISCOMPILES today — b restarts at 0; use
-  literals until that is fixed.
+  (`Animal.bird.eagle`) work. A named constant or expression seeds the
+  subsequent automatic ordinals: `const c=1; enum(a=c, b)` gives b=2.
+  `signed(E.a)` and `unsigned(E.a)` also expose the integer encoding.
 * Ranges: `0..=7`, `0..<8`, `2..+3`, optional `step 2`; ascending only.
-  `step` is honoured by a `for` loop but IGNORED when the range is used as a
-  value (`(0..<30 step 10)` yields all 30 entries) — a known bug. Open
+  `step` applies both in loops and to range values: `(0..<30 step 10)` is
+  `(0,10,20)`. A step must be a positive integer. Open
   ends in selectors (`a[1..]`); negative = distance from the end
   (`b#[1..=-2]`).
 
@@ -156,23 +156,20 @@ v#sext[0..=2]    // sign-extended slice
 v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce, popcount (lower to int 0/1)
 trans#[0] = v#[1]   // LHS bit assign; every dest bit driven exactly once
 const onehot = 1 << (1, 4, 3)        // == 0ub01_1010
-const z:u9 = concat(a, b, c)         // a:u4, b:u3, c:u2 — `a` lands in [8..5]
+const z:u9 = (a, b, c)#[..]         // a:u4, b:u3, c:u2 — `a` lands in [3..0]
 ```
 
 `#[]` is bits, `[]` is tuple/array elements, `@[N]` is a cycle typecheck —
 never mix them. Runtime bit indices (`a#[i]`) work.
 
-Two ways to pack bits: `concat(a, b, c)` — MSB-first, Verilog's `{a,b,c}` — or
-explicit per-range LHS assigns into a typed destination. A concat lane's window
-is its **declared type**, never its value or a literal's spelling (so a literal
-operand is an error — bind it to a typed name first), and the destination must
-declare the exact lane sum. A positional tuple or array lane splices its fields
-with **field 0 most significant**, so `concat(arr)` is the per-entry REVERSE of
-the whole-array read `x = arr` (which puts entry 0 in the LOW bits). A named
-bundle lane is rejected: names have identity but no order — select the fields
-yourself, `concat(t.hi, t.lo)`. Splicing a **`reg` array** reads it whole, which
-`inou.cgen` refuses unless the array is `:[ordering="old"]` (a whole read has no
-same-cycle forwarding model).
+Pack an ordered tuple or array with `p#[..]`: entry 0 occupies the least
+significant declared window. `#sext`, reductions, and subranges work over the
+same packed word, including a variable holding a tuple or array. Each window
+comes from the lane's declared type, never its current value. Multi-field named
+bundles have no bit order; spell an ordered tuple of their fields explicitly.
+A destination declared for a packing must match the sum of the lane widths.
+Whole reads of a register array require `:[ordering="old"]` because the
+simulator has no same-cycle forwarding model for them.
 
 ## Statements
 
@@ -221,10 +218,16 @@ const old = past[2](counter)  // pipelined: inserts 2 flops, shifts landing cycl
 * No `@[-1]`/`@[1]` register indexing, no `.[defer]` — use a `wire` (below)
   for next-state reads and backward edges.
 * Register attributes at declaration:
-  `reg c:u8:[clock_pin=ref clk2, reset_pin=ref rst2, sync=false, posclk=false, retime] = 3`.
+  `reg c:u8:[clock_pin=ref clk2, reset_pin=ref rst2, async=true, posclk=false] = 3`.
   `_pin` attributes connect **wires** → they need `ref` (a comptime constant
-  like `reset_pin=false` doesn't). `sync` defaults true (async reset =
-  `sync=false`); `retime` lets synthesis move/merge the flop.
+  like `reset_pin=false` doesn't). `async` defaults false (async reset =
+  `async=true`).
+* `reg x:T:[latch=true]` declares a level-sensitive latch — the grammar has no
+  `latch` keyword, and the marker is consumed at declaration (not readable back
+  as `.[latch]`). `enable_high` is an alias of `posclk` accepted on ANY
+  register: on a flop it is the clock edge, on a latch it is the ENABLE
+  polarity. An active-low latch enable (`enable_high=false`/`posclk=false`) is
+  REFUSED — write the inverted condition instead (`if !g { ... }`).
 * Multi-cycle reset code: assign a lambda **by name** (no parens):
   `reg arr:[1024]Tag = my_reset_mod`.
 
@@ -352,7 +355,7 @@ generated") — write `assume` for a precondition, `assert` for a postcondition.
 use `assume` (a proven assume is available to the optimizer as a don't-care).
 
 Prints: `puts("a={a} b={}", b)` (interpolation, queued to end of cycle, legal
-in `comb`), `print`, `format`. `cputs("msg")` prints at elaboration — file
+in `comb`), `print`. `cputs("msg")` prints at elaboration — file
 top-scope only for now (inside a lambda it is an undefined call).
 
 ## Tests (`lhd sim`)
@@ -506,7 +509,7 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 | `always @(posedge clk)` / `@(*)` | implicit — `reg` vs `mut` |
 | `case (x) ... endcase` | `match x { == v {...} else {...} }` |
 | `x[6:3]` | `x#[3..=6]` |
-| `{a, b}` concat | `concat(a, b)`, or per-range LHS bit assigns into a typed dest |
+| `{a, b}` concat | `(b, a)#[..]` — entry 0 lands in the LOW bits, so the argument order REVERSES |
 | `4'b10x?` / `x` value | `0ub10??` / `0sb?` |
 | one-hot mux / tri-state bus | `unique if` (lowers to `__hotmux`) |
 | Verilog reg memory read semantics | `reg mem:[N]T:[ordering="old"]` |
@@ -540,7 +543,7 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 12. The comptime `[...]` slot is a syntax error — comptime parameters are
     constant generics: `comb g<N=1>(x)`, called `g<N=3>(x=a)`.
 13. `_pin` register attributes need `ref` (`clock_pin=ref clk`); reset value
-    is the `= expr` initializer; `sync=false` for async reset.
+    is the `= expr` initializer; `async=true` for async reset.
 14. Enum comparisons use names (`State.Idle`), never the underlying integer.
 15. `if c { assert(x) }` checks `assert(x)` UNCONDITIONALLY — write
     `assert(c implies x)`.
@@ -555,7 +558,7 @@ chapter is the authoritative list; status below re-verified against a fresh
 build
 2026-07-31). Do not generate these unless explicitly asked:
 
-* `fluid` lambdas / valid-retry handshakes (parses only).
+* `fluid` lambdas / valid-stop handshakes (parses only).
 * The verification **temporal library** — `past(x, n)`, `rose(x [, w])`,
   `fell`, `stable`, `changed`, `eventually(x, w)`, `always(x, w)`. Cycle
   arguments are **positional** (there is no `f[N](x)` bracket form in this
@@ -568,7 +571,8 @@ build
   The `test`-block `regref` (dotted or single-cell string) WORKS and is the
   only way to drive a cell; reads are bare dotted `dut.x` at any depth.
   `sigref` was REMOVED 2026-09-06 — it was exactly a bare dotted read.
-  Writing a register BELOW the top instance is not implemented.
+  Nested registers can be driven with `regref(dut.child.count)` or
+  `regref("dut/child.count")`; child instance names follow their source bindings.
 * `cover`/`covercase`; in-language `lec()`; `.[rand]`/`.[crand]` (rejected in
   test blocks and design bodies; survive only where they constant-fold).
 * `macro=` memory-compiler binding; `import("prp")` stdlib.
@@ -634,7 +638,7 @@ lhd tool cat|grep|diff|tree ...       # inspect ln:/lg: artifacts
   (`--set lhd.incremental=false` = honest cold run, same netlist). Outputs:
   `--emit-dir lg:` / `--emit verilog:` (mapped netlist), `--emit-dir report:`
   (the two JSON reports); `--stats` adds per-color rows; pass knobs ride their
-  pass namespace (`--set abc.adder=cla`, `--set color.absorb=false`). The
+  pass namespace (`--set abc.adder=cla`, `--set color.max_gate=50000`). The
   coloring is always `synth` — use the manual `lhd pass color <alg>` + `lhd pass
   abc` steps for anything else.
 * **`lhd sim`** builds a C++ simulation of the `test` blocks. It needs the sim

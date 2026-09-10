@@ -89,6 +89,10 @@ cc_library(
         "//core",
         "//lnast",
         "//pass/common:pass",
+        # THE attribute-name vocabulary (battr.hpp). Header-only, so this does
+        # NOT link the upass/core plugin -- it just stops prp2lnast from
+        # hand-copying the list, which had already drifted both ways.
+        "//upass/core:battr_hdr",
         "@prpparse//:prpparse",
         # 2f-sim B0: prp_sim reads cgen_sim's per-module <stem>.iface.json
         # manifest instead of text-scraping the generated headers.

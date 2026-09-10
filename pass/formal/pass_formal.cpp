@@ -3,6 +3,10 @@
 #include "pass_formal.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +41,34 @@ int  to_int(std::string_view v, int dflt) {
     return dflt;
   }
 }
+
+// The pass's TOTAL wall-clock budget (pass.formal.timeout). `lhd compile` runs
+// this pass on every definition of the design, and a property whose cone the
+// prover cannot discharge burns its whole deterministic rlimit before answering
+// Unknown -- on a large design that is minutes of compile spent to learn nothing
+// (measured on minion: 52.5 s of a 55 s compile). The budget bounds that: each
+// query is handed only what is LEFT of it, and once it is gone the remaining
+// obligations are not solved at all.
+//
+// Degrading is sound in one direction only, which is the direction taken: an
+// unsolved obligation stays a RUNTIME CHECK (never elided, never a build error).
+// The cost is reproducibility -- a slower machine proves fewer properties, so
+// which checks get elided is no longer machine-independent. `timeout=0` restores
+// the fully deterministic rlimit-only behavior.
+struct Budget {
+  std::chrono::steady_clock::time_point start    = std::chrono::steady_clock::now();
+  long long                             total_ms = 0;  // 0 = unbounded
+  int                                   skipped  = 0;  // obligations left unsolved once it ran out
+
+  bool      bounded() const { return total_ms > 0; }
+  long long left_ms() const {
+    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    return total_ms - spent;
+  }
+  bool spent() const { return bounded() && left_ms() <= 0; }
+  // What one query may take: everything still unspent, capped to `int`.
+  int  query_ms() const { return static_cast<int>(std::clamp<long long>(left_ms(), 1, std::numeric_limits<int>::max())); }
+};
 // The decoded fproperty instance-name attr ("<kind>\x1f<loc>\x1f<msg>"): the
 // kind ("assert" | "assert_always" | "assume") plus the optional source
 // location and user message carried for diagnostics.
@@ -195,6 +227,16 @@ void Pass_formal::setup() {
                        "When no reset is detected the BMC starts from free state, so a refute is NOT treated as reachable",
                        "");
   m.add_label_optional("cone_max", "skip (defer to runtime) cones larger than this many nodes (0 = default 50000)", "0");
+  m.add_label_optional(
+      "timeout",
+      "TOTAL wall-clock seconds this pass may spend in the solver, across every definition and every "
+      "obligation; fractional accepted (0 = unbounded). Its OWN budget, unrelated to formal.timeout (which belongs to `lhd "
+      "formal verify` / `lhd lec`): this one bounds how much of a COMPILE property checking may cost. "
+      "Each query is armed with what is left of it; once it is gone the remaining obligations are not "
+      "solved and stay runtime checks (sound -- nothing is elided on an unsolved property). Note a "
+      "non-zero budget makes WHICH properties get proven machine-dependent; 0 keeps the run fully "
+      "deterministic (the budget_k rlimit alone)",
+      "10");
   m.add_label_optional("warn_deferred", "true|false warn whenever any obligation is deferred to runtime", "true");
   m.add_label_optional("warn_onehot", "true|false warn on a deferred Hotmux one-hot check", "true");
   m.add_label_optional("warn_assert", "true|false warn on a deferred assert", "true");
@@ -284,6 +326,31 @@ void Pass_formal::work(Eprp_var& var) {
   const int             cone_max = to_int(var.get("cone_max", "0"), 0);
   opts.budget_k                  = budget_k > 0 ? budget_k : 256;
   opts.cone_max                  = cone_max > 0 ? cone_max : 50000;
+
+  // The pass's TOTAL solver budget (see `struct Budget`). It starts ticking here,
+  // so the graph walks that find the obligations are inside it too -- they are
+  // part of what a compile pays for property checking.
+  Budget budget;
+  {
+    // Seconds, FRACTIONAL: `10` is the default and `0.25` is a legal quarter of a
+    // second. A sub-millisecond positive value still buys 1 ms, so only a literal
+    // `0` means unbounded.
+    const std::string text = std::string{var.get("timeout", "10")};
+    char*             end  = nullptr;
+    const double      secs = std::strtod(text.c_str(), &end);
+    const bool        ok   = !text.empty() && end != nullptr && *end == '\0' && std::isfinite(secs) && secs >= 0.0;
+    if (!ok) {
+      livehd::diag::err("pass.formal", "bad-timeout", "io")
+          .msg("pass.formal timeout must be a non-negative number of seconds, got '{}'", text)
+          .emit();
+      return;
+    }
+    const auto ms   = static_cast<long long>(secs * 1000.0);
+    budget.total_ms = (secs > 0.0) ? std::max<long long>(1, ms) : 0;
+  }
+  if (budget.bounded()) {
+    opts.timeout_ms = budget.query_ms();
+  }
 
   // mode=normal BMC-from-reset unroll depth (2f-formal): a TINY bound — the
   // single-frame base case plus enough free cycles that shallow reachable
@@ -419,21 +486,31 @@ void Pass_formal::work(Eprp_var& var) {
       // filters agree by construction: lec reports kind=="assume" for exactly
       // the occurrences is_assume_kind() accepts.
       auto occurrences = prop_occurrences(root);
-      bool any_assume  = false;
+      int  assumes     = 0;
       for (const auto& occ : occurrences) {
-        if (livehd::lec::is_assume_kind(fprop_parts(occ.base_node()).kind)) {
-          any_assume = true;
-          break;
-        }
+        assumes += livehd::lec::is_assume_kind(fprop_parts(occ.base_node()).kind) ? 1 : 0;
       }
-      if (!any_assume) {
+      if (assumes == 0) {
+        continue;
+      }
+      if (budget.spent()) {
+        // No budget left to encode + solve a whole-design contract preflight.
+        // Nothing is discharged, so every contract stays a live runtime check --
+        // the same conservative outcome as the correlation-mismatch path below.
+        // Only the assumes count: they are the obligations this preflight owns
+        // (the asserts in the vector are there for positional correlation).
+        budget.skipped += assumes;
         continue;
       }
       livehd::lec::Lec_options ho;
       ho.engine  = "bmc";
       ho.solver  = "cvc5";
       ho.bound   = bmc_bound;
-      ho.timeout = 0;
+      // Seconds, and a per-checkSat cap in this engine (the soft-total accounting
+      // is off whenever rlimit is set). One second is the floor, mirroring lec's
+      // own min_timeout: a straggler still earns a real attempt, so a call with
+      // many obligations may overrun the pass budget by up to one second each.
+      ho.timeout = budget.bounded() ? std::max(1, static_cast<int>(budget.left_ms() / 1000)) : 0;
       ho.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
       ho.partitions     = 1;
       ho.split          = "none";
@@ -546,6 +623,34 @@ void Pass_formal::work(Eprp_var& var) {
     const bool       is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
     formal::Prover   prover(g, opts);
 
+    // Every solver question of this graph goes through `ask`: it re-arms the
+    // prover with what is LEFT of the pass budget, and once that is gone it stops
+    // asking at all and returns the default Query_out (Unknown) -- so the walks
+    // below still run and still stamp each obligation as a kept runtime check,
+    // they just stop paying cvc5 for an answer.
+    // `obligation` says whether a skip costs the design a kept runtime check
+    // (an assert / assume / one-hot question) or is merely a diagnostic probe
+    // (the vacuity sweep); only the former is counted in the summary.
+    // `skipped` (optional) tells the caller the query never ran, so it can tell
+    // that default from a real Unknown when the difference matters.
+    auto ask = [&](auto&& query, bool obligation = true, bool* skipped = nullptr) -> formal::Query_out {
+      if (budget.spent()) {
+        budget.skipped += obligation ? 1 : 0;
+        if (skipped) {
+          *skipped = true;
+        }
+        return {};
+      }
+      if (budget.bounded()) {
+        prover.set_timeout_ms(budget.query_ms());
+      }
+      return query();
+    };
+    // A deferred obligation is normally worth one warning each ("could not be
+    // proven"). Out of budget it is not: the pass stopped asking, and the ONE
+    // summary at the end of the pass says so. Silence the per-obligation noise.
+    auto say_deferred = [&](bool enabled) { return enabled && !budget.spent(); };
+
     // Built-in obligation: a Hotmux's controls must be mutually exclusive. Collect
     // first so attribute writes never perturb the forward_class walk.
     std::vector<hhds::Node_class> hotmuxes;
@@ -559,7 +664,7 @@ void Pass_formal::work(Eprp_var& var) {
       for (const auto& [control, value] : gu::hotmux_inputs(node).arms) {
         controls.push_back(control);
       }
-      auto out = prover.are_exclusive(controls);
+      auto out = ask([&] { return prover.are_exclusive(controls); });
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalOnehot);  // one-hotness obligation discharged
       } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
@@ -580,7 +685,13 @@ void Pass_formal::work(Eprp_var& var) {
         // Undecided, a non-top module ("not enough top"), or (fast) a stateful
         // refutation -> keep the runtime check + a loud DEFERRED warning.
         gu::set_runtime_check(node, gu::kFormalOnehot);
-        warn_deferred(warn_onehot, "onehot-deferred", "Hotmux control exclusivity", g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(say_deferred(warn_onehot),
+                      "onehot-deferred",
+                      "Hotmux control exclusivity",
+                      g->get_name(),
+                      out,
+                      is_top,
+                      downgrade_refute);
       }
     }
 
@@ -653,7 +764,17 @@ void Pass_formal::work(Eprp_var& var) {
         }
         continue;
       }
-      auto out = prover.is_true(cond);
+      bool skipped = false;
+      auto out     = ask([&] { return prover.is_true(cond); }, /*obligation=*/true, &skipped);
+      if (skipped) {
+        // Out of budget the query never ran, so `out.stateful` is the default
+        // (false) -- NOT a classification. The branch below promotes a top assume
+        // to an active hypothesis (persisted as `proven`, consumed by LEC) on
+        // that flag alone, so classify it here from the solver-free cone walk:
+        // a state-dependent assume must stay a runtime check, never a hypothesis
+        // nothing checked. An unsupported cone counts as stateful (conservative).
+        out.stateful = prover.stateful_cone(cond);
+      }
       if (is_top && !out.stateful && !cond.is_const()) {
         // A selected top has no parent that can discharge a precondition over
         // its primary IO. It is therefore an environment constraint by
@@ -717,7 +838,7 @@ void Pass_formal::work(Eprp_var& var) {
         // refutation: the declared contract is kept as a runtime check (never a
         // hypothesis) + a loud DEFERRED warning.
         gu::set_runtime_check(node, gu::kFormalAssume);
-        warn_deferred(warn_assume, "assume-deferred", "assume", g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(say_deferred(warn_assume), "assume-deferred", "assume", g->get_name(), out, is_top, downgrade_refute);
       }
     }
     for (auto& c : proven_assumes) {
@@ -742,7 +863,16 @@ void Pass_formal::work(Eprp_var& var) {
     // assume_nocheck pair BY SPELLING (surviving the retraction), lec's queries
     // reject the UNSAT set as CONTRADICTORY, and `lhd formal verify` turns the
     // vacuous verdict into a usage error (lhd_kernel_formal.cpp).
-    if (unchecked_hypotheses && !prover.assumes_consistent()) {
+    // Out of budget this probe is skipped, which is safe HERE and only here: it
+    // exists to stop a contradictory hypothesis set from proving an assert
+    // vacuously, and past this line every assert query is short-circuited to
+    // Unknown, so no proof can happen for it to poison. The `proven` stamp on the
+    // unchecked assumes does survive into the persisted graph, and `lhd lec` /
+    // `lhd formal verify` re-probe the set and reject it themselves.
+    if (budget.bounded() && !budget.spent()) {
+      prover.set_timeout_ms(budget.query_ms());  // the consistency probe is a solve too
+    }
+    if (unchecked_hypotheses && !budget.spent() && !prover.assumes_consistent()) {
       livehd::diag::warn("pass.formal", "assume-contradiction", "comptime")
           .msg("the active assumptions of '{}' are jointly unsatisfiable: every assertion would prove vacuously", g->get_name())
           .hint("fix the contradicting assume(s); until then the assumptions are ignored and assertions stay runtime checks")
@@ -804,7 +934,7 @@ void Pass_formal::work(Eprp_var& var) {
       if (guard.is_invalid()) {
         return;  // unguarded property: nothing to ask, nothing to pay
       }
-      if (prover.is_false(guard).verdict != formal::Verdict::Proven) {
+      if (ask([&] { return prover.is_false(guard); }, /*obligation=*/false).verdict != formal::Verdict::Proven) {
         return;
       }
       livehd::diag::warn("pass.formal", "formal-vacuous-guard", "comptime")
@@ -834,7 +964,7 @@ void Pass_formal::work(Eprp_var& var) {
         return;
       }
       uint32_t code = (parts.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
-      auto     out  = prover.is_true(cond);
+      auto     out  = ask([&] { return prover.is_true(cond); });
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, code);  // cgen elides the runtime check
       } else if (allow_refute_error && out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
@@ -848,12 +978,24 @@ void Pass_formal::work(Eprp_var& var) {
         gu::set_runtime_check(node, code);  // keep: never elide a failing assert
       } else {
         gu::set_runtime_check(node, code);
-        warn_deferred(warn_assert, "assert-deferred", parts.kind, g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(say_deferred(warn_assert), "assert-deferred", parts.kind, g->get_name(), out, is_top, downgrade_refute);
       }
     };
 
     if (mode != "normal") {
       // mode=fast: single-frame induction over free (cut) state (unchanged).
+      for (auto& node : props) {
+        auto parts = fprop_parts(node);
+        if (!livehd::lec::is_assume_kind(parts.kind)) {
+          prove_assert_prover(node, parts, /*allow_refute_error=*/true);
+        }
+      }
+    } else if (budget.spent()) {
+      // mode=normal, but the budget is gone: encoding the whole design for the BMC
+      // engine is the expensive half and it would buy nothing. Take the same
+      // degrade the correlation-mismatch path takes -- the single-frame Prover,
+      // which `ask` short-circuits to Unknown, so every obligation is stamped a
+      // kept runtime check.
       for (auto& node : props) {
         auto parts = fprop_parts(node);
         if (!livehd::lec::is_assume_kind(parts.kind)) {
@@ -879,7 +1021,11 @@ void Pass_formal::work(Eprp_var& var) {
       po.bound        = bmc_bound;  // tiny BMC depth + the 1-induction step
       po.reset_cycles = 1;
       po.phase        = "after_reset";
-      po.timeout      = 0;  // deterministic budget only
+      // Seconds, and a per-checkSat cap here (the soft-total accounting is off
+      // whenever rlimit is set). 0 keeps the fully deterministic, wall-free
+      // behavior; a non-zero pass budget hands over what is left of it, with the
+      // same one-second floor as the preflight above.
+      po.timeout      = budget.bounded() ? std::max(1, static_cast<int>(budget.left_ms() / 1000)) : 0;
       po.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
       po.witness = true;
       po.partitions     = 1;  // no case-split forks
@@ -987,5 +1133,21 @@ void Pass_formal::work(Eprp_var& var) {
     // pass.formal edited the design rather than annotating it, and it threw away
     // a marker downstream passes consume -- the reason the `proven` channel
     // exists in the first place.
+  }
+
+  // ONE line for the whole pass, not one per obligation: the per-obligation
+  // "could not be proven" warnings are silenced once the budget is gone (they
+  // would all say the same thing), so this is the only place that reports it.
+  // A warning, not an error -- nothing unsound happened, the design just kept
+  // runtime checks a longer budget might have discharged.
+  if (budget.skipped > 0) {
+    livehd::diag::warn("pass.formal", "budget-exhausted", "comptime")
+        .msg("the {}s property-checking budget ran out: {} obligation(s) were not solved and stay runtime checks",
+             static_cast<double>(budget.total_ms) / 1000.0,
+             budget.skipped)
+        .hint(
+            "raise it with --set compile.formal.timeout=<seconds> (0 = unbounded), or skip the pass with --set "
+            "compile.formal.mode=none")
+        .emit();
   }
 }

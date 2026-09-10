@@ -1,0 +1,7 @@
+/*
+:name: unset_attribute_cassert
+:type: error
+:error: comptime cassert is false
+*/
+const a = 42
+cassert(a.[totally_made_up] == 12345) // locate_error_here

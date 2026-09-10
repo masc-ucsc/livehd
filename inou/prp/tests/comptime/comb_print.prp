@@ -1,0 +1,13 @@
+/*
+:name: comb_print
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+comb hello(x) -> (y) {
+  puts("hello {x}")
+  print("tail {x}")
+  y = x + 1
+}
+const y = hello(x=3)
+cassert(y == 4)

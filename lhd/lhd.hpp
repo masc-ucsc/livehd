@@ -543,6 +543,13 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {     "spef", "",    Synth_set_option::Kind::file,          "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
+// The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).
+// ONE spelling for every surface that lists it -- the bare-`pass` usage error,
+// the unknown-subcommand hints, the general help and the machine records --
+// so the lists can never disagree again.
+inline constexpr std::string_view kPassSubcommands
+    = "color <alg> | partition | single_edge | satopt | abc | opentimer | formal | liberty gensim | semdiff | analyze";
+
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
 // the method that consumes it. Enumerated from the live registry, so
 // `lhd list options`, --set validation, and the lhd.toml tables can never

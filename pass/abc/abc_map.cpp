@@ -24,6 +24,8 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+
+#include "ware_module.hpp"
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 #elif defined(__GLIBC__)
@@ -814,6 +816,10 @@ void Mapper::prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>
 }
 
 bool Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
+  const auto policy    = ware_policy(*rb.src, {opts_.ware_arith, opts_.ware_cmp, opts_.ware_shift});
+  opts_.ware_arith     = policy.arith;
+  opts_.ware_cmp       = policy.cmp;
+  opts_.ware_shift     = policy.shift;
   bool flow_overridden = false;
   auto apply           = [&](const Region_opts& ro, std::string_view src) {
     if (ro.ware.has_value()) {
@@ -3245,6 +3251,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (out_bits == 0) {
       out_bits = 1;
     }
+    if (op == Ntype_op::Sum) {
+      // All Sum outputs are realizations of the same integer expression.
+      // Build one adder at the largest requested width and share its prefixes.
+      for (const auto& e : n.out_edges()) {
+        out_bits = std::max(out_bits, gu::bits_of(e.driver));
+      }
+    }
     if (op == Ntype_op::SHL || op == Ntype_op::Not) {
       const auto demand = gu::masked_output_width(n, [&](const auto& consumer) { return region.contains(consumer); });
       if (demand > 0) {
@@ -3261,6 +3274,21 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
     blast_comb(n, out_bits, slots, ops, abc_bit, opts_, rb, region, refuse, refuse_shift_amount, node_facts);
+    if (op == Ntype_op::Sum) {
+      absl::flat_hash_set<hhds::Pin_class> outputs;
+      for (const auto& e : n.out_edges()) {
+        outputs.insert(e.driver);
+      }
+      for (const auto& output : outputs) {
+        if (output == out_pin) {
+          continue;
+        }
+        auto& target = bitnet[output];
+        for (int bit = 0; bit < std::max(1, gu::bits_of(output)); ++bit) {
+          target[bit] = slots.at(bit);
+        }
+      }
+    }
   }
   if (unsupported) {
     if (refusals > kMaxRefusals) {

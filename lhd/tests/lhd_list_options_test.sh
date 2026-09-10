@@ -74,10 +74,35 @@ echo "$out" | grep -q '"name":"formal.lec.assume_check"' \
   && fail "assume_check must be shared as formal.assume_check, not formal.lec.assume_check: $out"
 echo "$out" | grep -q '"name":"compile.formal.assume_check"' \
   && fail "the internal compile mirror must not be listed as a second canonical option: $out"
+# pass.formal's OWN timeout/reset (compile.formal.*) share a NAME with pass.lec's
+# formal.timeout / formal.reset, not a meaning: the common/specific split keys on
+# (method, flag), so a name collision hides neither namespace's option.
+echo "$out" | grep -q '"name":"compile.formal.timeout","method":"pass.formal","default":"10"' \
+  || fail "compile.formal.timeout (pass.formal's own budget) must be listed: $out"
+echo "$out" | grep -q '"name":"compile.formal.reset","method":"pass.formal"' || fail "compile.formal.reset must be listed: $out"
+echo "$out" | grep -q '"name":"formal.timeout","method":"pass.lec","default":"120"' \
+  || fail "formal.timeout must still be pass.lec's (default 120): $out"
+"$LHD" describe compile.formal.timeout | grep -q '"method":"pass.formal","default":"10"' \
+  || fail "describe compile.formal.timeout must resolve to pass.formal"
 echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"true"' || fail "formal.strict missing or no longer defaults to true: $out"
 echo "$out" | grep -q '"name":"formal.simfail","method":"pass.lec","default":"true"' || fail "formal.simfail missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.simfail_run","method":"pass.lec","default":"true"' || fail "formal.simfail_run missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.lec.simfail"' && fail "simfail must be shared as formal.simfail, not formal.lec.simfail: $out"
+# the verify engine reads ignore_memory / hard_timeout_mult too, so they are
+# COMMON (bare formal.*) -- the spelling every diagnostic already prints.
+echo "$out" | grep -q '"name":"formal.ignore_memory","method":"pass.lec"' || fail "formal.ignore_memory (common) missing: $out"
+echo "$out" | grep -q '"name":"formal.hard_timeout_mult","method":"pass.lec","default":"3"' \
+  || fail "formal.hard_timeout_mult (common) missing: $out"
+# the REVERSE of the guards above: every pass.lec label is listed under exactly
+# ONE of formal.<f> / formal.lec.<f> -- never both, and a pairing knob never bare.
+echo "$out" | grep -o '"name":"formal\.[a-z_]*","method":"pass.lec"' | sed 's/"name":"formal\.\([a-z_]*\)".*/\1/' | sort >"$W/common_leaves"
+echo "$out" | grep -o '"name":"formal\.lec\.[a-z_]*"' | sed 's/"name":"formal\.lec\.\([a-z_]*\)"/\1/' | sort >"$W/lec_leaves"
+[ -s "$W/common_leaves" ] && [ -s "$W/lec_leaves" ] || fail "formal.* / formal.lec.* leaves not found: $out"
+dup=$(comm -12 "$W/common_leaves" "$W/lec_leaves")
+[ -z "$dup" ] || fail "pass.lec label(s) listed under BOTH formal.* and formal.lec.*: $dup"
+for f in hier cones phase_sched match collapse gold_x; do
+  echo "$out" | grep -q "\"name\":\"formal.$f\"" && fail "lec-only $f must be formal.lec.$f, not formal.$f: $out"
+done
 echo "$out" | grep -q 'prpfail' && fail "removed prpfail vocabulary must not be listed: $out"
 echo "$out" | grep -q '"name":"formal.isabelle.strict"' || fail "formal.isabelle.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.lean.strict"' || fail "formal.lean.strict missing: $out"
@@ -217,6 +242,16 @@ grep -q "use --set formal.solver=lgyosys instead" "$W/r11d.json" || fail "lec.so
 grep -q "use --set formal.lec.hier=false instead" "$W/r11e.json" || fail "lec.hier must point at formal.lec.hier: $(cat "$W/r11e.json")"
 "$LHD" compile "$PRP" --set lec.minetimeout=9 --workdir "$W/w11f" -q >"$W/r11f.json" 2>/dev/null && fail "--set lec.minetimeout must fail"
 grep -q "use --set formal.spec_mining_timeout=9 instead" "$W/r11f.json" || fail "lec.minetimeout must compose both renames: $(cat "$W/r11f.json")"
+# a leaf DELETED outright under a removed namespace names the deletion's own
+# reason, never a rewrite into a second rejected spelling (lec.cache ->
+# "use formal.lec.cache" -> "was removed" was a two-step dead end); the sim.*
+# namespace (no eprp method) consults the same removed-flag table.
+"$LHD" compile "$PRP" --set lec.cache=false --workdir "$W/w11k" -q >"$W/r11k.json" 2>/dev/null && fail "--set lec.cache must fail"
+grep -q "lhd.incremental=false" "$W/r11k.json" || fail "lec.cache must point at lhd.incremental: $(cat "$W/r11k.json")"
+grep -qF "formal.lec.cache" "$W/r11k.json" && fail "lec.cache must not be rewritten into the rejected formal.lec.cache: $(cat "$W/r11k.json")"
+"$LHD" compile "$PRP" --set sim.cache=false --workdir "$W/w11l" -q >"$W/r11l.json" 2>/dev/null && fail "--set sim.cache must fail"
+grep -q "'sim.cache' was removed" "$W/r11l.json" || fail "sim.cache must name the removal: $(cat "$W/r11l.json")"
+grep -q "lhd.incremental=false" "$W/r11l.json" || fail "sim.cache must point at lhd.incremental: $(cat "$W/r11l.json")"
 # `lhd sim --help` ends with the standardized options block (like lec/compile),
 # enumerating the sim.* flags instead of a hand-maintained list (pretty page;
 # jsonl help would emit the machine record instead — forced here since piped).
@@ -268,5 +303,23 @@ grep -q "maybe you meant:" "$W/r12.json" || fail "leaf-match suggestion missing:
 grep -q "sim.vcd=false" "$W/r12.json" || fail "inline sim.vcd=default line missing: $(cat "$W/r12.json")"
 "$LHD" compile "$PRP" --set cgen.strict=1 --workdir "$W/w12b" -q >"$W/r12b.json" 2>/dev/null && fail "--set cgen.strict must fail"
 grep -q "formal.strict=true" "$W/r12b.json" || fail "wrong-pass inline suggestion missing: $(cat "$W/r12b.json")"
+
+# 13. The REMOVED lec.* namespace names no lhd-printed surface: every help page
+# and describe record spells the knobs formal.* / formal.lec.* -- what --set
+# actually accepts (§11 above pins the rejection of lec.*).
+no_lec() {  # $@ = an lhd argv whose output must not advertise lec.*
+  "$LHD" "$@" 2>&1 | grep -qE '(^|[^.a-z_])lec\.flag|--set lec\.|legacy lec\.' \
+    && fail "lhd $* still advertises the removed lec.* namespace"
+  return 0
+}
+for m in pretty jsonl; do
+  no_lec describe lec --diag-fmt $m
+  no_lec describe formal --diag-fmt $m
+  no_lec describe 'formal verify' --diag-fmt $m
+  no_lec lec --help --diag-fmt $m
+  no_lec formal verify --help --diag-fmt $m
+  no_lec help formal --diag-fmt $m
+  no_lec help --diag-fmt $m
+done
 
 echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options / sim namespace"

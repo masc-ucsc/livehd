@@ -268,7 +268,7 @@ EOF
 echo "PASS: aggregate member reads order their producer before the consumer"
 
 # ── (6) a nonuniform packed-array reset survives the Pyrope round trip ──────
-# Slang emits this state as one array reg with an exact packed `init=` value and
+# Slang emits this state as one array reg with an exact packed `initial=` value and
 # a whole-array next-state update. The Pyrope reader used to recognize only the
 # importer's `initial=` spelling in that whole-array path, so it kept the reset
 # condition but silently dropped the value: cgen reset all eight entries to 0.

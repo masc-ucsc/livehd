@@ -14,7 +14,7 @@
 // only the async SET (R becomes synchronous) -- which is why the forward direction
 // refutes too. ALL THREE directions are fixme until the cell grows a second slot.
 pub mod dual_async_set_reset::[timecheck=false](clk:u1, D:u1, S:u1, R:u1) -> (Q:u1@[]) {
-  reg Q:u1:[init=1, reset_pin=ref S, negreset=true, async=true]
+  reg Q:u1:[initial=1, reset_pin=ref S, negreset=true, async=true]
   if R == 0 {
     Q = 0
   } else {

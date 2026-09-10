@@ -1,0 +1,15 @@
+/*
+:name: unsigned_negative_runtime_unknown_width
+:type: error
+:error: reinterpret needs a fully-typed input
+:help: give the operand a sized type
+*/
+
+// Same rule on a RUNTIME value: `n` is inferred from an s4 and then widened by
+// the subtraction, so it can be negative and has no declared bit width.
+// (A non-negative operand needs no width -- `unsigned()` is then the identity.)
+comb neg_runtime(a:s4) -> (y:u8) {
+  mut n = a
+  n = n - 1
+  y = unsigned(n)  // locate_error_here
+}

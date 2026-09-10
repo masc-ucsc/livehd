@@ -2106,7 +2106,11 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         auto bw = pin_width(ctx, bs[0], node);
         return "(push_bit (unat (" + shift_amount_expr_at(ctx, bs[0], bw) + ")) " + a_cast + ")";
       }
-      // Multi-shift-OR: inline OR-chain
+      // More than one `b` driver can no longer arise: SHL's `b` is a plain
+      // single-driver sink (graph/cell.cpp; the runtime one-hot multi-amount
+      // form was removed). The OR-chain is kept as dead-but-defensive code so
+      // this model and the per-driver cert deps (SHL case of the cert builder)
+      // stay in step; pass/lean fatals on the same shape.
       std::vector<std::string> shifts;
       for (auto& bd : bs) {
         auto bw = pin_width(ctx, bd, node);

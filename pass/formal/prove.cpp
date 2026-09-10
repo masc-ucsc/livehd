@@ -101,6 +101,12 @@ int Prover::cone_info(const hhds::Pin_class& pin, bool& stateful, bool& unsuppor
   return n;
 }
 
+bool Prover::stateful_cone(const hhds::Pin_class& cond) {
+  bool st = false, unsup = false;
+  cone_info(cond, st, unsup);
+  return st || unsup;
+}
+
 // ---- Demand-driven cone encode: dpin -> Val, memoized; nullopt if unsupported.
 std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
   if (dpin.is_invalid()) {
@@ -375,6 +381,9 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       }
       Term a = lec::fit_to(tm_, pid(0)[0], W);
       Term acc;
+      // `b` is single-driver (the multi-driver one-hot amount was removed); the
+      // loop only keeps the zero-driver identity (no amount => `a`), as in
+      // pass/lec/encode.cpp and pass/abc/abc_blast.hpp.
       for (const auto& b : pid(1)) {
         Term shamt = lec::fit_to(tm_, Val{b.term, b.width, false}, W);
         Term sh    = tm_.mkTerm(Kind::BITVECTOR_SHL, {a, shamt});
@@ -663,6 +672,12 @@ Query_out Prover::solve(const Term& refute, int cone_nodes, bool stateful) {
     long long rl = static_cast<long long>(opts_.budget_k) * std::max(1, cone_nodes);
     solver.setOption("rlimit", std::to_string(rl));  // deterministic per-query resource cap
   }
+  if (opts_.timeout_ms > 0) {
+    // Wall backstop on top of the rlimit: the caller holds a TOTAL budget and a
+    // single cone can outlast it. `tlimit-per` resets per checkSat and a
+    // time-out returns `unknown` -> Verdict::Unknown -> keep the runtime check.
+    solver.setOption("tlimit-per", std::to_string(opts_.timeout_ms));
+  }
   solver.setOption("produce-models", "true");
   for (const auto& a : assumes_) {
     solver.assertFormula(a);
@@ -918,6 +933,9 @@ bool Prover::assumes_consistent() {
     // driver pins encoded so far, i.e. the union of every assume cone.
     long long rl = static_cast<long long>(opts_.budget_k) * static_cast<long long>(std::max<size_t>(1, memo_.size()));
     solver.setOption("rlimit", std::to_string(rl));
+  }
+  if (opts_.timeout_ms > 0) {
+    solver.setOption("tlimit-per", std::to_string(opts_.timeout_ms));
   }
   for (const auto& a : assumes_) {
     solver.assertFormula(a);

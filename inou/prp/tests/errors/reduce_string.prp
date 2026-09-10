@@ -1,8 +1,8 @@
 /*
 :name: reduce_string
 :type: error
-:error: requires an integer or boolean operand
-:help: enum, string, tuple, or array
+:error: strings are opaque and have no bit vector
+:help: numeric value or an ordered packed aggregate
 */
 // A bit reduction needs an integer/boolean operand. A string has no bits to
 // reduce, so `s#|[...]` is a compile error.

@@ -1,0 +1,25 @@
+/*
+:name: packed_variable_modifiers
+:type: comptime
+:verifier_pass: 13
+:verifier_fail: 0
+*/
+const p:[2]s4 = (1, -1)
+cassert(p#[..] == 241)
+cassert(p#sext[..] == -15)
+cassert(p#sext[4..] == -1)
+cassert(p#sext[0..=6] == -15)
+cassert(p#|[..] == 1)
+cassert(p#^[..] == 1)
+cassert(p#+[..] == 5)
+cassert(p#&[0..<8] == 0)
+const a:u4 = 1
+const b:s4 = -1
+const t = (a, b)
+cassert(t#sext[..] == -15)
+cassert(t#+[..] == 5)
+const zero_high:[2]u4 = (15, 0)
+cassert(zero_high#sext[..] == 15)
+const scalar:s8 = -15
+cassert(scalar#sext[..] == -15)
+cassert(scalar#sext[4..] == -1)

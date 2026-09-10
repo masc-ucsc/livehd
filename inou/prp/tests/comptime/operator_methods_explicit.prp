@@ -1,0 +1,16 @@
+/*
+:name: operator_methods_explicit
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+const a = (
+  const x=1,
+  comb eq(self,rhs) -> (r) { r = true },
+  comb to_string(self) -> (r) { r = "custom" }
+)
+mut b = a
+b.x = 2
+cassert(a.eq(rhs=b))
+cassert(a.to_string() == "custom")
+cassert(a != b) // Structural equality ignores the ordinary method named eq.

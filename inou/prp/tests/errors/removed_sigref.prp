@@ -1,0 +1,7 @@
+/*
+:name: removed_sigref
+:type: error
+:error: undefined function.*sigref
+:help: check the spelling
+*/
+const x = sigref("x") // locate_error_here
