@@ -29,6 +29,15 @@ So Direction 4 splits into two very different halves:
 This document measures the cost, enumerates the fixes, and states what Direction 4
 becomes under each of the two futures for Direction 3.
 
+**Part II builds the fix and measures it.** `CertIO.lean` reads a certificate at
+run time instead of elaborating it. `cva6_hpdcache_subsystem_gate` — 108,666
+nodes, never elaborated at all — loads in 6.5 s and runs in 12.4 s.
+`csr_regfile_gate`'s 1,398.7 s of elaboration becomes 1.97 s of parsing, a
+factor of 709, and parse cost is linear where elaboration is O(N^1.77).
+Elaborated and loaded runs produce identical outputs on all four designs where
+both can be run. The price is a `partial`, unverified deserialiser in the
+trusted base.
+
 ---
 
 ## 1. Every per-design obligation, enumerated
@@ -352,3 +361,201 @@ has bitten this project twice before.
 | `issue_stage_gate` | 15,601 | 311.48 | 8.7 GB |
 | `fpu_wrap_gate` | 28,410 | 932.40 | 10.5 GB |
 | `csr_regfile_gate` | 34,874 | 1,398.67 | 11.7 GB |
+
+---
+
+# Part II — Runtime certificate loading, BUILT AND MEASURED
+
+Option A of section 3 is no longer a proposal.  It is implemented in
+`formal/lean/LeanSemanticPrimitives/Compiler/CertIO.lean` (~420 lines) and
+measured on six real CVA6 certificates spanning 1,782 to 108,666 nodes.
+
+## What was built
+
+1. **A wire format, `DCERT1`** — whitespace-separated integers, length-prefixed,
+   fixed arity per record.  Deliberately dull: `pass_lean.cpp` already walks
+   exactly these fields to print the Lean literal, so emitting this instead is a
+   change of punctuation in the printer, not of structure.
+2. **`writeCert` / `parseCert`** — a serialiser used as the reference, and a
+   `partial`, unverified reader.
+3. **`runChecked`** — evaluates `compilesOk` at RUN time and runs the design,
+   with `runChecked_correct` proved once, for every design:
+
+   ```lean
+   theorem runChecked_correct (D : DesignCert) (inp : RuntimeInput) (st : RuntimeState)
+       (r : RuntimeResult) (h : runChecked D inp st = .ok r) :
+       r = interpretDesign D inp st
+   ```
+
+   `#print axioms` gives `[propext, Classical.choice, Quot.sound]` — notably NOT
+   `ofReduceBool`, which every generated file carries today.
+4. **`scripts/lean_cert_to_dcert.py`** — converts an emitted `.lean` literal to
+   `DCERT1` as text, so a certificate too large to elaborate can still be run.
+
+## Cost: measured
+
+Wall seconds.  "elaborate" is `lake env lean` on the emitted file exactly as
+`run_lean_queue.sh` invokes it; "load" is a fresh process that reads the
+certificate and runs one cycle.
+
+| design | nodes | elaborate (s) | load, total (s) | parse (ms) | run (ms) |
+|---|---:|---:|---:|---:|---:|
+| `btb_gate` | 1,782 | 21.6 | 19.8 | 133 | 3,425 |
+| `alu_gate` | 6,597 | 75.9 | 18.8 | 363 | 1,145 |
+| `decoder_gate` | 8,971 | 116.5 | 17.3 | 483 | 404 |
+| `aes_gate` | 11,681 | 157.5 | 13.2 | 575 | 661 |
+| `csr_regfile_gate` | 34,874 | **1,398.7** | 57.2 | 1,973 | 41,425 |
+| `cva6_hpdcache_subsystem_gate` | 108,666 | **not attempted** | 29.4 | 6,501 | 12,438 |
+
+Two things matter more than any single row.
+
+**Parsing is linear where elaboration is not.**  Per node: 0.075, 0.055, 0.054,
+0.049, 0.057, 0.060 ms across a 60x size range — flat.  Elaboration runs about
+13 ms/node at the small end and degrades as O(N^1.77).  At `csr_regfile_gate`
+that is 1,973 ms against 1,398,670 ms, a factor of **709**.
+
+**The largest design was never elaborated at all.**
+`cva6_hpdcache_subsystem_gate` — 97,774 sources, 108,666 nodes, 535 flops, 12
+memories — extrapolates to hours of elaboration and 40+ GB.  It loads in 6.5 s
+and runs in 12.4 s.  This is the clearest statement of the feature: the
+certificate never became a Lean constant, so its size stopped being a Lean
+problem.
+
+The ~13 s floor in the "load" column is Lean startup plus importing the library,
+measured at 8.7-10.6 s and design-INDEPENDENT.  It is paid once per process, not
+once per design, and disappears entirely in a `lake exe` build.
+
+## Correctness: the loaded design agrees with the elaborated one
+
+Digest = outputs plus next flop state, from a deterministic stimulus.
+
+| design | elaborated | loaded | |
+|---|---|---|---|
+| `btb_gate` | `77ee00b9519f` | `77ee00b9519f` | match |
+| `alu_gate` | `6ba1c62a7cd3` | `6ba1c62a7cd3` | match |
+| `decoder_gate` | `f3ef9c003399` | `f3ef9c003399` | match |
+| `aes_gate` | `a639355e6167` | `a639355e6167` | match |
+
+Two independent checks back this up:
+
+* **round trip** — `writeCert (parseCert x) == x` byte-identically on every
+  design tried;
+* **converter identity** — `lean_cert_to_dcert.py` output is byte-identical to
+  `writeCert` applied to the elaborated literal, on all four designs where both
+  can be produced.  That is what licenses using it on the two that cannot.
+
+## The digest test had to be repaired before it meant anything
+
+The first version of this comparison reported MATCH on every design and was
+worthless.  Two separate reasons, both worth recording.
+
+**The stimulus held the design in reset.**  All 64 `btb_gate` flops reset off
+input 4, active low; the LCG happened to drive that input to 0, so every output
+and flop read 0 and the digest compared equal no matter what the certificate
+said.  The stimulus now de-asserts every reset port collected from the
+`flopQAsync` sources.
+
+**Even repaired, some mutations are invisible.**  Negative controls on
+`decoder_gate`:
+
+| mutation | detected |
+|---|---|
+| truncate the file | yes — parse error |
+| corrupt the magic | yes — parse error |
+| move an output to a neighbouring slot | yes |
+| change one operator, `Op_SHL` to `Op_SRA` | yes |
+| bump one constant source | yes |
+| perturb a dependency of the node an output reads | yes |
+| perturb a dependency of the LAST topological node | **no** |
+| widen the last topological node | **no** |
+
+The two misses are dead nodes — nothing observable depends on them, so no input
+vector can distinguish them.  That is a property of the design, not a defect in
+the checker, but it does bound what a digest comparison proves: it witnesses
+agreement on the observable cone, not certificate equality.  Certificate
+equality is what the byte-exact round trip gives.
+
+`btb_gate` turned out to be degenerate for this purpose at BOTH reset levels.
+Its `flopQAsync` sources say reset when input 4 is 0, while all 64 of its
+`FlopDesc` records say reset when input 4 is 1 — opposite polarities on the same
+port, so no value lets the design run and the digest is all zeros throughout.
+That looks like the `negreset` conflation the `FlopDesc` docstring warns about;
+it is upstream of this work and is left as a note for the main branch.
+
+## A deployment constraint found by running it
+
+`DesignCert.slotsFrom` builds the topological order by non-tail recursion, one
+frame per node.  Above roughly 9,000 nodes that overflows the interpreter stack:
+
+```
+deep recursion was detected at 'interpreter'
+#1 Compiler.DesignCert.slotsFrom  ...
+```
+
+`--tstack` does not help — it sizes worker threads, and `lean --run` executes
+`main` on the main thread.  `ulimit -s unlimited` is the fix, and with it all six
+designs run.  The clean repair is to make `slotsFrom` tail-recursive, a few
+lines in `DesignCert.lean`; it was not done here because that file's `.olean`
+lives in the build directory shared with the main checkout.
+
+The elaborated path never hits this because it evaluates `slotsFrom` under
+`maxRecDepth 1000000`, which the emitted files set and which governs a different
+limit.
+
+## The trust boundary, precisely
+
+Still proved, for every design, with no per-design obligation: that the residual
+program the verified compiler builds agrees with `interpretDesign` on the
+certificate that was loaded.  `compileDesign_correct` and `runChecked_correct`
+carry this, and neither mentions a specific design.
+
+Newly trusted:
+
+* **`parseCert`.** It is `partial` and unverified.  A mis-parse yields a
+  different `DesignCert`, and every theorem is then true of a design nobody
+  asked about.  This extends the chain that already runs through
+  `pass_lean.cpp`'s transcription of LGraph into a certificate — one more link
+  on an existing chain, not a new kind of assumption.  A verified parser is
+  possible (`parseCert (writeCert D) = .ok D` is provable in principle) and is
+  the obvious follow-up.
+* **`lean_cert_to_dcert.py`**, when used instead of `writeCert`.  Mitigated, not
+  removed, by the byte-identity check.
+* **The runtime evaluation of `compilesOk`.**  Worth stating carefully: the
+  axiom list got *shorter* — `ofReduceBool` is gone — but the trust did not
+  decrease.  `native_decide` recorded "the compiled evaluator is right" as an
+  axiom; evaluating `compilesOk` at run time assumes exactly the same thing and
+  records nothing.
+
+Lost: the per-design `#print axioms` gate, because there is no per-design
+theorem left to print axioms for.  It moves to `runChecked_correct` and is
+checked once for the library.
+
+## What this does to the rest of Direction 4
+
+The premise was that a design edit should drive only a delta of work.  With
+per-design Lean cost at zero, there is no ΔProof to make incremental and no
+elaboration to avoid re-running.  What remains is ΔSim — regenerating the
+certificate itself, which is `lhd` time, not Lean time, and on large modules
+`lhd` was already 2-9% of end-to-end.
+
+Section 3's Option B (module split) and Option C (compressed literal) are
+superseded for this purpose.  The experiment worth keeping from section 7 is the
+ΔG measurement, which is now a question about certificate churn rather than
+about proof cost.
+
+Unchanged: adopting Direction 3 would reintroduce a per-design proof linear in
+node count and make none of the above available, since a shallow artifact cannot
+be loaded at run time.
+
+## Reproducing
+
+```
+scripts/lean_cert_to_dcert.py <mod>_Lgraph.lean <mod>.dcert
+ulimit -s unlimited
+lake env lean --run temp/results/loadone.lean <mod>
+```
+
+`CertIO.lean` is written to live in the library and be built by lake normally.
+It was compiled standalone here (`lake env lean -o <dir>/CertIO.olean`) so that
+nothing was written into the `.lake` shared with the main checkout while a
+51-module sweep was running there.
