@@ -1,0 +1,10 @@
+variant	shape	n	cpu_s	status
+baseline	-	0	12.08	OK
+naive	chain	32	16.07	OK
+naive	chain	64	20.02	OK
+naive	chain	128	39.95	OK
+naive	chain	256	37.06	FAIL
+naive	chain	512	37.62	FAIL
+composed	chain	32	26.06	OK
+composed	chain	64	66.94	OK
+composed	chain	128	237.75	OK

@@ -1,0 +1,3 @@
+import LeanSemanticPrimitives.Compiler.CompileDesign
+set_option maxRecDepth 1000000
+set_option maxHeartbeats 0

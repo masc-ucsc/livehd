@@ -1,0 +1,4 @@
+variant	shape	n	cpu_s	status
+pruned	chain	32	22.64	OK
+pruned	chain	64	50.50	OK
+pruned	chain	128	161.17	OK

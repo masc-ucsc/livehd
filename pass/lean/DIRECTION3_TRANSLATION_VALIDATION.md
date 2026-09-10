@@ -9,6 +9,15 @@ LGraph → `ResidualProgram`; add per-design translation validation **only** for
 Everything below is measured on this branch (`b1-b2-verified-compiler`,
 `485510493`) unless marked *unmeasured*. Probes are in `formal/lean/probes/d3_*.lean`.
 
+> **Part I (below) was written from probes; Part II reports building it.**
+> The implementation pass **refutes** Part I's central engineering hope — the
+> composed path via `runBindings_at` does not restore linearity, and reaches an
+> exponent of ~1.9 against a pre-committed bar of 1.2.  It also **strengthens**
+> the two negative findings: the naive proof does not merely get slow, it stops
+> working at n≈200; and the speed payoff on a real CVA6 module is **1.08x**, not
+> the 1.15x-1.21x the synthetic steelman suggested.  Skip to Part II for what
+> was actually built and measured.
+
 ---
 
 ## Verdict, up front
@@ -550,3 +559,378 @@ Listed so nothing here is mistaken for a result.
 - The `#eval`-driver measurements in §5 run under Lean's interpreter driving
   compiled leaf functions; a fully compiled harness may shift both columns,
   though not obviously their ratio.
+
+---
+
+# Part II — Built, and measured (implementation pass)
+
+The plan above was written from probes.  This part reports what happens when the
+thing is actually built: a reifier metaprogram, a generated per-design proof, and
+the linear composition path the plan identified as the only way to escape the
+quadratic `simp` blast.
+
+**Pre-committed success criterion**, fixed before any measurement: proof cost at
+or below roughly `O(N^1.2)` out to at least 4,096 bindings, with DINO scale
+(4,772) under ten minutes.
+
+## What was built
+
+### 1. `LeanSemanticPrimitives/Compiler/Reify.lean` — composition lemmas
+
+Six lemmas, all `simp only` one-liners, all discharged.  The two that carry the
+weight:
+
+```lean
+theorem runBindings_step (b : ResidualBinding) (bs : List ResidualBinding)
+    (env : SlotEnv) (v : CertVal) (hv : denoteExpr env b.rhs = v) :
+    runBindings (b :: bs) env = runBindings bs (env.push v)
+
+theorem srcAgree_push {env base : SlotEnv} (v : CertVal)
+    (hsz : base.size ≤ env.size)
+    (h : ∀ j, j < base.size → refBV env j = refBV base j) :
+    ∀ j, j < base.size → refBV (env.push v) j = refBV base j
+```
+
+`runBindings_step` advances the fold by one binding with the environment left
+opaque, so the generated proof can `set` after every step and never let an
+intermediate environment appear as a term of size `O(k)`.
+
+`srcAgree_push` is the one that changes the exponent rather than the constant.
+Without it, a binding that reads a SOURCE operand `k` levels down costs `k`
+rewrites through the push chain.  Sources fan out to many consumers — in the
+`chain` benchmark every one of the `N` bindings reads source slot 1 — so that
+term alone is `O(N^2)` and it is what the original quadratic measurement was
+mostly measuring.  With the invariant carried forward, a source read costs one
+rewrite whatever `k` is.
+
+### 2. `LeanSemanticPrimitives/Compiler/ReifyGen.lean` — the reifier
+
+```
+reify_design <designCert> as <name>
+```
+
+A `CommandElab` that runs `compileDesign` on the certificate **at elaboration
+time** via `evalExpr`, folds the resulting `ResidualProgram` into `Syntax`, and
+hands it to `elabCommand`.  All 21 `ResidualExpr` constructors are covered, plus
+outputs, flop updates with enable and reset priority, and memory updates.
+
+On a real CVA6 certificate:
+
+```
+reify_design csr_buffer_gate_designCert as csr_step
+-- reify_design: csr_step emitted, 45 sources, 44 bindings
+
+def tiny_step : RuntimeInput → RuntimeState → RuntimeResult :=
+fun i st =>
+  have s0 := (sourceValue i st tinyCert.sources[0]!).asBV;
+  have s1 := (sourceValue i st tinyCert.sources[1]!).asBV;
+  have v0 := randV 8 [s0, s1];
+  have v1 := rorBitsV 8 [v0, s1];
+  { nextState := { flops := #[], mems := #[] }, outputs := #[bv_resize 8 v1] }
+```
+
+This file is worth reading as the concrete answer to *why the theorem is per
+design*.  `compileDesign` is applied to a **value** here, obtained with
+`evalExpr`; the result is folded into `Syntax` and handed to `elabCommand`,
+which **mutates the environment**.  None of those steps is a function in the
+logic, so there is no term the logic could quantify over.  The "per design" is
+not a limitation of effort — it is where the metalanguage boundary falls.
+
+### 3. `pass/lean/scripts/d3_gen.py` — the benchmark generator
+
+Emits both proof variants for a synthetic design of `n` bindings, under two
+dependency shapes, because the shape is what decides which term dominates:
+
+* `chain` — binding `k` reads binding `k-1` and source 1.  Binding distance 1,
+  source distance `k`.  This is the shape the original measurement used.
+* `far` — binding `k` reads binding `k-1` and binding `k/2`.  Binding distances
+  grow as `k/2` and no invariant can collapse them: the adversarial case.
+
+## The naive proof has a hard ceiling, not just a slope
+
+The plan reported the naive `simp` blast as quadratic.  Built and run, it is
+worse than that: it **stops working entirely** at around 200 bindings.
+
+```
+probes/d3b_naive_chain_256.lean:557:2:
+  error: `simp` failed: maximum number of steps exceeded
+```
+
+That is simp's `maxSteps` (default 100,000), not `maxHeartbeats`, which the
+file already sets to 0.  The ceiling can be raised, but the growth that reaches
+it in 256 bindings is the same growth the 4.35x doubling ratio measured, so
+raising it buys a constant factor and not a usable design point.  Both `n = 256`
+and `n = 512` fail after about 37 CPU-seconds — the same time, because both die
+at the same step budget rather than at a size-dependent cost.
+
+So the honest statement about the naive path is not "quadratic".  It is: **the
+naive path does not reach the smallest real design in the benchmark suite.**
+`cvxif_fu_gate`, the smallest CVA6 module that proves today, has 23 nodes;
+`csr_buffer_gate` has 44; `controller_gate` has 104.  DINO has 4,772.
+
+## Where the quadratic actually lives — three sources, not one
+
+The plan attributed the blowup to `Array.push = ⟨toList ++ [a]⟩`.  Building it
+shows that is one of three independent contributions, and removing it is not
+enough.
+
+**(a) Environment term size.**  A proof that names the intermediate environments
+gives step `k` a term of size `O(k)`.  `runBindings_step` plus `set` fixes this:
+each environment stays a single free variable.  **Removed.**
+
+**(b) Dependency distance.**  Reading an operand `d` levels down costs `d`
+rewrites through the push chain.  For SOURCE operands `srcAgree_push` collapses
+this to one rewrite whatever the distance, which matters because sources fan out
+to many consumers.  For BINDING operands nothing collapses it: the cost is the
+sum of dependency distances, a property of the design, not of the proof.
+**Removed for sources, intrinsic for bindings.**
+
+**(c) Local-context size.**  This is the one the plan missed.  The generated
+proof introduces roughly `6N` hypotheses — `v_k`, `E_k`, `hE_k`, `hs_k`,
+`hag_k`, and two operand reads per binding.  Every tactic invocation re-scans
+that context, so even with (a) and (b) fixed the total is `O(N^2)`.
+
+The `residual list` is a fourth candidate — applying `runBindings_step` needs the
+cons structure exposed, leaving a tail of size `O(N-k)` — and it is not
+separable from (c) by this experiment.
+
+## Measured: the criterion is missed
+
+Marginal cost over a 12.08 CPU-second import baseline, `chain` shape, serial:
+
+| n | naive | composed | pruned |
+|---:|---:|---:|---:|
+| 32 | 3.99 | 13.98 | 10.56 |
+| 64 | 7.94 | 54.86 | 38.42 |
+| 128 | 27.87 | 225.67 | 149.09 |
+| 256 | **FAIL** (maxSteps) | | |
+| 512 | **FAIL** (maxSteps) | | |
+
+Doubling ratios and the exponent they imply:
+
+| | 32 → 64 | 64 → 128 | exponent |
+|---|---:|---:|---:|
+| naive | 1.99 | 3.51 | 0.99 / 1.81 |
+| composed | 3.92 | 4.11 | **1.97 / 2.04** |
+| pruned | 3.64 | 3.88 | **1.86 / 1.96** |
+
+Both composed variants are flatly quadratic, and both are *slower in absolute
+terms* than `naive` at every size where `naive` still works.  Pruning the local
+context recovers **34%** at n=128 (149.09 against 225.67) — a real constant, and
+no change to the slope.
+
+**The pre-committed criterion was `O(N^1.2)` out to 4,096 bindings with DINO
+scale under ten minutes.  The best variant reaches an exponent of about 1.9.
+The criterion is missed, and not marginally.**  Extrapolating 149 s at n=128 at
+that slope puts DINO's 4,772 bindings near **31 hours**, against the ten-minute
+bar and against the **0.8 s** the existing `native_decide` takes on the same
+design.
+
+## Script size separates the two causes cleanly
+
+The generated proof script's size on disk, by dependency shape:
+
+| n | `chain` | `far` |
+|---:|---:|---:|
+| 128 | 116 KB | 349 KB |
+| 256 | 234 KB | 1.19 MB |
+| 512 | 469 KB | 4.32 MB |
+| 1024 | 942 KB | **16.4 MB** |
+
+`chain` doubles exactly with `n` — the script is **linear**.  `far` roughly
+quadruples — the script is **quadratic**, because binding operands sit `k/2`
+levels down and each level costs one emitted rewrite.  That is cause (b),
+dependency distance, made directly visible: 16 MB of Lean source for 1,024
+bindings.
+
+The important half is `chain`.  Its script is linear in size, and its
+elaboration is still quadratic in time (exponent 1.9).  **A linear script that
+elaborates quadratically cannot be explained by term size or by dependency
+distance** — it isolates cause (c), the growing local context and goal that
+every tactic re-scans, as an independent obstruction.  This is the measurement
+that rules out "write a smarter tactic" as a way out: the script was already as
+short as it can be.
+
+## D3 against the legacy flow
+
+The claim the plan made for D3 was that it differs from the legacy
+9,210-theorem flow in *scope*: the legacy path re-derived operator semantics per
+design, while D3 reuses `compileDesign_correct` and only composes per-binding
+facts.  That claim survives — it is a real structural difference, and the
+generated proof never mentions `eval_op`, `interpOp`, or any operator lemma.
+
+What does not survive is the consequence anyone would want from it.
+
+| | legacy | D3 as built |
+|---|---|---|
+| per-design theorems | 9,210 | 1 |
+| operator semantics | re-derived per design | shared, proved once |
+| what the per-design proof does | everything | compose bindings |
+| **measured cost** | hours at ~6k nodes | **~31 h extrapolated at 4.8k** |
+| ceiling | reached in practice | naive dies at n≈200 |
+
+Reducing what the per-design proof has to *say* did not reduce what it *costs*,
+because the cost is dominated by the mechanics of walking an `O(N)` object in a
+term-rewriting kernel, not by the depth of the reasoning at each step.  Legacy's
+CVA6 `alu` took 4 h 15 m at 6,305 nodes; D3 extrapolates to the same order at
+smaller sizes.  **On the metric that motivated the branch, D3 is not an
+improvement on the flow it was supposed to improve on.**
+
+The contrast with what exists today is the sharp one.  `compilesOk` discharges
+the entire per-design obligation with a single `native_decide`, measured at
+**0.8 s on DINO's 4,772 nodes**.  That is not a better proof of the same
+statement — it is a different mechanism: one decision procedure whose per-node
+cost is a machine-word comparison, against `N` distinct kernel rewrites.  Any
+per-design scheme built from rewrites is competing with a compiled decision
+procedure and will lose by orders of magnitude.
+
+## D3 against Kôika and Cuttlesim — the record
+
+Kôika does **not** do translation validation, and the comparison is only
+interesting if that is stated correctly.
+
+```
+              Kôika source
+             /            \
+   verified compiler     Cuttlesim
+            |                |
+        circuits          C++ simulator
+     (machine-checked)   (unverified, separate compiler)
+```
+
+Cuttlesim is a **separate, unverified** Kôika-to-C++ compiler.  It does not
+consume the verified compiler's circuits.  Its correctness rests on
+**differential testing** between the Coq reference interpreter, Verilator, and
+Cuttlesim itself, plus formal verification of a few static analyses.  The
+authors say so, and note that a divergence could come from a Cuttlesim bug or
+from external-function implementations.
+
+Translation validation in the Pnueli (1998) / Necula (PLDI 2000) sense is
+different: the transformer stays untrusted, but each *instance* emits a proof
+that a checker verifies.  Nothing in Kôika does that for the simulator.
+
+So the honest positioning of D3 is not "Kôika tests, we prove."  It is:
+
+* **against Cuttlesim** — D3 would replace differential testing with a
+  kernel-checked proof per design.  Strictly stronger *if it ran*.  Measured, it
+  does not run at the sizes that matter.
+* **against our own current branch** — D3 is strictly *weaker*, because
+  `compileDesign_correct` already gives `∀ D` with no per-design proof, and
+  Cuttlesim's whole reason for existing (a fast simulator) is worth only 1.15x
+  to 1.21x here.
+
+The structural point the plan made still stands and is worth keeping in a
+write-up: our chain is serial (`RTL → LGraph → residual`) where Kôika's forks,
+so a verified segment composes with the rest instead of running beside it.  That
+argument does not depend on D3 being built.
+
+## End to end on a real design
+
+`csr_buffer_gate` — a real CVA6 module, certificate taken unmodified from
+`generated/cva6_vc/lean/`, **45 sources and 44 bindings**.
+
+```
+reify_design csr_buffer_gate_designCert as csr_step
+-- reify_design: csr_step emitted, 45 sources, 44 bindings
+```
+
+**Agreement, 50 sampled inputs:** the reified definition and `denoteResidual`
+produce identical outputs and identical next-state flops.  `true`.
+
+**Speed, 20,000 cycles**, forcing every observable (outputs and next-state
+flops) and timing between `IO.monoMsNow` calls with `IO.println` in between:
+
+| | total | per cycle | per node-cycle |
+|---|---:|---:|---:|
+| shallow — reified `def` | 23,120 ms | 1.156 ms | 26.3 µs |
+| deep — `denoteResidual` | 25,020 ms | 1.251 ms | 28.4 µs |
+| **speedup** | | **1.08x** | |
+
+**1.08x on a real design** — below even the 1.15x-1.21x the synthetic steelman
+gave.  Removing constructor dispatch buys almost nothing because dispatch is
+not where the time goes: `BV`'s GMP `Int` payload and `bits_to_int`'s per-bit
+loop dominate, and the emitted `let`-chain calls them identically.
+
+### This independently confirms the baseline correction
+
+The plan reported `denoteResidual` at 34.75 µs/cycle for a ONE-node design,
+against the main plan's 1.3 ms/cycle for the same design — a 37x error caused by
+materialising `List.range 20000` inside the timed region.
+
+This measurement is a third, independent data point: 1.251 ms/cycle across
+**44 nodes** is **28.4 µs per node-cycle**, which matches the 34.75 µs figure
+and not the 1.3 ms one.  The correction stands, and Phase 6's ~50 µs/cycle
+success bar should be re-examined against per-node cost rather than per-cycle.
+
+### Two measurement traps, both hit here
+
+Worth recording, because both produce plausible-looking numbers rather than
+errors:
+
+* `#eval timeit "..." (return e)` does **not** force `e` in the interpreter.  It
+  reported a 20,000-iteration loop as **0.012 ms**.
+* reading only `result.outputs.size` lets the compiler delete the entire
+  computation, since the array's length is known from its literal structure.
+
+Both were caught only because the numbers were physically impossible
+(sub-nanosecond per cycle).  A subtler version would have passed.
+
+## Verdict after building it
+
+The plan said D3 was buildable but not worth building.  Building it changes two
+of the three supporting claims, and both changes make the case *stronger*, not
+weaker.
+
+| plan said | built and measured |
+|---|---|
+| kernel-defeq trap is avoidable | **confirmed** — explicit literals stay inside noise at 4,096 |
+| naive `let`-chain proof is quadratic | **understated** — it *fails* at n≈200, `simp` maxSteps |
+| composed path via `runBindings_at` is the fix | **refuted** — best variant still exponent ~1.9 |
+| shallow buys 1.15x-1.21x | **confirmed and worse** — **1.08x** on a real design |
+
+The one genuinely new finding is the third.  The plan identified `Array.push`
+term growth as the obstruction and expected per-binding composition to remove
+it.  Composition *does* remove it, and the cost stays quadratic anyway, because
+the local context grows to `~6N` hypotheses that every tactic re-scans.  Pruning
+dead hypotheses recovers a constant factor, not the slope.
+
+**The deeper statement, which is the useful one to carry forward:** any
+per-design scheme that walks an `O(N)` object with `O(N)` kernel rewrites is
+quadratic in a term-rewriting kernel, whatever the rewrites say.  Escaping that
+requires the per-step facts to be *uniform* — decided by one compiled procedure
+rather than by `N` distinct rewrites.  That is exactly what `native_decide` on
+`compilesOk` already does, in **0.8 s at 4,772 nodes**.
+
+So D3's failure is not an engineering shortfall to be fixed with better tactics.
+It is the reason `compileDesign_correct` plus a decision procedure is the right
+architecture, stated as a measurement instead of a preference.
+
+## What is kept
+
+The reifier itself is worth keeping regardless of the verdict:
+
+* `ReifyGen.lean` emits a genuine straight-line Lean `def` from any accepted
+  certificate, all 21 constructors, flops and memories included.  It is the
+  concrete artifact for "compiled simulation", and it is the file to point at
+  when explaining why `reify_correct` is per design — `compileDesign` runs on a
+  *value* via `evalExpr` and the result is installed by `elabCommand`, an
+  environment mutation, so no term exists for the logic to quantify over.
+* `Reify.lean`'s six lemmas are sound and reusable; `srcAgree_push` in
+  particular is the right way to decouple proof cost from source fan-out and
+  would be needed by any future per-design scheme.
+* The agreement harness — reify, then check the emitted def against
+  `denoteResidual` on sampled inputs — is a cheap differential gate that does
+  not depend on the proof working, and would catch a reifier bug immediately.
+
+## Recommendation, unchanged and now measured
+
+Do not adopt D3 as the production path.  Keep it as the research comparison it
+was built to be: it now answers "why not translation validation for the last
+mile?" with three numbers rather than an argument — **1.08x** speed, exponent
+**~2.0** proof cost, and a naive path that **does not reach 256 bindings**.
+
+A2 stays first.  It keeps `∀ R`, and since the measured bottleneck is the `BV`
+value representation rather than dispatch, A2's typed `BitVec` targets the term
+that actually dominates.  The re-measurement of `denoteResidual` should happen
+before A2 is built at all, because 28.4 µs per node-cycle may already clear the
+bar the phase was created to reach.
