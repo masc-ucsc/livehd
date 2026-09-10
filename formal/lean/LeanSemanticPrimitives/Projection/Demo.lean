@@ -80,7 +80,7 @@ def sampleEnv : Val := .cons (.int 5) (.cons (.int 7) .nil)
 
 def interpP : Program := eraseProgram interpA
 
-def direct : EvalResult := evalFuel 200 interpP [] (.call 0 [.lit sample, .lit sampleEnv])
+def direct : EvalResult := evalFuel 200 interpP [] (.call interpP.entry [.lit sample, .lit sampleEnv])
 
 -- `(5 + 3) * 7 = 56`
 #guard direct == .value (.int 56)
@@ -95,7 +95,7 @@ def residualP : Program := match residual with | .ok p => p | .error _ => ⟨[],
 
 /-- The residual program, run on the dynamic input alone.  Note the argument
 list: the static parameter is GONE -- the specialized entry takes only `env`. -/
-def viaMix : EvalResult := evalFuel 200 residualP [] (.call 0 [.lit sampleEnv])
+def viaMix : EvalResult := evalFuel 200 residualP [] (.call residualP.entry [.lit sampleEnv])
 
 #guard viaMix == .value (.int 56)
 
@@ -189,7 +189,7 @@ def residual2P : Program := match residual2 with | .ok p => p | .error _ => ⟨[
 
 -- and the pipeline-produced residual computes the same thing, with the
 -- dispatch equally gone
-#guard evalFuel 200 residual2P [] (.call 0 [.lit sampleEnv]) == .value (.int 56)
+#guard evalFuel 200 residual2P [] (.call residual2P.entry [.lit sampleEnv]) == .value (.int 56)
 #guard ((residual2P.funs.map (fun fd => countCaseT fd.body)).foldl (· + ·) 0) == 0
 
 /-! ## Regression: an unfolded call with TWO dynamic arguments
@@ -230,14 +230,62 @@ def twoArgRes : Program :=
   match mixDriver 500 100 twoArgA [.int 10] with | .ok p => p | .error _ => ⟨[], 0⟩
 
 -- source:  main 10 7 2  =  sub (7 + 10) 2  =  15
-#guard evalFuel 500 twoArgP [] (.call 0 [.lit (.int 10), .lit (.int 7), .lit (.int 2)])
+#guard evalFuel 500 twoArgP [] (.call twoArgP.entry [.lit (.int 10), .lit (.int 7), .lit (.int 2)])
          == .value (.int 15)
 
 -- residual, on the dynamic arguments alone.  With the arguments mixed in the
 -- caller's environment this yielded the wrong value, because argument 1 read
 -- argument 0's binder.
-#guard evalFuel 500 twoArgRes [] (.call 0 [.lit (.int 7), .lit (.int 2)])
+#guard evalFuel 500 twoArgRes [] (.call twoArgRes.entry [.lit (.int 7), .lit (.int 2)])
          == .value (.int 15)
+
+/-! ## Regression: the entry is not source function 0
+
+Everything above agrees between the Lean and object specializers only because
+this toy's entry happens to be source function 0 and its helpers are inlined
+away, so the residual has ONE function and there is no order to disagree about.
+
+This fixture removes both accidents: two RESIDUALIZED functions, with the entry
+at source index 1 and its callee at index 0.  Before the Lean driver was made
+function-major it put the entry at residual index 0 (discovery order) while the
+object specializer put it at index 1 (function-major order) -- the two produced
+different programs, checked and confirmed.  Both residuals computed the same
+value, so the disagreement was purely a permutation of the function table, with
+the call indices embedded in the residual code pointing into the wrong one. -/
+
+open Surface in
+def twoFunS : SProgram where
+  entry := "main"
+  funs :=
+    [ { name := "helper", params := ["s", "x"]
+      , body := .prim .addI [.ref "x", .ref "s"] }
+    , { name := "main", params := ["s", "x"]
+      , body := .prim .mulI [.call "helper" [.ref "s", .ref "x"], int 2] } ]
+
+def twoFunResolved : Except String (Program × List Bool) := Surface.resolveProgram twoFunS
+#guard twoFunResolved.toOption.isSome
+
+def twoFunP   : Program   := match twoFunResolved with | .ok (p, _) => p | .error _ => ⟨[], 0⟩
+def twoFunInl : List Bool := match twoFunResolved with | .ok (_, i) => i | .error _ => []
+
+-- the entry is NOT source function 0; that is the whole point of the fixture
+#guard twoFunP.entry == 1
+
+def twoFunA : AProgram :=
+  match bta twoFunP twoFunInl [.stat, .dyn] 50 with | .ok a => a | .error _ => ⟨[], 0⟩
+#guard wfAProgram twoFunA
+
+def twoFunRes : Program :=
+  match mixDriver 500 100 twoFunA [.int 10] with | .ok p => p | .error _ => ⟨[], 0⟩
+
+-- two residual functions, and function-major order puts the entry second
+#guard twoFunRes.funs.length == 2
+#guard twoFunRes.entry == 1
+
+-- main 10 7 = (7 + 10) * 2 = 34, source and residual alike
+#guard evalFuel 500 twoFunP [] (.call twoFunP.entry [.lit (.int 10), .lit (.int 7)])
+         == .value (.int 34)
+#guard evalFuel 500 twoFunRes [] (.call twoFunRes.entry [.lit (.int 7)]) == .value (.int 34)
 
 end Demo
 end Projection

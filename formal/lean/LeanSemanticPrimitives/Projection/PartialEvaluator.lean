@@ -526,19 +526,72 @@ def addNew (seen : List SpecRequest) : List SpecRequest → List SpecRequest
       if memberReq r seen then addNew seen rs
       else r :: addNew (seen ++ [r]) rs
 
-/-- Worklist closure.  `wlFuel` bounds the number of specializations, which is
-the termination condition offline partial evaluation genuinely lacks: an
-infinite family of static argument tuples is a real (and useful to detect)
+/-! ## The closure
+
+FUNCTION-MAJOR, not a worklist -- and this is a correctness requirement, not a
+preference.  `MixProgram.lean` must iterate function-major so that the callee's
+index stays STATIC, which is what makes the specializer self-applicable.  A
+worklist here would leave the two drivers computing residual programs that
+differ by a permutation of the function table, with the call indices embedded in
+the residual code pointing at the wrong entries -- so `mixProgram` would not
+implement this specializer, and it does not, as a `#guard` in `Gate0` records.
+
+Both loops count DOWN on an explicit `Nat` rather than up to `A.funs.length`.
+That keeps the recursion structural, and the bridge to the object program later
+inducts on the same countdown. -/
+
+def filterFun (f : Nat) : List SpecRequest → List SpecRequest
+  | []      => []
+  | r :: rs => if r.funIdx = f then r :: filterFun f rs else filterFun f rs
+
+def groupFrom (reqs : List SpecRequest) : Nat → Nat → List SpecRequest
+  | 0,     _ => []
+  | k + 1, f => filterFun f reqs ++ groupFrom reqs k (f + 1)
+
+@[inline] def groupByFun (A : AProgram) (reqs : List SpecRequest) : List SpecRequest :=
+  groupFrom reqs A.funs.length 0
+
+def collectFor (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat) (f : Nat) :
+    List SpecRequest → Except MixError (List SpecRequest)
+  | []      => .ok []
+  | r :: rs =>
+    if r.funIdx = f then
+      match mixFun stepFuel A idx r, collectFor stepFuel A idx f rs with
+      | .ok (_, rq), .ok rest => .ok (rq ++ rest)
+      | .error z,    _        => .error z
+      | _,           .error z => .error z
+    else collectFor stepFuel A idx f rs
+
+def collectFrom (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat)
+    (reqs : List SpecRequest) : Nat → Nat → Except MixError (List SpecRequest)
+  | 0,     _ => .ok []
+  | k + 1, f =>
+    match collectFor stepFuel A idx f reqs, collectFrom stepFuel A idx reqs k (f + 1) with
+    | .ok a,    .ok b     => .ok (a ++ b)
+    | .error z, _         => .error z
+    | _,        .error z  => .error z
+
+/-- The dummy index is deliberate, and matches the object program: with the real
+`indexOfReq seen` this would fail `.noSpec` on the first genuinely new request,
+since by definition it is not in `seen` yet.  Discovery only reads the REQUESTS
+a specialization makes; the code it emits is thrown away. -/
+@[inline] def collectAll (stepFuel : Nat) (A : AProgram) (reqs : List SpecRequest) :
+    Except MixError (List SpecRequest) :=
+  collectFrom stepFuel A (fun _ => some 0) reqs A.funs.length 0
+
+/-- Chaotic iteration to a fixed point.  `wlFuel` bounds the number of ROUNDS,
+which is the termination condition offline partial evaluation genuinely lacks:
+an infinite family of static argument tuples is a real (and useful to detect)
 outcome, not a Lean limitation. -/
-def discover (stepFuel : Nat) : Nat → AProgram → List SpecRequest → List SpecRequest →
+def closeFM (stepFuel : Nat) : Nat → AProgram → List SpecRequest →
     Except MixError (List SpecRequest)
-  | _,     _, [],          seen => .ok seen
-  | 0,     _, _ :: _,      _    => .error .outOfFuel
-  | k + 1, A, req :: work, seen =>
-      match mixFun stepFuel A (fun _ => some 0) req with
-      | .error z => .error z
-      | .ok (_, rq) =>
-          discover stepFuel k A (work ++ addNew seen rq) (seen ++ addNew seen rq)
+  | 0,     _, _    => .error .outOfFuel
+  | k + 1, A, seen =>
+    match collectAll stepFuel A seen with
+    | .error z => .error z
+    | .ok fresh =>
+      let s2 := groupByFun A (seen ++ addNew seen fresh)
+      if seen.length = s2.length then .ok seen else closeFM stepFuel k A s2
 
 /-- Explicit recursion rather than `mapM`: `generate_spec` has to say that
 residual function `i` is the specialization of request `i`, and `List.mapM` over
@@ -556,14 +609,19 @@ def generateFrom (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option N
     Except MixError (List FunDef) :=
   generateFrom stepFuel A (indexOfReq reqs) reqs
 
-/-- `mix`.  The entry request is discovered first, so it is residual function 0. -/
+/-- `mix`.  The entry request is NOT residual function 0: function-major order
+puts requests for lower-numbered source functions first, so the entry's index
+has to be looked up -- exactly as `MixProgram.lean` does. -/
 def mixDriver (stepFuel wlFuel : Nat) (A : AProgram) (statics : List Val) :
     Except MixError Program :=
-  match discover stepFuel wlFuel A [⟨A.entry, statics⟩] [⟨A.entry, statics⟩] with
+  match closeFM stepFuel wlFuel A (groupByFun A [⟨A.entry, statics⟩]) with
   | .error z => .error z
   | .ok reqs =>
     match generate stepFuel A reqs with
     | .error z  => .error z
-    | .ok funs => .ok ⟨funs, 0⟩
+    | .ok funs =>
+      match indexOfReq reqs ⟨A.entry, statics⟩ with
+      | none   => .error (.noSpec A.entry)
+      | some e => .ok ⟨funs, e⟩
 
 end Projection

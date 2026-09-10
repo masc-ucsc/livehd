@@ -49,7 +49,7 @@ def objP : Program := objProgram.getD ⟨[], 0⟩
 #guard objP == Demo.residual2P
 
 -- and it computes what the interpreter computed
-#guard evalFuel 200 objP [] (.call 0 [.lit Demo.sampleEnv]) == .value (.int 56)
+#guard evalFuel 200 objP [] (.call objP.entry [.lit Demo.sampleEnv]) == .value (.int 56)
 
 -- the two-dynamic-argument unfold, through the OBJECT specializer too
 def objTwoArg : EvalResult :=
@@ -57,6 +57,16 @@ def objTwoArg : EvalResult :=
     (.call mixProgram.entry [.lit (encAProgram Demo.twoArgA), .lit (encVals [.int 10])])
 
 #guard (match objTwoArg with | .value v => decProgram v | _ => none) == some Demo.twoArgRes
+
+-- THE CASE THAT USED TO FAIL.  `Demo.twoFunA`'s entry is source function 1, so
+-- before the Lean driver was made function-major the two specializers produced
+-- residual programs differing by a permutation of the function table.  This is
+-- the guard that pins the fix.
+def objTwoFun : EvalResult :=
+  evalFuel 100000 mixProgram []
+    (.call mixProgram.entry [.lit (encAProgram Demo.twoFunA), .lit (encVals [.int 10])])
+
+#guard (match objTwoFun with | .value v => decProgram v | _ => none) == some Demo.twoFunRes
 
 /-! ## (b) The second projection
 
@@ -121,7 +131,8 @@ def compiledProgram : Option Program :=
 #guard compiledProgram == some Demo.residual2P
 
 -- and that program still computes what the interpreter computed
-#guard evalFuel 200 (compiledProgram.getD ⟨[], 0⟩) [] (.call 0 [.lit Demo.sampleEnv])
+#guard evalFuel 200 (compiledProgram.getD ⟨[], 0⟩) []
+         (.call (compiledProgram.getD ⟨[], 0⟩).entry [.lit Demo.sampleEnv])
          == .value (.int 56)
 
 /-! ## Gate 3 -- the compiler must not still be an interpreter

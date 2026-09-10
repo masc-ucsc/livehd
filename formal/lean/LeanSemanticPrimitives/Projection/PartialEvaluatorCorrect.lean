@@ -1011,22 +1011,10 @@ theorem specOK_all (A : AProgram) (Pr : Program) (reqs : List SpecRequest) (step
 
 /-! ## The driver
 
-`discover` only ever appends, so the entry request stays at index 0 and the
-residual entry really is the specialization of the program's entry. -/
-
-theorem discover_prefix {stepFuel : Nat} {A : AProgram} :
-    ∀ (k : Nat) (work seen reqs : List SpecRequest),
-      discover stepFuel k A work seen = .ok reqs → ∃ suf, reqs = seen ++ suf
-  | _,     [],          seen, reqs, h => by
-      simp only [discover] at h; cases h; exact ⟨[], by simp⟩
-  | 0,     _ :: _,      _,    _,    h => by simp [discover] at h
-  | k + 1, req :: work, seen, reqs, h => by
-      simp only [discover] at h
-      split at h <;> try contradiction
-      rename_i rq hmf
-      obtain ⟨suf, hsuf⟩ :=
-        discover_prefix k (work ++ addNew seen rq) (seen ++ addNew seen rq) reqs h
-      exact ⟨addNew seen rq ++ suf, by simpa using hsuf⟩
+The closure is function-major, so the entry request is NOT at index 0 -- but
+`mixDriver` looks its index up, and `indexOfReq_spec` turns that lookup into
+exactly the fact these two theorems need.  Nothing else in this file depends on
+the order requests come out in. -/
 
 /-- `mix_sound`, at the driver.
 
@@ -1048,12 +1036,13 @@ theorem mixDriver_sound {stepFuel wlFuel : Nat} {A : AProgram} {statics : List V
   rename_i reqs hdisc
   split at h <;> try contradiction
   rename_i funs hgenf
+  split at h <;> try contradiction
+  rename_i e hidx
   cases h
-  -- the entry request is still first
-  obtain ⟨suf, hsuf⟩ := discover_prefix _ _ _ reqs hdisc
-  have hzero : reqs[0]? = some ⟨A.entry, statics⟩ := by rw [hsuf]; simp
+  -- the entry request is wherever `mixDriver` said it was
   obtain ⟨fd', afd', hfd', hafd', _, hbody⟩ :=
-    specOK_all A ⟨funs, 0⟩ reqs stepFuel (by simpa [generate] using hgenf) m 0 _ hzero
+    specOK_all A ⟨funs, e⟩ reqs stepFuel (by simpa [generate] using hgenf) m e _
+      (indexOfReq_spec hidx)
   simp only [Program.fn] at hpf
   rw [hfd'] at hpf
   cases hpf
@@ -1728,11 +1717,12 @@ theorem mixDriver_complete {stepFuel wlFuel : Nat} {A : AProgram} {statics : Lis
   rename_i reqs hdisc
   split at h <;> try contradiction
   rename_i funs hgenf
+  split at h <;> try contradiction
+  rename_i e hidx
   cases h
-  obtain ⟨suf, hsuf⟩ := discover_prefix _ _ _ reqs hdisc
-  have hzero : reqs[0]? = some ⟨A.entry, statics⟩ := by rw [hsuf]; simp
   obtain ⟨fd', afd', hfd', hafd', hbody⟩ :=
-    specSound_all A ⟨funs, 0⟩ reqs stepFuel (by simpa [generate] using hgenf) mr 0 _ hzero
+    specSound_all A ⟨funs, e⟩ reqs stepFuel (by simpa [generate] using hgenf) mr e _
+      (indexOfReq_spec hidx)
   simp only [Program.fn] at hpf
   rw [hfd'] at hpf
   cases hpf
