@@ -77,74 +77,107 @@ Consequently, `P_D` should contain concrete bit-vector operations and
 straight-line state logic.  It should not traverse `D.nodes`, look up node IDs,
 or dispatch on `LGraphOp` at run time.
 
-## Audited status on 2026-09-12
+## Audited progress on 2026-09-12
 
-Completed in this branch:
+| Milestone | Status | What exists | What is still missing |
+| --- | --- | --- | --- |
+| 0. Shared semantics | **Complete** | pinned shared semantic files; `SimulatorContract.lean`; one-cycle and trace agreement theorems | re-pin only when the shared source changes |
+| 1. Hardware encoding | **Complete** | `DesignEncoding.lean` (total over `DesignCert`, memory descriptors included), `RuntimeEncoding.lean`, `StateRel`/`ResultRel` | finite-map memory representation, deferred by design |
+| 2. Hardware interpreter | **Next** | bit-vector primitives; the operand-normalisation obligation is identified and recorded | `I_hw`, most LGraph operations, interpreter-adequacy proof |
+| 3. First projected simulator | **Not started** | generic `mixDriver_iff` and toy first projection | specialization of `I_hw` and `projectDesign_correct` |
+| 4. Simulator packaging | **Partial infrastructure** | generic `refTrace`, `stepTrace`, and trace theorem | projected step, total/bounded execution, public runner |
+| 5. Cross-simulator relation | **Generic theorem complete** | `StepCorrect`, `step_agree`, and `trace_agree` | correctness instances/adapters for the concrete simulators |
+| 6. Literal second projection | **Relative theorem complete** | `secondProjection_correct` and concrete Gate 0 checks | `mixProgram_implements_mixHost` and hardware instantiation |
+| 7. Real-design evaluation | **Not started** | tiny shared-semantics fixture only | projected sequential, DINO, CORE-ET, CVA6 runs |
 
-- `ObjectLanguage.lean` defines the first-order, deeply embedded language.
-- `ObjectLanguageSemantics.lean` provides executable fuelled evaluation and the
-  fuel-free `Eval` relation, with soundness and completeness bridges.
-- `Encoding.lean` provides program-as-data encodings and round-trip theorems.
-- `BTA.lean` and `PartialEvaluator.lean` implement offline specialization.
-- `PartialEvaluatorCorrect.lean` proves `mixDriver_iff` (`mix_sound`) in both
-  directions, without fuel in the semantic statement.
-- `Demo.lean` executes the first projection for a toy expression interpreter;
-  the residual program removes interpreter dispatch.
-- `MixProgram.lean` contains the 53-function object-language specializer.
-- `SecondProjection.lean` proves `secondProjection_correct`: the derived
-  compiler, applied to any design value, agrees with running the object
-  `mixProgram` on the encoded interpreter and that design value.
-- `Gate0.lean` checks concrete self-application, including the corrected
-  function-major residual-function order and absence of interpreter term-tag
-  dispatch in the toy derived compiler.
+The language and specialization foundation completed before this simulator plan
+consists of:
 
-Not completed:
+- the first-order deeply embedded language and its executable and relational
+  semantics;
+- program-as-data encodings with round-trip theorems;
+- offline binding-time analysis and the host specializer;
+- `mixDriver_iff` (`mix_sound`) in both directions, without fuel in the theorem;
+- a toy first projection whose residual removes expression-interpreter
+  dispatch;
+- the 53-function object `mixProgram` and a relative second-projection theorem;
+- concrete self-application checks, including the corrected function-major
+  residual-function order and absence of interpreter term-tag dispatch.
 
-- this branch does not yet contain the shared `DesignCert`/runtime/one-cycle
-  semantic contract;
-- there is no object-language encoding of a hardware `DesignCert`;
-- there is no `I_hw` implementing the post-lowering hardware semantics;
-- the current bit-vector primitives cover only part of `LGraphOp`;
-- no residual program currently consumes `RuntimeInput`/`RuntimeState` or
-  returns `RuntimeResult`;
-- execution still requires caller-supplied fuel;
-- no theorem yet relates a projected hardware simulator to `interpretDesign`;
-- no multi-cycle projected trace or real hardware evaluation exists;
-- `mixProgram_implements_mixHost` is not proved.  Therefore the current
-  second-projection theorem is about the object `mixProgram` on its own terms;
-  it does not yet show that object self-application reproduces the Lean host
-  specializer.
+Milestone 0 then added the missing hardware semantic boundary:
 
-Thus the branch currently establishes a correct general specializer and toy
-first/second-projection evidence, but not yet a hardware simulator.
+- `DesignCert`, `RuntimeInput`, `RuntimeState`, `RuntimeResult`, and
+  `interpretDesign` are imported verbatim from `livehd-new` revision
+  `f82056dbb84174bb4c4fd9fd3c6099efd58e8a23`;
+- all eight pinned files match that revision exactly;
+- compiler/residual implementation modules were deliberately not imported, so
+  the future comparison with the verified compiler is non-circular;
+- `StepCorrect` states the common one-cycle obligation;
+- `step_agree` derives pairwise one-cycle equality through `interpretDesign`;
+- `stepTrace_correct` lifts any `StepCorrect` implementation to traces;
+- `trace_agree` derives pairwise trace equality;
+- a real shared `DesignCert` fixture executes through `interpretDesign`.
+
+Verification at this audit point:
+
+- all 21 modules in `.build-proj.sh` compile successfully;
+- `Audit.lean` checks 51 load-bearing theorems and reports only Lean's standard
+  axioms (`propext`, `Quot.sound`, and where required `Classical.choice`);
+- no `sorryAx` or `Lean.ofReduceBool` appears in the audit.
+
+The branch still does **not** contain a projected hardware simulator.  The
+immediate missing link is an object-language `I_hw` connected to the now-shared
+`interpretDesign`, followed by its first projection.
+
+## Current critical path
+
+Prioritize one narrow, real-LGraph vertical slice:
+
+```text
+shared memory-free DesignCert/runtime encoding
+  -> object I_hw for a small supported LGraph subset
+  -> I_hw adequacy for that subset
+  -> PE(I_hw, D) for one sequential certificate
+  -> projected StepCorrect instance
+  -> equality with another simulator via step_agree
+```
+
+This path establishes the paper's central simulator claim sooner than either
+encoding the entire hardware language up front or completing literal
+self-application first.  Extend operator coverage and memories after the first
+real sequential residual simulator and equivalence theorem work end to end.
 
 ## Ordered implementation plan
 
-### Milestone 0: establish the semantic boundary
+### Milestone 0: establish the semantic boundary — COMPLETE
 
-1. Bring the shared `Compiler.DesignCert`, runtime types, and
-   `interpretDesign` into this branch without bringing in `compileDesign`.
-   The Futamura implementation must remain independent of the verified compiler
-   it will later be compared against.
-2. Pin the imported definitions to a common revision or move them to a shared
-   base branch.  A copied-and-modified `interpretDesign` would make a later
-   equivalence theorem much less meaningful.
-3. Add a compatibility module containing only the common simulator contract and
-   equivalence definitions.
+Implemented by `SHARED_SEMANTICS.md` and `SimulatorContract.lean`:
 
-Acceptance: a single `DesignCert`, input, and state value can be passed unchanged
-to the reference semantics and to adapters for every executable track.
+1. The shared certificate, runtime, well-formedness, operator semantics, and
+   `interpretDesign` are pinned verbatim.
+2. `compileDesign` and its residual implementation remain outside this branch.
+3. `StepCorrect`, `step_agree`, `refTrace`, `stepTrace`,
+   `stepTrace_correct`, and `trace_agree` are proved.
+4. The acceptance fixture passes a shared certificate, input, and state
+   unchanged to `interpretDesign`.
 
-### Milestone 1: encode the hardware domain in the object language
+Maintenance rule: make semantic changes in the shared source branch and re-pin;
+do not locally fork these definitions.
 
-Add `DesignEncoding.lean` and `RuntimeEncoding.lean`:
+### Milestone 1: encode the hardware domain in the object language — COMPLETE
 
-1. Encode/decode `LGraphOp`, sources, dense nodes, outputs, flops, memory
-   descriptors, and `DesignCert` as tagged `Val` trees.
-2. Encode bit-vector inputs, flop state, outputs, and next flop state.
-3. Prove `decode (encode x) = some x` for every static certificate component.
-4. Define `StateRel` and `ResultRel` between object values and compiler runtime
+Implemented by `DesignEncoding.lean` and `RuntimeEncoding.lean`:
+
+1. Reuse the existing generic tagged `Val` and encoded-BV representation.
+2. First encode/decode the memory-free subset of `LGraphOp`, sources, dense
+   nodes, outputs, flops, and `DesignCert` needed by the initial vertical slice.
+3. Encode bit-vector inputs, flop state, outputs, and next flop state.
+4. Prove `decode (encode x) = some x` for every supported static certificate
+   component.
+5. Define `StateRel` and `ResultRel` between object values and compiler runtime
    values.
+6. Reuse `SimulatorContract.Acceptance.tinyD`, then add one sequential
+   flop/reset/enable certificate; avoid creating a parallel fixture format.
 
 Memory needs an explicit decision.  `RuntimeState.mems` is function-valued and
 cannot simply be serialized as the present finite `Val`.  First complete the
@@ -154,29 +187,57 @@ value plus finite updates (or another executable finite map) and prove a
 memory-bearing designs unless function extensionality and the representation
 bridge have actually been discharged.
 
-Acceptance: certificate encodings round-trip, and runtime encoding relations
-cover the declared supported fragment without an opaque unchecked primitive.
+Acceptance: both the combinational and sequential shared certificates
+round-trip, and their inputs, states, and results satisfy the runtime relations
+without an opaque unchecked primitive.  **Met**, with three deviations from what
+this milestone expected, all in the direction of more coverage:
 
-### Milestone 2: implement and prove the hardware interpreter `I_hw`
+- the certificate encoding is **total**, memory included.  Every *static*
+  memory component -- `memImg`, `memConst` with its literal table,
+  `MemoryDesc`, and all three memory operators -- is ordinary finite data.  The
+  hardness is confined to `RuntimeState.mems`, which is function-valued, so the
+  memory-free restriction lives in `RuntimeEncoding.lean` and nowhere else.
+- the encoders are total and the RELATIONS carry the honesty.  `encState` drops
+  `mems`; `decState` can only produce `mems := #[]`, so `StateRel_memFree` shows
+  a memory-bearing state satisfies no `StateRel` at all and the dropped
+  component cannot be smuggled through.  Stating the relations through the
+  decoder also makes them functional (`StateRel_functional`,
+  `ResultRel_functional`) -- one object value denotes at most one runtime value,
+  which Milestone 5 needs and which an encoder-side definition would not give.
+- an obligation for Milestone 2 was found and is recorded in
+  `RuntimeEncoding.lean` rather than left to surface as a failing bridge lemma:
+  the object's `bvBitAt` masks its operand by the RESULT width while
+  `bv_bit` masks by the operand's OWN width.  These agree for bit vectors
+  already reduced modulo their own width and diverge otherwise (counterexample
+  in the file).  Normalisation is an invariant of the shared semantics, not of
+  the `BV` type, so `I_hw`'s operator bridge must carry it explicitly.
 
-1. Extend `Prim`/`evalPrim` with the remaining concrete hardware operations:
-   modular arithmetic, signed/unsigned comparisons and division, shifts, muxes,
-   sign extension, masks, and later memory operations.
+### Milestone 2: implement and prove the hardware interpreter `I_hw` — NEXT
+
+1. Implement the first vertical slice using the already available BV
+   constructor/access/bitwise/resize primitives: sources, `Op_And`, outputs,
+   and the sequential shell.
 2. Give each residual primitive a bridge to the corresponding shared
    `eval_op_cert`/`interpretDesign` operation.
 3. Write the hardware interpreter as an object `Program`.  It must walk sources
    and dense nodes, construct outputs, and compute all flop next-state values
    from the old state with reset-before-enable priority.
 4. Annotate it with `DesignCert` static and runtime input/state dynamic.
-5. Prove interpreter adequacy:
+5. Prove interpreter adequacy for the accepted subset:
 
 ```text
 Eval I_hw [encode D, runtime] result
   <-> ResultRel result (interpretDesign D input state)
 ```
 
+6. Once the vertical slice is proved and projected, extend `Prim`/`evalPrim` to
+   modular arithmetic, signed/unsigned comparisons and division, shifts, muxes,
+   sign extension, masks, and later memory operations.  Extend adequacy rather
+   than replacing it with a second theorem.
+
 The proof should assume the same checked/well-formed certificate conditions as
-the shared semantics.  It must not appeal to the verified residual compiler.
+the shared semantics plus an explicit `SupportedByProjection D` predicate while
+coverage is incomplete.  It must not appeal to the verified residual compiler.
 
 Acceptance: direct execution of `I_hw` performs one hardware cycle on small
 certificate fixtures and the adequacy theorem is kernel checked.
@@ -213,7 +274,7 @@ Acceptance: at least one sequential certificate produces and executes a
 residual one-cycle simulator, with a generic proof connecting it to
 `interpretDesign`.
 
-### Milestone 4: make the residual program a usable simulator
+### Milestone 4: make the residual program a usable simulator — PARTIAL INFRASTRUCTURE
 
 1. Define a checker for the residual fragment produced from `I_hw`: closed
    terms, correct entry arity, acyclic or otherwise terminating call graph, and
@@ -224,16 +285,22 @@ residual one-cycle simulator, with a generic proof connecting it to
    from the public simulator API.
 4. Prove that `runProjected = .ok r` implies `r = interpretDesign ...`, and for
    accepted well-formed designs prove that `runProjected` succeeds.
-5. Define `runProjectedTrace` by threading `nextState` through an input list and
-   prove by induction that it equals iteration of `interpretDesign`.
+5. Define `stepOf (sim : ProjectedSimulator) : Step SimError` by running the
+   already-specialized artifact and ignoring the redundant design argument;
+   prove `StepCorrect (stepOf sim) D` from `projectDesign D = .ok sim`.  Do not
+   re-run specialization on every simulated cycle.
+6. Instantiate the already implemented generic `stepTrace` runner.  Its
+   correctness follows immediately from `stepTrace_correct` once the projected
+   one-cycle `StepCorrect` instance exists; do not implement or prove a second
+   Futamura-specific trace semantics.
 
 Acceptance: users can run one cycle or a trace without selecting fuel, and both
 APIs have reference-semantics theorems.
 
-### Milestone 5: relate every simulator through the common semantics
+### Milestone 5: relate every simulator through the common semantics — GENERIC THEOREM COMPLETE
 
-Define a small reusable predicate, parameterized by an implementation's error
-type:
+The reusable predicate and its one-cycle/trace composition theorems are already
+implemented in `SimulatorContract.lean`:
 
 ```lean
 StepCorrect step D :=
@@ -242,7 +309,7 @@ StepCorrect step D :=
     result = interpretDesign D input state
 ```
 
-Instantiate it with existing results:
+What remains is to instantiate it with existing results:
 
 | Track | Executable step | Existing/common proof boundary |
 | --- | --- | --- |
@@ -269,15 +336,29 @@ relations to traces.  Trace comparison tests on identical stimuli remain useful
 regression evidence, but the Lean theorem through `interpretDesign` is the
 formal relationship.
 
-Acceptance: one theorem shows that any two successful implementations for the
-same certificate produce equal one-cycle results (or related memory results),
-and another shows equal/related traces.
+`step_agree` and `trace_agree` already provide the final composition.  The
+acceptance gate is therefore concrete instances: first Futamura plus one other
+simulator, then the remaining adapters.  These adapters may live on an
+integration branch if importing another implementation here would violate the
+non-circular dependency boundary.
 
-### Milestone 6: finish the literal second projection
+Acceptance: instantiate `StepCorrect` for the projected simulator and at least
+one existing implementation, then demonstrate `step_agree` and `trace_agree`
+on the same real sequential certificate.
+
+### Milestone 6: finish the literal second projection — RELATIVE THEOREM COMPLETE
+
+Already complete: `secondProjection_correct` proves that the derived compiler,
+when applied to any design value, computes exactly what the object
+`mixProgram` computes on the interpreter and design.  Gate 0 checks its concrete
+toy instantiation and verifies that interpreter term-tag dispatch is absent.
+
+Remaining work:
 
 1. Prove `mixProgram_implements_mixHost` relationally and without a fixed fuel
    in the statement.
-2. Combine it with the already proved `secondProjection_correct`.
+2. Combine it with `secondProjection_correct` to connect object
+   self-application to the already verified host specializer.
 3. Decode the compiler's output and prove that applying the derived compiler to
    `D` produces a residual simulator semantically equivalent to direct
    `projectDesign D`.
@@ -321,9 +402,16 @@ Claims supported by the current branch:
 - a general offline specializer has a fuel-free semantic correctness theorem;
 - the toy first projection removes interpreter dispatch and executes correctly;
 - a relative second-projection theorem relates a derived compiler to the object
-  specializer.
+  specializer;
+- the hardware tracks now share one pinned `DesignCert` one-cycle semantics;
+- any two implementations satisfying `StepCorrect` are generically proved to
+  agree for one cycle and for traces.  No Futamura hardware implementation
+  satisfies that contract yet;
+- a `DesignCert` is object-language data: the encoding round-trips for every
+  certificate, and is injective, so a theorem about the specializer's input is a
+  theorem about the certificate rather than about a value resembling one.
 
-Claims enabled by Milestones 0--5:
+Claims enabled after completing Milestones 1--5:
 
 - specializing the formal post-lowering IR interpreter produces an executable,
   cycle-accurate simulator for each accepted design;

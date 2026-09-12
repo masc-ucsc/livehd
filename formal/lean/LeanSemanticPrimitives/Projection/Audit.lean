@@ -16,6 +16,7 @@ import LeanSemanticPrimitives.Projection.BTA
 import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
 import LeanSemanticPrimitives.Projection.SecondProjection
 import LeanSemanticPrimitives.Projection.SimulatorContract
+import LeanSemanticPrimitives.Projection.RuntimeEncoding
 
 namespace Projection
 
@@ -72,5 +73,23 @@ namespace Projection
 #print axioms allStatic_forall₂
 #print axioms toCode_forall₂
 #print axioms Compat_allStat
+
+-- the hardware domain as object data (SIMULATOR_PLAN milestone 1)
+#print axioms decListG_encListG
+#print axioms decArr_encArr
+#print axioms decOp_encOp
+#print axioms decSource_encSource
+#print axioms decNode_encNode
+#print axioms decFlop_encFlop
+#print axioms decDesign_encDesign
+#print axioms encDesign_inj
+#print axioms decBV_encBV
+#print axioms StateRel_encState
+#print axioms StateRel_memFree
+#print axioms StateRel_functional
+#print axioms ResultRel_encResult
+#print axioms ResultRel_memFree
+#print axioms ResultRel_functional
+#print axioms interpretDesign_memFree
 
 end Projection

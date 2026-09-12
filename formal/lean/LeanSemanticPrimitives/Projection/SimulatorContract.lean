@@ -131,6 +131,55 @@ def tinySt : RuntimeState := { flops := #[], mems := #[] }
 -- and it is combinational: the next state is empty, so a trace is stable
 #guard (refTrace tinyD tinySt [tinyIn, tinyIn]).length == 2
 
+/-! ### A sequential certificate
+
+`tinyD` is combinational, so it exercises nothing that carries a cycle.  This
+one adds exactly the "sequential shell" the plan's vertical slice names -- one
+flop with an enable and a synchronous reset, and a REGISTERED output (the output
+reads the flop's Q source slot, not the node) -- while still using only `Op_And`
+for combinational logic, so it does not widen the operator subset `I_hw` has to
+support.
+
+Deliberately one design, not a family: reset priority over enable, the
+old-state fallback when disabled, and the resize on the way into the flop are
+all visible in the three vectors below.
+
+```
+  q <= rst ? 0 : (en ? (d & 4'b1100) : q)
+  out = q
+``` -/
+def seqD : DesignCert where
+  sources  := #[ .input 0 4      -- slot 0: d
+               , .const 4 12     -- slot 1: mask 0b1100
+               , .input 1 1      -- slot 2: en
+               , .input 2 1      -- slot 3: rst
+               , .flopQ  0 4 ]   -- slot 4: q
+  nodes    := #[{ op := .Op_And, width := 4, deps := #[0, 1] }]   -- slot 5
+  outputs  := #[{ slot := 4, width := 4 }]
+  flops    := #[{ width := 4, din := 5, enable := some 2, resetPin := some 3
+                , resetValue := 0, resetActiveLow := false }]
+  memories := #[]
+
+/-- `d`, `en`, `rst`. -/
+def seqIn (d en rst : Int) : RuntimeInput := #[mk_bv 4 d, mk_bv 1 en, mk_bv 1 rst]
+
+def seqSt (q : Int) : RuntimeState := { flops := #[mk_bv 4 q], mems := #[] }
+
+-- enabled, not reset: q captures d & 0b1100, and the output is the OLD q
+#guard (interpretDesign seqD (seqIn 5 1 0) (seqSt 0)).outputs             == #[mk_bv 4 0]
+#guard (interpretDesign seqD (seqIn 5 1 0) (seqSt 0)).nextState.flops     == #[mk_bv 4 4]
+
+-- disabled: q holds, and holding is the OLD STATE, not the din
+#guard (interpretDesign seqD (seqIn 3 0 0) (seqSt 4)).outputs             == #[mk_bv 4 4]
+#guard (interpretDesign seqD (seqIn 3 0 0) (seqSt 4)).nextState.flops     == #[mk_bv 4 4]
+
+-- reset beats enable, and loads `resetValue` rather than the din
+#guard (interpretDesign seqD (seqIn 3 1 1) (seqSt 4)).nextState.flops     == #[mk_bv 4 0]
+
+-- two cycles of the reference trace: 0 -> 4 -> 4, seen as outputs 0 then 4
+#guard ((refTrace seqD (seqSt 0) [seqIn 5 1 0, seqIn 5 1 0]).map
+          (fun r => r.outputs)) == [#[mk_bv 4 0], #[mk_bv 4 4]]
+
 end Acceptance
 
 end Projection

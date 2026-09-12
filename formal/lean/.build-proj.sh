@@ -37,6 +37,8 @@ MODULES=(
   Projection/PartialEvaluatorCorrect
   Projection/SecondProjection
   Projection/SimulatorContract
+  Projection/DesignEncoding
+  Projection/RuntimeEncoding
   Projection/Audit
 )
 
