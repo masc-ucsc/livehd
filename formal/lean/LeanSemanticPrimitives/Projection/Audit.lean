@@ -15,6 +15,7 @@ import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics
 import LeanSemanticPrimitives.Projection.BTA
 import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
 import LeanSemanticPrimitives.Projection.SecondProjection
+import LeanSemanticPrimitives.Projection.SimulatorContract
 
 namespace Projection
 
@@ -57,6 +58,11 @@ namespace Projection
 #print axioms secondProjection_correct
 #print axioms secondProjection_correct_call
 #print axioms Eval_entry
+
+-- the common simulator contract (SIMULATOR_PLAN milestone 0 / 5)
+#print axioms step_agree
+#print axioms stepTrace_correct
+#print axioms trace_agree
 #print axioms evalFuel_mono
 #print axioms evalFuel_complete
 #print axioms generateFrom_spec

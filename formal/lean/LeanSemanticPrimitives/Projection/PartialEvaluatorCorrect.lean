@@ -11,10 +11,12 @@
   RESIDUAL fuel (`mixDriver_complete`) -- and `evalFuel_complete` is what turns
   "terminates at some fuel" back into `Eval` on both sides.
 
-  WHAT IS STILL ONLY CHECKED: the PROJECTIONS.  That `mixProgram` computes what
-  this specializer computes, and that the derived compiler's output matches, are
-  separate theorems (`mixProgram_implements_mixHost`, `secondProjection_correct`).
-  Neither is written; Gate0's `#guard`s are the only evidence for them.
+  PROJECTION STATUS.  `secondProjection_correct` is now proved: the derived
+  compiler agrees with the object `mixProgram` on every design value.  What is
+  still only checked is that `mixProgram` computes what this Lean specializer
+  computes (`mixProgram_implements_mixHost`).  Consequently Gate0's concrete
+  equality with the host-produced residual is still a `#guard` rather than the
+  consequence of an end-to-end self-application theorem.
   ############################################################################
 
   THE STATEMENT IS ABOUT `erase A`, NOT ABOUT `A`.  Specialization is only

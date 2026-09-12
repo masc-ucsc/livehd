@@ -315,6 +315,78 @@ theorem and_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
   intro i hi
   simp only [bv_bit_bvenc, BitVec.getLsbD_and, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
 
+/-- Arity-3 `And` bridge.  **Fold-free by construction**: the RHS is the same
+left-nested `&&&` chain `nary_op_inline` emits, so the default closer suffices and
+no `List.foldl` machinery is introduced.
+
+This is Bug 9's lesson applied preemptively: `andn_bridge` below is correct at
+arity 3, but its closer must unfold a `List.foldl`, and that rewriting sent the
+kernel into *unbounded* recursion for binary `Or` on deep operand chains.  Give
+each small arity a fold-free bridge rather than routing it through the fold. -/
+theorem and3_bridge {wa wb wc w : Nat} (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) :
+    eval_op LGraphOp.Op_And w [bvenc a, bvenc b, bvenc c]
+      = bvenc (((bv_zext a : BitVec w) &&& (bv_zext b : BitVec w)) &&& (bv_zext c : BitVec w)) := by
+  show bv_bitwise w (fun x y => x && y)
+        (bv_bitwise w (fun x y => x && y) (bv_resize w (bvenc a)) (bvenc b)) (bvenc c) = _
+  rw [bv_resize_bvenc]
+  apply bv_bitwise_eq
+  intro i hi
+  have hin : bv_bit (bv_bitwise w (fun x y => x && y) (bvenc (bv_zext a : BitVec w)) (bvenc b)) i
+      = ((bv_zext a : BitVec w).getLsbD i && b.getLsbD i) := by
+    unfold bv_bitwise
+    rw [bv_bit_bitsToInt _ hi]
+    simp [bv_bit_bvenc]
+  rw [hin]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_and, getLsbD_zext_lt b hi, getLsbD_zext_lt c hi]
+
+/-- Peel one level off a left-nested `bv_bitwise` And chain.  Factored out of the
+inline `have` in `and3_bridge` so each extra arity costs one `have`, not a fresh
+copy of the whole proof.  Note `wx` is separate from the chain width `w`: the
+operands of an n-ary And keep their own widths and are `bv_zext`ed by the fast
+model, so they are not all `BitVec w`. -/
+theorem bv_bit_and_step {w wx : Nat} (A : BV) (x : BitVec wx) {i : Nat} (hi : i < w) :
+    bv_bit (bv_bitwise w (fun p q => p && q) A (bvenc x)) i
+      = (bv_bit A i && x.getLsbD i) := by
+  unfold bv_bitwise
+  rw [bv_bit_bitsToInt _ hi]
+  simp [bv_bit_bvenc]
+
+/-- Arity-4 `And`.  Same fold-free shape as `and3_bridge`: the RHS is exactly the
+left-nested `&&&` chain `nary_op_inline` emits, so the default closer suffices and
+no `List.foldl` is introduced (Bug 9).
+
+Found by the CVA6 module sweep: `cva6_raw_checker_gate` has 13 arity-4 `And` nodes.
+Observed arities across DINO + all swept CVA6 modules are 2, 3 and 4; if a wider one
+ever appears, extend by adding one `have` in the same pattern. -/
+theorem and4_bridge {wa wb wc wd w : Nat}
+    (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) (d : BitVec wd) :
+    eval_op LGraphOp.Op_And w [bvenc a, bvenc b, bvenc c, bvenc d]
+      = bvenc ((((bv_zext a : BitVec w) &&& (bv_zext b : BitVec w))
+                 &&& (bv_zext c : BitVec w)) &&& (bv_zext d : BitVec w)) := by
+  show bv_bitwise w (fun x y => x && y)
+        (bv_bitwise w (fun x y => x && y)
+          (bv_bitwise w (fun x y => x && y) (bv_resize w (bvenc a)) (bvenc b)) (bvenc c)) (bvenc d) = _
+  rw [bv_resize_bvenc]
+  apply bv_bitwise_eq
+  intro i hi
+  have h2 := bv_bit_and_step (bvenc (bv_zext a : BitVec w)) b hi
+  have h3 := bv_bit_and_step
+      (bv_bitwise w (fun p q => p && q) (bvenc (bv_zext a : BitVec w)) (bvenc b)) c hi
+  -- `bv_bitwise_eq` has already peeled the OUTERMOST level (the `&&& d`), so the
+  -- chain left in the goal is one shorter than the term above.
+  rw [h3, h2]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_and,
+             getLsbD_zext_lt b hi, getLsbD_zext_lt c hi, getLsbD_zext_lt d hi]
+
+/-- Emitter-facing check at `cva6_raw_checker_gate` nid 312's exact shape:
+`Op_And` width 1, four 1-bit operands, the first a constant. -/
+example (b c d : BitVec 1) :
+    eval_op LGraphOp.Op_And 1
+        [bvenc (BitVec.ofInt 1 ((Int.ofNat 1))), bvenc b, bvenc c, bvenc d]
+      = bvenc ((((bv_zext (BitVec.ofInt 1 ((Int.ofNat 1))) : BitVec 1) &&& (bv_zext b : BitVec 1))
+                 &&& (bv_zext c : BitVec 1)) &&& (bv_zext d : BitVec 1)) :=
+  and4_bridge _ b c d
+
 theorem or_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     eval_op LGraphOp.Op_Or w [bvenc a, bvenc b]
       = bvenc ((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w)) := by
@@ -324,6 +396,101 @@ theorem or_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
   have hz : bv_bit (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
     unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
   simp only [hz, bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
+
+/-- **Arity-1 `Or`.**  `nary_op_inline` with a single operand emits a bare
+`bv_zext a` -- no `|||` at all -- so the RHS here is exactly that.
+
+This exists to keep the closer on the DEFAULT simp set.  The n-ary
+`orn_bv_bridge` states its RHS as
+`bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w`, a shape the fast model never
+produces: it introduces both a `0#w |||` seed and `bv_to_bitvec`-wrapped operands.
+Reconciling that forces `BitVec.zero_or` and `bv_to_bitvec_bvenc_zext` into the
+per-node closer, and both match with a free metavariable (`0#?w ||| ?x`,
+`bv_to_bitvec ?w (bvenc ?v)`), so simp attempts them across the whole goal.  Measured
+on `cva6_ras_gate`'s 11 n-ary `Or` nodes: adding those two lemmas takes the file from
+9.2 s to 44.3 s (~1.2 s and ~2.0 s per node).  Matching the fast model's shape
+directly avoids the whole problem -- the same reason `or_bridge` (arity 2) is cheap. -/
+theorem or1_bridge {wa w : Nat} (a : BitVec wa) :
+    eval_op LGraphOp.Op_Or w [bvenc a] = bvenc (bv_zext a : BitVec w) := by
+  show bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a) = _
+  apply bv_bitwise_eq
+  intro i hi
+  simp only [bv_bit_mk_bv_zero, bv_bit_bvenc, Bool.false_or, getLsbD_zext_lt a hi]
+
+/-- Emitter-facing check at the shape real designs emit (width 1, one 1-bit operand);
+arity-1 `Or` is 319 of `cva6_pmp_gate`'s 423 n-ary `Or` nodes and 97 of the TLB's 112. -/
+example (a : BitVec 1) :
+    eval_op LGraphOp.Op_Or 1 [bvenc a] = bvenc ((bv_zext a) : BitVec 1) :=
+  or1_bridge a
+
+--------------------------------------------------------------------------------
+-- Fold-free n-ary `Or` at the small arities.
+--
+-- WHY these exist, measured on cva6_ras_gate nid 36 (Op_Or, width 130, four
+-- operands of widths 65/66/130/131), isolated with full file context (6.0 s floor):
+--
+--   show only .............................  6.0 s
+--   + rw [orn_bv_bridge] .................  6.0 s
+--   + simp only [fv36] ...................  6.0 s
+--   + List.foldl_cons, List.foldl_nil ....  6.0 s   <- the FOLD is innocent
+--   + BitVec.zero_or ..................... 10.1 s   (+4.1 s)
+--   + bv_to_bitvec_bvenc_zext ............ 32.2 s   (+22.1 s, 85 %)
+--
+-- `orn_bv_bridge`'s RHS is `bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w`, a
+-- shape the fast model never emits.  Reconciling it forces `BitVec.zero_or` and
+-- `bv_to_bitvec_bvenc_zext` into the per-node closer, and the latter has BOTH width
+-- arguments implicit -- LHS head `bv_to_bitvec ?w (bvenc ?v)` -- so `simp only`
+-- matches it against every subterm of a large generated goal.  Cost scales with the
+-- surrounding context, which is why an isolated probe (same arity, same mixed
+-- widths, same closer: ~5 s for 8 nodes) cannot see it.
+--
+-- Stating the RHS in the fast model's own left-nested `|||` shape needs NEITHER
+-- lemma, so the closer stays on the default set.  Same discipline as `or_bridge`
+-- (arity 2) and `and3_bridge`/`and4_bridge`.
+--------------------------------------------------------------------------------
+
+/-- Peel one level off a left-nested `bv_bitwise` Or chain. -/
+theorem bv_bit_or_step {w wx : Nat} (A : BV) (x : BitVec wx) {i : Nat} (hi : i < w) :
+    bv_bit (bv_bitwise w (fun p q => p || q) A (bvenc x)) i
+      = (bv_bit A i || x.getLsbD i) := by
+  unfold bv_bitwise
+  rw [bv_bit_bitsToInt _ hi]
+  simp [bv_bit_bvenc]
+
+theorem or3_bridge {wa wb wc w : Nat} (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) :
+    eval_op LGraphOp.Op_Or w [bvenc a, bvenc b, bvenc c]
+      = bvenc (((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w)) ||| (bv_zext c : BitVec w)) := by
+  show bv_bitwise w (fun x y => x || y)
+        (bv_bitwise w (fun x y => x || y)
+          (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) (bvenc b)) (bvenc c) = _
+  apply bv_bitwise_eq
+  intro i hi
+  have h1 : bv_bit (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
+    unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
+  have h2 := bv_bit_or_step (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) b hi
+  rw [h2, h1]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi,
+             getLsbD_zext_lt c hi]
+
+theorem or4_bridge {wa wb wc wd w : Nat}
+    (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) (d : BitVec wd) :
+    eval_op LGraphOp.Op_Or w [bvenc a, bvenc b, bvenc c, bvenc d]
+      = bvenc ((((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w))
+                 ||| (bv_zext c : BitVec w)) ||| (bv_zext d : BitVec w)) := by
+  show bv_bitwise w (fun x y => x || y)
+        (bv_bitwise w (fun x y => x || y)
+          (bv_bitwise w (fun x y => x || y)
+            (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) (bvenc b)) (bvenc c)) (bvenc d) = _
+  apply bv_bitwise_eq
+  intro i hi
+  have h1 : bv_bit (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
+    unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
+  have h2 := bv_bit_or_step (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) b hi
+  have h3 := bv_bit_or_step (bv_bitwise w (fun p q => p || q)
+                (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) (bvenc b)) c hi
+  rw [h3, h2, h1]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi,
+             getLsbD_zext_lt c hi, getLsbD_zext_lt d hi]
 
 theorem xor_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     eval_op LGraphOp.Op_Xor w [bvenc a, bvenc b]
@@ -456,6 +623,7 @@ theorem sra_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) (hw : w ≤ w
   rw [← hsra]
   exact mk_bv_toInt_zext (sem_sra a b) hw
 
+
 --------------------------------------------------------------------------------
 -- Shift left (SHL): the cert xor-fold-from-zero collapses to a masked shift.
 --------------------------------------------------------------------------------
@@ -536,6 +704,38 @@ theorem mk_bv_ofInt {w : Nat} (y : Int) : mk_bv w y = bvenc (BitVec.ofInt w y) :
   have hnn : 0 ≤ y % ((2 ^ w : Nat) : Int) := Int.emod_nonneg y (by positivity)
   rw [BitVec.toNat_ofInt, Int.ofNat_eq_natCast, Int.toNat_of_nonneg hnn,
       Int.emod_emod_of_dvd _ (dvd_refl _)]
+
+/-- **Widening SRA bridge.**  `sra_bridge` above assumes `w ≤ wa` and matches a fast
+model that `bv_zext`s the shifted result.  That is sound only when the result is
+TRUNCATED: the certificate `bv_sra` keeps the SIGNED value
+(`mk_bv w (bv_sint a / 2^amt)`), so at `w > wa` it sign-extends while `bv_zext`
+zero-extends -- genuinely different values for a negative operand.  A widening SRA
+must therefore sign-extend in the fast model, and then the bridge needs **no side
+condition at all**, since `mk_bv w V = bvenc (BitVec.ofInt w V)` holds at every
+width.
+
+This is the LiveHD-faithful direction: `inou/cgen/cgen_sim.cpp` reads an arithmetic
+shift's operand as *signed* and materializes the result at the target width. -/
+theorem sra_bridge_sext {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_SRA w [bvenc a, bvenc b]
+      = bvenc (bv_sext (sem_sra a b) : BitVec w) := by
+  have hsra : (sem_sra a b).toInt = a.toInt / (2:Int) ^ b.toNat := by
+    unfold sem_sra
+    rw [BitVec.toInt_sshiftRight, Int.shiftRight_eq_div_pow]; norm_num
+  show bv_sra w (bvenc a) (bvenc b) = _
+  unfold bv_sra
+  rw [bv_sint_bvenc, bv_uint_bvenc]
+  show mk_bv w (a.toInt / (2:Int) ^ b.toNat) = bvenc (bv_sext (sem_sra a b) : BitVec w)
+  rw [← hsra]
+  unfold bv_sext
+  exact mk_bv_ofInt _
+
+/-- The widening case really did diverge -- `zext` vs `sext` of the same shifted
+value are different at these widths, so the fix is a correctness fix, not a
+cosmetic one.  (a = all-ones 65 bits, shift 0.) -/
+example : (bv_zext (sem_sra (BitVec.allOnes 65) (0#7)) : BitVec 192)
+        ≠ (bv_sext (sem_sra (BitVec.allOnes 65) (0#7)) : BitVec 192) := by
+  native_decide
 
 theorem sext_bridge {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam) (hamt : amt.toNat = wa) :
     eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = bvenc (bv_sext a : BitVec w) := by
@@ -1010,5 +1210,275 @@ theorem BT.find_eq_none {α : Type} : ∀ (t : BT α) (d : Nat), d ∉ BT.keys t
       by_cases h1 : d < k
       · simp only [if_pos h1]; exact BT.find_eq_none lo d hlo
       · simp only [if_neg h1, if_neg hk]; exact BT.find_eq_none hi d hhi
+
+--------------------------------------------------------------------------------
+-- Memory operators (Op_MemRead / Op_MemWrite / Op_MemWriteBE).
+--
+-- The fast model carries a memory as a FUNCTION `BitVec addr -> BitVec data`
+-- (SemanticPrimitives.mem_read / mem_write / mem_write_be); the certificate
+-- carries it as `Int -> BV` inside `CertVal.mem`.  `memenc` is the encoding
+-- between them, and the three `*_bridge` lemmas below are what the emitted
+-- per-node proofs of a memory design rewrite with -- one per fold step of
+-- `memory_write_fold`, one per read port.
+--------------------------------------------------------------------------------
+
+/-- Encode a fast-model function-valued memory as a certificate memory image.
+
+The domain guard is LOAD-BEARING, not defensive.  `cert_mem_write` keys on
+`x = bv_uint addr`, an EXACT comparison on `Int`, while `BitVec.ofInt a x` WRAPS.
+Without the guard, `a = 6`, `addr = 0`, `x = 64` disagree: the certificate side
+sees `64 ≠ 0` and reads through to the old image, but the encoded side sees
+`BitVec.ofInt 6 64 = 0 = addr` and returns the freshly written data.  Guarding
+makes both sides constant off `[0, 2^a)`.  Every address the certificate actually
+produces is `bv_uint _`, i.e. `_ % 2^w`, hence always inside the guard. -/
+def memenc {a d : Nat} (m : BitVec a → BitVec d) : Int → BV :=
+  fun x => if 0 ≤ x ∧ x < 2 ^ a then bvenc (m (BitVec.ofInt a x)) else mk_bv d 0
+
+/-- `BitVec.ofInt` inverts `Int.ofNat ∘ BitVec.toNat`. -/
+theorem ofInt_ofNat_toNat {w : Nat} (x : BitVec w) :
+    BitVec.ofInt w (Int.ofNat x.toNat) = x := by
+  have h := bv_to_bitvec_bvenc x
+  unfold bv_to_bitvec at h
+  rwa [bv_uint_bvenc] at h
+
+/-- An encoded address is inside `memenc`'s guard. -/
+theorem bvenc_addr_in_range {w : Nat} (x : BitVec w) :
+    0 ≤ Int.ofNat x.toNat ∧ Int.ofNat x.toNat < 2 ^ w := by
+  refine ⟨Int.natCast_nonneg _, ?_⟩
+  have h : Int.ofNat x.toNat < ((2 ^ w : Nat) : Int) := Int.ofNat_lt.mpr x.isLt
+  simpa using h
+
+/-- Reading `memenc` at an encoded address gives the encoded stored word. -/
+theorem memenc_at {a d : Nat} (m : BitVec a → BitVec d) (x : BitVec a) :
+    memenc m (bv_uint (bvenc x)) = bvenc (m x) := by
+  rw [bv_uint_bvenc]
+  unfold memenc
+  rw [if_pos (bvenc_addr_in_range x), ofInt_ofNat_toNat]
+
+/-- Decode a certificate memory image back to a fast-model function.  Inverse of
+`memenc` on the guarded range; `<Top>_nextStateFromCert` uses it to rebuild the
+function-valued state field from the certificate's `.mem` value. -/
+def memdec (a d : Nat) (m : Int → BV) : BitVec a → BitVec d :=
+  fun x => bv_to_bitvec d (m (Int.ofNat x.toNat))
+
+/-- Round trip: this is what `<Top>_next_refines_fast` closes the memory field with. -/
+theorem memdec_memenc {a d : Nat} (m : BitVec a → BitVec d) : memdec a d (memenc m) = m := by
+  funext x
+  unfold memdec memenc
+  rw [if_pos (bvenc_addr_in_range x), ofInt_ofNat_toNat, bv_to_bitvec_bvenc]
+
+theorem bvenc_zero {d : Nat} : bvenc (0#d) = mk_bv d 0 := by
+  unfold bvenc; simp
+
+/-- `Op_MemRead`: the enable-gated certificate read equals the encoded fast read. -/
+theorem mem_read_bridge {a d we : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (en : BitVec we) :
+    cert_mem_read d (memenc m) (bvenc addr) (bvenc en)
+      = bvenc (if bitvec_nonzero en then mem_read m addr else 0#d) := by
+  unfold cert_mem_read
+  rw [bv_nonzero_bvenc]
+  by_cases h : bitvec_nonzero en
+  · rw [if_pos h, if_pos h, memenc_at, bv_resize_bvenc, bv_zext_id]
+    rfl
+  · rw [if_neg h, if_neg h, bvenc_zero]
+
+/-- On the guarded range `BitVec.ofInt` is a section of `Int.ofNat ∘ toNat`. -/
+theorem ofNat_toNat_ofInt {a : Nat} {x : Int} (h0 : 0 ≤ x) (h1 : x < 2 ^ a) :
+    Int.ofNat (BitVec.ofInt a x).toNat = x := by
+  rw [BitVec.toNat_ofInt]
+  have hc : (2:Int) ^ a = ((2 ^ a : Nat) : Int) := by simp
+  rw [hc] at h1
+  rw [Int.emod_eq_of_lt h0 h1]
+  simp [Int.toNat_of_nonneg h0]
+
+/-- Ungated read, for the raw read a SYNC memory feeds into its read-data register.
+The emitter supplies a literal enable, so `h` is `by decide` at the call site. -/
+theorem mem_read_en_bridge {a d we : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (en : BitVec we) (h : bitvec_nonzero en = true) :
+    cert_mem_read d (memenc m) (bvenc addr) (bvenc en) = bvenc (mem_read m addr) := by
+  rw [mem_read_bridge]
+  simp [h]
+
+/-- `Op_MemWrite`: one enable-gated certificate write step equals the encoded
+fast-model write step.  This is one step of `memory_write_fold`. -/
+theorem mem_write_bridge {a d we : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (v : BitVec d) (en : BitVec we) :
+    cert_mem_write (memenc m) (bvenc addr) (bvenc v) (bvenc en)
+      = memenc (if bitvec_nonzero en then mem_write m addr v else m) := by
+  unfold cert_mem_write
+  rw [bv_nonzero_bvenc]
+  by_cases h : bitvec_nonzero en
+  · rw [if_pos h, if_pos h]
+    funext x
+    rw [bv_uint_bvenc]
+    unfold memenc mem_write
+    by_cases hr : 0 ≤ x ∧ x < 2 ^ a
+    · rw [if_pos hr, if_pos hr]
+      by_cases hx : x = Int.ofNat addr.toNat
+      · rw [if_pos hx, hx, ofInt_ofNat_toNat, if_pos rfl]
+      · rw [if_neg hx]
+        have hne : BitVec.ofInt a x ≠ addr := by
+          intro hc
+          exact hx (by rw [← ofNat_toNat_ofInt hr.1 hr.2, hc])
+        rw [if_neg hne]
+    · -- x outside the guard.  The certificate key `bv_uint _` is always inside it,
+      -- so no aliasing can occur and both sides are the constant `mk_bv d 0`.
+      have hx : x ≠ Int.ofNat addr.toNat := by
+        intro hc; exact hr (hc ▸ bvenc_addr_in_range addr)
+      rw [if_neg hx, if_neg hr, if_neg hr]
+  · rw [if_neg h, if_neg h]
+
+theorem shl_one {d : Nat} (byte_w : Nat) : (1#d <<< byte_w) = BitVec.ofNat d (2^byte_w) := by
+  apply BitVec.eq_of_toNat_eq
+  simp [BitVec.toNat_shiftLeft, Nat.shiftLeft_eq, Nat.pow_mod]
+
+theorem borrow_mod (M k : Nat) (hM : 0 < M) : (M - 1 + (k + 1) % M) % M = k % M := by
+  rw [Nat.add_mod_mod]
+  have h : M - 1 + (k + 1) = M + k := by omega
+  rw [h, Nat.add_mod_left]
+
+theorem shl_sub_one {d : Nat} (byte_w : Nat) :
+    (1#d <<< byte_w) - 1#d = BitVec.ofNat d (2^byte_w - 1) := by
+  apply BitVec.eq_of_toNat_eq
+  rw [shl_one]
+  rcases Nat.eq_zero_or_pos d with hd | hd
+  · subst hd; simp [Nat.mod_one]
+  · have hM : 0 < 2^d := Nat.two_pow_pos d
+    have h1 : (1 : Nat) % 2^d = 1 := Nat.mod_eq_of_lt (Nat.one_lt_two_pow (by omega))
+    have hk : 2^byte_w - 1 + 1 = 2^byte_w := by
+      have : 1 ≤ 2^byte_w := Nat.one_le_two_pow
+      omega
+    simp only [BitVec.toNat_sub, BitVec.toNat_ofNat, h1]
+    rw [← hk, borrow_mod _ _ hM, Nat.add_sub_cancel]
+
+theorem ones_low_getLsbD {d : Nat} (byte_w j : Nat) :
+    ((1#d <<< byte_w) - 1#d).getLsbD j = (decide (j < d) && decide (j < byte_w)) := by
+  rw [shl_sub_one]
+  simp [BitVec.getLsbD_ofNat, Nat.testBit_two_pow_sub_one]
+
+/-- Bit `i` of one byte's mask word: set exactly on that byte's slice. -/
+theorem byte_mask_word_getLsbD {d : Nat} (byte_w bi i : Nat) :
+    (byte_mask_word byte_w bi (d := d)).getLsbD i
+      = (decide (i < d) && decide (bi * byte_w ≤ i) && decide (i - bi * byte_w < byte_w)) := by
+  unfold byte_mask_word
+  rw [BitVec.getLsbD_shiftLeft, ones_low_getLsbD]
+  by_cases h1 : i < d
+  · by_cases h2 : bi * byte_w ≤ i
+    · have : ¬ (i < bi * byte_w) := by omega
+      have hsub : i - bi * byte_w < d := by omega
+      simp [h1, h2, this, hsub]
+    · have : i < bi * byte_w := by omega
+      simp [h1, h2, this]
+  · simp [h1]
+
+/-- The accumulating fold turns into an `any` over the visited byte indices. -/
+theorem fold_mask_getLsbD {be d : Nat} (bev : BitVec be) (byte_w i : Nat) :
+    ∀ (l : List Nat) (acc : BitVec d),
+      ((l.foldl (fun (acc : BitVec d) (bi : Nat) =>
+          if bev.getLsbD bi then acc ||| byte_mask_word byte_w bi (d := d) else acc) acc).getLsbD i)
+      = (acc.getLsbD i
+          || l.any fun bi => bev.getLsbD bi && (byte_mask_word byte_w bi (d := d)).getLsbD i) := by
+  intro l
+  induction l with
+  | nil => intro acc; simp
+  | cons b t ih =>
+    intro acc
+    simp only [List.foldl_cons, List.any_cons]
+    by_cases hb : bev.getLsbD b
+    · rw [if_pos hb, ih]
+      simp only [hb, Bool.true_and, BitVec.getLsbD_or]
+      cases hacc : acc.getLsbD i <;>
+        cases hm : (byte_mask_word byte_w b (d := d)).getLsbD i <;>
+        cases ht : (t.any fun bi => bev.getLsbD bi && (byte_mask_word byte_w bi (d := d)).getLsbD i) <;>
+        simp
+    · rw [if_neg hb, ih]
+      simp [hb]
+
+/-- Unique enabled byte: bit `i` of the assembled mask is byte `i / byte_w`'s enable. -/
+theorem byte_enable_mask_getLsbD {be d : Nat} (bev : BitVec be) (byte_w i : Nat)
+    (hbw : 0 < byte_w) :
+    (byte_enable_mask bev byte_w (d := d)).getLsbD i
+      = (decide (i < d) && bev.getLsbD (i / byte_w)) := by
+  unfold byte_enable_mask
+  rw [fold_mask_getLsbD]
+  simp only [BitVec.getLsbD_zero, Bool.false_or, byte_mask_word_getLsbD]
+  rw [Bool.eq_iff_iff]
+  simp only [List.any_eq_true, List.mem_range, Bool.and_eq_true, decide_eq_true_eq]
+  constructor
+  · rintro ⟨bi, _hbi, hbev, ⟨hid, hle⟩, hlt⟩
+    have hdiv : i / byte_w = bi := by
+      apply Nat.div_eq_of_lt_le hle
+      have hs : (bi + 1) * byte_w = bi * byte_w + byte_w := by ring
+      omega
+    exact ⟨hid, by rw [hdiv]; exact hbev⟩
+  · rintro ⟨hid, hbev⟩
+    refine ⟨i / byte_w, BitVec.lt_of_getLsbD hbev, hbev, ⟨hid, Nat.div_mul_le_self i byte_w⟩, ?_⟩
+    have hdm := Nat.div_add_mod i byte_w
+    have hml := Nat.mod_lt i hbw
+    have : i - i / byte_w * byte_w = i % byte_w := by
+      rw [Nat.mul_comm]; omega
+    omega
+
+/-- Bit `i` of the fast-model masked update: `new` where the byte is enabled. -/
+theorem masked_word_update_getLsbD {d be : Nat} (old new : BitVec d) (bev : BitVec be)
+    (byte_w i : Nat) (hbw : 0 < byte_w) :
+    (masked_word_update old new bev byte_w).getLsbD i
+      = (if bev.getLsbD (i / byte_w) then new.getLsbD i else old.getLsbD i) := by
+  unfold masked_word_update
+  simp only [BitVec.getLsbD_or, BitVec.getLsbD_and, BitVec.getLsbD_not,
+             byte_enable_mask_getLsbD bev byte_w i hbw]
+  by_cases hi : i < d
+  · by_cases hb : bev.getLsbD (i / byte_w) <;> simp [hi, hb]
+  · have ho : old.getLsbD i = false := BitVec.getLsbD_of_ge old i (by omega)
+    have hn : new.getLsbD i = false := BitVec.getLsbD_of_ge new i (by omega)
+    simp [hi, ho, hn]
+
+/-- A `bits_to_int` word whose bits match a `BitVec` IS that `BitVec`, encoded. -/
+theorem mk_bv_bits_eq_bvenc {d : Nat} (f : Nat → Bool) (Y : BitVec d)
+    (h : ∀ i, f i = Y.getLsbD i) : mk_bv d (bits_to_int d f) = bvenc Y := by
+  have hf : f = (fun i => Y.getLsbD i) := funext h
+  rw [hf, bits_to_int_toNat]
+  rfl
+
+/-- The certificate byte-masked update equals the encoded fast-model one. -/
+theorem cert_masked_update_bridge {d be : Nat} (old new : BitVec d) (bev : BitVec be)
+    (byte_w : Nat) (hbw : 0 < byte_w) :
+    cert_masked_update d (bvenc old) (bvenc new) (bvenc bev) byte_w
+      = bvenc (masked_word_update old new bev byte_w) := by
+  unfold cert_masked_update
+  apply mk_bv_bits_eq_bvenc
+  intro i
+  rw [masked_word_update_getLsbD old new bev byte_w i hbw]
+  simp only [bv_bit_bvenc]
+
+/-- `Op_MemWriteBE`: one enable-gated byte-masked certificate write step equals the
+encoded fast-model step.  Note the fast model gates on `bitvec_nonzero bev` outside
+`mem_write_be`, exactly where `cert_mem_write_be` gates internally. -/
+theorem mem_write_be_bridge {a d be : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (v : BitVec d) (bev : BitVec be) (byte_w : Nat) (hbw : 0 < byte_w) :
+    cert_mem_write_be d (memenc m) (bvenc addr) (bvenc v) (bvenc bev) byte_w
+      = memenc (if bitvec_nonzero bev then mem_write_be m addr v bev byte_w else m) := by
+  unfold cert_mem_write_be
+  rw [bv_nonzero_bvenc]
+  by_cases h : bitvec_nonzero bev
+  · rw [if_pos h, if_pos h]
+    funext x
+    rw [bv_uint_bvenc]
+    unfold memenc mem_write_be mem_write mem_read
+    by_cases hr : 0 ≤ x ∧ x < 2 ^ a
+    · rw [if_pos hr, if_pos hr]
+      by_cases hx : x = Int.ofNat addr.toNat
+      · rw [if_pos hx, hx, ofInt_ofNat_toNat, if_pos rfl,
+             if_pos (bvenc_addr_in_range addr),
+             cert_masked_update_bridge _ _ _ _ hbw]
+      · rw [if_neg hx]
+        have hne : BitVec.ofInt a x ≠ addr := by
+          intro hc
+          exact hx (by rw [← ofNat_toNat_ofInt hr.1 hr.2, hc])
+        rw [if_neg hne]
+    · have hx : x ≠ Int.ofNat addr.toNat := by
+        intro hc; exact hr (hc ▸ bvenc_addr_in_range addr)
+      rw [if_neg hx, if_neg hr, if_neg hr]
+  · rw [if_neg h, if_neg h]
 
 end OpBridge

@@ -1,27 +1,66 @@
 #!/usr/bin/env bash
-# Build the Projection modules with plain `lean` (no lake, no Mathlib).
-# Only OpBridge.lean needs Mathlib; nothing here does, so we skip the hours-long
-# Mathlib build entirely and keep iteration at a few seconds.
+# Build the shared semantic core + the Projection modules with plain `lean`
+# (no lake, no Mathlib).
+#
+# The shared core -- SemanticPrimitives, Translation/LGraphModel,
+# Translation/GraphRefine, Compiler/* -- is imported verbatim from livehd-new at
+# a pinned revision (see Projection/SHARED_SEMANTICS.md).  None of it imports
+# Mathlib, so it builds here in seconds alongside everything else.
+#
+# Translation/OpBridge.lean DOES need Mathlib and is deliberately absent from
+# the list below; it is pinned for consistency, not built by this script.
 set -uo pipefail
 cd "$(dirname "$0")"
 OUT=.olean-dev
 export LEAN_PATH="$PWD/$OUT"
 export LEAN_NUM_THREADS=4
-mkdir -p "$OUT/LeanSemanticPrimitives/Projection"
-# Default: the whole Projection library, in dependency order.
-MODULES=(ObjectLanguage ObjectLanguageSemantics Encoding BindingTime
-         PartialEvaluator Surface BTA MixProgram Demo Gate0
-         PartialEvaluatorCorrect SecondProjection Audit)
-if [ $# -gt 0 ]; then MODULES=("$@"); fi
+
+# Module paths relative to LeanSemanticPrimitives/, in dependency order.
+MODULES=(
+  SemanticPrimitives
+  Translation/LGraphModel
+  Translation/GraphRefine
+  Compiler/DesignCert
+  Compiler/Runtime
+  Compiler/DesignCertWF
+  Compiler/DesignSemantics
+  Projection/ObjectLanguage
+  Projection/ObjectLanguageSemantics
+  Projection/BindingTime
+  Projection/Encoding
+  Projection/Surface
+  Projection/BTA
+  Projection/PartialEvaluator
+  Projection/MixProgram
+  Projection/Demo
+  Projection/Gate0
+  Projection/PartialEvaluatorCorrect
+  Projection/SecondProjection
+  Projection/SimulatorContract
+  Projection/Audit
+)
+
+# A bare name on the command line means a Projection module; a path is taken
+# as given, so `./.build-proj.sh Compiler/DesignSemantics` also works.
+if [ $# -gt 0 ]; then
+  MODULES=()
+  for a in "$@"; do
+    if   [ -f "LeanSemanticPrimitives/$a.lean" ];            then MODULES+=("$a")
+    elif [ -f "LeanSemanticPrimitives/Projection/$a.lean" ]; then MODULES+=("Projection/$a")
+    else echo "  no such module: $a" >&2; exit 2
+    fi
+  done
+fi
 
 rc=0
 for m in "${MODULES[@]}"; do
-  [ -f "LeanSemanticPrimitives/Projection/$m.lean" ] || continue
-  src="LeanSemanticPrimitives/Projection/$m.lean"
-  olean="$OUT/LeanSemanticPrimitives/Projection/$m.olean"
-  printf '  %-28s ' "$m"
+  src="LeanSemanticPrimitives/$m.lean"
+  [ -f "$src" ] || continue
+  olean="$OUT/LeanSemanticPrimitives/$m.olean"
+  mkdir -p "$(dirname "$olean")"
+  printf '  %-38s ' "$m"
   t0=$(date +%s%N)
-  if out=$(taskset -c 0-3 nice -n 19 lean -o "$olean" "$src" 2>&1); then
+  if out=$(taskset -c 0-3 nice -n 19 ionice -c3 lean -o "$olean" "$src" 2>&1); then
     t1=$(date +%s%N); printf 'ok   %5s ms\n' "$(( (t1-t0)/1000000 ))"
     [ -n "$out" ] && echo "$out" | sed 's/^/      /'
   else
