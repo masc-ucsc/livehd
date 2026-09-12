@@ -39,6 +39,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 
 CFG_PARAM = ("config_pkg::cva6_cfg_t CVA6Cfg = "
@@ -90,6 +91,23 @@ TYPE_INDEX = {}
 PACKAGES = set()
 
 
+RICH_KINDS = ("PackedStructType", "PackedArrayType", "EnumType")
+
+
+def index_type(nm, t):
+    """Record `nm -> t`, letting a structural type beat a scalar one.
+
+    The same parameter name is `logic` in configurations where its feature is
+    off and a struct/enum where it is on.  Plain first-wins would freeze the
+    degenerate binding and re-create the "no implicit conversion from 'bit[2:0]'
+    to 'fp_format_e'" class of failure, so a rich kind always upgrades a scalar.
+    """
+    old = TYPE_INDEX.get(nm)
+    if old is None or (old.get("kind") == "ScalarType"
+                       and t.get("kind") in RICH_KINDS):
+        TYPE_INDEX[nm] = t
+
+
 def build_type_index(root):
     """name -> expanded type dict, for every named type slang did expand."""
     def walk(n):
@@ -102,9 +120,22 @@ def build_type_index(root):
         if n.get("kind") == "Package" and n.get("name"):
             PACKAGES.add(n["name"])
         nm, t = n.get("name"), n.get("type")
-        if nm and isinstance(t, dict) and t.get("kind") in (
-                "PackedStructType", "PackedArrayType", "EnumType"):
-            TYPE_INDEX.setdefault(nm, t)
+        if nm and isinstance(t, dict):
+            k = t.get("kind")
+            if k in RICH_KINDS:
+                index_type(nm, t)
+            elif k == "ScalarType" and n.get("kind") in ("TypeParameter", "TypeAlias"):
+                # `parameter type X = logic` left at its DEFAULT.  slang gives it
+                # a bare ScalarType, so the three structural kinds above miss it
+                # and the wrapper fell back to a bare name no import declares --
+                # `acc_mmu_req_t` (ex_stage.sv:33, load_store_unit.sv:29), which
+                # CVA6 never binds to a struct anywhere, so 1-bit `logic` is the
+                # right answer, not a failure.
+                #
+                # Only TypeParameter/TypeAlias qualify: those names denote TYPES.
+                # Indexing every ScalarType would index every `logic` SIGNAL too,
+                # and first-wins would let a signal shadow a real struct.
+                index_type(nm, t)
         # A TypeAlias carries its expansion under `target`, NOT `type` -- and for
         # the hpdcache family that is the ONLY place the structure appears.  Every
         # other mention of e.g. `hpdcache_req_sid_t` is a cross-scope reference
@@ -112,7 +143,7 @@ def build_type_index(root):
         # meant the type was unresolvable anywhere and 18 modules fell back to a
         # bare name that no import could declare.
         if nm and n.get("kind") == "TypeAlias" and isinstance(n.get("target"), dict):
-            TYPE_INDEX.setdefault(nm, n["target"])
+            index_type(nm, n["target"])
         for v in n.values():
             if isinstance(v, (dict, list)):
                 walk(v)
@@ -144,7 +175,7 @@ def packed_array_of_named(t):
     en = bare_type_name(elem)
     if not en or not rng:
         return None
-    return f"{en} {rng}"
+    return (en, rng)          # caller maps `en` through the reconstruction table
 
 
 def bare_type_name(t):
@@ -232,6 +263,19 @@ def type_width(t):
     return None
 
 
+_TRAILING_DIMS = re.compile(r"^(.*?)((?:\s*\[[^\]]*\])*)\s*$", re.S)
+
+
+def split_packed_dims(txt):
+    """Split rendered type text into (base, trailing packed dimensions).
+
+    `"logic [63:0]"` -> `("logic", "[63:0]")`.  A rendered struct ends in `}`, so
+    its inner `[..]`s are not mistaken for trailing dimensions.
+    """
+    m = _TRAILING_DIMS.match(txt.strip())
+    return (m.group(1).strip(), m.group(2).strip()) if m else (txt.strip(), "")
+
+
 def render_field_type(t):
     """SystemVerilog text for a field's type (packed only).
 
@@ -263,8 +307,17 @@ def render_field_type(t):
     if k == "ScalarType":
         return "logic"
     if k == "PackedArrayType":
+        # Packed dimensions read left to right, OUTERMOST first: an index selects
+        # on the LEFTMOST one.  `logic [0:0][63:0] rdata` makes rdata[0] 64 bits;
+        # `logic [63:0][0:0] rdata` makes it ONE bit.  Appending this array's
+        # range AFTER the element's text emitted the second form, and
+        # `hpdcache_rsp_t.rdata[0][32 +: 32]` then failed with "cannot select
+        # range of [63:32] from 'logic[0:0]'" (cva6_hpdcache_if_adapter.sv:331).
+        # So the range goes immediately after the base, before the inner dims.
         inner = render_field_type(t.get("elementType", {}))
-        return f"{inner} {t.get('range','')}"
+        rng = t.get("range", "")
+        base, dims = split_packed_dims(inner)
+        return f"{base} {rng}{dims}".rstrip()
     if k == "PackedStructType":
         fields = sorted(t.get("members", []), key=lambda m: m.get("bitOffset", 0), reverse=True)
         body = " ".join(f"{render_field_type(f.get('type', {}))} {f.get('name')};" for f in fields)
@@ -303,6 +356,47 @@ def gen_wrapper(defn, inst):
     typedefs, tp_binds, unresolved = [], [], []
     pkg_types = []          # (name, text) emitted into <module>_gate_types
     recon = {}              # bare type name -> reconstructed package-visible name
+    emitted_r = set()       # reconstructed names already written into pkg_types
+
+    def ensure_named(bn):
+        """Return a name for type `bn` that this wrapper actually declares.
+
+        Three cases, and getting them confused is what cost the pipeline modules:
+          * already reconstructed for a type parameter -> reuse that exact name,
+            or the port refers to an identifier the wrapper never declares;
+          * expandable from the AST -> reconstruct it into the companion package
+            now.  Most of these names are some module's own `parameter type`
+            (`parameter type scoreboard_entry_t = logic`), so NO import can make
+            the bare name visible;
+          * otherwise -> the bare name is all we have; the imports may cover it.
+        """
+        if not bn:
+            return bn
+        if bn in recon:
+            return recon[bn]
+        t2 = TYPE_INDEX.get(bn)
+        if isinstance(t2, dict):
+            nm2 = f"{bn}__r"
+            if nm2 in emitted_r:
+                # Already written by the type-parameter loop under a different
+                # key.  Emitting it again is a redefinition error, not a no-op.
+                recon[bn] = nm2
+                return nm2
+            emitted_r.add(nm2)
+            if t2.get("kind") == "PackedStructType":
+                pkg_types.append(render_struct(t2, nm2))
+            else:
+                rendered = render_field_type(t2)
+                if rendered == "logic":
+                    w2 = type_width(t2)
+                    if not w2:
+                        return bn
+                    rendered = "logic" if w2 == 1 else f"logic [{w2-1}:0]"
+                pkg_types.append(f"  typedef {rendered} {nm2};")
+            recon[bn] = nm2
+            return nm2
+        return bn
+
     # bare type name -> the local typedef this wrapper emits for it.  A port and a
     # type parameter that name the SAME type must use the SAME local name, or the
     # port refers to an identifier the wrapper never declares.
@@ -347,15 +441,18 @@ def gen_wrapper(defn, inst):
                     continue
             tp_binds.append((tp["name"], nm))
             local_name[tp["name"]] = nm
+            emitted_r.add(nm)
+            # A port naming the PARAMETER itself must reuse this reconstruction.
+            recon[tp["name"]] = nm
             if bn0:
                 # Ports naming the same type must use the SAME reconstruction, or
                 # they refer to an identifier the wrapper never declares.
                 recon[bn0] = nm
             continue
 
-        # Not expandable: the name is all we have.
+        # Not expandable directly: try the index by name before giving up.
         if bn0:
-            tp_binds.append((tp["name"], bn0))
+            tp_binds.append((tp["name"], ensure_named(bn0)))
         else:
             unresolved.append(tp["name"])
 
@@ -374,12 +471,13 @@ def gen_wrapper(defn, inst):
         if w is None:
             bn = bare_type_name(raw)
             if bn:
-                decls.append(f"  {d} {recon.get(bn, bn)} {nm}")
+                decls.append(f"  {d} {ensure_named(bn)} {nm}")
                 conns.append(f"      .{nm}({nm})")
                 continue
             pa = packed_array_of_named(t)
             if pa:
-                decls.append(f"  {d} {pa} {nm}")
+                en, rng = pa
+                decls.append(f"  {d} {ensure_named(en)} {rng} {nm}")
                 conns.append(f"      .{nm}({nm})")
                 continue
             return None, f"port `{nm}` has an unpacked/unknown type"
