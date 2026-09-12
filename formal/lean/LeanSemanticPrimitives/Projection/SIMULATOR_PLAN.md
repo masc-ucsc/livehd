@@ -83,8 +83,8 @@ or dispatch on `LGraphOp` at run time.
 | --- | --- | --- | --- |
 | 0. Shared semantics | **Complete** | pinned shared semantic files; `SimulatorContract.lean`; one-cycle and trace agreement theorems | re-pin only when the shared source changes |
 | 1. Hardware encoding | **Complete** | `DesignEncoding.lean` (total over `DesignCert`, memory descriptors included), `RuntimeEncoding.lean`, `StateRel`/`ResultRel` | finite-map memory representation, deferred by design |
-| 2. Hardware interpreter | **Next** | bit-vector primitives; the operand-normalisation obligation is identified and recorded | `I_hw`, most LGraph operations, interpreter-adequacy proof |
-| 3. First projected simulator | **Not started** | generic `mixDriver_iff` and toy first projection | specialization of `I_hw` and `projectDesign_correct` |
+| 2. Hardware interpreter | **Executable, not yet proved** | `OperatorBridge.lean` (every bridge `rfl`); `I_hw` as a 17-function object program; one cycle checked against `interpretDesign` on both fixtures | the adequacy THEOREM; `SupportedByProjection`; operators beyond `Op_And` |
+| 3. First projected simulator | **Executable, not yet proved** | `projectDesign`; both fixtures specialize; residual agrees with `interpretDesign` on every vector; no design tag survives | `projectDesign_correct`; the O(N^2) environment plumbing |
 | 4. Simulator packaging | **Partial infrastructure** | generic `refTrace`, `stepTrace`, and trace theorem | projected step, total/bounded execution, public runner |
 | 5. Cross-simulator relation | **Generic theorem complete** | `StepCorrect`, `step_agree`, and `trace_agree` | correctness instances/adapters for the concrete simulators |
 | 6. Literal second projection | **Relative theorem complete** | `secondProjection_correct` and concrete Gate 0 checks | `mixProgram_implements_mixHost` and hardware instantiation |
@@ -212,7 +212,7 @@ this milestone expected, all in the direction of more coverage:
   in the file).  Normalisation is an invariant of the shared semantics, not of
   the `BV` type, so `I_hw`'s operator bridge must carry it explicitly.
 
-### Milestone 2: implement and prove the hardware interpreter `I_hw` — NEXT
+### Milestone 2: implement and prove the hardware interpreter `I_hw` — EXECUTABLE, ADEQUACY NOT PROVED
 
 1. Implement the first vertical slice using the already available BV
    constructor/access/bitwise/resize primitives: sources, `Op_And`, outputs,
@@ -240,7 +240,29 @@ the shared semantics plus an explicit `SupportedByProjection D` predicate while
 coverage is incomplete.  It must not appeal to the verified residual compiler.
 
 Acceptance: direct execution of `I_hw` performs one hardware cycle on small
-certificate fixtures and the adequacy theorem is kernel checked.
+certificate fixtures and the adequacy theorem is kernel checked.  **First half
+met, second half not.**  `I_hw` computes `encResult (interpretDesign D i s)`
+exactly, on the combinational fixture and on all three sequential vectors
+(enabled, disabled, reset-beats-enable), compared against the shared semantics
+rather than against a hand-written expected value.  The adequacy theorem is not
+written, so these are `#guard`s -- the same distinction Gate 0 draws.
+
+Two findings from writing it, both recorded in the file:
+
+- **the slot environment is the whole design problem.**  `interpretDesign`
+  carries `rho : Nat -> CertVal`, a function; `L` is first order, so the
+  environment must be data.  It is a cons chain, newest-first, read at depth
+  `n - 1 - s`; both `n` and `s` come from the certificate, so the walk is static
+  and `ucall` unrolls it.  Newest-first is what avoids `append`.
+- **what that costs.**  A dep at depth `k` residualizes to `k` `tl`s and one
+  `hd`, so an N-slot design gives O(N^2) plumbing and the residual still conses
+  its environment at run time.  The dispatch is gone, which is what the first
+  projection is for, but this is not yet the straight-line `let` chain the
+  legacy fast model emits.  The fix is a specializer-side simplification
+  (`hd (consP a b) => a`, `tl (consP a b) => b`), which collapses the chain to a
+  single variable reference once the elements are `let`-bound.  That touches
+  `PartialEvaluator.lean` and its 1783-line proof, so it is deliberately not
+  bundled with getting this correct first.
 
 ### Milestone 3: obtain the first projected simulator
 
@@ -272,7 +294,19 @@ they are not substitutes for the semantic theorem.
 
 Acceptance: at least one sequential certificate produces and executes a
 residual one-cycle simulator, with a generic proof connecting it to
-`interpretDesign`.
+`interpretDesign`.  **Execution met, proof not.**  `projectDesign` specializes
+both fixtures; each residual is a SINGLE function of two arguments (input and
+state -- the design is gone, literally, from the arity), and it reproduces
+`interpretDesign` on every vector.
+
+Gate 0 applied to hardware: the only `caseT` tag surviving in either residual is
+`tagState`, which destructures the runtime state record and must be there.  No
+source tag, no `tagNode`, no `tagOp`, no `tagFlop` -- so no walk over `D.nodes`
+and no test on an opcode, where the interpreter dispatches on all twelve.  The
+surviving primitives are the hardware ones plus the environment plumbing; no
+reflection primitive (`mkCtorP`/`ctorTagP`/`ctorFieldsP`) survives at all.  The
+sequential residual keeps exactly two `ite`s -- the reset and enable tests,
+which are genuinely runtime conditions -- and the combinational one keeps none.
 
 ### Milestone 4: make the residual program a usable simulator — PARTIAL INFRASTRUCTURE
 
