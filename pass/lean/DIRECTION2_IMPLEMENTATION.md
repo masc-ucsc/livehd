@@ -8,30 +8,42 @@ document on two points that changed after it was written.
 
 ## What changed since the planning pass
 
-### 1. Direction 4 landed, and D2 should be built on it
+### 1. `DesignCert` is the shared artifact; the transport is a detail
 
 `DIRECTION2_IR_SEMANTICS.md:345-368` (§6, item 4) calls for generating a driver
-`.lean` per module and running it.  That is now the wrong design.
+`.lean` per module and elaborating it.  That is one way to get a certificate
+into Lean.  Direction 4 added a second — `Compiler/CertIO.lean` parses one at
+run time, since `compileAndRun_correct` is stated `∀ D` and the design never
+has to become a Lean constant.
 
-`direction-4-incremental` (`03c5515a7`) added `Compiler/CertIO.lean`: a
-certificate is **parsed at run time** rather than elaborated, because
-`compileAndRun_correct` is stated `∀ D` and the design never has to become a
-Lean constant.  Measured, this is not a convenience — it is the difference
-between a gate that covers 46 CVA6 modules and one that covers 44:
+**These are transports, not artifacts.**  `pass_lean.cpp` emits one
+`DesignCert` and every direction consumes that same object: the root branch
+evaluates it, D2 compares two of them, D3 reifies one, D4 parses one.  D2 needs
+the artifact.  It does not need D4.
 
-| | per-module Lean cost | largest module reachable |
-|---|---|---|
-| generate + elaborate a driver | 21.6 s … **1,398.7 s** | ~35k nodes |
-| parse a certificate (D4) | 133 ms … 6.5 s | **108,666 nodes** |
+So **D2 is built against a certificate source, not against a transport**:
 
-`cva6_hpdcache_subsystem` (108,666 nodes) and `cva6_hpdcache_wrapper` (107,213)
-**have never been elaborated at all**.  They are also, being the largest and
-most pass-transformed, exactly where a graph-pass bug is most likely to hide.
-A differential built on elaboration cannot see them.
+```
+loadCert : FilePath → IO DesignCert     -- elaboration today, CertIO if merged
+```
 
-**Decision: the comparison runs as a compiled binary that takes two certificate
-paths.**  No generated Lean per module, no elaboration, no per-module import
-cost.  §6 item 4 is superseded.
+Default is elaboration, which keeps D2 landable on its own and keeps D4's
+unverified `parseCert` out of D2's trusted base.  If D4 merges, D2 picks up the
+fast path by swapping one function, and gets a side benefit: a differential that
+runs both transports over the same certificate puts `parseCert` itself under
+test.
+
+An earlier draft of this plan made D4 a prerequisite and justified it by saying
+the two ~108k-node modules "have never been elaborated at all."  True as stated,
+but it implied impossibility.  Extrapolating the measured O(N^1.77):
+
+| module | nodes | elaboration, extrapolated |
+|---|---:|---:|
+| cva6_hpdcache_wrapper | 107,213 | ~2.8 h |
+| cva6_hpdcache_subsystem | 108,666 | ~2.9 h |
+
+Expensive, not impossible — a reason to prefer the fast transport when it
+exists, never a reason to couple the directions.
 
 ### 2. The cost model in §9 is wrong by roughly 8×
 
@@ -65,6 +77,11 @@ Depth where the state space is small, breadth where it is not.
 
 ## Phase 0 — names in the certificate  *(prerequisite, ~half a day)*
 
+**This belongs on the root branch, not on D2.**  It changes the shared
+`DesignCert` that every direction consumes, so it is emitter work that D2
+happens to be the first caller to need — the same way ROM `init` support was.
+Landing it on a direction branch would fork the artifact.
+
 Nothing past a single-module demo works without this.  Measured: an emitted
 certificate contains **zero identifiers**.
 
@@ -79,7 +96,9 @@ are alphabetically stable, so only the flop axis is actually broken.
    `flop_<nid>`, which bakes in the thing we are trying to be robust against.
 3. Emit as a parallel array so the existing `DesignCert` shape is untouched and
    every proven module keeps proving.
-4. Extend D4's `parseCert`/`writeCert` to round-trip it.
+4. Any transport that reads certificates round-trips the new field — today
+   that means the elaborated form; `CertIO`'s `parseCert`/`writeCert` too if
+   D4 has merged by then.
 
 **Gate:** re-run the 129-module sweep and confirm 0 regressions.  This touches
 the emitter every proof depends on, so it is the one phase that can break
@@ -101,8 +120,9 @@ Executable definitions only.  No proofs — this is model-use, not model-buildin
    - Returns **the first differing cycle and the port name**, not `Bool`.
      Localisation is most of the value; a bare `false` on a 108k-node module is
      nearly useless.
-3. `Compiler/DiffMain.lean` — the executable: two certificate paths, a seed, a
-   node-cycle budget; exit 0 / 1 with a report on stderr.
+3. `Compiler/DiffMain.lean` — the entry point: two certificates, a seed, a
+   node-cycle budget; exit 0 / 1 with a report on stderr.  It takes certificates
+   through `loadCert`, so it is indifferent to how they arrived.
 
 Correspondence keys on **names**, never ordinals.
 
