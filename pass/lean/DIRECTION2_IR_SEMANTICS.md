@@ -1,482 +1,416 @@
-# Direction 2 — the simulator as executable semantics of the compiler IR
+# Direction 2 — LGraph as a directly executable semantic model
 
-**Objective:** emit a `DesignCert` at more than one point in the LiveHD pass
-pipeline and check that consecutive graphs agree *observationally*:
+## Corrected scope
 
-```
-                    RTL
-                     │  slang → yosys script → yosys2lg
-                     ▼
-        G0  ──cprop──►  G1  ──bitwidth──►  G2  ──single_edge──►  G3
-         │              │                  │                     │
-      cert(G0)       cert(G1)           cert(G2)              cert(G3)
-         └──────────────┴───── Sim(Gᵢ) ≟ Sim(Gᵢ₊₁) ─────────────┘
-```
+Direction 2 asks one question:
 
-This makes the Lean model something other than a user-facing simulator: it
-becomes **the executable semantics of the IR**, and the IR's own passes become
-things that can be tested against it. Cuttlesim cannot do this — it bypasses
-Kôika's RTL compiler entirely, so it has no intermediate stages to compare.
+> Can the semantics of LiveHD's post-lowering LGraph IR itself be executed as a
+> cycle-accurate simulator, without first translating the design to a residual
+> language or generating a design-specific semantic model?
 
-Status: **nothing built.** What follows is measured investigation plus a plan.
-Two probe runs were executed (§2, §4); everything else is read-only.
+The answer is not a pre-/post-pass comparison.  Such a comparison is a useful
+application of executable semantics, but it neither defines the IR nor produces
+its simulator.  The earlier revision of this document made that application the
+whole direction and was therefore off target.
 
----
-
-## 0. Executive summary
-
-| finding | § |
-|---|---|
-| The emitter is **already re-entrant** — `lhd compile lg:DIR --emit-dir lean:` works today, and CORE-ET already uses it | 2 |
-| `--recipe O0` suppresses all graph passes, so a **true pre-cprop G0 is reachable** — measured | 2, 4 |
-| The saved `lgdb_raw`/`lgdb_norm` artifacts are **useless as a differential pair** — cprop is already at fixpoint in them | 4 |
-| A real pair exists: on `intpipe_inst_bits_stage`, cprop folds **170 → 139 constants** while leaving inputs (5) and flops (32) untouched | 4 |
-| **The certificate contains zero names** — measured, literally `grep -c` = 0. Input/output ordinals happen to be name-sorted and stable; **flop ordinals are nid-sorted and are not** | 5 |
-| `RuntimeState` has **no `DecidableEq`** (memories are functions), so state can only be compared on flops plus sampled memory addresses | 6 |
-| `cert_lgraph_diff.py` is **not** rung 1 of this ladder — it is a different axis (one graph, two extractors, static) | 7 |
-| The honest claim is narrower than "attacks RTL → LGraph": it attacks the **pass pipeline**, and it is **blind to any error common to both stages** | 8 |
-
----
-
-## 1. Where `pass.lean` can be invoked, and what runs before it
-
-The graph-pass recipe is short, explicit, and lives in one function
-(`lhd/lhd_kernel_common.cpp:775-819`):
-
-| recipe | graph passes | line |
-|---|---|---|
-| `O0` | **none** — returns `{}` | `lhd_kernel_common.cpp:794-796` |
-| `O1` (default) | `pass.cprop` [+ `pass.bitfuzz` if enabled] | `:797-806` |
-| `O2` | `pass.cprop` [+ `pass.bitfuzz`] + `pass.bitwidth` | `:807-817` |
-
-Everything else in `graph_pipeline_and_emits` (`lhd_kernel_compile.cpp:1325`)
-runs unconditionally after the recipe:
-
-1. recipe loop — `lhd_kernel_compile.cpp:1327-1335`
-2. latch-contract check — `:1343`
-3. `pass.formal` (default `fast`, `none` under O0) — `:1369`
-4. `lg:` save, then `emit_lean_outputs` — `:1405`
-
-**`pass.single_edge` is not a recipe pass.** It is a separate top-level
-subcommand (`lhd/lhd_kernel_passes.cpp:745-769`) taking `lg:` in and `lg:` out,
-which is why the CORE-ET runner invokes it as its own process step.
-
-So the CORE-ET pipeline as it actually runs today
-(`scripts/run_coreet_module_lean.sh`):
-
-| step | command | line | graph passes it runs |
-|---|---|---|---|
-| 1 | `lhd compile verilog … --emit-dir lg:LG_RAW` | `:91` | **cprop** (default O1) |
-| 2 | `lhd pass single_edge lg:LG_RAW --emit-dir lg:LG_NORM` | `:111` | single_edge only |
-| 3 | `lhd lec --impl lg:LG_NORM --ref verilog:…` | `:140` | — (the RTL-vs-LGraph gate) |
-| 4 | `lhd compile lg:LG_NORM --emit-dir lean:…` | `:161` | **cprop again** (default O1) |
-
-**Note the double cprop.** Today's certificate is really
-
-```
-cert( cprop( single_edge( cprop( yosys(RTL) ) ) ) )
-```
-
-Measured harmless right now (§4: the second cprop is a fixpoint on both probed
-modules), but it is not documented anywhere and it is exactly the kind of thing
-that makes a "which graph did we prove about?" question unanswerable. Step 4
-should pass `--recipe O0` regardless of whether Direction 2 proceeds.
-
----
-
-## 2. Is the emitter re-entrant? Yes, already — no plumbing needed
-
-`lhd compile lg:DIR` loads every graph from a saved library
-(`lhd_kernel_compile.cpp:1490-1498`) and then calls the same
-`graph_pipeline_and_emits` (`:1502`) that the source path uses. The lean emit is
-just another `--emit-dir` slot.
-
-**Measured.** Four emits from saved libraries, all exit 0:
-
-```
-lhd compile lg:generated/core-et/<M>/lgdb_{raw,norm} --top <M> \
-    --recipe {O0,O1} --emit-dir lean:<out> \
-    --set formal.lean.mode=verified_compiler
-```
-
-`--recipe O0` is accepted on the `lg:` path and does suppress the recipe. That
-is the lever Direction 2 needs: **emit a certificate from a saved graph without
-perturbing it.**
-
-What changes between stages, in certificate terms:
-
-| certificate field | changes across a pass? |
-|---|---|
-| `sources` (`const`) | **yes** — cprop folds them (§4: 170 → 139) |
-| `sources` (`input`) | no, unless a port is removed |
-| `sources` (`flopQ`) | usually not for cprop/bitwidth; **yes** for single_edge (adds a phase divider) |
-| `nodes` | yes — count and slot indices both shift |
-| `outputs` | count is stable *unless* an output becomes undriven (§5 hazard) |
-| `flops` | see above |
-| widths | **yes** under O2 (`pass.bitwidth` is exactly a width rewriter) |
-
-Slot indices shift on **every** stage, because the slot space is dense
-(`DesignCert.lean`: sources `0..S-1`, node `i` at `S+i`). Slot numbers are
-therefore meaningless across stages; only ordinals and array positions carry
-over.
-
----
-
-## 3. What `Sim(Gᵢ) = Sim(Gᵢ₊₁)` actually means
-
-This is the crux. The equality is **not** literal — different slot spaces,
-different node counts, possibly different flop sets. Writing it as `=` would be
-a type error at best and a false claim at worst.
-
-### 3.1 What is observable
-
-`interpretDesign` is single-cycle (`DesignSemantics.lean:61-67`). Direction 2
-needs a trace, which does not exist yet:
+The intended result is a generic Lean interpreter whose program input is a
+`DesignCert`:
 
 ```lean
-def runTrace (D : DesignCert) : RuntimeState → List RuntimeInput
-    → List (Array BV) × RuntimeState
-  | st, []      => ([], st)
-  | st, i :: is =>
-      let r          := interpretDesign D i st
-      let (os, st')  := runTrace D r.nextState is
-      (r.outputs :: os, st')
+directStep : DesignCert -> RuntimeInput -> RuntimeState -> Except SimError RuntimeResult
 ```
 
-The observable interface of a `DesignCert` is exactly:
+For a design `D`, repeatedly executing `directStep D` is its simulator:
 
-- **inputs** `Array BV`, positionally (`Runtime.lean:18`)
-- **outputs** `Array BV`, positionally (`Runtime.lean:26-28`)
-
-State is **not** observable. `RuntimeState.flops`/`.mems` are implementation
-detail of a particular graph, and a pass is entitled to change them.
-
-### 3.2 The relation
-
-> **Definition (observational equivalence).** Certificates `D`, `D'` are
-> observationally equivalent with respect to an input correspondence
-> `ι : Fin n → Fin n'`, an output correspondence `ω : Fin m → Fin m'`, and an
-> initial-state relation `≈₀`, iff
->
-> ```
-> ∀ st st', st ≈₀ st' →
->   ∀ is : List RuntimeInput,
->     (runTrace D  is             st ).1
->       = map (permute ω) (runTrace D' (map (permute ι) is) st').1
-> ```
-
-Read: **from corresponding initial states, corresponding input sequences produce
-corresponding output sequences.** State is existentially quantified away behind
-`≈₀` — it is never compared directly, because it is not observable.
-
-This is a coinductive/infinitary statement. The *checkable* version fixes a
-state pair and a finite input sequence, which is what the gate will run.
-
-### 3.3 Three cases, in increasing difficulty
-
-| case | when | `≈₀` | tractable? |
-|---|---|---|---|
-| **A — flop set preserved** | `n=n'`, `m=m'`, `D.flops` and `D'.flops` same length/widths in order, memories identical | **identity** (`st' = st`) | yes, decidable per `(st, is)` |
-| **B — flop set permuted** | same flops, different order | a bijection `σ` with `st'.flops[σ i] = st.flops[i]` | needs names in the cert (§5) |
-| **C — flop set changed** | flops added or removed | a stuttering refinement (below) | **out of scope for rung 1** |
-
-**Case A is the target.** Measured available for cprop on
-`intpipe_inst_bits_stage` (§4), and it is the expected shape for `pass.bitwidth`
-too — bitwidth rewrites widths, not the flop set, though a width change makes
-even Case A non-identity if a flop narrows.
-
-**Case C is genuinely harder and should not be attempted first.**
-`pass.single_edge` synthesises a phase divider, so `G'` has state `G` does not,
-and `G'` takes P sub-steps per `G` step. The relation degrades to a *stuttering
-refinement*: an abstraction `α : RuntimeState' → RuntimeState`, plus sampling
-every P-th cycle,
-
-```
-(runTrace D is st).1  =  everyPth P (runTrace D' (stretch P is) st').1
+```text
+                   static design
+                        D
+                        |
+          input_t ---- directStep ---- state_t
+                         |                  |
+                      output_t          state_t+1
 ```
 
-with `P` and the sampling phase recovered from the pass. This is a different
-theorem shape and belongs after rung 2.
+One successful call is one transition of the post-lowering IR.  Iteration gives
+the output and state trace.  In that precise sense, the simulator is the
+executable semantic model of the IR.
 
-### 3.4 What cannot be compared at all
+---
 
-`RuntimeState` derives **only `Inhabited`** (`Runtime.lean:21-24`):
+## 1. What already exists
+
+The B1+B2 branch already defines the source-side meaning of a certificate:
 
 ```lean
-structure RuntimeState where
-  flops : Array BV
-  mems  : Array (Int → BV)
-deriving Inhabited
+interpretDesign : DesignCert -> RuntimeInput -> RuntimeState -> RuntimeResult
 ```
 
-`mems` is function-valued, so there is no `DecidableEq RuntimeState` and there
-cannot be one. Consequences:
+`interpretDesign D i s` evaluates the graph, observes the current-cycle outputs,
+and computes the next flop and memory state.  It is the right-hand side of
+`compileDesign_correct`, hence the specification against which the verified
+compiler is proved.
 
-- **outputs** (`Array BV`) — decidable, compare directly. This is the real check.
-- **flops** (`Array BV`) — decidable, compare directly. Useful as a *stronger*
-  optional check in Case A, and as a much better failure localiser than outputs
-  alone.
-- **memories** — **only pointwise at sampled addresses**. A full memory
-  comparison is not expressible. Say so in the gate's output; a "PASS" that
-  silently skipped memory state is the kind of thing this repo has been burned
-  by before.
+This definition is executable in Lean's logical sense, but it is not yet a
+standalone simulator implementation.  Its environment is a nested function
+`Nat -> CertVal`; every update adds another function layer, so evaluating all
+slots is quadratic.  Its own source says that it is never executed and is used
+only for reasoning.  There is no multi-cycle runner, simulator executable,
+input/state format, or performance evaluation for direct interpretation.
+
+Direction 2 starts from this existing definition.  It does not claim that a new
+semantics was introduced on this branch.
 
 ---
 
-## 4. Measured: which pass pairs are worth checking
+## 2. Difference from the verified compiler
 
-Two probes were run (small CORE-ET modules, detached, `MemoryMax`, `nice -n19
-ionice -c3`).
+Both directions consume the same `DesignCert` and must have the same observable
+behavior, but they realize it differently.
 
-### Probe 1 — the saved artifacts are not a usable pair
-
-`txfma_e4` (3 nodes, combinational) and `intpipe_inst_bits_stage` (176 nodes,
-32 flops), certificates emitted from `lgdb_raw` and `lgdb_norm` at both `O0`
-and `O1`:
-
-```
-raw_O0  norm_O0  raw_O1  norm_O1   →  all four BYTE-IDENTICAL, both modules
-```
-
-Two facts fall out:
-
-- **cprop is idempotent** on an already-cprop'd graph — the second cprop in
-  step 4 changes nothing on these modules;
-- **single_edge is a no-op** on a plain posedge design, exactly as
-  `run_coreet_module_lean.sh:10-13` claims.
-
-So the existing `lgdb_raw`/`lgdb_norm` pair **cannot** serve as the
-differential. The interesting delta happens *inside* the first `lhd compile
-verilog` invocation, before anything is written to disk.
-
-### Probe 2 — a real pair, via `--recipe O0` on the source compile
-
-`intpipe_inst_bits_stage`, `lhd compile verilog … --recipe {O0,O1} --emit-dir
-lg:`, then certificate emitted from each at `--recipe O0`:
-
-| certificate | **G0** (pre-cprop) | **G1** (post-cprop) |
-|---|---:|---:|
-| `SourceDesc.const` | **170** | **139** |
-| `SourceDesc.input` | 5 | 5 |
-| `SourceDesc.flopQ` | 32 | 32 |
-| outputs | 1 | 1 |
-| file bytes | 31,755 | 27,849 |
-
-**31 constants folded; the input set, the output set and the flop set are all
-untouched.** This is a textbook Case A pair, and it is the rung-1 experiment.
-
-The `flopQ` ordinals were `0..31` on both sides (`SourceDesc.flopQ 0 1`,
-`flopQ 1 1`, …) — but see §5: that stability is not guaranteed, it is luck.
-
-### Recommended order
-
-| rung | pair | case | why first |
-|---|---|---|---|
-| **1** | `G0` → `G1` (cprop) | A | measured available; flop set provably unchanged; largest node delta |
-| **2** | `G1` → `G2` (bitwidth, O2) | A, with width changes | second real optimization; exercises the width axis, which is where the last shipped bug lived |
-| **3** | `G1` → `G1'` with `pass.bitfuzz` on | A | **already a verification canary** (`lhd_kernel_common.cpp:778-790`): it strips width/sign annotations and forces reconstruction. Turning it on and demanding an *unchanged* certificate is the cheapest strong test in this whole plan |
-| 4 | `G2` → `G3` (single_edge) | **C** | needs the stuttering relation; do last |
-
-Rung 3 deserves emphasis. `pass.bitfuzz` already exists precisely to make width
-assumptions observable, and Direction 2 gives it a much sharper oracle than it
-has today: not "does the graph still typecheck" but "does it still compute the
-same function".
-
----
-
-## 5. The blocker: the certificate has no names
-
-**Measured:** `grep -ciE 'name|"[a-z_]+"'` over an emitted certificate returns
-**0**. There is not a single identifier in it.
-
-The export structs (`pass/lean/design_cert_export.hpp:43-90`) carry `id`,
-`kind`, `width`, `addr_w`, `ordinal` — and no name:
-
-```cpp
-struct SourceIn { uint32_t id; SourceKind kind; uint32_t width; …; uint32_t ordinal; … };  // :43
-struct OutputIn { uint32_t id; uint32_t width; };                                          // :71
-struct FlopIn   { uint32_t width; uint32_t din; std::optional<uint32_t> enable; … };        // :76
-```
-
-So cross-stage correspondence rests entirely on ordinals and array order. Those
-come from three `std::map`s in `pass_lean.cpp`:
-
-| what | container | keyed by | ordering | stable across passes? |
-|---|---|---|---|---|
-| inputs | `input_field` (`:259`) | **port name** (`std::string`) | alphabetical | **yes** |
-| outputs | `output_field` (`:263`) | **port name** (`std::string`) | alphabetical | **yes** |
-| flops | `flop_field` (`:266`) | **LGraph nid** (`uint32_t`) | nid order | **no** |
-
-Ordinals are assigned by walking those maps in order
-(`pass_lean.cpp:2398-2412`), and outputs are emitted by walking `output_field`
-(`:2568-2574`).
-
-**Two concrete hazards:**
-
-1. **Flop ordinals are nid-ordered.** Any pass that renumbers nodes permutes the
-   flop array silently. Probe 2 happened to preserve `0..31`, which proves
-   nothing — cprop touched only constants there. The flop *name* is recoverable
-   in principle (`pass_lean.cpp:2079-2100` derives `st_<wirename>` from the
-   first non-`_` output wire), but it is **not exported**, and the fallback
-   `flop_<nid>` bakes the nid into the name anyway.
-
-2. **An undriven output is silently dropped.** `pass_lean.cpp:2569-2572`:
-   ```cpp
-   auto it = output_cert_ids.find(kv.first);
-   if (it == output_cert_ids.end()) { continue; }   // undriven output: no slot to name
-   ```
-   So output arity can differ between stages, and the comparison would then
-   align the wrong ports against each other. A differential that does not check
-   arity first would report a spurious mismatch — or worse, a spurious match.
-
-### Fix 1 (prerequisite for everything past rung 1)
-
-Add a stable name to `SourceIn`, `OutputIn` and `FlopIn`, emit it into the
-certificate as a comment or a parallel Lean array, and key the cross-stage
-correspondence on **names, not ordinals**. For flops, prefer the wire name and
-make the unnamed fallback deterministic (e.g. a hash of the driver cone) rather
-than nid-derived.
-
-This is a small emitter change and it is the difference between a gate that
-works on one module and a gate that works on 129.
-
----
-
-## 6. What to build
-
-1. **`Compiler/Trace.lean`** — `runTrace` as in §3.1, plus
-   `sampleMem : (Int → BV) → List Int → List BV` for the memory limitation.
-   Small, no proofs needed; this is executable-model territory.
-2. **`Compiler/Differential.lean`** — the checkable specialisation:
-   ```lean
-   def traceAgree (D D' : DesignCert) (ι ω : Array Nat)
-       (st : RuntimeState) (st' : RuntimeState) (is : List RuntimeInput) : Bool
-   ```
-   Decidable, `native_decide`-able, returning the first differing cycle and port
-   rather than a bare `false` — localisation is most of the value.
-3. **Emitter change (Fix 1)** — names in the certificate.
-4. **`scripts/stage_diff.sh`** — per module: compile at `--recipe O0` and
-   `--recipe O1` to two `lg:` dirs, emit a certificate from each at
-   `--recipe O0`, generate a driver `.lean`, run it.
-5. **Arity/shape preflight** — refuse to compare when input arity, output arity,
-   or flop count differ, with the reason named. This is what stops the §5
-   hazards from producing a meaningless verdict.
-6. **Input generation** — pseudorandom over the declared widths, seeded from
-   `lhd.seed` so a failure reproduces. Constrained-random would be better but is
-   not needed to find a pass bug.
-
----
-
-## 7. Relation to `cert_lgraph_diff.py`
-
-**It is not the first rung of this ladder.** It is a different axis, and
-conflating them would overstate what exists:
-
-| | `cert_lgraph_diff.py` | Direction 2 |
+| | Direction 2: direct semantics | B1+B2: verified compiler |
 |---|---|---|
-| graphs compared | **one** | **two** |
-| extractors | **two** (`pass.lean` vs `inou.cgen.verilog`) | **one** |
-| comparison | static, constants only | executable, full I/O trace |
-| catches | a wrong constant width in the extractor | a pass that changes behaviour |
+| Static input | `DesignCert` | `DesignCert` |
+| Per-design transformation | none | `compileDesign D : ResidualProgram` |
+| Per-cycle dispatch | on `DenseNodeCert.op` | on `ResidualExpr` |
+| Executed representation | LGraph certificate directly | typed residual program |
+| Main theorem | direct execution = `interpretDesign` | residual execution = `interpretDesign` |
+| Intended role | reference simulator and semantic model | compiled simulator |
 
-`cert_lgraph_diff.py` exists because the constant-width bug passed both gates by
-being *shared* between the fast model and the certificate; the fix was a second,
-independent extractor. Direction 2 keeps one extractor and varies the graph.
+The required Direction 2 theorem is therefore:
 
-They are complementary and neither subsumes the other. What generalises is the
-principle — *get a second opinion from something that does not share the failure
-mode* — not the code.
-
----
-
-## 8. What this establishes, and what it does not
-
-**The claim to make:**
-
-> Direction 2 is the only executable check on the **LiveHD graph-pass pipeline**.
-> It can localise a behavioural discrepancy to a specific pass, which the LEC
-> gate cannot do.
-
-**Not** "the only empirical attack on RTL → LGraph" — that overstates it. The
-boundary decomposes, and Direction 2 covers only the last arrow:
-
-```
-RTL ─slang─► AST ─yosys script─► RTLIL ─yosys2lg─► G_yosys ─cprop/bitwidth/single_edge─► G_final
-└──────────────────── LEC gate covers this, end to end ─────────────────────────────────┘
-                                                        └──── Direction 2 covers this ────┘
+```lean
+theorem directStep_correct
+    (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) (r : RuntimeResult)
+    (h : directStep D i s = .ok r) :
+    r = interpretDesign D i s
 ```
 
-The LEC gate (`run_coreet_module_lean.sh:128-145`) already compares raw RTL
-against the final graph, and it is *stronger* where it is conclusive — it is a
-formal equivalence check, not testing. Direction 2's distinct contributions are:
+The direct evaluator must not call `compileDesign`, construct a
+`ResidualProgram`, or dispatch on `ResidualExpr`; otherwise it is only another
+entry point to B1+B2.
 
-- **localisation** — LEC says "the graph disagrees with the RTL"; Direction 2
-  says "cprop is where it started";
-- **coverage where LEC is inconclusive** — the runner already tolerates an
-  inconclusive LEC (`:148`, non-fatal unless `LEC_STRICT=true`);
-- **it tests the passes on their own terms**, without needing the RTL at all,
-  so it works on graphs that have no RTL (post-`single_edge`, post-`abc`).
+The two implementations can still cross-check one another, and their generic
+correctness theorems should imply:
 
-**What it does not establish — state all three in any report:**
+```text
+directStep D i s = ok r  and  compilesOk D = true
+    implies r = compileAndRun D i s
+```
 
-1. **Nothing about the reader.** `G0` is already yosys's output. Everything
-   upstream of `yosys2lg` — slang elaboration, the yosys script's `flatten`,
-   `proc -ifx`, `memory -nomap` — is invisible to this check.
-2. **It is testing, not proof.** The relation in §3.2 is universally quantified
-   over input sequences; the gate checks finitely many. A pass bug on an
-   unexercised path survives.
-3. **It is blind to any error common to both stages.** Both certificates go
-   through the same `pass.lean` extractor and are interpreted by the same
-   `eval_op`. A wrong operator semantics cancels *exactly*, on both sides — this
-   is structurally the same failure that let the constant-width bug through both
-   gates. **Direction 2 cannot be the answer to "is `eval_op` right?"** It is
-   the answer to "do the passes preserve whatever `eval_op` means".
-
-That third point is the sharpest limitation and the one most likely to be
-forgotten when the gate is green.
+for every certificate accepted by both.  This equality is a consequence and an
+evaluation oracle, not Direction 2's definition.
 
 ---
 
-## 9. Cost
+## 3. Semantic boundary
 
-**Emit side** — measured on `intpipe_inst_bits_stage` (207 → 176 nodes): each
-`lhd` invocation under 1 s. Two extra invocations per module (one `compile
-verilog --recipe O0`, one `compile lg: --recipe O0 --emit-dir lean:`). Negligible
-against the front-end cost already being paid.
+The formal boundary begins at `DesignCert`, not at SystemVerilog and not at the
+in-memory C++ graph object.  Calling this “LGraph semantics” is justified only
+for the LGraph subset whose extraction into `DesignCert` is documented and
+checked.
 
-**Evaluation side** — `denoteResidual` measured at **≈1.3 ms/cycle**. For 1,000
-cycles that is ~1.3 s of evaluation per module, but per-module Lean startup
-(~10 s import baseline, measured) dominates. Estimate for the **85 CORE-ET + 44
-CVA6 = 129** modules already proving:
+The chain is:
 
-| | serial | 4-way |
-|---|---:|---:|
-| emit (2 × 129 invocations) | ~5 min | ~2 min |
-| evaluate (1,000 cycles each) | ~25 min | ~7 min |
+```text
+RTL -> LiveHD post-lowering LGraph -> DesignCert -> directStep -> trace
+      outside Lean                 trusted export   proved core
+```
 
-Comfortably a single detached sweep. **If A2 lands** (Phase 6, 10–50× on
-`denoteResidual`), the evaluation half becomes free and the cycle count can go
-up by the same factor.
+The C++ LGraph-to-`DesignCert` exporter is currently trusted.  RTL-to-LGraph LEC,
+operator grounding, shape checks, and independent differential checks reduce
+that risk but do not constitute a proof of the exporter.  The formal claim must
+therefore be stated as:
 
-**Caveat:** the 9 CORE-ET front-end hangs and the 2 CVA6 timeouts
-(`cva6_mmu`, `cva6_tlb` at 1800 s) are unavailable to this sweep for the same
-reason they are unavailable to the main one — the certificate never gets
-produced.
+> For every accepted `DesignCert`, direct execution implements the Lean-defined
+> one-cycle semantics of that certificate.
+
+It must not be stated as an end-to-end proof that arbitrary RTL and LGraph have
+the intended meaning.
+
+Certificate transport is separate from semantics.  A certificate may be an
+elaborated Lean value or may arrive through Direction 4's runtime loader.  The
+same `directStep D` consumes the resulting value.  An unverified parser enlarges
+the trusted boundary; it does not change the semantic theorem.
 
 ---
 
-## 10. Sequencing
+## 4. Cycle contract
 
-Rungs 1–3 are independent of every other phase in the coverage plan and need no
-theorem changes — `runTrace` and `traceAgree` are executable definitions, not
-proofs. Rung 1 is roughly a day once Fix 1 lands; Fix 1 is a few hours.
+The plan must freeze the following contract before optimizing the evaluator.
 
-The natural slot is **alongside Phase 3**, not after it: Phase 3 modifies
-`pass.single_edge`, which is shared with the Isabelle/Rocq/ACL2 flows and the
-LEC gate, and the plan already calls for a regression run across all of them.
-A working `Sim(Gᵢ) ≟ Sim(Gᵢ₊₁)` gate is exactly the instrument that regression
-wants — it would test the modified pass directly rather than inferring its
-correctness from downstream proofs.
+### 4.1 One step
 
-Rung 4 (single_edge, Case C) should follow Phase 3, since the phase-divider
-structure it must model is the thing Phase 3 changes.
+For primary inputs `i` and current state `s`, one step returns:
+
+- combinational outputs for the current state and inputs;
+- next flop values, with reset priority over enable and hold;
+- next mutable-memory images after the cycle's writes.
+
+The direct simulator must use the same source, output, flop, and memory rules as
+`interpretDesign`, including asynchronous reset visibility, reset polarity and
+value, byte enables, write ordering, read enable behavior, and synchronous-ROM
+read-data registers.
+
+### 4.2 Traces
+
+The multi-cycle semantics is iteration, not a second semantic definition:
+
+```lean
+structure TraceResult where
+  steps : List RuntimeResult
+  finalState : RuntimeState
+
+runDirect : DesignCert -> RuntimeState -> List RuntimeInput
+    -> Except SimError TraceResult
+```
+
+At cycle `t+1`, the state is the `nextState` returned at cycle `t`.  The trace
+theorem follows by induction from `directStep_correct`.
+
+### 4.3 Initial state
+
+Not every hardware design has a unique initial state.  The semantic API therefore
+takes an explicit `RuntimeState`.  A reset-driving convenience function may be
+provided by the executable, but it is stimulus generation rather than part of
+the IR semantics.
+
+### 4.4 Clock scope
+
+One call represents one step of the normalized single-edge design accepted by
+the certificate exporter.  Native multi-clock/event scheduling is outside the
+current `DesignCert` model and must be rejected or normalized before export.
+Calling the result cycle-accurate is relative to this documented cycle boundary.
+
+### 4.5 Observations
+
+The public observation is the ordered output vector at each cycle.  The state is
+also returned so proofs can state invariants and refinements.  Mutable memories
+are function-valued; they are reasoned about extensionally or sampled at chosen
+addresses rather than compared with `DecidableEq`.
+
+---
+
+## 5. Accepted semantic fragment
+
+**Delivered.**  `Compiler/DirectCheck.lean` defines the acceptance predicate,
+independently of `compileDesign`: nothing in it mentions `ResidualExpr`,
+`ResidualProgram`, or the compiler, and it does not even import them.  Using the
+compiler as the admission test would make Direction 2 depend on the very
+implementation it is supposed to differ from.
+
+### 5.1 The accepted-operator table
+
+The table is derived from the post-lowering LGraph contract as the exporter
+implements it (`pass_lean.cpp`, `cert_node_expr`), then checked against a census
+of every generated `DesignCert` (469 files, 147 distinct by content hash:
+DINO ×3, CORE-ET, CVA6).  `w` is the node's result width, `n` its arity.
+
+| operator | arity rule | width rule | operand kinds | result | grounded by |
+|---|---|---|---|---|---|
+| `Op_Const c` | `n = 0` | `w > 0` | — | bv `w` | `Ntype_op::Nconst` |
+| `Op_Sum k` | `n ≥ 1`, `k ≤ n` | `w > 0` | all bv | bv `w` | `Ntype_op::Sum` (deps = adds ++ subs) |
+| `Op_Mult` | `n ≥ 1` | `w > 0` | all bv | bv `w` | `Ntype_op::Mult` |
+| `Op_UDiv` | `n = 2` | `w > 0` | bv | bv `w` | `Ntype_op::Div` |
+| `Op_And` / `Op_Or` / `Op_Xor` | any, **including 0** | `w > 0` | bv | bv `w` | `Ntype_op::And/Or/Xor` |
+| `Op_Ror` | any | `w = 1` | bv | bv 1 | `Ntype_op::Ror` |
+| `Op_Not` | `n = 1` | `w > 0` | bv | bv `w` | `Ntype_op::Not` |
+| `Op_EQ` | `n ≥ 2` | `w = 1` | bv | bv 1 | `Ntype_op::EQ` |
+| `Op_ULT` / `Op_UGT` | `n = 2` | `w = 1` | bv | bv 1 | `Ntype_op::LT/GT`, unsigned |
+| `Op_SLT` / `Op_SGT` | `n = 2` | `w = 1` | bv | bv 1 | `Ntype_op::LT/GT`, signed |
+| `Op_SHL` | `n = 2` | `w > 0` | bv | bv `w` | `Ntype_op::SHL` |
+| `Op_SRA` | `n = 2` | `w > 0` | bv | bv `w` | `Ntype_op::SRA` |
+| `Op_Sext` | `n = 2` | `w > 0` | bv | bv `w` | `Ntype_op::Sext` (operand 1 = sign position) |
+| `Op_GetMask` | `n = 2` | `w > 0` | bv | bv `w` | `Ntype_op::Get_mask` |
+| `Op_SetMask` | `n = 3` | `w > 0` | bv | bv `w` | `Ntype_op::Set_mask` |
+| `Op_MuxBool` | `n = 3` | `w > 0` | bv | bv `w` | `Ntype_op::Mux`, 2 data + 1-bit sel; deps `[sel, false, true]` |
+| `Op_MuxN` | `n ≥ 2` | `w > 0` | bv | bv `w` | `Ntype_op::Mux` otherwise; deps `[sel, data…]` |
+| `Op_MemRead` | `n = 3` | `w > 0` | `[mem, bv, bv]` | bv `w` | `cert_memory_expand` |
+| `Op_MemWrite` | `n = 4` | `w > 0` | `[mem, bv, bv, bv]` | **mem** | `cert_memory_expand` |
+| `Op_MemWriteBE b` | `n = 4`, `b > 0` | `w > 0` | `[mem, bv, bv, bv]` | **mem** | `cert_memory_expand` |
+
+Five operators are REFUSED, each for a stated reason rather than because they
+happen to be unreachable:
+
+| refused | why |
+|---|---|
+| `Op_Sub` | no exporter site; `Ntype_op::Sum` carries subtrahends instead |
+| `Op_LT`, `Op_GT` | no exporter site (`Ntype_op::LT/GT` always selects the signed or unsigned variant from `node_output_is_signed`), and `eval_op` defines both as UNSIGNED comparisons — an ungrounded equation that would silently compare a signed operand unsigned |
+| `Op_Div`, `Op_SDiv` | no exporter site; `eval_op Op_Div`'s signedness is likewise ungrounded |
+
+This is deliberately **not** a copy of `compileOp`'s eight refusals.  Direction 2
+accepts three operators B1+B2 refuses — `Op_Const`, `Op_UDiv`, `Op_SetMask` —
+because each has an exporter site and a total, grounded `eval_op` equation, and
+it refuses `Op_Div`/`Op_LT`/`Op_GT` for a reason (ungrounded signedness) rather
+than for a count.
+
+### 5.2 Hard constraints versus contract constraints
+
+Two different things live in the arity and width rules, and the difference is
+recorded in the source:
+
+* **fallback-avoidance (hard).**  `Op_Not` at arity ≠ 1, `Op_SRA` at arity ≠ 2,
+  the comparisons, the mux and the three memory operators all reach `eval_op`'s
+  `| _, w, _ => mk_bv w 0` wildcard at any other arity.  Unchecked, a malformed
+  certificate would simulate as zeros.  `Op_MemWriteBE 0` is in this class too:
+  `cert_masked_update` divides the bit index by the byte width.
+* **contract (soft).**  `Op_EQ`, `Op_Ror` and the four comparisons produce a
+  one-bit result in `graph/cell.cpp`; `Op_MuxN` needs a selector plus at least
+  one data operand.  `eval_op` is defined at other shapes, but the LGraph
+  contract is not, so those certificates are malformed and are refused.
+
+`Op_And` / `Op_Or` / `Op_Xor` accept **any** arity, zero included, because the
+census finds real arity-0 `Op_Or` nodes in CVA6 (`cva6_icache`, `csr_regfile`,
+`id_stage`, `cva6_ptw`, `cva6_hpdcache_if_adapter`) — a driverless reduce node,
+whose value is a defined `mk_bv w 0` and not a fallback.
+
+### 5.3 What else `checkDesign` establishes
+
+`DesignSemWF` (proved from `checkDesign D = .ok ()` by `checkDesign_sound`) also
+carries: dependency ordering; every output, flop pin and memory image naming a
+real slot; bit-vector-versus-memory typing for every dependency and every shell
+reference, from a static `slotKind`; nonzero widths; flop and memory ordinals in
+range and agreeing with their descriptors; asynchronous flops having a reset pin
+and the matching reset value; ROM tables no larger than `2 ^ aw`; and consistent
+widths for repeated primary-input ordinals.  `checkRuntime` adds the input/state
+shape check: `inputArity D ≤ i.size`, and one state entry per declared flop and
+memory.
+
+### 5.4 What the checker cannot establish
+
+Two things are recorded as trusted rather than checked:
+
+* **Single-edge normalisation.**  The certificate carries no clock-model
+  provenance, so no Lean predicate can discover whether the C++ graph was
+  correctly normalised.  This stays an exporter precondition.
+* **Asynchronous-reset POLARITY.**  An async flop's `resetPin` slot and its
+  `resetInput` ordinal legitimately disagree on polarity — the census finds
+  9,262 async sources whose `activeLow` is the opposite of their
+  `FlopDesc.resetActiveLow`, because the pin slot reads an already-inverted node
+  while the ordinal reads the raw port.  Only the reset VALUE, the width and the
+  existence of a reset pin are cross-checkable, and only those are checked.  The
+  `mutFlopResetPolarity` negative control shows the evaluator is sensitive to
+  the field that is not cross-checked.
+
+### 5.5 No accepted node reaches a fallback
+
+Phase 0's gate is a theorem list, not a promise.  `DirectCheck`'s `OpEquations`
+section gives, for every accepted (operator, arity), the named primitive the
+call reduces to — `eval_op .Op_Not w [a] = bv_not w a`, `eval_op_cert
+.Op_MemRead w [.mem m, .bv a, .bv en] = .bv (cert_mem_read w m a en)`, and so on
+for all 24.  Each is `rfl`, which is the point: the claim is about which BRANCH
+is taken, and each equation is false if the call took a fallback.  Restating the
+operator bodies instead would repeat the mistake `eval_op_correct` already makes
+(near-identical sides, proving nothing about the equations' fidelity to LiveHD).
+
+---
+
+## 6. What “formally verified” means here
+
+Direction 2 needs four layers of evidence, stated separately.
+
+1. **Semantic equations.** Each accepted operator and each state-update rule has
+   an explicit Lean definition, including corner cases such as division by zero,
+   shift amounts, signedness, reset priority, and memory collisions.
+2. **Executable-refinement proof.** The efficient dense evaluator equals
+   `interpretDesign` for every accepted certificate, input, and state.
+3. **Trace proof.** Iterating the efficient evaluator produces the same trace as
+   iterating the reference one-step semantics.
+4. **Artifact grounding.** Tests, LEC, and extraction checks connect real LGraphs
+   to certificates.  This is validation of the trusted boundary, not a Lean proof
+   of the C++ exporter.
+
+The existing theorem `eval_op_correct` has nearly identical executable and
+denotational bodies.  It establishes definitional agreement but is not an
+independent validation of the operator equations.  The plan must not cite it as
+proof that the equations match LiveHD or RTL.
+
+Useful secondary theorems are determinism, preservation of runtime-state shape,
+and agreement with B1+B2 on certificates accepted by both.
+
+---
+
+## 7. Deliverable
+
+The Direction 2 artifact is a generic simulator library and a native Lean
+executable, not generated semantic code:
+
+```text
+lgraph-sim DESIGN INPUT_TRACE INITIAL_STATE
+```
+
+The core executable API accepts a `DesignCert` value.  Initially, a small
+per-design launcher may import an elaborated certificate literal.  If Direction
+4 is available, the same simulator may receive certificates at run time; a
+verified parser is separate follow-up work.
+
+The executable reports ordered outputs and next state per cycle, rejects invalid
+certificates before execution, and uses deterministic trace formats suitable for
+Lean/Isabelle proof workflows and differential testing.
+
+Because `RuntimeState.mems` contains functions, a CLI cannot serialize it
+directly.  Its external state format must represent each memory by a default
+value plus finite address/value overrides, convert that representation to a
+function on input, and print only requested/sampled addresses on output.
+
+---
+
+## 8. Current status
+
+| Component | Status |
+|---|---|
+| `DesignCert`, runtime input/state/result types | implemented on the inherited B1+B2 base |
+| `interpretDesign` one-cycle reference semantics | implemented and used as B1+B2's specification |
+| Generic graph traversal and operator semantics | implemented |
+| Accepted-operator table, grounded and census-checked | **done** — §5.1, `Compiler/DirectCheck.lean` |
+| Independent source-level certificate checker | **done** — `checkDesign` / `checkRuntime`, soundness proved |
+| Efficient direct evaluator over dense certificate nodes | **done** — `evalDense`, one array pass per cycle |
+| `directStep_correct` | **proved**, no `sorry`, axioms `propext / Classical.choice / Quot.sound` |
+| Multi-cycle direct trace runner and trace theorem | **done** — `runDirect`, `runDirect_correct` |
+| Agreement with B1+B2 where both accept | **proved** — `directStep_eq_compileAndRun` |
+| Standalone simulator executable | **done** — `lgraph-sim`, generic over `DesignCert` |
+| Direct-simulation measurements on CORE-ET, CVA6, DINO | **done** — see `DIRECTION2_RESULTS.md` |
+
+The honest current claim is therefore stronger than the previous revision's:
+
+> The certificate's one-cycle semantics is now executed directly, by a checked
+> evaluator proved to implement `interpretDesign`, and the resulting simulator
+> runs real CORE-ET, CVA6 and DINO designs — every distinct generated
+> certificate is accepted, up to a 107,213-node CVA6 cache subsystem with twelve
+> mutable memories.  What remains trusted is the C++
+> LGraph → `DesignCert` exporter and the single-edge clock normalisation it
+> performs — neither is a Lean theorem, and §3 states the boundary.
+
+---
+
+## 9. Non-goals and separate applications
+
+Direction 2 does not by itself:
+
+- prove LiveHD optimization passes correct;
+- compare graphs before and after compiler passes;
+- derive a residual compiler through Futamura projection;
+- replace B1+B2's compiled simulator;
+- verify the C++ exporter or RTL frontend;
+- provide native multi-clock/event-driven semantics.
+
+Pre-/post-pass trace comparison remains a plausible application once
+`runDirect` exists.  It should have its own plan and claims.  It is not the
+definition or completion criterion of Direction 2.
+
+---
+
+## 10. Paper claim
+
+A statement the artifacts support:
+
+> We define a one-cycle Lean semantics for post-lowering LGraph certificates and
+> a standalone interpreter that executes it directly — dispatching on the
+> LGraph operator, without residual compilation, and without importing the
+> verified compiler.  The interpreter is fail-closed against an independent,
+> source-level acceptance predicate whose accepted-operator table is derived
+> from the exporter and validated against every generated certificate, and it is
+> proved to implement the same one-cycle semantics that is already the verified
+> compiler's specification; iterating it is proved to produce the same trace as
+> iterating the specification.  The resulting binary runs real CORE-ET, CVA6 and
+> DINO certificates.  The formal claim begins at `DesignCert`: the C++ exporter
+> and its single-edge clock normalisation remain trusted.

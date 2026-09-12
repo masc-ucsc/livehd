@@ -4,3 +4,6 @@
 
 # Stray Lean compiler artifact from a bare `lean <file>` invocation.
 /*.c
+
+# Generated per-design simulator launchers (make_sim_launcher.py).
+/Sims/

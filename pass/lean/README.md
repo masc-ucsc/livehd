@@ -54,6 +54,92 @@ Verified:
 - Builds against the current graph API: `bazel build //pass/lean:pass_lean`,
   `//lhd:lhd`, and `lake build` (support package) all succeed.
 
+## Direction 2 — the certificate executed directly (`lgraph-sim`)
+
+A second consumer of the same `DesignCert`: instead of compiling it to the
+residual language and running that (B1+B2), the certificate is TRAVERSED on
+every cycle, dispatching on `LGraphOp` through `eval_op_cert`.  Plan and scope
+are in `DIRECTION2_IR_SEMANTICS.md`; the engineering order and what each phase
+delivered are in `DIRECTION2_IMPLEMENTATION.md`; measurements and the trust
+boundary are in `DIRECTION2_RESULTS.md`.
+
+Modules, all under `formal/lean/LeanSemanticPrimitives/Compiler/` and all
+Mathlib-free except the last two:
+
+| module | contents |
+|---|---|
+| `DirectCheck.lean` | `SimError`, static `slotKind`, the accepted-operator table, `checkDesign` / `checkRuntime`, `DesignSemWF`, soundness, and one `rfl` equation per accepted (operator, arity) |
+| `DirectSemantics.lean` | `evalDense`, `directFlopNext`, `directStepRaw`, `directStep`, and `directStep_correct` |
+| `DirectTrace.lean` | `refTrace`, `runDirect`, `runDirect_correct`, `zeroState` / `zeroInput` |
+| `DirectSim.lean` | the `lgraph-sim` library: option parsing, trace/state file formats, `MemImageExt`, `simMain` |
+| `DirectExamples.lean` | five toy shapes, ten malformed certificates, seven single-field mutants, a synthetic 200k-node chain |
+| `DirectTests.lean` | the execution gate, as `#guard`s that run during `lake build` |
+| `DirectVsCompiled.lean` | agreement with B1+B2 (imports the compiler; the direct chain does not) |
+| `DirectBench.lean` | the phase-6 measurement and differential harness |
+
+The direct evaluator must never import the residual language — if it did, it
+would be another entry point to B1+B2 rather than a second implementation.  The
+import graph enforces this: `DirectSemantics` imports `DirectCheck` only.
+
+### Running it
+
+```bash
+cd <repo>/formal/lean
+lake build LgraphSim                       # -> .lake/build/bin/lgraph-sim
+.lake/build/bin/lgraph-sim --list
+.lake/build/bin/lgraph-sim counter-async-reset --inputs rst.in --state q5.state --show-state
+.lake/build/bin/lgraph-sim mem-read-write  --inputs mem.in --watch-mem 0:1
+```
+
+Exit status: 0 success, 1 the certificate or the runtime shape was REFUSED,
+2 usage, 3 I/O.  The ten malformed certificates ship in the binary, so a refusal
+can be demonstrated without a build.
+
+### Simulating a real design
+
+```bash
+python3 pass/lean/scripts/make_sim_launcher.py --bench \
+    <generated>/lean/SingleCycleCPU_Lgraph.lean
+cd formal/lean
+lake build SimSingleCycleCPU               # -> .lake/build/bin/lgraph-sim-SingleCycleCPU
+.lake/build/bin/lgraph-sim-SingleCycleCPU SingleCycleCPU --cycles 20 --show-state
+```
+
+The launcher redirects the certificate's import from `Compiler.CompileDesign` to
+`Compiler.DirectTrace`, so a per-design simulator builds without Mathlib.  It
+packages the certificate as DATA and calls the generic `simMain`; no semantic
+code and no proof script is emitted, which is what keeps this direct
+interpretation rather than generation.
+
+Both outputs are LOCAL artifacts: `Sims/` is gitignored, and the `[[lean_exe]]`
+stanza the script appends to `formal/lean/lakefile.toml` belongs with it — do not
+commit a stanza whose `Sims/` module is not in the tree, or `lake build
+Sim<Top>` fails for the next person.  The tracked lakefile carries only the
+`Sims` library declaration and the bundled `LgraphSim` binary.
+
+`--bench` additionally emits `lgraph-bench-<Top>`, which times the check, the
+direct interpreter and the compiled simulator on the same inputs and runs a
+cycle-by-cycle differential between them.  That one DOES pull in Mathlib, and
+linking it requires Mathlib's native objects.
+
+### Sweeping every certificate through the checker
+
+```bash
+python3 pass/lean/scripts/direct_sweep.py --out pass/lean/SWEEP_direction2.tsv \
+    --jobs 6 --cycles 4 <generated-root>
+```
+
+Deduplicates by content hash, generates a Mathlib-free probe per certificate, and
+records the verdict, shape, check time, first-step time and steady-state time.
+Exit status is non-zero if any certificate is not ACCEPTED.
+
+Add `--max-rec-depth 20000000` for the two 14 MB CVA6 hpdcache certificates:
+the `set_option maxRecDepth 1000000` the exporter emits is exhausted while
+ELABORATING their `sources := #[…]` literal, so the probe fails before
+`checkDesign` runs.  With the larger limit they are ACCEPTED and simulate —
+`cva6_hpdcache_wrapper_gate` is 107,213 nodes with twelve mutable memories —
+at about four hours and 16.6 GB, essentially all of it elaboration.
+
 ## Validation Pipeline (order matters)
 
 Upstream LEC is now strong enough to be the mandatory RTL-to-LGraph semantic

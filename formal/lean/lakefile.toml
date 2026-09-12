@@ -8,3 +8,18 @@ rev = "v4.31.0"
 
 [[lean_lib]]
 name = "LeanSemanticPrimitives"
+
+# Generated per-design simulator launchers (pass/lean/scripts/make_sim_launcher.py).
+# Not in `defaultTargets`: a real design's certificate literal is megabytes of
+# array elements, and nothing else needs it elaborated.
+[[lean_lib]]
+name = "Sims"
+globs = ["Sims.+"]
+
+# Direction 2's standalone direct simulator.  Not in `defaultTargets`: linking a
+# native binary on every `lake build` would slow the proof workflow down for no
+# gain.  Build it explicitly with `lake build LgraphSim`.
+[[lean_exe]]
+name = "LgraphSim"
+root = "Main"
+exeName = "lgraph-sim"
