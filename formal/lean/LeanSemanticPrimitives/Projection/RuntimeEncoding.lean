@@ -51,53 +51,49 @@ def tagResult : Nat := 121
 
 /-! ## Bit vectors -/
 
-@[inline] def encBV (b : BV) : Val := .ctor bvTag [encNat b.width, encInt b.value]
+/-- Literally the object language's own `BV` injection.  Not an alias for
+tidiness: `evalPrim`'s bit-vector cases call `LGraphModel`'s `mk_bv`,
+`bv_bitwise`, `bv_not` and `bv_resize` directly, so an encoded runtime `BV` is
+accepted by the object primitives with no marshalling at all. -/
+@[inline] def encBV (b : BV) : Val := ofBV b
 
-/-- The retyping, spelled out: an encoded runtime `BV` IS an object-language bit
-vector, so `evalPrim .bvAnd` and friends accept it directly.  `rfl`, and the
-fact that it is `rfl` is the point. -/
 theorem encBV_eq_mkBV (b : BV) : encBV b = mkBV (Int.ofNat b.width) b.value := rfl
 
-def decBV : Val → Option BV
-  | .ctor t [w, x] =>
-    if t = bvTag then
-      match decNat w, decInt x with
-      | some w', some x' => some { width := w', value := x' }
-      | _, _ => none
-    else none
-  | _ => none
+@[simp] theorem asBV_encBV (b : BV) : asBV (encBV b) = some b := asBV_ofBV b
 
-@[simp] theorem decBV_encBV (b : BV) : decBV (encBV b) = some b := by
-  simp [encBV, decBV]
+/-- The object language's own `asBV`, for the same reason `encBV` is `ofBV`: a
+second decoder for the same representation is a second thing that can drift. -/
+@[inline] def decBV : Val → Option BV := asBV
 
-/-! ### A Milestone 2 obligation, found while writing this file
+@[simp] theorem decBV_encBV (b : BV) : decBV (encBV b) = some b := asBV_ofBV b
 
-The encoding is a retyping, but the OPERATIONS are not automatically the same,
-and the difference is one line in each definition:
+/-! ### Why the object's bit operations are the pinned ones
 
-  * the object's `bvBitAt w v i` masks the operand by the RESULT width `w`;
-  * `LGraphModel.bv_bit x i` masks it by the operand's OWN `x.width`.
+This started as a Milestone 2 obligation and became a change to
+`ObjectLanguageSemantics.lean` instead, which is the better place for it.
 
-For a bit vector already reduced modulo its own width these agree at every
-`i < w`, whatever the two widths are -- probed at equal, wider and narrower
-operand widths, all three agree.  For one that is NOT reduced they diverge:
+The object language used to reimplement the bit operations over `(Int, Int)`
+pairs, and the reimplementation was not equivalent to `LGraphModel`'s: its
+`bvBitAt` masked an operand by the RESULT width where `bv_bit` masks by the
+operand's OWN width.  The two therefore disagreed on any bit vector not already
+reduced modulo its own width --
 
 ```
   evalPrim .bvAnd [.int 4, encBV (mk_bv 4 5), encBV <width := 2, value := 7>]
     ≠  encBV (eval_op .Op_And 4 [mk_bv 4 5, <width := 2, value := 7>])
 ```
 
-because the object sees `7 % 2^4 = 7` where `bv_bit` sees `7 % 2^2 = 3`.
+-- because the object saw `7 % 2^4 = 7` where `bv_bit` saw `7 % 2^2 = 3`.
+Normalisation is an invariant of the shared semantics, so the divergence was
+unreachable through `interpretDesign`; it was perfectly reachable through
+`evalPrim`, and every operator bridge below would have had to carry a
+normalisation hypothesis to exclude it.
 
-So `I_hw`'s operator bridge needs normalisation as a HYPOTHESIS.  It is an
-invariant rather than a restriction -- `mk_bv` and `bv_resize` establish it, and
-every value reaching `eval_op` in `interpretDesign` comes through
-`sourceValue` (which resizes every source, inputs and flop Qs included) or out
-of a previous `eval_op` (which ends in `mk_bv`).  The `BV` *type* does not
-enforce it, though, and `srcFlopNext`'s disabled branch passes
-`s.flops[idx]` through unresized, so the invariant has to be carried explicitly
-rather than assumed.  Milestone 2 proves it; this note exists so that milestone
-does not rediscover it from a failing bridge lemma. -/
+Rather than prove around a fork, the fork was removed: `evalPrim` now calls the
+pinned functions.  Every bridge in `OperatorBridge` is `rfl` as a result, and
+the whole class of "the object models the operator slightly differently" bugs is
+gone rather than excluded.  This is Milestone 0's rule applied one level down --
+the object language was the mutable side, so it is the side that moved. -/
 
 @[inline] def encBVs (xs : Array BV) : Val := encArr encBV xs
 @[inline] def decBVs (v : Val) : Option (Array BV) := decArr decBV v

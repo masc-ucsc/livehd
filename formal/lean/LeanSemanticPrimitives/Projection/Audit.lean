@@ -16,7 +16,7 @@ import LeanSemanticPrimitives.Projection.BTA
 import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
 import LeanSemanticPrimitives.Projection.SecondProjection
 import LeanSemanticPrimitives.Projection.SimulatorContract
-import LeanSemanticPrimitives.Projection.RuntimeEncoding
+import LeanSemanticPrimitives.Projection.OperatorBridge
 
 namespace Projection
 
@@ -91,5 +91,13 @@ namespace Projection
 #print axioms ResultRel_memFree
 #print axioms ResultRel_functional
 #print axioms interpretDesign_memFree
+
+-- the object primitives against the pinned hardware semantics (milestone 2)
+#print axioms prim_bvAnd
+#print axioms prim_bvResize
+#print axioms prim_bvUint
+#print axioms evalOpCert_And
+#print axioms evalOp_And_two
+#print axioms srcFlopNext_eq
 
 end Projection

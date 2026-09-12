@@ -14,44 +14,60 @@
 -/
 
 import LeanSemanticPrimitives.Projection.ObjectLanguage
+import LeanSemanticPrimitives.Translation.LGraphModel
 
 namespace Projection
 
 /-! ## Bit vectors, as encoded values
 
 `BV` is not a primitive type of `L`.  A bit vector is `ctor bvTag [int w, int v]`,
-mirroring `LGraphModel.BV = ⟨width, value⟩`.  Keeping it an ordinary encoded value
-is what lets the object specializer carry bit vectors with no special support. -/
+mirroring `LGraphModel.BV = <width, value>`.  Keeping it an ordinary encoded value
+is what lets the object specializer carry bit vectors with no special support.
+
+THE OPERATIONS ARE THE PINNED ONES, NOT A COPY.  `evalPrim`'s bit-vector cases
+call `mk_bv`, `bv_bitwise`, `bv_not`, `bv_resize`, `bv_uint` and `bv_bit` from
+`Translation/LGraphModel.lean` directly, so the only thing this file supplies is
+the REPRESENTATION -- how a `BV` sits inside `Val` -- and not the arithmetic.
+
+That is a deliberate reversal of an earlier draft, which reimplemented the bit
+operations over `(Int, Int)` pairs.  The reimplementation was not equivalent:
+its `bvBitAt` masked an operand by the RESULT width where `bv_bit` masks by the
+operand's OWN width, so the two disagreed on any bit vector not already reduced
+modulo its own width (`ctor bvTag [int 2, int 7]` against a 4-bit operand is the
+smallest case).  Normalisation happens to be an invariant of the shared
+semantics, so the divergence was unreachable through `interpretDesign` -- but it
+was reachable through `evalPrim`, it would have had to be excluded by hypothesis
+in every operator bridge, and it is exactly the kind of quiet fork that
+Milestone 0 pinned the semantics to prevent.  Calling the pinned functions costs
+one import and makes each bridge lemma `rfl`.
+
+The import is `Translation/LGraphModel` only -- no Mathlib, so the library still
+builds in seconds.  `ObjectLanguage.lean`, which merely NAMES the primitives,
+stays free of it. -/
 
 /-- Reserved tag for encoded bit vectors.  High, to stay clear of the small tags
-`Encoding.lean` gives to `Term`/`Program` constructors. -/
+`Encoding.lean` gives to `Term`/`Program` constructors and the 100-121 block
+`DesignEncoding.lean`/`RuntimeEncoding.lean` use for the hardware domain. -/
 def bvTag : Nat := 1000
 
 @[inline] def mkBV (w v : Int) : Val := .ctor bvTag [.int w, .int v]
 
-/-- Value modulo `2^w`, matching `LGraphModel.mk_bv`'s normalisation. -/
-@[inline] def bvNorm (w v : Int) : Val :=
-  if w ≤ 0 then mkBV 0 0 else mkBV w (v % (2 ^ w.toNat))
+/-- A `BV` as an object value.  `RuntimeEncoding.encBV` is this function; the
+runtime encoding of a bit vector is not a translation but a retyping. -/
+@[inline] def ofBV (b : BV) : Val := mkBV (Int.ofNat b.width) b.value
 
-@[inline] def asBV : Val → Option (Int × Int)
-  | .ctor t [.int w, .int v] => if t = bvTag then some (w, v) else none
+/-- …and back.  A negative width is rejected rather than clamped: `BV.width` is
+a `Nat`, so a negative one is junk in `Val`, not a bit vector of some width. -/
+@[inline] def asBV : Val → Option BV
+  | .ctor t [.int w, .int v] => if t = bvTag then (if 0 ≤ w then some ⟨w.toNat, v⟩ else none) else none
   | _                        => none
 
-/-- Bit `i` of a bit vector, by its unsigned value. -/
-@[inline] def bvBitAt (w v : Int) (i : Int) : Bool :=
-  if w ≤ 0 ∨ i < 0 then false
-  else ((v % (2 ^ w.toNat)).toNat >>> i.toNat) % 2 == 1
+@[simp] theorem asBV_ofBV (b : BV) : asBV (ofBV b) = some b := by
+  simp [asBV, ofBV, mkBV]
 
-/-- Bitwise combine at width `w`, one bit at a time.  First-order: the operation
-is chosen by the caller's `Prim`, never passed as a function. -/
-def bvCombine (f : Bool → Bool → Bool) (w a b : Int) : Val :=
-  if w ≤ 0 then mkBV 0 0
-  else
-    let n := w.toNat
-    let bits : Nat := (List.range n).foldl
-      (fun acc (i : Nat) =>
-        if f (bvBitAt w a (Int.ofNat i)) (bvBitAt w b (Int.ofNat i)) then acc + 2 ^ i else acc) 0
-    mkBV w (Int.ofNat bits)
+/-- A width argument arrives as an `Int` (everything in `L` counts in `Int`);
+this is the single place it becomes the `Nat` the hardware model wants. -/
+@[inline] def widthOf (w : Int) : Nat := w.toNat
 
 /-! ## Primitive evaluation
 
@@ -98,29 +114,31 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
       else .error "mkCtor: negative tag"
   | .ctorTagP,    [.ctor t _]  => .ok (.int (Int.ofNat t))
   | .ctorFieldsP, [.ctor _ fs] => .ok (listVal fs)
-  | .bvMk,    [.int w, .int v] => .ok (bvNorm w v)
-  | .bvWidth, [v] => match asBV v with | some (w, _) => .ok (.int w) | none => .error "bvWidth: not a BV"
+  | .bvMk,    [.int w, .int v] => .ok (ofBV (mk_bv (widthOf w) v))
+  | .bvWidth, [v] => match asBV v with
+                     | some b => .ok (.int (Int.ofNat b.width))
+                     | none   => .error "bvWidth: not a BV"
   | .bvUint,  [v] => match asBV v with
-                     | some (w, x) => .ok (.int (if w ≤ 0 then 0 else x % (2 ^ w.toNat)))
-                     | none => .error "bvUint: not a BV"
+                     | some b => .ok (.int (bv_uint b))
+                     | none   => .error "bvUint: not a BV"
   | .bvBit,   [v, .int i] => match asBV v with
-                             | some (w, x) => .ok (.bool (bvBitAt w x i))
-                             | none => .error "bvBit: not a BV"
+                             | some b => .ok (.bool (0 ≤ i && bv_bit b i.toNat))
+                             | none   => .error "bvBit: not a BV"
   | .bvAnd, [.int w, a, b] => match asBV a, asBV b with
-                              | some (_, x), some (_, y) => .ok (bvCombine (· && ·) w x y)
+                              | some x, some y => .ok (ofBV (bv_bitwise (widthOf w) (· && ·) x y))
                               | _, _ => .error "bvAnd: not a BV"
   | .bvOr,  [.int w, a, b] => match asBV a, asBV b with
-                              | some (_, x), some (_, y) => .ok (bvCombine (· || ·) w x y)
+                              | some x, some y => .ok (ofBV (bv_bitwise (widthOf w) (· || ·) x y))
                               | _, _ => .error "bvOr: not a BV"
   | .bvXor, [.int w, a, b] => match asBV a, asBV b with
-                              | some (_, x), some (_, y) => .ok (bvCombine xor w x y)
+                              | some x, some y => .ok (ofBV (bv_bitwise (widthOf w) xor x y))
                               | _, _ => .error "bvXor: not a BV"
   | .bvNot, [.int w, a] => match asBV a with
-                           | some (_, x) => .ok (bvCombine (fun p _ => !p) w x 0)
-                           | none => .error "bvNot: not a BV"
+                           | some x => .ok (ofBV (bv_not (widthOf w) x))
+                           | none   => .error "bvNot: not a BV"
   | .bvResize, [.int w, a] => match asBV a with
-                              | some (aw, x) => .ok (bvNorm w (if aw ≤ 0 then 0 else x % (2 ^ aw.toNat)))
-                              | none => .error "bvResize: not a BV"
+                              | some x => .ok (ofBV (bv_resize (widthOf w) x))
+                              | none   => .error "bvResize: not a BV"
   | p, vs =>
       if vs.length = p.arity then
         .error s!"primitive {repr p}: operand types do not match"

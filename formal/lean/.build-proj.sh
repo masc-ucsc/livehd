@@ -39,6 +39,7 @@ MODULES=(
   Projection/SimulatorContract
   Projection/DesignEncoding
   Projection/RuntimeEncoding
+  Projection/OperatorBridge
   Projection/Audit
 )
 
