@@ -1148,6 +1148,38 @@ void Lnast_prp_writer::write_module() {
     print(is_mod ? "mod " : "comb ");
   }
   print(lambda_name());
+  // Not gated on is_verilog_origin(): a hand-written fully-defaulted generic unit
+  // re-emits through this same path (pass_prp_writer no longer drops it), and its
+  // header is what makes the output re-parse to the same unit.
+  if (lnast->has_generics()) {
+    print("<");
+    const auto& names    = lnast->get_generics();
+    const auto& defaults = lnast->get_generic_defaults();
+    for (size_t i = 0; i < names.size(); ++i) {
+      if (i != 0) {
+        print(", ");
+      }
+      print(quote_kw_path(names[i]));
+      print("=");
+      // A negative literal needs expression grouping in a generic argument.
+      const bool negative = defaults[i].starts_with('-');
+      if (negative) {
+        print("(");
+      }
+      if (defaults[i].size() >= 2 && defaults[i].front() == '\'' && defaults[i].back() == '\'') {
+        print("\"");
+        print(escape_string(std::string_view(defaults[i]).substr(1, defaults[i].size() - 2)));
+        print("\"");
+      } else {
+        print(defaults[i]);
+      }
+      if (negative) {
+        print(")");
+      }
+      declared_.insert(strip_prefix(names[i]));
+    }
+    print(">");
+  }
   // `timecheck=false` opts the re-compile out of the Pyrope timing / comb-cycle
   // checks (plain regs = always_ff cycle-0 state, undriven wire = X, same-cycle
   // wire ring not flagged as a comb loop) — the semantics a Verilog-imported unit
@@ -4645,6 +4677,8 @@ static std::string escape_string(std::string_view s) {
     switch (c) {
       case '\\': out += "\\\\"; break;
       case '"' : out += "\\\""; break;
+      case '{' : out += "\\{"; break;
+      case '}' : out += "\\}"; break;
       case '\n': out += "\\n"; break;
       case '\r': out += "\\r"; break;
       case '\t': out += "\\t"; break;
@@ -7036,6 +7070,17 @@ Lnast_nid Lnast_prp_writer::find_stages_child(Lnast_nid nid) const {
 
 bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
   auto t = lnast->get_type(nid);
+  if (lnast->is_verilog_origin() && lnast->has_generics()
+      && (t == Lnast_ntype::Lnast_ntype_store || t == Lnast_ntype::Lnast_ntype_declare)) {
+    auto lhs = lnast->get_child(nid);
+    if (!lhs.is_invalid()) {
+      const auto  name  = strip_prefix(lnast->get_name(lhs));
+      const auto& names = lnast->get_generics();
+      if (std::any_of(names.begin(), names.end(), [&](const auto& param) { return strip_prefix(param) == name; })) {
+        return true;  // The module header declares this bound parameter.
+      }
+    }
+  }
   if (t == Lnast_ntype::Lnast_ntype_type_spec) {
     return true;  // folded into a declaration
   }

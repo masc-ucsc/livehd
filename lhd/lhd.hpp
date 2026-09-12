@@ -145,8 +145,8 @@ struct Options {
   // pyrope command; harmless defaults elsewhere.
   bool        fmt_inplace = false;  // -i / --inplace: rewrite each input file
   std::string fmt_output;           // -o / --output FILE: write to FILE (one input)
-  int         fmt_indent = 0;       // --indent N: spaces per level (0 => prpfmt default 4)
-  int         fmt_width  = 0;       // --width N: wrap column (0 => prpfmt default 80)
+  int         fmt_indent = 2;       // --indent N: spaces per level
+  int         fmt_width  = 132;     // --width N: wrap column
   bool        fmt_verify = false;   // --verify: re-parse the formatted output
 
   std::string result_json;

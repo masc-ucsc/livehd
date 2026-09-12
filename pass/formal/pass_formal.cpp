@@ -250,7 +250,7 @@ void Pass_formal::setup() {
                        "true");
   m.add_label_optional("warn_assume", "true|false warn on a deferred assume", "true");
   m.add_label_optional("assume_check",
-                       "internal compile mirror of canonical formal.assume_check: false keeps assumptions active but "
+                       "INTERNAL compile mirror of canonical formal.assume_check: false keeps assumptions active but "
                        "treats all of them as assume_nocheck",
                        "true");
   m.add_label_optional("hier_preflight",

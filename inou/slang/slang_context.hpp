@@ -697,7 +697,7 @@ private:
       const slang::ast::Expression& e, const slang::ast::PackageSymbol* home, std::set<std::string>& imports_out,
       std::vector<std::pair<const slang::ast::PackageSymbol*, std::string>>& refs_out);
   // Any leaf of `expr` is a package Parameter / package enum member.
-  static bool                                               contains_package_param(const slang::ast::Expression& expr);
+  bool                                                      contains_package_param(const slang::ast::Expression& expr);
   // The structural lowering of `expr` can preserve pkg.PARAM leaves: every
   // sub-lowering it dispatches to is supported (no unsupported-op hard error a
   // tier-1 fold would otherwise have absorbed). Kinds outside this set keep the

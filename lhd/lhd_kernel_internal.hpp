@@ -280,6 +280,11 @@ std::string_view top_entity_of(std::string_view name);
 // one name matches. Returns "" when nothing (or more than one name) matches;
 // the caller keeps its own not-found handling. `diag_pass` is the warning's
 // origin identity (e.g. "pass.lec").
+// Resolve `want` against internal `file.entity` unit names: exact match first,
+// then the unique entity-tail match. Returns "" when zero or more than one
+// candidate matches. An EMPTY `diag_pass` resolves QUIETLY (no
+// `top-entity-fallback` warning) -- for internal probes that are not selecting
+// the top on the user's behalf.
 std::string resolve_top_name(const std::vector<std::string>& names, std::string_view want, std::string_view diag_pass);
 
 // The shared "pick the top module on a side" ladder (lec / formal verify /

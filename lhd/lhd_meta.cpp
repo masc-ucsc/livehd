@@ -603,7 +603,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pyrope fmt") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pyrope fmt","description":"Format Pyrope source (a clang-format for Pyrope): the prpfmt formatter walks the tree-sitter-pyrope grammar and re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping). Prints to stdout by default; -i/--inplace rewrites each file; -o/--output writes one file. No result envelope (the output is the formatted source). Exit 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"inplace","type":"flag","aliases":["-i"]},{"name":"output","type":"path","aliases":["-o"]},{"name":"indent","type":"int","default":4},{"name":"width","type":"int","default":80},{"name":"verify","type":"flag"}]},"inputs":["pyrope"],"outputs":["stdout","pyrope"],"examples":["lhd pyrope fmt foo.prp","lhd pyrope fmt -i foo.prp bar.prp","lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp"]})json");
+        R"json({"schema_version":1,"name":"pyrope fmt","description":"Format Pyrope source (a clang-format for Pyrope): the prpfmt formatter walks the tree-sitter-pyrope grammar and re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping). Prints to stdout by default; -i/--inplace rewrites each file; -o/--output writes one file. No result envelope (the output is the formatted source). Exit 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"inplace","type":"flag","aliases":["-i"]},{"name":"output","type":"path","aliases":["-o"]},{"name":"indent","type":"int","default":2},{"name":"width","type":"int","default":132},{"name":"verify","type":"flag"}]},"inputs":["pyrope"],"outputs":["stdout","pyrope"],"examples":["lhd pyrope fmt foo.prp","lhd pyrope fmt -i foo.prp bar.prp","lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp"]})json");
     return 0;
   }
   if (name == "pyrope lsp" || name == "lsp") {
@@ -803,8 +803,8 @@ int help_pyrope(const std::string& sub) {
         "flags:\n"
         "  -i, --inplace     rewrite each input file in place (unchanged files are left alone)\n"
         "  -o, --output FILE write to FILE instead of stdout (a single input file)\n"
-        "      --indent N    spaces per indent level (default 4)\n"
-        "      --width N     wrap column / max line width (default 80)\n"
+        "      --indent N    spaces per indent level (default 2)\n"
+        "      --width N     wrap column / max line width (default 132)\n"
         "      --verify      re-parse the formatted output and warn (exit 1) if it no longer parses\n"
         "\n"
         "exit: 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written\n"

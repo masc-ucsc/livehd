@@ -9,6 +9,43 @@ compilation and synthesis as well as `ln:`/`lnast-dump:` inspection. Use
 `--reader yosys` for the integrated Yosys SystemVerilog frontend when native
 lowering is unsupported; `yosys-slang` remains its compatibility alias.
 
+Pyrope-only emission preserves integer and string module parameters as generic
+defaults (`pub mod core<N=8, MODE="fast">...`). Each Slang-elaborated
+specialization carries its bound values, including instance overrides; localparams
+remain body constants. These are parameters of the emitted, elaborated body:
+port widths, generate branches, and other structural choices have already been
+resolved by Slang. To change those choices, re-elaborate the Verilog configuration.
+
+Two limitations of that header are real and currently unchecked:
+
+* **Only a parameter that still appears SYMBOLICALLY in the emitted body is
+  honoured on override.** A parameter that reached an elaboration-time decision
+  is baked in: `assign y = (N == 2) ? a + 1 : a + 2` emits the taken arm
+  unconditionally, yet the header still advertises `<N=2>`, so a Pyrope-side
+  `core<N=3>(...)` compiles and produces DIFFERENT hardware than the Verilog with
+  the same override (it LECs REFUTED, with no diagnostic). Every string parameter
+  is in this class — Slang consumes string expressions during elaboration.
+  A parameter used only in arithmetic (`assign y = a + N`) does round-trip
+  correctly, and that is what `lhd/tests/slang_param_provenance_test.sh` covers.
+* **Recompiling the emitted Pyrope renames every parameterized module.** A
+  generic header makes the re-read unit a deferred TEMPLATE, so each call site
+  mints a specialization clone named `subm__u1_u8_N_3_h007714d1`. Direct
+  `verilog:` -> `lg:` is unaffected, but on the `verilog:` -> `pyrope:` -> `lg:`
+  leg `canonical_entity_name` cannot undo the mangling, so cross-frontend def
+  pairing dies (measured on a two-instance hierarchy: `2 ref-only def(s)`,
+  `registers ref 0/2 paired`, verdict `DIFFERENCES present` on an equivalent
+  design) and hierarchical LEC degrades to one flat whole-design proof.
+  The fix is to give an IDENTITY specialization — every generic bound to its own
+  declaration default, no injected port type, no var-arg — the module's own name,
+  which is the rule `specialize_top_defaults` already applies to a generic top:
+  one parameter value-set means one LGraph, and it is the module. Doing that at
+  a call site additionally requires the emitted instance call to resolve to the
+  CONCRETE twin rather than the template; naming the clone after the template
+  without that makes `lookup_callee` return the template again, which
+  re-specializes the same statement forever (observed as a stack overflow in
+  `hhds::Source_locator::find_file`, via the scratch-locator `base_` chain the
+  loop grows).
+
 ## Passing raw slang driver args (`-- ...`)
 
 Everything after a `--` on the `lhd` command line rides straight to the slang

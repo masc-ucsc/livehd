@@ -342,6 +342,26 @@ TEST(Semdiff, CombinationalArrayMemoryIsNotStateCorrespondence) {
   EXPECT_EQ(1U, seq.state.name_pairs_mem);
 }
 
+TEST(Semdiff, MemoryToRegisterCoverageUsesEachSidesRepresentation) {
+  auto  ref  = build_memory_kind("lgdb_semdiff_mem_to_reg_ref", 0);
+  auto& lib  = livehd::Hhds_graph_library::instance("lgdb_semdiff_mem_to_reg_impl");
+  auto  impl = lib.create_io("memory_kind")->create_graph();
+  auto  flop = create_typed_node(*impl, Ntype_op::Flop);
+  flop.set_name("m");
+  auto q = flop.create_driver_pin(0);
+  livehd::graph_util::set_bits(q, 8);
+  livehd::graph_util::set_pin_name(q, "m");
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  const auto r           = livehd::semdiff::structural_match(ref.get(), impl.get(), options);
+  EXPECT_EQ(1U, r.state.name_pairs);
+  EXPECT_EQ(1U, r.state.a_paired);
+  EXPECT_EQ(1U, r.state.b_paired);
+  EXPECT_EQ(1U, r.state.a_paired_mems);
+  EXPECT_EQ(0U, r.state.b_paired_mems);
+  EXPECT_EQ(0U, r.state.b_mems);
+}
+
 // canonical_digest: two independently-built identical designs (separate
 // libraries — independent gids, allocation order) produce the SAME digest.
 TEST(Semdiff, DigestStableAcrossLibraries) {
@@ -662,6 +682,8 @@ TEST(Semdiff, AggregateProvenanceLossKeepsPhysicalLeafIdentity) {
   auto r                 = livehd::semdiff::structural_match(ref.get(), impl.get(), options);
   EXPECT_EQ(1U, r.state.a_total);
   EXPECT_EQ(4U, r.state.b_total);
+  EXPECT_EQ(1U, r.state.a_paired);
+  EXPECT_EQ(4U, r.state.b_paired);
   EXPECT_EQ(1U, r.state.name_pairs);
   EXPECT_EQ(0U, r.state.full_pairs);
   EXPECT_EQ(0U, r.state.a_unpaired);

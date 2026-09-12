@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "dlop.hpp"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Lookup.h"
 #include "slang/ast/Statement.h"
@@ -1245,10 +1246,31 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
   }
 }
 
+// A Verilog parameter whose name is a Pyrope RESERVED WORD cannot be emitted as a
+// generic: the writer has to backtick-escape it (`` <`step`=1> ``), but prp2lnast
+// registers a generic under that raw, quoted spelling while every body read
+// canonicalizes to the bare name -- so the emitted file no longer re-parses. Such
+// a parameter stays on the body-const / folding path instead.
+//
+// The set is prpparse's OWN table (the X-macro the lexer reads), never a copy --
+// the same rule, and the same dep, as upass/prp_writer's is_pyrope_reserved_ident.
+static bool is_pyrope_reserved_ident(std::string_view s) {
+  // clang-format off: the `#include` inside the braced list makes clang-format
+  // break the hand-added words one per line, which buries them.
+  static const absl::flat_hash_set<std::string_view> kw = {
+      // Reserved by the docs or held for future syntax, so absent from the
+      // parser's table; over-quoting a non-keyword is harmless.
+      "nil", "where", "priority", "defer", "async", "await", "cpp",
+#define PRP_KEYWORD(name) #name,
+#include "prpparse/prp_keywords.def"
+  };
+  // clang-format on
+  return kw.contains(s);
+}
+
 void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
-  if (!options_.preserve_param_provenance) {
-    return;
-  }
+  std::vector<std::string> generics;
+  std::vector<std::string> defaults;
   for (const auto& member : body.members()) {
     if (member.kind != slang::ast::SymbolKind::Parameter) {
       continue;
@@ -1258,7 +1280,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
       continue;  // package params ride `pkg.NAME`
     }
     const auto& cv = ps.getValue();
-    if (!cv.isInteger()) {
+    if (!cv.isInteger() && !cv.isString()) {
       continue;
     }
     std::string name(ps.name);
@@ -1267,19 +1289,57 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
     if (!plain || used_names_.count(name) != 0u) {
       continue;  // colliding / exotic name — keep folding this param
     }
+    if (!ps.isLocalParam() && !is_pyrope_reserved_ident(name)) {
+      // Slang has already elaborated this specialization. Its defaults must
+      // be the bound values, including instance overrides, not the original
+      // declaration's initializer. Keep the same generic metadata as Pyrope;
+      // this body is concrete, so it does not need the deferred-template flag.
+      //
+      // A RESERVED-WORD parameter (`parameter step = 1`, a legal Verilog name and
+      // a real shape -- see inou/yosys/tests/fixme_paramods.v) is excluded: the
+      // writer would have to emit it backtick-escaped (`` <`step`=1> ``), and
+      // prp2lnast registers a generic under that RAW spelling while body reads
+      // canonicalize to the bare name, so the emitted file no longer re-parses
+      // ("read of undefined variable 'step'"). Falling through leaves it on the
+      // body-const / folding path, which does re-parse. Lift this once
+      // prp2lnast canonicalizes a backticked generic name at registration.
+      generics.push_back(name);
+      defaults.push_back(cv.isString() ? Dlop::from_string(cv.str())->to_pyrope() : const_text(cv.integer()));
+    }
+    if (!options_.preserve_param_provenance) {
+      continue;  // Graph flows keep the bound metadata but fold body references.
+    }
+    if (cv.isString()) {
+      used_names_.insert(name);
+      continue;  // Slang consumes string expressions during elaboration.
+    }
     // A single store, no declare: the prp_writer's single-store path renders
     // it in place as `const NAME = <rhs>`. The initializer lowers through the
     // NORMAL machinery, so a pkg-referencing defining expression stays
     // symbolic (`const THRESH = lpkg.BASE * 2`) and anything else folds; an
     // unread param is dropped by the writer's dead-signal elimination.
     std::string value = const_text(cv.integer());
-    if (const auto* init = ps.getInitializer(); init != nullptr) {
+    if (const auto* init = ps.getInitializer(); init != nullptr && ps.isLocalParam()) {
       value = lower_rvalue(*init);
     }
+    // A symbolic initializer can lower to a BOOLEAN (`localparam WITH_PCPI =
+    // ENABLE_PCPI || ENABLE_MUL`), and Pyrope keeps bool and int distinct: the
+    // const IS boolean-typed, so every later read must use it directly, never
+    // re-`!= 0` it against an integer. Without the mark, booleanize() compares a
+    // boolean const to `0` and typecheck/constprop hard-error
+    // ("comparison mixes a bool with an int/string") -- which took the picorv32
+    // v2prp flow from exit 0 to a failed compile, since picorv32.v builds
+    // WITH_PCPI exactly this way.
+    const bool value_is_bool = is_bool_value(value);
     builder_.create_assign_stmts(name, value);
+    if (value_is_bool) {
+      mark_bool(name);
+    }
     local_param_lname_.emplace(&member, name);
     used_names_.insert(name);
   }
+  builder_.lnast->set_generics(std::move(generics));
+  builder_.lnast->set_generic_defaults(std::move(defaults));
 }
 
 std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortSymbol& port, int bits, bool is_signed) {

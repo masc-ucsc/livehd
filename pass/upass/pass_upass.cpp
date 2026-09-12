@@ -18,9 +18,9 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
-#include "log.hpp"               // LHD_LOG developer tracing on the "upass" channel
+#include "log.hpp"           // LHD_LOG developer tracing on the "upass" channel
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "str_tools.hpp"
-#include "perf_tracing.hpp"      // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
@@ -181,6 +181,7 @@ void Pass_upass::setup() {
                         "task 1m: surface unresolved live imports on the pass var (kernel iterate loop) instead of "
                         "hard-erroring (default false)",
                         "false");
+  m1.add_label_optional("default_top", "INTERNAL instantiate this generic entry point with its declaration defaults", "");
   m1.add_label_optional("inline",
                         "true|false: inline fully-defined `comb` calls. Default FALSE — a directly-named comb is "
                         "emitted as a sub-module instance, preserving the comb boundary for debug/optimization; the "
@@ -583,8 +584,18 @@ void Pass_upass::work(Eprp_var& var) {
   // comb functions), and those generated trees should run through the same
   // configured upass pipeline before downstream stages see them.
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
-    const auto ln = var.lnasts.at(idx);
+    auto ln = var.lnasts.at(idx);
     function_registry.ensure(var.lnasts);  // folds in any newly-appended lnasts
+    if (ln->is_template() && ln->get_top_module_name() == var.get("default_top")) {
+      auto         manager = std::make_shared<upass::Lnast_manager>(ln);
+      uPass_runner specializer(manager, {}, up.pass_options);
+      specializer.set_function_registry(function_registry);
+      ln              = specializer.specialize_top_defaults();
+      var.lnasts[idx] = ln;
+      if (up.run_ssa) {
+        uPass_ssa::run(ln, &var.lnasts, up.stream_ssa);
+      }
+    }
     // A pre-elaborated import is reused as-is: it stays REGISTERED above (so
     // callers resolve it through its restored io_meta) and is lowered by the
     // tolg step below, but its body is NOT re-walked — re-running constprop/

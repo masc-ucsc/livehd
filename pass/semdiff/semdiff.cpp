@@ -1067,6 +1067,32 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
   };
   finish(ga, sa, st.a_unpaired, st.a_ambiguous, res.a_state_unpaired, res.a_mem_diverged, "ref");
   finish(gb, sb, st.b_unpaired, st.b_ambiguous, res.b_state_unpaired, res.b_mem_diverged, "impl");
+
+  // Count coverage in each side's own representation. Reusing the ref's
+  // Memory pair count for impl can report 107/104 memories paired when three
+  // same-named states are registers on impl. Group leaves just like total.
+  const auto coverage = [](const State_side& ss, uint32_t& mems, uint32_t& paired, uint32_t& paired_mems) {
+    struct Group {
+      bool memory = false;
+      bool paired = true;
+    };
+    absl::flat_hash_map<std::string, Group> groups;
+    for (const auto& c : ss.cells) {
+      const auto key    = c.aggregate_key.empty() ? std::format("physical:{}", c.node.get_debug_nid())
+                                                  : std::format("aggregate:{}", c.aggregate_key);
+      auto&      group  = groups[key];
+      group.memory     |= c.is_mem;
+      group.paired     &= c.token != 0;
+    }
+    mems = 0;
+    for (const auto& [key, group] : groups) {
+      mems        += group.memory;
+      paired      += group.paired;
+      paired_mems += group.paired && group.memory;
+    }
+  };
+  coverage(sa, st.a_mems, st.a_paired, st.a_paired_mems);
+  coverage(sb, st.b_mems, st.b_paired, st.b_paired_mems);
 }
 
 // Per-side analysis: forward/backward signatures + node order.

@@ -20,6 +20,10 @@ cc_library(
     ] + [
         "//core",
         "//pass/common:pass",
+        # prpparse's OWN keyword table (prp_keywords.def) -- a Verilog parameter
+        # named like a Pyrope reserved word cannot be emitted as a generic. Same
+        # dep, same reason, as upass/prp_writer: never hand-copy the list.
+        "@prpparse//:prp_keywords",
     ],
     alwayslink = True,  # Needed to have constructor called
 )

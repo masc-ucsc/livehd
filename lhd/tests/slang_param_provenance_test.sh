@@ -119,4 +119,121 @@ $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir verilog:"$W/vd" --w
   || fail "default graphs flow did not compile"
 echo "PASS: graphs flow folds by default; explicit =true there is refused"
 
+# Module parameters use generic defaults; localparams remain body constants.
+# Different elaborated instances must retain their OVERRIDDEN values. Include
+# signed defaults and a string needing cooked-string escaping on re-emission.
+cat >"$W/params.sv" <<'EOF'
+module params #(parameter int STEP = 3, parameter string TAG = "a'b{c}\\d", parameter int NEG = -2)
+  (input [7:0] a, output [8:0] y, output [8:0] z);
+  localparam BIAS = STEP + 1;
+  assign y = a + STEP + NEG;
+  assign z = a + BIAS;
+endmodule
+module pair(input [7:0] a, output [8:0] y, output [8:0] z, output [8:0] v, output [8:0] w);
+  params u0(a, y, z);
+  params #(.STEP(7), .TAG("other")) u1(a, v, w);
+endmodule
+module params_override(input [7:0] a, output [8:0] y, output [8:0] z);
+  params #(.STEP(9), .NEG(-4)) u(a, y, z);
+endmodule
+EOF
+$LHD compile "$W/params.sv" --top pair --emit-dir pyrope:"$W/params" --workdir "$W/params-w" -q \
+  || fail "module parameter emission failed"
+grep -q 'STEP=3' "$W/params/params.prp" || fail "default STEP missing from generic header"
+grep -q 'STEP=7' "$W/params/params_p1.prp" || fail "overridden STEP missing from specialization header"
+grep -Fq 'NEG=(-2)' "$W/params/params.prp" || fail "negative generic default missing"
+grep -Fq 'TAG="a' "$W/params/params.prp" || fail "string generic default missing"
+grep -Eq 'const STEP\b|const NEG\b' "$W/params/params.prp" && fail "generic parameter rebound in body"
+grep -q 'const BIAS' "$W/params/params.prp" || fail "localparam missing from body"
+for top in pair params; do
+  $LHD lec --ref verilog:"$W/params.sv" --ref-top "$top" --impl pyrope:"$W/params/" --impl-top "$top.$top" \
+    --workdir "$W/params-lec-$top" -q --result-json "$W/params-lec-$top.json" \
+    || fail "generated generic parameters not equivalent ($top): $(cat "$W/params-lec-$top.json" 2>/dev/null)"
+done
+cat >"$W/params/params_override.prp" <<'EOF'
+const pp = import("params.params")
+pub comb params_override(a:u8) -> (y:u9, z:u9) {
+  const r = pp<STEP=9, NEG=(-4)>(a=a)
+  y = r.y
+  z = r.z
+}
+EOF
+$LHD lec --ref verilog:"$W/params.sv" --ref-top params_override --impl pyrope:"$W/params/" \
+  --impl-top params_override.params_override --workdir "$W/params-lec-override" -q \
+  --result-json "$W/params-lec-override.json" \
+  || fail "overriding emitted parameters changed semantics: $(cat "$W/params-lec-override.json" 2>/dev/null)"
+echo "PASS: integer/string/negative generic defaults, instance overrides, and localparams are LEC-exact"
+
+# A localparam whose initializer lowers to a BOOLEAN (`A || B`) must stay
+# boolean-typed on the const it binds: without the kind mark every later read
+# re-compares it to 0 and typecheck refuses ("comparison mixes a bool with an
+# int/string"), which is the picorv32 `WITH_PCPI` shape and took the documented
+# v2prp flow from exit 0 to a failed compile.
+cat >"$W/boolparam.sv" <<'EOF'
+module boolparam #(parameter [0:0] EN_A = 0, parameter [0:0] EN_B = 0, parameter [0:0] CATCH = 1)
+  (input [7:0] a, output y);
+  localparam WITH_X = EN_A || EN_B;
+  assign y = (CATCH || WITH_X) && !a[0];
+endmodule
+EOF
+$LHD compile "$W/boolparam.sv" --top boolparam --emit-dir pyrope:"$W/boolp" --workdir "$W/boolp-w" -q   || fail "boolean localparam over module parameters did not compile"
+grep -Fq 'const WITH_X = (EN_A != 0) or (EN_B != 0)' "$W/boolp/boolparam.prp"   || fail "boolean localparam lost its symbolic form: $(cat "$W/boolp/boolparam.prp")"
+$LHD compile "$W/boolp/boolparam.prp" --top boolparam.boolparam --emit-dir lg:"$W/boolp-lg"   --workdir "$W/boolp-rw" -q || fail "emitted boolean-localparam Pyrope does not re-compile"
+echo "PASS: a boolean localparam over module parameters stays boolean and re-compiles"
+
+# A parameter named like a Pyrope RESERVED WORD must NOT become a generic: the
+# header would have to backtick-escape it, and prp2lnast registers a generic under
+# that raw spelling while body reads canonicalize to the bare name, so the emitted
+# file stops re-parsing. Such a parameter falls back to folding instead.
+cat >"$W/kwparam.sv" <<'EOF'
+module kwparam #(parameter pipe = 3, parameter step = 2, parameter WIDTH = 8)
+  (input [7:0] a, output [8:0] y);
+  assign y = a + pipe + step;
+endmodule
+EOF
+$LHD compile "$W/kwparam.sv" --top kwparam --emit-dir pyrope:"$W/kwp" --workdir "$W/kwp-w" -q   || fail "reserved-word parameter emission failed"
+grep -q 'WIDTH=8' "$W/kwp/kwparam.prp" || fail "non-keyword parameter lost its generic header"
+grep -Fq '`pipe`' "$W/kwp/kwparam.prp" && fail "a reserved-word parameter was emitted as a backticked generic"
+$LHD compile "$W/kwp/kwparam.prp" --top kwparam.kwparam --emit-dir lg:"$W/kwp-lg" --workdir "$W/kwp-rw" -q   || fail "emitted Pyrope with a reserved-word parameter does not re-parse"
+echo "PASS: a reserved-word Verilog parameter folds instead of becoming an unparseable generic"
+
+# A `pyrope:` RE-EMIT of a generated generic unit must not be silently dropped.
+# pass.prp_writer used to skip every template, which wrote a ZERO-BYTE .prp at
+# exit 0 with the unit still listed in manifest.json -- and destroyed the input
+# when the emit dir was the input dir.
+$LHD compile "$W/params/pair.prp" "$W/params/params.prp" "$W/params/params_p1.prp"   --emit-dir pyrope:"$W/reemit" --workdir "$W/reemit-w" -q || fail "re-emit of generated Pyrope failed"
+for u in params params_p1; do
+  [ -s "$W/reemit/$u.prp" ] || fail "re-emit wrote a ZERO-BYTE $u.prp (template silently dropped)"
+  grep -q 'STEP=' "$W/reemit/$u.prp" || fail "re-emitted $u.prp lost its generic header"
+done
+echo "PASS: a fully-defaulted generic unit survives a pyrope -> pyrope re-emit"
+
+# KNOWN GAP (see inou/slang/README.md): recompiling the emitted Pyrope renames a
+# parameterized STATEFUL module to its mangled specialization, so cross-frontend
+# def pairing degrades on the verilog -> pyrope -> lg leg. (A parameterized COMB
+# child is inlined instead, so it never shows this.) Pinned so the day the
+# identity-specialization naming lands, this flips and says so out loud.
+cat >"$W/rt.v" <<'EOF'
+module rtsub #(parameter int N = 3)(input clk, input [7:0] a, output reg [8:0] y);
+  always @(posedge clk) y <= a + N;
+endmodule
+module rttop(input clk, input [7:0] a, output [8:0] y, output [8:0] z);
+  rtsub u0(clk, a, y);
+  rtsub #(.N(5)) u1(clk, a, z);
+endmodule
+EOF
+$LHD compile "$W/rt.v" --top rttop --emit-dir lg:"$W/rt-lgv" --workdir "$W/rt-wv" -q \
+  || fail "stateful parameterized reference did not compile"
+$LHD tool tree lg:"$W/rt-lgv" 2>/dev/null | grep -q '^rtsub ' \
+  || fail "the verilog -> lg leg should keep the plain module name"
+$LHD compile "$W/rt.v" --top rttop --emit-dir pyrope:"$W/rt-p" --workdir "$W/rt-wp" -q \
+  || fail "stateful parameterized pyrope emission failed"
+$LHD compile "$W/rt-p"/*.prp --top rttop.rttop --emit-dir lg:"$W/rt-lgp" --workdir "$W/rt-wr" -q \
+  || fail "recompiling the generated stateful Pyrope failed"
+if $LHD tool tree lg:"$W/rt-lgp" 2>/dev/null | grep -q 'rtsub__'; then
+  echo "KNOWN GAP: recompiled parameterized stateful modules keep their mangled specialization names"
+else
+  fail "mangled specialization names are GONE -- the identity-specialization fix landed; replace this block with the real assertion (semdiff --top rttop --ref lg:rt-lgv --impl lg:rt-lgp reports '3 def pair(s), 0 ref-only' and 'registers ref 2/2 paired') and drop the matching limitation from inou/slang/README.md"
+fi
+
 echo "ALL PASS"

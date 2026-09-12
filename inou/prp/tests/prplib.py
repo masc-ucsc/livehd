@@ -182,6 +182,15 @@ class PrpRunner:
         if test.params.get('tolg'):
             cmd += ['--emit-dir',
                     'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
+        # Optional `:error_top: <name>` — pass an explicit `--top`. Some
+        # diagnostics only fire for a top the USER named (a generic entry point
+        # with no declaration default is a real error when it was requested as
+        # the top, and a library template waiting for its caller when it was
+        # merely the only unit in the file), so the fixture has to be able to
+        # say which of the two it is pinning. A distinct tag, not `:top_module:`,
+        # because that one defaults to 'top' for every test.
+        if test.params.get('error_top'):
+            cmd += ['--top', test.params['error_top'].strip()]
         return cmd
 
     def lhd_warning(self, test, mode):

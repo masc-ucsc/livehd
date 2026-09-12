@@ -111,9 +111,16 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
   if (n_hits != 1) {
     return {};
   }
-  livehd::diag::warn(diag_pass, "top-entity-fallback", "name")
-      .msg("top '{}' not found; using '{}' (the unique entity-name match)", want, hit)
-      .emit();
+  if (!diag_pass.empty()) {
+    // An EMPTY diag_pass means "resolve quietly": the caller is asking an
+    // internal "which unit would the top be" question, not selecting the top on
+    // the user's behalf, so the fallback must not be announced. Routing such a
+    // probe through this warning reported a false "top 'X' not found" for every
+    // design that merely contained a generic template.
+    livehd::diag::warn(diag_pass, "top-entity-fallback", "name")
+        .msg("top '{}' not found; using '{}' (the unique entity-name match)", want, hit)
+        .emit();
+  }
   return hit;
 }
 

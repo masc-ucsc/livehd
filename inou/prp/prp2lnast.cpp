@@ -18,6 +18,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "battr.hpp"  // THE attribute vocabulary (//upass/core:battr_hdr, header-only)
+#include "range_bits.hpp"  // kMaxIntTypeWidth (//upass/core:range_bits_hdr, header-only)
 #include "diag.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
@@ -5032,11 +5033,57 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // source text in a `const` child of the generic ref: func_extract
           // lifts it into Lnast::generic_defaults_, and the runner re-classifies
           // it (type / constant / lambda) exactly like an explicit `<…>` arg.
-          TSNode def = child_by_field(ti, "definition");
+          TSNode      def = child_by_field(ti, "definition");
+          std::string default_text;
+          if (!ts_node_is_null(def)) {
+            // Cooked strings use double quotes in source, but LNAST/Dlop
+            // constants carry the decoded, single-quoted representation.
+            // Preserve the same value as an ordinary string expression.
+            auto literal = def;
+            while (std::string_view(ts_node_type(literal)) == "expression_type" && ts_node_named_child_count(literal) == 1) {
+              literal = ts_node_named_child(literal, 0);
+            }
+            if (const auto value = plain_string_literal_text(literal); value) {
+              default_text = Dlop::from_string(*value)->to_pyrope();
+            } else {
+              default_text = std::string(trim(get_text(def)));
+              // Signed numeric defaults are grouped by the grammar (`N=(-1)`).
+              // Store the numeric value, not the grouping, for specialization.
+              // Peel only a BALANCED outer pair: `((-1)*(3-4))`'s first '(' closes
+              // mid-text, and blind peeling would hand `-1)*(3-4` to from_pyrope.
+              const auto peel_balanced = [](std::string_view t) {
+                while (t.size() >= 2 && t.front() == '(' && t.back() == ')') {
+                  int depth = 0;
+                  for (std::size_t i = 0; i < t.size(); ++i) {
+                    depth += t[i] == '(' ? 1 : (t[i] == ')' ? -1 : 0);
+                    if (depth == 0 && i + 1 != t.size()) {
+                      return t;  // the leading '(' is not the one the last ')' closes
+                    }
+                  }
+                  t = trim(t.substr(1, t.size() - 2));
+                }
+                return t;
+              };
+              const auto numeric = peel_balanced(std::string_view(default_text));
+              if (numeric.size() > 1 && (numeric.front() == '-' || numeric.front() == '+')
+                  && std::isdigit(static_cast<unsigned char>(numeric[1])) != 0) {
+                // Best effort: from_pyrope THROWS on anything past a single signed
+                // literal (`(-1+2)`, `(-4..=4)`, `(-1,2)`, `(-0b1010)`), and those
+                // are all grammatically legal here. Keep the source text so the
+                // runner/tolg reports its own LOCATED error, exactly as the
+                // unsigned twin `(1+2)` already does -- never an `internal` class
+                // exception with no span.
+                try {
+                  default_text = std::string(Dlop::from_pyrope(numeric)->to_pyrope());
+                } catch (const std::exception&) {  // NOLINT: source text stays the diagnostic carrier
+                }
+              }
+            }
+          }
           if (stream_lambda) {
-            streamed_generic_defaults.emplace_back(ts_node_is_null(def) ? std::string{} : std::string(trim(get_text(def))));
+            streamed_generic_defaults.emplace_back(default_text);
           } else if (!ts_node_is_null(def)) {
-            lnast->add_child(gref, Lnast_node::create_const(std::string(trim(get_text(def)))));
+            lnast->add_child(gref, Lnast_node::create_const(default_text));
           }
         }
       };
@@ -7107,7 +7154,7 @@ Lnast_node Prp2lnast::attribute_set_to_node(TSNode n) {
 // `u2147483647`) makes Dlop::get_mask_value build a multi-gigabit constant and
 // hang, so the two `u<N>/s<N>/i<N>` parse sites reject anything above this with
 // a clean diagnostic. Generous vs. any real design (buses are a few k bits).
-static constexpr long long kMaxIntTypeWidth = 1 << 20;
+static constexpr long long kMaxIntTypeWidth = upass::kMaxIntTypeWidth;  // upass/core/range_bits.hpp -- one ceiling
 
 // Parse the <N> in `u<N>/s<N>/i<N>`. Returns nullopt on non-numeric, overflow,
 // negative, or above kMaxIntTypeWidth.

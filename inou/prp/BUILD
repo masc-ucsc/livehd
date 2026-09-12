@@ -93,6 +93,10 @@ cc_library(
         # NOT link the upass/core plugin -- it just stops prp2lnast from
         # hand-copying the list, which had already drifted both ways.
         "//upass/core:battr_hdr",
+        # The integer-type width ceiling (kMaxIntTypeWidth). Header-only for the
+        # same reason as battr_hdr: one ceiling, no hand-copied constant that can
+        # drift from the one the uPass generic binder enforces.
+        "//upass/core:range_bits_hdr",
         "@prpparse//:prpparse",
         # 2f-sim B0: prp_sim reads cgen_sim's per-module <stem>.iface.json
         # manifest instead of text-scraping the generated headers.

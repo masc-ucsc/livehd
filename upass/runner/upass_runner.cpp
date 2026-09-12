@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <charconv>
 #include <cstdlib>
 #include <format>
 #include <functional>
@@ -1063,7 +1064,8 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
   if (!materialize_) {
     return;
   }
-  auto folded = try_fold_ref(name);
+  auto folded
+      = !preserved_param_names_.empty() && preserved_param_names_.contains(name) ? std::optional<Dlop>{} : try_fold_ref(name);
   // Substitute only a genuine folded constant. A `nil` value is an
   // unset/poison marker (not is_invalid, so it slips past the check below, but
   // its to_pyrope() is the placeholder `0`); emitting it would replace a live
@@ -2142,7 +2144,46 @@ bool uPass_runner::any_pass_drops() const {
   return false;
 }
 
+bool uPass_runner::track_param_provenance() {
+  // Keep the dataflow derived from module parameters symbolic in emitted
+  // source. Evaluation still sees the bound constants in the symbol table;
+  // only producer removal and materialized operands are affected.
+  if (preserved_param_names_.empty() || lm->get_lnast().get() != root_lnast_.get() || !lm->has_child()) {
+    return false;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string dst(lm->current_text());
+  bool              derived = preserved_param_names_.contains(dst);
+  auto              scan    = [&](auto&& self) -> void {
+    if (Lnast_ntype::is_ref(lm->get_raw_ntype()) && preserved_param_names_.contains(std::string(lm->current_text()))) {
+      derived = true;
+    }
+    if (!lm->has_child()) {
+      return;  // a leaf: move_to_child() would INVALIDATE the cursor and kill the caller's sibling loop
+    }
+    lm->move_to_child();
+    do {
+      self(self);
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  };
+  while (lm->move_to_sibling()) {
+    scan(scan);
+  }
+  lm->restore_cursor(saved);
+  if (derived) {
+    preserved_param_names_.insert(dst);
+  }
+  return derived;
+}
+
 void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
+  const bool parameter_expr = !fold_all && track_param_provenance();
   // 1. Run per-node process_* so symbol tables see the current statement.
   dispatch_to_passes(fn);
   // 2. Region/verdict drops (verifier cassert discharge, func_extract
@@ -2153,7 +2194,7 @@ void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
   //    means every consumer folds the value, so the producer is dead.
   //    cassert has NO dst (child 0 is the condition) and always emits.
   bool drop = any_pass_drops();
-  if (!drop && lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_cassert && lm->has_child()) {
+  if (!drop && !parameter_expr && lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_cassert && lm->has_child()) {
     const auto here = lm->save_cursor();
     lm->move_to_child();
     if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
@@ -2478,6 +2519,7 @@ void uPass_runner::merge_fact_fields(Bundle& bound, const Bundle& from) {
 }
 
 void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_all) {
+  const bool parameter_expr = !fold_all && track_param_provenance();
   Resolved_node rn;
   if (!resolve_node_operands(rn)) {
     // No leading dst ref: still push-dispatch with a throwaway dst (hooks
@@ -2501,7 +2543,7 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
   // these stores implicitly; the streaming source retains a composite io
   // node, so make the output-root rule explicit (e.g. `o.id = 0`).
   const bool output_driver = io_output_names_.contains(rn.dst_name);
-  if ((!vote_drop || output_driver) && !any_pass_drops()) {
+  if ((!vote_drop || output_driver || parameter_expr) && !any_pass_drops()) {
     emit_op_with_fold(fold_all);
   }
 }
@@ -3441,9 +3483,9 @@ void uPass_runner::process_bit_selection() {
     // width was static all along. Only the value-INDEPENDENT masks are used
     // here: a non-negative const (popcount) or a fully bounded range.
     {
-      const auto  sv = lm->save_cursor();
-      std::string dst;
-      std::string value_name;
+      const auto             sv = lm->save_cursor();
+      std::string            dst;
+      std::string            value_name;
       std::optional<int64_t> selected;
       if (lm->move_to_child()) {
         dst = std::string(lm->current_text());
@@ -3454,7 +3496,8 @@ void uPass_runner::process_bit_selection() {
         }
         if (!value_name.empty() && lm->move_to_sibling()) {  // MASK
           if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-            if (const auto m = Dlop::from_pyrope(lm->current_text()); m && m->is_integer() && !m->has_unknowns() && !m->is_negative()) {
+            if (const auto m = Dlop::from_pyrope(lm->current_text());
+                m && m->is_integer() && !m->has_unknowns() && !m->is_negative()) {
               selected = m->popcount();
             }
           } else if (const auto r = symbol_table_.get_bundle(lm->current_text()); r && !r->get_attr("rng_s").is_invalid()) {
@@ -3473,7 +3516,7 @@ void uPass_runner::process_bit_selection() {
       // x's own declare, and stamping an integer envelope on it is wrong when
       // x is a tuple (a slang-imported `core_ctrl_resp` struct port hit exactly
       // that: "cannot assign integer value ... (it is tuple)").
-      const bool dst_is_tmp = !dst.empty() && (dst.front() == '%' || dst.starts_with("___"));
+      const bool dst_is_tmp       = !dst.empty() && (dst.front() == '%' || dst.starts_with("___"));
       // ... and only over a SCALAR source. On this (slang) path a packed struct
       // IS a bit vector: `s.field[i] = v` is a read-modify-write whose get_mask
       // temps are whole-struct (tuple-shaped) copies, and declaring one of
@@ -3481,7 +3524,7 @@ void uPass_runner::process_bit_selection() {
       // assign integer value to `core_ctrl_resp` (it is tuple)"). A named or
       // multi-positional source is left alone; an element read (at most one
       // positional, or shape attrs only) is exactly the case this exists for.
-      bool source_is_scalar = !value_name.empty();
+      bool       source_is_scalar = !value_name.empty();
       if (source_is_scalar) {
         if (const auto vb = symbol_table_.get_bundle(value_name); vb) {
           source_is_scalar = !vb->has_named_top() && vb->unnamed_top_count() <= 1;
@@ -3499,8 +3542,7 @@ void uPass_runner::process_bit_selection() {
         // attrs, so a real value is never discarded.
         if (const auto b = symbol_table_.get_bundle_for_write(dst);
             b && !b->is_empty() && !b->has_trivial(bundle_path::of_string("0")) && !b->has_named_top()
-            && b->unnamed_top_count() == 0
-            && std::all_of(b->get_attrs().begin(), b->get_attrs().end(), [](const auto& a) {
+            && b->unnamed_top_count() == 0 && std::all_of(b->get_attrs().begin(), b->get_attrs().end(), [](const auto& a) {
                  return a.first.starts_with("__array_") || a.first.starts_with("__elem_");
                })) {
           // ERASE in place: Symbol_table::set treats residual attrs as NAME
@@ -4220,10 +4262,10 @@ bool uPass_runner::try_lower_typecast() {
   // (typecheck's set_value_kind — a runtime `a<b` stamps value_kind=boolean
   // there, NOT on entry "0", whose range reads as a signed int(-1,0)); mirror
   // uPass_typecheck::kind_of_bundle. Enums carry the `enumentry` attr.
-  bool                operand_is_bool = false;
-  bool                operand_is_enum = false;
+  bool                operand_is_bool       = false;
+  bool                operand_is_enum       = false;
   bool                operand_decl_unsigned = false;  // declared `:uN` => provably >= 0
-  upass::Kind         operand_kind    = upass::Kind::unknown;
+  upass::Kind         operand_kind          = upass::Kind::unknown;
   std::optional<Dlop> vmax;
   std::optional<Dlop> vmin;
   if (auto b = symbol_table_.get_bundle(arg_name); b) {
@@ -6458,6 +6500,15 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
           dst->add_child(dst_parent, Lnast_node::create_ref(gb.type_name));
           return;
         }
+        // BOOLEAN before the envelope arm: a bool bind carries a 1/0 envelope too,
+        // and Pyrope keeps bool and int distinct -- typing a `:T` port as
+        // int(max=1,min=0) made `if a` fail with `cond-not-bool`. This is the
+        // shape prp2lnast emits for a hand-written `:bool` port (a childless
+        // prim_type_bool), and it mirrors the inline path's own arm ordering.
+        if (gb.kind == Io_kind::boolean) {
+          dst->add_child(dst_parent, Lnast_ntype::create_prim_type_bool());
+          return;
+        }
         if (gb.max || gb.min) {
           auto pt = dst->add_child(dst_parent, Lnast_ntype::create_prim_type_int());
           dst->add_child(pt, Lnast_node::create_const(gb.max ? std::string(gb.max->to_pyrope()) : std::string("nil")));
@@ -8158,6 +8209,52 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   const auto bind_of_type_name = [&](const std::string& tn, std::string from) -> Generic_bind {
     Generic_bind gb;
     gb.from = std::move(from);
+    // Declaration defaults carry source type tokens rather than the typed
+    // temporary emitted for an explicit `<u8>` actual.
+    if (tn == "bool" || tn == "boolean") {
+      gb.kind = Io_kind::boolean;
+      gb.max  = *Dlop::create_integer(1);
+      gb.min  = *Dlop::create_integer(0);
+      return gb;
+    }
+    // Width sugar `uN`/`sN`/`iN` -- the same spelling set uPass_constprop's
+    // does_operand decodes. int64_t (not int) so an out-of-int spelling like
+    // `u9999999999` still lands on the diagnostic below instead of falling
+    // through and being substituted verbatim as a named type.
+    //
+    // KNOWN GAP: unlike uPass_constprop::does_operand (which decodes a type token
+    // only when `!is_known_var`, "a real variable wins over a type-token
+    // spelling"), this decode runs BEFORE any value lookup. On the
+    // specialize_top_defaults path the symbol table is empty, so a top generic
+    // whose DEFAULT names a comptime constant spelled like a width token
+    // (`comptime const i2 = 3` used as `<N=i2>`) binds as a TYPE and the clone
+    // gets a prim_type node in a value position -- reported as
+    // `unresolved reference ''`. Fixing it needs the file-unit constant scope
+    // seeded here (a call site is unaffected: bind_of_explicit_arg folds the ref
+    // first). Compile-time error, never wrong hardware.
+    if (tn.size() > 1 && (tn.front() == 'u' || tn.front() == 'i' || tn.front() == 's')) {
+      int64_t    width  = 0;
+      const auto parsed = std::from_chars(tn.data() + 1, tn.data() + tn.size(), width);
+      if ((parsed.ec == std::errc{} || parsed.ec == std::errc::result_out_of_range) && parsed.ptr == tn.data() + tn.size()
+          && (width > 0 || parsed.ec == std::errc::result_out_of_range)) {
+        // Bound BEFORE materializing: max_from_bits builds a 2^N-1 Dlop and the
+        // LNAST const it is stringified into is what exhausts memory. Both
+        // explicit spellings (`(a:uN)`, `f<uN>(…)`) already refuse above this.
+        if (parsed.ec == std::errc::result_out_of_range || width > upass::kMaxIntTypeWidth) {
+          fcall_arg_fail(call_span,
+                         "width-too-large",
+                         std::format("integer type width '{}' in {} is out of range (0..{} bits)",
+                                     tn,
+                                     gb.from,
+                                     upass::kMaxIntTypeWidth),
+                         "use a smaller bit width");
+        }
+        gb.kind = Io_kind::integer;
+        gb.max  = upass::max_from_bits(static_cast<uint32_t>(width), tn.front() != 'u');
+        gb.min  = upass::min_from_bits(static_cast<uint32_t>(width), tn.front() != 'u');
+        return gb;
+      }
+    }
     if (const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), tn); f && f->has_type_spec) {
       switch (f->kind) {
         case upass::decl_facts::Num::unsigned_int:
@@ -8203,7 +8300,8 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       gb.const_text = s;
       return gb;
     }
-    if (std::isdigit(static_cast<unsigned char>(c0)) != 0) {
+    if (std::isdigit(static_cast<unsigned char>(c0)) != 0
+        || (s.size() > 1 && (c0 == '-' || c0 == '+') && std::isdigit(static_cast<unsigned char>(s[1])) != 0)) {
       Generic_bind gb;
       gb.from = std::move(from);
       gb.kind = Io_kind::integer;
@@ -8533,6 +8631,53 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   apply_defaults();
   validate_kinds();
   return binds;
+}
+
+std::shared_ptr<Lnast> uPass_runner::specialize_top_defaults() {
+  const auto  callee   = lm->get_lnast();
+  const auto  name     = std::string(callee->get_top_module_name());
+  const auto& gens     = callee->get_generics();
+  const auto& defaults = callee->get_generic_defaults();
+  for (std::size_t i = 0; i < gens.size(); ++i) {
+    if (i >= defaults.size() || defaults[i].empty()) {
+      fcall_arg_fail(lm->current_span(),
+                     "top-generic-default",
+                     std::format("generic `{}` of top `{}` has no default", gens[i], name),
+                     "declare a default or select a concrete caller as the top");
+    }
+  }
+  const auto binds = resolve_generic_binds(callee, callee->io_meta(), {}, {}, 0, {}, name, lm->current_span());
+  // Every INPUT must end up concretely typed. There is no call site here to
+  // infer a width from (the rule `type_from_actual` enforces as
+  // `fcall-untyped-actual`), so an untyped input would silently lower as a 1-bit
+  // SIGNED wire -- `pub mod u2<N=3>(a) -> (y:u9@[0])` emitted
+  // `input signed a` and reported "pass", while the same module WITHOUT the
+  // generic is refused outright. Outputs are legitimately inferred from the body.
+  for (const auto& e : callee->io_meta().inputs) {
+    if (e.bits > 0 || e.has_range || e.kind != Io_kind::none || e.array_size > 0 || e.is_varargs) {
+      continue;  // already concrete
+    }
+    bool resolved = false;
+    if (!e.type_name.empty()) {
+      if (const auto it = binds.find(e.type_name); it != binds.end()) {
+        // A width token the parse REJECTED (`u0`, `u99999999999`) leaves neither
+        // an envelope nor a boolean kind, so it must not pass as "typed".
+        resolved = it->second.max.has_value() || it->second.min.has_value() || it->second.kind == Io_kind::boolean;
+      } else {
+        resolved = true;  // a plain named type -- substituted verbatim, checked downstream
+      }
+    }
+    if (!resolved) {
+      fcall_arg_fail(lm->current_span(),
+                     "top-untyped-port",
+                     std::format("input `{}` of top `{}` has no declared type — a `{}` boundary needs an explicit width",
+                                 e.name,
+                                 name,
+                                 callee->get_lambda_kind()),
+                     "annotate the port (e.g. `a:u8`), or give the generic it is typed by a resolvable default");
+    }
+  }
+  return clone_template_specialized(callee, name, {}, {}, {}, {}, binds);
 }
 
 bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,

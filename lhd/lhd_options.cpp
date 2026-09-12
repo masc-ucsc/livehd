@@ -603,7 +603,7 @@ Options parse_args(int argc, char** argv) {
       } catch (const std::exception&) {
         consumed = 0;
       }
-      if (v.empty() || consumed != v.size() || n <= 0) {
+      if (v.empty() || consumed != v.size() || n <= 0 || n > std::numeric_limits<int>::max()) {
         throw Lhd_error{"usage", std::format("{} expects a positive integer, got '{}'", a, v), ""};
       }
       if (a == "--indent") {

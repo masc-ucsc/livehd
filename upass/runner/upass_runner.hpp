@@ -86,9 +86,12 @@ public:
   uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
                upass::Options_map options = {});
 
-  void               run();
-  bool               has_configuration_error() const { return configuration_error; }
-  const std::string& get_configuration_error() const { return configuration_error_msg; }
+  void                   run();
+  // Elaborate a hardware entry point without call-site actuals. The caller
+  // keeps the template in the call registry for explicit instantiations.
+  std::shared_ptr<Lnast> specialize_top_defaults();
+  bool                   has_configuration_error() const { return configuration_error; }
+  const std::string&     get_configuration_error() const { return configuration_error_msg; }
 
   // Mark this runner as processing a function-body LNAST spawned by
   // func_extract. The dead-code-elimination pass uses this to skip
@@ -129,7 +132,14 @@ public:
   // Comptime evaluation is unaffected (it reads the symbol table, never the
   // materialized tree), but lnast.tolg cannot wire a symbolic ref — so the
   // kernel only turns this on for a pyrope-emitting, no-graphs compile.
-  void set_preserve_param_provenance(bool v) { preserve_param_provenance_ = v; }
+  void set_preserve_param_provenance(bool v) {
+    preserve_param_provenance_ = v;
+    if (v && root_lnast_->is_verilog_origin()) {
+      for (const auto& name : root_lnast_->get_generics()) {
+        preserved_param_names_.insert(name);
+      }
+    }
+  }
 
 protected:
   struct Pass_entry {
@@ -212,6 +222,8 @@ protected:
   std::vector<std::shared_ptr<Lnast>> new_lnasts;
   bool                                materialize_{true};                 // see set_materialize()
   bool                                preserve_param_provenance_{false};  // see set_preserve_param_provenance()
+  absl::flat_hash_set<std::string>    preserved_param_names_;
+  bool                                track_param_provenance();
 
   // The `pkg.PARAM` a folded ref came from, or "" when the value has no
   // imported-package origin. Reads uPass_constprop's tget_origin plus the

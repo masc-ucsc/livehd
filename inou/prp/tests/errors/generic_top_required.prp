@@ -1,0 +1,12 @@
+/*
+:name: generic_top_required
+:type: error
+:tolg: 1
+:error_top: generic_top_required
+:error: generic `N` of top .* has no default
+:help: declare a default or select a concrete caller
+*/
+
+pub mod generic_top_required<N>(a:u8) -> (y:u9@[0]) {
+  y = a + N
+}

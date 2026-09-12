@@ -166,10 +166,10 @@ void semdiff_command(Options& opts, Result& res) {
     auto pct = [](uint64_t n, uint64_t d) { return d == 0 ? 100.0 : 100.0 * static_cast<double>(n) / static_cast<double>(d); };
     // Registers = every state cell that is not a Memory; the pair counts carry
     // their own Memory subset so both rows are exact rather than inferred.
-    const uint32_t a_regs      = st.a_total - st.a_mems;
-    const uint32_t b_regs      = st.b_total - st.b_mems;
-    const uint32_t paired_mem  = st.name_pairs_mem + st.full_pairs_mem;
-    const uint32_t paired_regs = (st.name_pairs + st.full_pairs) - paired_mem;
+    const uint32_t a_regs        = st.a_total - st.a_mems;
+    const uint32_t b_regs        = st.b_total - st.b_mems;
+    const uint32_t a_paired_regs = st.a_paired - st.a_paired_mems;
+    const uint32_t b_paired_regs = st.b_paired - st.b_paired_mems;
     std::print("semdiff[stats]: defs      {} paired, {} ref-only\n", def_pairs, ref_only);
     std::print("semdiff[stats]: nodes     ref {}/{} matched ({:.1f}%), impl {}/{} matched ({:.1f}%), {} region(s)\n",
                a_matched,
@@ -179,19 +179,19 @@ void semdiff_command(Options& opts, Result& res) {
                b_total,
                pct(b_matched, b_total),
                regions);
-    std::print("semdiff[stats]: registers ref {}/{} paired ({:.1f}%), impl {}/{} — by name {}, by structure {}\n",
-               paired_regs,
+    std::print("semdiff[stats]: registers ref {}/{} paired ({:.1f}%), impl {}/{} — ref pairs by name {}, by structure {}\n",
+               a_paired_regs,
                a_regs,
-               pct(paired_regs, a_regs),
-               paired_regs,
+               pct(a_paired_regs, a_regs),
+               b_paired_regs,
                b_regs,
                st.name_pairs - st.name_pairs_mem,
                st.full_pairs - st.full_pairs_mem);
-    std::print("semdiff[stats]: memories  ref {}/{} paired ({:.1f}%), impl {}/{} — by name {}, by structure {}\n",
-               paired_mem,
+    std::print("semdiff[stats]: memories  ref {}/{} paired ({:.1f}%), impl {}/{} — ref pairs by name {}, by structure {}\n",
+               st.a_paired_mems,
                st.a_mems,
-               pct(paired_mem, st.a_mems),
-               paired_mem,
+               pct(st.a_paired_mems, st.a_mems),
+               st.b_paired_mems,
                st.b_mems,
                st.name_pairs_mem,
                st.full_pairs_mem);

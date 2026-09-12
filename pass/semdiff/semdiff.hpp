@@ -88,8 +88,12 @@ struct Semdiff_options {
 // since an ambiguous bucket is matcher headroom while a no-counterpart cell is
 // a genuine diff).
 struct State_stats {
-  uint32_t a_total = 0, b_total = 0;                // state cells per side
-  uint32_t a_mems = 0, b_mems = 0;                  // Memory subset of the totals
+  uint32_t a_total = 0, b_total = 0;  // state cells per side
+  uint32_t a_mems = 0, b_mems = 0;    // Memory subset of the totals
+  // Coverage is side-specific: one Memory may correspond to registers, and
+  // one logical aggregate may correspond to several physical leaves.
+  uint32_t a_paired = 0, b_paired = 0;
+  uint32_t a_paired_mems = 0, b_paired_mems = 0;
   uint32_t name_pairs     = 0;                      // tier-1: state_key 1:1 across the sides
   uint32_t a_name_grouped = 0, b_name_grouped = 0;  // key on both sides but colliding within one
   uint32_t seed_pairs     = 0;                      // caller-supplied seed_pairs that resolved (anchored) a cell pair
@@ -112,6 +116,10 @@ struct State_stats {
     b_total          += o.b_total;
     a_mems           += o.a_mems;
     b_mems           += o.b_mems;
+    a_paired         += o.a_paired;
+    b_paired         += o.b_paired;
+    a_paired_mems    += o.a_paired_mems;
+    b_paired_mems    += o.b_paired_mems;
     name_pairs       += o.name_pairs;
     a_name_grouped   += o.a_name_grouped;
     b_name_grouped   += o.b_name_grouped;

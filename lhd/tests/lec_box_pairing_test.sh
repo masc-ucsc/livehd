@@ -165,4 +165,41 @@ fi
 grep -q "REFUTED" "$W/state_anon_bug.out" || { cat "$W/state_anon_bug.out" >&2; fail "stateful REAL bug did not report REFUTED"; }
 echo "PASS(state_anon_bug): real stateful bug still REFUTED through the flat confirmation"
 
+# An inlined child definition still exists in the library. It must not become
+# a one-sided box merely because its definition name matches on both sides.
+cat > "$W/inline_box.prp" <<'EOF'
+pub comb helper(a:u8) -> (y:u8) {
+  y = a ^ 0x5a
+}
+pub mod inline_box(a:u8) -> (y:u8@[1]) {
+  reg q:u8 = 0
+  q = helper(a)
+  y = q
+}
+EOF
+for inline in false true; do
+  "$LHD" compile "$W/inline_box.prp" --top inline_box --set "compile.upass.inline=$inline" \
+    --emit-dir "lg:$W/inline-$inline" --workdir "$W/inline-compile-$inline" > "$W/inline-$inline.log" 2>&1 \
+    || fail "inline fixture compile failed ($inline): $(cat "$W/inline-$inline.log")"
+done
+for order in top_down bottom_up; do
+  "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-true" --top inline_box \
+    --set formal.engine=ind --set "formal.lec.hier_order=$order" --workdir "$W/inline-lec-$order" \
+    > "$W/inline-$order.out" 2>&1 || fail "asymmetric inlining failed ($order): $(cat "$W/inline-$order.out")"
+  grep -q "'inline_box' PROVEN (0 child collapses)" "$W/inline-$order.out" \
+    || fail "inlined child was still boxed ($order): $(cat "$W/inline-$order.out")"
+  grep -q 'under collapse\|ref-only cut point' "$W/inline-$order.out" \
+    && fail "asymmetric inlining needed a box fallback ($order)"
+done
+echo "PASS(inline): asymmetric inlining descends directly under both hierarchy orders"
+sed 's/q = helper(a)/q = helper(a ^ 1)/' "$W/inline_box.prp" > "$W/inline_box_bug.prp"
+"$LHD" compile "$W/inline_box_bug.prp" --top inline_box --set compile.upass.inline=true \
+  --emit-dir "lg:$W/inline-bug" --workdir "$W/inline-compile-bug" > "$W/inline-bug.log" 2>&1 \
+  || fail "inlined negative control did not compile: $(cat "$W/inline-bug.log")"
+if "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-bug" --top inline_box \
+  --workdir "$W/inline-lec-bug" > "$W/inline-bug.out" 2>&1; then
+  fail "asymmetric inlining hid a real output difference"
+fi
+grep -q 'REFUTED' "$W/inline-bug.out" || fail "asymmetric inlining negative control did not refute"
+
 echo "lec_box_pairing_test: all sections PASS"

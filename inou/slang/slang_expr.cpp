@@ -257,9 +257,9 @@ std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Ex
 
 bool Slang_context::contains_package_param(const slang::ast::Expression& expr) {
   bool found = false;
-  auto check = [&found](const slang::ast::Symbol& sym) {
+  auto check = [this, &found](const slang::ast::Symbol& sym) {
     if (!found && (sym.kind == slang::ast::SymbolKind::Parameter || sym.kind == slang::ast::SymbolKind::EnumValue)
-        && owning_package(sym) != nullptr) {
+        && (owning_package(sym) != nullptr || local_param_lname_.contains(&sym))) {
       found = true;
     }
   };

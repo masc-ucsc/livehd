@@ -245,7 +245,19 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
           var.add(ln);
         }
       }
-      lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+      // Each side's selected top also controls ELABORATION: a generic entry
+      // needs its defaults instantiated before there is a graph to select.
+      // Scope that to lower_lnasts only -- pass.formal reads `opts.top` as the
+      // design's COMMITTED top boundary (is_top => an IO assume becomes an
+      // unchecked hypothesis, an assert must hold unconditionally), so letting a
+      // per-side `--ref-top`/`--impl-top` submodule reach the graph pipeline
+      // fails the run on contracts the real parent discharges.
+      auto        side_opts    = opts;
+      const auto& selected_top = side == "ref" ? opts.ref_top : opts.impl_top;
+      if (!selected_top.empty()) {
+        side_opts.top = selected_top;
+      }
+      lower_lnasts(side_opts, res, var, lib_path, /*need_graphs=*/true);
       graph_pipeline_and_emits(opts, res, var, lib_path);
     }
   } else {
@@ -635,10 +647,34 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
   // The LEC-able defs are those present on BOTH sides; children[def] = the child
   // def keys it instantiates (taken from the ref-side Subs, canonicalized).
-  absl::flat_hash_map<std::string, std::vector<std::string>> children;
+  absl::flat_hash_map<std::string, std::vector<std::string>>         children;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> box_children;
+  absl::flat_hash_map<std::string, std::vector<std::string>>         impl_children;
+  for (const auto& [name, g] : impl_by_name) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+      if (gu::type_op_of(node) == Ntype_op::Sub) {
+        impl_children[name].push_back(canon_impl(node.get_subnode_io()->get_name()));
+      }
+    }
+  }
   for (auto& [name, g] : ref_by_name) {
     if (impl_by_name.find(name) == impl_by_name.end()) {
       continue;
+    }
+    // A corresponding instance can be below a rolled-loop wrapper. Box
+    // matching already handles those occurrences; direct child counts do not.
+    auto&                    reachable = box_children[name];
+    std::vector<std::string> pending{name};
+    while (!pending.empty()) {
+      auto parent = std::move(pending.back());
+      pending.pop_back();
+      if (auto it = impl_children.find(parent); it != impl_children.end()) {
+        for (const auto& child : it->second) {
+          if (reachable.insert(child).second) {
+            pending.push_back(child);
+          }
+        }
+      }
     }
     absl::flat_hash_set<std::string> seen;
     for (auto node : g->body().nodes(hhds::Node_order::forward)) {
@@ -1262,6 +1298,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // unbounded top proof with no caveat on the run's verdict line.
   std::vector<uint8_t>                                       bounded_proof(order.size(), 0);
   std::vector<std::vector<std::string>>                      assumed(order.size());
+  //   descended[i] children def i DESCENDED because the implementation parent has
+  //                no occurrence of them (asymmetric inlining). Such a child was
+  //                already flat on both sides inside def i's own proof, so an
+  //                escalation round has nothing left to inline there: re-solving
+  //                it is a bit-identical query, and the force_flat_refuted it
+  //                would record flips the def into the proven-absorbing flat
+  //                confirmation (a second, fully flat solve of the whole subtree
+  //                whose Unknown DEMOTES a settled PROVEN). Written in-task and
+  //                read only with no task in flight, like `assumed`.
+  std::vector<absl::flat_hash_set<std::string>>              descended(order.size());
   std::vector<absl::flat_hash_set<std::string>>              force_flat(order.size());
   std::vector<absl::flat_hash_set<std::string>>              force_flat_refuted(order.size());
   // `refuted` for OTHER defs, snapshotted between rounds. run_def reads a
@@ -1403,13 +1449,25 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     std::vector<std::string> coll;  // SPECULATIVE child boxes (the retry confirms these; trust is excluded)
     bool                     kids_proven = true;
     assumed[def_ix].clear();
+    descended[def_ix].clear();
     if (auto it = children.find(name); it != children.end()) {
       for (const auto& c : it->second) {
         if (is_trusted(c)) {
           continue;  // already force-boxed via the trust seed above; an assumption, so it never flips kids_proven
         }
-        auto       ci        = order_ix.find(c);
-        const bool is_proven = ci != order_ix.end() && proven[ci->second] != 0;
+        auto       ci                  = order_ix.find(c);
+        const bool is_proven           = ci != order_ix.end() && proven[ci->second] != 0;
+        // A definition can survive in both libraries even after its instances
+        // were inlined on one side. Boxing that one-sided boundary creates
+        // unmatched UF cut points and sends an easy combinational comparison
+        // into BMC. Descend when the implementation parent has no occurrence,
+        // including below any hierarchy/rolled-loop wrappers.
+        const auto compatible_children = box_children.find(name);
+        if (compatible_children == box_children.end() || !compatible_children->second.contains(c)) {
+          kids_proven = kids_proven && is_proven;
+          descended[def_ix].insert(c);
+          continue;
+        }
         // TOP-DOWN: box the child whether or not it is proven YET. The premise
         // "this child pair is equivalent" is discharged by that child's OWN
         // entry in this same pass — the module DAG is well-founded, so the
@@ -1418,7 +1476,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         //   `force_flat` overrides: an escalation round descends the ONE child
         // whose refutation this def has to absorb or whose inconclusive proof it
         // has to discharge in context.
-        const bool want_box  = (top_down || is_proven) && force_flat[def_ix].count(c) == 0 && !assume_cones.contains(c);
+        const bool want_box = (top_down || is_proven) && force_flat[def_ix].count(c) == 0 && !assume_cones.contains(c);
         if (want_box) {
           // A child must NOT collapse when its ref/impl port sets diverge the
           // tuple-leaf <-> flat-bus way (Pyrope `req.a`/`req.b` leaves vs one
@@ -1456,7 +1514,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           if (top_down && force_flat[def_ix].count(c) > 0) {
             if (auto gk = children.find(c); gk != children.end()) {
               for (const auto& g : gk->second) {
-                auto gi = order_ix.find(g);
+                auto       gi               = order_ix.find(g);
+                const auto grandchild_boxes = box_children.find(c);
+                if (grandchild_boxes == box_children.end() || !grandchild_boxes->second.contains(g)) {
+                  continue;  // asymmetric inlining also applies during escalation
+                }
                 if (gi == order_ix.end() || force_flat[def_ix].count(g) > 0 || refuted_snapshot[gi->second] != 0
                     || assume_cones.contains(g)) {
                   continue;  // itself being absorbed, or known-different: descend it too
@@ -2324,13 +2386,27 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           if (pi == order_ix.end()) {
             continue;
           }
-          // Already absorbed in an earlier round, or the parent never boxed it.
+          // Already absorbed in an earlier round, or the parent declined to box it
+          // because force_flat already said so.
           if (force_flat[pi->second].count(order[i]) > 0) {
             continue;
           }
           force_flat[pi->second].insert(order[i]);
           if (refuted[i] != 0) {
             force_flat_refuted[pi->second].insert(order[i]);
+          }
+          // Record the absorption (so the ABSORBED accounting stays right and
+          // later rounds stay idempotent) but DO NOT schedule a retry for a parent
+          // that never boxed this child in the first place: the asymmetric-inlining
+          // guard already descended it, so the parent's standing proof ALREADY
+          // contains the child flat on both sides. Re-solving is the identical
+          // query, and the force_flat_refuted just recorded would drag a settled
+          // PROVEN through the proven-absorbing flat confirmation -- on a 170-module
+          // design those parents are 25-210 s defs, and the retry runs on the
+          // REMAINING soft budget, so the redundant round can time out and demote a
+          // verdict that was already final.
+          if (descended[pi->second].count(order[i]) > 0) {
+            continue;
           }
           if (retry_set.insert(pi->second).second) {
             retry.push_back(pi->second);

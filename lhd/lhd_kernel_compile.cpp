@@ -1358,6 +1358,94 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     }
   }
 
+  // A generic hardware top has no call site to trigger specialization. Wait
+  // until imports converge, then instantiate its defaults through uPass's
+  // normal template cloning and elaboration. Keep the original templates in
+  // the call registry during this final walk, so explicit bindings still work.
+  if (need_graphs && std::any_of(var.lnasts.begin(), var.lnasts.end(), [](const auto& ln) {
+        return ln->is_template() && !ln->get_generics().empty();
+      })) {
+    // Every generic of a unit carries a declaration default: only then is the
+    // unit elaborate-able with no call site at all.
+    const auto fully_defaulted = [](const std::shared_ptr<Lnast>& ln) {
+      const auto& gens = ln->get_generics();
+      const auto& defs = ln->get_generic_defaults();
+      return !gens.empty() && defs.size() >= gens.size()
+             && std::none_of(defs.begin(), defs.end(), [](const auto& d) { return d.empty(); });
+    };
+    // `pub <entity>` in its own file unit's pub list. A private helper lambda is
+    // never a plausible auto-top, so it must not make the choice ambiguous.
+    const auto is_pub_entity = [&](std::string_view full) {
+      const auto dot = full.rfind('.');
+      if (dot == std::string_view::npos) {
+        return true;  // a bare unit name is its own file
+      }
+      const auto file = full.substr(0, dot);
+      const auto ent  = full.substr(dot + 1);
+      for (const auto& u : var.lnasts) {
+        if (u->get_top_module_name() != file) {
+          continue;
+        }
+        const auto& pubs = u->get_pub_list();
+        return std::any_of(pubs.begin(), pubs.end(), [&](const auto& p) { return p.name == ent; });
+      }
+      return false;
+    };
+    std::vector<std::string> names;
+    for (const auto& ln : var.lnasts) {
+      if (!ln->get_lambda_kind().empty()) {
+        names.emplace_back(ln->get_top_module_name());
+      }
+    }
+    const bool explicit_top = !opts.top.empty() && opts.top != "-auto-top";
+    std::string selected;
+    if (explicit_top) {
+      // QUIET resolve: this is an internal "would the top be a generic template"
+      // probe, not the user-facing top selection (filter_top / pick_top_graph
+      // still announce their own fallback). Announcing it here made every design
+      // that merely CONTAINED a generic template report a false
+      // `top-entity-fallback` warning on a `--top` that resolved perfectly well.
+      selected = resolve_top_name(names, opts.top, /*diag_pass=*/"");
+    } else if (names.size() == 1) {
+      selected = names.front();
+    } else {
+      // No `--top`: the sole PUB fully-defaulted generic template is the only
+      // unambiguous candidate. Keying on names.size()==1 instead dropped the top
+      // from the emit -- silently, exit 0 -- for the ordinary shape of a generic
+      // `pub mod` beside a private helper, or beside any import.
+      for (const auto& ln : var.lnasts) {
+        if (!ln->is_template() || !fully_defaulted(ln) || !is_pub_entity(ln->get_top_module_name())) {
+          continue;
+        }
+        if (!selected.empty()) {
+          selected.clear();  // ambiguous -- decline rather than guess
+          break;
+        }
+        selected = ln->get_top_module_name();
+      }
+    }
+    for (const auto& ln : var.lnasts) {
+      if (ln->get_top_module_name() != selected || !ln->is_template() || ln->get_generics().empty()) {
+        continue;
+      }
+      // A missing declaration default is a user error only when the user NAMED
+      // this template as the top. Auto-selecting the sole unit of a
+      // parameterized LIBRARY file must not fail: the per-file batch flow (emit
+      // `ln:`+`lg:` per file, link afterwards) depends on the empty-lg-emit
+      // warn-and-exit-0 contract below, and a no-default generic there is a
+      // template waiting for its caller, not a broken design.
+      if (!explicit_top && !fully_defaulted(ln)) {
+        break;
+      }
+      for (const auto& done : var.lnasts) {
+        done->set_upass_converged(true);
+      }
+      up["default_top"] = selected;
+      run_step("pass.upass", var, up, opts, res);
+      break;
+    }
+  }
+
   if (wants_dump(opts, "lnast")) {
     screen_dump_lnasts(var.lnasts, "post-upass");
   }

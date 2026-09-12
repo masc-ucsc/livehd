@@ -23,6 +23,13 @@ namespace upass {
 // helpers special-case it. `bits == 0` means "unbounded / no derivation" and the
 // caller should treat the returned 0 as a sentinel, not a real bound.
 
+// The one integer-type width ceiling. Every spelling that can name a width --
+// a `:uN` annotation, an explicit `f<uN>` bind, a generic DECLARATION DEFAULT --
+// must reject above this BEFORE materializing a bound: max_from_bits(N) builds a
+// 2^N-1 Dlop and stringifying it into an LNAST const is what actually exhausts
+// memory (a bare `<T=u2000000000>` peaked at 40 GB RSS before this existed).
+inline constexpr int64_t kMaxIntTypeWidth = 1 << 20;
+
 inline Dlop unsigned_max_from_bits(uint32_t bits) {
   if (bits == 0) {
     return *Dlop::create_integer(0);

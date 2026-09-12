@@ -102,7 +102,26 @@ void Pass_prp_writer::work(Eprp_var& var) {
     // Its concrete twins ARE emitted and every call site names one of them, so
     // dropping the template loses nothing the artifact can use.
     if (ln->is_template()) {
-      continue;
+      // ... EXCEPT a template every one of whose generics carries a DECLARATION
+      // DEFAULT. That one is elaboration-COMPLETE as written: the writer renders
+      // it with its own `<NAME=default, …>` header and the result re-parses to the
+      // same unit. Dropping it silently truncated a v2prp artifact to a ZERO-BYTE
+      // .prp on re-emit (exit 0, 0 diagnostics, still listed in manifest.json) --
+      // and destroyed the input when the emit dir was the input dir.
+      const auto& gens = ln->get_generics();
+      const auto& defs = ln->get_generic_defaults();
+      const bool  fully_defaulted
+          = !gens.empty() && defs.size() >= gens.size()
+         && std::none_of(defs.begin(), defs.end(), [](const auto& d) { return d.empty(); });
+      if (!fully_defaulted) {
+        // Genuinely unelaborated (untyped param, `...args`, an unbound `<T>`).
+        // Say so: a skipped unit must never be reported as a successful emit.
+        livehd::diag::warn("pass.prp_writer", "template-not-emitted", "io")
+            .msg("unit `{}` is an unelaborated template — not written", ln->get_top_module_name())
+            .hint("its concrete specializations are emitted instead; give every generic a default to emit the template itself")
+            .emit();
+        continue;
+      }
     }
     std::string full(ln->get_top_module_name());
     by_file[full.substr(0, full.find('.'))].push_back(ln);
