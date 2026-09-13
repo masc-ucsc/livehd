@@ -150,7 +150,7 @@ struct Options {
   bool        fmt_verify = false;   // --verify: re-parse the formatted output
 
   // Source-only repetition analysis (`pyrope style`).
-  size_t style_min_repeats          = 3;
+  size_t style_min_repeats          = 7;
   size_t style_max_block_statements = 128;
   size_t style_max_findings         = 20;
 

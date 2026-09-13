@@ -3,6 +3,7 @@
 #include "encode.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <concepts>
 #include <cstdint>
 #include <format>
@@ -315,6 +316,71 @@ static std::string normalize_reg_name(std::string_view raw) {
   return out;
 }
 
+// A ROLLED comptime loop (compile.unroll=false, the default) is ONE replicated
+// `__loop<n>` Sub named `u_loop_<n>` (upass_runner.cpp: plan.inst), and hhds
+// spells its k-th occurrence `u_loop_<n>__li<k>` (format_occurrence_path,
+// Occurrence_name_policy::loop_prefix "__li"; k = the per-parent running
+// ordinal). The UNROLLED lowering of the SAME source stamps the k-th body
+// copy's instances `<lhs>__li<k>` (loop_inst_suffix) with no wrapper level, over
+// the same ordinal space (sibling loops continue numbering, nested loops restart
+// per parent: next_loop_ordinal_bases_ mirrors hhds). Dropping the wrapper
+// segment and carrying its tag(s) onto the next path segment therefore maps the
+// rolled spelling onto the unrolled one EXACTLY:
+//   u_loop_0__li1.lane_q.acc           -> lane_q__li1.acc
+//   u_loop_1__li2.lane_r.acc           -> lane_r__li2.acc    (second sibling loop)
+//   u_loop_0__li0.u_loop_0__li1.t.acc  -> t__li0__li1.acc    (nested)
+// Applied to BOTH designs (rolled-vs-rolled keeps pairing). It is only a
+// correspondence HYPOTHESIS, like any equal-name pair: the inductive step and
+// the reset-equality precondition still have to prove it, so a wrong fold can
+// fail to pair, never false-prove. A wrapper that is the LAST segment (the
+// `__loop<n>` box instance itself) is left as-is: nothing to fold onto.
+static std::optional<std::string_view> rolled_loop_wrapper_tag(std::string_view seg) {
+  constexpr std::string_view inst = "u_loop_";  // upass_runner.cpp std::format("u_loop_{}", roll_seq_)
+  constexpr std::string_view li   = "__li";     // hhds loop_prefix == uPass loop_inst_suffix()
+  if (!seg.starts_with(inst)) {
+    return std::nullopt;
+  }
+  size_t       i  = inst.size();
+  const size_t d0 = i;
+  while (i < seg.size() && std::isdigit(static_cast<unsigned char>(seg[i]))) {
+    ++i;
+  }
+  const auto tag = seg.substr(i);
+  if (i == d0 || !tag.starts_with(li) || tag.size() == li.size()
+      || !std::all_of(tag.begin() + static_cast<std::ptrdiff_t>(li.size()), tag.end(), [](unsigned char c) {
+           return std::isdigit(c) != 0;
+         })) {
+    return std::nullopt;
+  }
+  return tag;
+}
+
+static std::string fold_rolled_loop_wrappers(const std::string& s) {
+  if (s.find("u_loop_") == std::string::npos) {
+    return s;  // fast path: nothing to fold
+  }
+  std::string out, carry;
+  size_t      pos = 0;
+  for (;;) {
+    const size_t           dot = s.find('.', pos);
+    const std::string_view seg(s.data() + pos, (dot == std::string::npos ? s.size() : dot) - pos);
+    if (const auto tag = rolled_loop_wrapper_tag(seg); tag && dot != std::string::npos) {
+      carry += *tag;  // wrapper level: drop the segment, carry its ordinal tag
+    } else {
+      if (!out.empty()) {
+        out += '.';
+      }
+      out += seg;
+      out += carry;
+      carry.clear();
+    }
+    if (dot == std::string::npos) {
+      return out;
+    }
+    pos = dot + 1;
+  }
+}
+
 std::string canon_flop_name(std::string_view hier_name) {
   std::string_view sv = hier_name;
   // A leading yosys "$decoration$" (e.g. "$driver$ex_mem_ex_result", left by the
@@ -337,6 +403,8 @@ std::string canon_flop_name(std::string_view hier_name) {
   // (`csrMod\_Mhpmevent10_0` versus `csrMod_Mhpmevent10_0`).
   s.erase(std::remove(s.begin(), s.end(), '`'), s.end());
   s.erase(std::remove(s.begin(), s.end(), '\\'), s.end());
+  // Rolled-loop wrapper levels -> the unrolled spelling (see the helpers above).
+  s = fold_rolled_loop_wrappers(s);
   // ".reg_" (the CIRCT single-field stage-register flop name) -> "_" first, so the
   // collapse survives the generic "." -> "_" flatten that follows. (A register file
   // bank "registers.regs_7" has ".regs_", not ".reg_", so it is left for the dot
@@ -4308,10 +4376,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       out.mem_wr[mc.key].push_back(Encoded::Mem_wr_port{addr, wmask, din});
     }
 
-    // Reset (highest priority) overrides per-port + update for a registered
-    // whole-array: a_next = reset ? <init bus array> : a_next. The init bus may be
-    // runtime (e.g. enqPtrVec resets to a computed wire), or absent (=> zero).
-    if (mc.is_whole && !mc.reset.is_invalid()) {
+    // Reset (highest priority) tops the next-state of ANY persistent memory
+    // with a `reset` condition — the whole-array `update` cell and the per-port
+    // `reg m:[N]T = <const>` alike: a_next = reset ? <init bus array> : a_next.
+    // The init bus may be runtime (e.g. enqPtrVec resets to a computed wire), or
+    // absent (=> zero). A per-port memory gets a Mem_whole record with a NULL
+    // bus so the cones consumer compares the reset arm (or keeps the array cut)
+    // instead of trusting the per-port route alone: equal write ports do NOT
+    // imply equal next-state when the reset values differ.
+    if (!mc.is_comb && !mc.reset.is_invalid()) {
       Val rv = driver_val(mc.reset, ok);
       if (ok) {
         Term rst_hot = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
@@ -4325,10 +4398,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         } else {
           init_bus = bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
         }
-        Term a_init                 = array_from_bus(mc.a_cur, init_bus);
-        a_next                      = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
-        out.mem_whole[mc.key].reset = rst_hot;
-        out.mem_whole[mc.key].init  = init_bus;  // raw, as fed to array_from_bus; the consumer sort-checks
+        Term  a_init = array_from_bus(mc.a_cur, init_bus);
+        a_next       = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
+        auto& rec    = out.mem_whole[mc.key];
+        rec.reset    = rst_hot;
+        rec.init     = init_bus;  // raw, as fed to array_from_bus; the consumer sort-checks
+        if (!mc.a_cur_shared) {
+          rec.exact = false;  // same rule as the update record: the hold arm is a per-design free array
+        }
       } else {
         out.mem_whole[mc.key].exact = false;  // a reset arm we could not model tops the next-state
       }

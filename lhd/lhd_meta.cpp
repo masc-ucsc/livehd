@@ -608,7 +608,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pyrope style") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pyrope style","description":"Find repeated statement blocks using Tree-sitter, without compiling. Reports likely unrolled loops when numeric literals and identifier indices follow affine progressions. Skips damaged sequences in partial code. Advisory only; no rewrites. Findings and summary use the diagnostics stream, with template/count/progression attrs and source spans. Exit 0 for findings or partial parses; 1 for input/parser failures","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"min-repeats","type":"int","default":3,"min":3,"max":1000000},{"name":"max-block-statements","type":"int","default":128,"min":1,"max":4096},{"name":"max-findings","type":"int","default":20,"min":1,"max":1000000}]},"inputs":["pyrope"],"outputs":["diagnostics"],"examples":["lhd pyrope style foo.prp","lhd pyrope style foo.prp --diag-fmt pretty","lhd pyrope style foo.prp --emit diagnostics:style.jsonl"]})json");
+        R"json({"schema_version":1,"name":"pyrope style","description":"Find repetition, whole-tuple copy candidates, flattened bundle arguments, and single-destination conditionals using Tree-sitter, without compiling or resolving imports. Reports likely unrolled loops when numeric literals and identifier indices follow affine progressions. Skips damaged sequences in partial code. Advisory only; no rewrites. Findings and summary use the diagnostics stream, with rule-specific attrs, source spans, and related locations. Exit 0 for findings or partial parses; 1 for input/parser failures","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"min-repeats","type":"int","default":7,"min":3,"max":1000000},{"name":"max-block-statements","type":"int","default":128,"min":1,"max":4096},{"name":"max-findings","type":"int","default":20,"min":1,"max":1000000}]},"inputs":["pyrope"],"outputs":["diagnostics"],"examples":["lhd pyrope style foo.prp","lhd pyrope style foo.prp --diag-fmt pretty","lhd pyrope style foo.prp --emit diagnostics:style.jsonl"]})json");
     return 0;
   }
   if (name == "pyrope lsp" || name == "lsp") {
@@ -800,19 +800,20 @@ void print_general_help() {
 int help_pyrope(const std::string& sub) {
   if (sub == "style") {
     std::print(
-        "lhd pyrope style — find repeated statement blocks with Tree-sitter\n\n"
+        "lhd pyrope style — suggest source cleanups with Tree-sitter\n\n"
         "usage: lhd pyrope style FILE… [flags]\n"
         "  Suggest loops for contiguous repeated blocks with consistent numeric progressions.\n"
         "  Blocks can contain multiple statements and nested scopes; whitespace/comments are ignored.\n"
-        "  No compilation or rewrites. Syntax errors make analysis partial, not fatal.\n\n"
+        "  Also suggest whole-tuple copies, structured bundle arguments, and single-destination if expressions.\n"
+        "  No compilation, import resolution, or rewrites. Syntax errors make analysis partial, not fatal.\n\n"
         "flags:\n"
-        "  --min-repeats N           minimum copies (default 3, range 3..1000000)\n"
+        "  --min-repeats N           minimum repeated copies (default 7, range 3..1000000)\n"
         "  --max-block-statements N  largest block to search (default 128, range 1..4096)\n"
-        "  --max-findings N          highest-ranked nonoverlapping findings per file (default 20)\n"
+        "  --max-findings N          highest-ranked findings across all rules per file (default 20)\n"
         "  --diag-fmt pretty|json    human text or JSONL on stderr (auto by default)\n"
         "  --emit diagnostics:PATH  write structured findings and summary to PATH\n\n"
         "exit: 0 including suggestions/partial parses; 1 for input or parser failures\n"
-        "Limits: contiguous copies within a scope, consistent numeric/identifier-index strides;\n"
+        "Repetition limits: contiguous copies within a scope, consistent numeric/identifier-index strides;\n"
         "no arbitrary renaming, statement reordering, semantic proof, or automatic refactoring.\n");
     return 0;
   }

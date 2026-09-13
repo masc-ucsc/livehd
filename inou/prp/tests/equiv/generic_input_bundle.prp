@@ -1,0 +1,16 @@
+/*
+:name: generic_input_bundle
+:type: equiv
+:equiv_engine: cvc5
+:pyrope_top: top
+:verilog_top: top
+*/
+// A declared input bundle has flattened I/O leaves but no tuple constructor.
+// Forwarding it as a whole named actual must bind the specialized child.
+mod select_data<N=8>::[timecheck=false](a:u8, ctl:(valid:u1, data:u8)) -> (y:u8@[]) {
+  y = if ctl.valid != 0 { ctl.data } else { a }
+}
+pub mod top::[timecheck=false](a:u8, ctl:(valid:u1, data:u8)) -> (y:u8@[]) {
+  mut selected = select_data<N=8>(a=a, ctl=ctl)
+  y = selected.y
+}

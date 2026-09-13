@@ -48,7 +48,9 @@ namespace livehd::graph_util {
 // when the selected node was expanded. This is for occurrence-aware consumers
 // that retain the shapes they implement natively and expand only their
 // documented fallback cases.
-bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::string_view from_pass);
+// When supplied, replicas receives the newly created ordinary instances.
+bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::string_view from_pass,
+                            std::vector<hhds::Node_class>* replicas = nullptr);
 
 // Materializes every compact Subnode_group in private scratch `g`. Returns the
 // number of groups realized, or -1 if a binding could not be represented.

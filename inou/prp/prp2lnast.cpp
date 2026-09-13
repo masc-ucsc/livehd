@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -5154,6 +5155,13 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       }
     }
   }
+  // 2f-generic_port_width — a port bound of THIS lambda may read its generics
+  // (see Pending_port_bound). Scoped to the signature: restored once the body
+  // frame opens (flush_deferred_port_bounds below), so a nested lambda starts
+  // clean.
+  const bool saved_has_generics = std::exchange(
+      lambda_has_generics_,
+      stream_lambda ? !streamed_generics.empty() : (!gen_idx.is_invalid() && !lnast->get_first_child(gen_idx).is_invalid()));
   if (stream_lambda) {
     lnast->set_generics(std::move(streamed_generics));
     lnast->set_generic_defaults(std::move(streamed_generic_defaults));
@@ -5428,6 +5436,13 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // literal default like `store(in2, 3)` folds; an expression `b = a + 5` emits
   // its tmp here too (not in the enclosing frame). Emitted before the reg/attr
   // prologues below and the user body.
+  //
+  // 2f-generic_port_width — port bounds deferred by emit_arg_assign: lower
+  // their desugar into the body prologue (the frame is body_idx now) and point
+  // the io leaves at the results. Before the input defaults and the body, so a
+  // lambda nested in the body starts with a clean generic flag.
+  flush_deferred_port_bounds();
+  lambda_has_generics_ = saved_has_generics;
   for (const auto& [pname, pdef] : input_defaults) {
     // Lower the default FIRST (it may append a `%t = a + 5` tmp to the body),
     // then the store that consumes it — so the tmp precedes its use.
@@ -7315,6 +7330,75 @@ void Prp2lnast::prelower_type_bounds(TSNode type_cast_node) {
   }
 }
 
+// Does this integer type carry a `bits=`/`max=`/`min=` bound that does not
+// fold here (a generic parameter, an expression over one)?
+bool Prp2lnast::int_type_has_unfoldable_bound(TSNode ty) const {
+  if (ts_node_is_null(ty)) {
+    return false;
+  }
+  const std::string_view t(ts_node_type(ty));
+  if (t != "uint_type" && t != "sint_type") {
+    return false;
+  }
+  TSNode constraint = child_by_field(ty, "constraint");
+  if (ts_node_is_null(constraint)) {
+    return false;
+  }
+  for (TSNode item : ts_node_named_children(constraint)) {
+    const std::string_view it(ts_node_type(item));
+    if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
+      continue;
+    }
+    TSNode lv = child_by_field(item, "lvalue");
+    TSNode rv = child_by_field(item, "rvalue");
+    if (ts_node_is_null(lv) || ts_node_is_null(rv)) {
+      continue;
+    }
+    const std::string key(trim(get_text(lv)));
+    if ((key == "bits" || key == "max" || key == "min") && !resolve_type_int_value(rv)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 2f-generic_port_width — see Pending_port_bound. Runs once the body stmts
+// frame is open: the desugar lands in the body prologue and the io leaves are
+// rewritten IN PLACE (the tree is append-only, and SSA's flatten_assign takes
+// the FIRST type child, so appending a second prim_type_int would not do).
+void Prp2lnast::flush_deferred_port_bounds() {
+  auto pending = std::exchange(pending_port_bounds_, {});
+  for (const auto& pb : pending) {
+    prelower_type_bounds(pb.type_cast);  // emits into the current stmts frame == the body prologue
+    TSNode ty         = child_by_field(pb.type_cast, "type");
+    TSNode constraint = ts_node_is_null(ty) ? TSNode{} : child_by_field(ty, "constraint");
+    if (ts_node_is_null(constraint)) {
+      continue;
+    }
+    const auto it = prelowered_int_bounds_.find(ts_node_start_byte(constraint));
+    if (it == prelowered_int_bounds_.end()) {
+      continue;
+    }
+    for (auto c : lnast->children(pb.store)) {
+      if (!Lnast_ntype::is_prim_type_int(lnast->get_type(c))) {
+        continue;
+      }
+      auto mx    = lnast->get_first_child(c);
+      auto mn    = mx.is_invalid() ? mx : lnast->get_sibling_next(mx);
+      auto patch = [&](const Lnast_nid& leaf, const Lnast_node& n) {
+        if (leaf.is_invalid() || n.is_invalid()) {
+          return;
+        }
+        lnast->set_type(leaf, n.get_type());
+        lnast->set_name(leaf, n.get_name());
+      };
+      patch(mx, it->second.max);
+      patch(mn, it->second.min);
+      break;
+    }
+  }
+}
+
 bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt) {
   // Classify the base keyword → signedness and optional concrete width.
   bool unsigned_base = false;
@@ -7379,13 +7463,15 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     auto bound_not_comptime
         = [&](std::string_view which) { return std::format("`{}(...)` bound `{}` is not a compile-time value", kw, which); };
     // A generic parameter only works where prelower_type_bounds runs -- a
-    // VARIABLE DECLARATION inside the body. A port/return type, a tuple field
-    // type or a `f<signed(bits=N)>` generic argument has no statement position to
-    // desugar the bound into, so say so instead of promising a spelling that will
-    // land back here.
+    // VARIABLE DECLARATION inside the body, or a port/return type of the
+    // generic lambda itself (flush_deferred_port_bounds). A tuple field type or
+    // a `f<signed(bits=N)>` generic argument has no statement position to
+    // desugar the bound into, so say so instead of promising a spelling that
+    // will land back here.
     constexpr std::string_view bound_hint
-        = "use a literal or a `comptime const`; a generic parameter (`mod m<N=8>(…) { mut x:unsigned(bits=N) … }`) is "
-          "resolved only on a variable declaration inside the body";
+        = "use a literal or a `comptime const`; a generic parameter is resolved on a variable declaration inside the body "
+          "and on the ports of the generic lambda itself (`mod m<N=8>(a:unsigned(bits=N))`), not on a tuple field type or "
+          "a `<…>` argument";
     if (key == "range") {
       // No `range` type argument — it would be pure sugar for max/min, so it
       // is rejected to keep a single way to bound an integer type.
@@ -8012,6 +8098,12 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       { "negedge",                                                                                      "use `posclk=false`"},
       {  "signed",                           "signedness is derived from the type — declare `:sN` (read it with `x.[sign]`)"},
       {"unsigned",                           "signedness is derived from the type — declare `:uN` (read it with `x.[sign]`)"},
+      // A proposed-but-never-adopted spelling: whether an array is a flop bank
+      // or a memory is the synthesis flow's call, and a `reg` array with a
+      // reset value already resets every entry in one cycle (08-memories.md).
+      { "storage",
+       "there is no `storage` attribute: a `reg` array with a reset value already resets every entry in one cycle (see "
+       "08-memories.md); an array is registers or a memory by the synthesis flow, not by attribute"                  },
   };
   for (const auto& m : mistakes) {
     if (name == m.wrong) {
@@ -8090,6 +8182,13 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
         check_decl_init_kind(trim(get_text(id)), lit, ty, type_cast);
       } else {
         check_decl_init_kind(trim(get_text(id)), arg_val, ty, type_cast);
+      }
+      // 2f-generic_port_width — see Pending_port_bound. The placeholder entry
+      // makes int_type_call_bounds treat the site as deferred (no warning) and
+      // emit_type_expr emit `nil` for now; the flush rewrites the leaves.
+      if (!lambda_kind.empty() && lambda_has_generics_ && int_type_has_unfoldable_bound(ty)) {
+        prelowered_int_bounds_.try_emplace(ts_node_start_byte(child_by_field(ty, "constraint")), Prelowered_bounds{});
+        pending_port_bounds_.push_back({type_cast, aidx});
       }
       emit_arg_type(aidx, ty);
     }

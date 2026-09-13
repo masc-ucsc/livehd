@@ -1,0 +1,20 @@
+/*
+:name: register_array_immediate_reset
+:type: equiv
+:pyrope_top: top
+:verilog_top: top
+:equiv_engine: cvc5
+:lec_top: top
+:lec_set: formal.timeout=5
+:lec_grep: PROVEN equivalent
+*/
+// Working spelling: four byte registers carried in a packed register.
+// Reset has priority over writes. Lane zero is the least-significant byte.
+pub mod top::[timecheck=false](
+  clock:u1, reset:u1, we:u1, waddr:u2, data:u8, raddr:u2
+) -> (q:u8@[], all_data:u32@[]) {
+  reg bank:u32:[reset_pin=ref reset, async=true] = 0
+  q = bank#[(raddr * 8)..+8]
+  all_data = bank
+  if we != 0 { bank#[(waddr * 8)..+8] = data }
+}

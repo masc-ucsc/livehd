@@ -24,6 +24,7 @@ exports_files([
     "tests/sim/color_kernel_llvm_mem_whole.prp",
     "tests/sim/mem_sim_gated_clock.prp",
     "tests/sim/loop_roll_conditional_state_call.prp",
+    "tests/sim/loop_roll_carry.prp",
 ])
 
 # The pyrope/verilog golden pairs (used by the lhd flow-matrix tests).
@@ -1362,3 +1363,14 @@ _SIMEQ_FIXME = []
     )
     for base in _SIMEQ + _SIMEQ_FIXME
 ]
+
+filegroup(
+    name = "generic_tuple_register_fixture",
+    srcs = [
+        "tests/equiv/generic_tuple_register.prp",
+        "tests/equiv/generic_tuple_register.v",
+        "tests/equiv/generic_tuple_register/cell.prp",
+        "tests/equiv/generic_tuple_register/packed.v",
+    ],
+    visibility = ["//lhd/tests:__pkg__"],
+)

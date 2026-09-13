@@ -4123,8 +4123,8 @@ std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_d
         if (rit == range_lohi_.end()) {
           return std::nullopt;
         }
-        const auto lo = parse_int_const(rit->second.first);
-        const auto hi = parse_int_const(rit->second.second);
+        const auto lo = parse_int_const(rit->second.lo);
+        const auto hi = parse_int_const(rit->second.hi);
         if (!lo || !hi || *lo < 0 || *hi < *lo + 1) {
           return std::nullopt;
         }
@@ -5270,7 +5270,7 @@ void Lnast_prp_writer::write_set_mask() {
   // recorded its bounds in range_lohi_ (the same table the READ side uses).
   // mask_runs can never parse that ref NAME, so without this the write fell
   // through to the "unparsable mask" arm below and was silently DROPPED.
-  const std::pair<std::string, std::string>* dyn_range = nullptr;
+  const Range_bounds* dyn_range = nullptr;
   if (move_to_sibling()) {  // mask: a const, or a ref to a range temp
     mask_txt = std::string(current_text());
     if (current_ntype() == Lnast_ntype::Lnast_ntype_ref) {
@@ -5317,9 +5317,11 @@ void Lnast_prp_writer::write_set_mask() {
     }
     // `x#[i]` and `x#[lo..=hi]` are both writable LHS forms; a range temp whose
     // two bounds are the same expression IS the single-bit spelling. The bounds
-    // are NAMES, so they go through strip_prefix like any other emitted ref.
-    const std::string lo = strip_prefix(dyn_range->first);
-    const std::string hi = strip_prefix(dyn_range->second);
+    // are OPERANDS (a name, a literal, or a folded temp's inlined expression),
+    // so they render like any other operand — a bare name here left a folded
+    // `t6 = t4 + 7` referenced but never defined (`bank#[t4..=t6]`).
+    const std::string lo = render_range_bound(dyn_range->lo_nid);
+    const std::string hi = render_range_bound(dyn_range->hi_nid);
     if (lo == hi) {
       os << std::format("{}#[{}] = {}", target, lo, ins);
     } else {
@@ -6403,7 +6405,7 @@ void Lnast_prp_writer::analyze_folding() {
       auto        rhi = rlo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(rlo);
       std::string lo  = rlo.is_invalid() ? std::string("0") : std::string(lnast->get_name(rlo));
       std::string hi  = rhi.is_invalid() ? lo : std::string(lnast->get_name(rhi));
-      range_lohi_[mn] = {lo, hi};
+      range_lohi_[mn] = Range_bounds{.lo = lo, .hi = hi, .lo_nid = rlo, .hi_nid = rhi.is_invalid() ? rlo : rhi};
       if (it->second.use_count == 1) {
         folded_node_.insert(it->second.def_node.get_class_index().value);  // range stmt inlined into the slice
       }
@@ -6629,6 +6631,15 @@ std::string Lnast_prp_writer::const_text(Lnast_nid node) const {
   return std::format("\"{}\"", escape_string(text));
 }
 
+// A range bound is an OPERAND: a literal, a name, or a single-use temp whose
+// definition the fold policy inlined (`t6 = t4 + 7` has no line of its own), so
+// it goes through render_value like every other operand. operand_ctx=true
+// parenthesises a loose expression: `..` and `+` share a precedence tier, so
+// `t4..=t4 + 7` is a `mixed-precedence` error on recompile; `t4..=(t4 + 7)` is not.
+std::string Lnast_prp_writer::render_range_bound(Lnast_nid bound) {
+  return bound.is_invalid() ? std::string("0") : render_value(bound, /*operand_ctx=*/true);
+}
+
 std::string Lnast_prp_writer::render_value(Lnast_nid node, bool operand_ctx) {
   auto t = lnast->get_type(node);
   if (t == Lnast_ntype::Lnast_ntype_ref) {
@@ -6717,8 +6728,8 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
     case N::Lnast_ntype_range: {
       auto        lo  = lnast->get_sibling_next(c0);
       auto        hi  = lo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(lo);
-      std::string los = lo.is_invalid() ? std::string("0") : std::string(strip_prefix(lnast->get_name(lo)));
-      std::string his = hi.is_invalid() ? los : std::string(strip_prefix(lnast->get_name(hi)));
+      std::string los = render_range_bound(lo);
+      std::string his = hi.is_invalid() ? los : render_range_bound(hi);
       return std::format("{}..={}", los, his);
     }
     default:
@@ -6794,21 +6805,21 @@ std::string Lnast_prp_writer::render_get_mask_rhs(Lnast_nid c0, bool operand_ctx
       if (rit != range_lohi_.end()) {
         // The bounds are TEXT here (a range temp's operands need not be
         // literals); only a numeric pair can be simplified.
-        const auto lo = parse_int_const(rit->second.first);
-        const auto hi = parse_int_const(rit->second.second);
+        const auto lo = parse_int_const(rit->second.lo);
+        const auto hi = parse_int_const(rit->second.hi);
         if (lo && hi && *lo >= 0 && *hi >= *lo) {
           if (is_whole_width_mask(src, static_cast<int>(*lo), static_cast<int>(*hi))) {
             return srctxt(operand_ctx);  // selects every bit of the source: a no-op
           }
           return fmt_bit_range(srctxt(true), static_cast<int>(*lo), static_cast<int>(*hi));  // tight
         }
-        // Non-literal bounds are NAMES: they must go through strip_prefix like
-        // every other emitted ref (`%3` -> `t3`, `x___ssa_1` -> `x__w1`), or the
-        // slice names something the recompile has never heard of.
+        // Non-literal bounds are OPERANDS (a name, or a folded temp's inlined
+        // expression): render them, never print the raw name — the fold policy
+        // may have suppressed the bound's own definition line.
         return std::format("{}#[{}..={}]",
                            srctxt(true),
-                           strip_prefix(rit->second.first),
-                           strip_prefix(rit->second.second));  // tight
+                           render_range_bound(rit->second.lo_nid),
+                           render_range_bound(rit->second.hi_nid));  // tight
       }
     } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
       std::string mt(lnast->get_name(mask));

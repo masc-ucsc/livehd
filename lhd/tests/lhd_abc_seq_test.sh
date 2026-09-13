@@ -347,6 +347,17 @@ has "$NETV" "posedge" || fail "abc_seq register_max_bits: oversized register pay
 ! has "$NETV" "DFFx1 " || fail "abc_seq register_max_bits: oversized register payload still entered ABC"
 echo "PASS: register_max_bits keeps only oversized state regions native (abc_seq)"
 
+# abc_mem's `reg mem:[8]u8 = 0` carries a reset value, i.e. a one-cycle
+# whole-array reset. The lgyosys cross-check below compares that reset array
+# (an inline reg array on the source side) against its realization -- a
+# cgen_memory_* instance module, or the bit-blasted `_mem<N>` reset flops --
+# and none of lgcheck's strategies closes that correspondence by induction: it
+# burns its whole default budget (600s) per run and returns INCONCLUSIVE either
+# way. The unbounded proof of the same fold is pass/lec:lec_cones_test (cvc5,
+# the memory<->storage-bank bridge); here the yosys leg is a bounded sanity
+# check, so cap its budget.
+export LGCHECK_EQUIV_TIMEOUT=30
+
 # memory=false: the memory stays
 # a native boundary instance (not bit-blasted).
 run_abc_lec abc_mem abc_mem.abc_mem true false
@@ -369,7 +380,11 @@ echo "PASS: the default memory mode folds a small memory (abc_mem)"
 # ...and `auto` keeps the SAME memory native once it is over memory_max_bits,
 # with the one-line note naming it. memory=true ignores the threshold entirely.
 run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.abc.memory_max_bits=63
-has "$NETV" '`include.*cgen_memory' || fail "abc_mem auto/max_bits=63: memory was folded anyway"
+# Native = the shipped wrapper (`include cgen_memory_*.v) for a reset-less
+# memory, or the `cgen_memory_*_instance_*` boundary module a memory with a
+# whole-array reset is enclosed in (the wrappers have no reset port).
+{ has "$NETV" '`include.*cgen_memory' || has "$NETV" 'cgen_memory_.*_instance_'; } \
+  || fail "abc_mem auto/max_bits=63: memory was folded anyway"
 ! has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem auto/max_bits=63: unexpectedly lowered"
 grep -q '"code":"memory-max-bits"' "$ABCDIAG" \
   || fail "abc_mem auto/max_bits=63: no memory-max-bits note: $(cat "$ABCDIAG")"

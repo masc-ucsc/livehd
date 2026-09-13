@@ -44,7 +44,8 @@ Boundary snapshot_boundary(const hhds::Node_class& inst) {
   return b;
 }
 
-bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnode_loop& desc, std::string_view from_pass) {
+bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnode_loop& desc, std::string_view from_pass,
+                std::vector<hhds::Node_class>* replicas = nullptr) {
   const auto gio       = inst.get_subnode_io();
   const auto inst_name = default_instance_name(inst);
   const auto fail      = [&](const std::string& msg) {
@@ -64,9 +65,8 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
     return std::ranges::any_of(carries, [pid](const auto& carry) { return carry.input_port() == pid; });
   };
 
-  // A count large enough to exhaust memory is a descriptor bug, not a design.
-  // The front end has its own `upass.roll_cap`, but a hand-built or loaded
-  // graph reaches here without passing through it.
+  // Compact loops can describe large domains without allocating each lane.
+  // A backend requesting physical expansion must bound its allocation.
   constexpr uint64_t kMaxExpand = 1u << 20;
   if (desc.count > kMaxExpand) {
     return fail(std::format("count {} exceeds the {} expansion cap", desc.count, kMaxExpand));
@@ -309,7 +309,7 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
                                   static_cast<uint64_t>(*desc.next_active_output)));
         }
         auto andn = create_typed_node(*g, Ntype_op::And);
-        auto as        = andn.create_sink_pin(static_cast<hhds::Port_id>(0));  // multi-driver "as"
+        auto as   = andn.create_sink_pin(static_cast<hhds::Port_id>(0));  // multi-driver "as"
         // The previous occurrence's activation is whatever drives its sink.
         if (!prev_act.is_invalid()) {
           for (const auto& e : prev.inp_edges()) {
@@ -389,12 +389,19 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
   }
 
   inst.del_node();
+  if (replicas != nullptr) {
+    *replicas = std::move(reps);
+  }
   return true;
 }
 
 }  // namespace
 
-bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::string_view from_pass) {
+bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::string_view from_pass,
+                            std::vector<hhds::Node_class>* replicas) {
+  if (replicas != nullptr) {
+    replicas->clear();
+  }
   if (g == nullptr || !inst.is_loop_subnode()) {
     return false;
   }
@@ -406,7 +413,7 @@ bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::s
     return false;
   }
   try {
-    return expand_one(g, inst, *desc, from_pass);
+    return expand_one(g, inst, *desc, from_pass, replicas);
   } catch (const std::exception& e) {
     livehd::diag::err(from_pass, "replica-expand", "internal")
         .msg("cannot expand replicated instance '{}': {}", default_instance_name(inst), e.what())

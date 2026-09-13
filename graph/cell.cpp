@@ -247,7 +247,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 11:
           return "initial";  // comptime x 1 -- contents (entry 0 in the low `bits`,
                              // row-major); a reg array with a bound reset restores
-                             // it through a one-entry-per-cycle sweep write port
+                             // it in ONE cycle through the `reset` pin (14) below
                              // (tolg). For a WHOLE-ARRAY cell (the `update` pin is
                              // driven) `initial` is RUNTIME-capable and carries the
                              // reset-value bus (entry 0 in the low `bits`).

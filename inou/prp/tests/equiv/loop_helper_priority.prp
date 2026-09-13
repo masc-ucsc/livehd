@@ -1,0 +1,21 @@
+/*
+:name: loop_helper_priority
+:type: equiv
+:pyrope_top: top
+:verilog_top: top
+:equiv_engine: cvc5
+*/
+// RenameBuffer cleanup reproducer: a counted loop in an inlined comb.
+// Previously failed with undefined 'inl1_*.valid_count.__loop0'; merely
+// preserving that name also incorrectly folded the loop's carry to zero.
+// Both call sites must retain the conditional accumulator updates.
+comb valid_count(valid:u8) -> (count:u4) {
+  count = 0
+  for lane in 0..<8 {
+    if valid#[0] != 0 and valid#[lane] != 0 { count = lane + 1 }
+  }
+}
+pub comb top(a:u8, b:u8) -> (x:u4, y:u4) {
+  x = valid_count(a)
+  y = valid_count(b)
+}

@@ -136,7 +136,8 @@ public:
   // structurally inlined first and ONE Partitioner runs on the flat def; a
   // single resulting region is emitted directly under the top's own name (no
   // wrapper), so a flat coloring yields exactly one output module. Returns
-  // false on a fatal collect/flatten error.
+  // false on a fatal collect/flatten error. preserved_defs adds pass-local
+  // boundaries whose bodies are mapped once before their callers are rebuilt.
   // `want_pre_bodies` (incremental synth): also rebuild each per-def region's
   // original logic into a throwaway lib and hand it to the hook via
   // Region_body::pre_body -- the abc cache's stable structural-compare artifact.
@@ -146,5 +147,5 @@ public:
                                   std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
                                   livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off,
                                   bool want_pre_bodies = false, const livehd::partition::Body_batch_builder& batch_hook = {},
-                                  size_t batch_size = 64);
+                                  size_t batch_size = 64, const std::unordered_set<hhds::Gid>& preserved_defs = {});
 };

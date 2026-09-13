@@ -676,18 +676,34 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
       }
     }
-    absl::flat_hash_set<std::string> seen;
-    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-      if (gu::type_op_of(node) != Ntype_op::Sub) {
-        continue;
+    absl::flat_hash_set<std::string> seen, wrappers;
+    // A ROLLED loop's lifted body (`__loop<n>`, uPass `roll`) exists on THIS
+    // side only, so it is never a shared child -- but the shared defs BELOW it
+    // (`lane` under `u_loop_0`) must still be enumerated, or this parent is
+    // flattened whole and its flat miter has to pair every replica flop by
+    // name. Descend through the one-sided wrapper exactly as `reachable` does
+    // for the impl side above; the encoder boxes a collapsed def at any depth.
+    std::function<void(hhds::Graph*)> collect = [&](hhds::Graph* pg) {
+      for (auto node : pg->body().nodes(hhds::Node_order::forward)) {
+        if (gu::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto        sio = node.get_subnode_io();
+        std::string cn  = canon_ref(sio->get_name());
+        auto        rit = ref_by_name.find(cn);
+        if (rit == ref_by_name.end()) {
+          continue;
+        }
+        if (impl_by_name.find(cn) != impl_by_name.end()) {
+          if (seen.insert(cn).second) {
+            children[name].push_back(cn);
+          }
+        } else if (node.is_loop_subnode() && rit->second != pg && wrappers.insert(cn).second) {
+          collect(rit->second);
+        }
       }
-      auto        sio = node.get_subnode_io();
-      std::string cn  = canon_ref(sio->get_name());
-      if (ref_by_name.find(cn) != ref_by_name.end() && impl_by_name.find(cn) != impl_by_name.end() && !seen.count(cn)) {
-        children[name].push_back(cn);
-        seen.insert(cn);
-      }
-    }
+    };
+    collect(g);
   }
 
   // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles),

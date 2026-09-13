@@ -839,6 +839,7 @@ protected:
   // positions (literals contribute their kind only), then falls to its
   // declaration default. Conflicts and arity mismatches are fatal call-site
   // errors. A generic that nothing types stays absent (`triadd(a=1,b=2,c=3)`).
+  [[nodiscard]] static std::string generic_cast_token(const Generic_bind& gb);
   absl::flat_hash_map<std::string, Generic_bind> resolve_generic_binds(
       const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
       const std::vector<bool>& param_set, std::size_t nbind, const std::vector<Generic_actual>& explicit_generics,
@@ -866,6 +867,17 @@ protected:
                                                     const std::vector<Spec_port>& inject, const std::vector<Spec_port>& vports,
                                                     const std::string& vname, const std::vector<Spec_port>& out_inject,
                                                     const absl::flat_hash_map<std::string, Generic_bind>& type_subst);
+  // 2f-generic_port_width — fold a deferred port bound of `tmpl` (a `%tmp`
+  // defined by its straight-line body prologue, a generic name, or a literal)
+  // under `binds`. nullopt = not a compile-time integer.
+  [[nodiscard]] static std::optional<Dlop> fold_template_bound(const std::shared_ptr<Lnast>& tmpl, std::string_view text,
+                                                               const absl::flat_hash_map<std::string, Generic_bind>& binds,
+                                                               int depth = 0);
+  // Concrete port type of an io entry with has_deferred_bound(); a side that
+  // does not fold is a fatal `type-bound-not-comptime`.
+  [[nodiscard]] Spec_port deferred_port_type(const std::shared_ptr<Lnast>& tmpl, const Lnast_io_entry& e,
+                                             const absl::flat_hash_map<std::string, Generic_bind>& binds,
+                                             const std::string& callee_name, const livehd::diag::Span& span);
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
                          const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
   // Emit a `func_call(dst, callee, [name=], port=val…)` with NAMED actuals into a
@@ -1187,13 +1199,9 @@ protected:
   static constexpr std::size_t                  kInlineMaxDepth = 256;
   std::size_t                                   inline_budget_{200000};
 
-  // compile.unroll — lift an eligible comptime range-loop body into one
-  // generated definition and emit a single replicated instance instead of
-  // unrolling. Default OFF: rolling is opt-in until the LEC/formal paths
-  // handle a replicated Sub natively rather than by expansion.
-  bool     roll_enabled_{false};
-  uint64_t roll_cap_{1024};
-  bool     roll_arrays_{false};  // compile.upass.roll_arrays: array-typed carries may cross the lifted boundary
+  // The sole loop representation switch. False preserves compact loops;
+  // true requests per-iteration source expansion for benchmarking.
+  bool unroll_requested_{false};
   // Per-unit counter making each lifted definition's name unique (the dedup in
   // specialized_emitted_ / pass_upass is BY NAME and silently DROPS a second
   // definition that collides).

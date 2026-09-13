@@ -1,0 +1,19 @@
+/*
+:name: generic_interface_width
+:type: equiv
+:pyrope_top: top
+:verilog_top: top
+:equiv_engine: cvc5
+:lec_top: top
+:lec_grep: PROVEN equivalent
+*/
+// Working spelling: callers supply concrete port types.
+mod lane_xor<Word=u4>(a:Word, b:Word) -> (y:Word@[0]) {
+  y = a ^ b
+}
+pub mod top(a4:u4, b4:u4, a12:u12, b12:u12) -> (y4:u4@[0], y12:u12@[0]) {
+  mut small = lane_xor<Word=u4>(a=a4, b=b4)
+  mut large = lane_xor<Word=u12>(a=a12, b=b12)
+  y4 = small.y
+  y12 = large.y
+}

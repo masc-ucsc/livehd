@@ -211,3 +211,20 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "loop_cleanup_test",
+    srcs = ["loop_cleanup_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/prp:abc_tests"],
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "//graph",
+        "//pass/color:pass_color",
+        "//pass/liberty:pass_liberty",
+        "//pass/lec:lec_query",
+        "//pass/partition:pass_partition",
+        "@googletest//:gtest_main",
+    ],
+)

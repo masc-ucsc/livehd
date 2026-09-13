@@ -1092,6 +1092,27 @@ class PrpRunner:
                 return None, '`lhd compile {}` failed (rc={}){}'.format(
                     os.path.basename(src), proc.returncode, ': ' + why if why else '')
 
+        # A flat golden can describe state held in generic child instances.
+        # Compare occurrence names after flattening both selected tops when the
+        # fixture requests it; every state element must still match by name.
+        if test.params.get('state_match_flatten', '').strip().lower() in ('true', '1', 'yes', 'on'):
+            flat_dirs = []
+            stem = os.path.splitext(os.path.basename(prp))[0]
+            for side, lgdir, tag in (('ref', lg_ref, 'pyrope_top'), ('impl', lg_impl, 'verilog_top')):
+                top = self._resolve_lg_entity(
+                    lgdir if os.path.isabs(lgdir) else os.path.join(tmp_dir, lgdir), test.params.get(tag), stem)
+                if not top:
+                    return None, ':state_match_flatten: requires a resolvable :{}:'.format(tag)
+                flat_dir = lgdir + '_flat'
+                cmd = [self.lhd, 'pass', 'color', 'flat', 'lg:' + lgdir, '--top', top,
+                       '--emit-dir', 'lg:' + flat_dir, '--workdir', os.path.join(workdir, 'w_flat_' + side)]
+                proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                log, _ = proc.communicate()
+                if proc.returncode != 0:
+                    return None, 'flatten {} failed (rc={}): {}'.format(side, proc.returncode, self._first_error_message(log))
+                flat_dirs.append(flat_dir)
+            lg_ref, lg_impl = flat_dirs
+
         # Tops are resolved against each library's OWN entity list before being
         # passed. `:pyrope_top:`/`:verilog_top:` name the MODULES lgcheck
         # compares, which is not always how the lg: entity is spelled (`top` vs

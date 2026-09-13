@@ -158,10 +158,7 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# Pinned to 2f9c5e2 (top of tree; "update parser" on top of ace9553's 2opt-freq
-# B `{ ::[abc=…, color=…] … }` scope-attribute grammar — "block attributes" —
-# the 2f-verify `formal name.dotted {}` block grammar and the 3g generics
-# grammar).
+# Pinned to 3609d517 ("fx prp fmt"); parser and formatter share this archive.
 #
 # The co-development swap to the local ../tree-sitter-pyrope checkout is OVER:
 # the grammar work is pushed, so this is the pinned archive again and livehd is
@@ -177,9 +174,9 @@ http_archive(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-fa2x4YpVdiv3IfJnhFvX2i4lykaStywqtnly/DKGUOE=",  # 2f9c5e2 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-2f9c5e2ac4994c2d9e7308af783e97df94020094/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/2f9c5e2ac4994c2d9e7308af783e97df94020094.zip"],
+    integrity = "sha256-QPqRtnx/TCV10urgDdgOHBym4FS2Ke8AxLEDwhvzeZ0=",  # 3609d517 (same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-3609d5173d55e82432dd37ffffec5f422f7898eb/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3609d5173d55e82432dd37ffffec5f422f7898eb.zip"],
 )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
@@ -209,41 +206,13 @@ http_archive(
 # prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
 # src/parser.c via a genrule, so no local checkout is required. Bump the pin per
 # the @prpparse note above (recompute integrity).
-# ===========================================================================
-# TEMPORARY: on the LOCAL ../tree-sitter-pyrope working tree, not the pin.
-#
-# Why: the pinned 2f9c5e2 prpfmt silently DROPS `pub`, `wire`, `fluid` and an
-# enum's `:type` annotation, glues `ref x` into `refx` and `step 3` into `step3`,
-# lets a `//` comment swallow the next item on a second pass, and cannot parse
-# `f::[name=u](args)` / leading word-operator continuations / `_0` identifiers.
-# `lhd pyrope fmt -i` writes those losses straight over the user's source, so the
-# fixes have to be in effect, and they live in the sibling working tree.
-#
-# The fixes are committed in ../tree-sitter-pyrope as
-#   8b5e51272578017f1c2f040b636a84a61241fdfb
-# but that commit is NOT pushed, so the archive URL cannot resolve yet.
-#
-# TO RESTORE THE PIN, once that commit is on masc-ucsc/tree-sitter-pyrope:
-#   1. c=8b5e51272578017f1c2f040b636a84a61241fdfb
-#   2. curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/$c.zip \
-#        | openssl dgst -sha256 -binary | base64
-#   3. restore the http_archive block below with that commit + integrity, and do
-#      the SAME for @prpparse above (both unzip the same archive).
-#   4. `git revert` of this commit restores the block verbatim (minus the bump).
-# ===========================================================================
-new_local_repository(
+http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    path = "../tree-sitter-pyrope",
+    integrity = "sha256-QPqRtnx/TCV10urgDdgOHBym4FS2Ke8AxLEDwhvzeZ0=",
+    strip_prefix = "tree-sitter-pyrope-3609d5173d55e82432dd37ffffec5f422f7898eb",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3609d5173d55e82432dd37ffffec5f422f7898eb.zip"],
 )
-# The pin this replaces (restore verbatim, with the commit/integrity bumped):
-# http_archive(
-#     name = "tree_sitter_pyrope",
-#     build_file = "//packages:prpfmt.BUILD",
-#     integrity = "sha256-fa2x4YpVdiv3IfJnhFvX2i4lykaStywqtnly/DKGUOE=",  # 2f9c5e2
-#     strip_prefix = "tree-sitter-pyrope-2f9c5e2ac4994c2d9e7308af783e97df94020094",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/2f9c5e2ac4994c2d9e7308af783e97df94020094.zip"],
-# )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(
 #     name = "tree_sitter_pyrope",

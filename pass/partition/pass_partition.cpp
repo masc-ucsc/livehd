@@ -1185,7 +1185,11 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
       std::shared_ptr<hhds::GraphIO> out_child
           = decl_only_subs ? clone_subnode_decl(dst_lib, n) : livehd::partition::resolve_or_clone_subdef(dst_lib, n);
       if (out_child) {
-        neo.set_subnode(out_child);
+        if (auto loop = n.subnode_loop()) {
+          neo.set_subnode(out_child, *loop);
+        } else {
+          neo.set_subnode(out_child);
+        }
       } else {
         livehd::diag::err("pass.partition", "missing-subdef", "unsupported")
             .msg("sub-instance '{}' in '{}' references child def '{}' missing from the output library",
@@ -1492,7 +1496,11 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
       std::shared_ptr<hhds::GraphIO> out_child
           = decl_only_subs ? clone_subnode_decl(dst_lib, n) : livehd::partition::resolve_or_clone_subdef(dst_lib, n);
       if (out_child) {
-        neo.set_subnode(out_child);
+        if (auto loop = n.subnode_loop()) {
+          neo.set_subnode(out_child, *loop);
+        } else {
+          neo.set_subnode(out_child);
+        }
       } else {
         livehd::diag::err("pass.partition", "missing-subdef", "unsupported")
             .msg("sub-instance '{}' in '{}' references child def '{}' missing from the output library",
@@ -1961,7 +1969,8 @@ bool flatten_is_single_module(hhds::Graph* g, Flatten_mode mode) { return flatte
 bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                          std::string_view top_in, bool debug_color, const livehd::partition::Body_builder& hook,
                                          livehd::partition::Flatten_mode flatten, bool want_pre_bodies,
-                                         const livehd::partition::Body_batch_builder& batch_hook, size_t batch_size) {
+                                         const livehd::partition::Body_batch_builder& batch_hook, size_t batch_size,
+                                         const std::unordered_set<hhds::Gid>& preserved_defs) {
   std::string               top{top_in};
   std::vector<hhds::Graph*> order;
   auto*                     g = resolve_order(graphs, top, order);
@@ -1976,7 +1985,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     for (auto* def : order) {
       if (def == g
           || (!def->get_input_node().attr(livehd::attrs::memory_module).has()
-              && !def->get_input_node().attr(livehd::attrs::ware_module).has())) {
+              && !def->get_input_node().attr(livehd::attrs::ware_module).has() && !preserved_defs.contains(def->get_gid()))) {
         continue;
       }
       if (auto existing = outlib->find_io(def->get_name()); existing && existing->get_graph()) {
@@ -1992,12 +2001,13 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                livehd::partition::Flatten_mode::on,
                                want_pre_bodies,
                                batch_hook,
-                               batch_size)) {
+                               batch_size,
+                               preserved_defs)) {
         return false;
       }
       if (auto a = def->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
         outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::ware_module).set(a.get());
-      } else {
+      } else if (def->get_input_node().attr(livehd::attrs::memory_module).has()) {
         outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
       }
     }
@@ -2009,11 +2019,20 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     std::string                  flat_name;
     if (order.size() > 1) {
       flat_name   = top + "__flatten_tmp";
-      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name, nullptr, true);
+      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name, nullptr, true, preserved_defs);
       if (!flat_holder) {
         return false;  // diag already emitted
       }
       flat_src = flat_holder.get();
+    }
+    if (preserved_defs.contains(g->get_gid())) {
+      // A shared loop implementation is one synthesis unit, including ordinary
+      // helpers flattened into it. Do not resurrect their former color cuts.
+      for (auto node : flat_src->body().nodes()) {
+        if (is_partitionable(node)) {
+          livehd::graph_util::set_color(node, 1);
+        }
+      }
     }
     Partitioner p(flat_src,
                   outlib,
@@ -2049,7 +2068,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   debug_color,
                   hook,
                   /*flatten=*/false,
-                  fuse_colors,
+                  fuse_colors || preserved_defs.contains(def->get_gid()),
                   want_pre_bodies,
                   batch_hook,
                   batch_size);

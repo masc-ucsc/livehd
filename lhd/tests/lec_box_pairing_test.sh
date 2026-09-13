@@ -94,11 +94,16 @@ pub mod top(d:u32) -> (q:u32@[0]) {
   q = (s3 << 24) | (s2 << 16) | (s1 << 8) | s0
 }
 EOF
-# Anonymous variant: names cannot pair (.v ua0..ua3 vs .prp dst-vars s0..s3),
-# so occurrence pairing MISPAIRS the reversed declarations -> the collapsed
+# Anonymous variant: names cannot pair (.v ua* vs .prp dst-vars s0..s3), so the
+# occurrence fallback decides. That fallback orders the unnamed remainder by a
+# NATURAL sort of the canonical names on each side (query.cpp
+# natural_cname_less), so a mere declaration-order reversal now pairs the lanes
+# correctly and proves directly. To keep the flat-confirmation backstop under
+# test, the .v names are DELIBERATELY crossed against the lanes: lane k is
+# spelled ua(3-k), so ua0 (lane 3) sorts against s0 (lane 0) -> the collapsed
 # parent spuriously refutes -> the flat confirmation must rescue it.
 sed -e 's/::\[name=u[0-3]\]//' "$W/state.prp" > "$W/state_anon.prp"
-sed -e 's/ u\([0-3]\)(/ ua\1(/' "$W/state.v" > "$W/state_anon.v"
+sed -e 's/ u0(/ ua3(/' -e 's/ u1(/ ua2(/' -e 's/ u2(/ ua1(/' -e 's/ u3(/ ua0(/' "$W/state.v" > "$W/state_anon.v"
 # Anonymous variant with a REAL bug (lane 0 input inverted).
 sed 's/(a = d & 0xff)/(a = (d \& 0xff) ^ 1)/' "$W/state_anon.prp" > "$W/state_anon_bug.prp"
 

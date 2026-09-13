@@ -1,0 +1,23 @@
+/*
+:name: loop_roll_array_carry
+:type: simulation
+:expect_instances: u_loop_0=1 *=2
+*/
+// Array carries use the same default compact representation as scalar carries.
+// The second Sub is the bounds-check assertion in the shared loop body.
+pub mod loop_roll_array_carry(x:u8) -> (first:u8@[0], last:u8@[0]) {
+  mut values:[4]u8 = 0
+  for i in 0..<4 { values[i] = x ^ i }
+  first = values[0]
+  last = values[3]
+}
+
+test loop_roll_array_carry.lanes {
+  mut dut = loop_roll_array_carry
+  tick 2 {
+    dut.x = if clock == 0 { 19 } else { 240 }
+    step
+    assert(dut.first == dut.x)
+    assert(dut.last == (dut.x ^ 3))
+  }
+}

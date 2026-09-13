@@ -142,7 +142,7 @@ private:
         do_meet_op(c);
       } else if (N::is_if_like(t) || N::is_while(t) || N::is_for(t) || N::is_rolled_for(t) || N::is_tick(t)) {
         // `rolled_for` belongs here, not in the generic else: it is a `for` that
-        // upass.roll kept compact, so it writes every carry/final in its source
+        // uPass kept compact, so it writes every carry/final in its source
         // body and its lowering payload calls the lifted module. The generic
         // branch forgets only the first ref child — the loop INDEX — leaving the
         // carries with their PRE-loop cycle, so a landing check like `acc@[2]`

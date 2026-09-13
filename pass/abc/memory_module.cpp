@@ -9,6 +9,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,9 @@ struct Scratch {
     path = p;
   }
   ~Scratch() {
+    if (std::getenv("LHD_MEMORY_KEEP_SCRATCH") != nullptr) {
+      return;  // debugging: keep the generated RTL and yosys script for inspection
+    }
     std::error_code ec;
     fs::remove_all(path, ec);
   }
@@ -131,17 +135,29 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   std::vector<Connection>                inputs, outputs;
   std::map<std::string, hhds::Pin_class> input_pins;
   hhds::Port_id                          next_pid = 1;
+  // Whole-array reset of a LOWERED memory: kept as a module input and
+  // re-applied on the storage flops after yosys `memory_map` (see below).
+  hhds::Pin_class                        reset_input;
+  std::string                            reset_input_name;
+  std::optional<Dlop>                    init_const;
+  int64_t                                mem_bits = 0;
   for (const auto& e : edges) {
     const int       pid = e.sink.get_port_id(), off = pid % Ntype::Memory_port_stride;
     // Configuration is specialized into the child. init may instead be a
     // runtime reset-value bus, so only a constant init is a parameter.
     const bool      config = off == 1 || off == 5 || off == 6 || off == 7 || off == 8 || off == 9 || off == 10 || off == 15
                              || (off == 11 && e.driver.is_const());
+    if (off == 1 && e.driver.is_const()) {
+      mem_bits = gu::const_of(e.driver).to_just_i64();
+    }
+    if (off == 11 && e.driver.is_const()) {
+      init_const = gu::const_of(e.driver);
+    }
     hhds::Pin_class driver;
+    std::string     pname;
     if (config) {
       driver = gu::create_const(*body, gu::const_of(e.driver));
     } else {
-      std::string pname;
       const auto  field = off == 0 ? "addr" : off == 2 ? "clock" : off == 3 ? "din" : off == 4 ? "enable" : "";
       if (off == 2 && single_clock) {
         pname = "clk";
@@ -162,6 +178,22 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       }
       // Specialize constant-address ports without deleting their interface.
       driver = e.driver.is_const() ? gu::create_const(*body, gu::const_of(e.driver)) : input_pins.at(pname);
+    }
+    if (lower && off == 14 && !config) {
+      // The whole-array `reset` (every `reg m:[N]T = <const>` with a reset)
+      // is NOT handed to the inner memory: the shipped cgen_memory_* wrapper
+      // -- which yosys `memory_map` turns into one storage flop per entry,
+      // `data[N]`, the name the `_mem<N>` rename below keys on -- has no
+      // reset port, and the inline reg-array form cgen emits for a reset
+      // memory is sliced by yosys `proc` into anonymous `$auto$ff.cc` flops
+      // that no longer name their entry (which breaks pass/lec's memory <->
+      // storage-bank bridge). The `initial` pin still rides as the wrapper's
+      // INIT (power-on contents); the reset is re-applied on the lowered
+      // flops as reset_pin + initial + async -- exactly the flop a scalar
+      // `reg` with a reset lowers to.
+      reset_input      = driver;
+      reset_input_name = pname;
+      continue;
     }
     driver.connect_sink(inner.create_sink_pin(e.sink.get_port_id()));
   }
@@ -237,6 +269,58 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       }
       if (gu::type_op_of(node) == Ntype_op::Memory) {
         diag::err("pass.abc", "memory-lowering", "internal").msg("memory RTL lowering retained a Memory in '{}'", name).fatal();
+      }
+    }
+    if (!reset_input_name.empty()) {
+      // Re-apply the whole-array reset on the lowered storage flops (see the
+      // edge loop above): entry N resets to lane N of the init contents (0
+      // when the memory has none), asynchronously when the memory says so.
+      auto  lowered = result->get_graph();
+      auto  rst     = lowered->get_input_pin(reset_input_name);
+      if (rst.is_invalid()) {
+        diag::err("pass.abc", "memory-lowering", "internal")
+            .msg("memory RTL lowering of '{}' lost its reset input '{}'", name, reset_input_name)
+            .fatal();
+      }
+      const bool async_reset = [&] {
+        auto a = mem.attr(attrs::memory_async_reset);
+        return a.has() && a.get() != 0;
+      }();
+      const auto initial_pid = Ntype::get_sink_pid(Ntype_op::Flop, "initial");
+      for (const auto node : lowered->body().nodes()) {
+        if (gu::type_op_of(node) != Ntype_op::Flop) {
+          continue;
+        }
+        const auto flop_name = gu::node_name_of(node);
+        if (!flop_name.starts_with("_mem")) {
+          continue;
+        }
+        const auto index_txt = flop_name.substr(4);
+        if (index_txt.empty() || !std::ranges::all_of(index_txt, [](char c) { return c >= '0' && c <= '9'; })) {
+          continue;
+        }
+        const int64_t index = std::stoll(std::string(index_txt));
+        // memory_map seeded the power-on value from INIT on the `initial`
+        // sink; the same pin is the reset value on a reset flop, so redrive it
+        // with the entry's lane (they agree by construction).
+        std::vector<hhds::Edge_class> old_initial;
+        for (const auto& e : node.inp_edges()) {
+          if (!e.sink.is_invalid() && e.sink.get_port_id() == initial_pid) {
+            old_initial.push_back(e);
+          }
+        }
+        for (auto& e : old_initial) {
+          e.del_edge();
+        }
+        Dlop lane = *Dlop::create_integer(0);
+        if (init_const && mem_bits > 0) {
+          lane = *init_const->get_mask_op(*Dlop::get_mask_value(static_cast<int>((index + 1) * mem_bits - 1), static_cast<int>(index * mem_bits)));
+        }
+        gu::create_const(*lowered, lane).connect_sink(gu::setup_sink_by_name(node, "initial"));
+        rst.connect_sink(gu::setup_sink_by_name(node, "reset_pin"));
+        if (async_reset) {
+          gu::create_const(*lowered, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(node, "async"));
+        }
       }
     }
     if (!lib->copy_from(imported, name)) {
@@ -315,6 +399,13 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
           inline_array = true;
         }
         if (off == 12) {
+          inline_array = true;
+        }
+        if (off == 14) {
+          // A whole-array `reset` (every `reg m:[N]T = <const>` with a reset)
+          // has no cgen_memory_* wrapper either: cgen emits it as an inline
+          // reg array, so it takes the same instance-module boundary as a
+          // bulk-update cell whether or not it is bit-blasted.
           inline_array = true;
         }
       }

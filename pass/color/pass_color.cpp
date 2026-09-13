@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 
 #include "color_acyclic.hpp"
 #include "color_cgen.hpp"
@@ -277,18 +278,14 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   return s;
 }
 
-// Can the whole `top` hierarchy be inlined into one flat def? The flattener
-// REFUSES two shapes, and pass.color must not turn either into a hard failure:
+// Can `top` be colored through a virtual flat view? Recursive hierarchy must
+// not turn the optional cross-module coloring into a hard failure:
 // colouring the flat view is a QoR choice, and a design that cannot be
 // flattened simply falls back to the per-def colouring it always had.
 //
-//   * a REPLICATED (loop) Sub -- it stands for `count` occurrences and splicing
-//     one body copy would silently drop the rest (graph/inline_sub.cpp refuses
-//     for the same reason). Every rolled design has one.
-//   * a RECURSIVE hierarchy -- inlining would not terminate.
-//
-// Both are cheap to see from the structure alone: this walks unique defs, never
-// node edges, so it costs the hierarchy's size and not the design's.
+// Recursive hierarchy cannot be inlined. Compact loops remain opaque in the
+// virtual view, so their presence does not prevent ordinary module merging.
+// This visits each unique definition once.
 bool hierarchy_is_flattenable(hhds::Graph* top, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& gid2graph, std::string* why) {
   absl::flat_hash_set<hhds::Gid> done;
   absl::flat_hash_set<hhds::Gid> on_path;
@@ -311,10 +308,6 @@ bool hierarchy_is_flattenable(hhds::Graph* top, const absl::flat_hash_map<hhds::
       auto it = gid2graph.find(n.get_subnode_gid());
       if (it == gid2graph.end() || it->second == nullptr) {
         continue;  // body-less black box: stays an opaque instance, always fine
-      }
-      if (n.is_loop_subnode()) {
-        *why = std::format("'{}' instantiates '{}' as a replicated (loop) Sub", g->get_name(), it->second->get_name());
-        return false;
       }
       if (!self(self, it->second)) {
         return false;
@@ -613,6 +606,20 @@ void Pass_color::color(Eprp_var& var) {
   // instances follow it. That is still a valid partition (a region is just a set
   // of nodes) -- it only means those instances share a region rather than the
   // ones cones picked. Counted and reported rather than silently absorbed.
+  // A compact loop shares one implementation across its iterations. Keep that
+  // implementation together; ordinary synthesis cuts and size windows must not
+  // split the body into independently mapped regions.
+  std::unordered_set<hhds::Gid> loop_bodies;
+  if (alg == "synth") {
+    for (const auto& [gid, graph] : gid2graph) {
+      for (auto node : graph->body().nodes()) {
+        if (node.is_loop_subnode() && gid2graph.contains(node.get_subnode_gid())) {
+          loop_bodies.insert(node.get_subnode_gid());
+        }
+      }
+    }
+  }
+
   bool virtual_flat = false;
   if (alg == "synth" && opts.hier && top_g != nullptr && gid2graph.size() > 1) {
     auto*       lib = top_g->get_io() ? top_g->get_io()->get_library() : nullptr;
@@ -629,7 +636,7 @@ void Pass_color::color(Eprp_var& var) {
     if (lib != nullptr) {
       const std::string                  flat_name = std::string{top_g->get_name()} + "__color_flat_tmp";
       livehd::partition::Flat_origin_map origin;
-      auto                               flat = livehd::partition::flatten_hierarchy(top_g, lib, flat_name, &origin);
+      auto flat = livehd::partition::flatten_hierarchy(top_g, lib, flat_name, &origin, false, loop_bodies);
       if (!flat) {
         return;  // diag already emitted (recursive hierarchy, replicated Sub, ...)
       }
@@ -718,7 +725,11 @@ void Pass_color::color(Eprp_var& var) {
     Def_color_sizes sizes;
     Color_opts      o = opts;
     o.sizes           = stats ? &sizes : nullptr;
-    run_one(alg, g, o, var);
+    if (loop_bodies.contains(g->get_gid())) {
+      livehd::color::Color_flat(o).label(g);
+    } else {
+      run_one(alg, g, o, var);
+    }
     if (stats) {
       auto it = inst_cnt.find(g->get_gid());
       stats_acc.add(g->get_name(), sizes, it == inst_cnt.end() ? 1 : it->second);
@@ -726,8 +737,11 @@ void Pass_color::color(Eprp_var& var) {
   };
 
   if (virtual_flat) {
-    // Already colored, over the flat view. Re-running the per-def algorithm here
-    // would overwrite every color that was just written back.
+    // The flat view contains each loop as an opaque node. Its shared body was
+    // not part of that view and still needs its single implementation color.
+    for (auto gid : loop_bodies) {
+      color_def(gid2graph.at(gid));
+    }
   } else if (top_g != nullptr && opts.hier) {
     // Top-driven hierarchical walk: color the top plus every unique sub-def
     // reachable through the instance hierarchy (hhds hier_range yields one

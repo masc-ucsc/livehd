@@ -124,6 +124,15 @@ equivalent and still spell its state differently, and folding the two together
 would mean `fixme`-ing a live equivalence proof every time the naming is the
 only thing wrong.
 
+For a hierarchical Pyrope design with a flat golden, set
+`:state_match_flatten: true` together with `:pyrope_top:` and `:verilog_top:`.
+The harness flattens both selected tops with `lhd pass color flat` before
+matching their state by instance-qualified name. This changes the comparison
+scope, not the requirement that every register and memory find a counterpart.
+`generic_tuple_register` uses this mode with field-named golden registers;
+its separate `lhd/tests:lec_tuple_register_test` retains the packed golden and
+checks unbounded equivalence plus behavioral mutations.
+
 ### The gap classes
 
 In rough order of how much they are worth fixing:

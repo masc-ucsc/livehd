@@ -938,9 +938,8 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
   // FWD is the per-(read,write) matrix (bit k*n_wr+j) and can exceed a plain
   // integer parameter's 32 bits, so it is explicitly sized to THIS shape's
   // n_rd*n_wr (floored at 256 to match the shipped ware/rtl templates). A
-  // reset-restore expansion mints one write port per entry, so the matrix
-  // easily runs past 256 bits and a fixed width would silently drop the high
-  // read-port rows.
+  // wide register file (many read and write sites) runs the matrix past 256
+  // bits, and a fixed width would silently drop the high read-port rows.
   // ... but the direct-read specialization reads NEITHER matrix, and its whole
   // reason to exist is the shape (thousands of ports) whose n_rd*n_wr product
   // runs into the millions. Declaring two multi-megabit parameters no logic
@@ -1246,41 +1245,23 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // reader silently reads nothing (measured on a packed reg array that is both
   // element-indexed and assigned whole; it LEC-refuted). The wrappers also
   // cannot carry a runtime reset bus or an update bus, which is the original
-  // reason this path exists.
-  if (!mem_update_dpin.is_invalid() || wants_read_all) {
+  // reason this path exists -- and the third trigger: a whole-array `reset`
+  // (every `reg m:[N]T = <const>` with a reset, upass.tolg finalize_mems) has
+  // no wrapper port either.
+  //
+  // Same-cycle collisions: a registered per-port read below is a continuous
+  // read off the array reg (the COMMITTED value) topped by an explicit
+  // forwarding chain built from the cell's FWD/UNDEF matrices -- the same
+  // per-(read,write) semantics the cgen_memory_* wrappers implement -- so an
+  // `ordering="program"`/`"fwd"`/`"none"` memory diverted here keeps its
+  // graph-level meaning. (A whole-array `update` cell never gets a real
+  // matrix: tolg leaves `fwd` at its provisional declare value there, and a
+  // clocked bulk update is a next-state no same-cycle read observes, so that
+  // cell reads the committed contents only.)
+  if (!mem_update_dpin.is_invalid() || wants_read_all || !mem_reset_dpin.is_invalid()) {
     const bool has_update = !mem_update_dpin.is_invalid();
-    // The inline form has NO collision model: a registered read is a continuous
-    // `assign` off the array reg, so it always returns the COMMITTED value, and
-    // a combinational one is emitted after the writes, so it always forwards.
-    // The cgen_memory_* wrappers below carry the per-(read,write) FWD/UNDEF
-    // matrices instead. Diverting a `type` 0/1 memory here purely because
-    // something reads it WHOLE therefore silently downgrades `ordering="fwd"` /
-    // `ordering="none"` to `"old"` -- so refuse loudly rather than emit Verilog
-    // that disagrees with the graph. (A whole-array `update` cell never gets a
-    // real matrix: tolg leaves `fwd` at its provisional declare value there.)
-    if (!has_update && (mem_type == 0 || mem_type == 1)) {
-      const bool collides = (!mem_fwd_dpin.is_invalid() && !const_of(mem_fwd_dpin).is_known_zero())
-                            || (!mem_undef_dpin.is_invalid() && !const_of(mem_undef_dpin).is_known_zero());
-      if (collides) {
-        // Name the two matrices: "non-zero" alone does not say WHICH ordering
-        // the graph is asking for, and the two demand different fixes.
-        const auto mat_txt = [&](const hhds::Pin_class& p) -> std::string {
-          return p.is_invalid() ? std::string("-") : std::string(const_of(p).to_pyrope());
-        };
-        livehd::diag::err("inou.cgen", "mem-readall-collision", "unsupported")
-            .msg(
-                "memory {} is read WHOLE (read_all) and also carries a non-zero same-cycle collision matrix "
-                "(fwd={}, undef={}); the inline reg-array emission the whole read forces has no forwarding model",
-                debug_name(node),
-                mat_txt(mem_fwd_dpin),
-                mat_txt(mem_undef_dpin))
-            .hint(
-                "spell `ordering=\"old\"` on the array, or drop the whole-array read so the cgen_memory_* wrapper (which "
-                "carries FWD/UNDEF) is used")
-            .fatal();
-        return;
-      }
-    }
+    const int  lanes      = mem_wensize > 1 ? static_cast<int>(mem_wensize) : 1;  // write-enable lanes per entry
+    const int  lane_w     = mem_bits / lanes;
     // Inline storage uses the same reversible base name as a wrapper instance,
     // so an emit/read round trip can recover the original Memory identity.
     const auto      aname = absl::StrCat(iname, "_data");
@@ -1320,7 +1301,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // per-cycle default of the combinational always_comb. Sliced once here
     // because both consumers want the same per-entry constants.
     std::vector<std::string> init_entries;
-    if (!mem_init_dpin.is_invalid() && mem_reset_dpin.is_invalid() && mem_init_dpin.is_const()) {
+    if (!mem_init_dpin.is_invalid() && mem_init_dpin.is_const()) {
       const auto& init_value = const_of(mem_init_dpin);
       init_entries.reserve(static_cast<size_t>(mem_size));
       for (int i = 0; i < mem_size; ++i) {
@@ -1330,11 +1311,14 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
     std::string initbus;
     if (!mem_init_dpin.is_invalid() && !mem_reset_dpin.is_invalid()) {
-      // Runtime reset-value bus (whole-array cells only). With no `reset`
-      // condition the same pin is instead the COMPTIME power-on contents.
+      // Reset-value bus: a runtime wire on a whole-array cell, or the constant
+      // reset value of `reg m:[N]T = <const>`. A constant one is ALSO the
+      // power-on contents (the `initial` block below): the declaration's value
+      // is both, exactly like a scalar reg's.
       initbus = absl::StrCat(aname, "_rst");
       fout->append(absl::StrCat("wire [", busw - 1, ":0] ", initbus, " = ", get_wire_or_const(mem_init_dpin, busw, true), ";\n"));
-    } else if (registered && !init_entries.empty()) {
+    }
+    if (registered && !init_entries.empty()) {
       // Without this a memory diverted here by read_all would silently lose its
       // power-on state. ONLY for the registered form: the combinational form
       // drives the array from an always_comb, and IEEE 1800 forbids a variable
@@ -1355,9 +1339,24 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       fout->append(absl::StrCat("always @(posedge ", get_wire_or_const(clock_dpin, 1, true), reset_event, ") begin\n"));
       std::string ind = "  ";
-      if (!mem_reset_dpin.is_invalid()) {  // reset to the runtime init/reset bus (highest priority)
+      if (!mem_reset_dpin.is_invalid()) {  // reset to the init/reset bus (highest priority)
         fout->append(absl::StrCat("  if (", get_wire_or_const(mem_reset_dpin, 1, true), ") begin\n"));
-        fout->append(absl::StrCat("    ", aname, " <= ", initbus.empty() ? std::string("'b0") : initbus, ";\n"));
+        if (!init_entries.empty() && !has_update) {
+          // A per-port memory's CONSTANT reset value is written entry by entry,
+          // the shape a hand-written reset block has (`mem[0] <= 8'd1; mem[1]
+          // <= 8'd2;`). The packed `data <= 32'h04030201` form reads back
+          // through slang as a whole-array store of a scalar, which Pyrope
+          // BROADCASTS to every entry -- a silent per-entry corruption on any
+          // non-uniform value. A whole-array `update` cell keeps the packed
+          // assignment: that is the shape the reader recognizes as a bulk
+          // update with a reset (per-lane writes would re-read as independent
+          // write ports and lose the bulk-update identity).
+          for (int i = 0; i < mem_size; ++i) {
+            fout->append(absl::StrCat("    ", aname, "[", i, "] <= ", init_entries[i], ";\n"));
+          }
+        } else {
+          fout->append(absl::StrCat("    ", aname, " <= ", initbus.empty() ? std::string("'b0") : initbus, ";\n"));
+        }
         fout->append("  end else begin\n");
         ind = "    ";
       }
@@ -1380,12 +1379,39 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         if (p.rdport || p.addr.is_invalid() || p.din.is_invalid() || invalid_const_addr(p.addr)) {
           continue;
         }
-        auto w = absl::StrCat(aname,
-                              "[",
-                              get_wire_or_const(p.addr, mem_addr_bits, true),
-                              "] <= ",
-                              get_wire_or_const(p.din, mem_bits, true),
-                              ";\n");
+        const auto addr_txt = get_wire_or_const(p.addr, mem_addr_bits, true);
+        if (lanes > 1 && !p.enable.is_invalid()) {
+          // wensize > 1: the enable is a per-lane mask (bit l writes lane l),
+          // exactly the wrapper's `for(i<WENSIZE) if(wr_enable[i]) data[addr][i*MASKSIZE +: MASKSIZE] <= ...`.
+          const auto en_txt  = get_wire_or_const(p.enable, static_cast<int>(lanes), true);
+          const auto din_txt = get_wire_or_const(p.din, mem_bits, true);
+          for (int l = 0; l < lanes; ++l) {
+            const int hi = (l + 1) * lane_w - 1;
+            const int lo = l * lane_w;
+            fout->append(absl::StrCat(ind,
+                                      "if (",
+                                      en_txt,
+                                      "[",
+                                      l,
+                                      "]) ",
+                                      aname,
+                                      "[",
+                                      addr_txt,
+                                      "][",
+                                      hi,
+                                      ":",
+                                      lo,
+                                      "] <= ",
+                                      din_txt,
+                                      "[",
+                                      hi,
+                                      ":",
+                                      lo,
+                                      "];\n"));
+          }
+          continue;
+        }
+        auto w = absl::StrCat(aname, "[", addr_txt, "] <= ", get_wire_or_const(p.din, mem_bits, true), ";\n");
         fout->append(p.enable.is_invalid() ? absl::StrCat(ind, w)
                                            : absl::StrCat(ind, "if (", get_wire_or_const(p.enable, 1, true), ") ", w));
       }
@@ -1462,8 +1488,46 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       // IEEE array semantics make a read through an unknown/out-of-range
       // index unknown. Spell that result directly: a constant unknown
       // selector is diagnosed as an invalid element by slang before lowering.
-      const auto rhs = invalid_const_addr(p.addr) ? unknown_entry()
-                                                  : absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]");
+      const auto raddr = get_wire_or_const(p.addr, mem_addr_bits, true);
+      std::string rhs  = invalid_const_addr(p.addr) ? unknown_entry() : absl::StrCat(aname, "[", raddr, "]");
+      if (registered && !has_update) {
+        // Same-cycle forwarding chain from the cell's per-(read,write) FWD /
+        // UNDEF matrices (bit r*n_wr + w, graph/cell.cpp): a later write port
+        // overrides an earlier one (last writer wins, matching the nonblocking
+        // storage priority above), so the chain is built w high -> low with
+        // the innermost rung being the committed read. An UNDEF rung reads x.
+        // (A whole-array `update` cell keeps its provisional matrix and reads
+        // the committed contents only -- see the routing comment above.)
+        const int r = n_rd_pos - 1;
+        int       w = n_wr_ports;
+        for (auto it = port_vector.rbegin(); it != port_vector.rend(); ++it) {
+          if (it->rdport) {
+            continue;
+          }
+          --w;
+          const int  bit = r * n_wr_ports + w;
+          const bool fwd = !mem_fwd_dpin.is_invalid() && const_of(mem_fwd_dpin).bit_test(bit);
+          const bool udf = !mem_undef_dpin.is_invalid() && const_of(mem_undef_dpin).bit_test(bit);
+          if ((!fwd && !udf) || it->addr.is_invalid() || it->din.is_invalid() || invalid_const_addr(it->addr)) {
+            continue;
+          }
+          if (lanes > 1) {
+            livehd::diag::err("inou.cgen", "mem-inline-lanes", "unsupported")
+                .msg("memory {} has a per-lane write enable (wensize={}) and a same-cycle collision matrix, which the "
+                     "inline reg-array emission (forced by its reset / whole-array read) does not forward per lane",
+                     debug_name(node),
+                     lanes)
+                .hint("spell `ordering=\"old\"` on the array, or drop the reset value / whole-array read")
+                .fatal();
+            return;
+          }
+          std::string hit = absl::StrCat("(", get_wire_or_const(it->addr, mem_addr_bits, true), " == ", raddr, ")");
+          if (!it->enable.is_invalid()) {
+            hit = absl::StrCat("(", get_wire_or_const(it->enable, 1, true), " && ", hit, ")");
+          }
+          rhs = absl::StrCat(hit, " ? ", udf ? unknown_entry() : get_wire_or_const(it->din, mem_bits, true), " : ", rhs);
+        }
+      }
       drive(get_wire_or_const(dout_dpin), rhs);
     }
     if (wants_read_all) {  // packed data is already {data[size-1], ..., data[0]}
@@ -1564,6 +1628,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       const auto& uv        = const_of(mem_undef_dpin);
       std::string undef_txt = uv.is_just_i64() ? std::to_string(uv.to_just_i64()) : const_to_verilog(uv);
       parameters            = absl::StrCat(parameters, first_entry ? "" : " ,", ".UNDEF", "(", undef_txt, ")");
+    }
+    if (!mem_reset_dpin.is_invalid()) {
+      // Unreachable by construction (a `reset` diverts the cell to the inline
+      // path above); fail closed rather than drop the reset.
+      livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+          .msg("memory {} carries a whole-array `reset` but reached the cgen_memory_* wrapper path, which has no reset port",
+               debug_name(node))
+          .fatal();
+      return;
     }
     if (!mem_init_dpin.is_invalid()) {
       // Power-on contents ride the wrapper's INIT parameter (packed, entry 0
@@ -3904,7 +3977,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // emits `<port> = <iname>_o<pid>;` like any other driver.
           // De-collide: `default_instance_name` is the instance's NAME when it
           // has one, so two same-named instances (a generate loop, or the
-          // occurrences an `upass.roll` expansion produces) would otherwise
+          // occurrences produced by expanding a compact loop) would otherwise
           // declare and drive one shared net per port instead of one each.
           // Claim the slot FIRST: get_unique_decl_name permanently reserves the
           // name it hands back, so computing it for a pin another site already
@@ -4141,10 +4214,10 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
   // A flop RESET has the identical hazard, and the same two consumers: an
   // async reset lands in the edge event (`or posedge <x>`), and the sync level
   // test reads it through get_wire_or_const — which ignores pin2expr and emits
-  // a bare undeclared name. A DERIVED reset used once is now an ordinary shape:
-  // a reg array's reset-restore sweep counter parks on `!reset` (upass.tolg
-  // build_restore_sweep), and in a memory-only design that inverter's single
-  // reader is this pin. It emitted `if (eq_32)` against no such net.
+  // a bare undeclared name. A DERIVED reset used once is an ordinary shape (a
+  // `negreset` inverter, a reset gated by a condition), and in a memory-only
+  // design that inverter's single reader is this pin. It emitted `if (eq_32)`
+  // against no such net.
   // (A Memory's own whole-array `reset` needs nothing here: every Sub/Memory
   // input driver is force-declared above.)
   //

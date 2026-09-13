@@ -2542,7 +2542,7 @@ private:
   // name:[N]T`; one write port per store site and one read port per tuple_get
   // site (no port merging here — that is a future LG pass). Per-port sink pids
   // stride by 12 (graph/cell.cpp); the r-th read port's data comes out on
-  // driver pid (n_wr_total + r), so the write-site count is pre-scanned at the
+  // driver pid (n_user_wr + r), so the write-site count is pre-scanned at the
   // declare.
   struct Mem_info {
     hhds::Node_class     node;
@@ -2553,7 +2553,6 @@ private:
     bool                 is_array    = false;  // type=2: mut/const array (no clock, no persistence)
     bool                 is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
     bool                 init_wired  = false;
-    int                  n_wr_total  = 0;  // user sites + the restore port (fixes dout pids)
     int                  n_user_wr   = 0;  // pre-scanned program write sites
     int                  wr_next     = 0;
     int                  rd_next     = 0;
@@ -2577,12 +2576,13 @@ private:
     int64_t                      legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
     bool                         has_legacy_fwd  = false;
     std::vector<int>             rd_wr_before;  // per read port: writes minted before it
-    // 1a-mem reset-restore — per-entry reset values: finalize_mems() turns
-    // these into ONE restore write port (addr = a sweep counter, din =
-    // init[addr], enable=reset) and gates the user ports' enables with !reset.
-    // The restore port stays OUT of the fwd mask: a read during reset returns
-    // the committed (old) contents.
-    std::vector<spool_ptr<Dlop>> restore_vals;
+    // Declared reset value (`reg m:[N]T = <const|tuple>`), packed entry 0 in
+    // the low elem_mw bits — the SAME value the `initial` pin carries. Non-null
+    // => finalize_mems wires the cell's whole-array `reset` (pin 14): the reset
+    // restores every entry in ONE cycle, exactly like a scalar reg. nil => none.
+    // (A value, not a spool_ptr: Mem_info is copied into mem_map_, and a null
+    // spool_ptr cannot be copied -- its copy bumps the pointee's refcount.)
+    std::optional<Dlop>          reset_init;
     // Whole-array support: a runtime `mem = <bus>` store drives the cell's
     // `update` sink (size*elem_mw bus) instead of minting per-entry write
     // ports. A whole `x = mem` read materializes the async `read_all` driver
@@ -3055,9 +3055,9 @@ private:
     // `initial` pin (a scalar broadcasts to every entry; a tuple literal packs
     // per entry). nil / 0sb? = uninitialized. It is ALSO the RESET value of
     // every entry (the same statement `= <const>` makes on a scalar reg), so
-    // the module has a reset by construction and finalize_mems() builds the
-    // one-entry-per-cycle restore SWEEP from these values. mut/const arrays get
-    // theirs via the whole-array store instead.
+    // the module has a reset by construction and finalize_mems() wires the
+    // cell's whole-array `reset` pin, which reloads the `initial` contents in
+    // ONE cycle. mut/const arrays get theirs via the whole-array store instead.
     spool_ptr<Dlop>                       reg_init;
     std::vector<spool_ptr<Dlop>>          init_entries;
     // Read an INLINE init child on the declare. The Pyrope frontend gives
@@ -3066,12 +3066,11 @@ private:
     // slang reader instead emits the `initial` contents INLINE as a scalar
     // const or a tuple_add literal on the declare — for BOTH regs and arrays.
     // Reading it here for arrays too lands the contents on the type==2 `init`
-    // pin with NO reset-restore (wants_restore is gated on !is_array below),
-    // i.e. pure power-on init: a `mut`/`const` array has no clock, so there is
-    // nothing for a reset to re-load. A reg array DOES restore its init — a
-    // memory still has no parallel reset port, so finalize_mems() realizes it
-    // as a one-entry-per-cycle sweep. Flatten an inline tuple literal's
-    // constant leaves row-major into entries.
+    // pin with NO reset (reset_init is gated on !is_array below), i.e. pure
+    // power-on init: a `mut`/`const` array has no clock, so there is nothing
+    // for a reset to re-load. A reg array DOES restore its init through the
+    // cell's whole-array `reset` pin (finalize_mems). Flatten an inline tuple
+    // literal's constant leaves row-major into entries.
     std::function<bool(const Lnast_nid&)> flatten_lit = [&](const Lnast_nid& tnid) -> bool {
       for (auto ch = lnast_->get_first_child(tnid); !ch.is_invalid(); ch = lnast_->get_sibling_next(ch)) {
         const auto cht = lnast_->get_type(ch);
@@ -3161,21 +3160,6 @@ private:
     }
 
     const int  user_sites      = count_mem_write_sites(name_nid);
-    // `!init_entries.empty()` is not redundant with `reg_init`: it is the SAME
-    // predicate finalize_mems() mints the restore port with. A zero-entry array
-    // leaves `reg_init` set (the broadcast loop simply never runs) with no
-    // per-entry values, and budgeting a port here that finalize_mems then
-    // declines to mint would punch a hole in the write-port block -- every read
-    // dout is recovered by COUNTING write ports (`n_write + r`), so the reads
-    // would silently bind to the wrong driver pid.
-    // A memory reset needs a reset SIGNAL, and it need not be the module's
-    // implicit one: `reg arr:[N]u8:[reset_pin=ref rst] = 0` names its own, and
-    // tree_declares_reset_reg deliberately does NOT mint the implicit `reset`
-    // then -- so keying this on `reset_name_` alone silently dropped the whole
-    // reset (no sweep, no !reset gate on the user writes, the value demoted to
-    // a power-on `INIT`). That is br_delay's Pyrope, which LEC-refuted at the
-    // first post-reset step.
-    const bool wants_restore   = !is_array && reg_init && !init_entries.empty() && !mem_reset_source(name).empty();
     // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
     // finalize_mems() builds once every port is minted and each read port's
     // program position is known (`rd_wr_before`). The `ordering` attr is read
@@ -3249,14 +3233,16 @@ private:
     // to file scope), but the gate is mode-keyed so it activates with regref.
     info.is_pub          = std::string_view(lnast_->get_name(mode_nid)).find("pub") != std::string_view::npos;
     info.n_user_wr       = user_sites;
-    // One restore port, not `size` of them: the reset re-load is a
-    // one-write-per-cycle SWEEP (finalize_mems), so the port block grows by a
-    // single slot no matter how many entries the array has.
-    info.n_wr_total      = user_sites + (wants_restore ? 1 : 0);
     info.legacy_fwd_mask = legacy_fwd_mask;
     info.has_legacy_fwd  = has_legacy_fwd;
-    if (wants_restore) {
-      info.restore_vals = std::move(init_entries);
+    // `!init_entries.empty()` is not redundant with `reg_init`: a zero-entry
+    // array leaves `reg_init` set (the broadcast loop simply never runs) with
+    // nothing to reset. Whether a reset SIGNAL exists is decided in
+    // finalize_mems (mem_reset_source): `reg arr:[N]u8:[reset_pin=ref rst] = 0`
+    // names its own, and tree_declares_reset_reg deliberately does NOT mint the
+    // implicit `reset` then.
+    if (!is_array && reg_init && !init_entries.empty()) {
+      info.reset_init = *reg_init;
     }
     mem_map_.emplace(std::string(name), info);
     mem_order_.emplace_back(name);
@@ -4008,7 +3994,7 @@ private:
   }
 
   // tuple_get(ref dst, ref mem, idx) — one read port per site, always
-  // enabled; dst binds to the port's dout driver (pid n_wr_total + r).
+  // enabled; dst binds to the port's dout driver (pid n_user_wr + r).
   void lower_tuple_get(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     auto src = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
@@ -4211,7 +4197,7 @@ private:
     if (addr.is_invalid()) {
       return;  // flatten_mem_addr reported
     }
-    const int  slot = mi.n_wr_total + mi.rd_next;
+    const int  slot = mi.n_user_wr + mi.rd_next;
     const auto base = slot * kMemPortStride;
     // Program-order position: the writes minted so far are exactly those that
     // textually precede this read, i.e. the ones it may forward from.
@@ -4220,7 +4206,7 @@ private:
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
         .connect_driver(create_const(*g_, *Dlop::create_integer(1)));  // rdport = 1 (read)
-    auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_wr_total + mi.rd_next));
+    auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_user_wr + mi.rd_next));
     ++mi.rd_next;
     auto dst_name = lnast_->get_name(dst);
     if (mi.elem_signed) {
@@ -4231,97 +4217,6 @@ private:
       set_ubits(dout, mi.elem_mw);
       record(dst_name, dout, mi.elem_mw);
     }
-  }
-
-  // 1a-mem reset-restore SWEEP: the (addr, din) pair that drives the single
-  // restore write port. Entry k is written on the k-th cycle of the reset
-  // window, so the array is fully restored only after `size` cycles of reset
-  // held high — the "memories have no reset port" cost of spelling a reset
-  // value on an array. The counter parks at 0 for as long as the module is OUT
-  // of reset (its reset_pin is the INVERTED module reset), so every reset
-  // pulse sweeps from entry 0, and it saturates at size-1 so a longer reset
-  // just rewrites the last entry. A 1-entry array needs no counter, and the
-  // `= <const>` broadcast (every entry equal) needs no data mux. `not_rst` is
-  // the caller's inverted reset, shared with the user-write gating so both read
-  // one net.
-  [[nodiscard]] std::pair<Pin, Pin> build_restore_sweep(std::string_view name, const Mem_info& mi, const Pin& not_rst,
-                                                        const Pin& clk) {
-    const auto& vals = mi.restore_vals;
-    const auto  n    = static_cast<int64_t>(vals.size());
-    I(n > 0);
-    if (n == 1) {
-      return {create_const(*g_, *Dlop::create_integer(0)), create_const(*g_, *vals[0])};
-    }
-    const bool uniform
-        = std::all_of(vals.begin() + 1, vals.end(), [&](const auto& v) { return v->eq_op(*vals[0])->is_known_true(); });
-    const int32_t addr_w = mw_of_val(n - 1);
-
-    auto cnt = make_node(Ntype_op::Flop);
-    if (!clk.is_invalid()) {
-      setup_sink_by_name(cnt, "clock_pin").connect_driver(clk);
-    }
-    setup_sink_by_name(cnt, "reset_pin").connect_driver(not_rst);
-    setup_sink_by_name(cnt, "initial").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
-    auto q = cnt.create_driver_pin(0);
-    set_ubits(q, addr_w);
-    // Name it after the array: pass/lec pairs state BY NAME, and an anonymous
-    // `flop_<nid>` here would drop both designs into the speculative tier-2
-    // signature pass.
-    std::string cnt_name{name};
-    if (auto ssa = cnt_name.find("___ssa_"); ssa != std::string::npos) {
-      cnt_name.resize(ssa);
-    }
-    cnt_name = absl::StrCat(cnt_name.empty() ? std::string_view{"mem"} : canon_io_name(cnt_name), "_rstcnt");
-    cnt.set_name(cnt_name);
-    livehd::graph_util::set_pin_name(q, cnt_name);
-    // Real sequential state: register it so the Time_checker reads the q->din
-    // self-loop as a state cut instead of "register feedback through stage
-    // registers".
-    plain_reg_flops_[cnt.get_debug_nid()] = cnt_name;
-    // din = (q == size-1) ? q : q + 1
-    auto eq                               = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
-    eq.create_sink_pin(0).connect_driver(q);
-    eq.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(n - 1)));
-    auto at_last = eq.create_driver_pin(0);
-    set_ubits(at_last, 1);
-    auto inc = make_node(Ntype_op::Sum);
-    setup_sink_by_name(inc, "as").connect_driver(q);
-    setup_sink_by_name(inc, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-    auto inc_d = inc.create_driver_pin(0);
-    set_ubits(inc_d, addr_w + 1);
-    // `q + 1` reaches `n`, which needs addr_w+1 bits, but the saturating mux
-    // never SELECTS that value. Truncate the advance arm back to the counter's
-    // own width so the mux — and therefore the flop's din — is exactly addr_w
-    // wide. Without the Get_mask the din carrier is one bit wider than Q, and
-    // pass/bitwidth's process_flop unions the din range into Q: the counter
-    // grows a bit, which widens the memory address and pushes the ROM mux
-    // selector past its last arm.
-    auto inc_trunc = make_node(Ntype_op::Get_mask);
-    setup_sink_by_name(inc_trunc, "a").connect_driver(inc_d);
-    setup_sink_by_name(inc_trunc, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(addr_w)));
-    auto inc_w = inc_trunc.create_driver_pin(0);
-    set_ubits(inc_w, addr_w);
-    auto sat = make_node(Ntype_op::Mux);
-    sat.create_sink_pin(0).connect_driver(at_last);
-    sat.create_sink_pin(1).connect_driver(inc_w);  // sel==0: advance
-    sat.create_sink_pin(2).connect_driver(q);      // sel==1: hold the last entry
-    auto sat_d = sat.create_driver_pin(0);
-    set_ubits(sat_d, addr_w);  // both arms are addr_w: the counter never leaves [0, n-1]
-    setup_sink_by_name(cnt, "din").connect_driver(sat_d);
-
-    if (uniform) {
-      return {q, create_const(*g_, *vals[0])};
-    }
-    // Per-entry reset values: a ROM lookup of the init contents, one Mux arm
-    // per entry (arm k sits at sink pid k+1, graph/cell.cpp).
-    auto sel = make_node(Ntype_op::Mux);
-    sel.create_sink_pin(0).connect_driver(q);
-    for (int64_t k = 0; k < n; ++k) {
-      sel.create_sink_pin(static_cast<hhds::Port_id>(k + 1)).connect_driver(create_const(*g_, *vals[static_cast<size_t>(k)]));
-    }
-    auto sel_d = sel.create_driver_pin(0);
-    set_ubits(sel_d, mi.elem_mw);
-    return {q, sel_d};
   }
 
   void finalize_mems() {
@@ -4339,81 +4234,11 @@ private:
             mi.wr_next,
             mi.n_user_wr);
       }
-      // 1a-mem reset-restore — a concrete-init reg array with a bound reset
-      // re-loads its init while reset is held. `reg arr:[N]T = <const>` is the
-      // same statement a scalar `reg r:uW = <const>` makes: that const is the
-      // reset value of every entry. A memory has no
-      // parallel reset port to realize it with, so the restore is a SWEEP: one
-      // write port (addr=<sweep counter>, din=init[addr], enable=reset) plus a
-      // small counter that advances one entry per cycle while reset is high.
-      // The array is therefore fully restored only after `size` cycles of
-      // reset. (A bounded LEC still proves it against a one-cycle scalar reset
-      // at the default 2, because it seeds a memory's cycle-0 state from the
-      // `initial` pin — which the same `= <const>` set — and the sweep then only
-      // rewrites what is already there. Starting from an ARBITRARY array needs
-      // `--set formal.reset_cycles=<size>`.) Every USER port's enable, and the
-      // whole-array `update_enable`, is gated with !reset so program writes
-      // stay suppressed while the sweep runs (exactly like a scalar reg's
-      // din). The restore port is excluded from the fwd mask, so a same-cycle
-      // read during reset returns the committed (old) contents.
-      //
-      // The port is minted UNCONDITIONALLY when there are restore values, even
-      // for a whole-array cell that also takes the source-spelled one-cycle
-      // reset below (where the sweep is then dead logic: that reset is the
-      // top-priority arm, so this port's `reset` enable is only ever read
-      // inside its `else`). `n_wr_total` — and with it every read dout's driver
-      // pid — was budgeted at the DECLARE, and cgen_sim/lec recover a read's
-      // dout by COUNTING the write ports they find (`n_write + r`). Skipping
-      // the port here would leave a hole in that count and point every read at
-      // the wrong dout.
-      if (!mi.restore_vals.empty()) {
-        // The sweep runs off the reset the DECLARATION named, not necessarily
-        // the module's implicit one (see mem_reset_source); resolving it as
-        // `reset_pin()` unconditionally would mint a second, unconnected
-        // `reset` input on a module that already spells its own.
-        const auto rst_name = mem_reset_source(name);
-        Pin        rst      = (!rst_name.empty() && g_->get_io()->has_input(rst_name)) ? g_->get_input_pin(rst_name) : reset_pin();
-        bool       neg      = reset_neg_;
-        if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
-          if (auto nit = pit->second.find("negreset"); nit != pit->second.end() && nit->second != "false") {
-            neg = true;
-          }
-        }
-        if (neg) {
-          rst = not1(rst);
-        }
-        const auto en_pid_off = 4;
-        Pin        not_rst    = not1(rst);
-        for (int u = 0; u < mi.n_user_wr; ++u) {
-          const auto pid = static_cast<uint64_t>(u * kMemPortStride + en_pid_off);
-          for (const auto& e : mi.node.inp_edges()) {
-            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
-              auto old_en = e.driver;
-              e.del_edge();
-              mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(and2(old_en, not_rst));
-              break;
-            }
-          }
-        }
-        if (mi.has_update) {
-          // A bulk update would overwrite the entries the sweep has already
-          // restored, so it is suppressed for the whole reset window (an
-          // always-on bus becomes `!reset`).
-          mi.update_en = and2(mi.update_en, not_rst);
-          redrive_mem_sink(mi, 13, mi.update_en);
-        }
-        const auto [sweep_addr, sweep_din] = build_restore_sweep(name, mi, not_rst, mem_clock_pin(name));
-        const auto base                    = mi.n_user_wr * kMemPortStride;
-        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(sweep_addr);
-        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(sweep_din);
-        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
-        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-            .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
-      }
       // Same-cycle ordering: build the per-(read,write) `fwd` matrix now that
       // every port is minted. Bit (r*n_wr + w) => read port r forwards write
-      // port w. Only the USER write ports can forward; the restore ports
-      // (reset) never do, so a read during reset sees the committed contents.
+      // port w. A write suppressed by reset (finalize_mems gates every user
+      // enable with !reset) never lands, so a read during reset sees the
+      // committed contents.
       //   "program" (default): row r = the writes that textually precede read r
       //                        (a PREFIX, recorded in rd_wr_before)
       //   "fwd":               every read forwards every user write
@@ -4468,18 +4293,17 @@ private:
       // br_tracker_linked_list_ctrl. With no rows the packed matrix is exactly
       // zero, which is also what the inline reg-array emission implements.
       const int n_rd = static_cast<int>(mi.rd_wr_before.size());
-      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update && mi.n_wr_total > 0) {
+      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update && mi.n_user_wr > 0) {
         // Row-major bit string, MSB first: bit (r*n_wr + w) sits at index
         // n_bits-1-(r*n_wr+w). Built as TEXT so a wide matrix stays exact — a
         // whole-array expansion easily reaches 9rd x 8wr = 72 bits, and every
         // consumer reads it with Dlop::bit_test (arbitrary precision).
-        const int   n_bits = n_rd * mi.n_wr_total;
+        const int   n_bits = n_rd * mi.n_user_wr;
         std::string bits(static_cast<size_t>(n_bits), '0');
         // ordering="none": the SAME layout, but the bits mean "undefined on a
         // collision" rather than "forward". A zero `fwd` row alone cannot say
         // whether the read is defined-OLD or undefined, so "none" needs its own
-        // matrix (graph/cell.cpp pid 15). Only the USER write ports go in it —
-        // a restore (reset) port is deterministic, exactly as for `fwd`.
+        // matrix (graph/cell.cpp pid 15).
         std::string ubits(static_cast<size_t>(n_bits), '0');
         for (int r = 0; r < n_rd; ++r) {
           int fwd_upto   = 0;
@@ -4491,10 +4315,10 @@ private:
             case Mem_info::Mem_order::none   : undef_upto = mi.n_user_wr; break;
           }
           for (int w = 0; w < fwd_upto; ++w) {
-            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] = '1';
+            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_user_wr + w))] = '1';
           }
           for (int w = 0; w < undef_upto; ++w) {
-            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] = '1';
+            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_user_wr + w))] = '1';
           }
         }
         // Same encoding for both: compact int64 while it fits (so the emitted
@@ -4670,66 +4494,118 @@ private:
         }
       }
 
-      // Whole-array reset: a registered whole-array (`update` driven) loads its
-      // reset value on reset via the cell's `reset` + runtime `initial` pins (cgen
-      // / cgen_sim / lec emit `if(reset) data[i] <= init[i]`). The slang reader
-      // harvested the reset into `initial` (the reset-value bus const) +
-      // `reset_pin` (+ `negreset`) attrs; consume them here. This is the
-      // one-cycle parallel reset the SOURCE spelled out and it stays exact —
-      // Pyrope's `= <const>` reset value, which no source hardware backs, is
-      // the one realized as the restore sweep above.
-      if (mi.has_update) {
+      // ── Memory reset: ONE cycle, every entry, through the cell's whole-array
+      // `reset` pin (14) + the `initial` bus — the same contract a scalar reg
+      // has. Two sources, ONE wiring:
+      //   (a) the declaration's `= <const|tuple>` (mi.reset_init, already on the
+      //       `initial` pin); its reset signal is the declaration's reset_pin=
+      //       or the module's implicit reset (mem_reset_source);
+      //   (b) the importer's `initial=<packed bus> reset_pin=<sig>` attr pair on
+      //       a whole-array (`update`) cell — the slang reader's form.
+      // `initial=` (04b-attributes.md: the PACKED contents, entry 0 in the low
+      // bits) next to a declared reset value must AGREE with it: both ride the
+      // one `initial` pin (power-on contents == reset value), so two different
+      // values is a contradiction, not an override. Next to `= nil` it is
+      // power-on-only contents and NO reset is wired.
+      if (!mi.is_array) {
+        const absl::flat_hash_map<std::string, std::string>* attrs = nullptr;
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
-          auto&            attrs = pit->second;
-          std::string_view rpn;
-          if (auto rit = attrs.find("reset_pin"); rit != attrs.end()) {
-            rpn = rit->second;
+          attrs = &pit->second;
+        }
+        auto attr_of = [&](std::string_view k) -> std::string_view {
+          if (attrs == nullptr) {
+            return {};
           }
-          if (!rpn.empty() && rpn != "false") {
-            // Reset value bus -> init sink (overrides any declare-time const
-            // init).
-            // `initial` is the importer spelling; `init` is the canonical
-            // Pyrope declaration attribute emitted by prp_writer.  Both the
-            // Slang->Pyrope->LGraph round trip and a direct Slang->LGraph
-            // compile spell it `initial=...` (one name in both layers), so this
-            // is a single lookup -- exactly like finalize_regs().
-            auto iit = attrs.find("initial");
-            if (iit != attrs.end() && iit->second != "false") {
-              if (auto iv = Dlop::from_pyrope(iit->second); !iv->is_invalid()) {
-                if (iv->is_nil()) {
-                  iv = Dlop::create_integer(0);  // as always: a nil init is 0
-                }
-                for (const auto& e : mi.node.inp_edges()) {
-                  if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {  // init (pid 11)
-                    e.del_edge();
-                    break;
-                  }
-                }
-                setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *iv));
+          auto ait = attrs->find(std::string(k));
+          return ait == attrs->end() ? std::string_view{} : std::string_view(ait->second);
+        };
+        spool_ptr<Dlop> attr_init;
+        if (auto itxt = attr_of("initial"); !itxt.empty() && itxt != "false") {
+          attr_init = Dlop::from_pyrope(itxt);
+          if (!attr_init || attr_init->is_invalid()) {
+            error_here(
+                "upass.tolg: memory '{}' `initial={}` is not a comptime constant "
+                "(the packed contents, entry 0 in the low bits)",
+                name,
+                itxt);
+            continue;
+          }
+          if (attr_init->is_nil()) {
+            attr_init = Dlop::create_integer(0);  // as always: a nil initial is 0
+          }
+        }
+        if (attr_init && mi.reset_init) {
+          if (!attr_init->eq_op(*mi.reset_init)->is_known_true()) {
+            error_here(
+                "upass.tolg: memory '{}' declares the reset value {} (`= …`) but also carries `initial={}`: a "
+                "register array's initializer IS both its power-on contents and its reset value (one `initial` "
+                "pin), so the two must agree — drop one of them, or spell `= nil` to keep `initial=` as "
+                "power-on-only contents with no reset",
+                name,
+                mi.reset_init->to_pyrope(),
+                attr_of("initial"));
+            continue;
+          }
+        } else if (attr_init) {
+          // Power-on contents (`= nil` + `initial=`), or the importer's
+          // reset-value bus on a whole-array cell: replaces any declare-time
+          // `initial` (pid 11).
+          for (const auto& e : mi.node.inp_edges()) {
+            if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {
+              e.del_edge();
+              break;
+            }
+          }
+          setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *attr_init));
+        }
+        const auto rpn         = attr_of("reset_pin");
+        const bool wants_reset = mi.reset_init ? !mem_reset_source(name).empty()
+                                               : (mi.has_update && !rpn.empty() && rpn != "false" && static_cast<bool>(attr_init));
+        if (wants_reset) {
+          const auto rst_name = mem_reset_source(name);
+          Pin rst = (!rst_name.empty() && g_->get_io()->has_input(rst_name)) ? g_->get_input_pin(rst_name) : reset_pin();
+          bool neg = reset_neg_;
+          if (auto nv = attr_of("negreset"); !nv.empty() && nv != "false") {
+            neg = true;
+          }
+          if (neg) {
+            rst = not1(rst);
+          }
+          // Program writes are suppressed while reset is high, exactly like a
+          // scalar reg's din. The reset arm already has PRIORITY in every
+          // consumer (cgen inline, cgen_sim, pass/lec encode, pass/abc
+          // mem_lower); the gate is what keeps a same-cycle read from
+          // FORWARDING a write that never lands (a read during reset returns
+          // the committed contents), and it keeps a consumer that commits
+          // per-port writes after the whole-array apply correct regardless.
+          const Pin not_rst = not1(rst);
+          for (int u = 0; u < mi.n_user_wr; ++u) {
+            const auto pid = static_cast<uint64_t>(u * kMemPortStride + 4);
+            for (const auto& e : mi.node.inp_edges()) {
+              if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
+                auto old_en = e.driver;
+                e.del_edge();
+                mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(and2(old_en, not_rst));
+                break;
               }
             }
-            // Reset condition -> reset sink (active-high; pre-invert negreset).
-            Pin rp = g_->get_io()->has_input(std::string(rpn)) ? g_->get_input_pin(std::string(rpn)) : reset_pin();
-            if (!rp.is_invalid()) {
-              const bool neg = (attrs.count("negreset") && attrs.at("negreset") != "false") || reset_neg_;
-              if (neg) {
-                rp = not1(rp);
-              }
-              setup_sink_by_name(mi.node, "reset").connect_driver(rp);
-
-              // Preserve reset EDGE semantics as well as its value. The
-              // whole-array Memory pin block is full, so cgen consumes this
-              // node marker when it builds the event control.
-              bool async = reset_async_default_;
-              if (auto ait = attrs.find("async"); ait != attrs.end()) {
-                async = ait->second != "false" && ait->second != "0";
-              } else if (auto sit = attrs.find("sync"); sit != attrs.end()) {
-                async = sit->second == "false" || sit->second == "0";
-              }
-              if (async) {
-                mi.node.attr(livehd::attrs::memory_async_reset).set(1);
-              }
-            }
+          }
+          if (mi.has_update) {
+            mi.update_en = and2(mi.update_en, not_rst);
+            redrive_mem_sink(mi, 13, mi.update_en);
+          }
+          setup_sink_by_name(mi.node, "reset").connect_driver(rst);
+          // Preserve reset EDGE semantics as well as its value. The
+          // whole-array Memory pin block is full, so cgen consumes this
+          // node marker when it builds the event control.
+          bool async = reset_async_default_;
+          if (auto av = attr_of("async"); !av.empty()) {
+            async = av != "false" && av != "0";
+          } else if (auto sv = attr_of("sync"); !sv.empty()) {
+            async = sv == "false" || sv == "0";
+          }
+          if (async) {
+            mi.node.attr(livehd::attrs::memory_async_reset).set(1);
           }
         }
       }
@@ -5735,36 +5611,15 @@ private:
     }
   }
 
-  // The reset SIGNAL a memory's restore sweep should run off: a source-spelled
-  // `reset_pin` when the declaration carries one, otherwise the module's
-  // implicit reset. Empty means "no reset at all" (`reset_pin=false`, or no
-  // implicit reset either).
+  // The reset SIGNAL a memory's whole-array `reset` pin is driven from: a
+  // source-spelled `reset_pin` when the declaration carries one, otherwise the
+  // module's implicit reset. Empty means "no reset at all" (`reset_pin=false`,
+  // or no implicit reset either).
   [[nodiscard]] std::string mem_reset_source(std::string_view name) const {
     if (auto it = decl_reset_pin_.find(std::string(name)); it != decl_reset_pin_.end()) {
       return it->second == "false" ? std::string{} : it->second;
     }
     return reset_name_;
-  }
-
-  // The clock a memory's own state runs on: the source-spelled `clock_pin` when
-  // the declaration names one (same resolution finalize_mems uses for the cell
-  // itself), otherwise the module's implicit clock. The restore-sweep counter
-  // has to run on the SAME edge as the array it restores -- with only the
-  // implicit clock consulted it got NO clock at all on a module whose memory
-  // names its own (`reg mem:[N]u8:[clock_pin=ref clk, reset_pin=ref rst] = 0`),
-  // and cgen emitted `always @(posedge 'hx /*cgen-miss*/)`.
-  [[nodiscard]] Pin mem_clock_pin(std::string_view name) {
-    if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
-      if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end() && !cit->second.empty()) {
-        if (const auto cp = resolve_attr_signal(cit->second); !cp.is_invalid()) {
-          return cp;
-        }
-      }
-    }
-    if (!clock_name_.empty()) {
-      return clock_pin();
-    }
-    return Pin{};
   }
 
   // The module reset graph-input pin (same lazy stamping contract
@@ -8084,10 +7939,8 @@ private:
   // Every `attr_set(<var>, "reset_pin", <val>)` in the tree, collected BEFORE
   // the body walk. A source-spelled reset_pin normally reaches pending_attrs_
   // only AFTER the declare it belongs to (both the hand-written Pyrope form and
-  // the slang reader emit it later), but an array reg has to know at DECLARE
-  // time whether it gets a reset: the restore port is budgeted into
-  // `n_wr_total` there, and every read's dout driver pid is recovered by
-  // COUNTING write ports.
+  // the slang reader emit it later); mem_reset_source reads this table so a
+  // memory's reset signal resolves the same way at every point of the walk.
   absl::flat_hash_map<std::string, std::string>                                   decl_reset_pin_;
   std::string                                                                     clock_name_;
   bool                                                                            clock_minted_ = false;
@@ -9234,10 +9087,9 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
           // 1a-mem — an array reg is a memory, and `reg arr:[N]T = <const>`
           // means exactly what it means on a scalar: that const is the RESET
           // value of every entry, so an init'd array
-          // needs the implicit reset input just like a flop does. A memory has
-          // no parallel reset port, so finalize_mems() realizes the reset as a
-          // one-write-per-cycle SWEEP; that is a lowering detail, not a reason
-          // to withhold the port. `0sb?` is the array spelling of "no reset
+          // needs the implicit reset input just like a flop does (finalize_mems
+          // wires the cell's whole-array `reset` pin, which reloads every entry
+          // in one cycle). `0sb?` is the array spelling of "no reset
           // value" (lower_mem_declare stops on it exactly like `nil`).
           const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
           // "latch" counts too (2f-latch M7): a latch with a reset value needs

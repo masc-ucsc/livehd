@@ -19,8 +19,8 @@
 #
 # Expected FWD (1 write port, so row r is bit r):
 # The array carries NO initializer on purpose: an array init is a reset value,
-# and its restore sweep adds a second WRITE PORT — which shifts every row of the
-# matrix by one column and would hide a transpose behind arithmetic.
+# which binds a reset and gates every write enable with !reset — extra logic
+# that has nothing to do with the matrix under test.
 #
 #   program (default) -> 0b10 = 2   only the later read forwards
 #   fwd               -> 0b11 = 3   position-blind: both forward

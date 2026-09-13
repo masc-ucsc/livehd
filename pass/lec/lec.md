@@ -182,7 +182,10 @@ everything the encoder needs.
   above is bit-level by construction and untouched.
 - **Tier-2 uncertain state correspondence** (`formal.lec.state_pairing`, default on):
   correspondence is name-first (tier-1: `canon_flop_name` + explicit
-  `formal.lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the
+  `formal.lec.match`; a rolled comptime loop's wrapper level `u_loop_<n>__li<k>.`
+  is folded onto the next segment (`lane_q__li<k>`), the spelling the unrolled
+  lowering produces, so rolled and unrolled designs pair tier-1); a renamed flop
+  is an unmatched cut point that gates `ind` — the
   only unbounded-PROVEN engine — to Unknown. When unmatched state survives
   tier-1, the driver runs `pass/semdiff`'s full-match (SRP/ERP signature) pass
   per def-pair and injects the surviving pairs as **uncertain**

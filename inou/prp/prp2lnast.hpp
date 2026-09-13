@@ -598,6 +598,22 @@ protected:
   // at those sites too and turned `mod m<N=8>(a:unsigned(bits=N))` -- which
   // used to compile -- into a hard error.
   absl::flat_hash_set<uint32_t>                              prelower_visited_;
+  // 2f-generic_port_width — PORT/return types of a GENERIC lambda whose integer
+  // bound does not fold (`mod m<N=1>(a:unsigned(bits=N * 4))`). The signature
+  // is lowered before the body stmts frame exists, so the desugar cannot be
+  // emitted at the declaration like prelower_type_bounds does for a body `mut`.
+  // The io store gets a placeholder `nil` bound now; flush_deferred_port_bounds
+  // (run once the body frame opens) emits the desugar into the BODY PROLOGUE and
+  // rewrites the io leaves IN PLACE to the resulting refs. The runner folds them
+  // at specialization (uPass_runner::deferred_port_type), never this front end.
+  struct Pending_port_bound {
+    TSNode    type_cast;
+    Lnast_nid store;  // io `store(ref name, default, prim_type_int(max,min)[, stages])`
+  };
+  std::vector<Pending_port_bound>                            pending_port_bounds_;
+  bool                                                       lambda_has_generics_ = false;  // lowering a generic lambda's signature
+  bool                                                       int_type_has_unfoldable_bound(TSNode type_node) const;
+  void                                                       flush_deferred_port_bounds();
   // 2c-wire — declarations whose INLINE TUPLE type made emit_type_spec emit a
   // shape-seeding `store(<name>, %tuple_tmp)`. That store carries the TYPE's
   // field layout, not a user assignment, but it is structurally identical to

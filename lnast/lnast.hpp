@@ -213,6 +213,15 @@ struct Lnast_io_entry {
   int64_t     array_size  = 0;
   int32_t     elem_bits   = 0;
   bool        elem_signed = false;
+  // 2f-generic_port_width — an integer port bound prp2lnast could not fold
+  // (`a:unsigned(bits=N * 4)` on a GENERIC lambda): the RAW TEXT of each
+  // prim_type_int bound leaf (a `%tmp` ref defined by the body prologue, a
+  // generic name, or a literal such as `0`/`nil`), set only when at least one
+  // side is a ref. `bits`/`has_range` stay 0/false (never a silent 1-bit port);
+  // the specializer folds these once the generics are bound.
+  std::string bound_max_text = {};
+  std::string bound_min_text = {};
+  [[nodiscard]] bool has_deferred_bound() const noexcept { return !bound_max_text.empty() || !bound_min_text.empty(); }
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

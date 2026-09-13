@@ -1956,3 +1956,23 @@ sh_test(
     srcs = ["lhd_ln_generic_test.sh"],
     data = _FLOW_DATA,
 )
+
+sh_test(
+    name = "lec_tuple_register_test",
+    size = "medium",
+    srcs = ["lec_tuple_register_test.sh"],
+    data = [
+        "//lhd",
+        "//inou/prp:generic_tuple_register_fixture",
+    ],
+)
+
+sh_test(
+    name = "lhd_abc_loop_test",
+    size = "medium",
+    srcs = ["lhd_abc_loop_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:tests/sim/loop_roll_carry.prp",
+    ],
+)

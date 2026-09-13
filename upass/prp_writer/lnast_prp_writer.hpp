@@ -569,7 +569,16 @@ private:
   // (returns its node), or invalid. If `expect` is non-empty the target must equal
   // it; otherwise the target is reported in out_lhs.
   Lnast_nid                                   arm_value_def(Lnast_nid stmts_node, std::string expect, std::string& out_lhs) const;
-  absl::flat_hash_map<std::string, std::pair<std::string, std::string>> range_lohi_;  // range-temp name -> "lo","hi"
+  // A range temp's bounds: the raw spellings (the literal fast paths parse them)
+  // AND the operand nodes. A bound may be a single-use temp whose definition the
+  // fold policy inlined (its statement is suppressed), so an emitted range must
+  // render the bound through render_value — never print its bare name.
+  struct Range_bounds {
+    std::string lo, hi;
+    Lnast_nid   lo_nid, hi_nid;
+  };
+  absl::flat_hash_map<std::string, Range_bounds> range_lohi_;  // range-temp name -> bounds
+  std::string                                    render_range_bound(Lnast_nid bound);  // fold-aware, parenthesised operand
   std::vector<Lnast_nid>                 get_mask_nodes_;                             // every get_mask, for range-mask resolution
   std::vector<Lnast_nid>                 set_mask_nodes_;                             // every set_mask, same range-mask resolution
   std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index

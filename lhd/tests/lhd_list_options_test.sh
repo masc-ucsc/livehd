@@ -31,6 +31,18 @@ echo "$out" | grep -q '"name":"compile.upass.verifier"' || fail "compile.upass.v
 echo "$out" | grep -q '"name":"compile.upass.reset_style","method":"pass.upass","default":"sync"' \
   || fail "reset_style default/method missing: $out"
 echo "$out" | grep -q '"name":"compile.cgen.odir"' && fail "kernel-managed odir must not be listed: $out"
+# Loop representation has one public switch, defaulting to preservation.
+echo "$out" | grep -q '"name":"compile.unroll","method":"compile","default":"false"' \
+  || fail "compile.unroll must default false: $out"
+echo "$out" | grep -Eq '"name":"compile.upass.(roll|roll_arrays|roll_cap|unroll)"' \
+  && fail "internal or removed loop options must not be listed: $out"
+for obsolete in roll roll_arrays roll_cap unroll; do
+  "$LHD" compile "$PRP" --set "compile.upass.$obsolete=true" --workdir "$W/removed_$obsolete" -q \
+    >"$W/removed_$obsolete.json" 2>&1 && fail "compile.upass.$obsolete must be rejected"
+  grep -q 'compile.unroll' "$W/removed_$obsolete.json" || fail "missing canonical loop option hint for $obsolete"
+done
+echo "$out" | grep -q '"name":"pass.abc.unroll_carry","method":"pass.abc","default":"true"' \
+  || fail "ABC carry expansion default missing: $out"
 # Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
 echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
 # hier standardization: the vestigial per-def toggles are deleted, the real

@@ -18,21 +18,14 @@ module \mem_init_tuple.regi2 (
     t[3] = 8'd4;
   end
 
-  // A memory has no parallel reset port: the reset value is restored one entry
-  // per cycle by a sweep counter (a per-entry init is a ROM lookup on that
-  // counter), so a full restore takes SIZE cycles of reset held high.
-  reg [1:0] t_rstcnt;
-  wire [7:0] rstval = (t_rstcnt == 2'd0) ? 8'd1
-                    : (t_rstcnt == 2'd1) ? 8'd2
-                    : (t_rstcnt == 2'd2) ? 8'd3
-                                       : 8'd4;
-
+  // The per-entry reset values are restored in ONE cycle of reset, exactly
+  // like a scalar reg; program writes are suppressed while reset is held.
   always @(posedge clock) begin
-    if (!reset) t_rstcnt <= 2'd0;
-    else        t_rstcnt <= (t_rstcnt == 2'd3) ? t_rstcnt : t_rstcnt + 2'd1;
-
-    if (reset)   t[t_rstcnt] <= rstval;  // restore sweep
-    else if (we) t[i] <= a;            // program writes are suppressed in reset
+    if (reset) begin
+      t[0] <= 8'd1; t[1] <= 8'd2; t[2] <= 8'd3; t[3] <= 8'd4;
+    end else if (we) begin
+      t[i] <= a;
+    end
   end
 
   assign z = (we && !reset) ? a : t[i];

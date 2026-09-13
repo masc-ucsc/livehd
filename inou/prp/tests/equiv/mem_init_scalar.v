@@ -18,21 +18,18 @@ module \mem_init_scalar.regi (
     t[3] = 8'd3;
   end
 
-  // A memory has no parallel reset port: the reset value is restored one entry
-  // per cycle by a sweep counter, so a full restore takes SIZE cycles of reset
-  // held high. The counter parks at 0 while reset is low, so every reset pulse
-  // sweeps from entry 0.
-  reg [1:0] t_rstcnt;
-
+  // The reset value is restored to every entry in ONE cycle of reset, exactly
+  // like a scalar reg; program writes are suppressed while reset is held.
   always @(posedge clock) begin
-    if (!reset) t_rstcnt <= 2'd0;
-    else        t_rstcnt <= (t_rstcnt == 2'd3) ? t_rstcnt : t_rstcnt + 2'd1;
-
-    if (reset)   t[t_rstcnt] <= 8'd3;  // restore sweep
-    else if (we) t[i] <= a;          // program writes are suppressed in reset
+    if (reset) begin
+      t[0] <= 8'd3; t[1] <= 8'd3; t[2] <= 8'd3; t[3] <= 8'd3;
+    end else if (we) begin
+      t[i] <= a;
+    end
   end
 
-  // same index for read and write + fwd (the restore port never forwards)
+  // same index for read and write + fwd (a write suppressed by reset is not
+  // forwarded)
   assign z = (we && !reset) ? a : t[i];
 
 endmodule

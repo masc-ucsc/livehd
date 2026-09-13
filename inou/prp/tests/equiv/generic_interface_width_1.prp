@@ -1,0 +1,22 @@
+/*
+:name: generic_interface_width_1
+:lec_expect: proven
+*/
+// Desired spelling: specialize width expressions in INPUT and OUTPUT types.
+// The default and nondefault instance must keep independent widths. Every
+// input/output bit matters; silently narrowing either port cannot pass.
+mod lane_xor<LANES=1>(
+  a:unsigned(bits=LANES * 4), b:unsigned(bits=LANES * 4)
+) -> (y:unsigned(bits=LANES * 4)@[0]) {
+  y = a ^ b
+}
+// The selected top must materialize its DEFAULT port widths without a caller
+// from which to infer them. Matching concrete callers alone can hide this gap.
+pub mod top<LANES=3>(
+  a4:u4, b4:u4, a12:unsigned(bits=LANES * 4), b12:unsigned(bits=LANES * 4)
+) -> (y4:u4@[0], y12:unsigned(bits=LANES * 4)@[0]) {
+  mut small = lane_xor(a=a4, b=b4)
+  mut large = lane_xor<LANES=LANES>(a=a12, b=b12)
+  y4 = small.y
+  y12 = large.y
+}

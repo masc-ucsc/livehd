@@ -3577,6 +3577,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     bool                         unsign       = false;
     bool                         is_whole() const { return !update.is_invalid(); }
     bool                         registered() const { return !clock.is_invalid(); }
+    // A whole-array NEXT-STATE stage exists for a whole-array cell (its `update`
+    // bus) and for any per-port memory with a `reset`: the reset reloads the
+    // `initial` contents in one cycle (`reg m:[N]T = <const>`), staged through
+    // the same whole-array din/cen pair as a bulk update.
+    bool                         has_reset_stage() const { return is_whole() || !reset.is_invalid(); }
   };
   const auto infer_memory_unsign = [&](Mem& memory) {
     bool saw_value_pin = false;
@@ -5206,7 +5211,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         continue;
       }
       const auto* memory = direct_memory(site);
-      if (memory == nullptr || !memory->is_whole()) {
+      if (memory == nullptr || !memory->has_reset_stage()) {
         continue;
       }
       hout->append("  ",
@@ -7975,8 +7980,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
         }
         std::string whole_close;
-        if (m.is_whole()) {
+        if (m.has_reset_stage()) {
           const int W = m.bits * m.size;
+          // A reset reloads the `initial` contents in one cycle and cancels the
+          // staged per-port writes (tolg already gates their enables with
+          // !reset). For a per-port memory this is the only whole-array arm:
+          // the `else` below then holds nothing.
           if (!m.reset.is_invalid()) {
             const std::string initbus = m.init.is_invalid() ? absl::StrCat(value_type(W, m.unsign), "::create_integer(0)")
                                                             : stored_value_operand(m.init, W, m.unsign);
@@ -7991,6 +8000,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                       ".clear_pending(); } else {\n"));
             whole_close = "    }\n";
           }
+        }
+        if (m.is_whole()) {
+          const int W = m.bits * m.size;
           // The WHOLE-ARRAY update bus takes the same gated-clock guard the
           // per-port writes get through emit_wen: without it a clock-gated whole
           // array re-applies its update every tick with the gate as dead code,
@@ -10377,8 +10389,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               const MemPort* port       = port_group < memory->ports.size() ? &memory->ports[port_group] : nullptr;
               bool           required   = false;
               if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
-                required
-                    = memory->is_whole() && (name == "update" || name == "update_enable" || name == "initial" || name == "reset");
+                required = (memory->is_whole() && (name == "update" || name == "update_enable"))
+                           || (memory->has_reset_stage() && (name == "initial" || name == "reset"));
                 required |= port != nullptr && !port->rd
                             && (str_tools::ends_with(name, "addr") || str_tools::ends_with(name, "din")
                                 || (str_tools::ends_with(name, "enable") && name != "update_enable"));
@@ -10540,21 +10552,27 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("memory callback has no storage description");
               }
               if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
-                if (memory->is_whole()) {
+                if (memory->has_reset_stage()) {
                   const auto whole_width = static_cast<uint32_t>(memory->bits * memory->size);
-                  auto       update      = memory_operand(std::nullopt, "update");
-                  if (update.width == 0) {
-                    return reject("whole-array memory update has no data value");
-                  }
-                  update      = llvm_kernel.resize(update, whole_width, memory->unsign);
-                  auto enable = llvm_kernel.constant(1, 1, true);
+                  // A per-port memory with a reset has no bulk update: its only
+                  // whole-array arm is the reset reload (enable stays 0, the
+                  // reset is the `force`).
+                  auto update = llvm_kernel.constant(whole_width, 0, memory->unsign);
+                  auto enable = llvm_kernel.constant(1, memory->is_whole() ? 1 : 0, true);
                   auto force  = llvm_kernel.constant(1, 0, true);
-                  if (!memory->update_enable.is_invalid()) {
-                    auto update_enable = memory_operand(std::nullopt, "update_enable");
-                    if (update_enable.width == 0) {
-                      return reject("whole-array memory update has no enable value");
+                  if (memory->is_whole()) {
+                    update = memory_operand(std::nullopt, "update");
+                    if (update.width == 0) {
+                      return reject("whole-array memory update has no data value");
                     }
-                    enable = llvm_kernel.reduce_or(update_enable, 1, true);
+                    update = llvm_kernel.resize(update, whole_width, memory->unsign);
+                    if (!memory->update_enable.is_invalid()) {
+                      auto update_enable = memory_operand(std::nullopt, "update_enable");
+                      if (update_enable.width == 0) {
+                        return reject("whole-array memory update has no enable value");
+                      }
+                      enable = llvm_kernel.reduce_or(update_enable, 1, true);
+                    }
                   }
                   if (!memory->reset.is_invalid()) {
                     auto reset = memory_operand(std::nullopt, "reset");
@@ -11622,6 +11640,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return absl::StrCat("(", lhs, " && ", rhs, ")");
       };
       size_t temporary = 0;
+      // A compact loop instance with K carried outputs has K version-sites in
+      // the same color (one per output port), but its control -- refresh the
+      // wrapper inputs, then ONE native ordinal walk -- must run exactly once
+      // per color: each `__compact_advance()` COMMITS every lane's child
+      // state, so a second walk in the same clock stepped a two-carry tap
+      // chain twice per cycle (matched_filter: `xs`/`cs` carries).
+      absl::flat_hash_set<std::string> compact_loop_controlled;
       for (const size_t member : members) {
         const auto& version = color_plan_->version_sites()[member];
         const auto& site    = color_plan_->sites()[version.base_site];
@@ -11778,7 +11803,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           I(sio != nullptr);
           const auto sub_member = occurrence_sub_member(site);
           I(!sub_member.empty());
-          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control
+              && compact_loop_controlled
+                     .insert(absl::StrCat(sub_member,
+                                          version.version == livehd::sim::Color_plan::State_version::pre_rise ? "#pre" : "#post"))
+                     .second) {
             const auto loop = node.subnode_loop();
             I(loop.has_value());
             for (const auto& decl : sio->get_input_pin_decls()) {
@@ -11827,7 +11856,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
             }
             if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
+              // The walk COMMITS every lane's child state, and that state is
+              // opaque to this plan (no state site, no `__state_commit` slot):
+              // without the check below a design whose only state lives inside
+              // a rolled loop looked quiescent as soon as its inputs held
+              // still, and the pipeline froze mid-drain (matched_filter froze
+              // at the cycle its input went to zero). The wrapper's `__gen`
+              // moves when any lane's child committed a change (__sync_kids),
+              // so a moved generation is exactly "state changed": keep the
+              // period live and re-dirty every color that holds this instance.
+              fout->append("  { const uint64_t __loop_gen_before = ", sub_member, ".__gen;\n");
               fout->append("  ", sub_member, ".__compact_advance();  // compact-loop control: one native ordinal walk\n");
+              fout->append("  if (", sub_member, ".__gen != __loop_gen_before) {\n    __rt.__color_state_changed = true;\n");
+              emit_serial_dirty_site_colors(version.base_site, "    ");
+              fout->append("  } }\n");
             } else {
               fout->append("  ", sub_member, ".__compact_publish();  // compact-loop post-edge version: one native ordinal walk\n");
             }
@@ -11904,7 +11946,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (op == Ntype_op::Memory) {
               const auto* memory = find_local_mem(version.base_site);
               I(memory != nullptr && !state.empty());
-              if (memory->is_whole()) {
+              if (memory->has_reset_stage() && !memory->is_whole()) {
+                // Per-port memory with a reset: the whole-array stage is the
+                // reset reload of the `initial` contents, nothing else.
+                const int         width   = memory->bits * memory->size;
+                const std::string pending = whole_pending(version.base_site);
+                const std::string init    = memory->init.is_invalid()
+                                                ? absl::StrCat(value_type(width, memory->unsign), "::create_integer(0)")
+                                                : stored_value_operand(memory->init, width, memory->unsign);
+                fout->append("  ", pending, "_din = ", init, ";\n");
+                fout->append(absl::StrCat("  ", pending, "_cen = (", raw_operand(memory->reset, 1), ").is_known_true();\n"));
+                emit_state_commit_flag(member, "true");
+              } else if (memory->is_whole()) {
                 const int         width   = memory->bits * memory->size;
                 const std::string pending = whole_pending(version.base_site);
                 const std::string update  = stored_value_operand(memory->update, width, memory->unsign);
@@ -12819,7 +12872,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto* memory = find_local_mem(version.base_site);
         I(memory != nullptr);
         fout->append("    bool __changed = false;\n");
-        if (memory->is_whole()) {
+        if (memory->has_reset_stage()) {
           const auto pending = whole_pending(version.base_site);
           fout->append(absl::StrCat("    if (", pending, "_cen) __changed |= ", state, ".apply_update(", pending, "_din) != 0;\n"));
         }

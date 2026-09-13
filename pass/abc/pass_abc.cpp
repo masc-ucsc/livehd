@@ -40,6 +40,11 @@ void Pass_abc::setup() {
   Eprp_method m("pass.abc", "Technology-map each colored region to a standard-cell netlist (ABC)", &Pass_abc::work);
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
+  m.add_label_optional("unroll_carry",
+                       "true|false: expand carry-dependent loops before ABC mapping (default true). False maps their "
+                       "bodies separately and stitches the carry connections afterwards, for benchmarking. Independent "
+                       "loops always map separately; compile.unroll=true requests general front-end expansion.",
+                       "true");
   m.add_label_optional("satopt", "Prove cross-region mux and memory simplifications before ABC mapping", "true");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
@@ -620,9 +625,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
 }  // namespace
 
 void Pass_abc::work(Eprp_var& var) {
-  // ABC consumes a physical scratch design. Copy first so occurrence
-  // materialization and every later mapping rewrite leave the native source
-  // graph untouched.
+  // Copy first so selective carry expansion and mapping leave the source
+  // graph untouched. Independent loops stay compact until mapped-body stitching.
   hhds::GraphLibrary                        occurrence_library;
   std::vector<std::shared_ptr<hhds::Graph>> occurrence_graphs;
   for (const auto& source : var.graphs) {
@@ -665,29 +669,33 @@ void Pass_abc::work(Eprp_var& var) {
     auto io = source ? occurrence_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
     occurrence_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
   }
-  // Materialize everything the closure copy brought in, not just the
-  // `var.graphs`-named entries: a compact loop Sub left inside a closure-only
-  // callee is not something the mapper can read, so it would map one replica
-  // and drop the rest.
+  // Prepare every definition in the closure, including nested loop bodies.
   std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;
   for (const auto gid : occurrence_library.all_gids()) {
     if (auto graph = occurrence_library.get_graph(gid)) {
       scratch_graphs.push_back(std::move(graph));
     }
   }
-  std::unordered_set<hhds::Gid> loop_bodies;
-  for (const auto& graph : scratch_graphs) {
-    for (const auto node : graph->body().nodes()) {
-      if (node.is_loop_subnode() && node.get_subnode_graph()) {
-        loop_bodies.insert(node.get_subnode_graph()->get_gid());
-      }
-    }
-  }
-  if (!livehd::graph_util::materialize_occurrences_all(scratch_graphs, "pass.abc")) {
+  const auto unroll_carry_text = var.get("unroll_carry", "true");
+  if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
+      && unroll_carry_text != "on" && unroll_carry_text != "off") {
+    livehd::diag::err("pass.abc", "bad-unroll-carry", "usage")
+        .msg("pass.abc.unroll_carry expects true|false, got '{}'", unroll_carry_text)
+        .emit();
     return;
   }
-  if (!livehd::abc::cleanup_loop_bodies(scratch_graphs, loop_bodies)) {
+  livehd::abc::Loop_preparation loops;
+  if (!livehd::abc::prepare_loop_bodies(scratch_graphs,
+                                        unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
+                                        loops)) {
     return;
+  }
+  if (truthy(var.get("stats", "false"))) {
+    std::print("pass.abc loops: independent={} carried={} expanded={} retained={}\n",
+               loops.independent,
+               loops.carried,
+               loops.expanded,
+               loops.independent + loops.carried - loops.expanded);
   }
   // Def list handed to the hierarchy walks below (size gate, decomposition).
   // resolve_order builds its gid2graph EXCLUSIVELY from the vector it gets, so a
@@ -1200,8 +1208,8 @@ void Pass_abc::work(Eprp_var& var) {
   if (incr) {
     mapper.set_incr(incr.get());
   }
-  bool dbg = false;
-  Pass_partition::build_decomposition(
+  bool       dbg         = false;
+  const bool partitioned = Pass_partition::build_decomposition(
       resolve_graphs,
       &outlib,
       top,
@@ -1211,9 +1219,28 @@ void Pass_abc::work(Eprp_var& var) {
       /*want_pre_bodies=*/mapper.incremental(),
       threads == 1 ? livehd::partition::Body_batch_builder{}
                    : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
-      2 * livehd::abc::synthesis_thread_limit(threads, std::thread::hardware_concurrency()));
+      2 * livehd::abc::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
+      loops.preserved_defs);
 
   mapper.finish_parallel();
+  if (!partitioned) {
+    mapper.stop();
+    return;
+  }
+
+  // Stitch physical occurrences only AFTER each retained body has been mapped.
+  // Timing, boundary-load refinement and physical area then see every lane,
+  // while ABC never bit-blasts N copies of an independent loop's logic.
+  std::vector<std::shared_ptr<hhds::Graph>> mapped_graphs;
+  for (const auto gid : outlib.all_gids()) {
+    if (auto graph = outlib.get_graph(gid)) {
+      mapped_graphs.push_back(std::move(graph));
+    }
+  }
+  if (!livehd::graph_util::materialize_occurrences_all(mapped_graphs, "pass.abc")) {
+    mapper.stop();
+    return;
+  }
 
   // Partition-boundary refinement (abc_boundary.cpp): every region re-sized
   // against the exact loads and drivers beyond its ports. Skipped after a

@@ -3044,6 +3044,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // output buffer per bit. It also subsumes the clock/reset/enable treatment
     // for native flop/latch boundaries.
     for (const auto& e : n.inp_edges()) {
+      // The compact carry edge means previous ordinal, not same-instance
+      // Boolean feedback. Keep it out of ABC and restore it with the descriptor.
+      if (n.is_loop_subnode() && e.driver.get_master_node() == n) {
+        continue;
+      }
+
       int pid = static_cast<int>(e.sink.get_port_id());
       if (e.driver.is_const()) {
         bb.const_ins.emplace_back(pid, e.driver);
@@ -4116,7 +4122,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         // box (e.g. a liberty cell when re-mapping an already-mapped netlist)
         // is cloned as an IO-only decl so the instance stays opaque.
         if (auto out_child = livehd::partition::resolve_or_clone_subdef(outlib_, bb.node)) {
-          nn.set_subnode(out_child);
+          if (auto loop = bb.node.subnode_loop()) {
+            nn.set_subnode(out_child, *loop);
+          } else {
+            nn.set_subnode(out_child);
+          }
         } else {
           livehd::diag::err("pass.abc", "missing-subdef", "unsupported")
               .msg("pass.abc: sub-instance in region '{}' references child def '{}' missing from the output library",
@@ -4195,6 +4205,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           // blackbox cell decls), and an edge-less pin has no reader — leave
           // the attr absent (the unsigned default) rather than plant `signed`.
         }
+      }
+    }
+    if (bb.node.is_loop_subnode()) {
+      for (const auto& carry : bb.node.subnode_group().carries()) {
+        nn.create_driver_pin(carry.output_port()).connect_sink(nn.create_sink_pin(carry.input_port()));
       }
     }
     for (const auto& [pid, cdrv] : bb.const_ins) {

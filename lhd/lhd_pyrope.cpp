@@ -163,10 +163,18 @@ int run_style(const lhd::Options& opts) {
         b.emit();
       }
       for (const auto& f : report.findings) {
-        auto b = livehd::diag::Builder(livehd::diag::Severity::info,
-                                       "lhd.pyrope.style",
-                                       f.progressing ? "likely-unrolled-loop" : "repeated-code",
-                                       "syntax");
+        auto b = livehd::diag::Builder(livehd::diag::Severity::info, "lhd.pyrope.style", style::rule_name(f.rule), "syntax");
+        if (f.rule != style::Rule::RepeatedCode && f.rule != style::Rule::LikelyUnrolledLoop) {
+          b.at(style_span(path, f.range)).msg("{}", f.message).hint(f.hint).attr("score", std::to_string(f.score));
+          for (const auto& [key, value] : f.attributes) {
+            b.attr(key, value);
+          }
+          for (const auto& note : f.related) {
+            b.note(note.message, style_span(path, note.range));
+          }
+          b.emit();
+          continue;
+        }
         b.at(style_span(path, f.range))
             .msg("{}: {} statements per copy, repeated {} times across lines {}-{}",
                  f.progressing ? "likely unrolled loop" : "repeated code",

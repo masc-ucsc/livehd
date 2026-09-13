@@ -55,6 +55,8 @@ writes, it is one cycle behind. Put such reads below the `step`.
 | `loop_roll_carry_unrolled.prp` | same source, rolling off | `loop_roll_carry_unrolled.accumulates` | the other half of the rolled-vs-unrolled differential — same values, six instances |
 | `loop_roll_cond_write.prp` | conditionally-written carry | `loop_roll_cond_write.conditional_carry` | rolled; pins the carry-classification hazard (a variable written on only some paths is still a carry) |
 | `loop_roll_conditional_state_call.prp` | runtime-break loop with stateful conditional child | `rolled_cond_top.compact_for_and_conditional_child_if` | native `std::array` loop, cumulative activation, inactive carry bypass, reset-open child calls |
+| `loop_roll_array_carry.prp` | indexed array carry | `loop_roll_array_carry.lanes` | array loops stay compact by default, without a separate array option |
+| `loop_roll_large_domain.prp` | 1,025-iteration loop | `loop_roll_large_domain.compact` | trip count alone does not trigger source expansion |
 | `loop_roll_final_only.prp` | final-only loop result | `loop_roll_final_only.last_value` | rolled output with no ordinal-0 input value |
 | `loop_roll_named_alias.prp` | source-unit scalar type alias | `loop_roll_named_alias.alias_carry` | alias is resolved to a concrete lifted boundary |
 | `loop_roll_inferred_bool.prp` | inferred boolean carry | `loop_roll_inferred_bool.bool_carry` | boolean boundary inference without guessing an integer width |

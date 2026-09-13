@@ -10,6 +10,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <cctype>
 #include <optional>
 #include <print>
 #include <string>
@@ -91,6 +92,9 @@ struct Type_info {
   int64_t array_size  = 0;
   int32_t elem_bits   = 0;
   bool    elem_signed = false;
+  // Deferred generic-width bound leaves (see Lnast_io_entry::bound_max_text).
+  std::string bound_max_text;
+  std::string bound_min_text;
 };
 Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid) {
   Type_info ti;
@@ -159,6 +163,18 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     auto                max_nid = lnast->get_first_child(type_nid);
     std::optional<Dlop> max_v;
     std::optional<Dlop> min_v;
+    // 2f-generic_port_width — a REF bound (a deferred generic width, e.g.
+    // `unsigned(bits=N * 4)` on a generic lambda's port): keep both leaves'
+    // text for the specializer; bits stays 0 so nothing reads a 1-bit port.
+    if (!max_nid.is_invalid()) {
+      const auto min_n   = lnast->get_sibling_next(max_nid);
+      const bool max_ref = Lnast_ntype::is_ref(lnast->get_type(max_nid));
+      const bool min_ref = !min_n.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(min_n));
+      if (max_ref || min_ref) {
+        ti.bound_max_text = std::string(lnast->get_name(max_nid));
+        ti.bound_min_text = min_n.is_invalid() ? std::string("nil") : std::string(lnast->get_name(min_n));
+      }
+    }
     if (!max_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(max_nid))) {
       auto v = Dlop::from_pyrope(lnast->get_name(max_nid));
       if (v->is_integer()) {
@@ -668,10 +684,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     out.back().array_size  = ti.array_size;
     out.back().elem_bits   = ti.elem_bits;
     out.back().elem_signed = ti.elem_signed;
-    out.back().has_range   = ti.has_range;
-    out.back().range_min   = ti.range_min;
-    out.back().range_max   = ti.range_max;
-    out.back().has_default = has_default;
+    out.back().has_range      = ti.has_range;
+    out.back().range_min      = ti.range_min;
+    out.back().range_max      = ti.range_max;
+    out.back().has_default    = has_default;
+    out.back().bound_max_text = ti.bound_max_text;
+    out.back().bound_min_text = ti.bound_min_text;
   };
 
   if (!in_tup_nid.is_invalid()) {
@@ -716,6 +734,17 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
         staging->add_child(ty, Lnast_node::create_const(std::string(upass::max_from_bits(f.bits, f.is_signed).to_pyrope())));
         staging->add_child(ty, Lnast_node::create_const(std::string(upass::min_from_bits(f.bits, f.is_signed).to_pyrope())));
+      } else if (f.has_deferred_bound()) {
+        // 2f-generic_port_width — keep the deferred shape through an SSA
+        // rebuild so the specializer's in-place patch
+        // (clone_template_specialized) still finds the ref leaves.
+        auto leaf = [](const std::string& txt) {
+          const bool lit = txt.empty() || txt == "nil" || txt.front() == '-' || std::isdigit(static_cast<unsigned char>(txt.front())) != 0;
+          return lit ? Lnast_node::create_const(txt.empty() ? "nil" : txt) : Lnast_node::create_ref(txt);
+        };
+        auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
+        staging->add_child(ty, leaf(f.bound_max_text));
+        staging->add_child(ty, leaf(f.bound_min_text));
       }
       // Re-emit the trailing stages(min,max) annotation so the
       // post-SSA io tree keeps the pipe contract visible (the LN pipe upass

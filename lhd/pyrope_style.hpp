@@ -5,12 +5,13 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace livehd::pyrope::style {
 
 struct Options {
-  size_t min_repeats          = 3;
+  size_t min_repeats          = 7;
   size_t max_block_statements = 128;
   size_t max_findings         = 20;
 };
@@ -20,13 +21,27 @@ struct Range {
   uint32_t start_line, start_column, end_line, end_column;
 };
 
-struct Finding {
+enum class Rule { RepeatedCode, LikelyUnrolledLoop, WholeTupleCopy, FlattenedBundleArguments, SingleDestinationConditional };
+
+std::string_view rule_name(Rule rule);
+
+struct RelatedLocation {
   Range       range;
-  Range       first_copy;
-  size_t      statements, repetitions, score;
-  bool        progressing;
-  std::string pattern;
-  std::string progression;
+  std::string message;
+};
+
+struct Finding {
+  Range                                            range;
+  Range                                            first_copy;
+  size_t                                           statements, repetitions, score;
+  bool                                             progressing;
+  std::string                                      pattern;
+  std::string                                      progression;
+  Rule                                             rule = Rule::RepeatedCode;
+  std::string                                      message;
+  std::string                                      hint;
+  std::vector<std::pair<std::string, std::string>> attributes;
+  std::vector<RelatedLocation>                     related;
 };
 
 struct Report {

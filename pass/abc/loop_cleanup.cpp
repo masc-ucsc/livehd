@@ -3,15 +3,19 @@
 
 #include <functional>
 
+#include "absl/container/flat_hash_set.h"
 #include "bitwidth.hpp"
 #include "color_reduce.hpp"
 #include "cprop.hpp"
+#include "diag.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
 
 namespace livehd::abc {
+namespace {
 bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                         const std::unordered_set<hhds::Gid>&             loop_bodies) {
+                         const absl::flat_hash_set<hhds::Node_class>&     expanded_instances) {
   namespace gu = livehd::graph_util;
   std::unordered_set<hhds::Gid>                            visited;
   std::function<bool(const std::shared_ptr<hhds::Graph>&)> visit = [&](const auto& graph) {
@@ -30,7 +34,7 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       if (!visit(child)) {
         return false;
       }
-      if (!loop_bodies.contains(child->get_gid())) {
+      if (!expanded_instances.contains(inst)) {
         continue;
       }
       // Colors are local to each definition. A source block with its own ABC
@@ -83,5 +87,45 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
     }
   }
   return true;
+}
+}  // namespace
+
+bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool unroll_carry, Loop_preparation& result) {
+  result = {};
+  absl::flat_hash_set<hhds::Node_class> expanded_instances;
+  for (const auto& graph : graphs) {
+    std::vector<hhds::Node_class> loops;
+    for (const auto node : graph->body().nodes()) {
+      if (node.is_loop_subnode()) {
+        loops.push_back(node);
+      }
+    }
+    // Preserve the source module's ordinal naming while expanding selected sites.
+    for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
+      const auto group = it->subnode_group();
+      try {
+        group.validate();
+      } catch (const std::exception& e) {
+        livehd::diag::err("pass.abc", "replica-expand", "internal")
+            .msg("invalid compact loop '{}': {}", livehd::graph_util::default_instance_name(*it), e.what())
+            .emit();
+        return false;
+      }
+      const auto desc    = group.loop();
+      const bool carried = !group.carries().empty() || (desc->activation_input && desc->next_active_output);
+      carried ? ++result.carried : ++result.independent;
+      if (!carried || !unroll_carry) {
+        result.preserved_defs.insert(it->get_subnode_gid());
+        continue;
+      }
+      std::vector<hhds::Node_class> replicas;
+      if (!livehd::graph_util::materialize_occurrence(graph.get(), *it, "pass.abc", &replicas)) {
+        return false;
+      }
+      expanded_instances.insert(replicas.begin(), replicas.end());
+      ++result.expanded;
+    }
+  }
+  return cleanup_loop_bodies(graphs, expanded_instances);
 }
 }  // namespace livehd::abc

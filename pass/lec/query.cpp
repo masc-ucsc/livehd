@@ -1510,6 +1510,28 @@ Query_result safe_prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_opt
   }
 }
 
+// Once the transition relation is inductive, one reset-reachable state is
+// sufficient for its base. Try a short independent BMC base before spending
+// the user's full exploration window. Only the combined proof is unbounded;
+// a short bounded result by itself never changes the verdict policy.
+Query_result finish_packed_base(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts, Query_result ind,
+                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  if (!ind.packed_scalar_step_proven || opts.bound <= 1) {
+    return ind;
+  }
+  Lec_options base = opts;
+  base.engine      = "bmc";
+  base.bound       = 1;
+  auto         bmc = safe_prove_equal(ref, impl, base, sub_lib);
+  Query_result proof;
+  if (try_packed_scalar_proven(ind, bmc, proof)) {
+    ind = std::move(proof);
+  }
+  ind.cvc5     += bmc.cvc5;
+  ind.solve_ms += bmc.solve_ms;
+  return ind;
+}
+
 // Sequential fallback when fork/pipe is unavailable: run ind, then bmc, applying
 // the same trust asymmetry. Used only on a (rare) fork failure.
 Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
@@ -1518,7 +1540,7 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   Lec_options oi  = opts;
   oi.engine       = "ind";
   auto         ti = std::chrono::steady_clock::now();
-  Query_result ri = safe_prove_equal(ref, impl, oi, sub_lib);
+  Query_result ri = finish_packed_base(ref, impl, opts, safe_prove_equal(ref, impl, oi, sub_lib), sub_lib);
   ri.engine       = "ind";
   ri.elapsed_ms   = now_ms(ti);
   if (ri.verdict == Verdict::Proven) {
@@ -2034,7 +2056,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     oi.engine      = "ind";
     oi.partitions  = 1;
     auto ti        = std::chrono::steady_clock::now();
-    auto ri        = safe_prove_equal(ref, impl, oi, sub_lib);
+    auto ri        = finish_packed_base(ref, impl, opts, safe_prove_equal(ref, impl, oi, sub_lib), sub_lib);
     ri.engine      = "ind";
     ri.elapsed_ms  = now_ms(ti);  // real per-engine timing (was -1 in the ladder's diagnostics)
     absl::flat_hash_set<hhds::Graph*> seen;
@@ -2125,12 +2147,16 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     o.engine        = engines[i];
     auto         ci = std::chrono::steady_clock::now();
     Query_result r  = safe_prove_equal(ref, impl, o, sub_lib);
-    r.engine        = engines[i];
-    r.elapsed_ms    = now_ms(ci);
+    if (i == 0) {
+      r = finish_packed_base(ref, impl, opts, std::move(r), sub_lib);
+    }
+    r.engine     = engines[i];
+    r.elapsed_ms = now_ms(ci);
     return r;
   };
   auto trust = [](int i, const Query_result& r) -> bool {
-    return (i == 0 && r.verdict == Verdict::Proven && !r.packed_scalar_step_proven) || (i == 1 && r.verdict == Verdict::Refuted);
+    return (i == 0 && r.verdict == Verdict::Proven && (!r.packed_scalar_step_proven || r.packed_scalar_base_proven))
+           || (i == 1 && r.verdict == Verdict::Refuted);
   };
   auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust);
   if (!race.forked) {
@@ -2757,6 +2783,15 @@ struct Packed_scalar_bridge {
   // is representation-only and the embedded source register name is exact.
   // Other suffix matches remain speculative and require a reachable base.
   bool                     structural_partition = false;
+  std::vector<int>         widths;  // empty for one-bit cells; otherwise one width per field
+  int                      width_at(size_t i) const { return widths.empty() ? 1 : widths[i]; }
+  int                      total_width() const {
+    int sum = 0;
+    for (size_t i = 0; i < bit_keys.size(); ++i) {
+      sum += width_at(i);
+    }
+    return sum;
+  }
 };
 
 bool is_synthetic_partition_prefix(std::string_view prefix) {
@@ -2798,7 +2833,8 @@ bool split_loop_replica_key(std::string_view key, std::string& group, int& repli
 // one-bit implementation loop replicas. The spelling proposes a relation; it
 // does NOT justify it. The inductive step and reset-reachable BMC base are both
 // proved before the portfolio may turn it into a full equivalence result.
-std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side, const Io_name_map<int>& impl_side) {
+std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side, const Io_name_map<int>& impl_side,
+                                                              const Io_name_map<uint64_t>& impl_order) {
   std::map<std::string, std::map<int, std::string>> groups;
   for (const auto& [key, width] : impl_side) {
     if (width != 1 || ref_side.contains(key)) {
@@ -2843,7 +2879,7 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
     if (scalar_groups.size() != 1 || wit == wide_by_width.end() || wit->second.size() != 1) {
       continue;  // an arbitrary choice among same-shaped groups is not a correspondence
     }
-    out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front()), false});
+    out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front()), false, {}});
   }
 
   // Standard-cell mapping uses `<source-register>_<bit>` rather than the
@@ -2932,8 +2968,54 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
       bits.push_back(key);
     }
     const auto prefix = std::string_view(base).substr(0, base.size() - wide.size() - 1);
-    out.push_back(Packed_scalar_bridge{wide, std::move(bits), is_synthetic_partition_prefix(prefix)});
+    out.push_back(Packed_scalar_bridge{wide, std::move(bits), is_synthetic_partition_prefix(prefix), {}});
   }
+  // Tuple scalarization retains the aggregate name as each field's prefix.
+  // Declaration order proposes an MSB-first field layout; it is NOT an
+  // assumption about named-tuple bit ordering. Like loop-replica guesses,
+  // this relation must pass both induction and a reset-reachable base check.
+  std::set<std::string> used_fields;
+  for (const auto& bridge : out) {
+    used_fields.insert(bridge.bit_keys.begin(), bridge.bit_keys.end());
+    bridged_wides.insert(bridge.wide_key);
+  }
+  std::map<std::string, std::vector<std::string>> field_groups;
+  for (const auto& [field, width] : impl_side) {
+    if (width < 1 || ref_side.contains(field) || used_fields.contains(field)) {
+      continue;
+    }
+    std::vector<std::string> owners;
+    for (size_t pos = field.find('_'); pos != std::string::npos; pos = field.find('_', pos + 1)) {
+      const auto base = field.substr(0, pos);
+      if (const auto it = ref_side.find(base);
+          it != ref_side.end() && it->second > width && !impl_side.contains(base) && !bridged_wides.contains(base)) {
+        owners.push_back(base);
+      }
+    }
+    if (owners.size() == 1) {
+      field_groups[owners.front()].push_back(field);
+    }
+  }
+  for (auto& [wide, fields] : field_groups) {
+    int64_t total    = 0;
+    bool    complete = fields.size() > 1;
+    for (const auto& field : fields) {
+      total    += impl_side.at(field);
+      complete  = complete && impl_order.contains(field);
+    }
+    if (!complete || total != ref_side.at(wide)) {
+      continue;
+    }
+    std::sort(fields.begin(), fields.end(), [&](const auto& x, const auto& y) {
+      return impl_order.at(x) != impl_order.at(y) ? impl_order.at(x) > impl_order.at(y) : x < y;
+    });
+    Packed_scalar_bridge bridge{wide, fields, false, {}};
+    for (const auto& field : fields) {
+      bridge.widths.push_back(impl_side.at(field));
+    }
+    out.push_back(std::move(bridge));
+  }
+
   return out;
 }
 
@@ -3144,6 +3226,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     return c;
   };
+
+  Io_name_map<uint64_t> impl_state_order;
+  for (auto node : impl->occurrences().nodes(hhds::Node_order::forward)) {
+    if (graph_util::type_op_of(node) == Ntype_op::Flop) {
+      impl_state_order.emplace(eff(node.get_hier_name()), static_cast<uint64_t>(node.get_debug_nid()));
+    }
+  }
 
   // Def-name canonicalization across front-ends. A def's FULL callee name
   // embeds its front-end namespace (Pyrope "file.entity" vs slang's flat
@@ -3418,6 +3507,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (!(in_ref ? seen_ref_nk : seen_impl_nk).insert(nk).second) {
         nk_collision = true;
       }
+      if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+        std::fprintf(stderr,
+                     "[LEC_COLLAPSE] box %s def '%s' inst '%s' (walk order %zu)\n",
+                     in_ref ? "ref " : "impl",
+                     defkey.c_str(),
+                     canon_flop_name(node.get_hier_name()).c_str(),
+                     boxes_by_def[defkey].size());
+      }
       boxes_by_def[defkey].push_back(Box_inst{std::move(nk), canon_flop_name(node.get_hier_name()), node, in_ref});
     }
   };
@@ -3452,7 +3549,52 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
 
   // Name-first pairing per def: a canon instance name unique on BOTH sides is
-  // the tag; the remainder pairs by walk-order occurrence.
+  // the tag; the remainder pairs by occurrence ORDINAL. That ordinal is
+  // assigned in a NATURAL (numeric-aware) sort of the canonical instance
+  // names, not in the hhds occurrence walk order: the walk enumerates a rolled
+  // loop's replicas by definition (`u_loop_3` before `u_loop_1`, so
+  // `..__li14, __li12, __li13, __li8, ..`) while the other side lists its
+  // explicit instances in source order (`levels_0_nodes_0_n, ..`), and the
+  // per-ordinal pairing then tied every box to the wrong partner (a refute
+  // under collapse and a slow flat confirmation on an equivalent pair). Both
+  // spellings sort by their iteration numbers, which is the source order on
+  // either side. It is only a correspondence hypothesis: a wrong pairing
+  // refutes under collapse and is re-checked flat, never trusted.
+  const auto natural_cname_less = [](const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+      const bool da = std::isdigit(static_cast<unsigned char>(a[i])) != 0;
+      const bool db = std::isdigit(static_cast<unsigned char>(b[j])) != 0;
+      if (da && db) {
+        size_t ie = i, je = j;
+        while (ie < a.size() && std::isdigit(static_cast<unsigned char>(a[ie])) != 0) {
+          ++ie;
+        }
+        while (je < b.size() && std::isdigit(static_cast<unsigned char>(b[je])) != 0) {
+          ++je;
+        }
+        const std::string_view na(a.data() + i, ie - i), nb(b.data() + j, je - j);
+        // Compare numerically: strip leading zeros, then by length, then lexically.
+        const auto sa = na.substr(std::min(na.find_first_not_of('0'), na.size() - 1));
+        const auto sb = nb.substr(std::min(nb.find_first_not_of('0'), nb.size() - 1));
+        if (sa.size() != sb.size()) {
+          return sa.size() < sb.size();
+        }
+        if (sa != sb) {
+          return sa < sb;
+        }
+        i = ie;
+        j = je;
+        continue;
+      }
+      if (a[i] != b[j]) {
+        return a[i] < b[j];
+      }
+      ++i;
+      ++j;
+    }
+    return a.size() - i < b.size() - j;
+  };
   Io_name_map<std::string> ref_box_keys, impl_box_keys;
   for (const auto& defname : box_defnames) {
     const auto&      insts = boxes_by_def[defname];
@@ -3460,11 +3602,23 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     for (const auto& bi : insts) {
       (bi.in_ref ? ref_cnt : impl_cnt)[bi.cname]++;
     }
-    int ref_res = 0, impl_res = 0;
+    std::vector<const Box_inst*> ref_rest, impl_rest;
     for (const auto& bi : insts) {
-      const bool  named = ref_cnt[bi.cname] == 1 && impl_cnt[bi.cname] == 1;
-      std::string tag   = named ? ("n:" + bi.cname) : ("o" + std::to_string(bi.in_ref ? ref_res++ : impl_res++));
-      (bi.in_ref ? ref_box_keys : impl_box_keys)[bi.nk] = defname + "#" + tag;
+      const bool named = ref_cnt[bi.cname] == 1 && impl_cnt[bi.cname] == 1;
+      if (named) {
+        (bi.in_ref ? ref_box_keys : impl_box_keys)[bi.nk] = defname + "#n:" + bi.cname;
+      } else {
+        (bi.in_ref ? ref_rest : impl_rest).push_back(&bi);
+      }
+    }
+    for (auto* rest : {&ref_rest, &impl_rest}) {
+      std::stable_sort(rest->begin(), rest->end(), [&](const Box_inst* x, const Box_inst* y) {
+        return natural_cname_less(x->cname, y->cname);
+      });
+      int ordinal = 0;
+      for (const auto* unnamed : *rest) {
+        (unnamed->in_ref ? ref_box_keys : impl_box_keys)[unnamed->nk] = defname + "#o" + std::to_string(ordinal++);
+      }
     }
   }
 
@@ -4466,7 +4620,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       collect_flops(ref);
       side_ix = 1;
       collect_flops(impl);
-      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1]);
+      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1], impl_state_order);
 
       // ── bit-blasted state correspondence ──────────────────────────────────
       // Synthesis can implement ONE N-bit register as N one-bit library DFF
@@ -5550,15 +5704,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;
         }
         auto wide = ref_state.find(bridge.wide_key);
-        if (wide == ref_state.end() || wide->second.width != static_cast<int>(bridge.bit_keys.size())) {
+        if (wide == ref_state.end() || wide->second.width != bridge.total_width()) {
           res.detail += "; packed/scalar base unavailable (wide state missing)";
           return;
         }
         std::vector<cvc5::Term> bits;
         bits.reserve(bridge.bit_keys.size());
-        for (auto it = bridge.bit_keys.rbegin(); it != bridge.bit_keys.rend(); ++it) {
-          auto bit = impl_state.find(*it);
-          if (bit == impl_state.end() || bit->second.width != 1) {
+        for (size_t i = bridge.bit_keys.size(); i-- > 0;) {
+          auto bit = impl_state.find(bridge.bit_keys[i]);
+          if (bit == impl_state.end() || bit->second.width != bridge.width_at(i)) {
             res.detail += "; packed/scalar base unavailable (replica state missing)";
             return;
           }
@@ -6024,7 +6178,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   add_flops(ref);
   ind_side_ix = 1;
   add_flops(impl);
-  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1]);
+  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1], impl_state_order);
 
   // ── bit-blasted state correspondence (see the twin in the BMC seeding) ─────
   // Synthesis can implement ONE N-bit register as N one-bit library DFF cells;
@@ -6082,7 +6236,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;
     }
     auto pit = shared.find(bridge.wide_key);
-    if (pit == shared.end() || pit->second.width != static_cast<int>(bridge.bit_keys.size())) {
+    if (pit == shared.end() || pit->second.width != bridge.total_width()) {
       continue;
     }
     bool available = true;
@@ -6095,10 +6249,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (!available) {
       continue;
     }
+    int offset = 0;
     for (size_t i = 0; i < bridge.bit_keys.size(); ++i) {
-      const auto b               = static_cast<uint32_t>(i);
-      cvc5::Term t               = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
-      shared[bridge.bit_keys[i]] = Val{t, 1, false};
+      const int  width = bridge.width_at(i);
+      cvc5::Term t     = tm.mkTerm(
+          tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(offset + width - 1), static_cast<uint32_t>(offset)}),
+          {pit->second.term});
+      shared[bridge.bit_keys[i]]  = Val{t, width, false};
+      offset                     += width;
     }
     ind_bitblast.emplace(bridge.wide_key, bridge.bit_keys);
     if (!bridge.structural_partition) {
@@ -7104,16 +7262,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;
     }
     std::vector<cvc5::Term> bt;  // MSB first, as cvc5 CONCAT expects
-    bool                    all = true;
+    bool                    all         = true;
+    int                     total_width = 0;
     for (auto it = bits.rbegin(); it != bits.rend(); ++it) {
       auto bit = ie.outputs.find(std::string("\x01nxt:") + *it);
-      if (bit == ie.outputs.end() || bit->second.width != 1) {
+      if (bit == ie.outputs.end() || !shared.contains(*it) || bit->second.width != shared.at(*it).width) {
         all = false;
         break;
       }
       bt.push_back(bit->second.term);
+      total_width += bit->second.width;
     }
-    if (!all || bt.empty()) {
+    if (!all || bt.empty() || total_width != re.outputs.at(rkey).width) {
       continue;
     }
     cvc5::Term cat = bt.front();
@@ -7123,7 +7283,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     for (const auto& b : bits) {
       ie.outputs.erase(std::string("\x01nxt:") + b);
     }
-    ie.outputs[rkey] = Val{cat, static_cast<int>(bits.size()), false};
+    ie.outputs[rkey] = Val{cat, total_width, false};
   }
 
   for (const auto& [name, rv] : re.outputs) {
@@ -7286,7 +7446,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     const auto& a = rh->second;
     const auto& b = ih->second;
-    if (!a.exact || !b.exact || a.bus.getSort() != b.bus.getSort() || a.reset.isNull() != b.reset.isNull()) {
+    // A per-port memory with a reset arm carries a record with NO bus (the
+    // reset is the only whole-array arm); both sides must agree on which arms
+    // exist before any of them is compared.
+    if (!a.exact || !b.exact || a.bus.isNull() != b.bus.isNull() || a.reset.isNull() != b.reset.isNull()) {
+      return false;
+    }
+    if (!a.bus.isNull() && a.bus.getSort() != b.bus.getSort()) {
       return false;
     }
     auto add_arm
@@ -7300,7 +7466,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                            key + ":" + std::string(tag) + ".bus",
                            false});
           };
-    add_arm(a.cond, b.cond, a.bus, b.bus, "whole");
+    if (!a.bus.isNull()) {
+      add_arm(a.cond, b.cond, a.bus, b.bus, "whole");
+    }
     if (!a.reset.isNull()) {
       if (a.init.getSort() != b.init.getSort()) {
         return false;

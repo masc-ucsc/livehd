@@ -1,0 +1,27 @@
+/*
+:name: generic_tuple_register
+:type: equiv
+:equiv_engine: cvc5
+:verilog_top: generic_tuple_register
+:pyrope_top: generic_tuple_register
+:state_match_flatten: true
+*/
+
+// Imported generic tuple ports, a nested named layout, forward bundle wires,
+// a subtuple actual, and two specializations with different shapes.
+// Whole output reads must observe q while conditional writes update din.
+const cell = import("generic_tuple_register/cell.cell")
+type Payload = (payload:(data:u8, valid:u1), tag:u2)
+type Small = (data:u8, valid:u1)
+
+pub mod generic_tuple_register(clock:u1, reset:u1, a:u8, v:u1, tag:u2, flush:u1, enable:u1)
+  -> (q:u8@[], valid:u1@[], t:u2@[]) {
+  wire first_out:Payload = nil
+  const input = (const payload=(const data:u8=a, const valid:u1=v), const tag:u2=tag)
+  const first = cell<Payload>(clock=clock, reset=reset, data=input, flush=flush, enable=enable)
+  first_out = first.out
+  const second = cell<Small>(clock=clock, reset=reset, data=first_out.payload, flush=flush, enable=enable)
+  q = second.out.data
+  valid = second.out.valid
+  t = first_out.tag
+}

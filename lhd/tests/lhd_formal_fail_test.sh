@@ -329,12 +329,16 @@ pub mod memguard(c1:bool, c2:bool, a:u2, d:u8) -> (o:u8@[0]) {
 EOF
 compile_case memguard memguard
 [ "$RC" -eq 0 ] || fail "memguard must compile: $(cat "$DIAG")"
-grep -qE "wr_enable_0\((and_[0-9]+|[a-z_0-9]+)\)" "$VOUT" || fail "no memory write enable emitted: $(cat "$VOUT")"
+# The memory carries a reset value, so cgen emits it as an inline reg array
+# (`if (<en>) <mem>_data[a] <= d;`) rather than a cgen_memory_* wrapper
+# instance (`wr_enable_0(<en>)`); either spelling carries the write enable.
+grep -qE "wr_enable_0\((and_[0-9]+|[a-z_0-9]+)\)|if \((and_[0-9]+|[a-z_0-9]+)\) __lhdmem_h[0-9a-f]+_e_data\[" "$VOUT" \
+  || fail "no memory write enable emitted: $(cat "$VOUT")"
 python3 - "$VOUT" <<'PYEOF' || fail "the OUTER guard c1 was dropped from the memory write enable"
 import re, sys
 v = open(sys.argv[1]).read()
-m = re.search(r"wr_enable_0\((\w+)\)", v)
-assert m, "no wr_enable_0"
+m = re.search(r"wr_enable_0\((\w+)\)", v) or re.search(r"if \((\w+)\) __lhdmem_h[0-9a-f]+_e_data\[", v)
+assert m, "no memory write enable"
 sig = m.group(1)
 d = re.search(rf"{sig}\s*=\s*([^;]+);", v)
 assert d, f"no driver for {sig}: {v}"

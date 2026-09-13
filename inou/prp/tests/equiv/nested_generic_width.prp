@@ -1,0 +1,22 @@
+/*
+:name: nested_generic_width
+:type: equiv
+:equiv_engine: cvc5
+:pyrope_top: top
+:verilog_top: top
+*/
+// The inner width is a computed comptime value of a containing template.
+comb inner<W=8>(a:u64) -> (y:u64) {
+  mut widened:unsigned(bits=W * 4) = a
+  y = (widened + W)#[0..<W]
+}
+mod outer<N=8>(a:u64) -> (y:u64@[]) {
+  comptime const WIDTH = N
+  y = inner<W=WIDTH>(a=a)
+}
+pub mod top(a:u64, b:u64) -> (x:u64@[], y:u64@[]) {
+  mut first = outer<N=8>(a=a)
+  mut second = outer<N=40>(a=b)
+  x = first.y
+  y = second.y
+}

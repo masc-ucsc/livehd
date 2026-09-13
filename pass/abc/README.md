@@ -12,13 +12,29 @@ the pass emits one warning that it is partitioning an uncolored design.
 
 It reuses `pass.partition`'s decomposition seam
 (`Pass_partition::build_decomposition` + a body-builder hook): one module per
-color region. ABC first specializes materialized loop bodies in its private
-copy, folding iteration indices and control constants; the source library stays
-compact. Ordinary module boundaries and loop bodies with explicit ABC region
-options remain intact. Shared pattern sites are specialized when their inputs
-become constant; dynamic sites retain reuse. The body-builder hook
-replaces each region body with an ABC-mapped netlist instead of the original
-logic.
+color region. Compact loop bodies use one synthesis color, even across ordinary
+arithmetic cuts and region-size limits. In the virtual flat view a loop remains
+an opaque node, so surrounding ordinary modules can still merge normally.
+
+Independent loops map their shared body separately. After mapping, ABC's private
+output library expands the physical instances and stitches their index and
+invariant inputs before timing and physical-area accounting. The source library
+stays compact. `--set pass.abc.unroll_carry=true` (default) expands carry-dependent
+loops before mapping, allowing optimization across iterations. Set it to `false`
+to benchmark separate body mapping followed by carry-chain stitching. Runtime
+activation propagated between iterations also counts as a carry dependency.
+Both modes preserve combinational carry semantics; neither adds clock cycles.
+
+`compile.unroll=false` remains the sole frontend loop switch and defaults to
+false. Use `compile.unroll=true` to benchmark general source-loop expansion;
+there is no separate ABC expand-all option. Array carriers follow the same rule
+as scalar carriers. A whole-array carry is conservatively dependent even when
+its individual element updates might be independent.
+
+For expanded carry loops, ABC folds iteration indices and control constants.
+Bodies with explicit ABC region options remain boundaries. Shared pattern sites
+are specialized when their inputs become constant; dynamic sites retain reuse.
+The body-builder hook replaces each region with an ABC-mapped netlist.
 
 ## SAT simplification
 

@@ -60,8 +60,9 @@ struct Ictx {
 
 class Flattener {
 public:
-  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules)
-      : top_(top), lib_(lib), preserve_modules_(preserve_modules), origin_(origin) {}
+  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules,
+            const std::unordered_set<hhds::Gid>& preserved_defs)
+      : top_(top), lib_(lib), preserve_modules_(preserve_modules), origin_(origin), preserved_defs_(preserved_defs) {}
 
   std::shared_ptr<hhds::Graph> run(std::string_view flat_name);
 
@@ -75,6 +76,8 @@ private:
   // Optional flat-node -> (def, source node) sink. Filled at the single site
   // that mints a clone, so it cannot drift from node_map.
   livehd::partition::Flat_origin_map* origin_           = nullptr;
+
+  const std::unordered_set<hhds::Gid>& preserved_defs_;
 
   // Defs on the current instantiation path — a def re-entered while still open
   // is a recursive hierarchy (would recurse forever / overflow the stack).
@@ -250,7 +253,8 @@ void Flattener::create_nodes(Ictx* ctx) {
     if (op == Ntype_op::Sub && ctx->child_ctx.contains(n)) {
       continue;
     }
-    if (op == Ntype_op::Sub && n.is_loop_subnode() && n.get_subnode_graph() != nullptr) {
+    if (op == Ntype_op::Sub && n.is_loop_subnode() && n.get_subnode_graph() != nullptr
+        && !preserved_defs_.contains(n.get_subnode_gid())) {
       // A loop Sub stands for `count` occurrences in native HHDS structure.
       // Recursing would splice ONE body copy and dissolve the node, silently
       // dropping count-1 replicas (graph/inline_sub.cpp refuses for the same
@@ -264,7 +268,7 @@ void Flattener::create_nodes(Ictx* ctx) {
       failed_ = true;
       return;
     }
-    if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr
+    if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr && !preserved_defs_.contains(n.get_subnode_gid())
         && !(preserve_modules_
              && (n.get_subnode_graph()->get_input_node().attr(livehd::attrs::memory_module).has()
                  || n.get_subnode_graph()->get_input_node().attr(livehd::attrs::ware_module).has()))) {
@@ -595,8 +599,9 @@ std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outli
 }
 
 std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
-                                               Flat_origin_map* origin, bool preserve_modules) {
-  Flattener f(top, lib, origin, preserve_modules);
+                                               Flat_origin_map* origin, bool preserve_modules,
+                                               const std::unordered_set<hhds::Gid>& preserved_defs) {
+  Flattener f(top, lib, origin, preserve_modules, preserved_defs);
   return f.run(flat_name);
 }
 

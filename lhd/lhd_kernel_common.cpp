@@ -830,18 +830,14 @@ void check_known_set_passes(const Options& opts) {
           "--set/--config 'compile.cache' was removed",
           std::format("use --set lhd.incremental={} instead (one switch for the compile, pass.abc and formal caches)", value)};
     }
-    if (pass == "compile.upass" && flag == "roll") {
-      // The representation switch moved up a level and flipped: loops are
-      // KEPT in the LGraph by default, `compile.unroll=true` expands them.
-      const bool keep = value == "true" || value == "1" || value == "on";
+    if (pass == "compile.upass" && (flag == "roll" || flag == "roll_arrays" || flag == "roll_cap" || flag == "unroll")) {
       throw Lhd_error{"usage",
-                      "--set/--config 'compile.upass.roll' was removed",
-                      std::format("use --set compile.unroll={} instead (false = keep each comptime loop as one replicated "
-                                  "instance in the LGraph, the default; true = unroll it into one instance per iteration)",
-                                  keep ? "false" : "true")};
+                      std::format("--set/--config '{}' was removed", key),
+                      "use --set compile.unroll=false (the default) to preserve loops, or compile.unroll=true for benchmarking; "
+                      "there are no per-array or trip-count controls"};
     }
     if (pass == "compile" && flag == "unroll") {
-      // Kernel gate seeded into pass.upass as `roll=!unroll` (compile_sources).
+      // Kernel gate seeded into pass.upass as `unroll` (compile_sources).
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
       }
@@ -1078,7 +1074,7 @@ void check_known_set_passes(const Options& opts) {
 // bare `lnast_fmt`) overrides either default; validated by check_known_set_passes.
 // `compile.unroll` (default false): whether a comptime range loop is UNROLLED
 // into one instance per iteration on the way to the LGraph. Off, an eligible
-// loop is kept as ONE replicated instance (pass.upass `roll`); the backends
+// loop is kept as ONE replicated instance (pass.upass `unroll=false`); the backends
 // that cannot consume the compact form expand it themselves. Validated by
 // check_known_set_passes; seeded into pass.upass by compile_sources.
 bool compile_unroll_requested(const Options& opts) {

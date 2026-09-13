@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <string_view>
+#include <unordered_set>
 
 #include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
@@ -45,8 +46,11 @@ using Flat_origin_map = absl::flat_hash_map<hhds::Node_class, Flat_origin>;
 // `origin`, when non-null, is filled with one entry per CLONED flat node giving
 // the def and the node it was cloned from (see Flat_origin).
 // With preserve_modules, definitions marked attrs::memory_module or
-// attrs::ware_module remain instances. Their bodies must already exist in lib (children-first emission).
+// attrs::ware_module remain instances. The pass-local preserved_defs set adds
+// boundaries, including compact loop bodies. Their mapped bodies must already
+// exist in lib (children-first emission).
 [[nodiscard]] std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
-                                                             Flat_origin_map* origin = nullptr, bool preserve_modules = false);
+                                                             Flat_origin_map* origin = nullptr, bool preserve_modules = false,
+                                                             const std::unordered_set<hhds::Gid>& preserved_defs = {});
 
 }  // namespace livehd::partition
