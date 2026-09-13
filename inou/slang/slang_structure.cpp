@@ -181,6 +181,27 @@ const slang::ast::Expression* unknown_conn_expr(const slang::ast::AssertionExpr*
 struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::ast::VisitFlags::AllGood> {
   absl::flat_hash_set<const slang::ast::ValueSymbol*> blocking;
   absl::flat_hash_set<const slang::ast::ValueSymbol*> nonblocking;
+  // Optional: "is this `if` already decided at elaboration time?" When set, a
+  // decided conditional contributes only its LIVE arm's writes -- a dead arm
+  // never executes, so counting its writes invents state. That is how the loop
+  // counter of a `for` inside `if (STEP != 0)` (STEP == 0) became an undriven
+  // latch once lower_conditional correctly stopped lowering the arm.
+  // Left EMPTY by the other consumers, which keep the see-everything behavior.
+  std::function<std::optional<bool>(const slang::ast::ConditionalStatement&)> decided;
+
+  void handle(const slang::ast::ConditionalStatement& s) {
+    if (decided) {
+      if (const auto k = decided(s); k.has_value()) {
+        if (*k) {
+          s.ifTrue.visit(*this);
+        } else if (s.ifFalse != nullptr) {
+          s.ifFalse->visit(*this);
+        }
+        return;  // the dead arm's writes never happen
+      }
+    }
+    visitDefault(s);
+  }
 
   void handle(const slang::ast::AssignmentExpression& expr) {
     auto& set = expr.isNonBlocking() ? nonblocking : blocking;
@@ -818,6 +839,74 @@ const slang::ast::Expression* whole_net_driver(const slang::ast::ValueSymbol& sy
     return &ax.right();
   }
   return nullptr;
+}
+
+// Driver census for a NET: how many WHOLE-net drivers it has (an initializer
+// counts as one) and whether any continuous assign writes only a PART of it.
+// `whole_net_driver` returns the FIRST driver it finds, so promoting a
+// multiply-driven net to a single-driver Pyrope `wire` would silently drop the
+// rest — the same refusal the packed-array Type-C gate spells as
+// `whole_drivers == 1` plus `!part_written`. Nets cannot be assigned
+// procedurally, so the continuous assigns are the complete driver set — but
+// they do NOT all live in the net's own scope: a `generate` block can drive a
+// module-level net, so the scan has to descend into instantiated generate
+// scopes too. Missing one there would UNDERCOUNT and let a multiply-driven net
+// be promoted to a single-driver Pyrope `wire`.
+struct Net_driver_census {
+  int  whole = 0;
+  bool part  = false;
+};
+Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym) {
+  Net_driver_census                             out;
+  if (sym.getInitializer() != nullptr) {
+    ++out.whole;
+  }
+  std::function<void(const slang::ast::Scope&)> scan = [&](const slang::ast::Scope& scope) {
+    for (const auto& member : scope.members()) {
+      if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
+        const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+        if (!gen.isUninstantiated) {
+          scan(gen);
+        }
+        continue;
+      }
+      if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
+        for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+          scan(*entry);
+        }
+        continue;
+      }
+      if (member.kind != slang::ast::SymbolKind::ContinuousAssign) {
+        continue;
+      }
+      const auto& asn = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+      if (asn.kind != ExpressionKind::Assignment) {
+        continue;
+      }
+      const auto* lhs = &asn.as<slang::ast::AssignmentExpression>().left();
+      while (lhs->kind == ExpressionKind::Conversion) {
+        lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+      }
+      if (lhs->kind == ExpressionKind::NamedValue) {
+        if (&lhs->as<slang::ast::NamedValueExpression>().symbol == &sym) {
+          ++out.whole;
+        }
+        continue;
+      }
+      Named_value_collector nvc;  // a select/concat LHS: does it target `sym`?
+      lhs->visit(nvc);
+      for (const auto* s : nvc.syms) {
+        if (s == &sym) {
+          out.part = true;
+          break;
+        }
+      }
+    }
+  };
+  if (const auto* scope = sym.getParentScope(); scope != nullptr) {
+    scan(*scope);
+  }
+  return out;
 }
 
 // True iff `expr` reads `target` — directly, or transitively through the whole-net
@@ -1465,6 +1554,9 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     }
 
     Write_collector wc;
+    // Only THIS consumer gets the reachability filter: it is the one that mints
+    // reg/latch state, so a dead arm's writes here become real hardware.
+    wc.decided = [this](const slang::ast::ConditionalStatement& s) { return const_cond_value(s); };
     pbs.getBody().visit(wc);
     for (const auto* sym : wc.nonblocking) {
       reg_syms_.insert(sym);
@@ -1762,6 +1854,65 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         wire_syms_.insert(sym);
       }
     }
+
+    // TYPE-C SELF-REFERENCE, one dimension down: a plain packed-VECTOR net
+    // whose single whole-net driver reads its OWN bits —
+    //     wire [3:0] t;  assign t = {t[2], t[1], t[0], a[0]};
+    // — is the same false cycle as the packed-ARRAY case above. It is acyclic
+    // BIT by bit, so the value is perfectly well defined (`t` settles at
+    // `{4{a[0]}}`, confirmed against iverilog), but declared as an ordinary
+    // `mut` every sibling-bit read binds to the net's `0sb?` POISON init and
+    // only the one lane with a non-self operand survives. That is a SILENT
+    // MISCOMPILE of legal Verilog: lhd emitted `y = {1'b?,1'b?,1'b?,a[0]}`,
+    // exit 0, no diagnostic.
+    //
+    // It matters well beyond a toy: this is the shape firtool emits for every
+    // bit-sliced AES/SM4 S-box in xiangshan, and it is why `lhd lec` with
+    // `formal.solver=lgyosys` REFUTED BlockCipherModule / CryptoModule while
+    // cvc5 PROVED them — cvc5 is free to choose the implementation's X, so it
+    // cannot see a lowering that only lost DEFINEDNESS.
+    //
+    // Same repair as the array form: declaring the net a Pyrope `wire` hands it
+    // to graph/split_selfref's split_packed_selfref_wire at wire binding, which
+    // dissolves exactly this shape. Gated identically — one whole-net driver,
+    // no partial writes — because a Pyrope `wire` is single-driver by contract.
+    std::function<void(const slang::ast::Scope&)> seed_selfref_vector_nets = [&](const slang::ast::Scope& sc) {
+      for (const auto& member : sc.members()) {
+        if (visit_generate_scope(member, seed_selfref_vector_nets)) {
+          continue;
+        }
+        if (member.kind != SymbolKind::Net) {
+          continue;  // a VARIABLE cannot carry a continuous self-reference
+        }
+        const auto& ns = member.as<slang::ast::ValueSymbol>();
+        if (Array_range_write_collector::is_candidate(ns)) {
+          continue;  // real 2-D array — the loop above owns it
+        }
+        if (reg_syms_.contains(&ns) || input_syms_.contains(&ns) || output_syms_.contains(&ns)) {
+          continue;
+        }
+        if (wire_syms_.contains(&ns)) {
+          continue;  // already promoted by the cycle classifier
+        }
+        const auto& ct = ns.getType().getCanonicalType();
+        if (!ct.isIntegral() || ct.isStruct()) {
+          continue;  // structs have their own per-field split
+        }
+        const auto census = net_driver_census(ns);
+        if (census.whole != 1 || census.part) {
+          continue;
+        }
+        const auto* vdrv = whole_net_driver(ns);
+        if (vdrv == nullptr) {
+          continue;
+        }
+        absl::flat_hash_set<const slang::ast::ValueSymbol*> vvisiting;
+        if (driver_reads_target(*vdrv, ns, vvisiting, 0)) {
+          wire_syms_.insert(&ns);
+        }
+      }
+    };
+    seed_selfref_vector_nets(*body);
   }
   // Harvest declaration initializers and `initial begin ... end` power-on
   // contents before state declarations emit. A constant scalar initializer is

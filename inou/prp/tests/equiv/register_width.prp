@@ -1,0 +1,30 @@
+/*
+:name: register_width
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+// 2f-type_bound — a GENERIC-parameterized register width.
+//
+// `REGS32` has no value until the template is specialized, long after
+// prp2lnast, so no front-end folder can ever see it and the bound has to reach
+// LNAST as a ref the runner folds (bake_decl_pre_step, the same treatment an
+// `[N]` array dimension already got). Until then the `bits=` arm was a SILENT
+// no-op on a fold miss: `max_txt` stayed empty, the declare got
+// `prim_type_int(nil, 0)`, and `decoded` was sized by whatever value happened
+// to reach it -- exit 0, no diagnostic, wrong width. The `wrap` error this
+// fixture first reported ("call to undefined function 'wrap'") was three
+// passes downstream of that: with no declared width, try_lower_wrap_sat
+// declined and the call leaked to tolg.
+//
+// REGS32 defaults to FALSE so the narrow arm is what gets built, which makes
+// the `wrap` load-bearing: a 5-bit index must truncate into a 4-bit register.
+// With the width dropped, nothing truncated.
+
+pub mod top<REGS32=false>(index:u5) -> (value:u5@[]) {
+  reg decoded:unsigned(bits=if REGS32 { 5 } else { 4 }) = nil
+  wrap decoded = index
+  value = decoded
+}

@@ -1,0 +1,39 @@
+/*
+:name: stream_ssa_tuple_slot
+:type: equiv
+:verilog_top: stream_ssa_tuple_slot
+:pyrope_top: stream_ssa_tuple_slot
+:equiv_engine: cvc5
+*/
+
+// 2f-stream_ssa — a runtime-indexed tuple must read each element's value AS
+// CAPTURED at the tuple literal. 04-variables.md: "The last write in program
+// order wins".
+//
+// `::[timecheck=false]` marks the unit verilog_origin, which selects STREAMING
+// SSA: the LNAST keeps the BASE name on every read and only the runner versions
+// it at emit time. The slot->carrier map recorded the RAW name, so
+// try_lower_dynamic_tuple_index emitted the Hotmux arm against the variable's
+// VERSION-0 net -- `post_write` read `x` instead of `y`. Silent: exit 0, no
+// diagnostic, and DCE then deleted the whole now-unread producing cone. The
+// byte-identical source WITHOUT the attribute compiled correctly, which is the
+// single-token bracket.
+//
+// Both directions are pinned here on purpose, because a read-time (rather than
+// capture-time) resolve fixes `post_write` and breaks `pre_write`:
+//   post_write -- captured AFTER the reassignment  -> must be y
+//   pre_write  -- captured BEFORE the reassignment -> must be x
+// This is the reduction of the lhdsuite dino ALU, whose `[16]u64` result table
+// silently produced 0 for SRL/SRA/SUB/ADD/SLL.
+
+pub comb stream_ssa_tuple_slot::[timecheck=false](sel:u2, x:u8, y:u8) -> (post_write:u8, pre_write:u8) {
+  mut m:u8 = x
+  m = y
+  const t = (10, 20, m, 30)
+  post_write = t[sel]
+
+  mut n:u8 = x
+  const u = (40, 50, n, 60)
+  n = y
+  pre_write = u[sel]
+}

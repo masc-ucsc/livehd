@@ -1,0 +1,12 @@
+/*
+:name: nested_generic
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+const parent = import("nested_generic/parent.parent")
+pub mod top(a:u8) -> (y:u8@[0]) {
+  y = parent(a=a)
+}

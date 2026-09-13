@@ -2,6 +2,8 @@
 
 #include "prp_sim.hpp"
 
+#include "cpp_ident.hpp"  // livehd::cpp_ident — the SAME rule cgen_sim declares members with
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -1325,12 +1327,53 @@ private:
     return out;
   }
 
+  // The C++ spelling of a field path. cgen_sim DECLARES every member through
+  // livehd::cpp_ident (core/cpp_ident.hpp) and publishes that spelling as the
+  // port `"name"` in <stem>.iface.json, so a lookup here has to apply the SAME
+  // rule or the two drift: a Pyrope field named for a C++ reserved word or
+  // alternative token (`xor`, `not`, `class`) is declared `xor_` and would never
+  // be found under `xor`.
+  //
+  // Per DOT SEGMENT, and only up to a '[': a memory leaf's index (`regs[3]`) is
+  // emitted as C++ verbatim and must not be mangled.
+  //
+  // Note the quote handling: unquote_field_path is quote-AWARE when it strips the
+  // backticks, but it joins the bare segments with plain '.', so a quoted name
+  // that CONTAINS a dot (`` `a.b` ``) is indistinguishable afterwards and splits
+  // into two members here. cgen_sim::cpp_port_path splits on the first raw '.'
+  // and has the same blind spot, so the two sides still agree -- do not "fix"
+  // one without the other.
+  static std::string cxx_field_path(std::string_view path) {
+    const std::string bare = unquote_field_path(path);
+    std::string       out;
+    std::size_t       seg = 0;
+    for (std::size_t i = 0; i <= bare.size(); ++i) {
+      if (i != bare.size() && bare[i] != '.') {
+        continue;
+      }
+      std::string_view s(bare.data() + seg, i - seg);
+      const auto       br = s.find('[');
+      out += livehd::cpp_ident(br == std::string_view::npos ? s : s.substr(0, br));
+      if (br != std::string_view::npos) {
+        out.append(s.substr(br));  // `[idx]` is C++ already
+      }
+      if (i != bare.size()) {
+        out.push_back('.');
+      }
+      seg = i + 1;
+    }
+    return out;
+  }
+
   std::string field_storage(const std::string& var_raw, const std::string& fld_raw, bool write, int* w_out = nullptr,
                             bool* signed_out = nullptr) {
     // Both sides need the strip: the INSTANCE may be named for a keyword too
     // (`` `reg`.din ``), and every consumer below the lexer sees the bare name.
     const std::string var   = unquote_field_path(var_raw);
-    const std::string fld   = unquote_field_path(fld_raw);
+    // `var` stays the PYROPE spelling: it is a prp_sim-minted testbench local and
+    // the key of inst_of_var, not a name from the generated header. `fld` is
+    // matched against the manifest / emitted member, so it takes the C++ rule.
+    const std::string fld   = cxx_field_path(fld_raw);
     auto              width = [&](int w) {
       if (w_out != nullptr) {
         *w_out = w;

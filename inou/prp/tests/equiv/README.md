@@ -12,6 +12,11 @@ two equivalent (`lhd lec`, then yosys `lgcheck`). The golden is written by hand
 from the same specification, never generated, so it is an independent statement
 of what the design must compute.
 
+Imported helpers may live in a same-stem directory, for example
+`imported_bool_cast.prp` imports `imported_bool_cast/leaf.prp`. The automatic
+equivalence, state-matching, and Verilog round-trip targets stage those helpers;
+only top-level `.prp` files are discovered as fixtures.
+
 ## Header tags
 
 Every tag is a `:name: value` line inside the leading `/* … */` block.
@@ -21,6 +26,7 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:type: equiv` | run the LEC pair (`equiv_slang` for a golden `read_slang` cannot read) |
 | `:verilog_top:` | module to compare on the GOLDEN side (default: first module in the `.v`) |
 | `:pyrope_top:` | generated module to compare on the Pyrope side |
+| `:compile_top:` | optional source top to materialize explicitly during Pyrope compilation, including a defaulted generic among multiple public templates |
 | `:set: k=v …` | extra `--set` flags, applied to every mode |
 | `:reset_style: async` | elaborate implicit resets as async, so the golden can spell an async `always` |
 | `:equiv_engine: cvc5` | prove with `lhd lec` only; skip lgcheck (latch/edge shapes it calls different) |

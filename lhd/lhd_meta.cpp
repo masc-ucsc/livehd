@@ -17,7 +17,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps
-    = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
+    = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
 constexpr std::string_view kEmitKinds
     = R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","report","diagnostics"])json";
 constexpr std::string_view kErrorClasses
@@ -606,6 +606,11 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"pyrope fmt","description":"Format Pyrope source (a clang-format for Pyrope): the prpfmt formatter walks the tree-sitter-pyrope grammar and re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping). Prints to stdout by default; -i/--inplace rewrites each file; -o/--output writes one file. No result envelope (the output is the formatted source). Exit 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"inplace","type":"flag","aliases":["-i"]},{"name":"output","type":"path","aliases":["-o"]},{"name":"indent","type":"int","default":2},{"name":"width","type":"int","default":132},{"name":"verify","type":"flag"}]},"inputs":["pyrope"],"outputs":["stdout","pyrope"],"examples":["lhd pyrope fmt foo.prp","lhd pyrope fmt -i foo.prp bar.prp","lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp"]})json");
     return 0;
   }
+  if (name == "pyrope style") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"pyrope style","description":"Find repeated statement blocks using Tree-sitter, without compiling. Reports likely unrolled loops when numeric literals and identifier indices follow affine progressions. Skips damaged sequences in partial code. Advisory only; no rewrites. Findings and summary use the diagnostics stream, with template/count/progression attrs and source spans. Exit 0 for findings or partial parses; 1 for input/parser failures","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"min-repeats","type":"int","default":3,"min":3,"max":1000000},{"name":"max-block-statements","type":"int","default":128,"min":1,"max":4096},{"name":"max-findings","type":"int","default":20,"min":1,"max":1000000}]},"inputs":["pyrope"],"outputs":["diagnostics"],"examples":["lhd pyrope style foo.prp","lhd pyrope style foo.prp --diag-fmt pretty","lhd pyrope style foo.prp --emit diagnostics:style.jsonl"]})json");
+    return 0;
+  }
   if (name == "pyrope lsp" || name == "lsp") {
     print_json_line(
         R"json({"schema_version":1,"name":"pyrope lsp","description":"Pyrope LSP server (task 1n): JSON-RPC over stdio, Content-Length framed. Drives prp2lnast + pass.upass + core/diag per buffer; .prp only, ephemeral, no lgdb. stdio belongs to the protocol, so no result JSON is written","args":{},"examples":["lhd pyrope lsp"]})json");
@@ -753,7 +758,8 @@ void print_general_help() {
       "               lhd tool grep get_mask lg:dir     # filtered search (bare term -> any field)\n"
       "               lhd tool diff lg:before lg:after --attr color\n"
       "               lhd tool cat x.prp                # LNAST cat (was ln.cat)\n"
-      "  pyrope     Pyrope developer tools: fmt (clang-format-like formatter) | lsp (the LSP server)\n"
+      "  pyrope     Pyrope developer tools: style (repeated blocks) | fmt (formatter) | lsp (language server)\n"
+      "               lhd pyrope style foo.prp          # suggest loops for repeated blocks\n"
       "               lhd pyrope fmt -i foo.prp         # reformat in place\n"
       "               lhd pyrope fmt foo.prp            # print formatted source to stdout\n"
       "               lhd pyrope lsp                    # Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
@@ -790,8 +796,26 @@ void print_general_help() {
 }
 
 // `lhd pyrope [SUB] --help` — the Pyrope developer tools. `sub` is the
-// subcommand word ("fmt"/"lsp"), empty for the `pyrope` overview.
+// subcommand word ("fmt"/"lsp"/"style"), empty for the `pyrope` overview.
 int help_pyrope(const std::string& sub) {
+  if (sub == "style") {
+    std::print(
+        "lhd pyrope style — find repeated statement blocks with Tree-sitter\n\n"
+        "usage: lhd pyrope style FILE… [flags]\n"
+        "  Suggest loops for contiguous repeated blocks with consistent numeric progressions.\n"
+        "  Blocks can contain multiple statements and nested scopes; whitespace/comments are ignored.\n"
+        "  No compilation or rewrites. Syntax errors make analysis partial, not fatal.\n\n"
+        "flags:\n"
+        "  --min-repeats N           minimum copies (default 3, range 3..1000000)\n"
+        "  --max-block-statements N  largest block to search (default 128, range 1..4096)\n"
+        "  --max-findings N          highest-ranked nonoverlapping findings per file (default 20)\n"
+        "  --diag-fmt pretty|json    human text or JSONL on stderr (auto by default)\n"
+        "  --emit diagnostics:PATH  write structured findings and summary to PATH\n\n"
+        "exit: 0 including suggestions/partial parses; 1 for input or parser failures\n"
+        "Limits: contiguous copies within a scope, consistent numeric/identifier-index strides;\n"
+        "no arbitrary renaming, statement reordering, semantic proof, or automatic refactoring.\n");
+    return 0;
+  }
   if (sub == "fmt") {
     std::print(
         "lhd pyrope fmt — format Pyrope source (a clang-format for Pyrope, via prpfmt)\n"
@@ -831,7 +855,7 @@ int help_pyrope(const std::string& sub) {
     return 0;
   }
   if (!sub.empty()) {
-    std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp)\n", sub);
+    std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp | style)\n", sub);
     return 1;
   }
   std::print(
@@ -840,6 +864,7 @@ int help_pyrope(const std::string& sub) {
       "usage: lhd pyrope <subcommand> [args]\n"
       "\n"
       "subcommands (run `lhd pyrope <subcommand> --help` for details):\n"
+      "  style FILE… suggest loops for repeated statement blocks\n"
       "  fmt FILE…   format Pyrope source (clang-format-like): -i in place, else stdout\n"
       "  lsp         the Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
       "\n"
@@ -1176,11 +1201,7 @@ int help_pass(const std::string& sub) {
     return print_options_section({"pass.semdiff."});
   }
   if (!sub.empty()) {
-    std::print(
-        stderr,
-        "lhd help: unknown pass subcommand '{}' ({})\n",
-        sub,
-        kPassSubcommands);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' ({})\n", sub, kPassSubcommands);
     return 1;
   }
   std::print(
@@ -1238,7 +1259,7 @@ std::string json_version() {
 }
 
 constexpr std::string_view kJsonPyropeOverview
-    = R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
+    = R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"style","summary":"suggest loops for repeated statement blocks using Tree-sitter"},{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
 
 constexpr std::string_view kJsonPassColor
     = R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|cgen|synth|path|mincut|flat|reduce|clear (alg defaults to acyclic). flat gives the whole --top hierarchy one color (the flatten equivalent). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","cgen","synth","path","mincut","flat","reduce","clear"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass color flat --top m lg:dir"]})json";
@@ -1319,10 +1340,10 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPyropeOverview);
       return 0;
     }
-    if (sub == "fmt" || sub == "lsp") {
+    if (sub == "fmt" || sub == "lsp" || sub == "style") {
       return describe_as("pyrope " + sub);
     }
-    std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp)\n", sub);
+    std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp | style)\n", sub);
     return 1;
   }
   if (topic == "tool") {
@@ -1377,11 +1398,7 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassAnalyze);
       return 0;
     }
-    std::print(
-        stderr,
-        "lhd help: unknown pass subcommand '{}' ({})\n",
-        sub,
-        kPassSubcommands);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' ({})\n", sub, kPassSubcommands);
     return 1;
   }
   // `formal` is a family: the record follows the SUBCOMMAND, so

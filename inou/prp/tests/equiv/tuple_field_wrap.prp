@@ -1,0 +1,14 @@
+/*
+:name: tuple_field_wrap
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+pub mod top(clk:u1, a:u8) -> (value:u4@[]) {
+  reg decoded:(imm:u4, valid:bool) = nil
+  wrap decoded.imm = a
+  decoded.valid = true
+  value = decoded.imm
+}

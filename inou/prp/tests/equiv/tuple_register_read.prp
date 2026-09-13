@@ -1,0 +1,16 @@
+/*
+:name: tuple_register_read
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+pub mod top(clk:u1, request:bool) -> (now:bool@[], delayed:bool@[]) {
+  reg flags:(active:bool, delayed:bool) = nil
+  flags.active = false
+  flags.delayed = flags.active
+  if request { flags.active = true }
+  now = flags.active
+  delayed = flags.delayed
+}

@@ -1,0 +1,42 @@
+/*
+:name: nested_tuple_return
+:type: equiv
+:verilog_top: nested_tuple_return
+:pyrope_top: nested_tuple_return
+:equiv_engine: cvc5
+*/
+
+// 2f-nested_type — a whole-tuple assignment from a call whose return nests two
+// levels deep. A return is always a tuple, the one-field `io_data` wrapper
+// auto-unwraps, and what is left binds by name at the same level -- ordinary
+// assignment rules, no leaf flattening.
+//
+// This used to fail with "whole-tuple operation on `ctl` cannot be scalarized",
+// and reading the result by nested path failed with "instance result has no
+// output named 'ex.aa'". Neither was a detuple or epilogue limit: the callee was
+// never SPLICED at all. `sub_instance_eligible` force-declined the splice for
+// any callee with a two-dot output leaf, so the call stayed a Sub instance whose
+// result handle holds no tuple value, no split and no bundle. The cliff sat
+// exactly at the SECOND dot -- one-dot tuple returns already worked.
+//
+// The gate's stated reason ("the splice ABI materializes one level of output
+// fields") stopped being true once the prologue started minting
+// `inl<N>_<fully.dotted.leaf>` type_specs and the per-level field reads/writes
+// were joined back to those leaves. Removing it is the whole fix.
+//
+// The golden is the FLAT hand-written equivalent, which is the real claim: the
+// nested spelling must lower to exactly the same hardware as writing the fields
+// out one by one.
+
+pub comb unpack(bits:u4) -> (io_data:(ex:(aa:u1, bb:u1), wb:(cc:u1))) {
+  io_data.ex.aa = bits#[0]
+  io_data.ex.bb = bits#[1]
+  io_data.wb.cc = bits#[2]
+}
+
+pub mod nested_tuple_return(clock:u1, bits:u4) -> (y:u1@[], z:u1@[]) {
+  reg ctl:(ex:(aa:u1, bb:u1), wb:(cc:u1)) = nil
+  ctl = unpack(bits=bits)
+  y = ctl.ex.aa
+  z = ctl.wb.cc
+}

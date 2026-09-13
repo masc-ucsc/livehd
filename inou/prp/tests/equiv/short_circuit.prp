@@ -1,0 +1,16 @@
+/*
+:name: short_circuit
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+comb guarded<CARRY_CHAIN=0>(a:u8) -> (y:u8) {
+  cassert(CARRY_CHAIN == 0 or (CARRY_CHAIN > 0 and (64 % CARRY_CHAIN == 0)))
+  cassert(not (CARRY_CHAIN != 0 and (64 % CARRY_CHAIN == 0)))
+  y = a
+}
+pub mod top(a:u8) -> (y:u8@[0]) {
+  y = guarded<CARRY_CHAIN=0>(a=a)
+}

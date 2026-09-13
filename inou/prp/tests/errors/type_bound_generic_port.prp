@@ -1,0 +1,26 @@
+/*
+:name: type_bound_generic_port
+:type: warning
+:warning: is not a compile-time value
+:help: resolved only on a variable declaration inside the body
+*/
+
+// 2f-type_bound — KNOWN GAP, pinned deliberately as a warning.
+//
+// A generic width resolves on a variable declaration inside the body, because
+// prp2lnast can emit the `bits=` -> max/min desugar as statements just before
+// the declaration. A PORT type slot has no statement position, so the bound
+// cannot be deferred there and the port is left unbounded (`input a`, one bit).
+//
+// That is a real defect, but it PRE-DATES the deferral work and turning it into
+// a hard error would reject code that used to compile. So it warns: the drop is
+// no longer silent, and this fixture is what will notice when the gap closes --
+// at which point this becomes an `:type: compile` fixture asserting the port is
+// eight bits wide.
+
+mod m<N=8>(a:unsigned(bits=N)) -> (y:u8@[]) { // locate_warning_here
+  y = a
+}
+pub mod top(a:u8) -> (y:u8@[]) {
+  y = m<N=8>(a=a)
+}

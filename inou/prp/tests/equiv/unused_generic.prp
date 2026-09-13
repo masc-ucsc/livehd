@@ -1,0 +1,18 @@
+/*
+:name: unused_generic
+:type: equiv
+:verilog_top: leaf
+:pyrope_top: leaf
+:compile_top: leaf
+:equiv_engine: cvc5
+*/
+
+pub mod leaf<N=1>(a:u8) -> (y:u8@[]) {
+  reg value:u8 = nil
+  wrap value = a + N
+  y = value
+}
+pub mod select<FAST=false>(a:u8) -> (y:u8@[]) {
+  if FAST { y = leaf<N=2>(a=a) }
+  else { y = leaf(a=a) }
+}

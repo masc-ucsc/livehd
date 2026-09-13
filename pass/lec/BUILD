@@ -416,3 +416,9 @@ sh_test(
     ],
     tags = ["no-sandbox"],  # runs pass.abc/gensim + the in-process cvc5+abc engines
 )
+
+sh_test(
+    name = "lec_struct_array_bank_test",
+    srcs = ["tests/lec_struct_array_bank_test.sh"],
+    data = ["//lhd"],
+)

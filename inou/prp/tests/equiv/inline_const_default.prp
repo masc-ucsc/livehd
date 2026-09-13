@@ -1,0 +1,24 @@
+/*
+:name: inline_const_default
+:type: equiv
+:verilog_top: inline_const_default
+:pyrope_top: inline_const_default
+:equiv_engine: cvc5
+*/
+
+// 1i-inline — the structural half of the sim fixture ../sim/inline_const_default.prp
+// (read its comment). A constant default in an INLINED `comb` was dropped, and
+// the else arm of the resulting mux became `65'sb1????...`. This pair pins the
+// emitted hardware; the sim fixture pins the value, because pass.lec
+// concretizes an unknown to 0 and cannot see the defect on its own.
+
+comb inner(rs:u5) -> (sel:u3) {
+  sel = 0
+  if rs != 0 {
+    sel = 2
+  }
+}
+
+pub comb inline_const_default(rs:u5) -> (o:u3) {
+  o = inner(rs=rs).sel
+}

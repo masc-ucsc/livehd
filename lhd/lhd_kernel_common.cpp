@@ -1257,6 +1257,24 @@ void write_io_entry(std::ofstream& ofs, const Lnast_io_entry& e) {
 }
 
 void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
+  // Deferred templates are still source bodies. Their generic signature and
+  // template flag must survive independently of the tree, just as they do in
+  // the compile cache; otherwise reload lowers an unspecialized body as hardware.
+  ofs << ",\"template\":" << (ln.is_template() ? "true" : "false")
+      << ",\"skip_timecheck\":" << (ln.get_skip_timecheck() ? "true" : "false") << ",\"lg_name\":\""
+      << json_escape_min(ln.get_lg_name()) << "\"";
+  const auto write_strings = [&](std::string_view key, const std::vector<std::string>& values) {
+    ofs << ",\"" << key << "\":[";
+    for (size_t i = 0; i < values.size(); ++i) {
+      if (i) {
+        ofs << ',';
+      }
+      ofs << '\"' << json_escape_min(values[i]) << '\"';
+    }
+    ofs << ']';
+  };
+  write_strings("generics", ln.get_generics());
+  write_strings("generic_defaults", ln.get_generic_defaults());
   const auto& io = ln.io_meta();
   if (!io.empty()) {
     ofs << ",\"io_meta\":{\"in\":[";
@@ -1433,6 +1451,32 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
 // (written by write_unit_meta). adopt() loads them empty; restoring them lets a
 // pre-elaborated import skip re-elaboration (it already holds its final body).
 void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
+  if (u.HasMember("template") && u["template"].IsBool()) {
+    ln.set_template(u["template"].GetBool());
+  }
+  if (u.HasMember("skip_timecheck") && u["skip_timecheck"].IsBool()) {
+    ln.set_skip_timecheck(u["skip_timecheck"].GetBool());
+  }
+  if (u.HasMember("lg_name") && u["lg_name"].IsString()) {
+    ln.set_lg_name(u["lg_name"].GetString());
+  }
+  // Only OVERWRITE what the file actually carries: an `ln:` dir written before
+  // these keys existed has no "generics"/"generic_defaults", and setting them
+  // unconditionally would CLEAR whatever the loaded tree already established.
+  const auto read_strings = [&](const char* key, auto&& setter) {
+    if (!u.HasMember(key) || !u[key].IsArray()) {
+      return;
+    }
+    std::vector<std::string> values;
+    for (const auto& value : u[key].GetArray()) {
+      if (value.IsString()) {
+        values.emplace_back(value.GetString());
+      }
+    }
+    setter(std::move(values));
+  };
+  read_strings("generics", [&](std::vector<std::string> v) { ln.set_generics(std::move(v)); });
+  read_strings("generic_defaults", [&](std::vector<std::string> v) { ln.set_generic_defaults(std::move(v)); });
   auto read_entries = [](const rapidjson::Value& arr, std::vector<Lnast_io_entry>& out) {
     for (const auto& e : arr.GetArray()) {
       if (!e.IsObject() || !e.HasMember("n")) {
@@ -1545,6 +1589,13 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
       }
     }
     restore_unit_meta(u, *ln);  // io_meta/bw_meta (empty on adopt) for import reuse
+    // Concrete stateful bodies are already elaborated, including SSA and
+    // width narrowing. Rewalking them on the ln:-only path can reinterpret
+    // their private temporaries. Templates still need call-site elaboration.
+    const auto kind = ln->get_lambda_kind();
+    if (!ln->is_template() && !ln->io_meta().empty() && (kind == "mod" || kind == "pipe")) {
+      ln->set_pre_elaborated(true);
+    }
     out.push_back(std::move(ln));
   }
   if (out.empty()) {

@@ -2,6 +2,8 @@
 
 #include "cgen_sim.hpp"
 
+#include "cpp_ident.hpp"  // livehd::cpp_ident — THE shared RTL-name -> C++ identifier rule
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -420,22 +422,11 @@ std::string Cgen_sim::cpp_port_path(std::string_view name) {
   return absl::StrCat(cpp_id(name.substr(0, dot)), ".", cpp_id(name.substr(dot + 1)));
 }
 
-std::string Cgen_sim::cpp_id(std::string_view name) {
-  std::string r;
-  r.reserve(name.size() + 1);
-  // strip LNAST backtick quotes (`a[0]`)
-  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
-    name.remove_prefix(1);
-    name.remove_suffix(1);
-  }
-  for (char c : name) {
-    r.push_back((std::isalnum(static_cast<unsigned char>(c)) || c == '_') ? c : '_');
-  }
-  if (r.empty() || std::isdigit(static_cast<unsigned char>(r.front()))) {
-    r.insert(r.begin(), '_');
-  }
-  return r;
-}
+// Delegates to livehd::cpp_ident (core/cpp_ident.hpp) so this and prp_sim's
+// manifest lookup cannot drift: the member is DECLARED here and REFERENCED
+// there, and a Pyrope field named for a C++ reserved word or alternative token
+// (`xor`) has to be escaped identically on both sides.
+std::string Cgen_sim::cpp_id(std::string_view name) { return livehd::cpp_ident(name); }
 
 // A graph name (`file.entity`, or `../dir/file.entity` for a path-qualified
 // import) is used verbatim as the emitted .hpp/.cpp basename and in the sibling
@@ -5276,7 +5267,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       std::string group = dot == std::string::npos ? std::string{} : io.raw.substr(0, dot);
       if (group != open_group) {
         if (!open_group.empty()) {
-          hout->append("    } ", open_group, "{};\n");
+          hout->append("    } ", cpp_id(open_group), "{};\n");  // the group is a MEMBER: escape it too
         }
         if (!group.empty()) {
           hout->append("    struct {\n");
@@ -5302,7 +5293,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     if (!open_group.empty()) {
-      hout->append("    } ", open_group, "{};\n");
+      hout->append("    } ", cpp_id(open_group), "{};\n");  // the group is a MEMBER: escape it too
     }
   };
   hout->append("  struct In {\n");

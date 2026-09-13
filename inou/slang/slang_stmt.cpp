@@ -339,14 +339,56 @@ void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAsserti
   clear_pending_loc();
 }
 
+// Every `&&&` condition folds to a known constant with no x/z: true when they all
+// hold (the list is a conjunction), false when any is false, nullopt when any is
+// undecidable. An x/z guard deliberately stays runtime-lowered so the poison
+// propagates instead of an arm being silently deleted.
+std::optional<bool> Slang_context::const_cond_value(const slang::ast::ConditionalStatement& stmt) {
+  bool all_true = true;
+  for (const auto& c : stmt.conditions) {
+    auto cv = try_eval(*c.expr);
+    if (!cv || !cv->isInteger() || cv->integer().hasUnknown()) {
+      return std::nullopt;
+    }
+    if (!cv->isTrue()) {
+      all_true = false;
+    }
+  }
+  return all_true;
+}
+
 void Slang_context::lower_conditional(const slang::ast::ConditionalStatement& stmt) {
-  // Fold the &&& conditions; patterns are unsupported.
-  std::string cond;
+  // Patterns are unsupported — check before anything else has side effects.
   for (const auto& c : stmt.conditions) {
     if (c.pattern != nullptr) {
       emit_unsupported(stmt.sourceRange, "unsupported-pattern", "if-statement match patterns are not supported");
       return;
     }
+  }
+
+  // A guard that is already DECIDED at elaboration time: lower only the live
+  // arm, inline, with no `if` node and no dead arm. IEEE 1800 12.4 — a false
+  // `if` never executes its then-branch, so elaborating that branch into
+  // hardware is wrong no matter what it contains. This mirrors what LiveHD
+  // already does for dead GENERATE branches (`gen.isUninstantiated`).
+  //
+  // It also has to happen BEFORE the lower_rvalue() below, which has side
+  // effects (emits LNAST, declares symbols, records dependency reads).
+  //
+  // The motivating shape: `localparam STEP = 0; if (STEP != 0) for (i=0;i<8;i=i+STEP) ...`
+  // The loop can never run, but the unroller does not know that and a ZERO step
+  // never terminates, so it burned the whole per-process unroll budget and
+  // reported a misleading "loop unroll limit exhausted" on legal code.
+  if (const auto known = const_cond_value(stmt); known.has_value()) {
+    if (const slang::ast::Statement* live = *known ? &stmt.ifTrue : stmt.ifFalse; live != nullptr) {
+      lower_statement(*live);
+    }
+    return;
+  }
+
+  // Fold the &&& conditions.
+  std::string cond;
+  for (const auto& c : stmt.conditions) {
     auto v = booleanize(lower_rvalue(*c.expr));
     cond   = cond.empty() ? v : builder_.create_log_and_stmts(cond, v);
   }

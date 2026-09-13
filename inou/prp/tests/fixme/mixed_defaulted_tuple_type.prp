@@ -1,0 +1,35 @@
+/*
+:name: mixed_defaulted_tuple_type
+:type: compile
+*/
+// KNOWN BUG (not a TBD feature): a tuple type that MIXES a field carrying a
+// default with one that does not cannot be used as register state. It fails with
+//   upass.tolg: tuple/field store to 'r' has no hardware lowering
+// while BOTH uniform spellings work -- all-defaulted is ../equiv/defaulted_tuple.prp
+// and none-defaulted is ../equiv/reg_named_tuple_type.prp.
+//
+// Root cause is in prp2lnast, not the detupler: a mixed type is lowered with
+// too little information to describe. For `(mut flag:bool = false, mut state:u2)`
+// the LNAST is
+//     tuple_add %T, store(ref 'flag', const 'false'), ref 'state'
+//     type_spec %tmp : prim_type_bool       <- `flag`'s type, on an ANONYMOUS temp
+//     declare   %tmp : none, 'mut'
+// i.e. `state`'s `u2` NEVER appears anywhere, and `flag`'s type rides a temp with
+// no `tuple_get` linking it back to the tuple. The all-defaulted form emits that
+// `tuple_get` + `type_spec` pair per field, which is what detuple_field_alias_
+// consumes to fill in detuple_named_layout_ (see upass_runner.cpp).
+//
+// The detupler deliberately DECLINES rather than publishing the partial layout:
+// a layout missing `state` would split the register into one flop instead of two
+// and silently drop the field. Failing to compile is the safe direction; the fix
+// is to make prp2lnast emit the per-field type_specs uniformly.
+
+type D = (mut flag:bool = false, mut state:u2)
+
+pub mod mixed_defaulted_tuple_type(clk:u1, f:bool, s:u2) -> (of:bool@[], os:u2@[]) {
+  reg r:D = nil
+  r.flag  = f
+  r.state = s
+  of = r.flag
+  os = r.state
+}

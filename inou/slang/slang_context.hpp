@@ -922,6 +922,9 @@ private:
 
   // ── constant evaluation ────────────────────────────────────────────────────
   std::optional<slang::ConstantValue> try_eval(const slang::ast::Expression& expr);
+  // An `if` guard already decided at elaboration time (see lower_conditional):
+  // true/false when every `&&&` condition folds without x/z, else nullopt.
+  std::optional<bool>                 const_cond_value(const slang::ast::ConditionalStatement& stmt);
   std::optional<int64_t>              try_eval_int(const slang::ast::Expression& expr);
   // Like try_eval, but folds references to constant nets/vars by chasing their
   // single constant driver (a `wire x = <const>` initializer or an

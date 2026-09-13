@@ -53,6 +53,81 @@ EOF
 "$LHD" pyrope fmt "$W/wide.prp" --width 40 > "$W/w40.prp" 2>/dev/null || fail "fmt --width 40 exited non-zero"
 diff "$W/w_def.prp" "$W/w40.prp" >/dev/null && fail "--width 40 matched the default 132 output (value not plumbed)"
 
+# --- long if chains break at each branch and keep short bodies inline -------
+cat > "$W/chain.prp" <<'EOF'
+alu_out_0 = unique if instr.beq { alu_eq } elif instr.bne { not alu_eq } elif instr.bge { not alu_lts } elif instr.bgeu { not alu_ltu } elif instr.is_slti_blt_slt { alu_lts } elif instr.is_sltiu_bltu_sltu { alu_ltu } else { 0ub? != 0 }
+const short = if a { 1 } elif b { 2 } else { 3 }
+EOF
+cat > "$W/chain_expected.prp" <<'EOF'
+alu_out_0   = unique if instr.beq { alu_eq }
+  elif instr.bne { not alu_eq }
+  elif instr.bge { not alu_lts }
+  elif instr.bgeu { not alu_ltu }
+  elif instr.is_slti_blt_slt { alu_lts }
+  elif instr.is_sltiu_bltu_sltu { alu_ltu }
+  else { 0ub? != 0 }
+const short = if a { 1 } elif b { 2 } else { 3 }
+EOF
+"$LHD" pyrope fmt -i "$W/chain.prp" --verify 2>"$W/chain.err" || fail "chain fmt failed: $(cat "$W/chain.err")"
+diff -u "$W/chain_expected.prp" "$W/chain.prp" || fail "if chain did not wrap at branch boundaries"
+"$LHD" pyrope fmt -i "$W/chain.prp" --verify 2>"$W/chain.err" || fail "second chain fmt failed"
+diff -u "$W/chain_expected.prp" "$W/chain.prp" || fail "if chain formatting is not idempotent"
+
+# The width is a soft limit: keep dotted names intact, even on narrow lines.
+cat > "$W/identifier.prp" <<'EOF'
+const x = instr.slli
+const y = instr.very_long_member_name.another_very_long_member_name
+EOF
+"$LHD" pyrope fmt "$W/identifier.prp" --width 16 --verify >"$W/identifier_out.prp" 2>"$W/identifier.err" || fail "identifier fmt failed"
+diff -u "$W/identifier.prp" "$W/identifier_out.prp" || fail "formatter broke a dotted identifier"
+
+# Repeated operand shapes align their selectors and operators with assignment.
+cat > "$W/aligned.prp" <<'EOF'
+comb f() -> () {
+  const compressed_load_offset = (mem_rdata_latched#[5] << 6) | (mem_rdata_latched#[10 ..= 12] << 3) | (mem_rdata_latched#[6] << 2)
+}
+EOF
+cat > "$W/aligned_expected.prp" <<'EOF'
+comb f() -> () {
+  const compressed_load_offset = (mem_rdata_latched#[        5] << 6)
+                               | (mem_rdata_latched#[10 ..= 12] << 3)
+                               | (mem_rdata_latched#[        6] << 2)
+}
+EOF
+"$LHD" pyrope fmt -i "$W/aligned.prp" --width 100 --verify 2>"$W/aligned.err" || fail "aligned fmt failed"
+diff -u "$W/aligned_expected.prp" "$W/aligned.prp" || fail "repeated operands did not align"
+"$LHD" pyrope fmt -i "$W/aligned.prp" --width 100 --verify 2>"$W/aligned.err" || fail "second aligned fmt failed"
+diff -u "$W/aligned_expected.prp" "$W/aligned.prp" || fail "operand alignment is not idempotent"
+
+# Exercise operand-vector growth in the executable that links both the real
+# tree-sitter nodes and the compiler's AST facade. In debug builds their old
+# global TSNode names caused incompatible vector methods to collide at link time.
+printf 'const x = data[0]' > "$W/many_operands.prp"
+printf 'const x = data[0]\n' > "$W/many_operands_expected.prp"
+for index in 1 2 3 4 5 6 7 8; do
+  printf ' | data[%s]' "$index" >> "$W/many_operands.prp"
+  printf '        | data[%s]\n' "$index" >> "$W/many_operands_expected.prp"
+done
+printf '\n' >> "$W/many_operands.prp"
+"$LHD" pyrope fmt -i "$W/many_operands.prp" --width 40 --verify 2>"$W/many_operands.err" || fail "operand-vector fmt failed"
+diff -u "$W/many_operands_expected.prp" "$W/many_operands.prp" || fail "operand-vector growth corrupted nodes"
+
+# Other expressions use one indentation level for leading operator continuations.
+cat > "$W/continuation.prp" <<'EOF'
+comb f() -> () {
+  const result = first_long_operand + second_long_operand + third_long_operand
+}
+EOF
+cat > "$W/continuation_expected.prp" <<'EOF'
+comb f() -> () {
+  const result = first_long_operand
+    + second_long_operand
+    + third_long_operand
+}
+EOF
+"$LHD" pyrope fmt "$W/continuation.prp" --width 40 --verify >"$W/continuation_out.prp" 2>"$W/continuation.err" || fail "continuation fmt failed"
+diff -u "$W/continuation_expected.prp" "$W/continuation_out.prp" || fail "operator continuation indent is not one level"
+
 # --- -i in place rewrites, and re-running is a no-op -------------------------
 cp "$W/messy.prp" "$W/ip.prp"
 "$LHD" pyrope fmt -i "$W/ip.prp" 2>/dev/null || fail "fmt -i exited non-zero"

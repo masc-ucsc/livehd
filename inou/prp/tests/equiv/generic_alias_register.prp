@@ -1,0 +1,14 @@
+/*
+:name: generic_alias_register
+:type: equiv
+:equiv_engine: cvc5
+:verilog_top: generic_alias_register
+:pyrope_top: generic_alias_register
+*/
+const add = import("generic_alias_register/add.add")
+comptime const WIDTH = 10
+type Sum_T = signed(bits=WIDTH)
+pub mod generic_alias_register::[timecheck=false](a:Sum_T, b:Sum_T) -> (s:Sum_T@[0]) {
+  const node = add<Sum_T>(a=a, b=b)
+  s = node
+}

@@ -1,0 +1,13 @@
+/*
+:name: imported_bool_cast
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+const leaf = import("imported_bool_cast/leaf.leaf")
+pub mod top(a:bool) -> (y:u1@[]) {
+  const child = leaf(a=a)
+  y = unsigned(child.flag)
+}

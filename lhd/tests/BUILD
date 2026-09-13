@@ -1751,6 +1751,13 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Tree-sitter style analysis: repeated blocks, partial parses, and diagnostics.
+sh_test(
+    name = "lhd_style_test",
+    srcs = ["lhd_style_test.py"],
+    data = ["//lhd"],
+)
+
 # Kernel debug observables: --dump lg (multi-graph stderr dump), --verbose
 # (step-log mirroring), --depfile (make-style prerequisites).
 sh_test(
@@ -1942,4 +1949,10 @@ sh_test(
     size = "large",
     srcs = ["lhd_ware_options_smoke.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_ln_generic_test",
+    srcs = ["lhd_ln_generic_test.sh"],
+    data = _FLOW_DATA,
 )

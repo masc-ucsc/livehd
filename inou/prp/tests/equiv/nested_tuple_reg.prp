@@ -1,0 +1,35 @@
+/*
+:name: nested_tuple_reg
+:type: equiv
+:verilog_top: nested_tuple_reg
+:pyrope_top: nested_tuple_reg
+:equiv_engine: cvc5
+*/
+
+// 2f-nested_type — a NESTED tuple type used as register storage. It splits into
+// one flop per LEAF, named by the dotted path (`ctl.ex.aa`), exactly as the
+// flat spelling splits per field.
+//
+// This used to be impossible in three separate ways, all now fixed:
+//  1. prp2lnast rejected the DECLARATION itself ("assignment to undeclared
+//     variable 'ex'"): a tuple-typed FIELD re-entered emit_type_spec, which
+//     emitted a statement-level store against a bare field name. The per-field
+//     stamping is now recursive and emits DOTTED LEAF type_specs instead.
+//  2. The detupler flushed the pending declaration when it saw the type's shape
+//     seed, because the seed's children are bare refs with no scalar type of
+//     their own, leaving the seed temp undriven ("unresolved reference
+//     '%ctl_0'"). The leaf layout now arrives BEFORE the seed, so the split is
+//     deferred to the shape bind instead of abandoned.
+//  3. Reads and writes of a nested field carry one const key PER LEVEL
+//     (`store(ctl,'ex','aa',a)` / `tuple_get(%t,ctl,'ex','aa')`) while the
+//     split's field names are the JOINED paths, so neither matched. Both
+//     handlers now join the leading const keys.
+
+pub mod nested_tuple_reg(clock:u1, a:u1, b:u1) -> (y:u1@[], z:u1@[]) {
+  reg ctl:(ex:(aa:u1, bb:u1), wb:(cc:u1)) = nil
+  ctl.ex.aa = a
+  ctl.ex.bb = b
+  ctl.wb.cc = a & b
+  y = ctl.ex.aa
+  z = ctl.wb.cc
+}

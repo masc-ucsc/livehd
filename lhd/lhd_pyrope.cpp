@@ -15,6 +15,7 @@
 #include "lhd.hpp"
 #include "livehd_lsp.hpp"
 #include "prpfmt_api.h"
+#include "pyrope_style.hpp"
 
 namespace livehd::pyrope {
 
@@ -76,10 +77,9 @@ int run_fmt(const lhd::Options& opts) {
       continue;
     }
 
-    char*  out = nullptr;
+    char*  out     = nullptr;
     size_t out_len = 0;
-    int    rc = prpfmt_format_string(src.data(), src.size(), opts.fmt_indent, opts.fmt_width,
-                                     opts.fmt_verify ? 1 : 0, &out, &out_len);
+    int rc = prpfmt_format_string(src.data(), src.size(), opts.fmt_indent, opts.fmt_width, opts.fmt_verify ? 1 : 0, &out, &out_len);
     if (rc == 2) {
       livehd::diag::err("lhd.pyrope.fmt", "parse-failed", "syntax")
           .msg("'{}' did not parse", path)
@@ -122,6 +122,91 @@ int run_fmt(const lhd::Options& opts) {
   return exit_code;
 }
 
+livehd::diag::Span style_span(const std::string& path, const style::Range& r) {
+  livehd::diag::Span span;
+  span.file       = path;
+  span.start_byte = r.start_byte;
+  span.end_byte   = r.end_byte;
+  span.start_line = r.start_line;
+  span.start_col  = r.start_column;
+  span.end_line   = r.end_line;
+  span.end_col    = r.end_column;
+  return span;
+}
+
+int run_style(const lhd::Options& opts) {
+  if (opts.files.size() < 2) {
+    livehd::diag::err("lhd.pyrope.style", "no-input", "io")
+        .msg("no input files")
+        .hint("usage: lhd pyrope style FILE… [--min-repeats N] [--max-block-statements N] [--max-findings N]")
+        .emit();
+    return 1;
+  }
+  const style::Options config{opts.style_min_repeats, opts.style_max_block_statements, opts.style_max_findings};
+  int                  status = 0;
+  for (size_t i = 1; i < opts.files.size(); ++i) {
+    const auto& path = opts.files[i];
+    std::string src;
+    if (!read_file(path, src)) {
+      livehd::diag::err("lhd.pyrope.style", "missing-file", "io").msg("cannot open '{}'", path).emit();
+      status = 1;
+      continue;
+    }
+    try {
+      const auto report = style::analyze(src, config);
+      if (report.partial) {
+        auto b = livehd::diag::warn("lhd.pyrope.style", "partial-analysis", "syntax");
+        b.msg("'{}' contains syntax errors; reporting patterns only in intact statement sequences", path);
+        for (const auto& r : report.parse_errors) {
+          b.note("Tree-sitter error or missing syntax; this region was skipped", style_span(path, r));
+        }
+        b.emit();
+      }
+      for (const auto& f : report.findings) {
+        auto b = livehd::diag::Builder(livehd::diag::Severity::info,
+                                       "lhd.pyrope.style",
+                                       f.progressing ? "likely-unrolled-loop" : "repeated-code",
+                                       "syntax");
+        b.at(style_span(path, f.range))
+            .msg("{}: {} statements per copy, repeated {} times across lines {}-{}",
+                 f.progressing ? "likely unrolled loop" : "repeated code",
+                 f.statements,
+                 f.repetitions,
+                 f.range.start_line,
+                 f.range.end_line)
+            .hint(f.progressing ? "consider a loop; numbered scalar names may first need an indexed collection"
+                                : "consider a loop or a shared helper")
+            .attr("statements_per_copy", std::to_string(f.statements))
+            .attr("repetitions", std::to_string(f.repetitions))
+            .attr("score", std::to_string(f.score))
+            .attr("template", f.pattern)
+            .attr("progression", f.progression)
+            .note("first copy; template placeholders are descriptive, not executable Pyrope", style_span(path, f.first_copy))
+            .note(std::format("template:\n{}", f.pattern));
+        if (!f.progression.empty()) {
+          b.note(std::format("{}; i = 0..{}", f.progression, f.repetitions - 1));
+        }
+        b.emit();
+      }
+      livehd::diag::Builder(livehd::diag::Severity::info, "lhd.pyrope.style", "style-summary", "syntax")
+          .msg("'{}': {} suggestions, {} shown{}",
+               path,
+               report.total_findings,
+               report.findings.size(),
+               report.partial ? " (partial parse)" : "")
+          .attr("file", path)
+          .attr("partial", report.partial ? "true" : "false")
+          .attr("total_findings", std::to_string(report.total_findings))
+          .attr("shown_findings", std::to_string(report.findings.size()))
+          .emit();
+    } catch (const std::exception& e) {
+      livehd::diag::err("lhd.pyrope.style", "analysis-failed", "internal").msg("'{}': {}", path, e.what()).emit();
+      status = 1;
+    }
+  }
+  return status;
+}
+
 }  // namespace
 
 int run(const lhd::Options& opts) {
@@ -133,12 +218,15 @@ int run(const lhd::Options& opts) {
   if (sub == "fmt") {
     return run_fmt(opts);
   }
+  if (sub == "style") {
+    return run_style(opts);
+  }
   if (sub.empty()) {
-    livehd::diag::err("lhd.pyrope", "missing-subcommand", "io").msg("a sub-command is required").hint("lsp | fmt").emit();
+    livehd::diag::err("lhd.pyrope", "missing-subcommand", "io").msg("a sub-command is required").hint("lsp | fmt | style").emit();
   } else {
     livehd::diag::err("lhd.pyrope", "unknown-subcommand", "io")
         .msg("unknown sub-command '{}'", sub)
-        .hint("lsp | fmt")
+        .hint("lsp | fmt | style")
         .emit();
   }
   return 1;

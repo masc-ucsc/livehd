@@ -28,7 +28,11 @@ public:
 
   // Per-run setup: drop the bit-select source-kind cache (tmp names are unique
   // within a lambda walk, but a fresh run must start clean).
-  void begin_iteration() override { non_int_bitsel_.clear(); }
+  void begin_iteration() override {
+    non_int_bitsel_.clear();
+    pending_illegal_.clear();
+    poison_of_.clear();
+  }
 
   // Store routes both arities; the cursor-walking assign/tuple_set
   // bodies stay as private helpers (subtree payloads don't ride the span).
@@ -220,6 +224,40 @@ protected:
   // mask); the first-write coercion is `v & max`. No width/to_i.
   std::optional<std::string> pending_unsigned_overflow_msg_;
 
+  // 2c-shortcircuit — `and`/`or` short-circuit (02-basics.md "Evaluation
+  // order": "in `a and b`, `b` is not evaluated if `a` is false"). Since Pyrope
+  // expressions have no side effects the ONLY observable consequence is at
+  // compile time: an illegal operation inside an operand the logical fold never
+  // needs must not be reported. `cassert(N == 0 or (N > 0 and (64 % N == 0)))`
+  // with N==0 is legal Pyrope.
+  //
+  // Why a side table and not a poisoned nil VALUE: prp2lnast flattens an
+  // expression tree into PEER SSA statements, so `%t = 64 % N` is walked long
+  // before the enclosing `or` exists, and constprop's 2f-nil_diag invariant (a
+  // nil reaching a constprop output must be REPORTED, never silently folded) is
+  // about the VALUE plane. Keeping div/mod storing nothing preserves that
+  // invariant verbatim; only the diagnostic's TIMING moves here.
+  //
+  // The tmp-vs-name split is the semantic line, not a heuristic: a `%` tmp IS
+  // an operand sub-expression (skippable, 02-basics.md "Evaluation order"), a
+  // NAMED dst IS a statement (`const z = 64 % N`), and "Statements are
+  // evaluated one after another in program order" — a statement is never
+  // skipped, so it still reports immediately.
+  std::vector<std::optional<livehd::diag::Diagnostic>>          pending_illegal_;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<size_t>> poison_of_;
+
+  // Park `d` against tmp `dst`; emit it right away when `dst` is a real name.
+  void defer_or_emit_illegal(std::string_view dst, livehd::diag::Diagnostic d);
+  // Carry every operand's parked ids onto `dst` so a deferral survives the
+  // intervening ops (`mod` -> `eq` -> `log_and` in the fixture above).
+  void propagate_poison(std::string_view dst, upass::Src_span src);
+  // Drop the diagnostics parked against operands [from, src.size()) — the
+  // operands a decisive `and`/`or` operand made unreachable.
+  void discharge_poison(upass::Src_span src, size_t from);
+  // Left-to-right decisive-operand scan for `and`/`or`. Stores the decided
+  // result and returns true when an operand BEFORE the last one settles it.
+  bool short_circuit_logical(std::string_view dst_name, upass::Src_span src, bool is_and);
+
   // Named type per var, recorded by process_declare when the declare's
   // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
   // var's init bundle write, process_assign materializes NAMED's resolved bundle
@@ -270,7 +308,29 @@ protected:
   // mode/type_name/decl ranges at the declare node, before any store):
   upass::Mode decl_mode_of(std::string_view var) {
     const auto b = st().get_bundle(var);
-    return b ? b->get_mode() : upass::Mode::unknown;
+    const auto m = b ? b->get_mode() : upass::Mode::unknown;
+    if (m != upass::Mode::unknown || bundle_key::is_single_level(var)) {
+      return m;  // a bare name: the binding itself answers (unchanged)
+    }
+    // A DOTTED field path -- a detupled `reg`/`wire` leaf (`flags.active`,
+    // `io.a`). Symbol_table::get_bundle hands back a scalar sub-bundle CLONED
+    // from the leaf Entry, and Bundle::get_bundle never lifts Entry.mode into
+    // the clone's mode_, so the field's storage class was invisible here and
+    // every reg/wire guard that consumes this (process_store's "never
+    // symbolically bind a reg/wire store", process_assign's twin, and
+    // classify_statement_impl's "always emit a reg/wire store") silently never
+    // fired for a tuple field. Two wrong things followed for a `reg` tuple: the
+    // unconditional default store was dropped as dead, and a later read folded
+    // to the value written THIS cycle instead of the flop's q.
+    //
+    // decl_facts is the single source of truth for "what was `name` declared
+    // as" -- it splits "<root>.<field>" and reads the field Entry / the pending
+    // dotted-decl stash, exactly as decl_unsigned_max_of already does for the
+    // field's declared range. is_single_level is backtick-aware, so a quoted
+    // identifier like `` `bht_d.valid` `` (slang's flattened struct fields
+    // re-read from emitted Pyrope) stays ONE name -- never use find('.').
+    const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, var);
+    return f ? f->mode : upass::Mode::unknown;
   }
   std::string decl_type_name_of(std::string_view var) {
     const auto b = st().get_bundle(var);
@@ -456,6 +516,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit: a deferred illegal op rides the operand chain
     if (report_nil_operand(src)) {
       return classify_vote();
     }
@@ -488,6 +549,7 @@ protected:
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (nil_operand_error && report_nil_operand(src)) {
       return classify_vote();
     }
@@ -516,6 +578,7 @@ protected:
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (has_runtime_seed_operand(src)) {
       return keep_runtime_seed(dst);  // `and`/`or` over a runtime comb result → keep structural
     }
@@ -553,6 +616,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (nil_operand_error && report_nil_operand(src)) {
       return classify_vote();
     }
@@ -574,6 +638,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (report_reduction_nonint(src)) {  // foo must be an integer/boolean
       return classify_vote();
     }

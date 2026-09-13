@@ -158,6 +158,8 @@ cc_binary(
         "lhd_main.cpp",
         "lhd_pyrope.cpp",
         "lhd_pyrope.hpp",
+        "pyrope_style.cpp",
+        "pyrope_style.hpp",
     ],
     copts = COPTS,
     data = [
@@ -179,6 +181,7 @@ cc_binary(
         ":lhd_lib",
         "//lsp",
         "//pass/cost:host_mem",
+        "@tree_sitter",
         "@tree_sitter_pyrope//:prpfmt",
     ],
 )

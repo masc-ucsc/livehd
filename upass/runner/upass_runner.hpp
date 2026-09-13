@@ -125,6 +125,10 @@ public:
   // for the func_extract pre-loop and whenever take_staging() is consumed.
   void set_materialize(bool m) { materialize_ = m; }
 
+  // Declared OUTPUT-port facts for a call that lowers to a Sub instance rather
+  // than an inline splice (see the definition).
+  void stash_sub_instance_port_facts(std::string_view handle, const std::shared_ptr<Lnast>& callee);
+
   // Named-constant provenance (the Pyrope counterpart of inou.slang's
   // `preserve_param_provenance`): materialize a folded `pkg.PARAM` read as the
   // SYMBOLIC ref `pkg.PARAM` instead of its value, so `--emit-dir pyrope:`
@@ -411,6 +415,7 @@ protected:
   // false for a TUPLE/struct or unresolved named type (emit it verbatim).
   // `port_name` is the io port this type slot belongs to (empty for a declare's
   // slot); with provenance on it records the alias into Lnast::io_type_names.
+  std::pair<std::shared_ptr<Lnast>, Lnast_nid> lookup_file_type(std::string_view type_name);
   bool emit_scalar_named_type_slot(std::string_view type_name, std::string_view port_name = {});
   // Emit a declare/type_spec slot while concretizing scalar named aliases at
   // the element leaf of an array type. Array dimensions are copied verbatim:
@@ -605,8 +610,21 @@ protected:
   absl::flat_hash_set<std::string>                                                  stream_port_in_leaf_;
   absl::flat_hash_set<std::string>                                                  stream_port_out_leaf_;
   absl::flat_hash_set<std::string>                                                  io_output_names_;
-  absl::flat_hash_set<std::string>                                                  stream_port_prefix_;
-  absl::flat_hash_map<std::string, std::string>                                     stream_port_alias_;
+  // 1i-inline — the `inl<N>_<port>` locals an inlined `comb` frame mints for
+  // the CALLEE's output ports. io_output_names_ holds only the TOP unit's own
+  // ports (initialize_stream_port_abi), and an inlined output is declared with
+  // a bare `type_spec` so it carries no storage mode either — which left it
+  // matching neither of process_drop_candidate_push's "this store is a real
+  // hardware driver" guards. See the comment there. Names are salted by the
+  // monotonic inline_seq_, so entries never collide and the set is never
+  // popped: a stale hit could only KEEP a store (a missed fold), never drop
+  // one, which is the safe direction.
+  absl::flat_hash_set<std::string>                                                  inline_output_names_;
+  // THE predicate both drop paths (process_drop_candidate and
+  // process_drop_candidate_push) ask, so they can never disagree.
+  bool                                          is_inline_output_driver(std::string_view name) const;
+  absl::flat_hash_set<std::string>              stream_port_prefix_;
+  absl::flat_hash_map<std::string, std::string> stream_port_alias_;
 
   struct Stream_ssa_def {
     std::string source;
@@ -655,23 +673,52 @@ protected:
   // (`type_spec(io.a,T)...; declare(io,none,wire)`). Cache that already-seen
   // shape so the declaration can split immediately without looking ahead.
   absl::flat_hash_map<std::string, uPass_detuple_registry::Layout> detuple_predecl_fields_;
-  absl::flat_hash_map<std::string, Detuple_split>                  detuple_splits_;
-  absl::flat_hash_map<std::string, Detuple_index_alias>            detuple_index_aliases_;
-  bool                                                             detuple_replay_{false};
-  bool                                                             detuple_synthetic_{false};
+  // 2f-defaulted_tuple — the NAMED-child twin of detuple_shape_fields_.
+  //
+  // prp2lnast lowers a tuple type's field two different ways. Without a
+  // default (`type D = (a:bool, b:u5)`) the field is a `typed_field` and
+  // arrives as a POSITIONAL `ref` child whose name already carries the scalar
+  // type, which detuple_shape_fields_ collects. WITH a default
+  // (`type D = (mut a:bool = nil, …)`, 03-bundle.md "Tuple named fields can
+  // have a default type and or contents") the field is an `assignment`, so it
+  // arrives as a NAMED `store` child and the type rides a LATER
+  // `tuple_get` + `type_spec` pair against an anonymous projection temp.
+  // all_typed_refs went false, no layout was published, and `reg instr:D`
+  // stayed a whole-tuple aggregate whose field writes hard-errored in tolg
+  // ("tuple/field store has no hardware lowering").
+  //
+  // So: record the field ORDER here as the named children are seen, then let
+  // detuple_field_alias_ carry each projection temp back to its (tuple, field)
+  // so the trailing type_spec can fill the type in.
+  absl::flat_hash_map<std::string, uPass_detuple_registry::Layout> detuple_named_layout_;
+  struct Detuple_field_alias {
+    std::string tuple_tmp;
+    std::string field;
+  };
+  absl::flat_hash_map<std::string, Detuple_field_alias> detuple_field_alias_;
+  absl::flat_hash_map<std::string, Detuple_split>       detuple_splits_;
+  absl::flat_hash_map<std::string, Detuple_index_alias> detuple_index_aliases_;
+  bool                                                  detuple_replay_{false};
+  bool                                                  detuple_synthetic_{false};
 
-  bool                                               try_detuple_declare();
-  bool                                               try_detuple_store();
-  bool                                               try_detuple_tuple_add();
-  bool                                               try_detuple_tuple_get();
-  bool                                               try_detuple_typespec();
-  std::string                                        detuple_text(const Lnast_nid& nid) const;
-  std::string                                        detuple_registry_key(std::string_view type_name) const;
-  void                                               detuple_commit_pending_split(const Detuple_pending_decl& pending);
-  bool                                               detuple_finalize_pending_decl();
-  void                                               detuple_flush_pending_decl();
-  void                                               detuple_flush_pending_before_current();
-  void                                               detuple_publish_named_type(std::string_view name, std::string_view rhs);
+  bool        try_detuple_declare();
+  bool        try_detuple_store();
+  bool        try_detuple_tuple_add();
+  bool        try_detuple_tuple_get();
+  bool        try_detuple_typespec();
+  std::string detuple_text(const Lnast_nid& nid) const;
+  std::string detuple_registry_key(std::string_view type_name) const;
+  void        detuple_commit_pending_split(const Detuple_pending_decl& pending);
+  bool        detuple_finalize_pending_decl();
+  void        detuple_flush_pending_decl();
+  void        detuple_flush_pending_before_current();
+  void        detuple_publish_named_type(std::string_view name, std::string_view rhs);
+  // 2f-nested_type — flatten a (possibly NESTED) tuple VALUE into dotted leaf
+  // paths, so a whole-tuple assignment can bind it against a split destination
+  // whose field names are themselves dotted leaf paths. Flat input yields the
+  // same list it went in as.
+  void        detuple_flatten_tuple_value(const std::string& rhs, const std::string& prefix,
+                                          std::vector<std::pair<std::string, Lnast_node>>& out, int depth = 0);
   std::optional<uPass_detuple_registry::Scalar_type> detuple_scalar_type(std::string_view name) const;
   void detuple_emit_declare(std::string_view name, const uPass_detuple_registry::Scalar_type& type, std::string_view mode,
                             const Lnast_node* init = nullptr, const Lnast_node* dimension = nullptr);
@@ -765,19 +812,20 @@ protected:
   // bound type substitutes into `a:T` params, `-> (r:T)` outputs and body
   // `:T` slots; normal typing rules apply afterwards (no special coercion).
   struct Generic_bind {
-    Io_kind             kind       = Io_kind::none;  // integer/boolean/string; none = named type
-    std::optional<Dlop> max        = {};             // integer envelope when known
-    std::optional<Dlop> min        = {};
-    std::string         type_name  = {};  // named type (kind == none)
-    std::string         from       = {};  // binding source, for the mismatch diagnostic
+    uPass_detuple_registry::Layout tuple_fields;
+    Io_kind                        kind       = Io_kind::none;  // integer/boolean/string; none = named type
+    std::optional<Dlop>            max        = {};             // integer envelope when known
+    std::optional<Dlop>            min        = {};
+    std::string                    type_name  = {};  // named type (kind == none)
+    std::string                    from       = {};  // binding source, for the mismatch diagnostic
     // A CONSTANT-valued generic (`f<3>`): the literal substituted for body reads
     // of the generic name (`r = a + N` → `a + 3`). Non-empty ⇒ constant bind;
     // `kind`/`max`/`min` still carry its envelope (so a constant bound into a
     // type slot has a width — todo 3g D). Never inferred (explicit/default only).
-    std::string         const_text = {};
+    std::string                    const_text = {};
     // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
     // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
-    std::string         func_name  = {};
+    std::string                    func_name  = {};
   };
   // One explicit `<…>` argument at a call site. `value` is the bound entity's
   // text (a type ref / tmp, a constant, or a lambda name); `name` is set for a

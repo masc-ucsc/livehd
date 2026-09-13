@@ -18,7 +18,6 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "battr.hpp"  // THE attribute vocabulary (//upass/core:battr_hdr, header-only)
-#include "range_bits.hpp"  // kMaxIntTypeWidth (//upass/core:range_bits_hdr, header-only)
 #include "diag.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
@@ -28,6 +27,7 @@
 #include "prpparse/prp_diag.hpp"
 #include "prpparse/source_buffer.hpp"
 #include "prpparse/token.hpp"
+#include "range_bits.hpp"  // kMaxIntTypeWidth (//upass/core:range_bits_hdr, header-only)
 #include "source_path.hpp"
 #include "str_tools.hpp"
 
@@ -323,9 +323,9 @@ bool Prp2lnast::expr_has_side_effects(TSNode n) const {
   // mutates state, an `expr::[attr=…]` set configures a port, a lambda is a
   // definition, and an embedded scope / if / match / loop runs statements whose
   // effects are not captured by the discarded top-level value.
-  if (t == "function_call_expression" || t == "assignment" || t == "enum_assignment" || t == "attribute_set"
-      || t == "lambda" || t == "if_expression" || t == "match_expression" || t == "scope_statement"
-      || t == "while_statement" || t == "for_statement" || t == "loop_statement") {
+  if (t == "function_call_expression" || t == "assignment" || t == "enum_assignment" || t == "attribute_set" || t == "lambda"
+      || t == "if_expression" || t == "match_expression" || t == "scope_statement" || t == "while_statement" || t == "for_statement"
+      || t == "loop_statement") {
     return true;
   }
   for (TSNode c : ts_node_named_children(n)) {
@@ -1521,7 +1521,16 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
           continue;
         }
         const auto dit     = driver_count.find(wname);
-        const int  drivers = dit == driver_count.end() ? 0 : dit->second;
+        int        drivers = dit == driver_count.end() ? 0 : dit->second;
+        // Discount the inline-tuple TYPE's shape-seed store (see
+        // decl_shape_seed_targets_): it is a compiler artifact of the type, not
+        // one of the net's drivers.
+        if (drivers > 0 && decl_shape_seed_targets_.contains(wname)) {
+          --drivers;
+          if (drivers <= 1) {
+            full_driven_wires.erase(wname);  // the seed was the only WHOLE store
+          }
+        }
         // A net ASSEMBLED from DISJOINT bit fields (`w#[0..=3] = a;
         // w#[4..=7] = b`) has many write statements but ONE driver — each
         // refines the same value, and upass.tolg accumulates the whole chain
@@ -2816,6 +2825,11 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
     if (has_pub) {
       lnast->add_pub(trim(get_text(id)), "value", mint_src(id));
     }
+    // 2f-type_bound — emit any non-foldable integer type bound's statements
+    // FIRST. They must precede the `declare` that consumes them, and
+    // rewrite_decls_to_declare merges a CONTIGUOUS attr_set/type_spec run, so
+    // nothing may be inserted once the cluster head below is emitted.
+    prelower_type_bounds(child_by_field(ti, "type"));
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
     {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -3175,6 +3189,13 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       streamed_lexical_names_.insert(std::string(canonical_escaped_ident(trim(get_text(id)))));
     }
 
+    // 2f-type_bound — same rule as the bare-declaration path in emit_decl_attrs:
+    // a non-foldable integer type bound lowers to statements that must precede
+    // the contiguous attr_set/type_spec cluster below. This is the path a
+    // declaration WITH an initializer takes (`reg d:unsigned(bits=N) = nil`).
+    if (has_decl) {
+      prelower_type_bounds(tc);
+    }
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
     Lnast_nid  reg_decl_head{};  // set for `reg` decls; the init value rides this cluster head
     if (has_decl) {
@@ -3593,12 +3614,39 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // recovered by reading the field (a tuple_get on the same path). Without
       // this the qualifier was silently dropped and the field never wrapped.
       if (!overflow_kind.empty()) {
-        Lnast_node type_ref = builder.mint_tmp_ref();
-        auto       tg       = builder.add_child(Lnast_ntype::create_tuple_get());
-        lnast->add_child(tg, type_ref);
-        lnast->add_child(tg, root);
+        // `type=` must be the lvalue's NAME, not a READ of it. Every consumer
+        // resolves this operand through upass::decl_facts::lookup, which splits
+        // "<root>.<field>" and reads the field's DECLARED envelope: attributes'
+        // narrow_for_lhs, the runner's try_lower_wrap_sat, and bitwidth's
+        // wrap-sat exemption. A tuple_get tmp only carries that envelope when the
+        // field's value happens to be comptime-known (it rides the value copy in
+        // Symbol_table::set), so for a `reg`/runtime field the width was unknown
+        // and try_lower_wrap_sat declined -- leaving the `wrap(...)` call to reach
+        // tolg, which reported it as "call to undefined function 'wrap'".
+        //
+        // Only a STATIC path can be named. A runtime index (`t[i].f`) has no
+        // spellable declared name, so it keeps the tuple_get read.
+        Lnast_node  type_ref;
+        bool        static_path = root.is_ref() && !Lnast::is_tmp(root.get_name());
+        std::string dotted(root.get_name());
         for (auto& p : path) {
-          lnast->add_child(tg, p);
+          if (!p.is_const()) {
+            static_path = false;
+            break;
+          }
+          dotted += '.';
+          dotted += p.get_name();
+        }
+        if (static_path) {
+          type_ref = Lnast_node::create_ref(dotted);
+        } else {
+          type_ref = builder.mint_tmp_ref();
+          auto tg  = builder.add_child(Lnast_ntype::create_tuple_get());
+          lnast->add_child(tg, type_ref);
+          lnast->add_child(tg, root);
+          for (auto& p : path) {
+            lnast->add_child(tg, p);
+          }
         }
         Lnast_node wrapped = builder.mint_tmp_ref();
         auto       fc      = builder.add_child(Lnast_ntype::create_func_call());
@@ -5046,7 +5094,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
             if (const auto value = plain_string_literal_text(literal); value) {
               default_text = Dlop::from_string(*value)->to_pyrope();
             } else {
-              default_text = std::string(trim(get_text(def)));
+              default_text             = std::string(trim(get_text(def)));
               // Signed numeric defaults are grouped by the grammar (`N=(-1)`).
               // Store the numeric value, not the grouping, for specialization.
               // Peel only a BALANCED outer pair: `((-1)*(3-4))`'s first '(' closes
@@ -6439,6 +6487,9 @@ void Prp2lnast::process_type_statement(TSNode n) {
     }
   }
   if (!ts_node_is_null(rhs) && std::string_view(ts_node_type(rhs)) == "tuple") {
+    // Named tuple aliases need the same nested leaf layout as an anonymous
+    // declaration; expr_to_node intentionally skips tuple-typed bare fields.
+    emit_tuple_type_field_specs(get_text(name), rhs);
     // Lower the bundle FIRST (emits the tuple_add statement), then build the
     // store referencing its result — so the producer precedes the consumer.
     auto rhs_val = expr_to_node(rhs);
@@ -6811,7 +6862,17 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     TSNode     id   = child_by_field(n, "identifier");
     Lnast_node aref = ts_node_is_null(id) ? Lnast_node::create_const("nil") : expr_to_node(id);
     TSNode     tc   = child_by_field(n, "type");
-    if (!ts_node_is_null(tc)) {
+    // 2f-nested_type — a SCALAR field's type_spec against the bare field ref is
+    // harmless (it is what `does`/`equals`/enum bodies consume), but a
+    // TUPLE-shaped field's would emit a statement-level `store(ref '<field>',
+    // %tmp)` against a name that was never declared. The shape is stamped by
+    // emit_tuple_type_field_specs on the dotted path instead, so skip it here.
+    //
+    // GAP (reported, not fixed here): only a DECLARATION reaches this node
+    // through emit_type_spec, which does that dotted stamping. A `does`/
+    // `equals`/`case`/enum body with a nested tuple-typed field reaches it
+    // directly, and there the shape is now dropped with no diagnostic.
+    if (!ts_node_is_null(tc) && ts_node_is_null(tuple_type_inner(tc))) {
       emit_type_spec(aref, tc);
     }
     return aref;
@@ -7175,6 +7236,85 @@ static std::optional<int> try_parse_int_type_width(std::string_view digits) {
   return static_cast<int>(v);
 }
 
+Lnast_node Prp2lnast::emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r) {
+  auto idx = builder.add_child(head);
+  auto ref = builder.mint_tmp_ref();
+  lnast->add_child(idx, ref);
+  lnast->add_child(idx, l);
+  lnast->add_child(idx, r);
+  return ref;
+}
+
+void Prp2lnast::prelower_type_bounds(TSNode type_cast_node) {
+  if (ts_node_is_null(type_cast_node)) {
+    return;
+  }
+  TSNode ty = child_by_field(type_cast_node, "type");
+  if (ts_node_is_null(ty)) {
+    return;
+  }
+  const std::string_view t(ts_node_type(ty));
+  if (t != "uint_type" && t != "sint_type") {
+    return;
+  }
+  TSNode constraint = child_by_field(ty, "constraint");
+  if (ts_node_is_null(constraint)) {
+    return;
+  }
+  prelower_visited_.insert(ts_node_start_byte(constraint));
+  std::string kw(trim(get_text(ty)));
+  if (const auto paren = kw.find('('); paren != std::string::npos) {
+    kw = std::string(trim(std::string_view(kw).substr(0, paren)));
+  }
+  const bool is_signed = kw == "signed" || kw == "int" || kw == "integer"
+                         || (kw.size() >= 2 && (kw[0] == 's' || kw[0] == 'i') && std::isdigit(static_cast<unsigned char>(kw[1])));
+
+  Prelowered_bounds out;
+  for (TSNode item : ts_node_named_children(constraint)) {
+    const std::string_view it(ts_node_type(item));
+    if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
+      continue;
+    }
+    TSNode lv = child_by_field(item, "lvalue");
+    TSNode rv = child_by_field(item, "rvalue");
+    if (ts_node_is_null(lv) || ts_node_is_null(rv)) {
+      continue;
+    }
+    const std::string key(trim(get_text(lv)));
+    if (key != "bits" && key != "max" && key != "min") {
+      continue;  // `range=` is rejected in int_type_call_bounds
+    }
+    if (resolve_type_int_value(rv)) {
+      continue;  // folds here; nothing to defer
+    }
+    if (key == "max") {
+      out.max = expr_to_node(rv);
+      continue;
+    }
+    if (key == "min") {
+      out.min = expr_to_node(rv);
+      continue;
+    }
+    // `bits=E` is sugar (04b-attributes.md: "`bits` and `sign` are \"syntax
+    // sugar\" translated from `max`/`min`"), so emit that translation:
+    //   unsigned: max = (1 << E) - 1,        min = 0
+    //   signed:   max = (1 << (E-1)) - 1,    min = 0 - (1 << (E-1))
+    // The uniform formula reproduces the literal path's s1={-1,0} / s2={-2..1}
+    // results exactly; that path only spells them out to dodge Dlop's
+    // get_mask_value(0) wart, which this arithmetic never hits.
+    const Lnast_node one   = Lnast_node::create_const("1");
+    Lnast_node       e     = expr_to_node(rv);
+    Lnast_node       width = is_signed ? emit_bound_binop(Lnast_ntype::create_minus(), e, one) : e;
+    Lnast_node       span  = emit_bound_binop(Lnast_ntype::create_shl(), one, width);
+    out.max                = emit_bound_binop(Lnast_ntype::create_minus(), span, one);
+    out.min                = is_signed ? emit_bound_binop(Lnast_ntype::create_minus(), Lnast_node::create_const("0"), span)
+                                       : Lnast_node::create_const("0");
+  }
+  if (!out.max.is_invalid() || !out.min.is_invalid()) {
+    prelowered_int_bounds_.insert_or_assign(ts_node_start_byte(constraint), out);
+  }
+}
+
 bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt) {
   // Classify the base keyword → signedness and optional concrete width.
   bool unsigned_base = false;
@@ -7231,9 +7371,21 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     }
     std::string key(trim(get_text(lv)));
     std::string val(trim(get_text(rv)));
-    if (auto folded = resolve_type_int_value(rv)) {
-      val = std::string(folded->to_pyrope());
+    const auto  folded_value = resolve_type_int_value(rv);
+    const bool  folded       = folded_value.has_value();
+    if (folded) {
+      val = std::string(folded_value->to_pyrope());
     }
+    auto bound_not_comptime
+        = [&](std::string_view which) { return std::format("`{}(...)` bound `{}` is not a compile-time value", kw, which); };
+    // A generic parameter only works where prelower_type_bounds runs -- a
+    // VARIABLE DECLARATION inside the body. A port/return type, a tuple field
+    // type or a `f<signed(bits=N)>` generic argument has no statement position to
+    // desugar the bound into, so say so instead of promising a spelling that will
+    // land back here.
+    constexpr std::string_view bound_hint
+        = "use a literal or a `comptime const`; a generic parameter (`mod m<N=8>(…) { mut x:unsigned(bits=N) … }`) is "
+          "resolved only on a variable declaration inside the body";
     if (key == "range") {
       // No `range` type argument — it would be pure sugar for max/min, so it
       // is rejected to keep a single way to bound an integer type.
@@ -7243,10 +7395,39 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
                    std::format("`{}(range=…)` is not a valid integer type bound", kw),
                    "bound the type with `max=`/`min=` (e.g. `int(max=15, min=0)`) or a width type `u4`/`s5`");
     }
+    const bool deferred         = prelowered_int_bounds_.contains(ts_node_start_byte(tup));
+    // Reached by prelower_type_bounds? If not, this site (a port/return type, a
+    // tuple field type, a `f<signed(bits=N)>` generic argument) has no
+    // statement position to desugar into, so an unfoldable bound cannot be
+    // deferred -- and it must NOT be a hard error either: that shape compiled
+    // before deferral existed. Warn and fall back to the previous unbounded
+    // lowering, so the drop is at least no longer SILENT.
+    const bool prelowered_here  = prelower_visited_.contains(ts_node_start_byte(tup));
+    auto       bound_unresolved = [&](std::string_view which) {
+      if (prelowered_here) {
+        // A site prelowering DID visit: the bound is genuinely not comptime, so
+        // this is a hard error. Return -- without it the warning below fired too
+        // and the same defect was reported twice under one code.
+        report_error(rv, "type-bound-not-comptime", "type", bound_not_comptime(which), bound_hint);
+        return;
+      }
+      report_warning(rv, "type-bound-not-comptime", "type", bound_not_comptime(which), bound_hint);
+    };
     if (key == "max") {
-      max_txt = val;
+      // 2f-type_bound — `val` defaults to the RAW SOURCE TEXT, so an unfoldable
+      // bound used to be written into a `const` node verbatim. Never do that:
+      // either it folded, or it was deferred as a ref, or it is an error.
+      if (folded) {
+        max_txt = val;
+      } else if (!deferred) {
+        bound_unresolved(key);
+      }
     } else if (key == "min") {
-      min_txt = val;
+      if (folded) {
+        min_txt = val;
+      } else if (!deferred) {
+        bound_unresolved(key);
+      }
     } else if (key == "bits") {
       auto bv = resolve_type_int_value(rv);
       if (bv && bv->is_just_i64()) {
@@ -7259,6 +7440,11 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
                        "use a smaller bit width");
         }
         bits_to_bounds(static_cast<int>(bits), max_txt, min_txt);
+      } else if (!deferred) {
+        // The arm used to be a silent no-op here: `max_txt` stayed empty, the
+        // declare got `prim_type_int(nil, 0)`, and the register was sized by
+        // whatever value happened to reach it. Exit 0, wrong hardware.
+        bound_unresolved(key);
       }
     }
   }
@@ -7421,6 +7607,55 @@ Lnast_node Prp2lnast::does_operand_to_node(TSNode n) {
   return expr_to_node(n);
 }
 
+// 2f-nested_type — the inner `tuple` node when this type cast's type is a tuple
+// SHAPE (`:(a:u1, b:u1)`), else a null node. Used to recurse into a nested
+// tuple-typed FIELD instead of re-entering emit_type_spec, which would emit a
+// statement-level store against a bare field name.
+TSNode Prp2lnast::tuple_type_inner(TSNode type_cast_node) const {
+  if (ts_node_is_null(type_cast_node)) {
+    return TSNode{};
+  }
+  TSNode ty = child_by_field(type_cast_node, "type");
+  if (ts_node_is_null(ty) || std::string_view(ts_node_type(ty)) != "expression_type") {
+    return TSNode{};
+  }
+  for (TSNode inner : ts_node_named_children(ty)) {
+    if (std::string_view(ts_node_type(inner)) == "tuple") {
+      return inner;
+    }
+  }
+  return TSNode{};
+}
+
+void Prp2lnast::emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node) {
+  for (TSNode item : ts_node_named_children(tuple_node)) {
+    if (std::string_view(ts_node_type(item)) != "typed_field") {
+      continue;
+    }
+    TSNode fid = child_by_field(item, "identifier");
+    TSNode ftc = child_by_field(item, "type");
+    if (ts_node_is_null(fid) || ts_node_is_null(ftc)) {
+      continue;
+    }
+    const std::string fname{canonical_escaped_ident(trim(get_text(fid)))};
+    if (fname.empty() || fname.find('.') != std::string::npos) {
+      continue;
+    }
+    const std::string fpath = std::string(path) + "." + fname;
+    // A field whose type is ITSELF a tuple: descend, stamping only the LEAVES.
+    // Re-entering emit_type_spec here would emit `store(ref '<fpath>', %tmp)`
+    // -- a statement-level store whose child-0 is a path that was never
+    // declared -- which check_writes_in_scope reports as "assignment to
+    // undeclared variable", with the span on the DECLARATION line. That is why
+    // `reg ctl:(ex:(a:u1), wb:(c:u1))` could not be declared at all.
+    if (TSNode nested = tuple_type_inner(ftc); !ts_node_is_null(nested)) {
+      emit_tuple_type_field_specs(fpath, nested);
+      continue;
+    }
+    emit_type_spec(Lnast_node::create_ref(fpath), ftc);
+  }
+}
+
 void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) {
   // type_cast: ':' + (type + optional attribute | attribute). The integer
   // type-call form (`int(max=3)`) parses as a uint_type/sint_type carrying a
@@ -7457,10 +7692,24 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
                   "(`_:T` for an anonymous field)");
             }
           }
+          // Stamp the per-field types FIRST — before the shape seed itself.
+          // The detupler learns a NESTED layout only from these dotted leaf
+          // type_specs (the seed's own children are bare refs with no scalar
+          // type of their own), and it decides whether to keep the declaration
+          // pending when it SEES the seed. Emitted after it, the layout arrived
+          // too late and the seed was flushed as undescribable.
+          if (const auto tn = target.get_name(); !tn.empty()) {
+            emit_tuple_type_field_specs(tn, inner);
+          }
           auto bundle_ref = tuple_to_node(inner, false);
           auto aidx       = builder.add_child(Lnast_ntype::create_store());
           lnast->add_child(aidx, target);
           lnast->add_child(aidx, bundle_ref);
+          // 2c-wire: this store is the TYPE's shape, not a driver. Record the
+          // target so the single-driver counter discounts it (see the member).
+          if (const auto tn = target.get_name(); !tn.empty()) {
+            decl_shape_seed_targets_.insert(std::string(tn));
+          }
           // The tuple-shape store above carries the field VALUES/shape, and
           // tuple_to_node records each field's type on the field's tuple_get
           // tmp (read side: `does`/`.[bits]`). ALSO stamp each field's type on
@@ -7469,23 +7718,7 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
           // value-store establishes the field). This is what lets the per-field
           // overflow check (cat 3) see `x.a`'s declared range — the tmp-keyed
           // form never lands on the field's value-bundle entry.
-          if (const auto tn = target.get_name(); !tn.empty() && tn.find('.') == std::string_view::npos) {
-            for (TSNode item : ts_node_named_children(inner)) {
-              if (std::string_view(ts_node_type(item)) != "typed_field") {
-                continue;
-              }
-              TSNode fid = child_by_field(item, "identifier");
-              TSNode ftc = child_by_field(item, "type");
-              if (ts_node_is_null(fid) || ts_node_is_null(ftc)) {
-                continue;
-              }
-              const std::string fname{canonical_escaped_ident(trim(get_text(fid)))};
-              if (fname.empty() || fname.find('.') != std::string::npos) {
-                continue;
-              }
-              emit_type_spec(Lnast_node::create_ref(std::string(tn) + "." + fname), ftc);
-            }
-          }
+
           // Skip the empty `type_spec expr_type:` we'd otherwise emit; the
           // tuple-shape information is now encoded in the target's bundle.
           goto attrs;
@@ -7627,9 +7860,26 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
         min_txt = "0";
       }
     }
-    auto idx = lnast->add_child(parent, Lnast_ntype::create_prim_type_int());
-    lnast->add_child(idx, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
-    lnast->add_child(idx, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
+    auto                     idx = lnast->add_child(parent, Lnast_ntype::create_prim_type_int());
+    // 2f-type_bound — a bound prelower_type_bounds could not fold rides as a
+    // REF to the statements it emitted just above; the runner folds it once
+    // the generic is bound (bake_decl_pre_step). Everything else stays a const.
+    const Prelowered_bounds* pre = nullptr;
+    if (!ts_node_is_null(constraint)) {
+      if (const auto it = prelowered_int_bounds_.find(ts_node_start_byte(constraint)); it != prelowered_int_bounds_.end()) {
+        pre = &it->second;
+      }
+    }
+    if (pre != nullptr && !pre->max.is_invalid()) {
+      lnast->add_child(idx, pre->max);
+    } else {
+      lnast->add_child(idx, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
+    }
+    if (pre != nullptr && !pre->min.is_invalid()) {
+      lnast->add_child(idx, pre->min);
+    } else {
+      lnast->add_child(idx, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
+    }
   } else if (t == "bool_type") {
     lnast->add_child(parent, Lnast_ntype::create_prim_type_bool());
   } else if (t == "string_type") {
@@ -7702,7 +7952,6 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
   // name to battr.hpp and both sides learn it at once.
   auto is_known = [](std::string_view n) { return battr::is_builtin_attr_name(n); };
 
-
   if (is_known(name)) {
     // `clock`/`reset` are valid only as flag-only signal classifications
     // (`clk::[clock]`). With `=value` the user almost surely meant the
@@ -7742,19 +7991,19 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       {    "init",                                                                                           "use `initial`"},
       // Deleted from the vocabulary — without a row here each of these would
       // silently fold to nil as a user attribute instead of erroring.
-      {  "inputs",                                     "use `inp` to read a lambda's input port names (`f.[inp]`)"},
-      { "outputs",                                    "use `out` to read a lambda's output port names (`f.[out]`)"},
-      {   "ubits",                        "there is no `ubits` attribute: use `bits`, and read the sign with `x.[sign]`"},
-      {   "sbits",                        "there is no `sbits` attribute: use `bits`, and read the sign with `x.[sign]`"},
-      {   "defer",                "the `.[defer]` end-of-cycle read was removed — forward-declare a `wire` and read it"},
+      {  "inputs",                                               "use `inp` to read a lambda's input port names (`f.[inp]`)"},
+      { "outputs",                                              "use `out` to read a lambda's output port names (`f.[out]`)"},
+      {   "ubits",                            "there is no `ubits` attribute: use `bits`, and read the sign with `x.[sign]`"},
+      {   "sbits",                            "there is no `sbits` attribute: use `bits`, and read the sign with `x.[sign]`"},
+      {   "defer",                     "the `.[defer]` end-of-cycle read was removed — forward-declare a `wire` and read it"},
       // `.[loc]`/`.[file]` were registered but nothing ever derived them (the
       // documented `puts` example printed nil for both); removed from the
       // vocabulary, so pin the error here.
-      {     "loc",                                        "the `.[loc]` / `.[file]` source-location reads were removed"},
-      {    "file",                                        "the `.[loc]` / `.[file]` source-location reads were removed"},
+      {     "loc",                                             "the `.[loc]` / `.[file]` source-location reads were removed"},
+      {    "file",                                             "the `.[loc]` / `.[file]` source-location reads were removed"},
       // `saturate` was an alias only the CALL form honoured (`saturate x = …`
       // never parsed); `sat` is the one spelling, as in prp_keywords.def.
-      {"saturate",                                                                                          "use `sat`"},
+      {"saturate",                                                                                               "use `sat`"},
       {     "clk", "use `clock_pin=ref <wire>` to pick a register's clock, or `clock` to classify a signal (`clk::[clock]`)"},
       {     "rst", "use `reset_pin=ref <wire>` to pick a register's reset, or `reset` to classify a signal (`rst::[reset]`)"},
       {   "width",                      "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:u8`"},

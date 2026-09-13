@@ -1,0 +1,18 @@
+/*
+:name: defaulted_tuple
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+type Decode = (mut add:bool = nil, mut sub:bool = nil, mut rd:u5 = nil)
+pub mod top(clk:u1, resetn:bool, opcode:u2, rd:u5) -> (add:bool@[], sub:bool@[], dest:u5@[]) {
+  reg instr:Decode = nil
+  instr.add = resetn and (opcode == 0)
+  instr.sub = resetn and (opcode == 1)
+  instr.rd = rd
+  add = instr.add
+  sub = instr.sub
+  dest = instr.rd
+}

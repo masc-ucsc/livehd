@@ -1,0 +1,33 @@
+/*
+:name: selfref_wire
+:type: equiv
+:verilog_top: selfref_wire
+:pyrope_top: selfref_wire
+*/
+
+// 2c-wire / Type-C self-reference, the packed-VECTOR form. The golden's
+//     wire [3:0] t;  assign t = {t[2], t[1], t[0], a[0]};
+// is a word-level "loop" that is ACYCLIC bit by bit, so t settles at {4{a[0]}}
+// (confirmed against iverilog). This Pyrope states that settled value directly.
+//
+// The packed-ARRAY form of the same false cycle was fixed in 2026-06 (see
+// array_selfref.v); the VECTOR form was not, and it fell through BOTH gates of
+// the continuous-assign cycle classifier -- it has only ONE writer and a
+// whole-net (NamedValue) LHS. Left as a `mut`, every sibling-bit read bound to
+// the net's `0sb?` poison init and only the one lane with a non-self operand
+// survived: lhd emitted `y = {1'b?,1'b?,1'b?,a[0]}` with exit 0 and no
+// diagnostic -- a silent MISCOMPILE of legal Verilog.
+//
+// It is not a toy shape: firtool emits it for every bit-sliced AES/SM4 S-box in
+// xiangshan, and it is why `lhd lec --set formal.solver=lgyosys` REFUTED
+// BlockCipherModule/CryptoModule while cvc5 PROVED them. cvc5 may choose the
+// implementation's X, so it cannot see a lowering that only lost DEFINEDNESS --
+// which is exactly why a second engine's refutation is treated as authoritative.
+//
+// prp-v2prp2v-selfref_wire is the load-bearing half: it reads the golden BACK
+// through the Verilog front end, which is where the defect lived.
+
+pub comb selfref_wire(a:u4) -> (y:u4) {
+  mut b:u1 = a#[0..=0]
+  y = (b << 3) | (b << 2) | (b << 1) | b
+}

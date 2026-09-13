@@ -146,6 +146,63 @@ module unequal_reads(input logic clk, input logic we, input logic [7:0] req,
 endmodule
 EOF
 
+# Equal read counts do not imply equal port ordering. The implementation
+# reverses the two writes and reassociates both population-count addresses.
+cat > "$WORK/reordered_reads_ref.sv" <<'EOF'
+module reordered_reads(input logic clk, we, input logic [7:0] req, din,
+                       output logic [15:0] dout);
+  logic [7:0] mem [8];
+  logic [2:0] lo, hi;
+  assign lo = (req[0] + req[1]) + (req[2] + req[3]);
+  assign hi = (req[4] + req[5]) + (req[6] + req[7]);
+  always_ff @(posedge clk) if (we) begin
+    mem[0] <= mem[lo];
+    mem[1] <= mem[hi];
+    mem[7] <= din;
+  end
+  assign dout = {mem[1], mem[0]};
+endmodule
+EOF
+cat > "$WORK/reordered_reads_impl.sv" <<'EOF'
+module reordered_reads(input logic clk, we, input logic [7:0] req, din,
+                       output logic [15:0] dout);
+  logic [7:0] mem [8];
+  logic [2:0] lo, hi;
+  assign hi = ((req[7] + req[6]) + req[5]) + req[4];
+  assign lo = req[3] + (req[2] + (req[1] + req[0]));
+  always_ff @(posedge clk) if (we) begin
+    mem[1] <= mem[hi];
+    mem[0] <= mem[lo];
+    mem[7] <= din;
+  end
+  assign dout = {mem[1], mem[0]};
+endmodule
+EOF
+sed "s/mem\[hi\]/mem[hi ^ 3'd1]/" "$WORK/reordered_reads_impl.sv" > "$WORK/reordered_reads_bad.sv"
+
+# Different-width pointer arithmetic selects the same byte of a wide bus.
+# Proving the small shift operands should avoid expanding the whole barrel
+# shifter. A changed wrap boundary must still be refuted.
+cat > "$WORK/packed_select_ref.sv" <<'EOF'
+module packed_select(input logic [511:0] words, input logic [5:0] ptr,
+                     output logic [7:0] dout);
+  logic [5:0] index;
+  assign index = ptr >= 6'd48 ? ptr - 6'd48 : ptr;
+  assign dout = words >> (index * 8);
+endmodule
+EOF
+cat > "$WORK/packed_select_impl.sv" <<'EOF'
+module packed_select(input logic [511:0] words, input logic [5:0] ptr,
+                     output logic [7:0] dout);
+  logic signed [8:0] delta;
+  logic [5:0] index;
+  assign delta = $signed({3'b0, ptr}) - 9'sd48;
+  assign index = delta >= 0 ? delta[5:0] : ptr;
+  assign dout = words >> (index * 8);
+endmodule
+EOF
+sed "s/9'sd48/9'sd47/" "$WORK/packed_select_impl.sv" > "$WORK/packed_select_bad.sv"
+
 compile() {  # $1=src $2=lgdir $3=reader [$4=top]
   local top="${4:-rf}"
   $LHD compile "$WORK/$1" --reader "$3" --top "$top" --emit-dir "lg:$WORK/$2" --workdir "$WORK/w_$2" \
@@ -165,6 +222,12 @@ compile masked_din_ref.sv  masked_din_ref  slang masked_din
 compile masked_din_impl.sv masked_din_impl slang masked_din
 compile unequal_reads_ref.sv  unequal_reads_ref  slang unequal_reads
 compile unequal_reads_impl.sv unequal_reads_impl slang unequal_reads
+compile reordered_reads_ref.sv reordered_reads_ref slang reordered_reads
+compile reordered_reads_impl.sv reordered_reads_impl slang reordered_reads
+compile reordered_reads_bad.sv reordered_reads_bad slang reordered_reads
+compile packed_select_ref.sv packed_select_ref slang packed_select
+compile packed_select_impl.sv packed_select_impl slang packed_select
+compile packed_select_bad.sv packed_select_bad slang packed_select
 
 # `auto`, not `engine=ind`. An inductive-only CEX starts from an ARBITRARY state
 # that may be UNREACHABLE, so `ind` alone can no longer report REFUTED for a
@@ -200,6 +263,12 @@ expect "memory to packed-flop state" "$(verdict_ind packed_state_impl packed_sta
 expect "masked write data" "$(verdict_ind masked_din_impl masked_din_ref masked_din)" "PROVEN equivalent"
 # Unequal dynamic-read counts still correspond through proven addresses.
 expect "unequal equivalent read ports" "$(verdict_ind unequal_reads_impl unequal_reads_ref unequal_reads)" "PROVEN equivalent"
+
+expect "reordered equivalent read ports" "$(verdict_ind reordered_reads_impl reordered_reads_ref reordered_reads)" "PROVEN equivalent"
+expect "corrupted reordered read address" "$(verdict reordered_reads_bad reordered_reads_ref reordered_reads)" "REFUTED (not equivalent)"
+
+expect "equivalent packed read address" "$(verdict_ind packed_select_impl packed_select_ref packed_select)" "PROVEN equivalent"
+expect "corrupted packed read address" "$(verdict packed_select_bad packed_select_ref packed_select)" "REFUTED (not equivalent)"
 
 if [ $fail -ne 0 ]; then echo "lec_mem_test: FAILED"; exit 1; fi
 echo "lec_mem_test: PASSED"

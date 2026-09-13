@@ -423,9 +423,115 @@ uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : u
 }
 
 void uPass_constprop::end_run() {
+  // 2c-shortcircuit — a parked illegal-operation diagnostic that no `and`/`or`
+  // ever discharged belongs to an operand that WAS evaluated. Report it now,
+  // with the span captured at the illegal op, so the message/severity/location
+  // are byte-identical to the old eager emit.
+  for (auto& d : pending_illegal_) {
+    if (d) {
+      livehd::diag::sink().emit(std::move(*d));
+    }
+  }
+  pending_illegal_.clear();
+  poison_of_.clear();
   if (pending_unsigned_overflow_msg_) {
     throw std::runtime_error(*pending_unsigned_overflow_msg_);
   }
+}
+
+void uPass_constprop::defer_or_emit_illegal(std::string_view dst, livehd::diag::Diagnostic d) {
+  // A NAMED destination is a statement, and statements are always evaluated
+  // (02-basics.md, "Evaluation order") — report immediately, exactly as before.
+  // Only a `%` tmp is an operand sub-expression an `and`/`or` may skip.
+  if (dst.empty() || !Lnast::is_tmp(dst)) {
+    livehd::diag::sink().emit(std::move(d));
+    return;
+  }
+  pending_illegal_.emplace_back(std::move(d));
+  poison_of_[std::string(dst)].insert(pending_illegal_.size() - 1);
+}
+
+void uPass_constprop::propagate_poison(std::string_view dst, upass::Src_span src) {
+  if (poison_of_.empty() || dst.empty() || !Lnast::is_tmp(dst)) {
+    return;  // nothing parked, or the result is a statement-level name
+  }
+  // Gather first, insert after: inserting `dst` can rehash the map and
+  // invalidate an iterator held over the operand lookups.
+  absl::flat_hash_set<size_t> ids;
+  for (const auto& o : src) {
+    if (o.name.empty()) {
+      continue;
+    }
+    if (const auto it = poison_of_.find(std::string(o.name)); it != poison_of_.end()) {
+      ids.insert(it->second.begin(), it->second.end());
+    }
+  }
+  if (!ids.empty()) {
+    auto& into = poison_of_[std::string(dst)];
+    into.insert(ids.begin(), ids.end());
+  }
+}
+
+void uPass_constprop::discharge_poison(upass::Src_span src, size_t from) {
+  for (size_t j = from; j < src.size(); ++j) {
+    if (src[j].name.empty()) {
+      continue;
+    }
+    const auto it = poison_of_.find(std::string(src[j].name));
+    if (it == poison_of_.end()) {
+      continue;
+    }
+    // Retire the diagnostic outright; do NOT try to keep it alive for "some
+    // other reader of this tmp".
+    //
+    // The poison propagates FORWARD (mod -> eq -> log_and -> log_or), so by the
+    // time a short-circuit discharges, every tmp along the chain holds the id —
+    // a "does anyone else still hold it?" refcount is therefore ALWAYS true and
+    // would defeat the discharge entirely (measured: it re-reported all six
+    // truth-table cases).
+    //
+    // One discharge is definitive because a parked id only ever rides a `%`
+    // tmp, and those are single-use by construction: prp2lnast mints a fresh
+    // tmp per expression node. A value a user can read twice has a NAME, and
+    // defer_or_emit_illegal reports a named dst immediately rather than parking
+    // it (errors/shortcircuit_named_stmt.prp pins that).
+    for (const auto id : it->second) {
+      if (id < pending_illegal_.size()) {
+        pending_illegal_[id].reset();
+      }
+    }
+  }
+}
+
+bool uPass_constprop::short_circuit_logical(std::string_view dst_name, upass::Src_span src, bool is_and) {
+  if (dst_name.empty() || src.size() < 2) {
+    return false;
+  }
+  for (size_t i = 0; i < src.size(); ++i) {
+    const Dlop v = operand_value(src[i]);
+    // HARD CONSTRAINT: stop at the first operand with no comptime value and
+    // never look past it. That is real short-circuit semantics (an operand
+    // after an evaluated one is itself evaluated), and it is also what keeps
+    // clock gating intact: in `clk and enable` operand 0 is a runtime port, so
+    // the scan breaks at i==0 and the node keeps exactly as before. Scanning
+    // the whole list for a decisive operand instead would fold
+    // `clk and <comptime false>` to a constant 0 and silently delete every ICG
+    // (equiv/latch_icg.prp, sim/chained_clock_gates.prp, …).
+    if (!is_numeric(v) || v.is_nil() || v.has_unknowns()) {
+      return false;
+    }
+    const bool decisive = is_and ? v.is_known_false() : v.is_known_true();
+    if (!decisive) {
+      continue;
+    }
+    if (i + 1 >= src.size()) {
+      return false;  // last operand: the plain left-fold already gives this answer
+    }
+    discharge_poison(src, i + 1);  // the skipped operands are not evaluated
+    store_trivial(dst_name, *Dlop::from_pyrope(is_and ? "false" : "true"));
+    return true;
+  }
+  return false;
 }
 
 void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value) {
@@ -1234,15 +1340,19 @@ upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst,
   for (size_t i = 1; i < src.size(); ++i) {
     const Dlop d = operand_value(src[i]);
     if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
-      livehd::diag::sink().emit(livehd::diag::Diagnostic{
-          .severity = livehd::diag::Severity::error,
-          .code     = "div-by-zero",
-          .category = "type",
-          .pass     = "upass.constprop",
-          .message  = "division by zero is an illegal operation (the result is nil)",
-          .span     = lm->current_span(),
-          .hint     = "guard the divisor so it is non-zero at compile time",
-      });
+      // 2c-shortcircuit: park it when this is an operand sub-expression — an
+      // enclosing `and`/`or` may prove it is never evaluated. end_run reports
+      // whatever is left.
+      defer_or_emit_illegal(dst_name,
+                            livehd::diag::Diagnostic{
+                                .severity = livehd::diag::Severity::error,
+                                .code     = "div-by-zero",
+                                .category = "type",
+                                .pass     = "upass.constprop",
+                                .message  = "division by zero is an illegal operation (the result is nil)",
+                                .span     = lm->current_span(),
+                                .hint     = "guard the divisor so it is non-zero at compile time",
+                            });
       return classify_vote();  // do not fold/store the nil
     }
   }
@@ -1277,15 +1387,16 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
   for (size_t i = 1; i < src.size(); ++i) {
     const Dlop d = operand_value(src[i]);
     if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
-      livehd::diag::sink().emit(livehd::diag::Diagnostic{
-          .severity = livehd::diag::Severity::error,
-          .code     = "mod-by-zero",
-          .category = "type",
-          .pass     = "upass.constprop",
-          .message  = "modulo by zero is an illegal operation (the result is nil)",
-          .span     = lm->current_span(),
-          .hint     = "guard the divisor so it is non-zero at compile time",
-      });
+      defer_or_emit_illegal(dst_name,
+                            livehd::diag::Diagnostic{
+                                .severity = livehd::diag::Severity::error,
+                                .code     = "mod-by-zero",
+                                .category = "type",
+                                .pass     = "upass.constprop",
+                                .message  = "modulo by zero is an illegal operation (the result is nil)",
+                                .span     = lm->current_span(),
+                                .hint     = "guard the divisor so it is non-zero at compile time",
+                            });
       return classify_vote();  // do not fold/store the nil
     }
   }
@@ -1293,6 +1404,7 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
 }
 
 upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // A negative shift amount would hard-assert in Dlop::shln (src2 >= 0), so
   // leave the shl unresolved instead of folding. The diagnostic lives in
   // upass.bitwidth (negative-shift), which sees the amount's derived range —
@@ -1351,6 +1463,7 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
 }
 
 upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Same negative-amount rule as process_shl: leave the sra unresolved
   // instead of folding (Dlop::shrn hard-asserts on src2 < 0); the
   // negative-shift diagnostic lives in upass.bitwidth. A nil operand
@@ -1399,11 +1512,20 @@ upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& 
   // cassert/attribute-discharge combinators (`cassert(x.[debug] and …)` over an
   // unset/deferred attr), so nil propagates (keeps) for the verifier to resolve.
   (void)dst;
+  // 2c-shortcircuit (02-basics.md, "Evaluation order"): a decisive operand
+  // settles the result and the operands after it are NOT evaluated, so an
+  // illegal comptime op parked in them is discharged rather than reported.
+  if (short_circuit_logical(dst_name, src, /*is_and=*/true)) {
+    return classify_vote();
+  }
   return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); });
 }
 
 upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
+  if (short_circuit_logical(dst_name, src, /*is_and=*/false)) {  // 2c-shortcircuit, see process_log_and
+    return classify_vote();
+  }
   return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); });
 }
 
@@ -1850,10 +1972,12 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
 }
 
 upass::Vote uPass_constprop::process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   (void)dst;
   return process_eq_ne_impl<true>(dst_name, src);
 }
 upass::Vote uPass_constprop::process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   (void)dst;
   return process_eq_ne_impl<false>(dst_name, src);
 }
@@ -5052,6 +5176,7 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
 // fold_ref deleted — the runner reads Symbol_table::known_const_scalar directly.
 
 upass::Vote uPass_constprop::process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Sign-extend: [sext: ref(dst), ref_or_const(src), const(sign_bit_pos)]
   // The third operand is the sign bit's INDEX, not a width: `sext_op(from_bit)`
   // reads bit `from_bit` of src and replaces every bit above it with that bit
@@ -5217,6 +5342,7 @@ bool uPass_constprop::report_reduction_nonint(upass::Src_span src) {
 }
 
 upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Layout: ref(dst), ref(value), (const|ref)(mask)
   // The mask operand may be:
   //   - a constant integer / known scalar (treated as a bitmask),
@@ -5315,6 +5441,7 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
 }
 
 upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Layout: ref(dst), ref(input), (const|ref)(mask), (const|ref)(value)
   // Mirrors process_get_mask but writes back via set_mask_op. The mask
   // operand can be a constant integer (treated as a bitmask) or a `range`
@@ -5443,6 +5570,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
 // belongs at the runner's emit-time concat seam, which already rewrites the
 // width operands in place.
 upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   (void)dst;
   if (dst_name.empty() || src.empty() || (src.size() % 2) != 0) {
     return classify_vote();  // no dst, or a lane with no width operand: fail closed

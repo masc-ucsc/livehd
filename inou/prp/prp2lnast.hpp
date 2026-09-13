@@ -153,6 +153,15 @@ protected:
   // bounds from a `(max=…, min=…, bits=…)` constraint/argument tuple. Returns
   // false when `kw` is not an integer type keyword.
   bool                int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+  // 2f-type_bound — lower any integer type bound in `type_cast_node` that
+  // resolve_type_int_value cannot fold, into statements emitted AT THE CURRENT
+  // STATEMENT POSITION, and stash the resulting refs in prelowered_int_bounds_.
+  // Must run BEFORE the declaration's `attr_set` cluster head: the emitted
+  // statements have to precede the `declare` that consumes them, and
+  // rewrite_decls_to_declare merges a CONTIGUOUS attr_set/type_spec run.
+  void                prelower_type_bounds(TSNode type_cast_node);
+  // One `<head>(%tmp, l, r)` statement; returns the fresh %tmp ref.
+  Lnast_node          emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r);
 
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
@@ -486,6 +495,11 @@ protected:
 
   // Type handling
   void                 emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
+  // 2f-nested_type — stamp `path.<field>` type_specs for a tuple-shaped type,
+  // descending into nested tuple fields (leaves only). See the definition.
+  void                 emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node);
+  // The inner `tuple` node when `type_cast_node`'s type is a tuple SHAPE.
+  TSNode               tuple_type_inner(TSNode type_cast_node) const;
   void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
   // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
@@ -559,6 +573,42 @@ protected:
   // resolves the value that was statically known AT THE LAMBDA DECLARATION
   // POINT; a mut that has since gone runtime is erased and the slot errors.
   absl::flat_hash_map<std::string, int64_t>                  const_int_bindings_;
+  // 2f-type_bound — max/min for an integer type bound this front end cannot
+  // fold to a constant, most importantly a GENERIC width:
+  //   mod m<N=5>(…) { reg r:unsigned(bits=N) = nil … }
+  // `N` only has a value at SPECIALIZATION, long after prp2lnast, so no
+  // front-end folder can ever see it. The bound has to reach LNAST as a REF
+  // that the runner folds once the generic is bound (bake_decl_pre_step does
+  // exactly this for an array `[N]` dimension already). Until this existed the
+  // `bits=` arm simply did nothing on a fold miss: the declared width was
+  // dropped with NO diagnostic and the register was silently mis-sized.
+  //
+  // Keyed by the constraint tuple's start byte. Filled by
+  // prelower_type_bounds at the DECLARATION — the only site with a statement
+  // position to emit the desugar into — and consumed by int_type_call_bounds.
+  struct Prelowered_bounds {
+    Lnast_node max{Lnast_node::create_invalid()};
+    Lnast_node min{Lnast_node::create_invalid()};
+  };
+  absl::flat_hash_map<uint32_t, Prelowered_bounds>           prelowered_int_bounds_;
+  // Constraint tuples prelower_type_bounds actually examined. A PORT/return
+  // type, a tuple field type and a `f<signed(bits=N)>` generic argument have no
+  // statement position to desugar an unfoldable bound into, so prelowering
+  // never runs there. Without this the "not a compile-time value" error fired
+  // at those sites too and turned `mod m<N=8>(a:unsigned(bits=N))` -- which
+  // used to compile -- into a hard error.
+  absl::flat_hash_set<uint32_t>                              prelower_visited_;
+  // 2c-wire — declarations whose INLINE TUPLE type made emit_type_spec emit a
+  // shape-seeding `store(<name>, %tuple_tmp)`. That store carries the TYPE's
+  // field layout, not a user assignment, but it is structurally identical to
+  // one, so the single-driver counter booked it as driver #1 and
+  //     wire value:(data:u8) = nil
+  //     value = source            // the ONLY user assignment
+  // was rejected as `wire-multiple-drivers` -- with the span on the DECLARATION.
+  // It also MASKED the opposite check: such a wire never driven at all looked
+  // driven once, so `wire-undriven` could not fire for a tuple-typed wire.
+  // Names are discounted by exactly ONE seed; two real assignments still count 2.
+  absl::flat_hash_set<std::string>                           decl_shape_seed_targets_;
   // Compact declaration-point closure environment.  These maps are updated
   // only by unconditional outer-scope writes (the same rule as
   // const_int_bindings_) and let a streamed lambda write its capture prologue

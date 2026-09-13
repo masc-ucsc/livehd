@@ -553,7 +553,7 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
       // re-elaborate. The file/__pub wrappers carry no io_meta. Older ln: dirs
       // without persisted io_meta also fall back to re-elaboration.
       const auto lk = ln->get_lambda_kind();
-      if (!ln->io_meta().empty() && (lk == "mod" || lk == "pipe")) {
+      if (!ln->is_template() && !ln->io_meta().empty() && (lk == "mod" || lk == "pipe")) {
         ln->set_pre_elaborated(true);
       }
       var.add(ln);
@@ -1397,7 +1397,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
         names.emplace_back(ln->get_top_module_name());
       }
     }
-    const bool explicit_top = !opts.top.empty() && opts.top != "-auto-top";
+    const bool  explicit_top = !opts.top.empty() && opts.top != "-auto-top";
     std::string selected;
     if (explicit_top) {
       // QUIET resolve: this is an internal "would the top be a generic template"

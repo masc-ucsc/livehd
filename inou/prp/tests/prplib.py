@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import copy
 import glob
 import json
 import os
@@ -226,6 +227,8 @@ class PrpRunner:
         cmd = self.lhd_upass(test, 'equiv')
         if 'reset_style' in test.params:
             cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
+        if test.params.get('compile_top'):
+            cmd += ['--top', test.params['compile_top'].strip()]
         cmd += ['--emit-dir', 'verilog:{}/'.format(odir)]
         return cmd
 
@@ -1074,6 +1077,7 @@ class PrpRunner:
         # would not lower.
         base = [self.lhd, 'compile']
         runs = [(base + [prp] + self._extra_sets(test)
+                 + (['--top', test.params['compile_top'].strip()] if test.params.get('compile_top') else [])
                  + (['--set', 'upass.reset_style=' + test.params['reset_style']]
                     if 'reset_style' in test.params else [])
                  + ['--emit-dir', 'lg:' + lg_ref, '--workdir', os.path.join(workdir, 'w_ref')]),
@@ -1183,6 +1187,66 @@ class PrpRunner:
                            for k in ('regs', 'mems') if k in got and got[k]['total'])))
         return 0
 
+    def _run_compile(self, tmp_dir, test, mode, cmd=None, label=None):
+        cmd = self.gen_lhd_cmd(test, mode) if cmd is None else cmd
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        log, mode_rc = b'', 1
+        try:
+            log, _ = proc.communicate()
+            mode_rc = proc.returncode
+        except BaseException as e:
+            proc.kill()
+            proc.wait()
+            log = 'exception while running {}: {!r}\n'.format(cmd[0], e).encode('utf-8')
+        if mode == 'comptime' and mode_rc != 0:
+            mode_rc = self._comptime_expected_fail_ok(test, log, mode_rc)
+        print('{} - {} - {}'.format(test.params['name'], label or mode,
+                                   'success' if mode_rc == 0 else 'failed'))
+        if mode_rc != 0:
+            print(log.decode('utf-8', 'ignore'))
+        return mode_rc
+
+    def run_comptime(self, tmp_dir, test):
+        # Check both sources with the SAME verifier counts and pass flags.
+        # A formatter success alone says nothing about constant evaluation.
+        rc = self._run_compile(tmp_dir, test, 'comptime')
+        formatted = copy.deepcopy(test)
+        formatted.params['files'] = []
+        # abspath: the scandir skip below compares against os.path.abspath(entry.path),
+        # so a relative tmp_dir would never match and the scratch dir would be
+        # symlinked into itself.
+        sources = os.path.abspath(os.path.join(tmp_dir, self._scratch(test, 'fmt_sources')))
+        os.makedirs(sources, exist_ok=True)
+        parents = {}
+        for source in test.params['files']:
+            original = os.path.abspath(os.path.join(tmp_dir, source))
+            parent = os.path.dirname(original)
+            if parent not in parents:
+                directory = os.path.join(sources, str(len(parents)))
+                os.makedirs(directory)
+                parents[parent] = directory
+                # Retain sibling imports/resources without modifying them.
+                # Selected source links are replaced by formatted files below.
+                for entry in os.scandir(parent):
+                    if os.path.abspath(entry.path) != sources:
+                        os.symlink(entry.path, os.path.join(directory, entry.name))
+            output = os.path.join(parents[parent], os.path.basename(original))
+            if os.path.lexists(output):
+                os.unlink(output)
+            cmd = [self.lhd, 'pyrope', 'fmt', original, '--output', output]
+            proc = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT)
+            if proc.returncode != 0 or not os.path.isfile(output):
+                print('{} - comptime format - failed'.format(test.params['name']))
+                print(proc.stdout.decode('utf-8', 'ignore'))
+                return 1
+            formatted.params['files'].append(output)
+        cmd = self.lhd_comptime(formatted, 'comptime_formatted')
+        rc |= self._run_compile(tmp_dir, formatted, 'comptime', cmd=cmd,
+                                label='comptime after format')
+        return rc
+
     def run(self, tmp_dir, test: PrpTest):
 
         # KNOWN GAP (deliberately left as-is): with a multi-mode `:type:` (e.g.
@@ -1196,6 +1260,11 @@ class PrpRunner:
         # Fix those first, then switch this to `rc |=`.
         rc = 0
         for mode in test.params['type']:
+            if mode == 'comptime':
+                rc = self.run_comptime(tmp_dir, test)
+                if rc != 0:
+                    return rc  # Neither pass may be hidden by a later mode.
+                continue
             if mode == 'error':
                 rc = self.run_error(tmp_dir, test)
                 continue
@@ -1243,36 +1312,7 @@ class PrpRunner:
                 rc = self.run_verify(tmp_dir, test)
                 continue
 
-            cmd = self.gen_lhd_cmd(test, mode)
-
-            proc = subprocess.Popen(
-                cmd,
-                cwd=tmp_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-
-            # `log` must be bound on EVERY path: mode_rc starts at 1, so an
-            # exception out of communicate() now falls into the failure branch
-            # below, which prints it (and _comptime_expected_fail_ok reads it).
-            log     = b''
-            mode_rc = 1
-            try:
-                log, _ = proc.communicate()
-                mode_rc = proc.returncode
-            except BaseException as e:  # includes KeyboardInterrupt, as the bare except did
-                proc.kill()
-                log = 'exception while running {}: {!r}\n'.format(cmd[0], e).encode('utf-8')
-
-            if mode == 'comptime' and mode_rc != 0:
-                mode_rc = self._comptime_expected_fail_ok(test, log, mode_rc)
-
-            if mode_rc == 0:
-                print('{} - {} - success'.format(test.params['name'], mode))
-            else:
-                print('{} - {} - failed'.format(test.params['name'], mode))
-                print(log.decode('utf-8', 'ignore'))
-            rc = mode_rc
+            rc = self._run_compile(tmp_dir, test, mode)
 
         # Structural post-checks, independent of `:type:` so one implementation
         # serves the sim and equiv fixtures alike.

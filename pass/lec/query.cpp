@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -3742,6 +3743,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     solver.setLogic(state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
   }
 
+  // cvc5 1.3.4's full array propagation recursively preregisters fresh
+  // select(store(...), i) terms. Wide hardware arrays can exhaust a worker's
+  // stack (RenameBuffer: propagateRowLemma -> preRegisterTermInternal).
+  // Propagate existing reads only; lazy array lemmas retain the same theory.
+  solver.setOption("arrays-prop", "1");
+
   // Per-checkSat wall-clock bound (formal.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
   // 3-way commutativity at >=16 bits) make cvc5's bit-blast never return. Without
@@ -6322,21 +6329,35 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         bool        sgn;
       };
       absl::flat_hash_map<std::string, absl::flat_hash_map<int, Elt>> by_base;
+      // A base whose (base, lane) slot was claimed by two DIFFERENT flops is
+      // not a bank at all: `q_1_x` and `q_x_1` both strip to base "q_x" lane 1,
+      // and letting the second overwrite the first conflates two unrelated
+      // flops into one lane. Drop such a base outright rather than guess.
+      absl::flat_hash_set<std::string>                                ambiguous_base;
       for (const auto& [key, rec] : flops) {
         if (other.count(key)) {
           continue;  // already matches a flop on the other side -> not a bridge bank
         }
-        auto us = key.rfind('_');
-        if (us == std::string::npos || us + 1 >= key.size()) {
-          continue;
+        // Generated array-of-struct flops place the lane before the field:
+        // bank_0_bits_value_REG. Keep the field in the bank name, so separate
+        // valid/data banks cannot be confused merely because their sizes match.
+        for (size_t us = key.find('_'); us != std::string::npos; us = key.find('_', us + 1)) {
+          const auto end    = key.find('_', us + 1);
+          const auto idx    = key.substr(us + 1, end == std::string::npos ? end : end - us - 1);
+          int        lane   = 0;
+          const auto parsed = std::from_chars(idx.data(), idx.data() + idx.size(), lane);
+          if (idx.empty() || parsed.ec != std::errc{} || parsed.ptr != idx.data() + idx.size() || lane < 0) {
+            continue;
+          }
+          const auto base = key.substr(0, us) + (end == std::string::npos ? "" : key.substr(end));
+          auto [it, ins]  = by_base[base].try_emplace(lane, Elt{key, rec.w, rec.sgn});
+          if (!ins && it->second.key != key) {
+            ambiguous_base.insert(base);
+          }
         }
-        std::string idx = key.substr(us + 1);
-        if (idx.empty() || !std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c); })) {
-          continue;
-        }
-        by_base[key.substr(0, us)][std::stoi(idx)] = Elt{key, rec.w, rec.sgn};
       }
       struct Bank {
+        std::string              name;
         int                      n;
         int                      w;
         bool                     sgn;
@@ -6344,6 +6365,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       };
       std::vector<Bank> banks;
       for (auto& [base, elts] : by_base) {
+        if (ambiguous_base.count(base)) {
+          continue;
+        }
         int  n        = static_cast<int>(elts.size());
         bool complete = n > 1;
         int  w        = elts.begin()->second.w;
@@ -6358,7 +6382,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (!complete) {
           continue;
         }
-        Bank b{n, w, sgn, {}};
+        Bank b{base, n, w, sgn, {}};
         for (int i = 0; i < n; ++i) {
           b.keys.push_back(elts.at(i).key);
         }
@@ -6373,7 +6397,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                          const Io_name_map<MemRec>&  bank_mems,
                          const Io_name_map<MemRec>&  mem_mems,
                          bool                        mem_in_impl) {
+      // Since a key is registered under EVERY numeric segment it carries, two
+      // detected banks can share a flop (`bank_0_bits_1` is lane 0 of base
+      // "bank_bits_1" and lane 1 of base "bank_0_bits"). Bridging the same flop
+      // to two different arrays asserts contradictory state equalities, and an
+      // over-constrained miter is vacuously UNSAT -- a FALSE PROVEN. One bridge
+      // per flop.
+      absl::flat_hash_set<std::string> bridged_flops;
       for (auto& b : detect_banks(bank_flops, other_flops)) {
+        if (std::any_of(b.keys.begin(), b.keys.end(), [&](const auto& k) { return bridged_flops.count(k) != 0; })) {
+          continue;
+        }
         for (const auto& [mkey, mrec] : mem_mems) {
           if ((mem_in_impl ? used_impl_mem : used_ref_mem).count(mkey)) {
             continue;  // exact-name packed-flop bridge above owns this memory
@@ -6381,7 +6415,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (bank_mems.count(mkey)) {
             continue;  // memory matches a memory on the bank side -> not a bridge
           }
-          if (mrec.sig.size != b.n) {
+          if (mrec.sig.size != b.n || mrec.sig.bits != b.w) {
+            continue;
+          }
+          // An interior-index bank must identify its actual field. Preserve
+          // the legacy suffix-index detector for ordinary scalar arrays.
+          const bool interior_index
+              = std::any_of(b.keys.begin(), b.keys.end(), [&](const auto& key) { return !key.starts_with(b.name + "_"); });
+          if (interior_index && memory_correspondence_name(mrec.name) != memory_correspondence_name(b.name)) {
             continue;
           }
           if (!shared_mems.count(mkey)) {
@@ -6397,6 +6438,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           br.flop_w.assign(b.keys.size(), b.w);
           br.flop_sgn.assign(b.keys.size(), b.sgn);
           bridges.push_back(std::move(br));
+          (mem_in_impl ? used_impl_mem : used_ref_mem).insert(mkey);
+          bridged_flops.insert(b.keys.begin(), b.keys.end());
           break;  // one bank -> one memory
         }
       }
@@ -7530,6 +7573,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       size_t      obligation;   // index into `merge_obl`, or max() when the address Terms are identical
       bool        needs_array;  // a forwarding read: also needs the arrays proven equal
       std::string mem_key;
+      bool        conditional = true;  // retain read-coherence premises for the targeted matching routes
     };
     std::vector<cvc5::Term> merge_obl;
     std::vector<Merge_cand> merge_cands;
@@ -7587,22 +7631,61 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
 
-      // A duplicate inserted on one side shifts the remaining read ports, so
-      // the positional route below cannot be used when the counts differ. For
-      // modest sets, try the complete cross-product. This handles equivalent
-      // address arithmetic normalized into different shapes. Every candidate
-      // remains guarded by its own ABC proof; the bound prevents a large
-      // multi-read memory from turning this into quadratic work.
+      // Port positions need not correspond, even when counts agree. Group
+      // duplicate addresses first, then prove the modest cross-product of
+      // distinct addresses. Large generated memories often repeat the same
+      // few reads thousands of times; counting ports would miss this route.
       constexpr size_t kMaxCrossAddressProofs = 4096;
-      if (rrd.size() != ird.size() && rrd.size() * ird.size() <= kMaxCrossAddressProofs) {
-        for (const auto& a : rrd) {
-          for (const auto& b : ird) {
+      auto             address_groups         = [](const std::vector<Encoded::Mem_rd_port>& ports) {
+        std::vector<std::vector<size_t>>       groups;
+        std::unordered_map<cvc5::Term, size_t> shared, forwarded;
+        for (size_t k = 0; k < ports.size(); ++k) {
+          auto& index               = ports[k].from_shared_cur ? shared : forwarded;
+          auto [group_it, inserted] = index.emplace(ports[k].addr, groups.size());
+          if (inserted) {
+            groups.emplace_back();
+          }
+          groups[group_it->second].push_back(k);
+        }
+        return groups;
+      };
+      const auto ref_addr_groups  = address_groups(rrd);
+      const auto impl_addr_groups = address_groups(ird);
+      if (std::getenv("LEC_CONE_LOG") != nullptr) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] %s read addresses: %zu/%zu groups from %zu/%zu ports\n",
+                     key.c_str(),
+                     ref_addr_groups.size(),
+                     impl_addr_groups.size(),
+                     rrd.size(),
+                     ird.size());
+      }
+      // Exhaustive address probes are only candidates for an unconditional
+      // merge. Unproved cross-pairs otherwise add irrelevant array relations to
+      // every wide output slice. Loop-invariant — it reads only the port COUNTS.
+      const bool was_small_unequal = rrd.size() != ird.size() && rrd.size() * ird.size() <= kMaxCrossAddressProofs;
+      if (ref_addr_groups.size() * impl_addr_groups.size() <= kMaxCrossAddressProofs) {
+        for (const auto& ag : ref_addr_groups) {
+          const auto& a = rrd[ag.front()];
+          for (const auto& bg : impl_addr_groups) {
+            const auto& b = ird[bg.front()];
             if (a.addr == b.addr || a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()
                 || a.from_shared_cur != b.from_shared_cur) {
               continue;
             }
-            merge_cands.push_back({a.dout, b.dout, merge_obl.size(), !(a.from_shared_cur && b.from_shared_cur), key});
+            const size_t obligation = merge_obl.size();
             merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+            auto add_group_merge = [&](const Encoded::Mem_rd_port& port) {
+              if (a.dout != port.dout && a.dout.getSort() == port.dout.getSort()) {
+                merge_cands.push_back({a.dout, port.dout, obligation, !a.from_shared_cur, key, was_small_unequal});
+              }
+            };
+            for (size_t k = 1; k < ag.size(); ++k) {
+              add_group_merge(rrd[ag[k]]);
+            }
+            for (size_t k : bg) {
+              add_group_merge(ird[k]);
+            }
           }
         }
       } else if (rrd.size() != ird.size()) {
@@ -8015,7 +8098,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // candidate set can only miss a proof, never create a false one.
     std::vector<cvc5::Term> direct_coherence;
     for (const auto& c : merge_cands) {
-      if (c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven) {
+      if (!c.conditional || c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven) {
         continue;
       }
       const bool array_ok = !c.needs_array || direct_mem_proven.contains(c.mem_key);
@@ -8080,13 +8163,94 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
     }
-    const size_t            n_direct = try_ix.size();
-    std::vector<Cone_stats> stats;
-    const Cone_merge_map*   direct_merge        = first_direct_merge.empty() ? nullptr : &first_direct_merge;
-    size_t                  fresh_slice_proven  = 0;
-    size_t                  fresh_slice_sat     = 0;
-    size_t                  fresh_slice_unknown = 0;
+    const size_t                           n_direct = try_ix.size();
+    std::vector<Cone_stats>                stats;
+    const Cone_merge_map*                  direct_merge        = first_direct_merge.empty() ? nullptr : &first_direct_merge;
+    size_t                                 fresh_slice_proven  = 0;
+    size_t                                 fresh_slice_sat     = 0;
+    size_t                                 fresh_slice_unknown = 0;
+    // Equal operands imply equal results. Prove small differences underneath
+    // a common operation before bit-blasting its entire result: two reads of
+    // the same packed memory often differ only in their address arithmetic.
+    // These are sufficient lemmas, never assumptions. If any lemma does not
+    // prove, retain the original output obligation unchanged.
+    std::vector<cvc5::Term>                congruence_terms;
+    std::unordered_map<cvc5::Term, size_t> congruence_index;
+    std::vector<std::vector<size_t>>       congruence_jobs(terms.size());
+    for (size_t job = 0; job < terms.size(); ++job) {
+      auto equality = terms[job];
+      if (equality.getKind() == cvc5::Kind::AND && equality.getNumChildren() == 2) {
+        equality = equality[0];
+      }
+      if (equality.getKind() != cvc5::Kind::DISTINCT || equality.getNumChildren() != 2) {
+        continue;
+      }
+      std::vector<std::pair<cvc5::Term, cvc5::Term>> work{
+          {equality[0], equality[1]}
+      };
+      std::vector<cvc5::Term> leaves;
+      size_t                  visited = 0;
+      while (!work.empty() && leaves.size() <= 64 && ++visited <= 4096) {
+        const auto [a, b] = work.back();
+        work.pop_back();
+        if (a == b) {
+          continue;
+        }
+        bool same_operator = a.getKind() == b.getKind() && a.getNumChildren() == b.getNumChildren() && a.getNumChildren() > 0
+                             && a.hasOp() == b.hasOp();
+        if (same_operator && a.hasOp()) {
+          same_operator = a.getOp() == b.getOp();
+        }
+        for (size_t k = 0; same_operator && k < a.getNumChildren(); ++k) {
+          same_operator
+              = a[k].getSort() == b[k].getSort() && (a[k] == b[k] || a[k].getSort().isBitVector() || a[k].getSort().isBoolean());
+        }
+        if (same_operator) {
+          for (size_t k = 0; k < a.getNumChildren(); ++k) {
+            work.emplace_back(a[k], b[k]);
+          }
+        } else {
+          leaves.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a, b}));
+        }
+      }
+      if (!work.empty() || leaves.size() > 64 || (leaves.size() == 1 && leaves.front() == equality)) {
+        continue;
+      }
+      if (leaves.empty()) {
+        terms[job] = tm.mkFalse();
+        continue;
+      }
+      for (const auto& leaf : leaves) {
+        auto [lemma_it, inserted] = congruence_index.emplace(leaf, congruence_terms.size());
+        if (inserted) {
+          congruence_terms.push_back(leaf);
+        }
+        congruence_jobs[job].push_back(lemma_it->second);
+      }
+    }
+    size_t congruence_proven = 0;
+    if (!congruence_terms.empty()) {
+      const auto lemmas = abc_prove_unsat_batch(congruence_terms, opts.conelimit, cone_budget_left());
+      for (size_t job = 0; job < terms.size(); ++job) {
+        if (!congruence_jobs[job].empty()
+            && std::ranges::all_of(congruence_jobs[job], [&](size_t ix) { return lemmas[ix] == Cone_verdict::Proven; })) {
+          terms[job] = tm.mkFalse();
+          ++congruence_proven;
+        }
+      }
+    }
+    if (std::getenv("LEC_CONE_LOG") != nullptr && !congruence_terms.empty()) {
+      std::fprintf(stderr,
+                   "[LEC_CONE] congruence: %zu/%zu output jobs discharged from %zu operand lemmas\n",
+                   congruence_proven,
+                   terms.size(),
+                   congruence_terms.size());
+    }
     {
+      // Leave room for the original ABC obligations after the speculative
+      // slice proofs. A few hard slices must not consume the entire pass.
+      const auto fresh_deadline
+          = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max<int64_t>(1, cone_budget_left() / 2));
       bool fresh_budget_spent = false;
       for (const size_t parent : try_ix) {
         if (direct_jobs_of.at(parent).size() <= 1 || fresh_budget_spent) {
@@ -8105,10 +8269,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           for (size_t k = first; k < last; ++k) {
             group = group.isNull() ? terms[jobs[k]] : tm.mkTerm(cvc5::Kind::OR, {group, terms[jobs[k]]});
           }
+          if (group == tm.mkFalse()) {
+            continue;  // already discharged by congruence
+          }
           cvc5::Solver slice_solver(tm);
           slice_solver.setLogic("QF_AUFBV");
+          // Use the same bounded read propagation as the parent solver.
+          // Fresh output slices can still contain large symbolic arrays.
+          slice_solver.setOption("arrays-prop", "1");
           slice_solver.setOption("tlimit-per", "500");
           slice_solver.assertFormula(group);
+          if (std::getenv("LEC_CONE_LOG") != nullptr) {
+            std::fprintf(stderr, "[LEC_CONE] fresh slice %s jobs %zu..%zu\n", ind_diffs[parent].first.c_str(), first, last);
+          }
           if (acc != nullptr) {
             ++acc->checks;
           }
@@ -8132,13 +8305,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           } else {
             ++fresh_slice_unknown;
           }
-          if (budget_on && budget_left_ms() <= budget_floor_ms) {
+          if (std::chrono::steady_clock::now() >= fresh_deadline || (budget_on && budget_left_ms() <= budget_floor_ms)) {
             fresh_budget_spent = true;
           }
         }
       }
     }
     std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats, direct_merge);
+    // The isolated ABC batch may expire before reporting even a constant
+    // false. A later timeout cannot invalidate an already-discharged proof.
+    for (size_t job = 0; job < terms.size(); ++job) {
+      if (terms[job] == tm.mkFalse()) {
+        r1[job] = Cone_verdict::Proven;
+      }
+    }
     if (std::getenv("LEC_CONE_LOG") != nullptr) {
       int addr_ok = 0;
       for (size_t k = 0; k < merge_obl.size(); ++k) {

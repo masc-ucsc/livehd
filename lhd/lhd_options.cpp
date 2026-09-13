@@ -611,6 +611,27 @@ Options parse_args(int argc, char** argv) {
       } else {
         opts.fmt_width = static_cast<int>(n);
       }
+    } else if (a == "--min-repeats" || a == "--max-block-statements" || a == "--max-findings") {
+      auto   v        = std::string{need_value(a, i, argc, argv)};
+      size_t consumed = 0;
+      long   n        = 0;
+      try {
+        n = std::stol(v, &consumed);
+      } catch (const std::exception&) {
+        consumed = 0;
+      }
+      const long minimum = a == "--min-repeats" ? 3 : 1;
+      const long maximum = a == "--max-block-statements" ? 4096 : 1000000;
+      if (v.empty() || consumed != v.size() || n < minimum || n > maximum) {
+        throw Lhd_error{"usage", std::format("{} expects an integer in [{}, {}], got '{}'", a, minimum, maximum, v), ""};
+      }
+      if (a == "--min-repeats") {
+        opts.style_min_repeats = static_cast<size_t>(n);
+      } else if (a == "--max-block-statements") {
+        opts.style_max_block_statements = static_cast<size_t>(n);
+      } else {
+        opts.style_max_findings = static_cast<size_t>(n);
+      }
     } else if (a == "--verify") {  // `pyrope fmt`: re-parse the formatted output
       opts.fmt_verify = true;
     } else if (a == "-h" || a == "--help") {
@@ -731,8 +752,8 @@ Options parse_args(int argc, char** argv) {
   load_config(opts);
 
   // Infer the source language from the file extensions when not given.
-  if ((opts.command == "compile" || opts.command == "sim" || opts.command == "synth")
-      && opts.language.empty() && !opts.files.empty()) {
+  if ((opts.command == "compile" || opts.command == "sim" || opts.command == "synth") && opts.language.empty()
+      && !opts.files.empty()) {
     bool any_prp = false;
     bool any_v   = false;
     for (const auto& f : opts.files) {
@@ -757,8 +778,8 @@ Options parse_args(int argc, char** argv) {
   // sources via the raw `--` args (e.g. `-- -F filelist.f`) instead of a
   // positional .v file, in which case there is no extension to infer from, so
   // pin the language to verilog.
-  if ((opts.command == "compile" || opts.command == "synth") && opts.language.empty()
-      && !opts.raw_args.empty() && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
+  if ((opts.command == "compile" || opts.command == "synth") && opts.language.empty() && !opts.raw_args.empty()
+      && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
     opts.language = "verilog";
   }
 

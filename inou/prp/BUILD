@@ -274,6 +274,13 @@ sh_test(
         # tolg errors "wire 'io.a' is never driven" on valid code. See the
         # fixture header for the root-cause chain and fix direction.
         "wire_field_const_store",
+        # Known BUG tracker (not TBD): a tuple type MIXING a defaulted field
+        # with a plain one cannot be register state, though both UNIFORM
+        # spellings work (equiv/defaulted_tuple.prp, equiv/reg_named_tuple_type.prp).
+        # prp2lnast under-describes the mixed form -- the plain field's type
+        # never reaches LNAST -- so the detupler declines rather than publish a
+        # layout that would silently drop a flop. See the fixture header.
+        "mixed_defaulted_tuple_type",
     ]
 ]
 
@@ -558,7 +565,7 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
             "//inou/prp:%s" % prp_file,
             "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
             "//lhd",
-        ],
+        ] + glob([prp_file[:-len(".prp")] + "/*.prp"], allow_empty = True),
         deps = ["//inou/yosys:scripts"],
     )
     for prp_file in glob(
@@ -705,6 +712,12 @@ _STATEMATCH_FIXME = [
     "phase_hier_latch_neg",          # regs: only 0/1 paired
     "phase_two_clock_ports",         # regs: only 0/2 paired
     "struct_top_port",               # regs: only 0/1 paired
+    "type_alias_generic_attr",       # regs: only 0/1 paired -- the reg lives in the GENERIC CHILD instance
+                                     # (`add<Elem_T>`), the hand-written golden is flat, and the harness
+                                     # compares TOP-level state only, so a hierarchical golden reports
+                                     # "golden has 0" instead. prp-equiv + prp-v2prp2v both PROVE, which is
+                                     # the fixture's actual claim (a named alias through a generic keeps its
+                                     # width on the specialized ports and for `a.[bits]`).
     "wire_reg",                      # regs: only 0/1 paired
 ]
 
@@ -724,7 +737,7 @@ _STATEMATCH_FIXME = [
             "//inou/prp:%s" % prp_file,
             "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
             "//lhd",
-        ],
+        ] + glob([prp_file[:-len(".prp")] + "/*.prp"], allow_empty = True),
         tags = ["fixme"] if (
             prp_file.split("/")[-1].split(".")[0] in _STATEMATCH_FIXME
         ) else [],
@@ -1030,7 +1043,7 @@ _V2PRP2V_VERILOG_FIXME = [
             "//inou/prp:tests/equiv/%s.v" % base,
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
-        ],
+        ] + glob(["tests/equiv/%s/*.prp" % base], allow_empty = True),
         tags = ["fixme"] if (
             base in _V2PRP2V_NATIVE_FIXME or
             base in _V2PRP2V_VERILOG_FIXME
