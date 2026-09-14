@@ -506,6 +506,55 @@ TEST(CombEquiv, IndexedCarryLoopCertificateOmitsNoDescriptorObligation) {
   EXPECT_NE(result.loop_certificates.front().find("body=indexed_body"), std::string::npos);
 }
 
+TEST(CombEquiv, NestedLoopCertificatesSurviveUnresolvedParents) {
+  constexpr uint64_t count = (1u << 20) + 1;
+  for (bool outer_loop : {false, true}) {
+    SCOPED_TRACE(outer_loop);
+    hhds::GraphLibrary ref_lib, impl_lib;
+    auto               ref_child  = build_active_loop(ref_lib, count);
+    auto               impl_child = build_active_loop(impl_lib, count);
+    lec::Lec_options   options;
+    options.engine   = "ind";
+    options.collapse = {"active_body"};
+    auto child_proof = lec::prove_equal(ref_child.get(), impl_child.get(), options);
+    ASSERT_EQ(child_proof.verdict, Verdict::Proven) << child_proof.detail;
+    const auto wrap = [&](hhds::GraphLibrary& lib, const std::shared_ptr<hhds::Graph>& child) {
+      auto io = lib.create_io("wrapper");
+      io->add_input("seed", 0);
+      io->add_input("enable", 1);
+      io->add_output("result", 2);
+      for (auto name : {"seed", "enable", "result"}) {
+        io->set_bits(name, std::string_view(name) == "enable" ? 1 : 9);
+        io->set_unsign(name, true);
+      }
+      auto graph = io->create_graph();
+      auto node  = graph_util::create_typed_node(*graph, Ntype_op::Sub);
+      if (outer_loop) {
+        node.set_subnode(child->get_io(), hhds::Subnode_loop{.count = count});
+        node.create_driver_pin(2).connect_sink(node.create_sink_pin(0));
+      } else {
+        node.set_subnode(child->get_io());
+      }
+      graph->get_input_pin("seed").connect_sink(node.create_sink_pin(0));
+      graph->get_input_pin("enable").connect_sink(node.create_sink_pin(1));
+      auto result = node.create_driver_pin(2);
+      graph_util::set_ubits(result, 9);
+      result.connect_sink(graph->get_output_pin("result"));
+      return graph;
+    };
+    auto ref  = wrap(ref_lib, ref_child);
+    auto impl = wrap(impl_lib, impl_child);
+    if (outer_loop) {
+      // The outer body theorem was just discharged; even the huge inner
+      // loop implementation must now be excluded from this obligation.
+      options.collapse = {"active_top"};
+    }
+    auto result = lec::prove_equal(ref.get(), impl.get(), options);
+    EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+    EXPECT_EQ(result.loop_certificates.size(), 1);
+  }
+}
+
 TEST(CombEquiv, IndexedCarryDescriptorMismatchFallsBackAndRefutes) {
   hhds::GraphLibrary ref_lib;
   hhds::GraphLibrary impl_lib;

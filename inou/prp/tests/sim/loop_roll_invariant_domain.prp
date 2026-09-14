@@ -1,20 +1,10 @@
 /*
 :name: loop_roll_invariant_domain
 :type: simulation
-:expect_instances: u_loop_0=1 u_loop_1=1
+:expect_instances: u_loop_0=2 *=2
 */
-// A loop whose body nests a loop over a LOOP-INVARIANT domain must DECLINE to
-// roll, not roll and then die in tolg.
-//
-// lift_loop_body turns invariants into input ports of the lifted definition
-// exactly as it does the index and the carries, so `n` is runtime inside
-// `top.__loop0` and the inner `for j in 0..<n` can no longer be unrolled there
-// ("upass.tolg: non-comptime 'for' loop"). The planner's nested-domain guard
-// seeded its taint set from the index and the carries only, so it accepted this
-// shape and the compile then hard-failed on source that unrolls fine.
-//
-// `:expect_instances: u_loop_0=1 u_loop_1=1` IS the claim: the decline must happen at
-// planning time, leaving the loop source-unrolled.
+// The domain constant is captured by value in the outer body. Both loops
+// remain compact, with the inner subloop called from the outer definition.
 
 pub mod top(a:u8) -> (o:u12@[0]) {
   const n:u8  = 4
@@ -25,7 +15,7 @@ pub mod top(a:u8) -> (o:u12@[0]) {
   o = acc
 }
 
-test invariant_domain.unrolls {
+test invariant_domain.preserves_hierarchy {
   mut dut = top
   tick 1 {
     dut.a = 5

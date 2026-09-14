@@ -4932,6 +4932,24 @@ private:
       return;
     }
 
+    // A register carry has two additional fields: the enclosing register and
+    // a temporary bound to its pending D before the call. Q remains available
+    // under the ordinary register name throughout payload lowering.
+    for (auto map : lnast_->children(kids[lnast_rolled_for::carries])) {
+      auto in  = lnast_->get_first_child(map);
+      auto out = in.is_invalid() ? in : lnast_->get_sibling_next(in);
+      auto reg = out.is_invalid() ? out : lnast_->get_sibling_next(out);
+      if (!reg.is_invalid()) {
+        auto seed = lnast_->get_sibling_next(reg);
+        if (seed.is_invalid()) {
+          error_here("upass.tolg: malformed rolled_for register carry");
+          return;
+        }
+        auto value = set_mask_base(reg);
+        record(lnast_->get_name(seed), value.pin, value.mw);
+      }
+    }
+
     const std::string saved_index = std::exchange(rolled_index_port_, std::string(lnast_->get_name(kids[lnast_rolled_for::index])));
     last_lowered_sub_             = {};
     lower_stmts(kids[lnast_rolled_for::lowering_payload]);

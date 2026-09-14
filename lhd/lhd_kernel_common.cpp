@@ -2120,6 +2120,19 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
            ")\n";
   }
 
+  // The standalone root does not inherit LiveHD's .bazelrc. Match its macOS
+  // deployment target: Slop uses libc++ APIs unavailable at Bazel's older
+  // default target. Apply this to dependencies and the driver as well.
+  {
+    std::ofstream ofs(std::format("{}/.bazelrc", dir));
+    ofs << "# Match the C++ library requirements of LiveHD and Slop.\n"
+           "build --enable_platform_specific_config\n"
+           "build:macos --copt=-mmacosx-version-min=26.0\n"
+           "build:macos --linkopt=-mmacosx-version-min=26.0\n"
+           "build:macos --host_copt=-mmacosx-version-min=26.0\n"
+           "build:macos --host_linkopt=-mmacosx-version-min=26.0\n";
+  }
+
   // BUILD — one cc_library compiling every module's <name>.cpp against
   // @hlop//hlop (C++23). Each .cpp is its own compile action, so editing one
   // module's body recompiles only that .o (the per-module bodies no longer live

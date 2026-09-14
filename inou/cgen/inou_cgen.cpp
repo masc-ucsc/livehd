@@ -12,6 +12,7 @@
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
 #include "sim_color_plan.hpp"
+#include "sim_loop_fusion.hpp"
 #include "split_selfref.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
@@ -243,6 +244,19 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
   }
 
+  // Fuse only in the private simulator library, before discovery retains any
+  // occurrence handles. The fused body keeps ordinary child calls and native
+  // ordinal state; synthesis and LEC continue to see their original loops.
+  std::vector<std::shared_ptr<hhds::Graph>> fused_bodies;
+  for (const auto& graph : sim_graphs) {
+    if (!graph) {
+      continue;
+    }
+    auto bodies = livehd::sim::fuse_parallel_loops(graph.get());
+    fused_bodies.insert(fused_bodies.end(), bodies.begin(), bodies.end());
+  }
+  sim_graphs.insert(sim_graphs.end(), fused_bodies.begin(), fused_bodies.end());
+
   // The replacement scheduler starts with a read-only occurrence-wide plan.
   // Build it only after ALL simulator-private structural preparation above:
   // retained HHDS occurrence handles assert if a later rewrite advances the
@@ -348,7 +362,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (!entity.empty() && entity.front() == '%') {
       continue;  // a `test` block's minted comb is never emitted at all
     }
-    const bool root  = is_selected_root(full, entity);
+    const bool root  = is_selected_root(full, entity) || (backend == "llvm" && compact_kernel_defs.contains(g.get()));
     auto       probe = probe_for(g);
     probe.share_digest_memo(&digest_memo);
     if (!probe.generation_current(g.get(), root)) {
@@ -373,14 +387,17 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const auto        pos      = full.find_last_of("./");
     const std::string entity   = pos == std::string::npos ? full : full.substr(pos + 1);
     const bool        selected = is_selected_root(full, entity);
-    if (!selected || (!entity.empty() && entity.front() == '%')) {
+    // A compact body is a separate executable definition. Give LLVM the same
+    // versioned schedule used by the root instead of emitting a Slop body.
+    const bool        compact_root = backend == "llvm" && compact_kernel_defs.contains(g.get());
+    if ((!selected && !compact_root) || (!entity.empty() && entity.front() == '%')) {
       continue;
     }
     if (already_generated.contains(g.get())) {
       wrote_plan = true;  // the previous run's plan is still the current one
       continue;
     }
-    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty());
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), backend == "llvm");
     plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")

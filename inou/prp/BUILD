@@ -24,7 +24,17 @@ exports_files([
     "tests/sim/color_kernel_llvm_mem_whole.prp",
     "tests/sim/mem_sim_gated_clock.prp",
     "tests/sim/loop_roll_conditional_state_call.prp",
+    "tests/sim/loop_state_multi_carry.prp",
+    "tests/sim/loop_mixed_carry.prp",
+    "tests/sim/div_narrow_result.prp",
+    "tests/sim/loop_inlined_capture.prp",
+    "tests/sim/loop_inlined_array.prp",
+    "tests/sim/mem_wensize_lanes.prp",
+    "tests/sim/loop_fused_state.prp",
+    "tests/sim/loop_carry_kinds_sim.prp",
     "tests/sim/loop_roll_carry.prp",
+    "tests/sim/loop_hierarchy.prp",
+    "tests/sim/loop_invariant_broadcast.prp",
 ])
 
 # The pyrope/verilog golden pairs (used by the lhd flow-matrix tests).

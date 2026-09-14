@@ -32,6 +32,10 @@ as scalar carriers. A whole-array carry is conservatively dependent even when
 its individual element updates might be independent.
 
 For expanded carry loops, ABC folds iteration indices and control constants.
+Carry-independent data computations are extracted into a shared body before
+expansion. ABC maps that body once and reconnects its instances to the expanded
+carry chain. Index-only routing stays with the carry so constant propagation can
+simplify the per-iteration masks and connections.
 Bodies with explicit ABC region options remain boundaries. Shared pattern sites
 are specialized when their inputs become constant; dynamic sites retain reuse.
 The body-builder hook replaces each region with an ABC-mapped netlist.

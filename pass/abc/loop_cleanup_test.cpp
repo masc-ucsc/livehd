@@ -23,7 +23,7 @@ struct Design {
   std::shared_ptr<hhds::Graph> body, top;
   hhds::Node_class             independent, carried;
 
-  Design() {
+  explicit Design(bool parallel_data = false) {
     auto bio = lib.create_io("body");
     bio->add_input("a", 1);
     bio->add_input("idx", 2);
@@ -54,6 +54,19 @@ struct Design {
     auto z = mask.create_driver_pin(0);
     gu::set_ubits(z, 4);
     z.connect_sink(body->get_output_pin("z"));
+    if (parallel_data) {
+      bio->add_input("data", 5);
+      bio->set_bits("data", 4);
+      bio->set_unsign("data", true);
+      auto data = body->get_input_pin("data");
+      gu::set_ubits(data, 4);
+      auto independent_xor = gu::create_typed_node(*body, Ntype_op::Xor);
+      data.connect_sink(independent_xor.create_sink_pin(0));
+      idx.connect_sink(independent_xor.create_sink_pin(0));
+      auto value = independent_xor.create_driver_pin(0);
+      gu::set_ubits(value, 4);
+      value.connect_sink(sum.create_sink_pin(0));
+    }
 
     auto tio = lib.create_io("top");
     tio->add_input("x", 1);
@@ -88,6 +101,9 @@ struct Design {
         carried = n;
       } else {
         independent = n;
+      }
+      if (parallel_data) {
+        input.connect_sink(n.create_sink_pin(5));
       }
     }
   }
@@ -192,10 +208,13 @@ TEST(LoopCleanup, MappingThenStitchingPreservesIndependentAndCarriedResults) {
     for (auto flatten : {livehd::partition::Flatten_mode::off, livehd::partition::Flatten_mode::on}) {
       SCOPED_TRACE(unroll);
       SCOPED_TRACE(static_cast<int>(flatten));
-      Design ref, d;
+      Design ref(true), d(true);
       ASSERT_TRUE(gu::materialize_occurrences_all(ref.graphs(), "test"));
       abc::Loop_preparation prep;
       ASSERT_TRUE(abc::prepare_loop_bodies(d.graphs(), unroll, prep));
+      EXPECT_EQ(prep.shared_bodies.size(), unroll ? 1u : 0u);
+      auto graphs = d.graphs();
+      graphs.insert(graphs.end(), prep.shared_bodies.begin(), prep.shared_bodies.end());
       hhds::GraphLibrary mapped_lib;
       abc::Map_options   options;
       options.library      = "inou/prp/tests/abc/test.lib";
@@ -203,7 +222,7 @@ TEST(LoopCleanup, MappingThenStitchingPreservesIndependentAndCarriedResults) {
       abc::Mapper mapper(options);
       mapper.set_outlib(&mapped_lib);
       ASSERT_TRUE(Pass_partition::build_decomposition(
-          d.graphs(),
+          graphs,
           &mapped_lib,
           "top",
           false,

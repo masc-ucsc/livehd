@@ -1,0 +1,34 @@
+/*
+:name: loop_fused_state
+:type: simulation
+*/
+mod fused_state_lane(a:u8) -> (q:u16@[0]) {
+  reg acc:u16 = 0
+  wrap acc = acc + a
+  q = acc
+}
+
+mod loop_fused_state(a:u8) -> (first:u16@[0], second:u16@[0]) {
+  mut x:u16 = 0
+  for i in 0..<3 {
+    const value = fused_state_lane(a=a + i)
+    wrap x = x + value
+  }
+  first = x
+  mut y:u16 = 0
+  for i in 0..<3 {
+    const value = fused_state_lane(a=a + i + 1)
+    wrap y = y + value
+  }
+  second = y
+}
+
+test loop_fused_state.separate_state_per_lane {
+  mut dut = loop_fused_state
+  tick 4 {
+    dut.a = 1
+    step
+    assert(dut.first == (6 * (clock + 1)), "first loop advances once")
+    assert(dut.second == (9 * (clock + 1)), "second loop advances once")
+  }
+}

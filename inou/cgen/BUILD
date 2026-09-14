@@ -122,6 +122,18 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "sim_loop_fusion_test",
+    srcs = ["sim_loop_fusion_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":inou_cgen",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
 # A cgen Memory becomes `<wrapper instance>.data` when its Verilog is read
 # back. Two same-shaped uninitialized memories pin the reversible instance
 # provenance used by native LEC to retain exact state correspondence.

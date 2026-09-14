@@ -1234,8 +1234,11 @@ protected:
     std::string inst;                      // instance name for the replicated Sub
     bool        has_loop_control = false;  // body owns break/continue and needs activation roles
 
+    absl::flat_hash_map<std::string, std::string> actual_names;  // body-local name -> enclosing binding
+    std::vector<std::pair<std::string, Dlop>>     constants;     // copied values, never boundary ports
     std::vector<std::string>                    invariants;
     std::vector<std::string>                    carries;
+    absl::flat_hash_set<std::string>              registers;  // separate invariant Q and carried D
     std::vector<std::string>                    finals;  // must-written, no incoming ordinal-0 value
     absl::flat_hash_map<std::string, Spec_port> types;   // boundary name -> declared type
   };
@@ -1245,6 +1248,7 @@ protected:
   // `mut` local seeded from the input port and written back to the output port.
   static constexpr std::string_view kCarryInSuffix  = "__carry_in";
   static constexpr std::string_view kCarryOutSuffix = "__carry_out";
+  static constexpr std::string_view kCarryNextSuffix = "__carry_next";
   static constexpr std::string_view kLoopValid      = "__valid";
   static constexpr std::string_view kLoopExec       = "__loop_exec";
   static constexpr std::string_view kLoopNextActive = "__next_active";

@@ -1,0 +1,19 @@
+/*
+:name: loop_register_transport
+:type: lec
+*/
+// Rolled and expanded implementations must agree on Q/D across nested loops,
+// conditional writes, and partial writes before and after the loop boundary.
+pub mod top(reset:bool, clock:bool, enable:bool, x:u4) -> (y:u16@[0]) {
+  reg word:u16 = 0x1234
+  word#[0 ..+ 8] = 0xEE
+  for i in 0..<2 {
+    if enable {
+      for j in 0..<2 {
+        word#[(8+i*4+j*2) ..+ 2] = (word#[0 ..+ 2] + x + i + j) & 3
+      }
+    }
+  }
+  word#[4 ..+ 4] = 0xA
+  y = word
+}

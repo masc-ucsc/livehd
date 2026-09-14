@@ -1,11 +1,10 @@
 /*
 :name: loop_roll_external_reg
 :type: simulation
-:expect_instances: lane__li*=4 *=4
+:expect_instances: u_loop_0=1 lane=1 *=2
 */
-// An enclosing reg is deliberately not a value carry: every source-unrolled
-// iteration reads the same Q and rewrites the same D. Until Pyrope has a ref
-// mod boundary, the roller must decline this shape and preserve that behavior.
+// Every iteration reads the same Q and rewrites the same D. The compact loop
+// carries D separately while the enclosing definition owns the flop.
 
 mod reg_lane(x:u8) -> (z:u8@[0]) {
   z = x + 1

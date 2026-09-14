@@ -40,6 +40,9 @@ public:
     ge,
   };
 
+  // Packed ABI: inputs, outputs, and changed are disjoint buffers and do not
+  // overlap owner storage. Generated callers guarantee this for LLVM noalias.
+  // Values (and boundary casts) load lazily at their first arithmetic use.
   explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi = false);
   ~Cgen_llvm();
 

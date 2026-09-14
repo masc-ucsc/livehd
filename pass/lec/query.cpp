@@ -9364,6 +9364,34 @@ bool collapse_names_def(hhds::Graph* root, std::string_view full_name, const Lec
   return false;
 }
 
+// Only unresolved hierarchy belongs to the current obligation. A discharged
+// child is a sequence box; expanding loops inside its implementation repeats a
+// proof already completed below us (and can exceed the expansion limit).
+std::vector<std::shared_ptr<hhds::Graph>> unresolved_loop_graphs(const std::shared_ptr<hhds::Graph>& root,
+                                                                 const Lec_options&                  opts) {
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+  absl::flat_hash_set<hhds::Gid>            seen;
+  std::vector<std::shared_ptr<hhds::Graph>> work{root};
+  while (!work.empty()) {
+    auto graph = std::move(work.back());
+    work.pop_back();
+    if (!graph || !seen.insert(graph->get_gid()).second) {
+      continue;
+    }
+    graphs.push_back(graph);
+    for (auto node : graph->body().nodes()) {
+      if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto io = node.get_subnode_io();
+      if (io && !collapse_names_def(root.get(), io->get_name(), opts)) {
+        work.push_back(node.get_subnode_graph());
+      }
+    }
+  }
+  return graphs;
+}
+
 struct Loop_port_contract {
   std::string name;
   uint32_t    bits                                        = 0;
@@ -9710,7 +9738,33 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       failure.detail      = "could not copy compact-loop definitions into private LEC scratch state";
       return failure;
     }
+    ref_graphs        = unresolved_loop_graphs(ref_top, opts);
+    impl_graphs       = unresolved_loop_graphs(impl_top, opts);
     auto certificates = summarize_loop_pairs(ref_top.get(), impl_top.get(), opts);
+    // A failed parent theorem does not discard discharged grandchildren. Find
+    // the corresponding unresolved definitions and retain their local loop
+    // certificates while the remaining parent logic propagates upward.
+    // Index the impl side by entity once: the pairing is by unique entity name,
+    // so a per-ref linear rescan re-derived the same table for every definition.
+    absl::flat_hash_map<std::string, std::pair<std::shared_ptr<hhds::Graph>, size_t>> impl_by_entity;
+    for (const auto& mg : impl_graphs) {
+      if (mg == impl_top) {
+        continue;
+      }
+      auto& slot = impl_by_entity[def_entity(mg->get_name())];
+      slot.first = mg;
+      ++slot.second;
+    }
+    for (const auto& rg : ref_graphs) {
+      if (rg == ref_top) {
+        continue;
+      }
+      const auto it = impl_by_entity.find(def_entity(rg->get_name()));
+      if (it != impl_by_entity.end() && it->second.second == 1) {
+        auto nested = summarize_loop_pairs(rg.get(), it->second.first.get(), opts);
+        certificates.insert(certificates.end(), nested.begin(), nested.end());
+      }
+    }
     if (!graph_util::materialize_occurrences_all(ref_graphs, "pass.lec")
         || !graph_util::materialize_occurrences_all(impl_graphs, "pass.lec")) {
       Query_result failure;

@@ -7798,18 +7798,6 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   }
   const auto count = static_cast<uint64_t>(count_wide);
 
-  // Inside an inlined frame the two halves of this transform disagree about
-  // spelling: `ivar` came from current_text(), so it is the frame-renamed
-  // `<tag>i`, while collect_body_vars reads and copy_subtree_into COPIES raw
-  // LNAST names. The lifted definition would declare a `<tag>i` port the copied
-  // body never mentions, the raw `i` would be classified as a loop invariant,
-  // and emit_rolled_loop_call binds its actuals in a scratch tree pushed with an
-  // EMPTY tag — so the carry initial value would read the enclosing module's
-  // `acc` instead of the frame's `<tag>acc`. Unrolling handles this shape.
-  if (lm->in_inline_frame()) {
-    return refuse("the loop is inside an inlined frame (its names are frame-renamed, the copied body's are raw)");
-  }
-
   const auto& ln       = *lm->get_lnast();
   out.has_loop_control = subtree_has_loop_control(ln, body_stmts);
   const auto loop_nid  = ln.get_parent(body_stmts);  // the `for` node: the order anchor for written_before
@@ -7824,6 +7812,12 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   out.step  = step;
   out.count = count;
   out.ivar  = ivar;
+  for (const auto& name : read) {
+    out.actual_names[name] = lm->frame_variable(name);
+  }
+  for (const auto& name : written) {
+    out.actual_names[name] = lm->frame_variable(name);
+  }
 
   // Declared-in-body names are local; the iteration variable is the index.
   const auto is_local = [&](const std::string& n) { return declared.contains(n) || n == ivar; };
@@ -7843,8 +7837,13 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     if (is_local(n) || written.contains(n)) {
       continue;
     }
-    out.invariants.emplace_back(n);
+    if (auto value = symbol_table_.known_const_scalar(out.actual_names.at(n))) {
+      out.constants.emplace_back(n, *value);
+    } else {
+      out.invariants.emplace_back(n);
+    }
   }
+  std::ranges::sort(out.constants, {}, &std::pair<std::string, Dlop>::first);
   // Deterministic port order: the lifted definition's interface must not depend
   // on hash iteration order, or two compiles of the same source disagree.
   std::ranges::sort(out.carries);
@@ -7883,7 +7882,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   // source-unrolled: upass.bitwidth observes successive values and emits the
   // range/overflow diagnostics that compiling the lifted body once cannot see.
   // Calls make the boundary runtime even with constant-looking actuals.
-  const auto known_before_loop   = [&](const std::string& name) { return symbol_table_.known_const_scalar(name).has_value(); };
+  const auto known_before_loop
+      = [&](const std::string& name) { return symbol_table_.known_const_scalar(out.actual_names.at(name)).has_value(); };
   const bool constant_arithmetic = std::ranges::all_of(out.invariants, known_before_loop)
                                    && std::ranges::all_of(out.carries, known_before_loop) && !subtree_has_call(ln, body_stmts);
 
@@ -7897,9 +7897,15 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
         return &ce;
       }
     }
+    for (const auto& ce : encl_io.outputs) {
+      if (ce.name == nm) {
+        return &ce;
+      }
+    }
     return nullptr;
   };
   const auto type_of = [&](const std::string& n, Spec_port& sp) {
+    const auto actual     = lm->frame_variable(n);
     const auto from_facts = [&](const std::optional<upass::decl_facts::Facts>& f) {
       if (!f) {
         return false;
@@ -7914,14 +7920,14 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       }
       return false;
     };
-    if (from_facts(upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), n))) {
+    if (from_facts(upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), actual))) {
       return true;
     }
     // The variable's declaration facts retain the nominal alias name even
     // when its concrete range has not yet flowed onto the value entry. Resolve
     // the alias bundle here, before outlining into a definition that cannot see
     // the caller's type namespace.
-    if (const auto alias = try_typename(n); !alias.empty()) {
+    if (const auto alias = try_typename(actual); !alias.empty()) {
       if (from_facts(upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), alias))) {
         return true;
       }
@@ -7949,9 +7955,17 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
           if (nid.is_invalid()) {
             return false;
           }
-          if (Lnast_ntype::is_declare(tree.get_type(nid))) {
+          const auto parent      = tree.get_parent(nid);
+          const auto grandparent = parent.is_invalid() ? parent : tree.get_parent(parent);
+          const bool io_port     = Lnast_ntype::is_store(tree.get_type(nid)) && !parent.is_invalid()
+                                   && Lnast_ntype::is_tuple_add(tree.get_type(parent)) && !grandparent.is_invalid()
+                                   && Lnast_ntype::is_io(tree.get_type(grandparent));
+          if (Lnast_ntype::is_declare(tree.get_type(nid)) || io_port) {
             auto target = tree.get_first_child(nid);
             auto type_n = target.is_invalid() ? target : tree.get_sibling_next(target);
+            if (io_port && !type_n.is_invalid()) {
+              type_n = tree.get_sibling_next(type_n);  // skip the port default
+            }
             if (!target.is_invalid() && !type_n.is_invalid() && Lnast_ntype::is_ref(tree.get_type(target))
                 && tree.get_name(target) == wanted) {
               const auto tt = tree.get_type(type_n);
@@ -8072,7 +8086,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     // alias, so emitting `ref(W)` as the port type yields a 1-bit port and
     // silently truncates the carry. Prefer the declared range; refuse if the
     // name only has an alias.
-    if (auto dt = try_decl_type(n); dt && (dt->range_max || dt->range_min)) {
+    if (auto dt = try_decl_type(actual); dt && (dt->range_max || dt->range_min)) {
       sp = Spec_port{.inject = true, .max = dt->range_max, .min = dt->range_min};
       return true;
     }
@@ -8094,28 +8108,14 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     return false;
   };
   for (const auto& n : out.carries) {
-    // A register declared OUTSIDE and written inside the loop is legal Pyrope
-    // and perfectly meaningful — unrolled, each iteration just reads Q and
-    // rewrites D. Rolling it is what is blocked: the lifted body is a `mod`, so
-    // it would have to take the register BY REFERENCE (`ref acc`) to write the
-    // real flop rather than a copy of its value. `ref` is comb-only today —
-    // prp2lnast.cpp:4504-4513 rejects a `ref` parameter on a `mod` outright —
-    // so there is no way to express it. Lifting it as an ordinary value carry
-    // instead turned the flop's next state into the identity (it held its reset
-    // value forever), which is why this refuses rather than mis-lowers.
-    //
-    // TBD: lift this refusal once `ref` on a `mod` boundary exists. That is an
-    // independent Pyrope feature, not part of this proposal.
+    // The flop stays in the enclosing definition. Q is an invariant input;
+    // only the pending D value participates in the ordinal carry chain.
     if (decl_storage_class(ln, ln.get_root(), n) == "reg") {
-      return refuse(
-          std::format("`{}` is a register declared outside the loop; rolling would need to pass it as `ref {}`, "
-                      "and `ref` on a `mod` boundary is not supported yet (TBD)",
-                      n,
-                      n));
+      out.registers.insert(n);
     }
     // A non-final variable still needs an ordinal-0 value. Conditional writes,
     // reads-before-write and breakable loops all land here deliberately.
-    if (!written_before(ln, loop_nid, n)) {
+    if (!out.registers.contains(n) && !written_before(ln, loop_nid, n)) {
       return refuse(std::format("`{}` is written only inside the loop (no value enters ordinal 0)", n));
     }
     Spec_port sp;
@@ -8134,7 +8134,26 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   for (const auto& n : out.invariants) {
     Spec_port sp;
     if (!type_of(n, sp)) {
-      return refuse(std::format("loop-invariant `{}` has no declared type", n));
+      // Unlike a carry, an invariant cannot widen while this loop executes.
+      // Its inferred value envelope is therefore a valid boundary contract.
+      const auto& actual = out.actual_names.at(n);
+      if (auto bundle = symbol_table_.get_bundle(actual)) {
+        const auto& value = bundle->get_entry(bundle_path::of_string("0"));
+        if (value.bw_max.is_integer() && value.bw_min.is_integer()) {
+          sp = Spec_port{.inject = true, .max = value.bw_max, .min = value.bw_min};
+        }
+      }
+      if (!sp.inject) {
+        const auto& ranges = ln.bw_meta().ranges;
+        if (auto it = ranges.find(actual); it != ranges.end() && !it->second.unbounded) {
+          sp = Spec_port{.inject = true,
+                         .max    = *Dlop::create_integer(it->second.max),
+                         .min    = *Dlop::create_integer(it->second.min)};
+        }
+      }
+      if (!sp.inject) {
+        return refuse(std::format("loop-invariant `{}` has no inferred type", n));
+      }
     }
     out.types[n] = sp;
   }
@@ -8211,6 +8230,12 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   // a reg or a mod instance anywhere in the enclosing comb's body.
   body->set_lambda_kind(src->get_lambda_kind() == "comb" ? "comb" : "mod");
   body->set_template(false);
+  // The storage type has a sign bit, but the index only takes values in this
+  // elaborated domain. Preserve that tighter fact for shift/range analysis.
+  const auto last_index
+      = static_cast<int64_t>(static_cast<__int128>(plan.first) + static_cast<__int128>(plan.count - 1) * plan.step);
+  body->bw_meta().ranges[plan.ivar]
+      = BitwidthEntry{.min = std::min(plan.first, last_index), .max = std::max(plan.first, last_index), .unbounded = false};
 
   // One io port declaration: store(ref(name), const(nil), <type>) [+ stages].
   const auto add_port = [&](const Lnast_nid& parent, const std::string& name, const Spec_port& p, bool is_output) {
@@ -8253,6 +8278,9 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   }
   for (const auto& n : plan.carries) {
     add_port(ins, n + std::string(kCarryInSuffix), plan.types.at(n), false);
+    if (plan.registers.contains(n)) {
+      add_port(ins, n, plan.types.at(n), false);
+    }
   }
   auto outs = body->add_child(io_n, Lnast_ntype::create_tuple_add());
   if (plan.has_loop_control) {
@@ -8266,6 +8294,15 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   }
 
   auto stmts = body->add_child(root, Lnast_ntype::create_stmts());
+
+  // Capture elaborated constants by value. Making these ordinary inputs would
+  // erase their compile-time meaning in nested domains, type widths and generic
+  // bindings, besides needlessly adding hardware ports.
+  for (const auto& [name, value] : plan.constants) {
+    auto bind = body->add_child(stmts, Lnast_ntype::create_store());
+    body->add_child(bind, Lnast_node::create_ref(name));
+    body->add_child(bind, Lnast_node::create_const(value.to_pyrope()));
+  }
 
   if (plan.has_loop_control) {
     auto dcl = body->add_child(stmts, Lnast_ntype::create_declare());
@@ -8287,7 +8324,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   for (const auto& n : plan.carries) {
     const auto& p   = plan.types.at(n);
     auto        dcl = body->add_child(stmts, Lnast_ntype::create_declare());
-    body->add_child(dcl, Lnast_node::create_ref(n));
+    body->add_child(dcl, Lnast_node::create_ref(plan.registers.contains(n) ? n + std::string(kCarryNextSuffix) : n));
     if (p.kind == Io_kind::boolean) {
       body->add_child(dcl, Lnast_ntype::create_prim_type_bool());
     } else if (!p.type_name.empty()) {
@@ -8306,7 +8343,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     body->add_child(dcl, Lnast_node::create_const("mut"));
 
     auto seed = body->add_child(stmts, Lnast_ntype::create_store());
-    body->add_child(seed, Lnast_node::create_ref(n));
+    body->add_child(seed, Lnast_node::create_ref(plan.registers.contains(n) ? n + std::string(kCarryNextSuffix) : n));
     body->add_child(seed, Lnast_node::create_ref(n + std::string(kCarryInSuffix)));
   }
 
@@ -8397,6 +8434,55 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     }
   }
 
+  // Preserve nonblocking register semantics while the flop remains outside
+  // the loop. Explicit reads see Q; stores and partial-write bases update D.
+  if (!plan.registers.empty()) {
+    absl::flat_hash_map<std::string, std::string> register_writes;
+    std::function<void(const Lnast_nid&)>         collect_register_writes = [&](const Lnast_nid& nid) {
+      if (Lnast_ntype::is_store(body->get_type(nid))) {
+        auto dst   = body->get_first_child(nid);
+        auto value = dst.is_invalid() ? dst : body->get_sibling_next(dst);
+        if (!value.is_invalid() && plan.registers.contains(std::string(body->get_name(dst)))
+            && Lnast_ntype::is_ref(body->get_type(value))) {
+          register_writes[std::string(body->get_name(value))] = body->get_name(dst);
+        }
+      }
+      for (auto child : body->children(nid)) {
+        collect_register_writes(child);
+      }
+    };
+    collect_register_writes(stmts);
+    std::function<void(const Lnast_nid&, bool)> rewrite_registers = [&](const Lnast_nid& nid, bool keys) {
+      const auto type   = body->get_type(nid);
+      auto       target = body->get_first_child(nid);
+      if (Lnast_ntype::is_store(type) && !keys && !target.is_invalid()) {
+        const std::string name{body->get_name(target)};
+        if (plan.registers.contains(name)) {
+          body->set_name(target, name + std::string(kCarryNextSuffix));
+        }
+      }
+      if (Lnast_ntype::is_set_mask(type) && !target.is_invalid()) {
+        auto base = body->get_sibling_next(target);
+        if (!base.is_invalid()) {
+          const std::string name{body->get_name(base)};
+          if (auto it = register_writes.find(std::string(body->get_name(target))); it != register_writes.end()) {
+            // SSA may name the previous partial-write result as the base.
+            // That temporary belongs to the enclosing definition; this
+            // boundary transports the accumulated pending value instead.
+            body->set_name(base, it->second + std::string(kCarryNextSuffix));
+          } else if (plan.registers.contains(name)) {
+            body->set_name(base, name + std::string(kCarryNextSuffix));
+          }
+        }
+      }
+      const bool child_keys = makes_store_keys(*body, nid);
+      for (auto child : body->children(nid)) {
+        rewrite_registers(child, child_keys);
+      }
+    };
+    rewrite_registers(stmts, false);
+  }
+
   // A callee named through an IMPORT ALIAS (`const tap = import("tap.tap")`,
   // then `tap(...)`) is a const bound to the callee's tree name in THIS unit's
   // symbol table; the lifted definition is compiled on its own and cannot see
@@ -8438,7 +8524,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   for (const auto& n : plan.carries) {
     auto wb = body->add_child(stmts, Lnast_ntype::create_store());
     body->add_child(wb, Lnast_node::create_ref(n + std::string(kCarryOutSuffix)));
-    body->add_child(wb, Lnast_node::create_ref(n));
+    body->add_child(wb, Lnast_node::create_ref(plan.registers.contains(n) ? n + std::string(kCarryNextSuffix) : n));
   }
   return body;
 }
@@ -8454,15 +8540,16 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   // that would let the pre-loop keep folding the PRE-loop value of every carry.
   if (!staging) {
     const auto invalidate = [&](const std::string& n) {
+      const auto& actual = plan.actual_names.at(n);
       if (const auto tit = plan.types.find(n); tit != plan.types.end() && tit->second.array_size > 0) {
         const std::string unit{lm->get_top_module_name()};
         for (int64_t e = 0; e < tit->second.array_size; ++e) {
-          const std::string lane = n + "." + std::to_string(e);
+          const std::string lane = actual + "." + std::to_string(e);
           (void)symbol_table_.set(lane, Bundle::invalid_lconst);
           symbol_table_.field_touched.insert(Symbol_table::field_touch_key(unit, lane));
         }
       } else {
-        (void)symbol_table_.set(n, Bundle::invalid_lconst);
+        (void)symbol_table_.set(actual, Bundle::invalid_lconst);
       }
     };
     for (const auto& n : plan.finals) {
@@ -8496,16 +8583,32 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     auto map = staging->add_child(carry_map, Lnast_ntype::create_store());
     staging->add_child(map, Lnast_node::create_ref(n + std::string(kCarryInSuffix)));
     staging->add_child(map, Lnast_node::create_const(n + std::string(kCarryOutSuffix)));
+    if (plan.registers.contains(n)) {
+      staging->add_child(map, Lnast_node::create_ref(plan.actual_names.at(n)));
+      staging->add_child(map, Lnast_node::create_ref("%" + plan.inst + "_" + n + "_seed"));
+    }
   }
-  copy_subtree_into(src, source_body, staging, rolled, nullptr);
+  // The retained source is replayed when a processed comb is inlined. Its
+  // enclosing constant declarations may already have been folded away, so
+  // retain their values here as well as in the lifted implementation.
+  absl::flat_hash_map<std::string, Generic_bind> captured;
+  for (const auto& [name, value] : plan.constants) {
+    captured[name].const_text = value.to_pyrope();
+  }
+  copy_subtree_into(src, source_body, staging, rolled, &captured);
 
   auto                                            lowered = staging->add_child(rolled, Lnast_ntype::create_stmts());
   std::vector<std::pair<std::string, Lnast_node>> actuals;
   for (const auto& n : plan.invariants) {
-    actuals.emplace_back(n, Lnast_node::create_ref(n));
+    actuals.emplace_back(n, Lnast_node::create_ref(plan.actual_names.at(n)));
   }
   for (const auto& n : plan.carries) {
-    actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref(n));
+    if (plan.registers.contains(n)) {
+      actuals.emplace_back(n, Lnast_node::create_ref(plan.actual_names.at(n)));
+      actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref("%" + plan.inst + "_" + n + "_seed"));
+    } else {
+      actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref(plan.actual_names.at(n)));
+    }
   }
   actuals.emplace_back(std::string(kLoopValid), Lnast_node::create_const("true"));
 
@@ -8531,7 +8634,8 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     results.emplace_back(n, n + std::string(kCarryOutSuffix));
   }
   const size_t callee_outputs = results.size() + (plan.has_loop_control ? 1u : 0u);
-  for (const auto& [name, port] : results) {
+  for (const auto& [raw_name, port] : results) {
+    const auto& name = plan.actual_names.at(raw_name);
     if (callee_outputs == 1) {
       auto bind = staging->add_child(lowered, Lnast_ntype::create_store());
       staging->add_child(bind, Lnast_node::create_ref(name));
@@ -8545,7 +8649,7 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     // The source value is a runtime result now. Invalidate the old comptime
     // seed just as an uncertain scope does, so later statements cannot fold it
     // back to the pre-loop value.
-    if (const auto tit = plan.types.find(name); tit != plan.types.end() && tit->second.array_size > 0) {
+    if (const auto tit = plan.types.find(raw_name); tit != plan.types.end() && tit->second.array_size > 0) {
       // An ARRAY carry comes back as one packed runtime value, but the symbol
       // table still holds its pre-loop LANES ("0".."N-1"): invalidating the bare
       // name only clears slot 0, and a later `v[3]` then constant-folds to the
@@ -10497,9 +10601,12 @@ void uPass_runner::unroll_for() {
     lm->restore_cursor(for_bm);
     if (!unroll_requested_ || subtree_has_runtime_loop_control(*lm->get_lnast(), body_nid, tagged_i)) {
       Loop_roll_plan plan;
-      if (plan_loop_roll(body_nid, tagged_i, lo, hi, step, plan)) {
+      lm->move_to_nid(lm->get_lnast()->get_first_child(lm->get_lnast()->get_parent(body_nid)));
+      const std::string body_index(lm->current_raw_text());
+      lm->restore_cursor(for_bm);
+      if (plan_loop_roll(body_nid, body_index, lo, hi, step, plan)) {
         plan.inst    = std::format("u_loop_{}", roll_seq_);
-        plan.mangled = std::format("{}.__loop{}", lm->get_lnast()->get_top_module_name(), roll_seq_);
+        plan.mangled = std::format("{}.__loop{}", lm->outlining_owner(), roll_seq_);
         ++roll_seq_;
         if (specialized_emitted_.insert(plan.mangled).second) {
           new_lnasts.push_back(lift_loop_body(body_nid, plan));
@@ -13077,6 +13184,21 @@ void uPass_runner::process_lnast() {
       const auto first = Dlop::from_pyrope(source->get_name(kids[lnast_rolled_for::first]))->to_just_i64();
       const auto step  = Dlop::from_pyrope(source->get_name(kids[lnast_rolled_for::step]))->to_just_i64();
       const auto count = Dlop::from_pyrope(source->get_name(kids[lnast_rolled_for::count]))->to_just_i64();
+      if (!unroll_requested_ && count > 0) {
+        Loop_roll_plan plan;
+        const auto raw_index = std::string(source->get_name(kids[lnast_rolled_for::index]));
+        const auto last = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(count - 1) * step);
+        if (plan_loop_roll(kids[lnast_rolled_for::source_body], raw_index, first, last, step, plan)) {
+          plan.inst = std::format("u_loop_{}", roll_seq_);
+          plan.mangled = std::format("{}.__loop{}", lm->outlining_owner(), roll_seq_++);
+          if (specialized_emitted_.insert(plan.mangled).second) {
+            new_lnasts.push_back(lift_loop_body(kids[lnast_rolled_for::source_body], plan));
+          }
+          emit_rolled_loop_call(plan, kids[lnast_rolled_for::source_body]);
+          lm->restore_cursor(here);
+          break;
+        }
+      }
       const bool saved_break = loop_break_hit_;
       loop_break_hit_ = false;
       Unroll_scope unroll(*this);

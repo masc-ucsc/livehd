@@ -12,6 +12,7 @@ namespace livehd::abc {
 // expansion is per instance: a definition can serve both kinds of loop.
 struct Loop_preparation {
   std::unordered_set<hhds::Gid> preserved_defs;
+  std::vector<std::shared_ptr<hhds::Graph>> shared_bodies;
   size_t                        independent = 0;
   size_t                        carried     = 0;
   size_t                        expanded    = 0;

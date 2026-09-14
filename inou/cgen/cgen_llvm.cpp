@@ -80,6 +80,8 @@ public:
   llvm::Value*                           changed  = nullptr;
   llvm::Value*                           owner    = nullptr;
   std::vector<llvm::Value*>              values;
+  std::vector<size_t>                    input_word_offsets;
+  std::vector<std::optional<Value>>      deferred_casts;
   std::vector<std::pair<uint32_t, bool>> input_types;
   std::vector<Output>                    output_values;
   std::string                            error;
@@ -109,11 +111,18 @@ public:
       inputs->setName("inputs");
       outputs->setName("outputs");
       changed->setName("changed");
+      // The generated caller uses three disjoint packed buffers. Owner points
+      // at module storage, not into any of those local buffers.
+      for (unsigned index = 0; index < 4; ++index) {
+        function->addParamAttr(index, llvm::Attribute::NoAlias);
+      }
+      function->addParamAttr(0, llvm::Attribute::ReadOnly);
     }
     auto* entry = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(entry);
 
     values.reserve(input_types.size());
+    deferred_casts.resize(input_types.size());
     size_t word_offset = 0;
     for (size_t i = 0; i < input_types.size(); ++i) {
       const auto [width, unused_unsigned] = input_types[i];
@@ -122,12 +131,13 @@ public:
         error = "LLVM color inputs must have a non-zero width";
         return;
       }
+      input_word_offsets.push_back(word_offset);
       if (scalar_abi) {
         auto* value = &*argument++;
         value->setName("in");
         values.push_back(cast_integer(builder, value, width, true));
       } else {
-        values.push_back(load_packed(inputs, word_offset, width, "in"));
+        values.push_back(nullptr);  // Materialize at first use, not at kernel entry.
       }
       word_offset += word_count(width);
     }
@@ -173,10 +183,22 @@ public:
   Value remember(llvm::Value* value, uint32_t width, bool unsign) {
     const size_t id = values.size();
     values.push_back(value);
+    deferred_casts.emplace_back();
     return Value{id, width, unsign};
   }
 
   llvm::Value* get(Value value) {
+    if (value.id < input_types.size() && value.id < values.size() && values[value.id] == nullptr && value.width != 0) {
+      const auto width = input_types[value.id].first;
+      values[value.id] = load_packed(inputs, input_word_offsets[value.id], width, "in");
+    }
+    if (value.id < values.size() && values[value.id] == nullptr && deferred_casts[value.id]) {
+      const auto source  = *deferred_casts[value.id];
+      auto*      operand = get(source);
+      if (operand != nullptr) {
+        values[value.id] = cast_integer(builder, operand, value.width, source.unsign);
+      }
+    }
     if (value.id >= values.size() || values[value.id] == nullptr || value.width == 0) {
       if (error.empty()) {
         error = "invalid LLVM color value";
@@ -223,11 +245,15 @@ Cgen_llvm::Value Cgen_llvm::constant_words(uint32_t width, const std::vector<uin
 }
 
 Cgen_llvm::Value Cgen_llvm::resize(Value value, uint32_t result_width, bool result_unsign) {
-  auto* operand = impl_->get(value);
-  if (operand == nullptr || result_width == 0) {
+  if (value.width == 0 || result_width == 0 || value.id >= impl_->values.size()) {
     return {};
   }
-  return impl_->remember(cast_integer(impl_->builder, operand, result_width, value.unsign), result_width, result_unsign);
+  if (value.width == result_width) {
+    return Value{value.id, result_width, result_unsign};
+  }
+  const auto result                = impl_->remember(nullptr, result_width, result_unsign);
+  impl_->deferred_casts[result.id] = value;
+  return result;
 }
 
 Cgen_llvm::Value Cgen_llvm::unary_not(Value value, uint32_t result_width, bool result_unsign) {
@@ -311,8 +337,8 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
     return impl_->remember(cast_integer(impl_->builder, selected, result_width, true), result_width, result_unsign);
   }
 
-  const bool comparison = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
-                          || op == Binary_op::gt || op == Binary_op::ge;
+  const bool comparison      = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
+                               || op == Binary_op::gt || op == Binary_op::ge;
   const bool ordered         = op == Binary_op::lt || op == Binary_op::le || op == Binary_op::gt || op == Binary_op::ge;
   // An ORDERED compare is sign-aware and a mixed-sign pair has no common
   // interpretation at max(width): the unsigned side's top bit would be read as
@@ -659,7 +685,9 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
   llvm::FunctionAnalysisManager function_analyses;
   llvm::CGSCCAnalysisManager    cgscc_analyses;
   llvm::ModuleAnalysisManager   module_analyses;
-  llvm::PassBuilder             pass_builder(machine.get());
+  llvm::PipelineTuningOptions   tuning;
+  tuning.LoopUnrolling = false;
+  llvm::PassBuilder pass_builder(machine.get(), tuning);
   pass_builder.registerModuleAnalyses(module_analyses);
   pass_builder.registerCGSCCAnalyses(cgscc_analyses);
   pass_builder.registerFunctionAnalyses(function_analyses);
@@ -811,7 +839,9 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   llvm::FunctionAnalysisManager function_analyses;
   llvm::CGSCCAnalysisManager    cgscc_analyses;
   llvm::ModuleAnalysisManager   module_analyses;
-  llvm::PassBuilder             pass_builder(machine.get());
+  llvm::PipelineTuningOptions   tuning;
+  tuning.LoopUnrolling = false;
+  llvm::PassBuilder pass_builder(machine.get(), tuning);
   pass_builder.registerModuleAnalyses(module_analyses);
   pass_builder.registerCGSCCAnalyses(cgscc_analyses);
   pass_builder.registerFunctionAnalyses(function_analyses);

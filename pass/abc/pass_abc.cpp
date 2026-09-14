@@ -690,6 +690,7 @@ void Pass_abc::work(Eprp_var& var) {
                                         loops)) {
     return;
   }
+  scratch_graphs.insert(scratch_graphs.end(), loops.shared_bodies.begin(), loops.shared_bodies.end());
   if (truthy(var.get("stats", "false"))) {
     std::print("pass.abc loops: independent={} carried={} expanded={} retained={}\n",
                loops.independent,

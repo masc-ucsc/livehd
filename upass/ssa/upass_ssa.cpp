@@ -982,6 +982,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
                 for (auto sub : lnast->children(c)) {
                   if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
                     auto branch_pending = pending;  // copy: the pre-branch din flows in
+                    if (Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)) {
+                      // A loop body gets its own temporary namespace when
+                      // replayed or outlined. An enclosing temporary cannot
+                      // be renamed with that namespace. Keep the register
+                      // base here; tolg resolves it to the current pending D.
+                      branch_pending.clear();
+                    }
                     thread_stmts(sub, branch_pending);
                   }
                 }

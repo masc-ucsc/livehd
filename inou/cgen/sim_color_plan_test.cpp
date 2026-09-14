@@ -27,7 +27,7 @@ struct Flop_latch_fixture {
   hhds::Node_class             latch;
 };
 
-Loop_fixture make_compact_loop(std::string_view tag, uint64_t count) {
+Loop_fixture make_compact_loop(std::string_view tag, uint64_t count, bool surrounding_cones = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
 
   auto body_io = lib.create_io(std::string(tag) + "_body");
@@ -52,9 +52,24 @@ Loop_fixture make_compact_loop(std::string_view tag, uint64_t count) {
   hhds::Subnode_loop loop;
   loop.count = count;
   compact.set_subnode(body_io, loop);
-  parent->get_input_pin("seed").connect_sink(compact.create_sink_pin(0));
+  auto seed = parent->get_input_pin("seed");
+  if (surrounding_cones) {
+    auto before = gu::create_typed_node(*parent, Ntype_op::Not);
+    seed.connect_sink(before.create_sink_pin(0));
+    seed = before.create_driver_pin(0);
+    gu::set_bits(seed, 8);
+  }
+  seed.connect_sink(compact.create_sink_pin(0));
   auto output = compact.create_driver_pin(1);
-  output.connect_sink(parent->get_output_pin("result"));
+  gu::set_bits(output, 8);
+  auto result = output;
+  if (surrounding_cones) {
+    auto after = gu::create_typed_node(*parent, Ntype_op::Not);
+    result.connect_sink(after.create_sink_pin(0));
+    result = after.create_driver_pin(0);
+    gu::set_bits(result, 8);
+  }
+  result.connect_sink(parent->get_output_pin("result"));
   output.connect_sink(compact.create_sink_pin(0));
   compact.subnode_group().validate();
   return {parent, compact};
@@ -525,6 +540,21 @@ TEST(SimColorPlan, CompactLoopDiscoveryIsConstantSizeAndCutsCarry) {
   EXPECT_NE(text.find("kind=loop-carry cut=true"), std::string::npos);
 }
 
+TEST(SimColorPlan, LoopSharesColorWithSurroundingLogicWithoutExpanding) {
+  auto fixture = make_compact_loop("loop_with_cones", 1'000'000'000ULL, true);
+  for (bool llvm_runtime_calls : {false, true}) {
+    const auto plan = livehd::sim::Color_plan::discover(fixture.parent.get(), true, llvm_runtime_calls);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    EXPECT_EQ(plan.summary().grouped_sites, 3u);
+    EXPECT_EQ(plan.summary().compact_loops, 1u);
+    EXPECT_TRUE(std::ranges::any_of(plan.colors(), [&](const auto& color) {
+      return color.members.size() > 1 && std::ranges::any_of(color.members, [&](size_t member) {
+               return plan.sites()[plan.version_sites()[member].base_site].kind == livehd::sim::Color_plan::Site_kind::loop_control;
+             });
+    })) << plan.report();
+  }
+}
+
 TEST(SimColorPlan, PrivateRepairSplitsPackedFeedbackAcrossPureCombChildren) {
   auto                                  graph = make_cross_child_packed_feedback("cross_child_packed_feedback");
   absl::flat_hash_set<hhds::Node_class> before;
@@ -566,6 +596,56 @@ TEST(SimColorPlan, RetainedPoliciesSurvivePlanMove) {
   EXPECT_EQ(moved.summary().compact_loops, 1u);
 }
 
+TEST(SimColorPlan, PreserveSubstantialLeafModulesButFuseTinyHelpers) {
+  for (const size_t length : {1u, 64u}) {
+    auto& lib      = livehd::Hhds_graph_library::instance("lgdb_color_leaf_" + std::to_string(length));
+    auto  child_io = lib.create_io("leaf");
+    child_io->add_input("x", 0);
+    child_io->add_output("y", 1);
+    child_io->set_bits("x", 8);
+    child_io->set_bits("y", 8);
+    auto child = child_io->create_graph();
+    auto value = child->get_input_pin("x");
+    for (size_t i = 0; i < length; ++i) {
+      auto node = gu::create_typed_node(*child, Ntype_op::Not);
+      value.connect_sink(node.create_sink_pin(0));
+      value = node.create_driver_pin(0);
+      gu::set_bits(value, 8);
+    }
+    value.connect_sink(child->get_output_pin("y"));
+    auto io = lib.create_io("parent");
+    io->add_input("a", 0);
+    io->add_input("b", 1);
+    io->add_output("x", 2);
+    io->add_output("y", 3);
+    for (const auto name : {"a", "b", "x", "y"}) {
+      io->set_bits(name, 8);
+    }
+    auto graph = io->create_graph();
+    for (size_t i = 0; i < 2; ++i) {
+      auto call = gu::create_typed_node(*graph, Ntype_op::Sub);
+      call.set_subnode(child_io);
+      graph->get_input_pin(i == 0 ? "a" : "b").connect_sink(call.create_sink_pin(0));
+      call.create_driver_pin(1).connect_sink(graph->get_output_pin(i == 0 ? "x" : "y"));
+    }
+    auto plan = livehd::sim::Color_plan::discover(graph.get(), false);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    if (length == 1) {
+      EXPECT_EQ(plan.colors().size(), 2u);
+    } else {
+      EXPECT_EQ(plan.colors().size(), 4u);
+      EXPECT_GT(plan.summary().kernel_reuses, 0u);
+      for (const auto& color : plan.colors()) {
+        ASSERT_FALSE(color.members.empty());
+        const auto& path = plan.sites()[plan.version_sites()[color.members.front()].base_site].node.path();
+        for (const auto member : color.members) {
+          EXPECT_EQ(plan.sites()[plan.version_sites()[member].base_site].node.path(), path);
+        }
+      }
+    }
+  }
+}
+
 TEST(SimColorPlan, ReportIgnoresConstructionOrderGraphNamesAndNodeNames) {
   auto forward = make_parallel("ordered", false);
   auto reverse = make_parallel("reversed", true);
@@ -575,11 +655,11 @@ TEST(SimColorPlan, ReportIgnoresConstructionOrderGraphNamesAndNodeNames) {
   ASSERT_TRUE(a.complete());
   ASSERT_TRUE(b.complete());
   EXPECT_EQ(a.report(), b.report());
-  EXPECT_EQ(a.summary().colors, 4u);
-  EXPECT_EQ(a.summary().kernel_classes, 2u) << "the two identical NOT kernels reuse once in each state-version slot";
-  EXPECT_EQ(a.summary().kernel_reuses, 2u);
+  EXPECT_EQ(a.summary().colors, 2u) << "small independent cones share one color per phase";
+  EXPECT_EQ(a.summary().kernel_classes, 2u);
+  EXPECT_EQ(a.summary().kernel_reuses, 0u);
   for (const auto& kernel : a.kernel_classes()) {
-    EXPECT_EQ(kernel.colors.size(), 2u);
+    EXPECT_EQ(kernel.colors.size(), 1u);
   }
 }
 
@@ -834,7 +914,7 @@ TEST(SimColorPlan, DisjointOrPackDoesNotCreateAWordLevelFeedbackCycle) {
                            << plan.report();
 }
 
-TEST(SimColorPlan, StateActionsRemainSingletonColors) {
+TEST(SimColorPlan, StateActionsMergeWithinTheirExecutionSlot) {
   auto fixture = make_flop_feeds_high_latch("singleton_state");
   auto plan    = livehd::sim::Color_plan::discover(fixture.graph.get());
 
@@ -851,8 +931,8 @@ TEST(SimColorPlan, StateActionsRemainSingletonColors) {
     ASSERT_LT(version_to_color[i], plan.colors().size());
     const auto& color = plan.colors()[version_to_color[i]];
     EXPECT_EQ(site.slot, color.slot);
-    if (site.role != livehd::sim::Color_plan::Version_role::data) {
-      EXPECT_EQ(color.members.size(), 1u);
+    for (const auto member : color.members) {
+      EXPECT_EQ(plan.version_sites()[member].slot, site.slot);
     }
   }
 }
@@ -892,4 +972,57 @@ TEST(SimColorPlan, NullRootIsAnExplicitIncompletePlan) {
   EXPECT_FALSE(plan.complete());
   ASSERT_FALSE(plan.errors().empty());
   EXPECT_NE(plan.report().find("null simulation root"), std::string::npos);
+}
+
+TEST(SimColorPlan, LiveWordBudgetBoundsFanoutWithoutSplittingLowPressureChains) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_pressure");
+  auto  io  = lib.create_io("pressure");
+  for (unsigned i = 0; i < 64; ++i) {
+    io->add_input("in" + std::to_string(i), i);
+    io->add_output("out" + std::to_string(i), 64 + i);
+    io->set_bits("in" + std::to_string(i), 64);
+    io->set_bits("out" + std::to_string(i), 64);
+  }
+  auto graph = io->create_graph();
+  for (unsigned i = 0; i < 64; ++i) {
+    auto inv = gu::create_typed_node(*graph, Ntype_op::Not);
+    graph->get_input_pin("in" + std::to_string(i)).connect_sink(inv.create_sink_pin(0));
+    inv.create_driver_pin(0).connect_sink(graph->get_output_pin("out" + std::to_string(i)));
+  }
+  const auto plan = livehd::sim::Color_plan::discover(graph.get());
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  EXPECT_GT(plan.colors().size(), 2u);
+  size_t members = 0;
+  for (const auto& color : plan.colors()) {
+    EXPECT_LE(color.peak_live_words, 20u);
+    members += color.members.size();
+  }
+  EXPECT_EQ(members, plan.version_sites().size());
+
+  auto       chain      = make_combinational_chain("pressure_chain", 128);
+  const auto chain_plan = livehd::sim::Color_plan::discover(chain.get());
+  ASSERT_TRUE(chain_plan.complete());
+  EXPECT_EQ(chain_plan.colors().size(), 2u) << "long chains need few simultaneously live values";
+  for (const auto& color : chain_plan.colors()) {
+    EXPECT_LE(color.peak_live_words, 20u);
+  }
+}
+
+TEST(SimColorPlan, IndivisibleWideValuesRemainSingletons) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_wide_pressure");
+  auto  io  = lib.create_io("wide_pressure");
+  io->add_input("a", 0);
+  io->add_output("b", 1);
+  io->set_bits("a", 2048);
+  io->set_bits("b", 2048);
+  auto graph = io->create_graph();
+  auto inv   = gu::create_typed_node(*graph, Ntype_op::Not);
+  graph->get_input_pin("a").connect_sink(inv.create_sink_pin(0));
+  inv.create_driver_pin(0).connect_sink(graph->get_output_pin("b"));
+  const auto plan = livehd::sim::Color_plan::discover(graph.get());
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  for (const auto& color : plan.colors()) {
+    EXPECT_EQ(color.members.size(), 1u);
+    EXPECT_GT(color.peak_live_words, 20u);
+  }
 }

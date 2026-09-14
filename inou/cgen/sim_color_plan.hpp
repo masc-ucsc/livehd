@@ -175,6 +175,8 @@ public:
     std::vector<size_t> members;
     uint64_t            gate_equivalents = 0;
     uint64_t            execution_order  = 0;
+    uint64_t            peak_live_words  = 0;
+    uint64_t            live_in_words    = 0;
   };
 
   struct Color_dependency {
@@ -229,7 +231,10 @@ public:
   // `root` must already be fully prepared.  The plan holds lazy occurrence
   // handles, so structurally mutating root's library afterwards is a contract
   // violation caught by HHDS's mutation-epoch assertion in debug builds.
-  static Color_plan discover(hhds::Graph* root, bool include_observations = true);
+  // Separate clock runtime calls when the backend uses a distinct data ABI
+  // (LLVM). Compact loops may share colors with surrounding logic; their
+  // runtime guards each stateful advance once per phase across output colors.
+  static Color_plan discover(hhds::Graph* root, bool include_observations = true, bool separate_runtime_calls = false);
 
   [[nodiscard]] const std::vector<Site>&                sites() const noexcept { return sites_; }
   [[nodiscard]] const std::vector<Dependency>&          dependencies() const noexcept { return dependencies_; }

@@ -1020,7 +1020,7 @@ sh_test(
     name = "sim_color_llvm_smoke",
     size = "large",
     srcs = ["sim_color_llvm_smoke.sh"],
-    # The script builds its thirteen independent sim drivers in parallel waves
+    # The script builds its independent sim drivers in parallel waves
     # (SIM_COLOR_SMOKE_JOBS, default 6). Declare that to Bazel so the test
     # scheduler reserves the cores instead of stacking this test on top of a
     # full slate of others -- the wall-clock-sensitive formal budget tests
@@ -1034,6 +1034,17 @@ sh_test(
         "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
         "//inou/prp:tests/sim/mem_sim_gated_clock.prp",
+        "//inou/prp:tests/sim/loop_hierarchy.prp",
+        "//inou/prp:tests/sim/loop_invariant_broadcast.prp",
+        "//inou/prp:tests/sim/loop_roll_conditional_state_call.prp",
+        "//inou/prp:tests/sim/loop_state_multi_carry.prp",
+        "//inou/prp:tests/sim/loop_mixed_carry.prp",
+        "//inou/prp:tests/sim/div_narrow_result.prp",
+        "//inou/prp:tests/sim/loop_inlined_capture.prp",
+        "//inou/prp:tests/sim/loop_inlined_array.prp",
+        "//inou/prp:tests/sim/mem_wensize_lanes.prp",
+        "//inou/prp:tests/sim/loop_fused_state.prp",
+        "//inou/prp:tests/sim/loop_carry_kinds_sim.prp",
         "//lhd",
     ],
 )

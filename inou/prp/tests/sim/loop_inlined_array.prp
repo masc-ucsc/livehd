@@ -1,0 +1,24 @@
+/*
+:name: loop_inlined_array
+:type: simulation
+*/
+// Each inlined call has its own array carry. Reads after the loop must use
+// every updated lane, including lanes whose seed was a compile-time zero.
+comb lanes(x:u8) -> (y:u8) {
+  mut values:[4]u8 = 0
+  for i in 0..<4 { values[i] = x ^ i }
+  y = values[0] ^ values[3]
+}
+mod loop_inlined_array(x:u8) -> (y:u8@[0]) {
+  const a = lanes(x=x)
+  const b = lanes(x=x ^ 7)
+  y = a + b
+}
+test loop_inlined_array.values {
+  mut dut = loop_inlined_array
+  tick 2 {
+    dut.x = if clock == 0 { 19 } else { 240 }
+    step
+    assert(dut.y == 6)
+  }
+}
