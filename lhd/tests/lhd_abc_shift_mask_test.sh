@@ -35,14 +35,12 @@ assert q['gates']<1000,q
 assert pathlib.Path(sys.argv[2]).stat().st_size<1000000,'wide partition boundary survived'
 PY
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --emit verilog:"$W/models.v" --workdir "$W/models-work"
-for engine in cvc5 lgyosys; do
-  run lec --impl lg:"$W/mapped" --ref verilog:"$W/ref.v" --lib lg:"$W/models" --impl-top shift_mask --ref-top reference \
-    --set formal.solver="$engine" --set formal.timeout=60 --workdir "$W/$engine"
-  python3 - "$W/result.json" <<'PY'
+run lec --impl lg:"$W/mapped" --ref verilog:"$W/ref.v" --lib lg:"$W/models" --impl-top shift_mask --ref-top reference \
+  --set formal.timeout=60 --workdir "$W/default"
+python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))['lec']; assert r['verdict']=='proven',r
 PY
-done
 cat > "$W/tb.v" <<'SV'
 module tb;
   reg [7:0] data;

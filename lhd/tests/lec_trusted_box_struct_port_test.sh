@@ -34,7 +34,7 @@
 #
 # WHAT IS NOT WRONG (case 2 pins this down, so a future fix does not go
 # hunting in the front end): the emitted Pyrope and the netlist regenerated
-# from it are CORRECT — lgcheck proves the regenerated netlist against the
+# from it are CORRECT — default LEC proves the regenerated netlist against the
 # original through an internal struct-port child.
 
 set -u
@@ -47,7 +47,7 @@ trap 'rm -rf "${TMP}"' EXIT
 rc=0
 
 # A child with packed-struct ports, and two parents: one whose top ports are
-# also structs, one whose top ports are flat (so lgcheck can compare directly).
+# also structs, one whose top ports are flat (so their interfaces match directly).
 cat >"${TMP}/d.sv" <<'EOF'
 package dp;
   typedef struct packed { logic fp; logic [4:0] addr; logic thread_id; } dest_t;
@@ -88,9 +88,9 @@ else
   rc=1
 fi
 
-# --- case 2: the FRONT END is innocent. lgcheck the netlist regenerated from
+# --- case 2: the FRONT END is innocent. LEC the netlist regenerated from
 # the emitted Pyrope against the reference netlist. flat_top's own ports are
-# flat, so the port lists match and yosys can miter them directly.
+# flat, so the default LEC engine can compare their matching interfaces.
 run compile "lg:${TMP}/ref.lg"  --top flat_top --emit-dir "verilog:${TMP}/rv/" --workdir "${TMP}/w4" -q
 run compile "lg:${TMP}/impl.lg" --top flat_top --emit-dir "verilog:${TMP}/iv/" --workdir "${TMP}/w5" -q
 cat "${TMP}"/rv/*.v >"${TMP}/ref.v" 2>/dev/null
@@ -98,7 +98,7 @@ cat "${TMP}"/iv/*.v >"${TMP}/gen.v" 2>/dev/null
 if [ ! -s "${TMP}/ref.v" ] || [ ! -s "${TMP}/gen.v" ]; then
   echo "FAIL: could not emit the two netlists"
   rc=1
-elif "${LHD}" lec --set formal.solver=lgyosys --impl "verilog:${TMP}/gen.v" \
+elif "${LHD}" lec --impl "verilog:${TMP}/gen.v" \
        --ref "verilog:${TMP}/ref.v" --top flat_top --workdir "${TMP}/wl2" >"${TMP}/log" 2>&1; then
   echo "ok: netlist regenerated via Pyrope proves against the original"
 else

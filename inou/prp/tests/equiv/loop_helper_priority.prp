@@ -3,7 +3,6 @@
 :type: equiv
 :pyrope_top: top
 :verilog_top: top
-:equiv_engine: cvc5
 */
 // RenameBuffer cleanup reproducer: a counted loop in an inlined comb.
 // Previously failed with undefined 'inl1_*.valid_count.__loop0'; merely

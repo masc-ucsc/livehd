@@ -1,7 +1,6 @@
 /*
 :name: type_bound_generic_port
 :type: equiv
-:equiv_engine: cvc5
 :pyrope_top: top
 :verilog_top: top
 */

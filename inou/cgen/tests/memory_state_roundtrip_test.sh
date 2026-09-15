@@ -29,16 +29,15 @@ grep -q '__lhdmem_h62616e6b5f62_e' "$impl" || fail "bank_b lost cgen memory prov
   >"$W/lec.log" 2>&1 || { tail -40 "$W/lec.log"; fail "native endpoint LEC"; }
 grep -q 'PROVEN equivalent' "$W/lec.log" || { tail -40 "$W/lec.log"; fail "native endpoint did not prove"; }
 
-LGCHECK_EQUIV_TIMEOUT=30 "$LHD" lec --impl verilog:"$impl" --ref verilog:"$SRC" --top "$TOP" \
-  --set formal.solver=lgyosys --set formal.lec.gold_reader=slang --set formal.lec.gate_reader=slang \
-  --workdir "$W/w_lgyosys" -q >"$W/lgyosys.log" 2>&1 \
-  || { tail -40 "$W/lgyosys.log"; fail "lgyosys endpoint LEC or generated-wrapper parse"; }
-if grep -qia 'REFUTED\|not equivalent\|SETUP FAILED' "$W/lgyosys.log"; then
-  tail -40 "$W/lgyosys.log"
-  fail "lgyosys rejected the generated memory wrapper round trip"
+"$LHD" lec --set formal.timeout=30 --impl verilog:"$impl" --ref verilog:"$SRC" --top "$TOP" \
+  --workdir "$W/w_verilog" -q >"$W/verilog.log" 2>&1 \
+  || { tail -40 "$W/verilog.log"; fail "default LEC endpoint LEC or generated-wrapper parse"; }
+if grep -qia 'REFUTED\|not equivalent\|SETUP FAILED' "$W/verilog.log"; then
+  tail -40 "$W/verilog.log"
+  fail "default LEC rejected the generated memory wrapper round trip"
 fi
-grep -Eq 'PROVEN equivalent|INCONCLUSIVE' "$W/lgyosys.log" \
-  || { tail -40 "$W/lgyosys.log"; fail "lgyosys returned no recognized verdict"; }
+grep -Eq 'PROVEN equivalent|INCONCLUSIVE' "$W/verilog.log" \
+  || { tail -40 "$W/verilog.log"; fail "default LEC returned no recognized verdict"; }
 
 # The whole-array path emits the Memory state inline rather than through a
 # cgen_memory_* wrapper. It must carry the same reversible marker: otherwise
@@ -64,15 +63,14 @@ grep -q '__lhdmem_h617272_e_data' "$whole_impl" \
 grep -q 'PROVEN equivalent' "$W/whole_lec.log" \
   || { tail -40 "$W/whole_lec.log"; fail "whole-array native endpoint did not prove"; }
 
-LGCHECK_EQUIV_TIMEOUT=30 "$LHD" lec --impl verilog:"$whole_impl" --ref verilog:"$WHOLE_SV" --top "$WHOLE_TOP" \
-  --set formal.solver=lgyosys --set formal.lec.gold_reader=slang --set formal.lec.gate_reader=slang \
-  --workdir "$W/w_whole_lgyosys" -q >"$W/whole_lgyosys.log" 2>&1 \
-  || { tail -40 "$W/whole_lgyosys.log"; fail "whole-array lgyosys endpoint LEC or parse"; }
-if grep -qia 'REFUTED\|not equivalent\|SETUP FAILED' "$W/whole_lgyosys.log"; then
-  tail -40 "$W/whole_lgyosys.log"
-  fail "lgyosys rejected the inline whole-array state round trip"
+"$LHD" lec --set formal.timeout=30 --impl verilog:"$whole_impl" --ref verilog:"$WHOLE_SV" --top "$WHOLE_TOP" \
+  --workdir "$W/w_whole_verilog" -q >"$W/whole_verilog.log" 2>&1 \
+  || { tail -40 "$W/whole_verilog.log"; fail "whole-array default LEC endpoint LEC or parse"; }
+if grep -qia 'REFUTED\|not equivalent\|SETUP FAILED' "$W/whole_verilog.log"; then
+  tail -40 "$W/whole_verilog.log"
+  fail "default LEC rejected the inline whole-array state round trip"
 fi
-grep -Eq 'PROVEN equivalent|INCONCLUSIVE' "$W/whole_lgyosys.log" \
-  || { tail -40 "$W/whole_lgyosys.log"; fail "whole-array lgyosys returned no recognized verdict"; }
+grep -Eq 'PROVEN equivalent|INCONCLUSIVE' "$W/whole_verilog.log" \
+  || { tail -40 "$W/whole_verilog.log"; fail "whole-array default LEC returned no recognized verdict"; }
 
-echo "PASS: cgen wrapper and inline memory state provenance survives native and lgyosys Verilog round trips"
+echo "PASS: cgen wrapper and inline memory state provenance survives native and default LEC Verilog round trips"

@@ -703,3 +703,45 @@ TEST(LecState, CpropMuxSharingPreservesTransition) {
     }
   }
 }
+
+TEST(CombEquiv, SparseMaskInsertionPreservesAndClearsPositionalUnknowns) {
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("sparse_mask");
+  io->add_output("partial", 0);
+  io->add_output("complete", 1);
+  io->add_output("negative", 2);
+  for (const auto name : {"partial", "complete", "negative"}) {
+    io->set_bits(name, 8);
+    io->set_unsign(name, true);
+  }
+  auto g      = io->create_graph();
+  auto insert = [&](hhds::Pin_class base, int mask, const char* value) {
+    auto node = graph_util::create_typed_node(*g, Ntype_op::Set_mask);
+    base.connect_sink(graph_util::setup_sink_by_name(node, "a"));
+    graph_util::create_const(*g, *Dlop::create_integer(mask)).connect_sink(graph_util::setup_sink_by_name(node, "mask"));
+    graph_util::create_const(*g, *Dlop::from_binary(value, true)).connect_sink(graph_util::setup_sink_by_name(node, "value"));
+    auto out = node.create_driver_pin(0);
+    graph_util::set_ubits(out, 8);
+    return out;
+  };
+  auto partial  = insert(graph_util::create_const(*g, *Dlop::from_binary("????????", true)), 0xcc, "10?1");
+  auto complete = insert(partial, 0x3b, "10101");
+  auto negative = insert(graph_util::create_const(*g, *Dlop::from_binary("????????", true)), -5, "1011011");
+  partial.connect_sink(g->get_output_pin("partial"));
+  complete.connect_sink(g->get_output_pin("complete"));
+  negative.connect_sink(g->get_output_pin("negative"));
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  lec::Encoder      encoder(tm);
+  encoder.set_x_dontcare(true);
+  auto encoded = encoder.encode(g.get());
+  ASSERT_TRUE(encoded.ok) << encoded.error;
+  const auto& p = encoded.outputs.at("partial");
+  const auto& c = encoded.outputs.at("complete");
+  EXPECT_EQ(solver.simplify(p.x_mask), tm.mkBitVector(8, 0x3b));
+  EXPECT_EQ(solver.simplify(c.x_mask), tm.mkBitVector(8, 0));
+  EXPECT_EQ(solver.simplify(c.term), tm.mkBitVector(8, 0xad));
+  const auto& n = encoded.outputs.at("negative");
+  EXPECT_EQ(solver.simplify(n.x_mask), tm.mkBitVector(8, 4));
+  EXPECT_EQ(solver.simplify(n.term), tm.mkBitVector(8, 0xb3));
+}

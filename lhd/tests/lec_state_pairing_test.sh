@@ -133,7 +133,7 @@ echo "PASS: all-names-match design does zero tier-2 work"
 #    is the honest shape: it asserts the bounded pass EXISTS, not that a bounded
 #    pass is equivalence.
 OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false \
-      --set formal.strict=false 2>&1)
+      2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#7 pairing-off auto run should still bounded-pass (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing" && fail "#7 pairing ran despite formal.lec.state_pairing=false: $OUT"

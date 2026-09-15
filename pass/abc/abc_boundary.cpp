@@ -667,7 +667,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       pending.push_back(node);
       continue;
     }
-    if (op == Ntype_op::AttrSet || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::AttrSet) {
       continue;  // constants resolve through Pin_class::is_const
     }
     d.depth_complete = false;

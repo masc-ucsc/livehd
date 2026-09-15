@@ -16,6 +16,27 @@
 
 namespace {
 
+TEST(BitwidthInfer, UnsizedShiftRecoversFromSignedCountRange) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_signed_count");
+  auto  io     = lib.create_io("signed_count");
+  io->add_input("count", 1);
+  io->set_bits("count", 4);
+  io->set_unsign("count", false);
+  io->add_output("out", 2);
+  io->set_bits("out", 8);
+  auto g     = io->create_graph();
+  auto shift = gu::create_typed_node(*g, Ntype_op::SHL);
+  gu::setup_sink_by_name(shift, "a").connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
+  gu::setup_sink_by_name(shift, "b").connect_driver(g->get_input_pin("count"));
+  auto out = shift.create_driver_pin(0);
+  out.connect_sink(g->get_output_pin("out"));
+  Bitwidth{10}.do_trans(g);
+  EXPECT_FALSE(out.is_const());
+  EXPECT_EQ(gu::bits_of(out), 8);
+  EXPECT_TRUE(gu::is_unsign(out));
+}
+
 // A folded producer and an existing literal may intern to the same pin.
 // Their arithmetic multiplicity must survive, including a second collision
 // when 2 + 2 becomes an already-connected 4 (or 2 * 2 becomes 4).

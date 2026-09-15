@@ -3,7 +3,7 @@
 #
 # Exercises the "Linking libraries (Pyrope + a Verilog black box)" example in
 # ../docs/docs/livehd/02-usage.md — keep the command sequence here in sync with
-# that section. It mixes a yosys-elaborated Verilog leaf (`inv`, a black box) and
+# that section. It mixes a native-Slang-elaborated Verilog leaf (`inv`) and
 # a Pyrope leaf (`adder.adder`), imported as compiled LGraphs into a Pyrope top,
 # then links them into one new lg: library and emits Verilog.
 
@@ -19,9 +19,8 @@ fail() {
   exit 1
 }
 
-# 1. Verilog leaf -> lg: (through yosys; --reader yosys-verilog, since the
-#    default reader is now slang — this leaf is the documented yosys black box)
-"$LHD" compile "$D/inv.v" --top inv --reader yosys-verilog --emit-dir lg:"$W/inv_lg/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
+# 1. Verilog leaf -> lg: through the default native Slang reader.
+"$LHD" compile "$D/inv.v" --top inv --emit-dir lg:"$W/inv_lg/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
   || fail "inv.v compile→lg failed: $(cat "$W/r1.json" 2>/dev/null)"
 
 # 2. Pyrope leaf -> lg:

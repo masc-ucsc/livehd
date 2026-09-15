@@ -989,7 +989,10 @@ TEST(SimColorPlan, LiveWordBudgetBoundsFanoutWithoutSplittingLowPressureChains) 
     graph->get_input_pin("in" + std::to_string(i)).connect_sink(inv.create_sink_pin(0));
     inv.create_driver_pin(0).connect_sink(graph->get_output_pin("out" + std::to_string(i)));
   }
-  const auto plan = livehd::sim::Color_plan::discover(graph.get());
+  // The coarsener under an explicit 20-word budget (the default is wider;
+  // `sim.live_words` selects it per run): 64 independent 64-bit inversions
+  // cannot share one color, a 128-deep chain still can.
+  const auto plan = livehd::sim::Color_plan::discover(graph.get(), true, false, 20);
   ASSERT_TRUE(plan.complete()) << plan.report();
   EXPECT_GT(plan.colors().size(), 2u);
   size_t members = 0;
@@ -1000,7 +1003,7 @@ TEST(SimColorPlan, LiveWordBudgetBoundsFanoutWithoutSplittingLowPressureChains) 
   EXPECT_EQ(members, plan.version_sites().size());
 
   auto       chain      = make_combinational_chain("pressure_chain", 128);
-  const auto chain_plan = livehd::sim::Color_plan::discover(chain.get());
+  const auto chain_plan = livehd::sim::Color_plan::discover(chain.get(), true, false, 20);
   ASSERT_TRUE(chain_plan.complete());
   EXPECT_EQ(chain_plan.colors().size(), 2u) << "long chains need few simultaneously live values";
   for (const auto& color : chain_plan.colors()) {

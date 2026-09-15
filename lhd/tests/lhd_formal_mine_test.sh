@@ -9,11 +9,10 @@
 #     (assume(acc.count <= 5)) with provenance comments;
 #   * formal_report.json mined[] carries the same facts as machine records
 #     (status=inductive, pyrope text, the stuck obligation among targets);
-#   * EXIT POLICY (formal.strict, default TRUE): an undecided run is a FAILURE,
+#   * EXIT POLICY : an undecided run is a FAILURE,
 #     not a pass — the stuck run exits 7 ("unsupported": the TOOL ran out, the
 #     design is not disproved) and says so actionably, while STILL writing its
 #     mining artifacts so an agent loop can read them off the failing run.
-#     The `formal.strict=false` opt-out is pinned by lhd_formal_verify_test.
 #   * ROUND-TRIP: re-running with the mined block as a sidecar re-proves each
 #     mined assume (prove-then-use: "checked assume(s): ... proven (used)");
 #   * STALENESS: after a design edit that falsifies the mined fact (wrap at 7),
@@ -63,11 +62,11 @@ EOF
 WD="$W/wd"
 mkdir -p "$WD"
 OUT="$W/mine.out"
-"$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=6 --set formal.timeout=1 \
+"$LHD" formal verify "$W/miner.prp" --top miner  --set formal.timeout=1 \
   --set formal.min_timeout=1 --set formal.spec_mining_timeout=2 --set formal.engine=bmc \
   --set formal.mine=speculative --workdir "$WD" >"$OUT" 2>&1
 RC=$?
-# Default formal.strict=true: an inconclusive run must NOT exit 0 (a gate built on
+# Exit policy: an inconclusive run must NOT exit 0 (a gate built on
 # this run could not otherwise tell it from a proof), and must NOT be reported as a
 # refutation either — the design is undecided, not disproved.
 [ "$RC" -eq "$RC_INCONCLUSIVE" ] \
@@ -116,7 +115,7 @@ grep -qE 'checked assume\(s\): [1-9][0-9]* proven \(used\)' "$OUT" || fail "the 
 # The hard obligation is swapped for an easy one so the budget FREEZE cannot
 # stop the assume's deepening before its refuting cycle (a frozen assume stays
 # honestly disclosed as bounded — but this case pins the refutation itself).
-# rc must be the REFUTED class, not merely non-zero: under formal.strict an
+# rc must be the REFUTED class, not merely non-zero: an
 # inconclusive also exits non-zero, so only the exact code separates "the mined
 # fact is disproved" from "the solver gave up".
 sed -e 's/count == 5/count == 7/' \

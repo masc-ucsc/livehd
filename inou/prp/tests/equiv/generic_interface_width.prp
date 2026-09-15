@@ -3,7 +3,6 @@
 :type: equiv
 :pyrope_top: top
 :verilog_top: top
-:equiv_engine: cvc5
 :lec_top: top
 :lec_grep: PROVEN equivalent
 */

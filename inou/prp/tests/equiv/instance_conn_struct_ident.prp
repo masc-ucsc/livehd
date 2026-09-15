@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: instance_conn_struct_ident_top
 :pyrope_top: top
-:gold_reader: slang
 */
 
 // Regression for the slang per-module collector-state clobber (the XiangShan

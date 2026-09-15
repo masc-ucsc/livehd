@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: conditional_state_call.top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 
 // A stateful call under a runtime branch is an activation boundary: while en

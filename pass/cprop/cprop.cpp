@@ -16,13 +16,13 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
+#include "cprop_value.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 #include "pass_cprop.hpp"
 #include "perf_tracing.hpp"
 
-using livehd::graph_util::bits_of;
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
@@ -76,138 +76,10 @@ std::vector<hhds::Node_class> stable_nodes(hhds::Graph* g) {
 using livehd::graph_util::const_of;
 using livehd::graph_util::setup_sink_by_name;
 
-// Before bitwidth runs, an arithmetic pin's hint may be the enclosing source
-// type, even though the IR operation has unlimited precision. Only intrinsic
-// finite-width producers prove that a mask is redundant at this stage.
+// Only explicit operations and literal values can prove a mask redundant.
 bool fits_unsigned_window(const hhds::Pin_class& pin, int width) {
-  if (pin.is_invalid() || width <= 0 || !livehd::graph_util::is_unsign(pin)) {
-    return false;
-  }
-  const auto bits = bits_of(pin);
-  if (bits <= 0 || bits > width) {
-    return false;
-  }
-  if (pin.is_const() || is_graph_input_pin(pin)) {
-    return true;
-  }
-  const auto node = pin.get_master_node();
-  switch (type_op_of(node)) {
-    case Ntype_op::Get_mask: {
-      const auto mask = livehd::graph_util::get_driver_of_sink_name(node, "mask");
-      return mask.is_const() && !const_of(mask).is_negative() && !const_of(mask).has_unknowns()
-             && const_of(mask).popcount() <= width;
-    }
-    case Ntype_op::Concat: {
-      const auto total = livehd::graph_util::concat_total_width(node);
-      return total > 0 && total <= width;
-    }
-    case Ntype_op::Flop  :
-    case Ntype_op::Fflop :
-    case Ntype_op::Latch :
-    case Ntype_op::Sub   :
-    case Ntype_op::Memory:
-    case Ntype_op::EQ    :
-    case Ntype_op::LT    :
-    case Ntype_op::GT    : return true;
-    default              : return false;
-  }
-}
-
-// A finite Get_mask is an EXPLICIT precision-changing operation: its value has
-// exactly popcount(mask) packed magnitude bits, independent of the width of the
-// source or of an enclosing typed expression.  Keep that fact on the result pin
-// even when a frontend conservatively stamped the destination wider -- that is
-// the operation's range CONTRACT in unbounded LGraph semantics, not a
-// range-analysis guess, and node_util's debug_check_pin_hint asserts on it
-// (`Get_mask pin 'get_mask_48' selects 64 bits but is hinted at 75`). pass.
-// bitwidth runs later and cannot retroactively unbreak a graph cprop's own
-// rules already read at the wrong width.
-void restamp_finite_get_mask(hhds::Node_class& node, const Dlop& mask) {
-  if (mask.is_negative() || mask.has_unknowns()) {
-    return;
-  }
-  const auto magnitude_bits = mask.popcount();
-  I(magnitude_bits < static_cast<size_t>(std::numeric_limits<int32_t>::max()));
-  auto       out      = node.create_driver_pin(0);
-  const auto capacity = std::max<int32_t>(1, static_cast<int32_t>(magnitude_bits));
-  const auto current  = bits_of(out);
-  // A preceding range pass may prove that fewer carrier bits suffice. Keep
-  // that stronger fact; this repair is only for a stale enclosing/source width
-  // that exceeds the explicit selection's capacity.
-  livehd::graph_util::set_ubits(out, current == 0 ? capacity : std::min(current, capacity));
-  // Sign reinterpretation belongs to an explicit Sext, never to Get_mask's
-  // result annotation.
-}
-
-// Copy propagation can replace a narrow operand with a wider equivalent
-// carrier (most visibly when a packed-field read folds to a constant), and the
-// finite Get_mask normalization above can also correct an input's stale width.
-// Keep ordinary unlimited-precision operations lossless after those rewrites:
-// their result carrier may be wider than the range estimate, never narrower
-// than a value input. HLOP repeats this as a consteval assertion in generated
-// C++; this graph repair makes the producer metadata satisfy the same contract.
-//
-// pass.bitwidth running after cprop does NOT subsume this. It re-derives from
-// RANGES, and a range that is sound for the operation is not the same fact as
-// "this carrier can represent every input it reads" -- the sign-slot case in
-// particular (a uW literal needs W+1 bits in a SIGNED carrier) is a
-// representation fact, not a range fact. Dropping the repair refuted
-// //inou/prp:prp-equiv-rt_typecast and the signed packed-struct LEC.
-//
-// Explicitly reducing/selecting operations are intentionally absent: And may
-// be a mask, SRA drops shifted bits, and Get_mask/Ror/Rem select or reduce.
-void enforce_lossless_carriers(hhds::Graph* g) {
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-      const auto op = type_op_of(node);
-      if (op != Ntype_op::Sum && op != Ntype_op::Mult && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Not
-          && op != Ntype_op::SHL && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
-        continue;
-      }
-      auto out = node.create_driver_pin(0);
-      if (out.is_invalid()) {
-        continue;
-      }
-      const auto control_end   = op == Ntype_op::Hotmux ? livehd::graph_util::hotmux_control_end(node) : 0;
-      const bool signed_output = !livehd::graph_util::is_unsign(out);
-      int        required      = std::max(bits_of(out), 1);
-      for (const auto& e : node.inp_edges()) {
-        const auto pid = e.sink.get_port_id();
-        if ((op == Ntype_op::SHL && pid != 0)
-            || ((op == Ntype_op::Mux && pid == 0)
-                || (op == Ntype_op::Hotmux && livehd::graph_util::is_hotmux_control(pid, control_end)))) {
-          continue;  // shift count / selector widths are independent
-        }
-        int  input_bits   = bits_of(e.driver);
-        bool non_negative = livehd::graph_util::is_unsign(e.driver);
-        if (e.driver.is_const()) {
-          // ONE hydrate per edge: hydrating twice (once for the width, once for
-          // the sign below) doubled the deserialization cost of the hottest
-          // loop in this pass.
-          const auto& value = const_of(e.driver);
-          non_negative      = !value.is_negative();
-          // The graph hint is the literal unsigned PAYLOAD width, not
-          // Dlop::get_bits()'s signed carrier -- shared with upass/tolg's merge
-          // sizing and cgen_sim's mux-arm check so the three cannot drift.
-          input_bits        = std::max(input_bits, static_cast<int>(livehd::graph_util::literal_payload_bits(value)));
-        }
-        // Literal uW needs W+1 bits when an unlimited-precision operation
-        // lands in a signed carrier. This matters after copy propagation
-        // bypasses a finite slice: Not(u8) needs s9, and Or(s1,u1) needs s2.
-        // Unsigned outputs keep their literal W-bit realization.
-        if (signed_output && non_negative) {
-          ++input_bits;
-        }
-        required = std::max(required, input_bits);
-      }
-      if (required > bits_of(out)) {
-        livehd::graph_util::set_bits(out, required);
-        changed = true;
-      }
-    }
-  }
+  const int bound = livehd::cprop_value::unsigned_width(pin);
+  return width > 0 && bound >= 0 && bound <= width;
 }
 
 // "Does `p` (a driver pin) or `n` (a node) have EXACTLY one consumer edge?"
@@ -582,7 +454,7 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
 // disjointness test below HARDER to satisfy (it refuses), so it is the safe
 // direction; UNDER-approximating would pick the wrong operand and miscompile.
 //
-// An unsigned pin's `bits` is its literal significant width.
+// Bounds come only from explicit cell operations, never from pin annotations.
 [[nodiscard]] std::pair<int, int> footprint(const hhds::Pin_class& p, int depth) {
   if (p.is_invalid() || depth > 16) {
     return kFpBail;
@@ -603,11 +475,7 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
     return {fb, lb + 1};
   }
   if (is_graph_input_pin(p)) {
-    if (!livehd::graph_util::is_unsign(p)) {
-      return kFpBail;
-    }
-    const int bits = bits_of(p);
-    return bits > 0 ? std::pair<int, int>{0, bits} : kFpBail;
+    return kFpBail;
   }
   auto m = p.get_master_node();
   if (m.is_invalid()) {
@@ -651,15 +519,8 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
     }
     // else fall through to the generic bound
   }
-  if (!livehd::graph_util::is_unsign(p)) {
-    return kFpBail;  // a signed x makes shl(x,k) set every bit above k
-  }
-  int b = bits_of(p);
-  if (b == 0) {
-    return kFpBail;  // unsized (Nconst/Sub/Memory/IO stay exempt) -> [k,k) would
-                     // read as EMPTY and fold a live value to constant 0
-  }
-  return {0, b};
+  const int bound = livehd::cprop_value::unsigned_width(p);
+  return bound >= 0 ? std::pair<int, int>{0, bound} : kFpBail;
 }
 
 // The width n of a low-contiguous mask 2^n-1 (n>=1), or -1 for anything else
@@ -678,45 +539,15 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
 // "Is `op` a COMPUTED combinational cell (as opposed to an IO/state/Sub/const/
 // attr boundary)?"
 //
-// TRAP: cprop spells this question six times as the ORDERED test
-// `op <= Ntype_op::Hotmux` (38), because 39..56 used to be exactly the
-// boundary band. That reading is no longer true of the enum: Concat (58) is a
-// plain combinational op that sits ABOVE the band only because 58 was the last
-// free EVEN slot when it was added (cell.hpp -- even is forced, bit 0 is
-// is_loop_last, and 40..48 are reserved as the opposite-polarity twins of
-// Memory/Flop/Latch/Fflop/Sub). Left as a bare comparison, every one of those
-// six sites SILENTLY classified a concat as state: it was excluded from CSE, from
-// the copy-prop/fold sweep, and it was handed the declared-width door that only
-// boundary pins may use.
-//
-// Ordinal-identical to the old test for every other op, so no other cell's
-// classification moves. Rem (54) is combinational too but stays outside on
-// purpose: each of these sites has its own measured reason to exclude it (see
-// is_bool01 below and canonicalize_and_masks).
-[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) { return op <= Ntype_op::Hotmux || op == Ntype_op::Concat; }
-
-// TRUE only when the realization hint proves the value is in {0,1}. With one
-// literal-width contract there is no producer-specific exception: u1 means
-// exactly [0,1]. Constants carry their proof in the value itself.
-[[nodiscard]] bool is_bool01(const hhds::Pin_class& p) {
-  if (p.is_invalid()) {
-    return false;
-  }
-  auto const01 = [](const hhds::Pin_class& c_pin) -> bool {
-    if (c_pin.is_invalid() || !c_pin.is_const()) {
-      return false;
-    }
-    const auto& c = const_of(c_pin);
-    if (c.has_unknowns()) {
-      return false;
-    }
-    return c.is_known_zero() || (c.is_just_i64() && c.to_just_i64() == 1);
-  };
-  if (p.is_const()) {
-    return const01(p);
-  }
-  return livehd::graph_util::is_unsign(p) && bits_of(p) == 1;
+// Ntype::is_comb minus two deliberate exclusions. Clock_cell is a clock-network
+// operator, never folded or CSE'd as data. Rem is combinational too but every
+// site below has its own measured reason to keep it out (see is_bool01 and
+// canonicalize_and_masks).
+[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) {
+  return Ntype::is_comb(op) && op != Ntype_op::Rem && op != Ntype_op::Clock_cell;
 }
+
+using livehd::cprop_value::is_bool01;
 
 // Decode a 2-input EQ against a specific constant: returns the non-const
 // operand iff the node has exactly two input edges and exactly one of them is
@@ -914,11 +745,7 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
     total += w;
   }
 
-  // This is intrinsic construction metadata, not graph-wide width repair: a
-  // Concat's literal carrier is exactly sum(w_i). Written here rather than left
-  // to pass/bitwidth because subsequent cprop rules already read this width.
-  // Narrowing a head that was stamped wider is sound in the same breath: the
-  // tiling proves the value is below 2^total.
+  // The explicit lane table establishes this finite result capacity.
   auto out = node.create_driver_pin(0);
   livehd::graph_util::set_ubits(out, total);
 }
@@ -927,7 +754,7 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
 // `set_mask(set_mask(base,m0,v0),m1,v1)…`
 bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   auto head_out = node.get_driver_pin(0);
-  if (head_out.is_invalid() || !livehd::graph_util::is_unsign(head_out)) {
+  if (head_out.is_invalid()) {
     return false;
   }
 
@@ -971,18 +798,14 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
     cur = am;
   }
 
-  int pack_width = std::max(livehd::graph_util::bits_of(head_out), livehd::graph_util::bits_of(base_pin));
+  int pack_width = livehd::cprop_value::unsigned_width(base_pin);
+  if (pack_width < 0) {
+    return false;  // A finite concat cannot preserve an unbounded base.
+  }
   for (const auto& lane : lanes) {
     pack_width = std::max(pack_width, lane.hi);
   }
-  if (base_pin.is_invalid() || pack_width <= 0) {
-    return false;
-  }
-  // A NEGATIVE (or merely signed) base has set bits ABOVE the top lane -- for a
-  // negative constant, infinitely many -- and a Concat can only spell a finite
-  // unsigned word. `is_unsign` is attribute ABSENCE, so an unstamped base still
-  // passes; only an explicitly signed one is refused.
-  if (base_pin.is_const() ? const_of(base_pin).is_negative() : !livehd::graph_util::is_unsign(base_pin)) {
+  if (pack_width <= 0) {
     return false;
   }
 
@@ -1037,9 +860,30 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
       gaps.emplace_back(pos, pack_width);
     }
 
-    // Keep this optimization node-non-increasing. In practice a packed writer
-    // has many more overwritten lanes than residual intervals; the guard also
-    // avoids replacing a single Set_mask with a fragmented concat.
+    // Reuse complete lanes from an explicit concat without manufacturing
+    // slices. The lane table proves the layout even when every hint is absent.
+    auto base_node = base_pin.get_master_node();
+    if (!base_pin.is_const() && type_op_of(base_node) == Ntype_op::Concat) {
+      const auto                       base_lanes = livehd::graph_util::concat_lanes(base_node);
+      std::vector<std::pair<int, int>> remaining;
+      for (const auto& [lo, hi] : gaps) {
+        std::vector<Pack_lane> reused;
+        int                    covered_bits = 0;
+        for (const auto& lane : base_lanes) {
+          if (lane.offset >= lo && lane.offset + lane.width <= hi) {
+            reused.push_back({lane.value, lane.offset, lane.offset + lane.width});
+            covered_bits += lane.width;
+          }
+        }
+        if (covered_bits == hi - lo) {
+          lanes.insert(lanes.end(), reused.begin(), reused.end());
+        } else {
+          remaining.emplace_back(lo, hi);
+        }
+      }
+      gaps = std::move(remaining);
+    }
+    // Only newly created residual slices count against the removed chain.
     if (gaps.size() > chain.size() - 1) {
       return false;
     }
@@ -1080,56 +924,12 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
 // `(a<<8) | (b<<4) | c` pack tree. An operand whose bit span cannot be pinned
 // down refuses the whole rewrite.
 //
-// An UPPER bound on the low bits an operand can occupy, or -1 when there is
-// none. Deliberately NOT footprint(): footprint exists to prove DISJOINTNESS,
-// where an over-approximation merely refuses. Under the unified hint contract,
-// every stamped unsigned pin carries its literal finite width.
-//
-// Over-stating is safe in both roles -- the lane just covers provably-zero high
-// bits and the mask stays an identity -- so every uncertain case rounds UP.
-[[nodiscard]] int pack_lane_width(const hhds::Pin_class& p) {
-  if (p.is_invalid()) {
-    return -1;
-  }
-  if (p.is_const()) {
-    const auto& c = const_of(p);
-    if (c.is_negative()) {
-      return -1;
-    }
-    if (c.has_unknowns()) {
-      return c.get_bits();  // a '?'-const still occupies its declared width
-    }
-    const int lb = c.get_last_bit_set();
-    return lb < 0 ? 0 : lb + 1;  // 0 == known zero: contributes nothing
-  }
-  // A Concat answers EXACTLY from its lane table, so it must be asked before
-  // either stamp gate below. Both of those read the pin's `bits`/`sign`, and an
-  // unstamped Concat -- precisely what pass.bitfuzz produces, since collect()
-  // strips the attrs off every non-const, non-state driver pin -- would take the
-  // `bits <= 0` refusal even though the cell contract answers with no stamp at
-  // all. (A stamped Concat is always `unsign`, so the sign gate never bit here.)
-  if (!is_graph_input_pin(p) && !is_graph_output_pin(p)) {
-    if (auto cm = p.get_master_node(); !cm.is_invalid() && type_op_of(cm) == Ntype_op::Concat) {
-      const int total = livehd::graph_util::concat_total_width(cm);
-      if (total > 0) {
-        return total;  // exact, by cell contract
-      }
-      return -1;  // malformed lane table: refuse, never guess from the stamp
-    }
-  }
-  if (!livehd::graph_util::is_unsign(p)) {
-    return -1;  // a signed value's sign extension has no finite top bit
-  }
-  const int bits = bits_of(p);
-  if (bits <= 0) {
-    return -1;  // unsized: [0,0) would read as EMPTY and delete a live value
-  }
-  return bits;
-}
+// An upper bound from the explicit expression; unknown boundaries refuse.
+[[nodiscard]] int pack_lane_width(const hhds::Pin_class& p) { return livehd::cprop_value::unsigned_width(p); }
 
 bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
   auto out = node.get_driver_pin(0);
-  if (out.is_invalid() || !livehd::graph_util::is_unsign(out)) {
+  if (out.is_invalid()) {
     return false;
   }
 
@@ -1307,40 +1107,87 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
       if (type_op_of(next_sum_node) != Ntype_op::Sum) {
         continue;
       }
-      // Parallel-edge refusal: a Sum operand spliced into a consumer that
-      // already reads it needs a second parallel edge, and hhds overflow-mode
-      // sink storage (a set) silently DEDUPS it -- Sum(Sum(a,b),a) = 2a+b
-      // would collapse to a+b. Both `as` and `bs` are candidate destinations,
-      // so screen both.
-      {
-        auto as_sink        = find_sink_pin(next_sum_node, "as");
-        auto bs_sink        = find_sink_pin(next_sum_node, "bs");
-        bool shares_operand = false;
-        for (auto& inp : inp_edges_ordered) {
-          if (is_driver_connected_to_sink(inp.driver, as_sink) || is_driver_connected_to_sink(inp.driver, bs_sink)) {
-            shares_operand = true;
-            break;
+      // Where each operand LANDS in the consumer: its own sign composed with
+      // the sign of the edge being spliced (a subtrahend of a subtrahend adds).
+      //   Sum(A,Sum(B,C))  = Sum(A+C,B)
+      //   Sum(Sum(A,B),C)) = Sum(A+C,B)
+      //
+      // A shared operand -- one the consumer ALREADY reads -- decides by that
+      // landing sign. On the OPPOSITE port the two occurrences CANCEL
+      // (`(lo + 7) + 1 - lo` is the width `hi + 1 - lo` upass.tolg builds for
+      // every `x#[lo ..+ 8]` slice at a runtime offset; folding it to the
+      // literal 8 is what lets the shift+mask become a bitfield extract), so
+      // drop the consumer's edge instead of adding one. On the SAME port it
+      // would need a second parallel edge, which hhds overflow-mode sink
+      // storage (a set) silently DEDUPS -- Sum(Sum(a,b),a) = 2a+b would
+      // collapse to a+b -- so that consumer keeps its edge. A driver THIS node
+      // reads twice is decided by landing too, not refused outright: on the SAME
+      // landing the two occurrences want that one parallel edge (or, if they
+      // cancel, a double del_sink of one pair), so refuse; on OPPOSITE landings
+      // they are +D and -D, so drop BOTH and splice neither. `Sum(as:lo, bs:lo)`
+      // is the same runtime-offset width shape one level down, and forwarding it
+      // as two cancelling edges would grow the consumer's fan-in by two for a
+      // contribution of zero -- and nothing downstream folds that pair back out.
+      // Compare landings, not `inp.sink`: an illegal Sum pid >= 2 binarizes into
+      // `bs` above, and only the landing form then refuses conservatively.
+      const auto        as_sink  = find_sink_pin(next_sum_node, "as");
+      const auto        bs_sink  = find_sink_pin(next_sum_node, "bs");
+      const int         out_port = out.sink.get_port_id() == 0 ? 0 : 1;
+      bool              refuse   = false;
+      std::vector<bool> cancel(inp_edges_ordered.size(), false);
+      std::vector<bool> drop(inp_edges_ordered.size(), false);  // node-internal +D/-D pair: splice neither
+      std::vector<int>  landing(inp_edges_ordered.size(), 0);
+      for (size_t i = 0; i < inp_edges_ordered.size(); ++i) {
+        landing[i] = (inp_edges_ordered[i].sink.get_port_id() == 0 ? 0 : 1) ^ out_port;
+      }
+      for (size_t i = 0; i < inp_edges_ordered.size() && !refuse; ++i) {
+        for (size_t j = 0; j < i; ++j) {
+          if (inp_edges_ordered[j].driver != inp_edges_ordered[i].driver) {
+            continue;
+          }
+          if (landing[j] == landing[i]) {
+            refuse = true;
+          } else {
+            drop[i] = drop[j] = true;
           }
         }
-        if (shares_operand) {
-          continue;  // leave this consumer's edge in place
+      }
+      // Only the operands that will actually land ask the consumer anything: a
+      // dropped pair adds no edge, so a copy the consumer already reads is
+      // neither a parallel-edge hazard nor a cancellation opportunity for it.
+      for (size_t i = 0; i < inp_edges_ordered.size() && !refuse; ++i) {
+        if (drop[i]) {
+          continue;
         }
+        const auto& inp           = inp_edges_ordered[i];
+        const auto& same_sink     = landing[i] == 0 ? as_sink : bs_sink;
+        const auto& opposite_sink = landing[i] == 0 ? bs_sink : as_sink;
+        if (is_driver_connected_to_sink(inp.driver, same_sink)) {
+          refuse = true;
+        } else if (is_driver_connected_to_sink(inp.driver, opposite_sink)) {
+          cancel[i] = true;
+        }
+      }
+      if (refuse) {
+        continue;  // leave this consumer's edge in place
       }
 
-      for (auto& inp : inp_edges_ordered) {
-        // Sum(A,Sum(B,C))  = Sum(A+C,B)
-        // Sum(Sum(A,B),C)) = Sum(A+C,B)
-        if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 0) {
-          out.sink.connect_driver(inp.driver);
-        } else if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 1) {
-          out.sink.connect_driver(inp.driver);
-        } else if (inp.sink.get_port_id() == 1 && out.sink.get_port_id() == 0) {
-          setup_sink_by_name(next_sum_node, "bs").connect_driver(inp.driver);
-        } else {
-          setup_sink_by_name(next_sum_node, "as").connect_driver(inp.driver);
+      for (size_t i = 0; i < inp_edges_ordered.size(); ++i) {
+        const auto& inp = inp_edges_ordered[i];
+        if (drop[i]) {
+          continue;
         }
+        if (cancel[i]) {
+          (landing[i] == 0 ? bs_sink : as_sink).del_sink(inp.driver);
+          continue;
+        }
+        setup_sink_by_name(next_sum_node, landing[i] == 0 ? "as" : "bs").connect_driver(inp.driver);
       }
       out.del_edge();
+      if (!next_sum_node.has_inp_edges()) {
+        // Every operand cancelled (x - x): the consumer is the constant 0.
+        replace_node(next_sum_node, *Dlop::create_integer(0));
+      }
       progressed = true;
       break;  // iterator invalidated by the rewrite; restart the scan
     }
@@ -1353,16 +1200,6 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
 
 void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
-
-  for (const auto& out : node.out_edges()) {  // read-only width check
-    auto out_bits = bits_of(out.driver);
-    for (auto& inp : inp_edges_ordered) {
-      auto inp_bits = bits_of(inp.driver);
-      if (out_bits > 0 && inp_bits > 0 && out_bits != inp_bits) {
-        return;
-      }
-    }
-  }
 
   // Parallel-edge pre-scan: forwarding an operand into a consumer that
   // ALREADY reads that operand needs a second parallel edge, which hhds
@@ -1433,8 +1270,7 @@ namespace {
 }  // namespace
 
 bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
-  auto new_bits = bits_of(new_dpin);
-  for (const auto& out : node.out_edges()) {  // read-only width check
+  for (const auto& out : node.out_edges()) {
     // Parallel-edge refusal: if new_dpin ALREADY drives this consumer sink,
     // the reconnect needs a second parallel edge -- and hhds overflow-mode
     // sink storage is a set that silently DEDUPS it, so the consumer would
@@ -1448,24 +1284,6 @@ bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
           return false;
         }
       }
-    }
-    auto       out_bits = bits_of(out.driver);
-    // LGraph values are unlimited-precision integers; `bits` is materialization
-    // metadata. Replacing a wider unsigned identity wrapper with its narrower
-    // non-negative source loses no value bits—the source's range is already
-    // exact. Still reject every narrowing of the source range and every signed
-    // mismatch, where the removed node may have supplied a sign boundary.
-    //
-    // is_unsign() is attribute ABSENCE, so this rule is only as sound as the
-    // frontends' promise to stamp every SIGNED driver pin: an unstamped signed
-    // pin reads as a non-negative range here and its wrapper is dropped. That
-    // promise is the IR contract (`unsign` == value-range guarantee), not an
-    // assumption to be re-derived per pass — fix a violation at its producer
-    // (see lgyosys_tolg's instance-output stamping) rather than by weakening it.
-    const bool lossless_unsigned_widen
-        = livehd::graph_util::is_unsign(new_dpin) && new_bits > 0 && out_bits > 0 && new_bits <= out_bits;
-    if (out_bits > 0 && new_bits > 0 && out_bits != new_bits && !lossless_unsigned_widen) {
-      return false;
     }
   }
 
@@ -1939,7 +1757,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
     const auto& sel_const = const_of(inp_edges_ordered[0].driver);
-    const bool binary = is_two_arm_mux(inp_edges_ordered);
+    const bool  binary    = is_two_arm_mux(inp_edges_ordered);
     if (!sel_const.is_numeric() || sel_const.has_unknowns() || (!binary && !sel_const.is_just_i64())) {
       return;  // unknown-bit selector (0sb? poison cond): keep the mux as-is
     }
@@ -2124,22 +1942,13 @@ void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
     // Invalid/Nil are not values (division by zero, illegal shifts, etc.).
     return;
   }
-  auto                                                        dpin     = create_const(*current_graph, result);
-  const auto                                                  new_bits = bits_of(dpin);
-  // A collision can create a combined constant and relocate graph storage.
-  // Snapshot the sinks before reconnecting; no live iterator may span it.
-  absl::InlinedVector<std::pair<hhds::Pin_class, int32_t>, 4> consumers;
+  auto                                    dpin = create_const(*current_graph, result);
+  absl::InlinedVector<hhds::Pin_class, 4> consumers;
   for (const auto& out : node.out_edges()) {
-    consumers.emplace_back(out.sink, bits_of(out.driver));
+    consumers.push_back(out.sink);
   }
-  for (const auto& [sink, out_bits] : consumers) {
-    // Keep negative and nonnumeric values exact. adjust_bits truncates without
-    // re-signing, so adjusting -1 to eight bits would change its value to 255.
-    auto replacement = dpin;
-    if (new_bits != out_bits && out_bits != 0 && !result.is_negative() && result.is_numeric()) {
-      replacement = create_const(*current_graph, *result.adjust_bits(out_bits));
-    }
-    livehd::graph_util::connect_folded_const(*current_graph, replacement, sink);
+  for (const auto& sink : consumers) {
+    livehd::graph_util::connect_folded_const(*current_graph, dpin, sink);
   }
   node.del_node();
 }
@@ -2192,20 +2001,11 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
         || range0 != range1 || width <= 0) {
       return false;
     }
-    // The lane Mux is stamped at the WINDOW width below. A wider arm would make
-    // that stamp a lie, and a later pack canonicalization would then emit a
-    // Concat lane whose driver overflows its window (an internal compile error
-    // in pass.opentimer). 0 == unstamped == unknown, which is never a violation.
-    if (livehd::graph_util::bits_of(value0) > width || livehd::graph_util::bits_of(value1) > width) {
-      return false;
-    }
-
     auto lane_mux = livehd::graph_util::create_typed_node(*current_graph, Ntype_op::Mux);
     lane_mux.create_sink_pin(0).connect_driver(sel);
     lane_mux.create_sink_pin(1).connect_driver(value0);
     lane_mux.create_sink_pin(2).connect_driver(value1);
     auto lane = lane_mux.create_driver_pin(0);
-    livehd::graph_util::set_ubits(lane, width);
 
     for (auto edge : node.inp_edges()) {
       edge.del_edge();
@@ -2256,10 +2056,6 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
     if (!same_pin(sm_base, base) || mask.is_invalid() || value.is_invalid() || range.first < 0 || width <= 0) {
       return false;
     }
-    if (livehd::graph_util::bits_of(value) > width) {
-      return false;  // see factor_set_mask_pair: the lane Mux stamp must not narrow an arm
-    }
-
     auto get = livehd::graph_util::create_typed_node(*current_graph, Ntype_op::Get_mask);
     livehd::graph_util::setup_sink_by_name(get, "a").connect_driver(base);
     livehd::graph_util::setup_sink_by_name(get, "mask").connect_driver(mask);
@@ -2276,7 +2072,6 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
       lane_mux.create_sink_pin(2).connect_driver(old_lane);
     }
     auto lane = lane_mux.create_driver_pin(0);
-    livehd::graph_util::set_ubits(lane, width);
 
     for (auto edge : node.inp_edges()) {
       edge.del_edge();
@@ -2398,19 +2193,16 @@ void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& in
 
   const auto& wire_dpin = inp_edges_ordered[0].driver;
 
-  // Sext(X,1) feeding a Mux can be bypassed (a Mux selector/arm is contractually
-  // 1 bit) ONLY when X is already 1 bit. For a wider X (e.g. the offset-0 select
-  // of a bmux mux-tree, where X is the full ~addr signal) bypassing connects a
-  // multi-bit value to the 1-bit Mux selector, which cgen then emits as a
-  // reduction-OR (`if (x)` instead of `if (x[0])`) — selecting the wrong arm.
-  if (self_pos == 1 && bits_of(wire_dpin) == 1) {
+  // Sext(X,1) maps boolean 1 to -1. It preserves truthiness only, so bypass
+  // it on a selector with a proven boolean input, never on a Mux data arm.
+  if (self_pos == 1 && is_bool01(wire_dpin)) {
     // Restart-scan the lazy view: bypass each Mux consumer (rewrite + drop edge)
     // and restart; non-Mux consumers stay. No fan-out copy.
     bool progressed = true;
     while (progressed) {
       progressed = false;
       for (const auto& e : node.out_edges()) {
-        if (type_op_of(e.sink.get_master_node()) == Ntype_op::Mux) {
+        if (type_op_of(e.sink.get_master_node()) == Ntype_op::Mux && e.sink.get_port_id() == 0) {
           e.sink.connect_driver(wire_dpin);
           e.del_edge();
           progressed = true;
@@ -2659,29 +2451,15 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
       continue;
     }
 
-    // Decide the replacement width BEFORE minting anything: the Mux is
-    // stamped at max(this Or's stamp, C's capacity), and
-    // collapse_forward_for_pin only accepts a same-or-narrower unsigned
-    // driver, so a C wider than the Or's stamp is refused for certain. Bail
-    // here instead of building a Mux plus two consts just to delete them.
-    auto      out      = node.create_driver_pin(0);
-    const int out_bits = bits_of(out);
-    const int bits     = std::max({out_bits, static_cast<int>(C->get_bits()), 1});
-    if (out_bits > 0 && bits > out_bits) {
-      return false;
-    }
-
     auto mux = create_typed_node(*current_graph, Ntype_op::Mux);
     mux.create_sink_pin(0).connect_driver(x);
     mux.create_sink_pin(1).connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
     mux.create_sink_pin(2).connect_driver(create_const(*current_graph, *C));
     auto md = mux.create_driver_pin(0);
-    livehd::graph_util::set_bits(md, bits);
-    livehd::graph_util::set_unsign(md);  // result is 0 or C, both non-negative
     if (collapse_forward_for_pin(node, md)) {
       return true;
     }
-    mux.del_node();  // consumer width refused the swap; keep the original tree
+    mux.del_node();  // parallel-edge refusal; keep the original tree
     return false;
   }
   return false;
@@ -3063,8 +2841,6 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
 
   const auto& mask_const = const_of(mask_pin);
 
-  restamp_finite_get_mask(node, mask_const);
-
   // A fixed-width accumulator commonly lowers as
   //
   //   mask(mask(mask(a + b, W) + c, W) + d, W)
@@ -3145,40 +2921,15 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // go negative changes the value: u3 a=0b101 must read 5, not -3 (caught by
   // LEC once the lgcheck BMC stage became sound).
   if (mask_const.is_just_i64() && mask_const.to_just_i64() == -1) {
-    bool nonneg = false;
-    if (a_pin.is_const()) {
-      const auto& v = const_of(a_pin);
-      // is_positive() is exact at any width (an is_just_i64 gate would treat
-      // a >62-bit non-negative constant as "maybe negative"); an unknown sign
-      // bit reads negative, which stays conservative for Rule 4.
-      nonneg        = v.is_positive();
-    } else if (is_graph_input_pin(a_pin)) {
-      // `unsign` is a value-range guarantee in LGraph. The physical W-bit port
-      // representation is a backend boundary concern, not an IR Get_mask.
-      nonneg = livehd::graph_util::is_unsign(a_pin);
-    } else {
-      auto a_master = a_pin.get_master_node();
-      nonneg = (!a_master.is_invalid() && type_op_of(a_master) == Ntype_op::Get_mask) || livehd::graph_util::is_unsign(a_pin);
-    }
+    const bool nonneg = livehd::cprop_value::unsigned_width(a_pin) >= 0;
     if (!nonneg) {
       return false;
     }
     return collapse_forward_for_pin(node, a_pin);
   }
 
-  // Rule 5 (WIDTH NO-OP): get_mask(a, 2^n-1) == a when `a` provably has no bit
-  // at or above n, so the mask clears nothing.
-  //
-  // An LGraph cell is an unbounded-precision integer op and `bits` is DERIVED
-  // metadata (pass/bitfuzz strips it and recomputes it). An UNSIGNED pin of
-  // literal width W holds a value < 2^W: if W <= n the cell is pure overhead.
-  //
-  // THREE conditions, each load-bearing:
-  //  * is_unsign(a) -- for a SIGNED `a` this mask is the to-positive coercion
-  //    (it clears the sign extension), so dropping it would read -3 as a large
-  //    positive. Rule 4 above is the signed counterpart.
-  //  * a LOW-CONTIGUOUS mask [0,n) -- a bit-extract mask that does not start at
-  //    bit 0 repositions bits and is never an identity.
+  // A low contiguous mask is redundant only when an explicit expression
+  // proves that the input has no set bits above its selection window.
   {
     const int me = low_mask_width(mask_const);  // <0 unless a low-contiguous 2^n-1
     if (me > 0) {
@@ -3186,8 +2937,6 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
         if (collapse_forward_for_pin(node, a_pin)) {
           return true;
         }
-        // collapse refuses when a consumer's declared width disagrees; leave the
-        // cell in place rather than restamp somebody else's pin.
       }
     }
   }
@@ -3280,7 +3029,7 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
   }
 
   const auto [mb, me] = mask.get_mask_range();
-  if (mb != 0 || me <= 0 || !livehd::graph_util::is_unsign(value_pin) || value_pin.is_const() || is_graph_input_pin(value_pin)) {
+  if (mb != 0 || me <= 0 || value_pin.is_const() || is_graph_input_pin(value_pin)) {
     return false;
   }
 
@@ -3309,14 +3058,6 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
 // vanishes outright when x is already known 0/1.
 void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   if (node.is_invalid() || type_op_of(node) != Ntype_op::And || !node.has_out_edges()) {
-    return;
-  }
-  // Only an UNSIGNED-stamped And may become a Get_mask. A signed-stamped
-  // And-mask (lgyosys_tolg's shift lowering) is emitted as a WRAPPING
-  // masked value whose downstream companion Get_mask is the to-positive
-  // fixer -- the pair is a unit. Retyping must preserve that pair's unsigned
-  // result, never reinterpret the selected top bit as a sign bit.
-  if (!livehd::graph_util::is_unsign(node.create_driver_pin(0))) {
     return;
   }
   auto edges = node.inp_edges();  // snapshot
@@ -3352,14 +3093,6 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   livehd::graph_util::set_type_op(node, Ntype_op::Get_mask);
   setup_sink_by_name(node, "a").connect_driver(x_pin);
   setup_sink_by_name(node, "mask").connect_driver(mask_pin);
-  // Normalize the width stamp to the literal selection capacity. The rest of
-  // this sweep (scalar_get_mask, the packed-slice walker, CSE's width screen)
-  // reads bits_of on this pin long before pass.bitwidth gets to recompute it,
-  // and an And stamped narrower than its own mask would read as a lossy slice.
-  auto out = node.create_driver_pin(0);
-  if (bits_of(out) < n) {
-    livehd::graph_util::set_bits(out, n);
-  }
 }
 
 // Hash-cons identical combinational nodes: two nodes with the same op reading
@@ -3378,8 +3111,6 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
 // Guards, each load-bearing:
 //  * pure combinational ops only (is_computed_comb_op), minus LUT: its function
 //    table lives in a node attribute the key does not cover;
-//  * identical bits/sign stamps on the output -- a twin re-stamped differently
-//    by an earlier fold may be read at another width by its consumers;
 //  * names: prefer keeping a named twin (user wires are addressable by sim
 //    queries/VCD); when BOTH carry names, skip rather than pick a loser.
 void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
@@ -3445,40 +3176,11 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     if (kd.is_invalid() || nd.is_invalid()) {
       continue;
     }
-    if (bits_of(kd) != bits_of(nd) || livehd::graph_util::is_unsign(kd) != livehd::graph_util::is_unsign(nd)) {
-      continue;
-    }
     // On an already-colored graph (2opt/synthesis reruns) a merge across two
     // colors would move work between partitions behind the color pass's back.
     if (livehd::graph_util::has_color(node) != livehd::graph_util::has_color(kept)
         || (livehd::graph_util::has_color(node) && livehd::graph_util::color_of(node) != livehd::graph_util::color_of(kept))) {
       continue;
-    }
-    // Stamp-consistency screen: an UNSIGNED-stamped pin whose op can go
-    // negative when an input does is a frontend stamping violation (the IR
-    // contract says every signed driver is stamped -- see the
-    // collapse_forward_for_pin comment). At fanout 1 the lie stays latent
-    // because cgen INLINES the expression into its consumer's context;
-    // merging twins raises fanout and MATERIALIZES the pin at its lying
-    // unsigned width (slang's `s0 >>> s1` SRA landed as reg[4:0] and read
-    // -1 as 31). Ops that are non-negative by cell CONTRACT are exempt.
-    // Concat joins the exempt list: it is non-negative by CELL CONTRACT (each
-    // lane is masked into its own window, so a signed lane's sign never
-    // escapes), and a signed lane is the norm rather than a stamping lie.
-    // Without the exemption every real pack would read "suspicious" and no
-    // Concat would ever CSE.
-    if (livehd::graph_util::is_unsign(nd) && op != Ntype_op::EQ && op != Ntype_op::LT && op != Ntype_op::GT && op != Ntype_op::Ror
-        && op != Ntype_op::Get_mask && op != Ntype_op::Concat) {
-      bool suspicious = false;
-      for (const auto& e : node.inp_edges()) {
-        if (e.driver.is_const() ? const_of(e.driver).is_negative() : !livehd::graph_util::is_unsign(e.driver)) {
-          suspicious = true;
-          break;
-        }
-      }
-      if (suspicious) {
-        continue;
-      }
     }
     const bool kept_named = livehd::graph_util::has_name(kept) || !livehd::graph_util::pin_name_of(kd).empty();
     const bool node_named = livehd::graph_util::has_name(node) || !livehd::graph_util::pin_name_of(nd).empty();
@@ -3729,7 +3431,7 @@ void Cprop::canonicalize_latch_hold(const hhds::Node_class& latch) {
   }
 }
 
-void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] bool check_input_sized) {
+void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   if (!g) {
     return;
   }
@@ -3741,17 +3443,6 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] boo
     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
     ctx.event()->set_name(absl::StrCat(converted_str, name));
   });
-
-#ifndef NDEBUG
-  // Invariant (-c dbg): every value-producing cell must carry a resolved width
-  // at cprop ENTRY (i.e. as produced by tolg / upass generation). Checking at
-  // this boundary covers BOTH
-  // front-ends' tolg output (upass/tolg and inou/yosys/lgyosys_tolg). The lnast
-  // tolg additionally self-checks at its own output -- see uPass_tolg::run.
-  if (check_input_sized) {
-    livehd::graph_util::debug_assert_cells_sized(*g, "tolg/upass (seen at cprop entry)");
-  }
-#endif
 
   current_graph = g.get();
   // One topological construction, then local sweeps over that materialized
@@ -3834,7 +3525,6 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] boo
   // mints the Concat cells, and a stale vector would hide every freshly
   // created twin from the hash-cons.
   cse_pass(stable_nodes(current_graph));
-  enforce_lossless_carriers(current_graph);
   mux_share_pass();
   // The front ends sometimes spell an unconditional latch write as a
   // tautological enable cone (for example, a full case/default). The sweep
@@ -3853,15 +3543,6 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g, [[maybe_unused]] boo
   // invocation to discover.
   cleanup_dead_nodes(current_graph);
   current_graph = nullptr;
-
-#ifndef NDEBUG
-  // Debug self-check (Tier 1, -c dbg): every constant left in the graph must be
-  // consistent with the bits/sign attributes on its pin. This is the front line
-  // for catching front-end translation misses (a const stamped the wrong width/sign).
-  for (const auto& dpin : g->get_constant_node().out_pins()) {
-    livehd::graph_util::debug_check_const_pin(dpin);
-  }
-#endif
 }
 
 void Cprop::bwd_del_node(hhds::Node_class& node) {

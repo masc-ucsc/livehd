@@ -1,9 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 //  pass.lean - emit per-design Lean theory scaffolding for graph-certificate
-//  based translation proofs.  This pass intentionally mirrors the public knobs
-//  of pass.isabelle so the existing DINO/CVA6 generation scripts can be ported
-//  incrementally.
+//  based translation proofs. Only implemented emission controls are exposed.
 
 #include "pass_lean.hpp"
 
@@ -47,16 +45,6 @@ LeanCertWFMode parse_cert_wf_mode(std::string_view mode) {
     return LeanCertWFMode::Chunked;
   }
   return LeanCertWFMode::Skip;
-}
-
-LeanCertWFFallback parse_cert_wf_fallback(std::string_view mode) {
-  if (mode == "sorry") {
-    return LeanCertWFFallback::Sorry;
-  }
-  if (mode == "eval") {
-    return LeanCertWFFallback::Eval;
-  }
-  return LeanCertWFFallback::Fail;
 }
 
 const std::unordered_set<std::string> kLeanReserved = {
@@ -729,7 +717,7 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
     }
 
     case Ntype_op::And:
-    case Ntype_op::Or:
+    case Ntype_op::Or :
     case Ntype_op::Xor: {
       std::vector<std::string> terms;
       for (const auto& e : inp_edges_ordered(node)) {
@@ -978,10 +966,10 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
       // emitted as per-port lets by emit_node_lets; it is never a scalar expr.
       throw Emit_error("internal: Memory node n_" + std::to_string(node_id(node)) + " must be emitted via per-port read lets");
 
-    case Ntype_op::Latch:
-    case Ntype_op::Fflop:
-    case Ntype_op::Sub:
-    case Ntype_op::LUT:
+    case Ntype_op::Latch  :
+    case Ntype_op::Fflop  :
+    case Ntype_op::Sub    :
+    case Ntype_op::LUT    :
     case Ntype_op::AttrSet:
     case Ntype_op::Hotmux:
       fatal(ctx, "unsupported op `" + std::string(Ntype::get_name(op)) + "` at node n_" + std::to_string(node_id(node)) + ".");
@@ -1141,7 +1129,7 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
   std::vector<uint32_t> deps;
 
   switch (op) {
-    case Ntype_op::Sum   : {
+    case Ntype_op::Sum: {
       std::vector<uint32_t> adds;
       std::vector<uint32_t> subs;
       for (const auto& e : inp_edges_ordered(node)) {
@@ -1169,7 +1157,7 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
       }
       break;
     case Ntype_op::And:
-    case Ntype_op::Or:
+    case Ntype_op::Or :
     case Ntype_op::Xor:
     case Ntype_op::Ror:
     case Ntype_op::EQ : {
@@ -1338,44 +1326,14 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
   auto s = var.get("strict");
   strict = (s == "false") ? false : true;
 
-  auto n    = var.get("normalize");
-  normalize = (n == "false") ? false : true;
-
   auto ec   = var.get("emit_cert");
   emit_cert = (ec == "false") ? false : true;
 
   auto efb         = var.get("emit_fast_bridge");
   emit_fast_bridge = (efb == "true") ? true : false;
 
-  top              = std::string(var.get("top"));
-  cert_wf          = parse_cert_wf_mode(var.get("cert_wf"));
-  cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
-
-  auto ccs = var.get("cert_chunk_size");
-  if (!ccs.empty()) {
-    try {
-      cert_chunk_size = std::stoul(std::string(ccs));
-    } catch (...) {
-      cert_chunk_size = 25;
-    }
-  } else {
-    cert_chunk_size = 25;
-  }
-  if (cert_chunk_size == 0) {
-    cert_chunk_size = 25;
-  }
-
-  auto ccl = var.get("cert_chunk_limit");
-  if (!ccl.empty()) {
-    try {
-      cert_chunk_limit = std::stoul(std::string(ccl));
-    } catch (...) {
-      cert_chunk_limit = 0;
-    }
-  } else {
-    cert_chunk_limit = 0;
-  }
-
+  top       = std::string(var.get("top"));
+  cert_wf   = parse_cert_wf_mode(var.get("cert_wf"));
   max_width = str_tools::parse_max_width(var.get("max_width"));
 }
 
@@ -1384,18 +1342,16 @@ void Pass_lean::setup() {
   m1.add_label_optional("path", "Output directory for emitted Lean files.");
   m1.add_label_optional("top", "Top module name override.");
   m1.add_label_optional("strict",
-                        "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)",
+                        "true|false. Abort on unsupported ops",
                         "true");
-  m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
+
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
   m1.add_label_optional("emit_fast_bridge",
                         "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5). Non-memory only.",
                         "false");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
-  m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
-  m1.add_label_optional("cert_chunk_size", "Number of node certificates per chunk for cert_wf:chunked.", "25");
-  m1.add_label_optional("cert_chunk_limit", "Emit only first N certificate chunks for proof-shape testing (0 = all).", "0");
+
   register_pass(m1);
 }
 

@@ -50,7 +50,7 @@ C "$WORK/C.v"  --top top --emit-dir "lg:$WORK/C"  --workdir "$WORK/cc"
 
 WD="$WORK/wd"; mkdir -p "$WD"
 H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
-  OUT=$(LEC_PHASE_PLAN=1 "$LHD" lec "$@" --top top --set formal.lec.hier=true --workdir "$WD" 2>&1); RC=$?
+  OUT=$(LEC_PHASE_PLAN=1 "$LHD" lec "$@" --top top  --workdir "$WD" 2>&1); RC=$?
 }
 
 # 1) Cold run A vs B: nothing cached yet; verdicts get stored.
@@ -135,7 +135,7 @@ WDU="$WORK/wdu"; mkdir -p "$WDU"
 # def that comes back Unknown, so the 20s default would add 20s to each U run
 # below for no extra coverage — the ledger is what is under test here.
 U() { TO=$1; shift; OUT=$("$LHD" lec --ref "lg:$WORK/H1" --impl "lg:$WORK/H2" --top hard \
-      --set formal.lec.hier=true --set "formal.timeout=$TO" --set formal.min_timeout=1 \
+       --set "formal.timeout=$TO" --set formal.min_timeout=1 \
       "$@" --workdir "$WDU" 2>&1); RC=$?; }
 
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).

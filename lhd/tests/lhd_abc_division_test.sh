@@ -25,8 +25,6 @@ run tool cat lg:"$W/net" --top division > "$W/net.txt"
 grep -q '"kind":' "$W/net.txt" || { echo 'FAIL: netlist dump has no node kinds -- the absence check is vacuous' >&2; exit 1; }
 if grep -q '"kind":"div"' "$W/net.txt"; then echo 'native divider survived mapping' >&2; exit 1; fi
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/gensim"
-for engine in cvc5 lgyosys; do
-  run lec --impl lg:"$W/net" --ref lg:"$W/ref" --lib lg:"$W/models" --top division \
-    --set formal.solver="$engine" --set formal.timeout=60 --workdir "$W/$engine"
-  grep -q '"verdict":"proven"' "$W/r.json"
-done
+run lec --impl lg:"$W/net" --ref lg:"$W/ref" --lib lg:"$W/models" --top division \
+  --set formal.timeout=60 --workdir "$W/default"
+grep -q '"verdict":"proven"' "$W/r.json"

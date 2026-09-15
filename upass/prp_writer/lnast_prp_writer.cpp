@@ -349,10 +349,10 @@ std::string_view Lnast_prp_writer::infix_symbol(Lnast_ntype::Lnast_ntype_int t) 
 static bool is_associative_optype(Lnast_ntype::Lnast_ntype_int t) {
   using N = Lnast_ntype;
   switch (t) {
-    case N::Lnast_ntype_plus:
-    case N::Lnast_ntype_mult:
+    case N::Lnast_ntype_plus   :
+    case N::Lnast_ntype_mult   :
     case N::Lnast_ntype_bit_and:
-    case N::Lnast_ntype_bit_or:
+    case N::Lnast_ntype_bit_or :
     case N::Lnast_ntype_bit_xor:
     case N::Lnast_ntype_log_and:
     case N::Lnast_ntype_log_or : return true;
@@ -366,11 +366,11 @@ bool Lnast_prp_writer::is_foldable_optype(Lnast_ntype::Lnast_ntype_int t) {
     return true;  // every infix arithmetic/bitwise/logical/comparison op
   }
   switch (t) {
-    case N::Lnast_ntype_log_not:
-    case N::Lnast_ntype_bit_not:
-    case N::Lnast_ntype_sext:
-    case N::Lnast_ntype_get_mask:
-    case N::Lnast_ntype_concat:
+    case N::Lnast_ntype_log_not  :
+    case N::Lnast_ntype_bit_not  :
+    case N::Lnast_ntype_sext     :
+    case N::Lnast_ntype_get_mask :
+    case N::Lnast_ntype_concat   :
     case N::Lnast_ntype_tuple_get:
     case N::Lnast_ntype_attr_get : return true;
     // store is foldable only as a plain copy (handled at the call site, which
@@ -829,7 +829,7 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_bit_or       :
     case N::Lnast_ntype_bit_xor      :
     case N::Lnast_ntype_bit_not      :
-    case N::Lnast_ntype_tuple_get    :
+    case N::Lnast_ntype_tuple_get:
     // concat has no infix/postfix spelling, but it is still a plain value def
     // (`dst = concat(a, b, c)`), so it rides the same wrapper — only its RHS
     // rendering (a call shape) differs. Keeping it here, rather than in a
@@ -837,9 +837,9 @@ void Lnast_prp_writer::write_node() {
     // consumers too: a mux arm (arm_value_def) accepts any defines_child0 type,
     // and would render a concat arm as bare child0 — a silent lane drop — if
     // render_def_rhs did not spell it.
-    case N::Lnast_ntype_concat       :
-    case N::Lnast_ntype_attr_get     : write_value_stmt(); break;
-    default                          : {
+    case N::Lnast_ntype_concat  :
+    case N::Lnast_ntype_attr_get: write_value_stmt(); break;
+    default                     : {
       // Unknown node — record it (the pass fails the compile unless debug) and
       // emit a comment so the output stays parseable.
       emit_unimplemented(
@@ -3067,7 +3067,7 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
       const auto owner = std::string(strip_prefix(lnast->get_name(var_nid)));
       folded_attr_refs_by_owner_[owner].insert(val);
       folded_attr_owners_by_ref_[val].insert(owner);
-      if (key == "clock_pin" || key == "reset_pin" || key.ends_with("_pin")) {
+      if (key == "initial" || key == "clock_pin" || key == "reset_pin" || key.ends_with("_pin")) {
         pin_dep_nets_.insert(val);
         val = "ref " + val;
       }
@@ -4100,7 +4100,8 @@ std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_d
       // named-field read, which is not an element of that array.
       auto base = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0);
       auto key  = base.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(base);
-      if (base.is_invalid() || key.is_invalid() || !lnast->get_sibling_next(key).is_invalid() || !N::is_ref(lnast->get_type(base))) {
+      if (base.is_invalid() || key.is_invalid() || !lnast->get_sibling_next(key).is_invalid()
+          || !N::is_ref(lnast->get_type(base))) {
         return std::nullopt;
       }
       const auto it = array_elem_bits_.find(std::string(strip_prefix(lnast->get_name(base))));
@@ -4169,7 +4170,7 @@ std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_d
       }
       return best;
     }
-    case N::Lnast_ntype_bit_or:
+    case N::Lnast_ntype_bit_or :
     case N::Lnast_ntype_bit_xor: {
       // OR/XOR need EVERY operand bounded (a negative one sets the high bits).
       int widest = 0;
@@ -4284,8 +4285,8 @@ void Lnast_prp_writer::note_port_width(std::string_view name, std::string_view t
   if (type_txt.size() > 3 && type_txt.front() == '[') {
     const auto close = type_txt.find(']');
     if (close != std::string_view::npos && close + 2 < type_txt.size() && type_txt[close + 1] == 'u') {
-      const auto dim = type_txt.substr(1, close - 1);
-      const auto wtx = type_txt.substr(close + 2);
+      const auto dim    = type_txt.substr(1, close - 1);
+      const auto wtx    = type_txt.substr(close + 2);
       const bool ok_dim = !dim.empty() && std::all_of(dim.begin(), dim.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
       const bool ok_w   = !wtx.empty() && std::all_of(wtx.begin(), wtx.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
       if (ok_dim && ok_w && wtx.size() <= 6) {
@@ -5264,7 +5265,7 @@ void Lnast_prp_writer::write_set_mask() {
   if (move_to_sibling()) {  // val (base) — may be a single-use temp to inline
     val = render_value(cur, /*operand_ctx=*/true);
   }
-  std::string mask_txt;
+  std::string         mask_txt;
   // A RUNTIME bit range arrives as a ref to a `range` temp: `q[addr] <= 1`
   // lowers to `range(%r, addr, addr)` + `set_mask(q, q, %r, 1)`. scan_node
   // recorded its bounds in range_lohi_ (the same table the READ side uses).
@@ -5365,36 +5366,36 @@ bool Lnast_prp_writer::defines_child0(Lnast_ntype::Lnast_ntype_int t) {
     return true;
   }
   switch (t) {
-    case N::Lnast_ntype_log_not:
-    case N::Lnast_ntype_bit_not:
-    case N::Lnast_ntype_red_or:
-    case N::Lnast_ntype_red_and:
-    case N::Lnast_ntype_red_xor:
-    case N::Lnast_ntype_popcount:
-    case N::Lnast_ntype_sext:
-    case N::Lnast_ntype_set_mask:
-    case N::Lnast_ntype_get_mask:
-    case N::Lnast_ntype_store:
-    case N::Lnast_ntype_declare:
-    case N::Lnast_ntype_dp_assign:
+    case N::Lnast_ntype_log_not     :
+    case N::Lnast_ntype_bit_not     :
+    case N::Lnast_ntype_red_or      :
+    case N::Lnast_ntype_red_and     :
+    case N::Lnast_ntype_red_xor     :
+    case N::Lnast_ntype_popcount    :
+    case N::Lnast_ntype_sext        :
+    case N::Lnast_ntype_set_mask    :
+    case N::Lnast_ntype_get_mask    :
+    case N::Lnast_ntype_store       :
+    case N::Lnast_ntype_declare     :
+    case N::Lnast_ntype_dp_assign   :
     case N::Lnast_ntype_delay_assign:
-    case N::Lnast_ntype_range:
-    case N::Lnast_ntype_tuple_add:
+    case N::Lnast_ntype_range       :
+    case N::Lnast_ntype_tuple_add   :
     case N::Lnast_ntype_tuple_concat:
-    case N::Lnast_ntype_tuple_get:
-    case N::Lnast_ntype_attr_set:
+    case N::Lnast_ntype_tuple_get   :
+    case N::Lnast_ntype_attr_set    :
     case N::Lnast_ntype_attr_get:
     // concat( dst, lane_msb, …, lane_lsb ): child0 IS the def. Leaving it out
     // would count the destination as a READ, so every temp feeding a concat
     // looks multiply-used and stops folding (and the concat's own statement
     // would never be recognised as the def of its temp).
-    case N::Lnast_ntype_concat:
-    case N::Lnast_ntype_func_call   : return true;
+    case N::Lnast_ntype_concat   :
+    case N::Lnast_ntype_func_call: return true;
     // if/unique_if/cassert/for/while and the pseudo-func_* nodes read child0 (a
     // condition / value), so leave it classified as a USE — the safe default
     // (over-counting a use only blocks a fold; mis-marking a use as a def could
     // wrongly inline a multiply-read temp).
-    default                         : return false;
+    default                      : return false;
   }
 }
 

@@ -73,14 +73,13 @@ void semdiff_command(Options& opts, Result& res) {
   // designs correspond?" needs the state tiers on, and a single-def node count
   // answers nothing. An explicit --set of any implied key still wins — label()
   // returns the registry default only when the key is absent, so
-  // `truthy(k, stats?…)` is overridden by --set. `--stats` is the CLI sugar for
-  // the same knob; either form turns it on. hier is on by default (like every
-  // hier option): sweep the whole def DAG; hier=false compares one top pair.
-  const bool stats = opts.stats || truthy("stats", "0");
+  // --stats / lhd.stats selects reporting across passes. hier is on by default
+  // (like every hier option): sweep the whole def DAG; hier=false compares one
+  // top pair.
+  const bool stats = opts.stats;
   const bool hier  = truthy("hier", "1");
 
   livehd::semdiff::Semdiff_options o;
-  o.alg            = label("alg", "structural");
   o.matching_names = truthy("matching_names", stats ? "true" : "false");
   o.state_pairing  = truthy("state_pairing", stats ? "true" : "false");
   o.dump_state     = truthy("dump_state", "false");
@@ -114,8 +113,7 @@ void semdiff_command(Options& opts, Result& res) {
   // runs save, keeping the mark-in-place `match` workflow (tool grep/diff).
   const bool save = truthy("save", stats ? "0" : "1");
 
-  res.recipe_steps.emplace_back(std::format("pass.semdiff alg:{} matching_names:{} state_pairing:{} hier:{} id_granularity:{}",
-                                            o.alg,
+  res.recipe_steps.emplace_back(std::format("pass.semdiff matching_names:{} state_pairing:{} hier:{} id_granularity:{}",
                                             o.matching_names,
                                             o.state_pairing,
                                             hier,
@@ -750,7 +748,7 @@ void pass_command(Options& opts, Result& res) {
     set_top_label(opts, var, labels, "pass.color");
     merge_sets(opts, "pass.color", labels);
     if (opts.stats) {
-      labels["stats"] = "true";  // CLI sugar for pass.color.stats; either form turns it on
+      labels["stats"] = "true";  // shared --stats / lhd.stats selection
     }
     run_step("pass.color", var, labels, opts, res);
     {
@@ -848,6 +846,7 @@ void pass_command(Options& opts, Result& res) {
     // cells. Set AFTER merge_sets because `pass.abc.library` is not a user knob
     // (check_known_set_passes refuses it and names synth.liberty).
     labels["library"] = resolve_liberty(opts);
+    labels["threads"] = synth_set(opts, "threads", "0");
     res.inputs.push_back(labels["library"]);
     if (opts.stats) {
       labels["stats"] = "true";

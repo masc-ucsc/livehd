@@ -49,6 +49,6 @@ run compile lg:"$W/ref" --top "$TOP" --emit-dir verilog:"$W/refv" --workdir "$W/
 run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w_modelsv"
 cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/refv/"*.v > "$W/ref.v"
-run lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/w_lec"
+run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/w_lec"
 
 echo "PASS: ABC materializes only demanded bits of wide native boundaries ($NODES mapped nodes, LEC-proven)"

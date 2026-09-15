@@ -18,13 +18,13 @@ for workspace in _main livehd livehd+; do
   cp inou/yosys/inou_yosys_read.ys "$root/$workspace/inou/yosys/"
   RUNFILES_DIR="$root" TEST_SRCDIR= "$W/bin/lhd" compile "$W/input.v" \
     --reader yosys-verilog --top runfiles_example --workdir "$W/work-$workspace" \
-    --emit verilog:"$W/out-$workspace.v"
+    --emit-dir "lg:$W/lg-$workspace" --emit verilog:"$W/out-$workspace.v"
   test -s "$W/out-$workspace.v"
 done
 
 RUNFILES_DIR= TEST_SRCDIR="$W/runfiles-livehd+" "$W/bin/lhd" compile "$W/input.v" \
   --reader yosys-verilog --top runfiles_example --workdir "$W/work-test-srcdir" \
-  --emit verilog:"$W/out-test-srcdir.v"
+  --emit-dir "lg:$W/lg-test-srcdir" --emit verilog:"$W/out-test-srcdir.v"
 test -s "$W/out-test-srcdir.v"
 
 # An explicit bad script must not silently fall back to bundled defaults.

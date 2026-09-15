@@ -82,9 +82,11 @@ for m in A B D E; do C "$m"; done
 # verdict between cases and hide the behaviour being asserted.
 run() {  # <tag> <impl> <order> [extra...] -> RC/OUT
   local tag=$1 impl=$2 ord=$3; shift 3
+  order_args=()
+  [ "$ord" = "top_down" ] || order_args=(${order_args[@]+"${order_args[@]}"})
   rm -rf "$W/wd_$tag"
   OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/$impl" --top top \
-        --set formal.lec.hier=true --set "formal.lec.hier_order=$ord" \
+         --set "formal.lec.hier_order=$ord" \
         --workdir "$W/wd_$tag" "$@" 2>&1); RC=$?
 }
 
@@ -166,7 +168,7 @@ else echo "ok: hier_order rejects an unknown value"; fi
 
 rm -rf "$W/wd_ff"
 OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/B" --top top \
-      --set formal.lec.hier_order=top_down --set formal.lec.hier_refute=fail \
+       --set formal.lec.hier_refute=fail \
       --workdir "$W/wd_ff" 2>&1); RC=$?
 if ! echo "$OUT" | grep -q "forces the legacy bottom_up order"; then
   echo "FAIL: case 5 hier_refute=fail did not announce the fallback to bottom_up"; fail=1
@@ -198,7 +200,6 @@ for side in a b; do
 done
 if [ "$fail" -eq 0 ]; then
   OUT=$("$LHD" lec --ref "lg:$W/deep_a" --impl "lg:$W/deep_b" --top deep_top \
-        --set formal.lec.hier=true --set formal.lec.semdiff=structural \
         --workdir "$W/wd_deep" 2>&1); RC=$?
   if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q '82/82 def(s) proven'; then
     echo "FAIL: case 6 deep hierarchy traversal did not prove safely (rc=$RC)"; fail=1

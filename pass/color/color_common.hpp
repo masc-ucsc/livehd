@@ -7,8 +7,7 @@
 // The algorithms (acyclic, cgen, synth, path, mincut, flat) each compute a
 // per-node color id over a single graph def and then hand the result to
 // apply_coloring, which performs the optional continuous (per-region) split and
-// writes either the flat per-def color (default, "compact") or the per-instance
-// hier color.
+// writes the flat per-definition color.
 
 #include <cstdint>
 #include <string>
@@ -133,16 +132,13 @@ struct Def_color_sizes {
 
 // Per-pass options shared by every algorithm. `hier` selects whether the pass
 // driver colors the whole instance hierarchy (every unique def) or only the
-// given graph. `compact` writes the flat per-def color (the default — these
-// structural algorithms color identically per instance, so one write per def is
-// both correct and far cheaper); when false the per-instance hier color is
-// written instead. `continuous` splits each color into one id per maximal
+// given graph. Structural algorithms write one color per definition.
+// `continuous` splits each color into one id per maximal
 // connected same-color region. `keep_colored` preserves pre-existing colors on
 // nodes the algorithm leaves uncolored (the 2p iterative flow).
 struct Color_opts {
   bool hier         = true;
   bool verbose      = false;
-  bool compact      = true;
   bool continuous   = false;
   bool keep_colored = false;
 
@@ -237,7 +233,7 @@ struct Color_opts {
 }
 
 // Write `node2id` onto `g`'s regular nodes. Applies the continuous split when
-// requested, then writes flat (compact) or per-instance hier color. Nodes
+// requested, then writes the flat per-definition color. Nodes
 // absent from node2id are cleared (unless keep_colored leaves an existing
 // color in place). Returns the number of distinct color ids written; fills
 // `sizes` when non-null.

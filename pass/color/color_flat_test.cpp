@@ -23,8 +23,7 @@ namespace {
 
 Color_opts base_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
+  o.hier = false;
   return o;
 }
 

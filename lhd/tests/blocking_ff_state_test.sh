@@ -1,28 +1,9 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# LIVE fail-closed test: a variable BLOCKING-assigned inside an EDGE-sensitive
-# process and read outside it is persistent flop state.
-#
-# `--reader slang` models state from non-blocking (`<=`) writes only, and
-# collect_state_vars documents the rest: "one written there but read elsewhere
-# has flop semantics this reader does not model yet -> diagnosed". That
-# diagnostic only ever fired for module OUTPUTS (`blocking-ff-output`) and
-# unpacked arrays (`blocking-ff-array`). An INTERNAL scalar fell through and was
-# declared a plain `mut`, so the register VANISHED:
-#
-#     always @(posedge pulse or posedge rst)
-#       if (rst) ms_counter = 0; else ms_counter = ms_counter + 1;
-#     assign tick_count = ms_counter;
-#
-# lowered to a stateless `pub comb` whose output folded to the constant 1 -- it
-# compiled clean, exit 0, zero warnings, and lgcheck REFUTED it against the
-# source. That is the worst possible outcome, so this pins the refusal.
-#
-# The ACCEPTANCE half is what makes it a real test: a checker that rejects every
-# blocking write in an edge process would also pass the rejection cases. A
-# process-LOCAL blocking temp (written and read only inside the one process) is
-# legitimate and must still compile, and so must the ordinary `<=` register.
+# Native Slang retains scalar blocking-assigned state across clock edges.
+# Check both asynchronous-reset feedback and a separate-process pipeline
+# against explicit nonblocking RTL, plus local temporaries and loop controls.
 
 set -u
 
@@ -42,7 +23,7 @@ fail=0
 
 note() { echo "  $*"; }
 
-# --- 1. REFUSED: blocking-written scalar read by a continuous assign ----------
+# --- 1. State: blocking-written scalar read by a continuous assign ----------
 cat >"$TMP/bad_assign.v" <<'EOF'
 module bad_assign(input rst, input pulse, output [31:0] tick_count);
   reg [31:0] ms_counter;
@@ -54,7 +35,7 @@ module bad_assign(input rst, input pulse, output [31:0] tick_count);
 endmodule
 EOF
 
-# --- 2. REFUSED: blocking-written scalar read by ANOTHER process --------------
+# --- 2. State: blocking-written scalar read by ANOTHER process --------------
 cat >"$TMP/bad_proc.v" <<'EOF'
 module bad_proc(input clk, input [7:0] d, output reg [7:0] q);
   reg [7:0] stage;
@@ -64,22 +45,17 @@ endmodule
 EOF
 
 for t in bad_assign bad_proc; do
-  out=$("$LHD" compile "$TMP/$t.v" --reader slang --emit-dir "pyrope:$TMP/$t/" \
-        --workdir "$TMP/w_$t" -q 2>&1)
-  rc=$?
-  if [ $rc -eq 0 ]; then
-    echo "FAIL[$t]: compiled clean -- the register was silently dropped"
-    note "$out"
-    fail=1
-  elif ! echo "$out" | grep -q "blocking-assigned in an edge-sensitive process and read outside it"; then
-    # Match the MESSAGE, not the `blocking-ff-state` code: `-q` prints only the
-    # result envelope, which carries the message but not the diagnostic code.
-    echo "FAIL[$t]: exited $rc but without the blocking-ff-state diagnostic"
-    note "$out"
-    fail=1
-  else
-    echo "ok[$t]: refused with blocking-ff-state"
-  fi
+  "$LHD" compile "$TMP/$t.v" --emit-dir "pyrope:$TMP/$t/" \
+    --emit verilog:"$TMP/$t-out.v" --workdir "$TMP/w_$t" -q > "$TMP/$t.log" 2>&1 \
+    || { cat "$TMP/$t.log"; exit 1; }
+  # These fixtures have one assignment per written register in each branch;
+  # replacing = with <= gives an independently expressed state machine.
+  sed -e 's/ms_counter =/ms_counter <=/g' -e 's/stage =/stage <=/g' \
+    "$TMP/$t.v" > "$TMP/$t-ref.v"
+  "$LHD" lec --impl "$TMP/$t-out.v" --ref "$TMP/$t-ref.v" --top "$t" \
+    --workdir "$TMP/lec_$t" -q > "$TMP/$t-lec.log" 2>&1 \
+    || { cat "$TMP/$t-lec.log"; exit 1; }
+  echo "ok[$t]: blocking state survives emission and proves against nonblocking RTL"
 done
 
 # --- 3. ACCEPTED: a process-LOCAL blocking temp -------------------------------
@@ -104,7 +80,7 @@ EOF
 
 # --- 5. ACCEPTED: a module-scope for-LOOP INDEX shared by two processes -------
 # `n` is blocking-written by the edge process's loop control and referenced by
-# the comb process, which looks exactly like the refused shape -- but a loop
+# the comb process, which must not become state: a loop
 # index is not hardware state, elaboration unrolls it away. Refusing this
 # rejected two real corpus designs (a cache tag array and an AXIS SRL register),
 # so the loop control is excluded from the blocking-write set.

@@ -13,6 +13,56 @@
 
 namespace {
 
+TEST(CpropConstants, FoldedValueIgnoresResultAndOutputWidthHints) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hint_independence");
+  for (int hint : {0, 1, 8, 32}) {
+    auto io = lib.create_io("constant_hint_" + std::to_string(hint));
+    io->add_output("out", 1);
+    io->set_bits("out", 1);
+    auto g   = io->create_graph();
+    auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
+    gu::set_ubits(sum.create_driver_pin(0), hint);
+    gu::create_const(*g, *Dlop::create_integer(255)).connect_sink(sum.create_sink_pin(0));
+    gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+    sum.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+    Cprop{}.do_trans(g);
+    auto edges = g->get_output_pin("out").inp_edges();
+    ASSERT_EQ(edges.size(), 1);
+    ASSERT_TRUE(edges[0].driver.is_const());
+    EXPECT_EQ(gu::const_of(edges[0].driver).to_just_i64(), 256);
+  }
+}
+
+TEST(CpropMasks, BoundaryAnnotationsCannotProveAMaskRedundant) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_boundary_hints");
+  for (bool state : {false, true}) {
+    auto io = lib.create_io(state ? "state_mask" : "input_mask");
+    io->add_input("in", 1);
+    io->set_bits("in", 1);
+    io->add_output("out", 2);
+    io->set_bits("out", 8);
+    auto g     = io->create_graph();
+    auto input = g->get_input_pin("in");
+    gu::set_ubits(input, 1);
+    if (state) {
+      auto flop = gu::create_typed_node(*g, Ntype_op::Flop);
+      gu::setup_sink_by_name(flop, "din").connect_driver(input);
+      input = flop.create_driver_pin(0);
+      gu::set_ubits(input, 1);
+    }
+    auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
+    gu::setup_sink_by_name(mask, "a").connect_driver(input);
+    gu::setup_sink_by_name(mask, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(255)));
+    mask.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+    Cprop{}.do_trans(g);
+    auto edges = g->get_output_pin("out").inp_edges();
+    ASSERT_EQ(edges.size(), 1);
+    EXPECT_EQ(gu::type_op_of(edges[0].driver.get_master_node()), Ntype_op::Get_mask);
+  }
+}
+
 // A folded producer and an existing literal may intern to the same pin.
 // Their arithmetic multiplicity must survive, including a second collision
 // when 2 + 2 becomes an already-connected 4 (or 2 * 2 becomes 4).
@@ -45,12 +95,87 @@ TEST(CpropConstants, FoldedConstantsPreserveOperandMultiplicity) {
       constant(3).connect_sink(consumer.create_sink_pin(1));
     }
     consumer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
-    Cprop{}.do_trans(g, false);
+    Cprop{}.do_trans(g);
     auto edges = g->get_output_pin("out").inp_edges();
     ASSERT_EQ(edges.size(), 1);
     ASSERT_TRUE(edges.begin()->driver.is_const()) << index;
     EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), expected) << index;
   }
+}
+
+// `(lo + 7) + 1 - lo` is the width upass.tolg builds for `x#[lo ..+ 8]`. The
+// forward Sum merge lands the shared `lo` on the consumer's OPPOSITE port, so
+// the two occurrences cancel and the literal 8 is left. The same-port twin
+// `(lo + 7) + lo` must keep both contributions (a parallel edge would dedup).
+TEST(CpropConstants, ForwardSumCancelsOppositePortOperand) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_sum_cancel");
+  for (const bool cancel : {true, false}) {
+    auto io = lib.create_io(cancel ? "sum_cancel_opposite" : "sum_keep_same_port");
+    io->add_input("lo", 1);
+    io->set_bits("lo", 8);
+    io->add_output("out", 2);
+    auto g        = io->create_graph();
+    auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
+    auto lo       = g->get_input_pin("lo");
+    auto inner    = gu::create_typed_node(*g, Ntype_op::Sum);
+    auto inner_as = inner.create_sink_pin(0);
+    lo.connect_sink(inner_as);
+    constant(7).connect_sink(inner_as);
+    auto outer    = gu::create_typed_node(*g, Ntype_op::Sum);
+    auto outer_as = outer.create_sink_pin(0);
+    inner.create_driver_pin(0).connect_sink(outer_as);
+    constant(1).connect_sink(outer_as);
+    lo.connect_sink(cancel ? outer.create_sink_pin(1) : outer_as);
+    outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+    Cprop{}.do_trans(g);
+    auto edges = g->get_output_pin("out").inp_edges();
+    ASSERT_EQ(edges.size(), 1);
+    if (cancel) {
+      ASSERT_TRUE(edges.begin()->driver.is_const());
+      EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), 8);
+    } else {
+      EXPECT_FALSE(edges.begin()->driver.is_const());
+      size_t lo_uses = 0;
+      for ([[maybe_unused]] const auto& e : lo.out_edges()) {
+        ++lo_uses;
+      }
+      EXPECT_EQ(lo_uses, 2u);  // 2*lo + 8: neither `lo` contribution was dropped
+    }
+  }
+}
+
+// A driver the MERGED node reads twice is not a reason to refuse: `Sum(as:lo,
+// bs:lo)` puts its two occurrences on the consumer's two DIFFERENT ports, so
+// nothing races over one edge. The blanket "node reads it twice" refusal left
+// this merge -- and the `lo - lo` cancellation it exposes -- on the table.
+TEST(CpropConstants, ForwardSumMergesNodeInternalDuplicateDriver) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_sum_dup_driver");
+  auto  io     = lib.create_io("sum_dup_driver");
+  io->add_input("lo", 1);
+  io->set_bits("lo", 8);
+  io->add_output("out", 2);
+  auto g        = io->create_graph();
+  auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
+  auto lo       = g->get_input_pin("lo");
+
+  auto inner = gu::create_typed_node(*g, Ntype_op::Sum);  // lo - lo
+  lo.connect_sink(inner.create_sink_pin(0));
+  lo.connect_sink(inner.create_sink_pin(1));
+
+  auto outer    = gu::create_typed_node(*g, Ntype_op::Sum);  // inner + 5
+  auto outer_as = outer.create_sink_pin(0);
+  inner.create_driver_pin(0).connect_sink(outer_as);
+  constant(5).connect_sink(outer_as);
+  outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+
+  Cprop{}.do_trans(g);
+
+  auto edges = g->get_output_pin("out").inp_edges();
+  ASSERT_EQ(edges.size(), 1);
+  ASSERT_TRUE(edges.begin()->driver.is_const());
+  EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), 5);
 }
 
 // The first latch sweep cannot know that `x | -1` is an always-open enable.
@@ -85,7 +210,7 @@ TEST(CpropCleanup, RunsAfterFinalCanonicalization) {
   latch.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
 
   Cprop cp;
-  cp.do_trans(g, /*check_input_sized=*/false);
+  cp.do_trans(g);
 
   EXPECT_TRUE(latch.is_invalid()) << "the now-always-open latch should become a wire";
   EXPECT_TRUE(clock_shape.is_invalid()) << "final cleanup must remove the control cone orphaned by that rewrite";
@@ -252,7 +377,7 @@ TEST(CpropCleanup, EnabledFlopDoesNotNeedItsDataHoldMux) {
     if (shared) {
       d.connect_sink(g->get_output_pin("observe"));
     }
-    Cprop{}.do_trans(g, false);
+    Cprop{}.do_trans(g);
     EXPECT_FALSE(flop.is_invalid());
     EXPECT_EQ(gu::get_driver_of_sink_name(flop, "din"), g->get_input_pin("d"));
     if (shared) {
@@ -682,7 +807,7 @@ TEST(CpropMuxSharing, DeepPriorityChainHasLinearGeneratedSize) {
   EXPECT_LT(edges, 12 * depth);
 }
 
-TEST(CpropMuxSharing, NarrowAndColoredMuxesAreNotExpanded) {
+TEST(CpropMuxSharing, WidthHintsDoNotGateSharingButColorsDo) {
   for (bool colored : {false, true}) {
     Mux_graph f(colored ? "colored_mux" : "narrow_mux", 6, colored ? 32 : 1);
     auto      root = f.b;
@@ -694,7 +819,7 @@ TEST(CpropMuxSharing, NarrowAndColoredMuxesAreNotExpanded) {
     }
     root.connect_sink(f.graph->get_output_pin("out"));
     Cprop{}.do_trans(f.graph);
-    EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), colored ? 0 : 1);
   }
 }
 }  // namespace

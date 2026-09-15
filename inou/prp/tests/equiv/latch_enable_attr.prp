@@ -4,7 +4,6 @@
 :verilog_top: latch_enable_attr.gate
 :pyrope_top: gate
 :lec_top: gate
-:equiv_engine: cvc5
 */
 
 // `enable=` on a LATCH means the same thing it means on a flop: it ANDs onto

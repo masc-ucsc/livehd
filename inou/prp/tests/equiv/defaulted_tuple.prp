@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 
 type Decode = (mut add:bool = nil, mut sub:bool = nil, mut rd:u5 = nil)

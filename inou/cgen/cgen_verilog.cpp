@@ -143,9 +143,8 @@ void sort_by_sink_pid(livehd::graph_util::Edge_vec& edges) {
 
 }  // namespace
 
-Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap,
-                           const absl::flat_hash_map<std::string, std::string>* _flat_names)
-    : verbose(_verbose), odir(_odir), srcmap(_srcmap), nrunning(0), flat_names_(_flat_names) {
+Cgen_verilog::Cgen_verilog(std::string_view _odir, bool _srcmap, const absl::flat_hash_map<std::string, std::string>* _flat_names)
+    : odir(_odir), srcmap(_srcmap), nrunning(0), flat_names_(_flat_names) {
   static std::once_flag init_once;
   std::call_once(init_once, [] {
     // Full Verilog-2005 (IEEE 1364) + SystemVerilog (IEEE 1800-2017, Annex B)
@@ -1106,6 +1105,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   hhds::Pin_class mem_undef_dpin;   // per-(read,write) UNDEFINED-on-collision matrix (same layout)
   int             mem_type    = 2;  // array by default
   int             mem_wensize = 0;
+  bool            mem_posclk  = true;
 
   hhds::Pin_class mem_init_dpin;  // comptime contents OR (whole-array) runtime reset-value bus (entry 0 in the low bits)
   // Whole-array pins (driven => this cell is a whole-array memory: one `update`
@@ -1150,6 +1150,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         return;
       }
       mem_type = const_of(e.driver).to_just_i64();
+    } else if (pin_name == "posclk") {
+      if (!e.driver.is_const() || !const_of(e.driver).is_just_i64()
+          || const_of(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
+        livehd::diag::err("inou.cgen", "mem-clock-edge", "unsupported")
+            .msg("memory {} requires per-port clock edge polarity, which Verilog emission does not support", debug_name(node))
+            .fatal();
+        return;
+      }
+      mem_posclk = !const_of(e.driver).is_known_zero();
     } else if (pin_name == "wensize") {
       if (!e.driver.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
@@ -1259,12 +1268,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // clocked bulk update is a next-state no same-cycle read observes, so that
   // cell reads the committed contents only.)
   if (!mem_update_dpin.is_invalid() || wants_read_all || !mem_reset_dpin.is_invalid()) {
-    const bool has_update = !mem_update_dpin.is_invalid();
-    const int  lanes      = mem_wensize > 1 ? static_cast<int>(mem_wensize) : 1;  // write-enable lanes per entry
-    const int  lane_w     = mem_bits / lanes;
+    const bool      has_update = !mem_update_dpin.is_invalid();
+    const int       lanes      = mem_wensize > 1 ? static_cast<int>(mem_wensize) : 1;  // write-enable lanes per entry
+    const int       lane_w     = mem_bits / lanes;
     // Inline storage uses the same reversible base name as a wrapper instance,
     // so an emit/read round trip can recover the original Memory identity.
-    const auto      aname = absl::StrCat(iname, "_data");
+    const auto      aname      = absl::StrCat(iname, "_data");
     // The FIRST clock any port carries, not port zero's. tolg always wires the
     // cell clock into port 0's block, but a graph from another front end (or a
     // reloaded `lg:`) may put it on a later port -- and now that `read_all`
@@ -1337,7 +1346,11 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
           reset_event = absl::StrCat(" or posedge ", get_wire_or_const(mem_reset_dpin, 1, true));
         }
       }
-      fout->append(absl::StrCat("always @(posedge ", get_wire_or_const(clock_dpin, 1, true), reset_event, ") begin\n"));
+      fout->append(absl::StrCat("always @(",
+                                mem_posclk ? "posedge " : "negedge ",
+                                get_wire_or_const(clock_dpin, 1, true),
+                                reset_event,
+                                ") begin\n"));
       std::string ind = "  ";
       if (!mem_reset_dpin.is_invalid()) {  // reset to the init/reset bus (highest priority)
         fout->append(absl::StrCat("  if (", get_wire_or_const(mem_reset_dpin, 1, true), ") begin\n"));
@@ -1457,9 +1470,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
 
     // Async reads: per-entry douts (read port N => pid n_wr_ports+N) + read_all.
-    // Registered douts are `wire` (create_locals, type!=2) -> continuous assign;
-    // combinational douts are `reg` -> drive inside an always_comb.
-    const bool reads_in_comb = !registered;
+    // Match create_locals: type 2 douts are variables, type 0/1 douts are
+    // nets. A clockless ROM can still have type 0, so clock presence does
+    // not determine whether a procedural assignment is legal.
+    const bool reads_in_comb = mem_type == 2;
     if (reads_in_comb) {
       fout->append("always_comb begin\n");
     }
@@ -1484,12 +1498,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       if (!live_dout_pids.contains(dout_pid)) {
         continue;
       }
-      auto       dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(dout_pid));
+      auto        dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(dout_pid));
       // IEEE array semantics make a read through an unknown/out-of-range
       // index unknown. Spell that result directly: a constant unknown
       // selector is diagnosed as an invalid element by slang before lowering.
-      const auto raddr = get_wire_or_const(p.addr, mem_addr_bits, true);
-      std::string rhs  = invalid_const_addr(p.addr) ? unknown_entry() : absl::StrCat(aname, "[", raddr, "]");
+      const auto  raddr     = get_wire_or_const(p.addr, mem_addr_bits, true);
+      std::string rhs       = invalid_const_addr(p.addr) ? unknown_entry() : absl::StrCat(aname, "[", raddr, "]");
       if (registered && !has_update) {
         // Same-cycle forwarding chain from the cell's per-(read,write) FWD /
         // UNDEF matrices (bit r*n_wr + w, graph/cell.cpp): a later write port
@@ -1513,10 +1527,11 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
           }
           if (lanes > 1) {
             livehd::diag::err("inou.cgen", "mem-inline-lanes", "unsupported")
-                .msg("memory {} has a per-lane write enable (wensize={}) and a same-cycle collision matrix, which the "
-                     "inline reg-array emission (forced by its reset / whole-array read) does not forward per lane",
-                     debug_name(node),
-                     lanes)
+                .msg(
+                    "memory {} has a per-lane write enable (wensize={}) and a same-cycle collision matrix, which the "
+                    "inline reg-array emission (forced by its reset / whole-array read) does not forward per lane",
+                    debug_name(node),
+                    lanes)
                 .hint("spell `ordering=\"old\"` on the array, or drop the reset value / whole-array read")
                 .fatal();
             return;
@@ -1541,6 +1556,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   }
 
   if (mem_type == 0 || mem_type == 1) {  // sync or async memory
+    // Wrapper modules trigger on posedge; invert a uniform negedge clock at
+    // their boundary instead of changing the memory's storage semantics.
+    auto clock_expr = [&](const hhds::Pin_class& pin) {
+      auto expr = get_wire_or_const(pin, 1, true);
+      return mem_posclk ? expr : absl::StrCat("~(", expr, ")");
+    };
     bool            single_clock    = true;
     hhds::Pin_class base_clock_dpin = port_vector.empty() ? hhds::Pin_class{} : port_vector[0].clock;
     for (auto& p : port_vector) {
@@ -1664,7 +1685,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 
     first_entry = true;
     if (single_clock) {
-      fout->append(absl::StrCat(".clk(", get_wire_or_const(base_clock_dpin, 1, true), ")\n"));
+      fout->append(absl::StrCat(".clk(", clock_expr(base_clock_dpin), ")\n"));
       first_entry = false;
     }
 
@@ -1691,7 +1712,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 
         fout->append("  ,.rd_enable_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.enable, 1, true), ")\n");
         if (!single_clock) {
-          fout->append("  ,.rd_clock_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.clock, 1, true), ")\n");
+          fout->append("  ,.rd_clock_", std::to_string(n_rd_pos), "(", clock_expr(p.clock), ")\n");
         }
         // The dout driver pin for read port N is pid (n_wr_ports + N) — the
         // convention resolve_memory uses in lgyosys_tolg (`wrports + rdport`).
@@ -1724,7 +1745,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
                      get_wire_or_const(p.enable, std::max(mem_wensize, 1), true),
                      ")\n");
         if (!single_clock) {
-          fout->append("  ,.wr_clock_", std::to_string(n_wr_pos), "(", get_wire_or_const(p.clock, 1, true), ")\n");
+          fout->append("  ,.wr_clock_", std::to_string(n_wr_pos), "(", clock_expr(p.clock), ")\n");
         }
         fout->append("  ,.wr_din_", std::to_string(n_wr_pos), "(", get_wire_or_const(p.din, mem_bits, true), ")\n");
         ++n_wr_pos;
@@ -2395,8 +2416,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // The amount rides a declared variable or a literal, never an inlined
     // expression — create_locals guarantees it (Verilog SELF-determines this
     // position; see the shift-amount pass there).
-    auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));
-    final_expr    = absl::StrCat("(", wide_val, " << ", amt_expr, ")");
+    const auto amt_dpin = get_driver(find_sink_pin(node, "b"));
+    auto       amt_expr = get_expression(amt_dpin);
+    final_expr          = absl::StrCat("(", wide_val, " << ", amt_expr, ")");
+    if (operand_reads_signed(amt_dpin)) {
+      // A signed count carrier can contain values outside the nonnegative
+      // range used to infer this result (notably a lifted loop index). Keep
+      // the same result precision as a materialized shift: an enclosing
+      // wider AND/NOT must not widen the shift and expose extra high bits.
+      final_expr = absl::StrCat(obits, "'(", final_expr, ")");
+    }
   } else if (op == Ntype_op::SRA) {
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto val_expr = get_expression(a_dpin);
@@ -3880,7 +3909,12 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // type==2 (array) douts are procedurally assigned in process_memory's
           // always_comb, so they must be `reg`; type 0/1 douts connect to the
           // cgen_memory_* instance ports and must stay nets.
-          bool is_array_mem = false;
+          // Default TRUE: process_memory reads the same pin with `mem_type = 2`
+          // as its default, and it now picks procedural (`always_comb`) vs
+          // continuous dout assignment from that value. Defaulting the two the
+          // other way would emit `always_comb dout = ...` onto a `wire` for a
+          // Memory cell that arrives without a `type` pin.
+          bool is_array_mem = true;
           for (auto& e2 : node.inp_edges()) {
             if (e2.sink.get_port_id() == 7 && e2.driver.is_const()) {  // pid 7 = "type" (comptime x 1)
               is_array_mem = const_of(e2.driver).to_just_i64() == 2;
@@ -4126,17 +4160,20 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       if (!nname.empty() && nname.front() != '_') {
         continue;
       }
-      // Declare a named wire only for a fanout of >=2 (single-use nets inline).
-      // Cap the walk at 2: never iterate a high-fanout driver's full out-edge
-      // set just to learn it has "more than one" reader.
-      int fanout = 0;
+      // Small bitwise expressions are cheaper to inline at two uses than to
+      // materialize as another word-sized temporary. Keep the same expression
+      // and precision rules as the single-use path.
+      const bool bitwise = op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor;
+      // Keep the shared net that breaks recursive expansion on a cycle.
+      const int  limit   = bitwise && node.inp_edges().size() <= 2 && !comb_cycle.contains(node) ? 3 : 2;
+      int        fanout  = 0;
       for (const auto& e : node.out_edges()) {
         (void)e;
-        if (++fanout >= 2) {
+        if (++fanout >= limit) {
           break;
         }
       }
-      if (fanout < 2) {
+      if (fanout < limit) {
         continue;
       }
     }
@@ -4302,8 +4339,6 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   assert(nrunning == 0);
   ++nrunning;
-
-  (void)verbose;
 
   // NOTHING here mutates `graph`. A false comb loop through a pure-comb instance
   // used to be repaired by dissolving the instance, purely so this emitter could

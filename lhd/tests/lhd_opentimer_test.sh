@@ -100,7 +100,7 @@ fi
 # 3b. whole-design timing (hier=true): the hierarchical netlist top (wrapper +
 #     region instances) is structurally flattened into one scratch module and
 #     timed end-to-end — zero OT connect errors, module name = the real top.
-"$LHD" pass opentimer --set pass.opentimer.hier=true --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wth" \
+"$LHD" pass opentimer  --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wth" \
     -q --result-json "$W/rh.json" 2> "$W/ot_hier.err" || fail "hier=true opentimer -> $(cat "$W/rh.json")"
 grep -q "\"module\":\"$TOP\"" "$W/wth/timing.json" || fail "hier timing.json must report the real top name"
 grep -q '"max_delay":' "$W/wth/timing.json" || fail "hier timing.json missing max_delay"

@@ -234,7 +234,10 @@ public:
   // Separate clock runtime calls when the backend uses a distinct data ABI
   // (LLVM). Compact loops may share colors with surrounding logic; their
   // runtime guards each stateful advance once per phase across output colors.
-  static Color_plan discover(hhds::Graph* root, bool include_observations = true, bool separate_runtime_calls = false);
+  // `live_words` = the per-color live-word budget (0 = the built-in default).
+  static Color_plan         discover(hhds::Graph* root, bool include_observations = true, bool separate_runtime_calls = false,
+                                     uint64_t live_words = 0);
+  static constexpr uint64_t kDefaultLiveWords = 256;
 
   [[nodiscard]] const std::vector<Site>&                sites() const noexcept { return sites_; }
   [[nodiscard]] const std::vector<Dependency>&          dependencies() const noexcept { return dependencies_; }
@@ -288,6 +291,11 @@ private:
   std::vector<std::vector<size_t>>   canonical_members_;
   Summary                            summary_;
   std::vector<std::string>           errors_;
+  // Live machine words this plan's coarsener was allowed to keep alive across
+  // one color's members. Per-PLAN, not a global: report() prints the budget the
+  // colors below were actually built at, so a later discover() at a different
+  // budget cannot desynchronize this plan's report from this plan.
+  uint64_t                           live_word_budget_ = kDefaultLiveWords;
 };
 
 }  // namespace livehd::sim

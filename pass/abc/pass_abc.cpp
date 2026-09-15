@@ -122,20 +122,7 @@ void Pass_abc::setup() {
                        "mapped DFF cell's clk->Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 57 ps, "
                        "sky130 dfxtp_1 372 ps), a number = that many ps, 0 = no margin",
                        "auto");
-  m.add_label_optional("ctrl_flow",
-                       "control recipe: inherit normal mapping, or custom delay tier; region_opts and large_flow take precedence",
-                       "inherit");
-  m.add_label_optional("ctrl_area_relax", "custom control-tier slack-for-area cap (inherit uses normal policy)", "0");
-  m.add_label_optional("ctrl_time_budget_ms",
-                       "custom control-tier wall backstop including mapping and sizing (0 disables; inherit uses normal policy)",
-                       "5000");
-  m.add_label_optional("small_flow",
-                       "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
-                       "[small_min_ge, small_ge]; "
-                       "empty disables size-tiered mapping. Explicit region_opts flow overrides this selection",
-                       "");
-  m.add_label_optional("small_min_ge", "inclusive lower synthesis-GE bound for small_flow (0 means no lower bound)", "0");
-  m.add_label_optional("small_ge", "non-negative synthesis-GE threshold for small_flow (0 disables it)", "0");
+
   m.add_label_optional("large_flow",
                        "ABC command string for indivisible over-large regions at or above large_ge; empty disables the tier. "
                        "An explicit global flow or region_opts flow wins",
@@ -625,6 +612,14 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
 }  // namespace
 
 void Pass_abc::work(Eprp_var& var) {
+  const auto unroll_carry_text = var.get("unroll_carry", "true");
+  if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
+      && unroll_carry_text != "on" && unroll_carry_text != "off") {
+    livehd::diag::err("pass.abc", "bad-unroll-carry", "syntax")
+        .msg("pass.abc.unroll_carry expects true|false, got '{}'", unroll_carry_text)
+        .emit();
+    return;
+  }
   // Copy first so selective carry expansion and mapping leave the source
   // graph untouched. Independent loops stay compact until mapped-body stitching.
   hhds::GraphLibrary                        occurrence_library;
@@ -676,14 +671,6 @@ void Pass_abc::work(Eprp_var& var) {
       scratch_graphs.push_back(std::move(graph));
     }
   }
-  const auto unroll_carry_text = var.get("unroll_carry", "true");
-  if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
-      && unroll_carry_text != "on" && unroll_carry_text != "off") {
-    livehd::diag::err("pass.abc", "bad-unroll-carry", "usage")
-        .msg("pass.abc.unroll_carry expects true|false, got '{}'", unroll_carry_text)
-        .emit();
-    return;
-  }
   livehd::abc::Loop_preparation loops;
   if (!livehd::abc::prepare_loop_bodies(scratch_graphs,
                                         unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
@@ -723,9 +710,6 @@ void Pass_abc::work(Eprp_var& var) {
   auto out                 = std::string{var.get("out", "")};
   auto library             = std::string{var.get("library", "")};
   auto flow                = std::string{var.get("flow", "")};
-  auto small_flow          = std::string{var.get("small_flow", "")};
-  auto small_min_ge_s      = std::string{var.get("small_min_ge", "0")};
-  auto small_ge_s          = std::string{var.get("small_ge", "0")};
   auto large_flow          = std::string{var.get("large_flow", "")};
   auto large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool map_register        = truthy(var.get("register", "true"));
@@ -807,36 +791,6 @@ void Pass_abc::work(Eprp_var& var) {
           .fatal();
       return;
     }
-  }
-  uint64_t small_ge = 0;
-  {
-    auto* b      = small_ge_s.data();
-    auto* e      = small_ge_s.data() + small_ge_s.size();
-    auto [p, ec] = std::from_chars(b, e, small_ge);
-    if (ec != std::errc{} || p != e) {
-      livehd::diag::err("pass.abc", "bad-small-ge", "io")
-          .msg("pass.abc: small_ge must be a non-negative integer, got '{}'", small_ge_s)
-          .fatal();
-      return;
-    }
-  }
-  uint64_t small_min_ge = 0;
-  {
-    auto* b      = small_min_ge_s.data();
-    auto* e      = small_min_ge_s.data() + small_min_ge_s.size();
-    auto [p, ec] = std::from_chars(b, e, small_min_ge);
-    if (ec != std::errc{} || p != e) {
-      livehd::diag::err("pass.abc", "bad-small-min-ge", "io")
-          .msg("pass.abc: small_min_ge must be a non-negative integer, got '{}'", small_min_ge_s)
-          .fatal();
-      return;
-    }
-  }
-  if (small_ge != 0 && small_min_ge > small_ge) {
-    livehd::diag::err("pass.abc", "bad-small-ge-range", "io")
-        .msg("pass.abc: small_min_ge ({}) must not exceed small_ge ({})", small_min_ge, small_ge)
-        .fatal();
-    return;
   }
   uint64_t large_ge = 0;
   {
@@ -978,26 +932,11 @@ void Pass_abc::work(Eprp_var& var) {
   opts.area_relax_pct  = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow       = area_flow;
   opts.reg_margin      = reg_margin;
-  opts.ctrl_flow       = std::string{var.get("ctrl_flow", "inherit")};
-  const auto ctrl_uint = [&](std::string_view key) -> uint64_t {
-    const auto s         = std::string{var.get(key, key == "ctrl_area_relax" ? "0" : "5000")};
-    uint64_t   v         = 0;
-    const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || end != s.data() + s.size() || v > std::numeric_limits<uint32_t>::max()) {
-      livehd::diag::err("pass.abc", "bad-ctrl-option", "io").msg("{} must be a nonnegative 32-bit integer", key).fatal();
-    }
-    return v;
-  };
-  opts.ctrl_area_relax     = static_cast<uint32_t>(ctrl_uint("ctrl_area_relax"));
-  opts.ctrl_time_budget_ms = ctrl_uint("ctrl_time_budget_ms");
-  opts.small_flow          = small_flow;
-  opts.small_min_ge        = small_min_ge;
-  opts.small_ge            = small_ge;
-  opts.large_flow          = large_flow;
-  opts.large_ge            = large_ge;
-  opts.map_register        = map_register;
-  opts.memory_fold         = *memory_fold;
-  opts.memory_max_bits     = memory_max_bits;
+  opts.large_flow      = large_flow;
+  opts.large_ge        = large_ge;
+  opts.map_register    = map_register;
+  opts.memory_fold     = *memory_fold;
+  opts.memory_max_bits = memory_max_bits;
   opts.satopt = var.get("satopt", "true") != "false" && var.get("satopt", "true") != "0" && var.get("satopt", "true") != "off";
   opts.register_max_bits = register_max_bits;
   opts.dff_cell          = std::string{var.get("dff_cell", "")};

@@ -211,7 +211,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["lg-emit", "prp-emit", "exact-diff", "v2prp-sim"], required=True)
     ap.add_argument("--prp", required=True)
-    ap.add_argument("--reader", default="yosys-verilog")
+    ap.add_argument("--reader", default="slang")
     args = ap.parse_args()
 
     prp = Path(args.prp)

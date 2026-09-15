@@ -163,7 +163,8 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
 }
 
 bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                         const absl::flat_hash_set<hhds::Node_class>&     expanded_instances) {
+                         const absl::flat_hash_set<hhds::Node_class>&     expanded_instances,
+                         const absl::flat_hash_set<hhds::Gid>&            parallel_defs) {
   namespace gu = livehd::graph_util;
   std::unordered_set<hhds::Gid>                            visited;
   std::function<bool(const std::shared_ptr<hhds::Graph>&)> visit = [&](const auto& graph) {
@@ -198,18 +199,19 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
     }
     if (changed) {
       // Reduction may have hidden a loop's control expression in a shared
-      // pattern. Once iteration inputs become constants, specialize just those
-      // sites; patterns whose inputs remain dynamic still map once for reuse.
+      // pattern or extracted parallel body. Once iteration inputs become
+      // constants, specialize those sites so index-dependent data routing can
+      // fold too; bodies whose inputs remain dynamic still map once for reuse.
       bool specialized;
       do {
-        Cprop{}.do_trans(graph, false);
+        Cprop{}.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
-        Cprop{}.do_trans(graph, false);
+        Cprop{}.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
         std::vector<hhds::Node_class> constant_patterns;
         for (const auto node : graph->body().nodes()) {
           auto child = gu::type_op_of(node) == Ntype_op::Sub ? node.get_subnode_graph() : nullptr;
-          if (!child || !livehd::color::is_pattern_def_name(child->get_name())) {
+          if (!child || (!livehd::color::is_pattern_def_name(child->get_name()) && !parallel_defs.contains(child->get_gid()))) {
             continue;
           }
           for (const auto& edge : node.inp_edges()) {
@@ -240,6 +242,7 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
 
 bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool unroll_carry, Loop_preparation& result) {
   result = {};
+  absl::flat_hash_set<hhds::Gid> parallel_defs;
   if (unroll_carry) {
     absl::flat_hash_map<hhds::Gid, absl::flat_hash_set<hhds::Port_id>> carry_ports, index_ports;
     absl::flat_hash_map<hhds::Gid, std::shared_ptr<hhds::Graph>>       bodies;
@@ -270,6 +273,7 @@ bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
     }
     for (const auto& [gid, ports] : carry_ports) {
       if (auto shared = extract_parallel_data(bodies.at(gid), ports, index_ports[gid])) {
+        parallel_defs.insert(shared->get_gid());
         result.preserved_defs.insert(shared->get_gid());
         result.shared_bodies.push_back(std::move(shared));
       }
@@ -309,6 +313,6 @@ bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       ++result.expanded;
     }
   }
-  return cleanup_loop_bodies(graphs, expanded_instances);
+  return cleanup_loop_bodies(graphs, expanded_instances, parallel_defs);
 }
 }  // namespace livehd::abc

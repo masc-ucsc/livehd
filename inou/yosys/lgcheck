@@ -627,6 +627,32 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
+# A cgen memory wrapper gives the same state a different hierarchical name.
+# Map memories and propose structural correspondence, then PROVE every added
+# $equiv obligation. Leaving $mem cells opaque makes equiv_simple inconclusive;
+# a monolithic temporal SAT query also misses this useful state correspondence.
+run_equiv_yosys -p "${yosys_read}; memory; opt -full;
+    equiv_make gold gate equiv; hierarchy -top equiv;
+    equiv_struct -icells; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+  2>lgcheck1m.err | tee lgcheck1m.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ]; then
+  echo "1m.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
+# SAT/equiv_simple do not model $dlatch directly. Use Yosys's formal global-
+# clock model, including transparency/hold behavior, and prove the original
+# public comparison points. Structural guesses at a latch's D input are too
+# strong: D is deliberately don't-care while the latch is closed.
+run_equiv_yosys -p "${yosys_read}; memory; opt -full; clk2fflogic; opt -full;
+    equiv_make gold gate equiv; hierarchy -top equiv;
+    equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+  2>lgcheck1c.err | tee lgcheck1c.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ]; then
+  echo "1c.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
 #${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
 #read_verilog -sv ${VLG_INC} ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
 #design -copy-from gold -as gold gold
@@ -705,8 +731,10 @@ run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; re
 
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
+              memory_map
+              opt_clean
               write_verilog trace2.v
-              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -ignore_unknown_cells -show-ports miter
+              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -show-ports miter
               " \
   2>lgcheck2.err | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
@@ -760,7 +788,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   fi
   bmc_sat_cmds=""
   for ((t = bmc_start; t < bmc_start + LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -ignore_unknown_cells -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
+    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
   done
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
@@ -778,6 +806,8 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
+               clk2fflogic
+               opt_clean
                async2sync
                dffunmap; proc; opt_clean
                hierarchy -top miter

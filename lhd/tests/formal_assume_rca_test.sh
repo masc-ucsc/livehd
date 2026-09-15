@@ -63,7 +63,7 @@ EOF
 # itself remains hierarchical.  The flat implementation deliberately ignores
 # that input.
 if ! "$LHD" lec --ref "$W/rca_assumed.prp" --impl "$W/plus_one.prp" \
-     --ref-top rca_top --impl-top plus_one --set formal.lec.hier=true \
+     --ref-top rca_top --impl-top plus_one  \
      --set formal.engine=ind --workdir "$W/lec_assumed_w" >"$W/lec_assumed.out" 2>&1; then
   cat "$W/lec_assumed.out" >&2
   fail "RCA did not match hard-coded +1 under carry_in==true"
@@ -77,7 +77,7 @@ grep -q 'unchecked assume' "$W/lec_assumed.out" \
 # a+b while the other side still computes a+b+1, so LEC must find a witness.
 grep -v assume_nocheck "$W/rca_assumed.prp" >"$W/rca_plain.prp"
 if "$LHD" lec --ref "$W/rca_plain.prp" --impl "$W/plus_one.prp" \
-     --ref-top rca_top --impl-top plus_one --set formal.lec.hier=true \
+     --ref-top rca_top --impl-top plus_one  \
      --set formal.engine=ind --workdir "$W/lec_plain_w" >"$W/lec_plain.out" 2>&1; then
   cat "$W/lec_plain.out" >&2
   fail "RCA unexpectedly matched hard-coded +1 without the carry contract"

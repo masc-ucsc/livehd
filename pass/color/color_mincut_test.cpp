@@ -22,8 +22,7 @@ namespace {
 
 Color_opts flat_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
+  o.hier = false;
   return o;
 }
 

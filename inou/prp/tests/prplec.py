@@ -171,7 +171,7 @@ def _precompile(runner, tmp_dir, side, top, odir):
     # front end would have said (a `roll declined`) is there to grep.
     wdir = odir + '_w'
     cmd = [runner.lhd, 'compile', side.src, '--top', top,
-           '--emit-dir', 'lg:' + odir, '--workdir', wdir] + _set_args(_merge_sets(['lhd.incremental=false'], side.sets))
+           '--emit-dir', 'lg:' + odir, '--workdir', wdir] + _set_args(_merge_sets(['lhd.incremental=false'], side.sets, runner.equiv_sets))
     rc, log = _run(cmd, tmp_dir)
     # A pass's own chatter goes to the workdir's per-pass log, not the console.
     for f in sorted(globmod.glob(os.path.join(tmp_dir if not os.path.isabs(wdir) else '', wdir, 'logs', '*.log'))):
@@ -272,7 +272,7 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
     expect = (var_test.params.get('lec_expect') or 'proven').strip().lower()
     lec_base = _merge_sets(['lhd.incremental=false'],   # hermetic: no cross-run reuse
                            shared_compile,
-                           _sets(base_test, 'lec_set'), _sets(var_test, 'lec_set'))
+                           _sets(base_test, 'lec_set'), _sets(var_test, 'lec_set'), runner.equiv_sets)
 
     rc_all = 0
     for combo in _sweeps(base_test, var_test):

@@ -12,7 +12,7 @@ mkdir -p "$W"
 fail() {
   echo "FAIL: $*" >&2
   [ -f "$W/prp/$TOP.prp" ] && sed -n '1,120p' "$W/prp/$TOP.prp" >&2
-  [ -f "$W/lec/logs/001_lhd_lec_lgcheck.log" ] && tail -80 "$W/lec/logs/001_lhd_lec_lgcheck.log" >&2
+  [ -f "$W/lec.log" ] && tail -80 "$W/lec.log" >&2
   exit 1
 }
 
@@ -32,12 +32,10 @@ fi
   --workdir "$W/recompile" -q >/dev/null 2>&1 \
   || fail "emitted Pyrope did not recompile"
 
-LGCHECK_EQUIV_TIMEOUT=60 "$LHD" lec \
+"$LHD" lec \
   --impl verilog:"$W/out.v" --ref verilog:"$SRC" --top "$TOP" \
-  --set formal.solver=lgyosys \
-  --set formal.lec.gold_reader=slang --set formal.lec.gate_reader=slang \
-  --set formal.lec.normalize_split_ports=true \
-  --workdir "$W/lec" -q >/dev/null 2>&1 \
+  --set formal.timeout=60 \
+  --workdir "$W/lec" -q >"$W/lec.log" 2>&1 \
   || fail "round-tripped Verilog is not equivalent to the source"
 
 echo "PASS: nested keyword output remains a field assignment through the Pyrope round trip"

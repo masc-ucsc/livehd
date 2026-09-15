@@ -6,7 +6,7 @@ set -euo pipefail
 # Validation pipeline (plan Step 5) — order matters:
 #   1. LiveHD compile   RTL -> LGraph
 #   2. LEC gate         prove/classify RTL == LGraph   (run_dino_lgraph_lec_gate.sh)
-#                       REFUTED aborts; INCONCLUSIVE warns (LEC_STRICT=true = hard)
+#                       REFUTED and INCONCLUSIVE both abort
 #   3. pass.lean        LGraph -> Lean model + certificate   (this script)
 #   4. Lean typecheck   lake env lean <Top>_Lgraph.lean      (RUN_LEAN=true)
 #   5. cert bridge      generated model = graph certificate  (per-design theorems)
@@ -86,7 +86,6 @@ run_design() {
     --emit-dir lean:"$LEAN_DIR" \
     --set yosys.setundef=zero \
     --set formal.lean.strict="$STRICT" \
-    --set formal.lean.normalize=true \
     --set formal.lean.emit_cert="$EMIT_CERT" \
     --set formal.lean.max_width="$MAX_WIDTH" \
     > "$log" 2>&1
@@ -112,13 +111,13 @@ run_design() {
 }
 
 # Step 2 (pipeline order): LEC frontend gate — prove RTL == LGraph before any
-# theorem-prover generation.  REFUTED aborts; INCONCLUSIVE is a recorded warning
-# unless LEC_STRICT=true.  Skip with RUN_LEC_GATE=false (e.g. model-only bring-up).
+# theorem-prover generation. REFUTED and INCONCLUSIVE both abort.
+# Skip with RUN_LEC_GATE=false for model-only bring-up.
 if [[ "$RUN_LEC_GATE" == "true" ]]; then
   echo "[pipeline] step 2/5: LEC gate (RTL == LGraph) before pass.lean"
-  if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" LEC_STRICT="${LEC_STRICT:-false}" \
+  if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" \
        bash "$SCRIPT_DIR/run_dino_lgraph_lec_gate.sh"; then
-    echo "FATAL: LEC gate reported REFUTED (or strict INCONCLUSIVE); not generating Lean" >&2
+    echo "FATAL: LEC gate reported REFUTED or INCONCLUSIVE; not generating Lean" >&2
     exit 3
   fi
 else

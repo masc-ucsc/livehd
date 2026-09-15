@@ -45,7 +45,7 @@ void Pass_color::setup() {
                        "A partition is one (def, color) -- the unit pass.partition emits as `<def>__c<id>`. "
                        "`--stats` is the CLI sugar for the same knob; verbose adds the per-def table",
                        "false");
-  m.add_label_optional("compact", "write the flat per-def color (default; false = per-instance hier color)", "true");
+
   m.add_label_optional("continuous", "split each color into one id per connected region", "false");
   m.add_label_optional("keep_colored", "preserve pre-existing colors on nodes the algorithm leaves uncolored", "false");
   m.add_label_optional("cutoff", "acyclic: small-partition node-count merge cutoff", "1");
@@ -205,7 +205,6 @@ uint64_t parse_count(const Eprp_var& var, std::string_view label, std::string_vi
 std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var, bool hier_flat) {
   std::string s  = "{";
   s             += std::format("\"hier\":{},", opts.hier);
-  s             += std::format("\"compact\":{},", opts.compact);
   s             += std::format("\"continuous\":{},", opts.continuous);
   s             += std::format("\"keep_colored\":{}", opts.keep_colored);
   s             += std::format(",\"ware_arith\":{},\"ware_cmp\":{},\"ware_shift\":{}",
@@ -405,7 +404,6 @@ void Pass_color::color(Eprp_var& var) {
   opts.hier          = parse_bool(var.get("hier", "true"));
   opts.verbose       = parse_bool(var.get("verbose", "false"));
   const bool stats   = parse_bool(var.get("stats", "false"));
-  opts.compact       = parse_bool(var.get("compact", "true"));
   opts.continuous    = parse_bool(var.get("continuous", "false"));
   opts.keep_colored  = parse_bool(var.get("keep_colored", "false"));
   opts.min_ge        = parse_ge_bound(var, "min_ge", "500");

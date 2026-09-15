@@ -9,6 +9,8 @@ LIB=inou/prp/tests/abc/test.lib
 CTRL_CONES="${CTRL_CONES:-true}"
 run() {
   if [[ "$1" == synth ]]; then
+    control_args=()
+    [ "$CTRL_CONES" = "true" ] || control_args=(${control_args[@]+"${control_args[@]}"})
     "$LHD" "$@" --set "pass.color.ctrl_cones=$CTRL_CONES" -q
   else
     "$LHD" "$@" -q
@@ -39,7 +41,7 @@ grep -q 'reused .* proven mux facts' "$W/explicit"/logs/*pass_abc*.log
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/model-work"
 for mode in on off explicit; do
   run lec --impl lg:"$W/$mode-mapped" --ref lg:"$W/original" --lib lg:"$W/models" \
-    --top instance_out_struct_ident.top --set formal.solver=cvc5 --set formal.timeout=60 \
+    --top instance_out_struct_ident.top --set formal.timeout=60 \
     --workdir "$W/lec-$mode"
 done
 run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \

@@ -47,9 +47,12 @@ endmodule
 EOF
 for reader in yosys-verilog yosys-slang; do
   for temperature in cold warm; do
-    "$LHD" synth "$W/source.v" --reader "$reader" --top macro_declarations \
+    "$LHD" compile "$W/source.v" --reader "$reader" --top macro_declarations \
       --set "compile.yosys.macrolib=$W/hard macro.lib" \
       --set "compile.yosys.blackbox=$W/blackbox.v" \
+      --emit-dir "lg:$W/$reader-lg" --workdir "$W/$reader-compile" >"$W/$reader-compile.log" 2>&1 \
+      || { cat "$W/$reader-compile.log"; exit 1; }
+    "$LHD" synth "lg:$W/$reader-lg" --top macro_declarations \
       --set synth.liberty=inou/prp/tests/abc/test.lib --set synth.opentimer=false \
       --emit verilog:"$W/$reader.v" --workdir "$W/$reader" > "$W/$reader.log" 2>&1 \
       || { cat "$W/$reader.log"; exit 1; }

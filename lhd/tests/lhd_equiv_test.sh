@@ -12,7 +12,7 @@
 #   check verilog2 vs verilog0
 #   check verilog3 vs verilog0
 #
-# All three netlists must be logically equivalent (lgcheck/yosys LEC) to the
+# All three netlists must be logically equivalent (default LEC) to the
 # golden verilog0.
 
 set -u
@@ -40,21 +40,21 @@ run compile "$PRP" --emit-dir lg:"$W/lg2/" --workdir "$W/w3"
 run compile lg:"$W/lg2/" --emit verilog:"$W/v2.v" --workdir "$W/w4"
 
 # leg 3: verilog0 -> lg -> verilog3 (through the lg: serialization seam)
-run compile "$V0" --reader yosys-verilog --top "$TOP" --emit-dir lg:"$W/lg3/" --workdir "$W/w5"
+run compile "$V0" --top "$TOP" --emit-dir lg:"$W/lg3/" --workdir "$W/w5"
 run compile lg:"$W/lg3/" --emit verilog:"$W/v3.v" --workdir "$W/w6"
 
 for i in 1 2 3; do
-  run lec --set formal.solver=lgyosys --impl verilog:"$W/v$i.v" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c$i"
+  run lec --impl verilog:"$W/v$i.v" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c$i"
   echo "check verilog$i vs verilog0: equivalent"
 done
 
 # leg 4: check compiles non-verilog sides itself — pyrope: (bare .prp path,
 # kind inferred from the extension), ln:, and lg: against the golden verilog
-run lec --set formal.solver=lgyosys --impl "$PRP" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c4"
+run lec --impl "$PRP" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c4"
 echo "check pyrope (bare path) vs verilog0: equivalent"
-run lec --set formal.solver=lgyosys --impl ln:"$W/lns/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c5"
+run lec --impl ln:"$W/lns/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c5"
 echo "check ln: vs verilog0: equivalent"
-run lec --set formal.solver=lgyosys --impl lg:"$W/lg2/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c6"
+run lec --impl lg:"$W/lg2/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c6"
 echo "check lg: vs verilog0: equivalent"
 
 echo "PASS: all generated netlists and direct IR/source sides are equivalent to the golden verilog"

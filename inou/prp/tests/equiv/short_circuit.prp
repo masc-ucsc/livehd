@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 
 comb guarded<CARRY_CHAIN=0>(a:u8) -> (y:u8) {

@@ -190,7 +190,6 @@ struct Ctrl_pids {
     // ---- pure wiring / constants: an AIG spends nothing on these -------------
     case Ntype_op::Invalid:
     case Ntype_op::IO     :
-    case Ntype_op::Nconst :
     case Ntype_op::Concat :
     case Ntype_op::Sext:
     // A Not is a complement EDGE in an AIG, never a node.

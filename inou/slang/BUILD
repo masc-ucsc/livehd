@@ -77,9 +77,6 @@ sh_test(
     size = "large",
     srcs = ["tests/slang_filelist.sh"],
     data = glob(["tests/filelist/*"]) + ["//lhd"],
-    deps = [
-        "//inou/yosys:scripts",  # lgcheck + yosys2 for the LEC check
-    ],
 )
 
 # Unknown-module (blackbox) policy: without a user --ignore-unknown-modules
@@ -117,9 +114,6 @@ sh_test(
     ],
     tags = [
         "slang_compile",
-    ],
-    deps = [
-        "//inou/yosys:scripts",  # lgcheck + yosys2 for the lec tier
     ],
 ) for t in SLANG_LADDER.keys()]
 
@@ -189,9 +183,6 @@ sh_test(
     data = [
         "tests/sv/nested_keyword_output.v",
         "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
     ],
 )
 
@@ -294,7 +285,7 @@ sh_test(
 
 # A nested reset/enable write to one packed bit must not make ABC select the
 # entire carrier once per condition. cprop factors the Mux through Set_mask so
-# only the one-bit lane is Boolean logic; lgyosys independently checks the
+# only the one-bit lane is Boolean logic; the default LEC solver checks the
 # emitted result against the source.
 sh_test(
     name = "slang_conditional_packed_lane_update",
@@ -304,16 +295,13 @@ sh_test(
         "tests/sv/conditional_packed_lane_update.v",
         "//lhd",
     ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
 )
 
 # Two DISJOINT sub-word writes of DIFFERENT widths into one word of a packed 2-D
 # reg (minion's `ex_reg_data`). A memory carries one `wensize`, so it can hold
 # neither a mixed-width per-chunk enable nor two read-modify-write splices into a
 # clocked word -- the reader keeps such an array a flat flop bus instead, and
-# lgyosys checks the result against the source.
+# the default LEC solver checks the result against the source.
 sh_test(
     name = "slang_packed2d_mixed_partial_write",
     size = "large",
@@ -321,9 +309,6 @@ sh_test(
     data = [
         "tests/sv/packed2d_mixed_partial_write.v",
         "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
     ],
 )
 
@@ -586,9 +571,6 @@ sh_test(
         "tests/sv/unpacked_array_port_order.v",
         "//lhd",
     ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
 )
 
 sh_test(
@@ -599,9 +581,6 @@ sh_test(
     data = [
         "tests/sv/packed_array_loop_reg_sroa.v",
         "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
     ],
 )
 

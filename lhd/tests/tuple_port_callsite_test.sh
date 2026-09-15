@@ -36,7 +36,7 @@ endmodule
 EOF
 
 lec_proven() { # <name> <prp>
-  "$LHD" lec --impl "$2" --ref "$W/gold.v" --top parent --set formal.solver=cvc5 \
+  "$LHD" lec --impl "$2" --ref "$W/gold.v" --top parent \
     --set compile.upass.inline=false \
     --workdir "$W/lec_$1" -q --result-json "$W/lec_$1.json" \
     || fail "$1: lec run failed: $(cat "$W/lec_$1.json" 2>/dev/null)"
@@ -156,7 +156,7 @@ pub comb p2(fi:u8) -> (oo:u8) {
 EOF
 "$LHD" compile "$W/local_fields.prp" --top p2 --workdir "$W/we1" -q \
   || fail "comb + tuple literal with LOCAL-computed field values did not compile"
-"$LHD" lec --impl "$W/local_fields.prp" --ref "$W/gold_local.v" --top p2 --set formal.solver=cvc5 \
+"$LHD" lec --impl "$W/local_fields.prp" --ref "$W/gold_local.v" --top p2 \
   --workdir "$W/lec_local" -q --result-json "$W/lec_local.json" \
   || fail "local-fields lec run failed: $(cat "$W/lec_local.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec_local.json" || fail "local-fields lec not PROVEN: $(cat "$W/lec_local.json")"
@@ -173,7 +173,7 @@ pub comb p2(fi:u8) -> (oo:u8) {
 EOF
 "$LHD" compile "$W/local_fields2.prp" --top p2 --workdir "$W/we2" -q \
   || fail "comb + tuple literal with LOCAL const field values did not compile"
-"$LHD" lec --impl "$W/local_fields2.prp" --ref "$W/gold_local.v" --top p2 --set formal.solver=cvc5 \
+"$LHD" lec --impl "$W/local_fields2.prp" --ref "$W/gold_local.v" --top p2 \
   --workdir "$W/lec_local2" -q --result-json "$W/lec_local2.json" \
   || fail "local-const-fields lec run failed: $(cat "$W/lec_local2.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec_local2.json" || fail "local-const-fields lec not PROVEN: $(cat "$W/lec_local2.json")"
@@ -231,11 +231,11 @@ grep -q '^module core' "$W/relative/all.v" \
 grep -q '^module relative_top' "$W/relative/all.v" \
   || fail "single-file cgen output omitted the relative-import top"
 "$LHD" lec --impl "$W/relative/app/top.prp" --ref "$W/relative/all.v" \
-  --top relative_top --set formal.solver=lgyosys \
+  --top relative_top \
   --workdir "$W/relative/lec" --result-json "$W/relative/lec.json" -q \
-  || fail "lgyosys could not materialize the relative-import hierarchy"
+  || fail "default LEC could not materialize the relative-import hierarchy"
 grep -q '"verdict":"proven"' "$W/relative/lec.json" \
-  || fail "relative-import hierarchy was not lgyosys-PROVEN: $(cat "$W/relative/lec.json")"
+  || fail "relative-import hierarchy was not default LEC-PROVEN: $(cat "$W/relative/lec.json")"
 echo "PASS: relative import graph identities receive safe cgen filenames"
 
 # A generated helper name derived from an escaped scalar must stay escaped as

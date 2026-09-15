@@ -133,7 +133,9 @@ EOF
 # and the BMC path in collect_ins -- two independent max-width unions. Fixing
 # only one leaves formal.engine=bmc (and every auto fallback) refuting.
 for eng in auto ind bmc; do
-  run_lec "seq_$eng" --ref "$WORK/seq_ref.v" --impl "$WORK/seq_impl.v" --set formal.engine="$eng"
+  engine_args=()
+  [ "$eng" = "auto" ] || engine_args=(--set "formal.engine=$eng")
+  run_lec "seq_$eng" --ref "$WORK/seq_ref.v" --impl "$WORK/seq_impl.v" ${engine_args[@]+"${engine_args[@]}"}
   verdict | grep -Eq 'PROVEN|PASS\(' \
     || fail "engine=$eng did not reconcile the sequential sign-slot port: $(verdict)"
   verdict | grep -q 'width/sign reconciled on top port(s) a' \
@@ -170,9 +172,12 @@ EOF
 run_lec rst --ref "$WORK/rst_ref.v" --impl "$WORK/rst_impl.v" --set formal.engine=bmc
 verdict | grep -Eq 'PROVEN|PASS\(' \
   || fail "sign-slot RESET port did not reconcile: $(verdict)"
-# A vacuous solve reports the same word, so also require the run to have really
-# driven the reset both ways rather than pinning it to an impossible level.
-grep -q 'rst_n' "$OUT" || fail "reset port never appears in the bmc run -- vacuous?"
+# A structural proof need not mention reset in its log. A corrupted update
+# with the same sign-slot reset pair must refute under BMC: an impossible reset
+# assumption would instead vacuously prove this negative control too.
+sed "s/q <= a;/q <= a ^ 4'h1;/" "$WORK/rst_impl.v" > "$WORK/rst_bad.v"
+run_lec rst_bad --ref "$WORK/rst_ref.v" --impl "$WORK/rst_bad.v" --set formal.engine=bmc
+verdict | grep -q 'REFUTED' || fail "sign-slot reset made a differing design pass: $(verdict)"
 echo "PASS: a sign-slot reset port does not pin an unsatisfiable level"
 
 # ── (5) NEGATIVE control: a real difference still refutes ────────────────────

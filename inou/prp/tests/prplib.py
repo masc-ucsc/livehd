@@ -56,7 +56,8 @@ class PrpRunner:
     LiveHD Pyrope Compilation Runner
     """
 
-    def __init__(self):
+    def __init__(self, bitfuzz=False):
+        self.equiv_sets = ["compile.bitfuzz.mode=wires"] if bitfuzz else []
         # Tests drive the lhd kernel (one stateless invocation per mode); the
         # lgshell REPL is no longer involved.
         if os.path.exists("./bazel-bin/lhd/lhd"):
@@ -112,6 +113,7 @@ class PrpRunner:
         cmd += ['--workdir', self._scratch(test, mode), '-q']
         cmd += ['--set', 'upass.verifier=false', '--set', 'upass.tolg=false']
         cmd += self._extra_sets(test)
+        cmd += self.equiv_set_args()
         return cmd
 
     @staticmethod
@@ -131,15 +133,8 @@ class PrpRunner:
         return out
 
     @staticmethod
-    def _set_override(cmd, key, value):
-        """Set `--set key=value`, REPLACING any earlier value for the same key.
-
-        Composing on top of a base builder (lhd_upass) used to just append the
-        override, leaving one argv holding both `upass.verifier=false` and
-        `=true` and relying on last-wins. That is ambiguous to anyone reading
-        the command, so lhd now rejects a repeated key with a different value;
-        collapse it here instead.
-        """
+    def _without_setting(cmd, key):
+        """Remove a builder override so this stage uses the CLI default."""
         out, i = [], 0
         while i < len(cmd):
             if cmd[i] == '--set' and i + 1 < len(cmd) and cmd[i + 1].split('=')[0] == key:
@@ -147,12 +142,12 @@ class PrpRunner:
                 continue
             out.append(cmd[i])
             i += 1
-        return out + ['--set', '{}={}'.format(key, value)]
+        return out
 
     def lhd_comptime(self, test, mode):
         # Pure compile-time program: every cassert must resolve. The verifier
-        # (lhd default: off) is turned ON, mirroring the old bare pass.upass
-        # default; it hard-errors on known-false cassert and discharges
+        # uses its enabled CLI default after removing the smoke tier disable;
+        # it hard-errors on known-false cassert and discharges
         # known-true. To opt out for a specific case, drop `:type: comptime`
         # back to `:type: upass`.
         #
@@ -161,7 +156,7 @@ class PrpRunner:
         #   :verifier_fail: N   — expected count of known-false casserts
         # When set, the verifier end_run compares its tally and fails the
         # test if they don't match. -1 or absent disables the check.
-        cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
+        cmd = self._without_setting(self.lhd_upass(test, mode), 'upass.verifier')
         for tag in ('verifier_pass', 'verifier_fail', 'verifier_include_funcs'):
             if tag in test.params:
                 cmd += ['--set', 'upass.{}={}'.format(tag, test.params[tag])]
@@ -179,7 +174,7 @@ class PrpRunner:
         # the LNAST->LGraph compilation (lg: emit) so errors that
         # only fire at tolg (e.g. a func_call with no hardware lowering) are
         # exercisable as error tests.
-        cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
+        cmd = self._without_setting(self.lhd_upass(test, mode), 'upass.verifier')
         if test.params.get('tolg'):
             cmd += ['--emit-dir',
                     'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
@@ -219,18 +214,21 @@ class PrpRunner:
     def lhd_equiv(self, test, odir):
         # Equivalence test: compile to optimized LGraph and emit
         # per-module Verilog into `odir`. run_equiv() then LECs the generated
-        # Verilog against the sibling golden `.v` via inou/yosys/lgcheck.
+        # Verilog against the sibling golden `.v` via default lhd lec.
         #
         # Optional `:reset_style: async` header tag (task 2d-reg): set the
         # upass.reset_style elaboration flag so the implicit-reset flops wire
         # an async reset and the golden can assert the async always-block.
         cmd = self.lhd_upass(test, 'equiv')
-        if 'reset_style' in test.params:
+        if test.params.get('reset_style', 'sync') != 'sync':
             cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
         if test.params.get('compile_top'):
             cmd += ['--top', test.params['compile_top'].strip()]
         cmd += ['--emit-dir', 'verilog:{}/'.format(odir)]
         return cmd
+
+    def equiv_set_args(self):
+        return [arg for setting in self.equiv_sets for arg in ('--set', setting)]
 
     def gen_lhd_cmd(self, test, mode):
         gen_cmd = {
@@ -451,9 +449,9 @@ class PrpRunner:
     def run_equiv(self, tmp_dir, test: PrpTest):
         # Lower each .prp function to Verilog (inou.prp -> pass.upass tolg:1 ->
         # inou.cgen.verilog) and prove it equivalent to its sibling golden .v
-        # via inou/yosys/lgcheck (formal LEC). The generated module names are
+        # via default lhd lec (formal LEC). The generated module names are
         # the function-tree names (e.g. trivial_if.fun3); the golden must
-        # declare the same module name so lgcheck --top matches.
+        # declare the same module name so LEC selects the same top.
         name = test.params['name']
         prp  = test.params['files'][0]
         gold = os.path.splitext(prp)[0] + '.v'
@@ -519,38 +517,10 @@ class PrpRunner:
                 print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
                 return 1
 
-        # OUR ENGINE ALWAYS RUNS. This corpus is a test of `lhd lec` as much as
-        # it is of the front end, so every pair is discharged by our own encoder
-        # and must PROVE. The two legs have DIFFERENT contracts on purpose:
-        #
-        #   lhd lec  OURS. Must PROVE (PASS(n) counts -- a complete BMC is a real
-        #            result). UNKNOWN, a timeout or an encoder refusal is a gap in
-        #            the tool that this corpus exists to surface, so it FAILS.
-        #
-        #   lgcheck  an INDEPENDENT oracle (yosys). A definitive FAIL is always an
-        #            error -- it found a real difference, and if we PROVED the same
-        #            pair then one of the two engines is wrong and that is exactly
-        #            what we want to hear about. Its INCONCLUSIVE is NOT an error:
-        #            lgcheck simply could not decide, which says nothing about us.
-        #
-        # `:equiv_engine: cvc5` keeps its meaning: SKIP lgcheck for pairs whose two
-        # sides differ in LATCH / CLOCK-EDGE structure. lgcheck's cascade ends in a
-        # bounded miter that steps ONE posedge per step, so it cannot represent a
-        # latch closing before an edge or a negedge endpoint committing inside the
-        # period, and it calls equivalent designs different. For those the
-        # independent oracle is the v2prp2v original-Verilog leg plus
-        # lhd/tests/single_edge_four_classes_test.sh (Icarus on source vs
-        # normalized netlists).
-        # Optional `:lec_reader: yosys-verilog` header: read this pair through
-        # the yosys front end for OUR lec leg. For goldens that --reader slang
-        # deliberately fail-closes on (e.g. blocking_ff_state's
-        # `blocking-ff-state` refusal, whose own hint names this reader): the
-        # refusal stays pinned by lhd/tests/blocking_ff_state_test.sh and the
-        # fixme-tagged v2prp2v legs; the engine must still PROVE here.
-        lec_reader = (test.params.get('lec_reader') or '').strip() or 'slang'
+        # Every equivalence pair uses native Slang and the default LEC solver.
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
-                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', lec_reader,
-                   '--workdir', os.path.join(odir, 'w_lec')]
+                   '--impl-top', pyrope_top, '--ref-top', verilog_top,
+                   '--workdir', os.path.join(odir, 'w_lec')] + self.equiv_set_args()
         lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             llog, _ = lec.communicate()
@@ -569,59 +539,14 @@ class PrpRunner:
                   'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             print(ltxt)
 
-        if (test.params.get('equiv_engine') or '').strip() == 'cvc5':
-            if lec_ok:
-                print('{} - equiv - success via lhd lec (lgcheck skipped: latch/edge structure; '
-                      'verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
-            return 0 if lec_ok else 1
-
-        lgcheck_cmd = ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
-                       '--reference_top', verilog_top, '--implementation_top', pyrope_top]
-        # Optional `:gold_reader: slang` header: read the golden with yosys's
-        # built-in read_slang instead of read_verilog (goldens using
-        # SystemVerilog packed structs / '{...} patterns). No plugin is loaded
-        # any more -- read_slang ships inside the bundled yosys. The golden's
-        # top module must be a PLAIN identifier (no escaped `\a.b ` names --
-        # those break read_slang's --top/RTLIL naming), hence the `<name>_top`
-        # convention on such goldens.
-        if (test.params.get('gold_reader') or '').strip() == 'slang':
-            lgcheck_cmd += ['--gold_reader', 'slang']
-        check = subprocess.Popen(
-            lgcheck_cmd,
-            cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            clog, _ = check.communicate()
-            crc = check.returncode
-        except Exception:
-            check.kill()
-            crc, clog = 1, b''
-
-        # lgcheck rc: 0 pass | 2 INCONCLUSIVE (no proof, no counterexample) | else FAIL.
-        # Only a definitive FAIL is an error; an inconclusive independent oracle
-        # says nothing about this pair. Combine with our own leg above -- BOTH
-        # must be satisfied.
-        if crc == 0:
-            if lec_ok:
-                print('{} - equiv - success (lhd lec + lgcheck; verilog_top:{} pyrope_top:{})'.format(
-                    name, verilog_top, pyrope_top))
-            return 0 if lec_ok else 1
-        if crc == 2:
-            print('{} - equiv - lgcheck inconclusive (no proof, no counterexample; NOT a fail) '
-                  '{}(verilog_top:{} pyrope_top:{})'.format(
-                      name, 'but lhd lec PROVED it ' if lec_ok else '', verilog_top, pyrope_top))
-            return 0 if lec_ok else 1
-        # lgcheck says DIFFERENT. Always an error -- and if our engine PROVED the
-        # same pair, say so loudly: two engines disagreeing means one of them is
-        # wrong, which is the single most valuable signal this corpus produces.
-        print('{} - equiv - FAILED: lgcheck not equivalent{} (verilog_top:{} pyrope_top:{})'.format(
-            name, ' WHILE lhd lec PROVED it -- the two engines DISAGREE' if lec_ok else '',
-            verilog_top, pyrope_top))
-        print(clog.decode('utf-8', 'ignore'))
-        return 1
+        if lec_ok:
+            print('{} - equiv - success (lhd lec; verilog_top:{} pyrope_top:{})'.format(
+                name, verilog_top, pyrope_top))
+        return 0 if lec_ok else 1
 
     def _emit_combined_verilog(self, tmp_dir, cmd, odir, safe_name, side):
         # Run a compile cmd that emits per-module Verilog into odir, then
-        # concatenate the generated .v into one file (so lgcheck sees every
+        # concatenate the generated .v into one file (so LEC sees every
         # submodule of a hierarchical design). Returns (combined_path, log) or
         # (None, log) on failure.
         shutil.rmtree(odir, ignore_errors=True)
@@ -647,13 +572,7 @@ class PrpRunner:
         return combined, log
 
     def run_equiv_slang(self, tmp_dir, test: PrpTest):
-        # equiv variant for a golden .v that yosys-slang's read_slang cannot
-        # ingest (e.g. `'{...}` assignment-pattern lvalues on output ports). The
-        # standard `equiv` mode has lgcheck read the golden .v directly, which
-        # yosys cannot do here. Instead the .v is read by the NATIVE --reader
-        # slang into clean cgen Verilog (implementation) and LEC'd against the
-        # .prp-generated Verilog (reference). Only --reader slang is exercised
-        # (hence the `_slang` suffix); comparison is top-only via lgcheck.
+        # Check the two emitted Verilog sides through native Slang and default LEC.
         name = test.params['name']
         prp  = test.params['files'][0]
         vfile = os.path.splitext(prp)[0] + '.v'
@@ -674,7 +593,7 @@ class PrpRunner:
         # implementation: golden .v read by the native slang reader -> Verilog
         impl_odir = os.path.join(tmp_dir, 'tmp_eqs_impl_' + safe)
         impl_cmd = [self.lhd, 'compile', '--reader', 'slang', vfile, '--emit-dir', 'verilog:{}/'.format(impl_odir),
-                    '--workdir', self._scratch(test, 'equiv_slang')]
+                    '--workdir', self._scratch(test, 'equiv_slang')] + self.equiv_set_args()
         impl, ilog = self._emit_combined_verilog(tmp_dir, impl_cmd, impl_odir, safe, 'impl')
         if impl is None:
             print('{} - equiv_slang - FAILED: --reader slang could not lower {}'.format(name, vfile))
@@ -696,8 +615,9 @@ class PrpRunner:
         pyrope_top  = flat(pyrope_top)
 
         check = subprocess.Popen(
-            ['./inou/yosys/lgcheck', '--reference', ref, '--implementation', impl,
-             '--reference_top', pyrope_top, '--implementation_top', verilog_top],
+            [self.lhd, 'lec', '--ref', ref, '--impl', impl,
+             '--ref-top', pyrope_top, '--impl-top', verilog_top,
+             '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.equiv_set_args(),
             cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             clog, _ = check.communicate()
@@ -708,7 +628,7 @@ class PrpRunner:
         if crc == 0:
             print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             return 0
-        print('{} - equiv_slang - FAILED: lgcheck not equivalent (verilog_top:{} pyrope_top:{})'.format(
+        print('{} - equiv_slang - FAILED: lhd lec did not prove equivalence (verilog_top:{} pyrope_top:{})'.format(
             name, verilog_top, pyrope_top))
         print(clog.decode('utf-8', 'ignore'))
         return 1
@@ -774,7 +694,8 @@ class PrpRunner:
         cmd = [self.lhd, 'formal', 'verify']
         cmd += test.params['files']
         cmd += ['--top', test.params['top_module'], '--workdir', wd]
-        cmd += ['--set', 'formal.bound={}'.format(test.params.get('verify_bound', '6'))]
+        if str(test.params.get('verify_bound', '6')) != '6':
+            cmd += ['--set', 'formal.bound={}'.format(test.params['verify_bound'])]
         # The replay is run by the HARNESS below, VCD-less: the built-in
         # simfail_run compiles the VCD writer source, which bazel runfiles do
         # not stage (cc_library data deps carry headers/libs, not .cpp).
@@ -1056,7 +977,7 @@ class PrpRunner:
 
         Returns ({kind: {...}}, err). `err` non-None means the pair could not be
         measured at all — a side the reader will not lower. That is a FAILURE,
-        not a skip: the equiv proof itself goes through yosys/lgcheck and can
+        not a skip: the equiv proof and this state comparison have separate obligations and can
         stay green while `lhd compile` refuses the very same file, which is
         precisely the kind of hole this check exists to expose.
         """
@@ -1067,11 +988,6 @@ class PrpRunner:
 
         # The Pyrope side is `--ref`: it is the design whose state names this
         # repo controls, so it is the side whose elements must all find a home.
-        # `:lec_reader:` names the front end this golden needs (the default is
-        # slang). Ignoring it is not a harmless default: blocking_ff_state's `.v`
-        # is exactly the shape slang REFUSES, so reading it the wrong way turns a
-        # measurable pair into a skip.
-        gold_reader = (test.params.get('lec_reader') or '').strip()
         # No `-q`: the log is captured and only printed on failure, and the
         # quiet flag suppresses the very JSONL diagnostics that say WHY a side
         # would not lower.
@@ -1079,9 +995,9 @@ class PrpRunner:
         runs = [(base + [prp] + self._extra_sets(test)
                  + (['--top', test.params['compile_top'].strip()] if test.params.get('compile_top') else [])
                  + (['--set', 'upass.reset_style=' + test.params['reset_style']]
-                    if 'reset_style' in test.params else [])
+                    if test.params.get('reset_style', 'sync') != 'sync' else [])
                  + ['--emit-dir', 'lg:' + lg_ref, '--workdir', os.path.join(workdir, 'w_ref')]),
-                (base + [gold] + (['--reader', gold_reader] if gold_reader else [])
+                (base + [gold]
                  + ['--emit-dir', 'lg:' + lg_impl, '--workdir', os.path.join(workdir, 'w_impl')])]
         for cmd in runs:
             proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -1114,7 +1030,7 @@ class PrpRunner:
             lg_ref, lg_impl = flat_dirs
 
         # Tops are resolved against each library's OWN entity list before being
-        # passed. `:pyrope_top:`/`:verilog_top:` name the MODULES lgcheck
+        # passed. `:pyrope_top:`/`:verilog_top:` name the MODULES LEC
         # compares, which is not always how the lg: entity is spelled (`top` vs
         # the entity `mod_varargs_csa.top`), and handing semdiff a name it has to
         # guess at lands in its `top-entity-fallback` path — which ABORTS on some
@@ -1294,6 +1210,8 @@ class PrpRunner:
                 continue
             if mode == 'equiv':
                 rc = self.run_equiv(tmp_dir, test)
+                if rc:
+                    return rc
                 continue
             if mode == 'statematch':
                 # Its own `--mode`, driven by its own `prp-statematch-*` target,

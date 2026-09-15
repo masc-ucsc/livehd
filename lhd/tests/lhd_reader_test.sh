@@ -34,12 +34,12 @@ ls "$W/prps/"*.prp >/dev/null 2>&1 || fail "slang reader produced no .prp re-emi
 [ -s "$W/x.v" ] || fail "slang reader produced no verilog"
 
 # yosys-verilog reader: the plain yosys verilog frontend, end-to-end
-"$LHD" compile "$SV" --reader yosys-verilog --emit verilog:"$W/yv.v" --workdir "$W/w4" -q --result-json "$W/r4.json" \
+"$LHD" compile "$SV" --reader yosys-verilog --emit-dir "lg:$W/yv_lg" --emit verilog:"$W/yv.v" --workdir "$W/w4" -q --result-json "$W/r4.json" \
   || fail "yosys-verilog reader exited non-zero: $(cat "$W/r4.json" 2>/dev/null)"
 [ -s "$W/yv.v" ] || fail "yosys-verilog reader produced no verilog"
 
 # The concise Yosys reader selects the SystemVerilog-capable frontend.
-"$LHD" compile "$SV" --reader yosys --emit verilog:"$W/y.v" --workdir "$W/wy" -q --result-json "$W/ry.json" \
+"$LHD" compile "$SV" --reader yosys --emit-dir "lg:$W/y_lg" --emit verilog:"$W/y.v" --workdir "$W/wy" -q --result-json "$W/ry.json" \
   || fail "yosys reader exited non-zero"
 [ -s "$W/y.v" ] || fail "yosys reader produced no verilog"
 grep -q 'inou.yosys.tolg' "$W/ry.json" || fail "yosys alias did not use Yosys"
@@ -109,7 +109,7 @@ for stem in stems.values():
 PYCODE
 grep -q "module ${long_name}a" "$W/long.v" || fail "first long module identity lost"
 grep -q "module ${long_name}b" "$W/long.v" || fail "second long module identity lost"
-"$LHD" lec --impl "$W/long.v" --ref "$W/long.sv" --top top --set formal.solver=lgyosys --workdir "$W/long-lec" -q \
+"$LHD" lec --impl "$W/long.v" --ref "$W/long.sv" --top top --workdir "$W/long-lec" -q \
   || fail "long module name emission changed behavior"
 
 # Integrated frontend errors must retain their source diagnostic; upstream's
@@ -150,9 +150,9 @@ module reader_latch(input c, $reset_port, d, output logic q, output logic [2:0] 
 endmodule
 EOF
   "$LHD" compile "$W/latch-$polarity.sv" --reader yosys --top reader_latch \
-    --emit verilog:"$W/latch-$polarity.v" --workdir "$W/latch-$polarity-work" -q || fail "Yosys latch import failed"
+    --emit-dir "lg:$W/latch-$polarity-lg" --emit verilog:"$W/latch-$polarity.v" --workdir "$W/latch-$polarity-work" -q || fail "Yosys latch import failed"
   "$LHD" lec --impl "$W/latch-$polarity.v" --ref "$W/latch-$polarity.sv" --top reader_latch \
-    --set formal.solver=cvc5 --workdir "$W/latch-$polarity-lec" --result-json "$W/latch-$polarity-lec.json" -q \
+    --workdir "$W/latch-$polarity-lec" --result-json "$W/latch-$polarity-lec.json" -q \
     || fail "Yosys latch roundtrip failed ($polarity)"
   grep -q '"verdict":"proven"' "$W/latch-$polarity-lec.json" || fail "latch roundtrip was not proven ($polarity)"
 done

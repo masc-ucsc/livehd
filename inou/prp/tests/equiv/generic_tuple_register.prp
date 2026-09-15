@@ -1,7 +1,6 @@
 /*
 :name: generic_tuple_register
 :type: equiv
-:equiv_engine: cvc5
 :verilog_top: generic_tuple_register
 :pyrope_top: generic_tuple_register
 :state_match_flatten: true

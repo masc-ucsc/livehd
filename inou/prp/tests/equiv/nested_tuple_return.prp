@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: nested_tuple_return
 :pyrope_top: nested_tuple_return
-:equiv_engine: cvc5
 */
 
 // 2f-nested_type — a whole-tuple assignment from a call whose return nests two

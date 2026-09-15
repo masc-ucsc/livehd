@@ -16,13 +16,15 @@ parser.add_argument('-i', '--input', help='pyrope file to test', required=True)
 # pass. The two disagreeing IS the test result.
 parser.add_argument('--mode', help='override the fixture\'s :type: (e.g. vsim)', default=None)
 
+parser.add_argument('--bitfuzz', action='store_true', help='strip internal width/sign annotations before cprop in equivalence flows')
+
 args = parser.parse_args()
 
 test = PrpTest(args.input)
 if args.mode:
     test.params['type'] = [args.mode]
 
-runner = PrpRunner()
+runner = PrpRunner(bitfuzz=args.bitfuzz)
 rc = runner.run(os.getcwd(), test)
 
 if rc:

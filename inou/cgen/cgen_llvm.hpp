@@ -61,6 +61,11 @@ public:
                                       bool result_unsign);
   [[nodiscard]] Value sign_extend_from(Value value, uint32_t sign_bit, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value binary(Binary_op op, Value lhs, Value rhs, uint32_t result_width, bool result_unsign);
+  // Bits [count, count + len) of the UNSIGNED `source` (zero past its width),
+  // len <= 64, `count` read as a non-negative word index + bit offset: two
+  // guarded word loads and a funnel shift instead of a variable shift of the
+  // whole value (a 7,800-bit register file read per lane iteration).
+  [[nodiscard]] Value dynamic_extract(Value source, Value count, uint32_t len, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value mux(Value select, Value when_false, Value when_true, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value hotmux(const std::vector<Value>& inputs, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value indexed_mux(Value select, const std::vector<Value>& arms, uint32_t result_width, bool result_unsign);

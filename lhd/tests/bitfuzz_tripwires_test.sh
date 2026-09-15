@@ -65,6 +65,13 @@ for name in $DESIGNS; do
   # The whole test is vacuous if the pass silently did not run (an option
   # rename, a recipe change): require its summary record in the diagnostics.
   grep -q "bitfuzz-summary" "$d/bf.log" || fail "$name: pass.bitfuzz did not run (no bitfuzz-summary in $d/bf.log)"
+  python3 - "$d/wbf/logs" <<'PY' || fail "$name: bitfuzz must run between lowering and cprop"
+import pathlib
+import sys
+
+steps = [path.stem.split("_lhd_", 1)[-1] for path in sorted(pathlib.Path(sys.argv[1]).glob("*.log"))]
+assert steps.index("lnast_tolg") < steps.index("pass_bitfuzz") < steps.index("pass_cprop") < steps.index("pass_bitwidth"), steps
+PY
 
   for ref in "$d"/ref/*.v; do
     base="$(basename "$ref")"

@@ -85,7 +85,7 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
       }
       return std::make_pair(const_text(cv->integer()), *v);
     }
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       const auto& sym = e.as<slang::ast::ValueExpressionBase>().symbol;
       const auto* cv  = package_const_value(sym);
@@ -271,19 +271,19 @@ bool Slang_context::contains_package_param(const slang::ast::Expression& expr) {
 
 bool Slang_context::structural_preserve_ok(const slang::ast::Expression& expr) {
   switch (expr.kind) {
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: return true;  // read_symbol preserves (or folds cleanly)
     case ExpressionKind::UnaryOp          : {
       using slang::ast::UnaryOperator;
       switch (expr.as<slang::ast::UnaryExpression>().op) {
-        case UnaryOperator::Plus:
-        case UnaryOperator::Minus:
-        case UnaryOperator::BitwiseNot:
-        case UnaryOperator::BitwiseAnd:
-        case UnaryOperator::BitwiseOr:
-        case UnaryOperator::BitwiseXor:
+        case UnaryOperator::Plus       :
+        case UnaryOperator::Minus      :
+        case UnaryOperator::BitwiseNot :
+        case UnaryOperator::BitwiseAnd :
+        case UnaryOperator::BitwiseOr  :
+        case UnaryOperator::BitwiseXor :
         case UnaryOperator::BitwiseNand:
-        case UnaryOperator::BitwiseNor:
+        case UnaryOperator::BitwiseNor :
         case UnaryOperator::BitwiseXnor:
         case UnaryOperator::LogicalNot : return true;
         default                        : return false;  // ++/-- cannot be const anyway
@@ -364,7 +364,7 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
   }
 
   switch (expr.kind) {
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       // A HierarchicalValue (e.g. `stage[i-1].acc` into a named generate block)
       // is, after unrolling/const-folding, just a ValueExpressionBase whose
@@ -440,7 +440,7 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       return builder_.create_bit_or_stmts(parts);
     }
     case ExpressionKind::ElementSelect:
-    case ExpressionKind::RangeSelect:
+    case ExpressionKind::RangeSelect  :
     case ExpressionKind::MemberAccess : return lower_select(expr);
     case ExpressionKind::Call         : return lower_call(expr.as<slang::ast::CallExpression>());
     case ExpressionKind::SimpleAssignmentPattern:
@@ -549,6 +549,9 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
 }
 
 std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range) {
+  if (auto it = blocking_values_.find(&sym); it != blocking_values_.end()) {
+    return it->second;
+  }
   // Parameters / enum values / genvars should have folded in tier 1; if eval
   // failed (e.g. inside an uninstantiated context) report cleanly.
   if (sym.kind == slang::ast::SymbolKind::Parameter) {
@@ -564,7 +567,7 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     // constants, including signed and unknown bits; runtime selection then
     // follows exactly the same path as any other flattened array read.
     if (cv.isUnpacked() && flat_port_syms_.contains(&sym)) {
-      std::vector<Lnast_builder::Concat_lane>         lanes;
+      std::vector<Lnast_builder::Concat_lane>          lanes;
       std::function<bool(const slang::ConstantValue&)> append = [&](const auto& value) {
         if (value.isInteger()) {
           lanes.push_back({const_text(value.integer()), static_cast<int>(value.integer().getBitWidth())});
@@ -700,18 +703,18 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
     }
     // Reductions: expanded here (operand width is known) instead of relying
     // on tolg lowering for red_* nodes.
-    case UnaryOperator::BitwiseOr:  // |v
+    case UnaryOperator::BitwiseOr :  // |v
     case UnaryOperator::BitwiseNor: {
       auto v = to_int_value(lower_rvalue(operand));
       return mark_bool(expr.op == UnaryOperator::BitwiseOr ? builder_.create_ne_stmts(v, "0") : builder_.create_eq_stmts(v, "0"));
     }
-    case UnaryOperator::BitwiseAnd:  // &v
+    case UnaryOperator::BitwiseAnd :  // &v
     case UnaryOperator::BitwiseNand: {
       auto v   = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
       auto all = mask_text(oi.bits);
       return mark_bool(expr.op == UnaryOperator::BitwiseAnd ? builder_.create_eq_stmts(v, all) : builder_.create_ne_stmts(v, all));
     }
-    case UnaryOperator::BitwiseXor:  // ^v - parity via shift-halving
+    case UnaryOperator::BitwiseXor :  // ^v - parity via shift-halving
     case UnaryOperator::BitwiseXnor: {
       auto v = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
       for (int k = 32; k >= 1; k /= 2) {
@@ -725,8 +728,8 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       }
       return parity;
     }
-    case UnaryOperator::Preincrement:
-    case UnaryOperator::Predecrement:
+    case UnaryOperator::Preincrement :
+    case UnaryOperator::Predecrement :
     case UnaryOperator::Postincrement:
     case UnaryOperator::Postdecrement: {
       // `x++`/`++x`/`x--`/`--x`: read-modify-write the target. Pre returns the
@@ -769,13 +772,13 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
 std::optional<int> Slang_context::value_width(const slang::ast::Expression& e) const {
   using slang::ast::ExpressionKind;
   switch (e.kind) {
-    case ExpressionKind::IntegerLiteral:
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::IntegerLiteral   :
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue:
-    case ExpressionKind::ElementSelect:
-    case ExpressionKind::RangeSelect:
-    case ExpressionKind::MemberAccess:
-    case ExpressionKind::Concatenation:
+    case ExpressionKind::ElementSelect    :
+    case ExpressionKind::RangeSelect      :
+    case ExpressionKind::MemberAccess     :
+    case ExpressionKind::Concatenation    :
     case ExpressionKind::Replication      : break;
     case ExpressionKind::Conversion:
       // slang bounds a conversion by its destination type, but the operand
@@ -824,8 +827,8 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
 
   // Comparisons accept same-kind operands; everything else is integer-only.
   switch (expr.op) {
-    case BinaryOperator::Equality:
-    case BinaryOperator::Inequality:
+    case BinaryOperator::Equality    :
+    case BinaryOperator::Inequality  :
     case BinaryOperator::CaseEquality:
     case BinaryOperator::CaseInequality:
       if (is_bool_value(lhs) != is_bool_value(rhs)) {
@@ -947,7 +950,7 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
                        "unsupported-power",
                        "only constant powers or deferred `2 ** n` are supported by --reader slang");
       return "0";
-    case BinaryOperator::WildcardEquality:
+    case BinaryOperator::WildcardEquality  :
     case BinaryOperator::WildcardInequality: {
       auto cv = try_eval(re);
       if (cv && cv->isInteger()) {
@@ -1694,7 +1697,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // because cgen's truncation cancelled it. Keeping `shamt` at its own
   // signedness lets `sext(b) + bias` stay signed and land in 0..bi.bits.
   auto      shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)),
-                                           builder_.create_plus_stmts(shamt, std::to_string(bias)));
+                                                builder_.create_plus_stmts(shamt, std::to_string(bias)));
   auto      r       = trunc_to(shifted, sel_bits);
   return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
 }

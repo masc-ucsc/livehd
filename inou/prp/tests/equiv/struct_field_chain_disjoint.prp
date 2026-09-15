@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: struct_field_chain_disjoint_top
 :pyrope_top: top
-:gold_reader: slang
 */
 
 // Pyrope side of the per-field write-chain false comb loop (DISJOINT-lane

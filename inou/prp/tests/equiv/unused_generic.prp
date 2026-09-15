@@ -4,7 +4,6 @@
 :verilog_top: leaf
 :pyrope_top: leaf
 :compile_top: leaf
-:equiv_engine: cvc5
 */
 
 pub mod leaf<N=1>(a:u8) -> (y:u8@[]) {

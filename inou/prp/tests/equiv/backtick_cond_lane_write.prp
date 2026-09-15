@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: backtick_cond_lane_write_top
 :pyrope_top: top
-:gold_reader: slang
 */
 
 // Pyrope side of the conditional partial write to a BACKTICK-ESCAPED name.

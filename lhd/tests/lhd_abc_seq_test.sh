@@ -23,7 +23,7 @@
 # instances are blackbox boundaries; a memory is
 # either a boundary (memory=false) or lowered to flops+mux gates (memory=true).
 # Each mode's mapped netlist must be sequentially LEC-equivalent (yosys miter +
-# BMC/induction, via `lhd lec --set formal.solver=lgyosys`) to its `partition` twin.
+# BMC/induction, via `lhd lec`) to its `partition` twin.
 #
 #   prp -> lg
 #   pass color synth                       (the abc driver coloring)
@@ -31,7 +31,7 @@
 #   pass partition                          (same module structure, original logic)
 #   pass liberty gensim test.lib            (behavioral model per comb cell)
 #   cgen net + models -> impl.v ; cgen re -> ref.v
-#   lhd lec --set formal.solver=lgyosys (impl vs ref): must be sequentially LEC-equivalent
+#   lhd lec (impl vs ref): must be sequentially LEC-equivalent
 #
 # LEC soundness of this `lhd lec` / gensim pipeline (a corrupted reference must
 # FAIL) is covered by the combinational lhd_abc_test's negative control. A
@@ -82,15 +82,18 @@ run_abc_lec() {
   mkdir -p "$d"
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
+  local regset=() regmaxset=()
+  [ "$reg" = true ] || regset=(--set "pass.abc.register=$reg")
+  [ "$reg_max" = 0 ] || regmaxset=(--set "pass.abc.register_max_bits=$reg_max")
   local memset=()
-  [ "$mem" = "default" ] || memset=(--set "pass.abc.memory=$mem")
+  [ "$mem" = "default" ] || [ "$mem" = auto ] || memset=(--set "pass.abc.memory=$mem")
 
   [ -f "$prp" ] || fail "missing fixture $prp"
   run compile "$prp" --top "$top" --emit-dir lg:"$d/lg" --workdir "$d/w1"
   run pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
   ABCDIAG="$d/diag.jsonl"
   run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$LIB" \
-      --set pass.abc.register="$reg" --set pass.abc.register_max_bits="$reg_max" \
+      ${regset[@]+"${regset[@]}"} ${regmaxset[@]+"${regmaxset[@]}"} \
       ${memset[@]+"${memset[@]}"} "$@" --emit diagnostics:"$ABCDIAG" --workdir "$d/w3"
   # the original-logic twin (same module structure)
   run pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
@@ -108,7 +111,17 @@ run_abc_lec() {
   cat "$d/rev/"*.v > "$d/ref.v"
 
   # LEC: the tech-mapped netlist must equal the original logic in every mode
-  run lec --set formal.solver=lgyosys --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+  run lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+  if [ "$fix" = abc_mem ] && [ "$mem" = true ] && [ "$reg_max" = 0 ] && [ $# -eq 0 ]; then
+    grep -q '"bounded":false' "$r" || fail "mapped memory only proved to a bounded depth"
+    # Preserve all hierarchy and state names while corrupting one stored bit.
+    # The memory/bank relation must verify the write logic, not assume it.
+    sed "s/<= wdata;/<= wdata ^ 8'h01;/" "$d/ref.v" > "$d/bad_ref.v"
+    cmp -s "$d/ref.v" "$d/bad_ref.v" && fail "memory negative control changed nothing"
+    "$LHD" lec --impl "$d/impl.v" --ref "$d/bad_ref.v" --top "$top" \
+      --workdir "$d/wc_bad" -q --result-json "$d/bad.json" > "$d/bad.log" 2>&1
+    [ $? -eq 10 ] || fail "mapped memory corruption was not refuted: $(cat "$d/bad.log")"
+  fi
   NETV="$d/netv"
 }
 
@@ -119,7 +132,7 @@ has() { grep -hq "$2" "$1/"*.v; }
 # is a D-cone mux, so register=true folds it into the latch and maps every
 # register to plain DFFx1 cells named `<reg>_<bit>`; the `initial` is the reset
 # value realized on D, never a power-on value, so no native `always` survives.
-# The lgyosys LEC (reset pinned, then free) proves the fold; abc_async_reset
+# The default LEC LEC (reset pinned, then free) proves the fold; abc_async_reset
 # below adds the graph-native cvc5 proof, which seeds power-on state.
 run_abc_lec abc_seq abc_seq.abc_seq true false
 ! has "$NETV" "posedge" || fail "abc_seq register=true: a synchronous-reset register stayed a native flop"
@@ -159,7 +172,7 @@ rsrun pass abc --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --
   --workdir "$RSD/w4"
 rsrun pass liberty gensim "$LIB" --emit-dir lg:"$RSD/models" --workdir "$RSD/w5"
 rsrun lec --impl lg:"$RSD/net" --ref lg:"$RSD/re" --lib lg:"$RSD/models" --top abc_resetless_sync \
-  --set formal.solver=cvc5 --workdir "$RSD/wlec"
+  --workdir "$RSD/wlec"
 rsrun compile lg:"$RSD/net" --top abc_resetless_sync --emit-dir verilog:"$RSD/netv" --workdir "$RSD/w6"
 has "$RSD/netv" "DFFx1 " || fail "abc_resetless_sync: init-less flop was not mapped to DFF cells"
 ! has "$RSD/netv" "posedge" || fail "abc_resetless_sync: fake ABC init kept the flop native"
@@ -208,7 +221,7 @@ run_qn() {
   qrun pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set synth.liberty="$QLIB" --set abc.qor="$d/abc.json" \
     "$@" --workdir "$d/w4"
   qrun pass liberty gensim "$QLIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
-  qrun lec --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top" --set formal.solver=cvc5 \
+  qrun lec --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top" \
     --workdir "$d/wlec"
   qrun compile lg:"$d/net" --top "$top" --emit-dir verilog:"$d/netv" --workdir "$d/w6"
   qrun compile lg:"$d/models" --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
@@ -277,7 +290,7 @@ echo "PASS: DFF drive ladder picks the stronger rung for a high-fanout Q net"
 # directly). It stays native, `always @(posedge clk or posedge rst)`, with its
 # XOR data cone still mapped. The SYNCHRONOUS register is a D-cone mux and maps
 # to DFFx1 cells `sync_state_<bit>` with its 0ub1111 reset value realized on D;
-# the lgyosys LEC (reset pinned, then free) and the graph-native cvc5 LEC (which
+# the default LEC LEC (reset pinned, then free) and the graph-native cvc5 LEC (which
 # seeds power-on state from the source's `initial` and encodes its `reset_pin`
 # as ITE(rst, initial, ...)) both prove the mixed netlist.
 ARD="$W/abc_async_reset"
@@ -296,10 +309,10 @@ arrun compile lg:"$ARD/models" --emit-dir verilog:"$ARD/modelsv" --workdir "$ARD
 arrun compile lg:"$ARD/re" --top abc_async_reset --emit-dir verilog:"$ARD/rev" --workdir "$ARD/w8"
 cat "$ARD/netv/"*.v "$ARD/modelsv/"*.v > "$ARD/impl.v"
 cat "$ARD/rev/"*.v > "$ARD/ref.v"
-arrun lec --set formal.solver=lgyosys --impl verilog:"$ARD/impl.v" --ref verilog:"$ARD/ref.v" \
+arrun lec --impl verilog:"$ARD/impl.v" --ref verilog:"$ARD/ref.v" \
   --top abc_async_reset --workdir "$ARD/wc"
 arrun lec --impl lg:"$ARD/net" --ref lg:"$ARD/re" --lib lg:"$ARD/models" --top abc_async_reset \
-  --set formal.solver=cvc5 --workdir "$ARD/wlec"
+  --workdir "$ARD/wlec"
 has "$ARD/netv" "or posedge rst" || fail "abc_async_reset: asynchronous reset edge did not survive mapping"
 ! grep -h "always @" "$ARD/netv/"*.v | grep -qv "or posedge rst" \
   || fail "abc_async_reset: a synchronous-reset register stayed a native flop: $(grep -h 'always @' "$ARD/netv/"*.v)"
@@ -311,7 +324,7 @@ for b in 0 1 2 3; do
   has "$ARD/netv" "^DFFx1 sync_state_${b}(" || fail "abc_async_reset: sync_state[${b}] is not a DFFx1 named sync_state_${b}: $(grep -h '^DFFx1 ' "$ARD/netv"/*.v)"
 done
 ! has "$ARD/netv" "DFFx1 async_state" || fail "abc_async_reset: asynchronous-reset register incorrectly mapped to plain DFFx1"
-echo "PASS: asynchronous reset stays native, synchronous reset folds into D and maps to named DFF cells, LEC-equivalent (lgyosys + cvc5)"
+echo "PASS: asynchronous reset stays native, synchronous reset folds into D and maps to named DFF cells, LEC-equivalent (default LEC on Verilog and graphs)"
 
 # The same fixture under the QN-only cell: the sync-reset register composes with
 # the D-side inversion on both paths. Built-in flow: the latch crosses as ~(rst ?
@@ -348,15 +361,8 @@ has "$NETV" "posedge" || fail "abc_seq register_max_bits: oversized register pay
 echo "PASS: register_max_bits keeps only oversized state regions native (abc_seq)"
 
 # abc_mem's `reg mem:[8]u8 = 0` carries a reset value, i.e. a one-cycle
-# whole-array reset. The lgyosys cross-check below compares that reset array
-# (an inline reg array on the source side) against its realization -- a
-# cgen_memory_* instance module, or the bit-blasted `_mem<N>` reset flops --
-# and none of lgcheck's strategies closes that correspondence by induction: it
-# burns its whole default budget (600s) per run and returns INCONCLUSIVE either
-# way. The unbounded proof of the same fold is pass/lec:lec_cones_test (cvc5,
-# the memory<->storage-bank bridge); here the yosys leg is a bounded sanity
-# check, so cap its budget.
-export LGCHECK_EQUIV_TIMEOUT=30
+# whole-array reset. The default LEC engine compares both graph and Verilog
+# representations against the source memory.
 
 # memory=false: the memory stays
 # a native boundary instance (not bit-blasted).

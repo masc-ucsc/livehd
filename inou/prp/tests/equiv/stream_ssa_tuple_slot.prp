@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: stream_ssa_tuple_slot
 :pyrope_top: stream_ssa_tuple_slot
-:equiv_engine: cvc5
 */
 
 // 2f-stream_ssa — a runtime-indexed tuple must read each element's value AS

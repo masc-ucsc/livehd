@@ -39,7 +39,7 @@ H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
   # semdiff=none: this test validates the hierarchical SOLVER + child-collapse path,
   # so the structurally-identical self-lec must reach the solver (not be skipped by
   # the default semdiff=structural pre-check — that path is covered by lec_semdiff_test).
-  OUT=$("$LHD" lec "${@:2}" --top top --set formal.lec.hier=true --set formal.lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top top  --set formal.lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) self-lec: every def proves leaves-first; mid collapses leaf, top collapses mid.
@@ -84,7 +84,7 @@ else echo "ok: hier_refute=fail still fails fast, and warns that it is a debug m
 #     collapsed but FLATTENED into mid, so mid/top refute IN CONTEXT (the mode that
 #     can still prove a top equivalent over a differing child). The run must fail
 #     either way — a refuted block never exits 0 just because the top was inconclusive.
-H esc --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or" --set formal.lec.hier_refute=escalate
+H esc --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or"
 if [ "$RC" -eq 0 ]; then echo "FAIL: hier escalate rc=0 (want REFUTED)"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' REFUTED (0 child collapse"; then
   echo "FAIL: escalate did not FLATTEN the unproven leaf into mid (CEGAR)"; fail=1
@@ -112,8 +112,10 @@ endmodule
 EOF
 "$LHD" compile "$WORK/fan.v" --top fan --emit-dir "lg:$WORK/fanlib" --workdir "$WORK/cfan" >/dev/null 2>&1
 for jobs in 1 4; do
+  jobs_args=()
+  [ "$jobs" = "4" ] || jobs_args=(--set "formal.jobs=$jobs")
   "$LHD" lec --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
-    --set formal.lec.hier=true --set formal.lec.semdiff=none --set formal.jobs="$jobs" \
+     --set formal.lec.semdiff=none ${jobs_args[@]+"${jobs_args[@]}"} \
     --set lhd.incremental=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
   if [ $? -ne 0 ]; then echo "FAIL: fan hierarchy jobs=$jobs failed"; fail=1; fi
   grep "lec\[hier\]: '.*' .*child collapse" "$WORK/fan_$jobs.out" | sort >"$WORK/fan_$jobs.set"

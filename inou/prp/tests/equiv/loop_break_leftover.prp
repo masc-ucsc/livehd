@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: loop_break_leftover.top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 
 // `:equiv_engine: cvc5` (skip lgcheck, `lhd lec` is the oracle) is NOT the

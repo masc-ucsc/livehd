@@ -3,7 +3,6 @@
 :type: equiv simulation
 :verilog_top: matched_filter.top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 // Pulse-compression matched filter (radar correlator), TREE form — the
 // loop-machinery benchmark block: one design whose three source loops have

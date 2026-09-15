@@ -24,8 +24,10 @@ fail() { echo "FAIL: $*"; exit 1; }
 # run <prp> <top> <mode> [extra --set...]: compile, capture combined output + rc.
 run() {
   local prp="$1" top="$2" mode="$3"; shift 3
+  mode_args=()
+  [ "$mode" = "fast" ] || mode_args=(--set "compile.formal.mode=$mode")
   OUT="$W/$top.$mode.out"
-  "$LHD" compile "$W/$prp" --top "$top" --set compile.formal.mode="$mode" --workdir "$W/w_${top}_${mode}" "$@" >"$OUT" 2>&1
+  "$LHD" compile "$W/$prp" --top "$top" ${mode_args[@]+"${mode_args[@]}"} --workdir "$W/w_${top}_${mode}" "$@" >"$OUT" 2>&1
   RC=$?
 }
 

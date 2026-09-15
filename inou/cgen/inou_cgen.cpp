@@ -4,6 +4,9 @@
 
 #include <charconv>
 #include <map>
+#include <string>
+#include <string_view>
+#include <utility>
 
 #include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
@@ -17,17 +20,29 @@
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
+namespace {
+// Internal graph names are the hierarchical, always-unique `file.entity` (two
+// files may define the same simple module name). Both generators below split
+// one off the other, and the DUT/root verdict is decided from the pair -- so
+// the separator set and the no-separator fallback live here, once: a name that
+// splits one way for `is_selected_root` and another way for the emission loop
+// is a silently mis-selected top, not a compile error.
+std::pair<std::string, std::string> split_entity(std::string_view name) {
+  std::string full(name);
+  const auto  pos    = full.find_last_of("./");
+  std::string entity = pos == std::string::npos ? full : full.substr(pos + 1);
+  return {std::move(full), std::move(entity)};
+}
+}  // namespace
+
 Inou_cgen::Inou_cgen(const Eprp_var& var) : Pass("inou.cgen", var) {
-  auto v  = var.get("verbose");
-  verbose = v != "false" && v != "0";
-  auto m  = var.get("srcmap");
-  srcmap  = m == "true" || m == "1";
+  auto m = var.get("srcmap");
+  srcmap = m == "true" || m == "1";
 }
 
 void Inou_cgen::setup() {
   Eprp_method m1("inou.cgen.verilog", "export verilog from an Lgraph", &Inou_cgen::to_cgen_verilog);
 
-  m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
   m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment)", "false");
   register_inou("cgen", m1);
 
@@ -64,6 +79,9 @@ void Inou_cgen::setup() {
                         "sim.unknown_zero: fill every unknown (`?`) literal bit with 0 instead of a 0/1 drawn once "
                         "per literal from the run's seeded PRNG. true also lets the literal fold at C++ compile time",
                         "false");
+  m2.add_label_optional("live_words",
+                        "sim.live_words: live 64-bit words one color may keep across its members (0 = built-in default)",
+                        "0");
   register_inou("cgen", m2);
 }
 
@@ -72,9 +90,8 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 
   Inou_cgen pp(var);
 
-  auto dir     = pp.get_odir(var);
-  auto verbose = pp.verbose;
-  auto srcmap  = pp.srcmap;
+  auto dir    = pp.get_odir(var);
+  auto srcmap = pp.srcmap;
 
   // Consume var.graphs (HHDS handle): Eprp_var::add(Lgraph*) pushes the paired
   // shadow into var.graphs, so legacy producers (yosys.tolg, lgraph.match)
@@ -95,9 +112,8 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
       if (!g) {
         continue;
       }
-      std::string full(g->get_name());
-      auto        pos = full.find_last_of("./");
-      by_entity[pos == std::string::npos ? full : full.substr(pos + 1)].push_back(std::move(full));
+      auto [full, entity] = split_entity(g->get_name());
+      by_entity[std::move(entity)].push_back(std::move(full));
     }
     auto sanitize = [](std::string s) {
       for (auto& c : s) {
@@ -123,7 +139,7 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    Cgen_verilog p(verbose, dir, srcmap, &flat_names);
+    Cgen_verilog p(dir, srcmap, &flat_names);
     p.do_from_graph(g);
   }
 }
@@ -142,6 +158,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      color_dirty_s     = var.get("color_dirty");
   auto      debug_s           = var.get("debug");
   auto      unknown_zero_s    = var.get("unknown_zero");
+  auto      live_words_s      = var.get("live_words");
   auto      backend           = var.get("backend");
   if (backend != "slop" && backend != "llvm") {
     livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("sim.backend expects slop|llvm, got '{}'", backend).emit();
@@ -165,6 +182,23 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   const bool debug_on           = flag_on("sim.debug", debug_s);
   const bool unknown_zero_on    = flag_on("sim.unknown_zero", unknown_zero_s);
   flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
+  // Same loud grammar as the booleans above: a typo must not silently mean
+  // "the default". 0 = Color_plan's built-in default.
+  uint32_t live_words = 0;
+  if (!live_words_s.empty()) {
+    uint64_t   parsed = 0;
+    const auto first  = live_words_s.data();
+    const auto last   = first + live_words_s.size();
+    const auto result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr != last || parsed > (1u << 20)) {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+          .msg("sim.live_words expects a whole number of 64-bit words in [0, {}], got '{}'", 1u << 20, live_words_s)
+          .emit();
+      bad_flag = true;
+    } else {
+      live_words = static_cast<uint32_t>(parsed);
+    }
+  }
   if (bad_flag) {
     return;
   }
@@ -327,7 +361,26 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // repetition. Safe because prepare_graph() has already run over the whole
   // library, so no body changes shape while the memo is alive.
   absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
-  const auto                               probe_for = [&](const std::shared_ptr<hhds::Graph>& g) {
+  const auto                               is_selected_root = [&](std::string_view full, std::string_view entity) {
+    return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));
+  };
+  // The DUT is the module the driver pokes directly; see Cgen_sim::dut_.
+  // Resolved ONCE, here, next to `is_selected_root`: the verdict depends only
+  // on `top` and `instantiated`, three loops below ask for it, and two of them
+  // have already split the same name for their own use. One answer built where
+  // the rule lives cannot drift away from the rule.
+  absl::flat_hash_set<const hhds::Graph*> dut_graphs;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const auto [full, entity] = split_entity(g->get_name());
+    if (is_selected_root(full, entity)) {
+      dut_graphs.insert(g.get());
+    }
+  }
+  const auto is_dut    = [&](const std::shared_ptr<hhds::Graph>& g) { return dut_graphs.contains(g.get()); };
+  const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) {
     return Cgen_sim(dir,
                     vcd_out,
                     top,
@@ -340,10 +393,9 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                     color_dirty_on,
                     debug_on,
                     unknown_zero_on,
-                    backend == "llvm");
-  };
-  const auto is_selected_root = [&](std::string_view full, std::string_view entity) {
-    return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));
+                    backend == "llvm",
+                    is_dut(g),
+                    live_words);
   };
   // Which modules are already generated. Asked BEFORE the color plan, because
   // on a large design discovery dominates the emitter — measured on XiangShan
@@ -356,9 +408,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    const std::string full(g->get_name());
-    const auto        pos    = full.find_last_of("./");
-    const std::string entity = pos == std::string::npos ? full : full.substr(pos + 1);
+    const auto [full, entity] = split_entity(g->get_name());
     if (!entity.empty() && entity.front() == '%') {
       continue;  // a `test` block's minted comb is never emitted at all
     }
@@ -383,13 +433,11 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    const std::string full(g->get_name());
-    const auto        pos      = full.find_last_of("./");
-    const std::string entity   = pos == std::string::npos ? full : full.substr(pos + 1);
-    const bool        selected = is_selected_root(full, entity);
+    const auto [full, entity] = split_entity(g->get_name());
+    const bool selected       = is_selected_root(full, entity);
     // A compact body is a separate executable definition. Give LLVM the same
     // versioned schedule used by the root instead of emitting a Slop body.
-    const bool        compact_root = backend == "llvm" && compact_kernel_defs.contains(g.get());
+    const bool compact_root   = backend == "llvm" && compact_kernel_defs.contains(g.get());
     if ((!selected && !compact_root) || (!entity.empty() && entity.front() == '%')) {
       continue;
     }
@@ -397,7 +445,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       wrote_plan = true;  // the previous run's plan is still the current one
       continue;
     }
-    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), backend == "llvm");
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), backend == "llvm", live_words);
     plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
@@ -432,18 +480,20 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const auto  plan_it = root_color_plans.find(g.get());
     const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
     Cgen_sim    p(dir,
-               vcd_out,
-               top,
-               fakedelay,
-               plan,
-               compact_kernel_defs.contains(g.get()),
-               observe_on,
-               runtime_support_on,
-               slop_u_on,
-               color_dirty_on,
-               debug_on,
-               unknown_zero_on,
-               backend == "llvm");
+                  vcd_out,
+                  top,
+                  fakedelay,
+                  plan,
+                  compact_kernel_defs.contains(g.get()),
+                  observe_on,
+                  runtime_support_on,
+                  slop_u_on,
+                  color_dirty_on,
+                  debug_on,
+                  unknown_zero_on,
+                  backend == "llvm",
+                  is_dut(g),
+                  live_words);
     p.share_digest_memo(&digest_memo);
     p.do_from_graph(g);
   }

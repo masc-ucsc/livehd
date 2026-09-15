@@ -74,6 +74,75 @@ ck  "$OUT" "REFUTED"            "c vs a refutes"
 OUT=$(H b.v a.v --set lhd.incremental=false)
 ckn "$OUT" "lec\[cache\]:" "lhd.incremental=false opts out of the cache"
 
+# Proof scope must survive replay in both drivers. This complemented state
+# encoding currently settles by BMC from reset; the hierarchical form also
+# checks propagation from a bounded child into its otherwise identical parent.
+cat > "$WORK/bounded_ref.v" <<'EOF'
+module reset_low(input clock, input rst_ni, input d, output o);
+  reg q;
+  always @(posedge clock or negedge rst_ni)
+    if (!rst_ni) q <= 1'b0;
+    else q <= d;
+  assign o = q;
+endmodule
+module bounded_top(input clock, input rst_ni, input d, output o);
+  reset_low child(.clock(clock), .rst_ni(rst_ni), .d(d), .o(o));
+endmodule
+EOF
+cat > "$WORK/bounded_impl.v" <<'EOF'
+module reset_low(input clock, input rst_ni, input d, output o);
+  reg qn;
+  always @(posedge clock or negedge rst_ni)
+    if (!rst_ni) qn <= 1'b1;
+    else qn <= ~d;
+  assign o = ~qn;
+endmodule
+module bounded_top(input clock, input rst_ni, input d, output o);
+  reset_low child(.clock(clock), .rst_ni(rst_ni), .d(d), .o(o));
+endmodule
+EOF
+for mode in flat hier; do
+  args=()
+  [ "$mode" = hier ] || args=(--set formal.lec.hier=false)
+  scope_work="$WORK/scope_$mode"
+  for run in cold warm; do
+    "$LHD" lec --ref "$WORK/bounded_ref.v" --impl "$WORK/bounded_impl.v" \
+      --top bounded_top ${args[@]+"${args[@]}"} --workdir "$scope_work" \
+      --result-json "$WORK/${mode}_${run}.json" >"$WORK/${mode}_${run}.log" 2>&1 \
+      || { cat "$WORK/${mode}_${run}.log"; fail=1; }
+  done
+  python3 - "$WORK" "$mode" <<'PY_CHECK'
+import json, pathlib, sys
+root, mode = pathlib.Path(sys.argv[1]), sys.argv[2]
+cold, warm = [json.loads((root / f"{mode}_{run}.json").read_text())["lec"] for run in ("cold", "warm")]
+assert cold["verdict"] == warm["verdict"] == "proven", (cold, warm)
+assert cold["bounded"] is True and warm["bounded"] is True, (cold, warm)
+assert cold["bound"] == warm["bound"], (cold, warm)
+log = (root / f"{mode}_warm.log").read_text()
+assert "PROVEN (cache)" in log, log
+# Simulate a pre-fix cache record. Scope-less verdicts must be re-proved.
+cache_file = root / f"scope_{mode}" / "formal_cache.json"
+cache = json.loads(cache_file.read_text())
+def strip_scope(value):
+    if isinstance(value, dict):
+        value.pop("bounded", None)
+        for child in value.values(): strip_scope(child)
+    elif isinstance(value, list):
+        for child in value: strip_scope(child)
+strip_scope(cache)
+cache_file.write_text(json.dumps(cache))
+PY_CHECK
+  [ $? -eq 0 ] || fail=1
+  "$LHD" lec --ref "$WORK/bounded_ref.v" --impl "$WORK/bounded_impl.v" \
+    --top bounded_top ${args[@]+"${args[@]}"} --workdir "$scope_work" \
+    --result-json "$WORK/${mode}_legacy.json" >"$WORK/${mode}_legacy.log" 2>&1 \
+    || { cat "$WORK/${mode}_legacy.log"; fail=1; }
+  if grep -q 'PROVEN (cache)' "$WORK/${mode}_legacy.log"; then
+    echo "FAIL: $mode reused a legacy verdict without proof scope"; fail=1
+  fi
+  grep -q '"bounded":true' "$WORK/${mode}_legacy.json" || fail=1
+done
+
 if [ $fail -ne 0 ]; then echo "lec_cache_flat_test: FAILED"; exit 1; fi
 echo "lec_cache_flat_test: PASSED"
 exit 0

@@ -139,8 +139,6 @@ EOF
       --set yosys.filelist_file="$filelist" \
       --set yosys.setundef=zero \
       --set yosys.memory_mode="$YOSYS_MEMORY_MODE" \
-      --set formal.isabelle.strict=true \
-      --set formal.isabelle.normalize=true \
       --set formal.isabelle.max_width=1048576 \
       --set formal.isabelle.cert_wf="$ISABELLE_CERT_WF" \
       -- \
@@ -167,7 +165,6 @@ EOF
   echo "== $top: synth LGraph back to Verilog =="
   "$LHD" synth lg:"$lg" \
     --top "$top" \
-    \
     --workdir "$synth_work" \
     --result-json "$logs/lhd_synth_result.json" \
     --emit verilog:"$gate_v" \

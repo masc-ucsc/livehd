@@ -7,7 +7,7 @@
 #   lhd pass color <alg> --set color.continuous=true   (in-place coloring)
 #   lhd pass partition --emit-dir lg:dir2              (one module per region + new top)
 #   lg:dir2 -> verilog
-#   lhd lec --set formal.solver=lgyosys  (partitioned verilog vs the original): LEC-equivalent
+#   lhd lec  (partitioned verilog vs the original): LEC-equivalent
 #
 # Runs for the self-contained coloring algorithms (acyclic, synth); also checks
 # the stats-only mode and that an UNCOLORED design partitions cleanly: color 0
@@ -33,7 +33,7 @@ for ALG in acyclic synth; do
   D="$W/$ALG"
   mkdir -p "$D"
   # 1. compile to an optimized lg
-  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
   # 2. color in place (continuous => one region per color, the partition contract)
   run pass color "$ALG" --top "$TOP" --set color.continuous=true lg:"$D/lg" --workdir "$D/w2"
   # 3. partition into a fresh library
@@ -50,14 +50,14 @@ for ALG in acyclic synth; do
   # design at the end of this file.
   grep -q "part_flat__c" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original
-  run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
+  run lec --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"
 done
 
 # stats-only mode (no --emit-dir): must succeed and print region stats
 SD="$W/stats"
 mkdir -p "$SD"
-run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
+run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
 run pass color acyclic --top "$TOP" --set color.continuous=true lg:"$SD/lg" --workdir "$SD/w2"
 run pass partition --top "$TOP" lg:"$SD/lg" --workdir "$SD/w3"
 echo "PASS: partition stats-only mode"
@@ -68,7 +68,7 @@ echo "PASS: partition stats-only mode"
 # rebuild stays LEC-equivalent to the original.
 CD="$W/clear"
 mkdir -p "$CD"
-run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --emit-dir lg:"$CD/lg" --workdir "$CD/w1"
+run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$CD/lg" --workdir "$CD/w1"
 run pass color acyclic --top "$TOP" lg:"$CD/lg" --workdir "$CD/w2"
 run pass color clear --top "$TOP" lg:"$CD/lg" --workdir "$CD/w3"
 "$LHD" pass partition --top "$TOP" lg:"$CD/lg" --emit-dir lg:"$CD/lg2" -q --result-json "$CD/r.json" --workdir "$CD/w4"
@@ -84,7 +84,7 @@ run compile lg:"$CD/lg2" --top "$TOP" --emit verilog:"$CD/part.v" --workdir "$CD
 grep -q "^module part_flat" "$CD/part.v" || fail "uncolored partition did not emit the top module"
 grep -q "part_flat__c" "$CD/part.v" && fail "uncolored single-region design must not get a __c wrapper"
 # and it is still LEC-equivalent to the original
-run lec --set formal.solver=lgyosys --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
+run lec --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
 echo "PASS: uncolored design -> partition warns once + color-0 region, LEC-equivalent"
 
 echo "PASS: all pass.color/pass.partition flows"

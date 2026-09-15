@@ -19,12 +19,14 @@ module reductions(input [8:0] a, input signed [3:0] b, output [6:0] y);
 endmodule
 SV
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --emit verilog:"$W/models.v" --workdir "$W/models-work"
-for reader in yosys-slang yosys-verilog; do
-  run synth "$W/source.v" --reader "$reader" --top reductions --set synth.liberty="$LIB" \
+for reader in slang yosys-slang yosys-verilog; do
+  run compile "$W/source.v" --reader "$reader" --top reductions \
+    --emit-dir "lg:$W/$reader-lg" --workdir "$W/$reader-compile"
+  run synth "lg:$W/$reader-lg" --top reductions --set synth.liberty="$LIB" \
     --set synth.opentimer=false --emit verilog:"$W/$reader.v" --workdir "$W/$reader-synth"
   cat "$W/$reader.v" "$W/models.v" > "$W/impl.v"
   run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/source.v" --top reductions \
-    --set formal.solver=lgyosys --workdir "$W/$reader-lec"
+    --workdir "$W/$reader-lec"
   python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))['lec']; assert r['verdict']=='proven',r

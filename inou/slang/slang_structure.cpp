@@ -179,8 +179,8 @@ const slang::ast::Expression* unknown_conn_expr(const slang::ast::AssertionExpr*
 
 // Collect the symbols written by a statement subtree, split by style.
 struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::ast::VisitFlags::AllGood> {
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> blocking;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> nonblocking;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                         blocking;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                         nonblocking;
   // Optional: "is this `if` already decided at elaboration time?" When set, a
   // decided conditional contributes only its LIVE arm's writes -- a dead arm
   // never executes, so counting its writes invents state. That is how the loop
@@ -188,6 +188,15 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
   // latch once lower_conditional correctly stopped lowering the arm.
   // Left EMPTY by the other consumers, which keep the see-everything behavior.
   std::function<std::optional<bool>(const slang::ast::ConditionalStatement&)> decided;
+
+  bool skip_loop_controls = false;
+  void handle(const slang::ast::ForLoopStatement& s) {
+    if (skip_loop_controls) {
+      s.body.visit(*this);
+    } else {
+      visitDefault(s);
+    }
+  }
 
   void handle(const slang::ast::ConditionalStatement& s) {
     if (decided) {
@@ -219,36 +228,6 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
     };
     note(expr.left());
 
-    visitDefault(expr);
-  }
-};
-
-// Blocking writes of a process, EXCLUDING for-loop control (`for (j = 0; j <
-// N; j = j+1)`). A module-scope `integer j` used as a loop index in several
-// processes is not hardware state -- elaboration unrolls the loop -- but it IS
-// blocking-written in an edge process and referenced by the others, which made
-// every such design look like a silently-dropped register. Used only by
-// collect_blocking_ff_state; the plain Write_collector still sees everything.
-struct Ff_blocking_collector : public slang::ast::ASTVisitor<Ff_blocking_collector, slang::ast::VisitFlags::AllGood> {
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> blocking;
-
-  void handle(const slang::ast::ForLoopStatement& s) { s.body.visit(*this); }  // skip init / stop / step
-
-  void handle(const slang::ast::AssignmentExpression& expr) {
-    if (!expr.isNonBlocking()) {
-      std::function<void(const slang::ast::Expression&)> note = [&](const slang::ast::Expression& lhs) {
-        if (lhs.kind == ExpressionKind::Concatenation) {
-          for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
-            note(*op);
-          }
-          return;
-        }
-        if (const auto* sym = lhs_base_symbol(lhs)) {
-          blocking.insert(sym);
-        }
-      };
-      note(expr.left());
-    }
     visitDefault(expr);
   }
 };
@@ -857,7 +836,7 @@ struct Net_driver_census {
   bool part  = false;
 };
 Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym) {
-  Net_driver_census                             out;
+  Net_driver_census out;
   if (sym.getInitializer() != nullptr) {
     ++out.whole;
   }
@@ -1503,9 +1482,8 @@ std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortS
 
 // Pass 1 of the module conversion: classify processes and decide which
 // variables are clocked state (reg_syms_). A variable is state when an
-// edge-sensitive process writes it nonblocking. Blocking-written variables in
-// edge processes stay process-local temps; one written there but read
-// elsewhere has flop semantics this reader does not model yet -> diagnosed.
+// edge-sensitive process writes it. Blocking writes use a process-local value
+// before committing state, while loop-control assignments remain compile-time.
 // Recurses into generate blocks: an `always_ff` inside a generate-for writing
 // a module-scope array (`buffer_pc[buffer] <= f0_pc`) must classify that array
 // as a reg BEFORE the declares run, or a comb read declares it `mut` first.
@@ -1554,10 +1532,18 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     }
 
     Write_collector wc;
+    wc.skip_loop_controls = is_edge;
     // Only THIS consumer gets the reachability filter: it is the one that mints
     // reg/latch state, so a dead arm's writes here become real hardware.
-    wc.decided = [this](const slang::ast::ConditionalStatement& s) { return const_cond_value(s); };
+    wc.decided            = [this](const slang::ast::ConditionalStatement& s) { return const_cond_value(s); };
     pbs.getBody().visit(wc);
+    if (is_edge) {
+      for (const auto* sym : wc.blocking) {
+        if (sym->getType().getCanonicalType().isIntegral()) {
+          reg_syms_.insert(sym);
+        }
+      }
+    }
     for (const auto* sym : wc.nonblocking) {
       reg_syms_.insert(sym);
       if (is_latch_block) {
@@ -1585,92 +1571,6 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
         }
         reg_syms_.insert(sym);
         latch_syms_.insert(sym);
-      }
-    }
-  }
-}
-
-// Implements the documented half of collect_state_vars' contract that used to be
-// checked only for module OUTPUTS: "one written [blocking, in an edge process]
-// but read elsewhere has flop semantics this reader does not model yet ->
-// diagnosed". A blocking-written var of an edge process is a legitimate
-// process-local TEMP only while nothing outside that process reads it; the
-// moment another process, a continuous assign or an instance port reads it, it
-// is persistent state that survives the clock edge. Lowering it as a stateless
-// `mut` silently DELETED the register -- `always @(posedge p) ms = ms + 1;` with
-// `assign tick = ms` came out as a pure-combinational module whose output folded
-// to the constant 1, and lgcheck refuted it.
-//
-// Reads are attributed to their enclosing procedural block; anything outside a
-// block (continuous assigns, instance port connections) counts as an outside
-// read on its own. A var blocking-written by two different edge processes is
-// state as well -- neither can own it as a temp.
-void Slang_context::collect_blocking_ff_state(const slang::ast::Scope& body) {
-  using PB = slang::ast::ProceduralBlockSymbol;
-  absl::flat_hash_map<const slang::ast::Symbol*, const PB*>                      owner;  // blocking-written -> its edge block
-  absl::flat_hash_set<const slang::ast::Symbol*>                                 multi;  // ...written by more than one
-  // Per-block reads (null block = module level). Kept as the collector's raw
-  // vector, NOT a hash set: the resolve loop below iterates these and probes
-  // `owner`, so a set here would buy nothing and cost one table per member --
-  // and a Chisel-generated module has tens of thousands of members.
-  std::vector<std::pair<const PB*, std::vector<const slang::ast::ValueSymbol*>>> reads;
-
-  std::function<void(const slang::ast::Scope&)> walk = [&](const slang::ast::Scope& sc) {
-    for (const auto& member : sc.members()) {
-      if (visit_generate_scope(member, walk)) {
-        continue;
-      }
-      if (member.kind == SymbolKind::ProceduralBlock) {
-        const auto&           pbs = member.as<PB>();
-        Named_value_collector nv;
-        pbs.getBody().visit(nv);
-        reads.emplace_back(&pbs, std::move(nv.syms));
-        if (edge_trigger_count(pbs) > 0) {
-          // Only an EDGE block's blocking writes can own a symbol, so a
-          // level-sensitive block never needs this walk at all.
-          Ff_blocking_collector wc;
-          pbs.getBody().visit(wc);
-          for (const auto* sym : wc.blocking) {
-            if (auto [it, ins] = owner.try_emplace(sym, &pbs); !ins && it->second != &pbs) {
-              multi.insert(sym);
-            }
-          }
-        }
-        continue;
-      }
-      // Everything else that can READ a signal at module level: continuous
-      // assigns and instance port connections.
-      if (const auto* mscope = member.as_if<slang::ast::Scope>(); mscope != nullptr && member.kind != SymbolKind::Instance) {
-        walk(*mscope);
-      }
-      Named_value_collector nv;
-      member.visit(nv);
-      if (!nv.syms.empty()) {
-        reads.emplace_back(nullptr, std::move(nv.syms));
-      }
-    }
-  };
-  walk(body);
-
-  // Resolve owner-vs-reader by walking the READS once and probing `owner`, not
-  // by walking `owner` and scanning every read set. Both compute the same set --
-  // a blocking-written sym is state iff two edge blocks write it, or something
-  // other than its owning block reads it -- but the owner-outer form is
-  // |owner| x |reads| hash probes, and a symbol that is NOT read outside (the
-  // common case, a genuine process-local temp) scans the whole `reads` vector
-  // before concluding so. On XiangShan's Backend (1089 modules; Rob alone has
-  // ~83k module-level members) that pair was 83% of every sample taken during
-  // the slang->LNAST phase, and 28s of a 2m51 `lhd compile`. This form is
-  // linear in the number of read refs; the same run is 2m23.
-  // `multi` is a subset of `owner` (only a second, different writer puts a sym
-  // there), so seeding from it is exact.
-  for (const auto* sym : multi) {
-    blocking_ff_state_.insert(sym);
-  }
-  for (const auto& [rb, rsyms] : reads) {
-    for (const auto* sym : rsyms) {
-      if (auto it = owner.find(sym); it != owner.end() && it->second != rb) {
-        blocking_ff_state_.insert(sym);
       }
     }
   }
@@ -1766,7 +1666,6 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // Every classification pre-scan runs BEFORE the first expression lowers:
   // is_scalar_struct_var memoizes over the port/reg sets and struct_use_.
   collect_state_vars(*body);
-  collect_blocking_ff_state(*body);
   collect_struct_pattern_assigns(*body);
   {
     Struct_use_collector suc;
@@ -4433,7 +4332,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // exactly the position-independent representation for this legal
         // state feedback.
         if (drivers[r].writes.contains(net)) {
-          if (seq_out_nets.contains(net)) {
+          if (seq_out_nets.contains(net) || (drivers[r].member != nullptr && drivers[r].member->kind == SymbolKind::Instance)) {
             wire_syms_.insert(net);
             continue;  // NOT `break`: a LATER reader may still be a resolvable split driver
           }
@@ -5757,11 +5656,12 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       clear_pending_loc();
     }
 
-    // The then-arm must be const nonblocking stores to regs: those become
-    // the reset values. Validate-and-collect first, emit after — a partial
+    // Whole-register nonblocking stores become reset/load values; reset
+    // slices must be constant. Validate-and-collect first, emit after — a partial
     // emit would leave stray reset attrs behind when a later statement fails
     // the walk and the demote fallback lowers the arm synchronously instead.
-    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>> reset_stores;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>>                   reset_stores;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> async_loads;
     // PARTIAL (bit-range) reset writes: `if (!rst_b) begin q[9:1] <= 0; q[0] <= 1; end`
     // is one constant reset value spelled across several slices. Requiring a
     // whole-reg NamedValue write rejected it, and the whole always block then
@@ -5830,6 +5730,11 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           // attr-resolution work first (see provenance.md M6).
           auto cv = try_eval_const_net(as.right());
           if (!cv || !cv->isInteger()) {
+            if (as.isNonBlocking() && as.left().kind == ExpressionKind::NamedValue && !sym->getType().isUnpackedArray()
+                && !packed_mem_regs_.contains(sym)) {
+              async_loads.emplace_back(sym, &as.right());
+              return true;
+            }
             return false;
           }
           if (as.left().kind == ExpressionKind::NamedValue) {
@@ -5927,12 +5832,17 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       }
       emit_unsupported(cond_stmt.ifTrue.sourceRange,
                        "unsupported-async-load",
-                       "the async-reset arm must contain only constant non-blocking writes to state regs",
-                       "non-constant async loads have no flop lowering; use --reader yosys-slang");
+                       "the async-reset arm requires whole-register nonblocking loads or constant reset slices");
       return;
     }
     for (const auto& [sym, init_text] : reset_stores) {
       emit_reg_reset_attrs(*sym, init_text, reset_ref_name, edge_pos);
+    }
+
+    for (const auto& [sym, expr] : async_loads) {
+      auto ti    = tinfo(sym->getType());
+      auto value = fit_wrap(lower_rvalue(*expr), ti.bits, ti.is_signed);
+      emit_reg_reset_attrs(*sym, value, reset_ref_name, edge_pos, true);
     }
 
     // Peeling the reset arm into per-register attributes must not discard the
@@ -5960,29 +5870,33 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
 }
 
 void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
-                                         bool edge_pos) {
+                                         bool edge_pos, bool initial_is_ref) {
   declare_reg(sym);  // ensure declared (hoisting normally did)
   auto name = reg_net_of(sym);
   struct Reset_target {
     std::string name;
     std::string initial;
+    int         bits;
+    bool        is_signed;
   };
   std::vector<Reset_target> targets;
   if (auto sit = struct_var_info_.find(&sym); sit != struct_var_info_.end() && reg_syms_.contains(&sym)) {
     // The source reset value is the packed aggregate. Slice it by each leaf's
     // recorded packed offset so every expanded flop gets exactly its bits.
-    auto packed = Dlop::from_pyrope(initial);
+    auto packed = initial_is_ref ? Dlop::create_integer(0) : Dlop::from_pyrope(initial);
     if (!packed || packed->is_invalid()) {
       emit_unsupported(sym.location, "unsupported-aggregate-reset", "could not split the packed-aggregate reset value");
       return;
     }
     for (const auto& f : sit->second.fields) {
       auto mask = Dlop::get_mask_value(static_cast<int>(f.off) + f.bits - 1, static_cast<int>(f.off));
-      auto lane = packed->get_mask_op(*mask);
-      targets.push_back({absl::StrCat(name, ".", f.name), std::string(lane->to_pyrope())});
+      auto lane = initial_is_ref ? extract_field(std::string(initial), f.off, f.bits)
+                                 : std::string(packed->get_mask_op(*mask)->to_pyrope());
+      targets.push_back({absl::StrCat(name, ".", f.name), lane, f.bits, f.is_signed});
     }
   } else {
-    targets.push_back({name, std::string(initial)});
+    const auto ti = tinfo(sym.getType());
+    targets.push_back({name, std::string(initial), ti.bits, ti.is_signed});
   }
 
   // Claimed only once the attrs really emit: an aggregate split that bailed out
@@ -6006,7 +5920,24 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
   const bool lanes_carry_reset = array_reset_lanes_.contains(&sym) && packed_mem_regs_.contains(&sym);
   for (const auto& target : targets) {
     if (!lanes_carry_reset) {
-      emit_attr(target.name, "initial", target.initial, false);
+      if (initial_is_ref) {
+        // Attribute references must name a stable net, not a temporary that
+        // expression inlining can remove from the emitted Pyrope.
+        const auto stem      = target.name + "__async_load";
+        auto       load_name = stem;
+        for (int n = 0; used_names_.contains(load_name); ++n) {
+          load_name = absl::StrCat(stem, "_", n);
+        }
+        used_names_.insert(load_name);
+        builder_.create_declare_stmts(load_name,
+                                      "wire",
+                                      int_max_str(target.bits, target.is_signed),
+                                      int_min_str(target.bits, target.is_signed));
+        builder_.create_assign_stmts(load_name, fit_wrap(target.initial, target.bits, target.is_signed));
+        emit_attr(target.name, "initial", load_name, true);
+      } else {
+        emit_attr(target.name, "initial", target.initial, false);
+      }
     }
     emit_attr(target.name, "reset_pin", reset_ref, true);
     emit_attr(target.name, "sync", "false", false);
@@ -6061,68 +5992,62 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
   const bool implicit_clk = !negedge && input_syms_.contains(clk_sym) && (clk_sym->name == "clk" || clk_sym->name == "clock");
 
   Write_collector wc;
+  wc.skip_loop_controls = true;
   body.visit(wc);
 
+  // A memory can be written by several processes. Preserve the process
+  // clock at each group of stores; a global array attribute cannot express it.
   for (const auto* sym : emit_ordered(wc.nonblocking)) {
     if (!reg_syms_.contains(sym) || !sym->getType().getCanonicalType().isUnpackedArray()) {
       continue;
     }
-    const auto clock_key = std::make_pair(clk_sym, negedge);
-    auto [it, inserted]  = memory_clocks_.try_emplace(sym, clock_key);
-    if (!inserted && it->second != clock_key) {
-      emit_unsupported(clock.sourceRange,
-                       "multi-clock-memory",
-                       std::string("array '") + std::string(sym->name)
-                           + "' is written on different clocks or edges; --reader slang requires one clock per memory",
-                       "read the design with --reader yosys-slang to preserve per-port memory clocks");
-      proc_kind_ = Proc_kind::none;
-      return;
+    auto&                    ln   = *builder_.lnast;
+    const auto               name = reg_net_of(*sym);
+    std::vector<std::string> targets;
+    if (auto mit = mem_info_.find(sym); mit != mem_info_.end() && mit->second.is_tuple) {
+      for (const auto& field : mit->second.fields) {
+        targets.push_back(absl::StrCat(name, ".", field.name));
+      }
+    } else {
+      targets.push_back(name);
+    }
+    for (const auto& target : targets) {
+      auto attr = builder_.add_child(Lnast_ntype::create_attr_set());
+      ln.add_child(attr, Lnast_node::create_ref(target));
+      ln.add_child(attr, Lnast_node::create_const("__store_clock_pin"));
+      ln.add_child(attr, Lnast_node::create_ref(lname_of(*clk_sym)));
+      attr = builder_.add_child(Lnast_ntype::create_attr_set());
+      ln.add_child(attr, Lnast_node::create_ref(target));
+      ln.add_child(attr, Lnast_node::create_const("__store_posclk"));
+      ln.add_child(attr, Lnast_node::create_const(negedge ? "false" : "true"));
     }
   }
 
-  // A blocking-written variable of an edge process that other code reads has
-  // flop semantics this reader does not model yet.
-  for (const auto* sym : wc.blocking) {
-    if (output_syms_.contains(sym)) {
-      emit_unsupported(sym->location,
-                       "blocking-ff-output",
-                       std::string("output '") + std::string(sym->name)
-                           + "' is blocking-assigned in an edge-sensitive process; --reader slang only supports `<=` for state",
-                       "use a non-blocking assignment");
-      continue;
-    }
-    // An unpacked ARRAY blocking-written in an edge process is the same gap,
-    // but it is NOT an output so the check above never saw it — and unlike a
-    // scalar process-local temp, a module-scope array is PERSISTENT state.
-    // collect_state_vars only admits NONBLOCKING-written symbols to reg_syms_
-    // (see its header comment), so such an array is declared `mut`: a
-    // combinational, re-zeroed-every-cycle array. That silently drops the
-    // storage — measured, `always_ff begin if (we) mem[wa] = wd; q <= mem[ra];
-    // end` lowered to `q = (we && wa==ra) ? wd : 0` and lgcheck REFUTED it
-    // against the source. Refuse instead of miscompiling (the same fail-stop
-    // stance upass.tolg already takes when such an array is read before the
-    // write). yosys handles this shape by demoting the memory to per-entry
-    // registers (mem2reg); doing the same here is the real fix.
-    // The general case of the SAME gap: a blocking-written var of this edge
-    // process that something OUTSIDE the process reads is persistent flop
-    // state, not a process-local temp (collect_blocking_ff_state decides).
-    // Without this it was declared `mut` and the register vanished outright.
-    if (blocking_ff_state_.contains(sym)) {
-      emit_unsupported(sym->location, "blocking-ff-state",
-                       std::string("variable '") + std::string(sym->name)
-                           + "' is blocking-assigned in an edge-sensitive process and read outside it; --reader slang only "
-                             "supports `<=` for state, and would otherwise lower it as stateless combinational logic",
-                       "use a non-blocking assignment (`<=`), or read it with --reader yosys-verilog");
-      continue;
-    }
+  // Blocking writes update a process-local current value immediately. Commit
+  // it to the register only after the process, so other processes still see Q.
+  for (const auto* sym : emit_ordered(wc.blocking)) {
     const auto& sct = sym->getType().getCanonicalType();
+    // The ARRAY refusal must be screened BEFORE reg_syms_: collect_state_vars
+    // admits only INTEGRAL blocking writes to reg_syms_, so asking reg_syms_
+    // first makes this diagnostic unreachable for exactly the shape it exists
+    // for. A blocking-written unpacked array is then declared `mut` and its
+    // storage silently destroyed -- `always_ff begin if (we) mem[wa] = wd; q <=
+    // mem[ra]; end` lowers to `q = (we && wa==ra) ? wd : 0`, which lgcheck
+    // REFUTES (inou/prp/tests/fixme/mem_blocking_write.v).
     if (sct.isUnpackedArray()) {
-      emit_unsupported(sym->location, "blocking-ff-array",
-                       std::string("array '") + std::string(sym->name)
-                           + "' is blocking-assigned in an edge-sensitive process; --reader slang only supports `<=` for "
-                             "array state, and would otherwise lower it as a stateless combinational array",
-                       "use a non-blocking assignment (`<=`) for the array write, or read it with --reader yosys-verilog");
+      emit_unsupported(sym->location, "blocking-ff-array", "blocking memory writes require a port-local forwarding model");
+      continue;
     }
+    if (!reg_syms_.contains(sym)) {
+      continue;
+    }
+    if (!sct.isIntegral()) {
+      emit_unsupported(sym->location, "blocking-ff-array", "blocking memory writes require a port-local forwarding model");
+      continue;
+    }
+    auto value = builder_.create_lnast_tmp();
+    builder_.create_assign_stmts(value, reg_net_of(*sym));
+    blocking_values_.emplace(sym, value);
   }
 
   for (const auto* stmt : prologue) {
@@ -6142,13 +6067,20 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     builder_.pop_stmts();
   }
 
+  for (const auto* sym : emit_ordered(wc.blocking)) {
+    if (auto it = blocking_values_.find(sym); it != blocking_values_.end()) {
+      builder_.create_assign_stmts(reg_net_of(*sym), it->second);
+    }
+  }
+  blocking_values_.clear();
+  wc.nonblocking.insert(wc.blocking.begin(), wc.blocking.end());
   if (!implicit_clk) {
     auto& ln = *builder_.lnast;
     // Emit the clock_pin / posclk attr_set nodes in a stable source order:
     // wc.nonblocking is a pointer-keyed flat_hash_set with run-to-run-varying
     // iteration order, and this loop appends IR.
     for (const auto* sym : emit_ordered(wc.nonblocking)) {
-      if (!reg_syms_.contains(sym)) {
+      if (!reg_syms_.contains(sym) || sym->getType().getCanonicalType().isUnpackedArray()) {
         continue;
       }
       auto                     name = reg_net_of(*sym);
@@ -6516,7 +6448,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
-  ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
+  ln.add_child(fcall_idx, Lnast_node::create_ref(ref_name_of_raw(callee)));
   for (const auto& [pname, v] : in_args) {
     auto arg = ln.add_child(fcall_idx, Lnast_ntype::create_store());
     ln.add_child(arg, Lnast_node::create_ref(pname));
@@ -6726,7 +6658,7 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
-  ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
+  ln.add_child(fcall_idx, Lnast_node::create_ref(ref_name_of_raw(callee)));
   for (const auto& [pname, v] : in_args) {
     auto arg = ln.add_child(fcall_idx, Lnast_ntype::create_store());
     ln.add_child(arg, Lnast_node::create_ref(pname));

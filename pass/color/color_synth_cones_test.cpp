@@ -37,10 +37,9 @@ namespace {
 // that wants to pin the WALK is not silently pinning the shipped 30k policy.
 Color_opts raw_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
-  o.min_ge  = 0;  // the GE window does not shape cones; pinned here, not assumed
-  o.max_ge  = 0;
+  o.hier   = false;
+  o.min_ge = 0;  // the GE window does not shape cones; pinned here, not assumed
+  o.max_ge = 0;
   return o;
 }
 

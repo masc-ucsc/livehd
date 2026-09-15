@@ -134,20 +134,11 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   });
 
 #ifndef NDEBUG
-  // Validate structural and constant hints before range inference rewrites
-  // them. Do not compare a boundary cell's inferred input range against its
-  // output sign afterward: Flop/Mux/output connections are legal finite-width
-  // truncation boundaries, so a signed producer may intentionally feed an
-  // unsigned realization.
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
-      continue;
-    }
-    auto dpin = node.create_driver_pin(0);
-    if (dpin.is_invalid()) {
-      continue;
-    }
-    livehd::graph_util::debug_check_const_pin(dpin);
+  // Internal hints may be stale after cprop, or absent after bitfuzz. They
+  // are outputs of this pass, not preconditions for entering inference.
+  // Literal metadata remains independently checkable against its value.
+  for (const auto& pin : g->get_constant_node().out_pins()) {
+    livehd::graph_util::debug_check_const_pin(pin);
   }
 #endif
 
@@ -518,45 +509,26 @@ void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec&
     not_finished = true;
     return;
   }
-  if (unlikely(!n_it->second.is_always_positive())) {
-    // upass.bitwidth already reports the source-level warning. A range that
-    // includes negative counts has no sound SHL envelope, but that should not
-    // make this graph-wide sizing pass reject an otherwise sized graph. Keep
-    // TolG's conservative carrier for this node and continue.
-    auto out  = node.create_driver_pin(0);
-    auto bits = bits_of(out);
-    if (bits <= 0) {
-      not_finished = true;
-      return;
-    }
-    Bitwidth_range fallback;
-    if (livehd::graph_util::is_unsign(out)) {
-      fallback.set_ubits_range(bits);
-    } else {
-      fallback.set_sbits_range(bits);
-    }
-    bwmap.insert_or_assign(out.get_class_index(), fallback);
-    return;
-  }
-  Bitwidth_range n_bw = n_it->second;
+  // A signed count carrier can include negative values even when the caller
+  // constrains the actual count (notably a counted-loop body). Infer the
+  // envelope of valid counts instead of depending on this output's old hint.
+  // Include zero for the out-of-range hardware shift case as well.
+  const auto zero            = *Dlop::create_integer(0);
+  const auto n_min           = n_it->second.get_min();
+  const auto n_max           = n_it->second.get_max();
+  const bool may_be_negative = n_min.is_negative();
+  const auto n_lo            = may_be_negative ? zero : n_min;
+  const auto n_hi            = n_max.is_negative() ? zero : n_max;
 
-  // A zero count is the identity (a << 0 == a), not a zero result.
-  // Evaluate it through the same range corners as every other count.
-  if (!n_bw.is_always_positive()) {
-    not_finished = true;
-    return;
-  }
-
-  auto       max = a_bw.get_max();
-  auto       min = a_bw.get_min();
+  auto       max        = a_bw.get_max();
+  auto       min        = a_bw.get_min();
   // a<<n = a*2^n is monotonic in n per fixed operand (UP for a>0, MORE NEGATIVE
   // for a<0). The range envelope is the min/max over the four corner shifts —
   // NOT max<<nmax / min<<nmin, which leaves a negative `min` at min<<nmin and so
   // under-estimates the (more negative) true lower bound for signed inputs.
-  const Dlop corners[4]
-      = {*max.shl_op(n_bw.get_max()), *max.shl_op(n_bw.get_min()), *min.shl_op(n_bw.get_max()), *min.shl_op(n_bw.get_min())};
-  Dlop lo = corners[0];
-  Dlop hi = corners[0];
+  const Dlop corners[4] = {*max.shl_op(n_hi), *max.shl_op(n_lo), *min.shl_op(n_hi), *min.shl_op(n_lo)};
+  Dlop       lo         = may_be_negative ? zero : corners[0];
+  Dlop       hi         = lo;
   for (const auto& c : corners) {
     if (c.lt_op(lo)->is_known_true()) {
       lo = c;

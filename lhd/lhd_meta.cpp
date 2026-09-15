@@ -24,7 +24,7 @@ constexpr std::string_view kErrorClasses
     = R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
 
 constexpr std::string_view kJsonSynthCommand
-    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> optional pass.color reduce (synth.reduce=false by default; experimental synthesis-time reduction that can degrade QoR) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on — other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang","yosys","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
+    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> optional pass.color reduce (synth.reduce=false by default; experimental synthesis-time reduction that can degrade QoR) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on \u2014 other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -547,19 +547,19 @@ int describe_command(const Options& opts) {
   }
   if (name == "lec" || name == "formal lec") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set formal.* / formal.lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo"]})json");
+        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (Verilog always via native Slang; Yosys debug comparisons must first use lhd compile --reader yosys --emit-dir lg:DIR). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set formal.* / formal.lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd compile ref.v --reader yosys --emit-dir lg:ref_lg; lhd lec --impl lg:ref_lg --ref ref.v"]})json");
     return 0;
   }
   // `formal` names the FAMILY (a dispatcher); the runnable thing is the
   // subcommand, so each gets its own record. `formal lec` IS `lec`.
   if (name == "formal") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal","description":"Formal verification command family (2f-verify): a dispatcher, not a flow. `formal verify <design> [sidecar.prp ...] [BLOCK]` proves ONE design's assert/assert_always/assume obligations by BMC from reset — use it to answer \"does this design satisfy the properties I wrote?\". `formal lec --impl X --ref Y` is the equivalence check (an alias of `lhd lec`) — use it to answer \"are these two designs the same function?\". Both share the --set formal.* knob namespace (bound/timeout/solver/strict/...; lec pairing machinery is formal.lec.*). Describe a subcommand for its own record: `lhd describe 'formal verify'` / `lhd describe lec`","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true}],"optional":[]},"subcommands":[{"name":"verify","summary":"prove one design's assert/assume obligations by BMC from reset"},{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl) (= lhd lec)"}],"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo","lhd formal verify ALU.prp ALU.verify.prp --list-tests","lhd formal lec --impl impl.prp --ref ref.v"]})json");
+        R"json({"schema_version":1,"name":"formal","description":"Formal verification command family (2f-verify): a dispatcher, not a flow. `formal verify <design> [sidecar.prp ...] [BLOCK]` proves ONE design's assert/assert_always/assume obligations by BMC from reset — use it to answer \"does this design satisfy the properties I wrote?\". `formal lec --impl X --ref Y` is the equivalence check (an alias of `lhd lec`) — use it to answer \"are these two designs the same function?\". Both share the --set formal.* knob namespace (bound/timeout/solver/...; lec pairing machinery is formal.lec.*). Describe a subcommand for its own record: `lhd describe 'formal verify'` / `lhd describe lec`","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true}],"optional":[]},"subcommands":[{"name":"verify","summary":"prove one design's assert/assume obligations by BMC from reset"},{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl) (= lhd lec)"}],"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo","lhd formal verify ALU.prp ALU.verify.prp --list-tests","lhd formal lec --impl impl.prp --ref ref.v"]})json");
     return 0;
   }
   if (name == "formal verify") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...)","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
+        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...)","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
     return 0;
   }
   if (name == "semdiff" || name == "pass semdiff") {
@@ -783,7 +783,7 @@ void print_general_help() {
       "  (one file per module). --emit also infers the kind from a bare .v/.sv/.prp path\n"
       "\n"
       "shared flags:\n"
-      "  --top T   --reader slang|yosys|yosys-slang|yosys-verilog\n"
+      "  --top T   --reader slang (compile also accepts yosys|yosys-slang|yosys-verilog)\n"
       "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
       "  --workdir DIR   --result-json PATH\n"
       "  --diag-fmt auto|json|pretty    result + diagnostic rendering (auto: pretty on a\n"
@@ -944,8 +944,8 @@ int help_pass(const std::string& sub) {
         "  clear    remove any existing coloring\n"
         "\n"
         "--stats is the shared kernel flag — every pass that has a report reads it (also\n"
-        "  pass.semdiff, and lec / formal verify via formal.stats). HERE (or --set\n"
-        "  pass.color.stats=true) it reports what the coloring produced, on\n"
+        "  pass.semdiff, and lec / formal verify via lhd.stats). HERE (or --set\n"
+        "  lhd.stats=true) it reports what the coloring produced, on\n"
         "  stderr: partition count, max/min/avg/median size, singletons, how many land in\n"
         "  the 1k-5k band pass.abc likes, and uncolored nodes. A partition is one\n"
         "  (def, color) -- the unit pass.partition emits as `<def>__c<id>`. For `flat` it\n"
@@ -1003,11 +1003,10 @@ int help_pass(const std::string& sub) {
         "flags:\n"
         "  --top M                         select the root module\n"
         "  --emit-dir lg:OUT/              output library (must differ from the input)\n"
-        "  --set pass.single_edge.flag=value  pass options (listed below)\n"
         "\n"
         "examples:\n"
         "  lhd pass single_edge --top m lg:dir --emit-dir lg:norm\n");
-    return print_options_section({"pass.single_edge."});
+    return 0;
   }
   if (sub == "satopt") {
     std::print(
@@ -1105,6 +1104,7 @@ int help_pass(const std::string& sub) {
         "                             $HAGENT_TECH_DIR default). One spelling, shared with\n"
         "                             pass.opentimer and `lhd synth`; `pass.abc.library`\n"
         "                             is refused so no two readers can disagree.\n"
+        "  --set synth.threads=N      shared ABC worker cap (0 = available CPUs; 1 = serial)\n"
         "  --set pass.abc.flag=value  pass options (listed below)\n"
         "\n"
         "examples:\n"
@@ -1269,10 +1269,10 @@ constexpr std::string_view kJsonPassPartition
     = R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";
 
 constexpr std::string_view kJsonPassSingleEdge
-    = R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.single_edge.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
+    = R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
 
 constexpr std::string_view kJsonPassAbc
-    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> Liberty blackboxes. The cells come from THE one Liberty knob (--set synth.liberty, else $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib); pass.abc.library is refused. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"synth.liberty=PATH | pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
+    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> Liberty blackboxes. The cells come from THE one Liberty knob (--set synth.liberty, else $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib); pass.abc.library is refused. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"synth.liberty=PATH | synth.threads=N | pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
 
 constexpr std::string_view kJsonPassOpentimer
     = R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run). With a --workdir and lhd.incremental (default true) the STA result cache at <workdir>/sta_cache replays the stored report for an unchanged netlist+environment instead of re-timing; counters ride the envelope's incremental.sta","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats"]})json";
@@ -1491,9 +1491,9 @@ int help_command(const Options& opts) {
         "\n"
         "usage: lhd lec --impl KIND:PATH --ref KIND:PATH [formal-block.prp ...] [flags]\n"
         "  Sides may be verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path (kind inferred).\n"
-        "  Each side is loaded/elaborated to LGraphs; verilog elaborates through --reader\n"
-        "  (default slang, the direct SV->LNAST front-end; --reader yosys-slang|yosys-verilog\n"
-        "  overrides). The --set formal.solver knob selects the backend:\n"
+        "  Each side is loaded/elaborated to LGraphs; Verilog always uses native Slang.\n"
+        "  For frontend cross-checks, compile with --reader yosys --emit-dir lg:DIR, then\n"
+        "  compare that graph against the source through LEC. formal.solver selects the backend:\n"
         "    cvc5     in-process SMT (default)\n"
         "    bitwuzla in-process SMT\n"
         "    lgyosys  inou/yosys/lgcheck (the former `lhd check`; reads Verilog directly,\n"
@@ -1508,12 +1508,12 @@ int help_command(const Options& opts) {
         "  --impl KIND:PATH   --ref KIND:PATH\n"
         "  --top T            --impl-top T   --ref-top T   (T = full `file.entity` name, or\n"
         "                     the bare entity when unique — a top-entity-fallback warning notes it)\n"
-        "  --reader R         slang | yosys | yosys-slang | yosys-verilog (default slang)\n"
+        "  --reader slang     native Slang is the only source reader for LEC\n"
         "  --lib lg:DIR       cell-model libraries for instantiated cells (repeatable)\n"
         "  --collapse DEF     treat DEF as already-proven: force the sound black-box path (repeatable)\n"
         "  --trust DEF        ASSUME DEF equivalent without proving it — disclosed, never silent\n"
         "                     (the escape hatch for a cell the encoder cannot model) (repeatable)\n"
-        "  --stats            (= --set formal.stats=true) cvc5 solve insight, off by default\n"
+        "  --stats            (= --set lhd.stats=true) cvc5 solve insight, off by default\n"
         "  --set formal.flag=value   engine knobs (the options block below)\n"
         "\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
@@ -1528,7 +1528,7 @@ int help_command(const Options& opts) {
         "  the solve ~8x SLOWER — so it is a DIAGNOSIS tool for a solve that is too slow or\n"
         "  too big, never something to leave on, and never a way to time a run. That slowdown\n"
         "  can CHANGE THE VERDICT: a proof that fits formal.timeout without it may time out\n"
-        "  with it and return UNKNOWN, which under the default formal.strict=true exits\n"
+        "  with it and return UNKNOWN, which always exits\n"
         "  non-zero. Raise formal.timeout when diagnosing a run that has to keep passing.\n"
         "  `no cvc5 query ran` is a normal outcome (semdiff, the verdict cache and abc cone\n"
         "  decomposition settle defs without calling cvc5). `lhd formal verify` also writes\n"
@@ -1563,7 +1563,7 @@ int help_command(const Options& opts) {
         "which one: `verify` answers \"does this design satisfy the properties I wrote?\"\n"
         "(one design + its asserts/assumes); `lec` answers \"are these two designs the\n"
         "same function?\" (two designs, no properties). Both share the --set formal.*\n"
-        "knob namespace (bound, timeout, solver, strict, ...; lec pairing knobs are formal.lec.*).\n"
+        "knob namespace (bound, timeout, solver, ...; lec pairing knobs are formal.lec.*).\n"
         "\n"
         "examples:\n"
         "  lhd formal verify foo.prp --top foo            # prove foo's own obligations\n"
@@ -1596,7 +1596,7 @@ int help_command(const Options& opts) {
         "    REFUTED at cycle k  a REACHABLE violation + the per-cycle input trace (fails)\n"
         "    UNKNOWN             solver gave up / blackbox artifact / contradictory assumes\n"
         "                        (FAILS the run: an undecided check proved nothing, so it\n"
-        "                        must not exit 0. --set formal.strict=false = warning)\n"
+        "                        must not exit 0.)\n"
         "\n"
         "  every `assume` is a PROOF OBLIGATION (prove-then-use): CHECKED as an assert\n"
         "  first, and only a proven cycle's fact constrains later obligations. A refuted\n"
@@ -1627,7 +1627,7 @@ int help_command(const Options& opts) {
         "  --impl KIND:PATH     the design, when not given as a positional (--impl-top T)\n"
         "  --lib lg:DIR         cell-model libraries for instantiated cells (repeatable)\n"
         "  --workdir DIR        keep formal_report.json + the refutation artifacts here\n"
-        "  --stats              (= --set formal.stats=true) cvc5 solve insight, off by default\n"
+        "  --stats              (= --set lhd.stats=true) cvc5 solve insight, off by default\n"
         "  --set formal.flag=value   engine knobs (the options block below)\n"
         "\n"
         "  machine-readable feedback (agents): EVERY run writes formal_report.json into the\n"
@@ -1639,12 +1639,12 @@ int help_command(const Options& opts) {
         "  induction-surviving) into a paste-ready formal_mined.prp + the report's mined[];\n"
         "  formal.mine=speculative adds step-dropped bounded candidates.\n"
         "\n"
-        "  --stats / formal.stats reports what the solve actually did — problem size,\n"
+        "  --stats / lhd.stats reports what the solve actually did — problem size,\n"
         "  conflicts (= learned clauses), decisions, propagations, restarts, theory lemmas,\n"
         "  resource units, timings — at a ~8x SLOWER solve, so use it to diagnose a slow\n"
         "  proof, never to time one. That slowdown can CHANGE THE VERDICT: a proof that fits\n"
-        "  formal.timeout without it may time out with it and return UNKNOWN, which under\n"
-        "  the default formal.strict=true exits non-zero. Raise formal.timeout when\n"
+        "  formal.timeout without it may time out with it and return UNKNOWN, which always\n"
+        "  exits non-zero. Raise formal.timeout when\n"
         "  diagnosing a run that has to keep passing.\n"
         "\n"
         "examples:\n"

@@ -64,7 +64,7 @@ endmodule
 EOF
 
 "$LHD" compile "$W/raw.v" --reader yosys-verilog --top raw \
-  --emit verilog:"$W/raw_out.v" --workdir "$W/w_raw" -q >"$W/raw.log" 2>&1 \
+  --emit-dir "lg:$W/raw_lg" --emit verilog:"$W/raw_out.v" --workdir "$W/w_raw" -q >"$W/raw.log" 2>&1 \
   || { tail -5 "$W/raw.log"; fail "yosys-importer latch round-trip failed to compile"; }
 [ -s "$W/raw_out.v" ] || fail "yosys-importer round-trip emitted no verilog"
 
@@ -77,7 +77,7 @@ fi
 # The independent oracle. Pre-fix this REFUTED: yosys accepts the undeclared
 # name as an implicit wire reading X, so the miter genuinely sees two different
 # circuits. That makes lgcheck able to catch bug 1 even without iverilog.
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/raw_out.v" --ref verilog:"$W/raw.v" \
+"$LHD" lec --impl verilog:"$W/raw_out.v" --ref verilog:"$W/raw.v" \
   --top raw --workdir "$W/w_rawchk" -q >"$W/rawchk.log" 2>&1 \
   || { tail -3 "$W/rawchk.log"; fail "yosys-importer latch round-trip is NOT equivalent to its source"; }
 echo "ok: yosys-importer latch round-trip LEC-proves against its source"
@@ -126,7 +126,7 @@ for shape in high low; do
   # An unsigned boundary used to retain a one-use get_mask wrapper here. With
   # LGraph's unlimited signed value semantics, cprop may remove that redundant
   # wrapper and emit `d` directly; either spelling is the same canonical raw D.
-  grep -Eq 'if \([^)]*\) l <= (d|get_mask_[[:alnum:]_]+);' "$out" \
+  grep -Eq 'if \(.*\) l <= (d|get_mask_[[:alnum:]_]+);' "$out" \
     || { cat "$out"; fail "$shape: cprop did not canonicalize latch D to raw data + enable"; }
   grep -Eq 'mux_[[:alnum:]_]+[[:space:]]*=[[:space:]]*l;' "$out" \
     && { cat "$out"; fail "$shape: emitted a redundant Q hold arm before the latch D input"; }

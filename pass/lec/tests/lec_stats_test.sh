@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# `formal.stats` (CLI sugar `--stats`): the cvc5 solve-insight report on `lhd lec`
+# `lhd.stats` (CLI sugar `--stats`): the cvc5 solve-insight report on `lhd lec`
 # and `lhd formal verify`.
 #
 # THE CENTRAL GATE IS THE FORK BOUNDARY. Every default lec/verify path solves in a
@@ -91,7 +91,7 @@ run_lec() {  # $1=tag; $2.. = extra args -> sets OUT
 
 # 1) OFF BY DEFAULT, and silent. The plugin tier costs ~8x, so a run that did not
 #    ask for stats must not pay for it or print anything about it.
-run_lec off --set formal.engine=auto
+run_lec off
 if [ "$(grep -c 'stats\]:' "$OUT")" -eq 0 ]; then
   echo "ok: no --stats -> not one stats line"
 else
@@ -101,7 +101,7 @@ grep -q "PROVEN equivalent" "$OUT" || { echo "FAIL: the fixture stopped being PR
 
 # 2) *** THE FORK GATE *** engine=auto races ind|bmc in two FORKED children, so
 #    everything asserted here had to cross the wire codec to be visible at all.
-run_lec fork --set formal.engine=auto --set formal.cones=false --set lhd.incremental=false --stats
+run_lec fork  --set formal.cones=false --set lhd.incremental=false --stats
 if grep -q "raced ind|bmc" "$OUT"; then
   echo "ok: the fixture really did fork (raced ind|bmc)"
 else
@@ -134,12 +134,12 @@ if [ $disclosed -eq 0 ]; then
 fi
 
 # 3) The canonical per-pass spelling is equivalent to the CLI sugar. `--stats` is
-#    lhd-global; `formal.stats` is what `lhd describe`/`--set` list.
-run_lec canon --set formal.engine=auto --set formal.cones=false --set lhd.incremental=false --set formal.stats=true
+#    lhd-global; `lhd.stats` is what `lhd describe`/`--set` list.
+run_lec canon  --set formal.cones=false --set lhd.incremental=false --set lhd.stats=true
 if [ "$(grep -c 'stats\]:' "$OUT")" -ge 5 ]; then
-  echo "ok: --set formal.stats=true is equivalent to --stats"
+  echo "ok: --set lhd.stats=true is equivalent to --stats"
 else
-  echo "FAIL: --set formal.stats=true printed no report (option not registered / not threaded): $(tail -3 "$OUT")"; fail=1
+  echo "FAIL: --set lhd.stats=true printed no report (option not registered / not threaded): $(tail -3 "$OUT")"; fail=1
 fi
 
 # 4) NO cvc5 QUERY AT ALL is a normal outcome, not a bug: semdiff, the verdict cache

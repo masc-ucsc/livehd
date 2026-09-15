@@ -2,9 +2,9 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # Verilog round-trip via the lhd kernel: each test compiles
-# verilog -> LGraph (yosys-verilog reader) -> cprop (O1) -> cgen verilog,
-# then LECs the generated netlist against the original with `lhd lec --set formal.solver=lgyosys`
-# (inou/yosys/lgcheck underneath). One `lhd compile` replaces the old
+# verilog -> LGraph (yosys-verilog reader) -> cprop/bitwidth -> cgen verilog,
+# then checks the generated netlist against the original with both lgcheck
+# and native Slang/default lhd lec. Both must pass. One `lhd compile` replaces the old
 # tolg|>lgraph.save + lgraph.match|>cprop|>cgen lgshell pipelines; the
 # stderr-grep heuristics are gone because lhd checks the diag sink after
 # every step and reflects it in the exit code.
@@ -85,7 +85,7 @@ do
 
   # verilog -> lg -> cprop -> verilog, one stateless action. The per-step
   # logs (yosys chatter included) land under the --workdir.
-  ${LHD} compile ${full_input} --reader yosys-verilog --top ${base} \
+  ${LHD} compile ${full_input} --reader yosys-verilog --emit-dir lg:tmp_yosys/${base}_lg --top ${base} \
     --emit verilog:tmp_yosys_mix/all_${base}.v \
     --workdir tmp_yosys/${base} -q --result-json tmp_yosys/${input}.result.json \
     >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
@@ -117,13 +117,20 @@ do
       continue
     fi
   else
-    ${LHD} lec --set formal.solver=lgyosys --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
+    # Independent Yosys/lgcheck oracle plus native Slang/default LEC. Run
+    # both even if one fails, so a disagreement is visible in both logs.
+    inou/yosys/lgcheck --implementation tmp_yosys_mix/all_${base}.v --reference "${full_input}" \
+      --top "${base}" >tmp_yosys/${input}.lgcheck.log 2>&1
+    lgcheck_rc=$?
+    ${LHD} lec --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
       --top ${base} --workdir tmp_yosys/${base}_check -q \
       --result-json tmp_yosys/${input}.check.json >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    lec_rc=$?
+    if [ "$lec_rc" -eq 0 ] && [ "$lgcheck_rc" -eq 0 ]; then
       echo "Successfully matched generated verilog with original verilog (${full_input})"
     else
-      echo "FAIL: circuits are not equivalent (${full_input})"
+      echo "FAIL: ${full_input}: lgcheck rc=$lgcheck_rc, native lhd lec rc=$lec_rc"
+      cat tmp_yosys/${input}.lgcheck.log
       cat tmp_yosys/${input}.check.json 2>/dev/null
       ((fail++))
       fail_list+=" "$base

@@ -8,7 +8,7 @@
 // so corresponding nodes share an id and the diff is greppable. Mirrors
 // pass.lec's shape; the `lhd pass semdiff` command calls
 // semdiff::structural_match directly (as lec_command calls lec::prove_equal).
-// Knobs ride --set pass.semdiff.* (matching_names | id_granularity | alg).
+// Knobs ride --set pass.semdiff.* (matching_names | id_granularity).
 class Pass_semdiff : public Pass {
 public:
   explicit Pass_semdiff(const Eprp_var& var);

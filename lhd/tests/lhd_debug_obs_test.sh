@@ -31,12 +31,12 @@ grep -q '^//---- lg twog.xorit' "$W/dump.err" || fail "--dump lg stderr is missi
 [ "$(grep -n '^//---- lg' "$W/dump.err" | head -1 | grep -c addone)" = 1 ] \
   || fail "--dump lg graphs are not sorted by name"
 
-# 2. --verbose mirrors the per-step logs to stderr (yosys chatter included).
-"$LHD" compile "$MIX" --reader yosys-verilog --top bw_mix \
+# 2. --verbose mirrors the per-step logs to stderr (native frontend and uPass chatter included).
+"$LHD" compile "$MIX" --top bw_mix \
   --emit verilog:"$W/mix.gen.v" --verbose --workdir "$W/w_verb" 2>"$W/verb.err" \
   >/dev/null || fail "--verbose compile failed"
 [ -s "$W/verb.err" ] || fail "--verbose produced no stderr mirror"
-grep -qi 'yosys' "$W/verb.err" || fail "--verbose stderr does not include step logs"
+grep -q 'uPass - resolved order:' "$W/verb.err" || fail "--verbose stderr does not include step logs"
 
 # 3. --depfile writes a make-style prerequisite list naming the source.
 "$LHD" compile "$PRP" --emit-dir ln:"$W/lns/" --depfile "$W/dep.d" \

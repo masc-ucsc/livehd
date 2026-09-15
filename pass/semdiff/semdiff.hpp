@@ -33,8 +33,7 @@ namespace livehd::semdiff {
 [[nodiscard]] bool is_persistent_state(const hhds::Node_class& node);
 
 struct Semdiff_options {
-  std::string                                      alg               = "structural";  // v1; future: region | functional
-  bool                                             matching_names    = false;         // anchor internal flops/mems by hier name
+  bool                                             matching_names    = false;  // anchor internal flops/mems by hier name
   // Region-netlist reuse may rename only the enclosing module's boundary. In
   // that mode graph IO is paired by port id/shape; internal state and Sub-cell
   // interfaces retain their normal name-based identity.

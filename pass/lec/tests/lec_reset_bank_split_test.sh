@@ -45,7 +45,7 @@ EOF
 OUT=$(
   "$LHD" lec --ref "$WORK/ref.v" --impl "$WORK/impl.v" --top split \
     --set formal.engine=bmc --set formal.bound=2 \
-    --set formal.reset_cycles=2 --set formal.lec.hier=false \
+     --set formal.lec.hier=false \
     --set formal.timeout=20 --workdir "$WORK/w" 2>&1
 )
 RC=$?

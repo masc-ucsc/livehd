@@ -1,0 +1,21 @@
+/*
+:name: latch_match_exhaustive
+:type: equiv
+:verilog_top: latch_match_exhaustive
+:pyrope_top: latch_match_exhaustive
+*/
+
+// The empty else is unreachable: both values of the selector write q.
+pub mod latch_match_exhaustive(sel:u1, a:u4, b:u4) -> (q:u4@[]) {
+  reg q:u4:[latch=true]
+  match sel {
+    == 0 {
+      q = a
+    }
+    == 1 {
+      q = b
+    }
+    else {
+    }
+  }
+}

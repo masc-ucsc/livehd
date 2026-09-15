@@ -137,6 +137,24 @@ Typed_path parse_check_side(std::string_view flag, std::string_view arg) {
                   "input kinds: verilog, pyrope, ln, lg"};
 }
 
+void add_cli_set(Options& opts, std::string key, std::string val) {
+  // One argv carrying the same flag with two DIFFERENT values is always a
+  // mistake: which one wins is an implementation detail, so silently
+  // picking one makes the command mean something its author did not write.
+  // A caller layering an override on a base command must COLLAPSE the two
+  // before building argv (see _set_override in inou/prp/tests/prplib.py),
+  // not rely on last-wins. Repeating the SAME value is harmless and
+  // accepted — a script may legitimately pass a default twice.
+  for (const auto& [k, v] : opts.sets) {
+    if (k == key && v != val) {
+      throw Lhd_error{"usage",
+                      std::format("--set {} given twice with different values ('{}' then '{}')", key, v, val),
+                      "drop one — repeating a flag with the SAME value is fine, but two values are ambiguous"};
+    }
+  }
+  opts.sets.emplace_back(std::move(key), std::move(val));
+}
+
 // --emit PATH: KIND:PATH, or a bare output path whose kind is inferred from the
 // extension (.v/.sv -> verilog, .prp -> pyrope). Inference is `--emit` only (a
 // single file); `--emit-dir` directory containers keep their explicit KIND:DIR.
@@ -441,16 +459,16 @@ Options parse_args(int argc, char** argv) {
       opts.unused_inputs = need_value(a, i, argc, argv);
       // The consuming pass decides what the report is: pass.semdiff the aggregate
       // match report, pass.color the partition-size report, and lec / formal verify
-      // (formal.stats) the cvc5 solve-insight report — that last one costs ~8x.
+      // (lhd.stats) the cvc5 solve-insight report — that last one costs ~8x.
       //
       // On the formal paths that ~8x is NOT purely observational: it eats the same
       // formal.timeout budget the proof does, so a run that proves in time without
       // --stats can time out with it and return UNKNOWN, which the default
-      // formal.strict=true turns into a non-zero exit. Both help blocks
+      // always results in a non-zero exit. Both help blocks
       // (lhd_meta.cpp `lec` and `formal verify`) say so; raise formal.timeout when
       // diagnosing a run that still has to pass.
     } else if (a == "--stats") {
-      opts.stats = true;
+      add_cli_set(opts, "lhd.stats", "true");
     } else if (a == "--set") {
       auto kv  = std::string{need_value(a, i, argc, argv)};
       auto pos = kv.find('=');
@@ -462,21 +480,7 @@ Options parse_args(int argc, char** argv) {
       // (2h-set_path). Fully-qualified keys pass through unchanged.
       auto key = canonical_set_key(kv.substr(0, pos), cmd_path);
       auto val = kv.substr(pos + 1);
-      // One argv carrying the same flag with two DIFFERENT values is always a
-      // mistake: which one wins is an implementation detail, so silently
-      // picking one makes the command mean something its author did not write.
-      // A caller layering an override on a base command must COLLAPSE the two
-      // before building argv (see _set_override in inou/prp/tests/prplib.py),
-      // not rely on last-wins. Repeating the SAME value is harmless and
-      // accepted — a script may legitimately pass a default twice.
-      for (const auto& [k, v] : opts.sets) {
-        if (k == key && v != val) {
-          throw Lhd_error{"usage",
-                          std::format("--set {} given twice with different values ('{}' then '{}')", key, v, val),
-                          "drop one — repeating a flag with the SAME value is fine, but two values are ambiguous"};
-        }
-      }
-      opts.sets.emplace_back(std::move(key), std::move(val));
+      add_cli_set(opts, std::move(key), std::move(val));
     } else if (a == "--dump") {
       // Repeatable, comma-separable: --dump parse --dump lg == --dump parse,lg
       std::string v{need_value(a, i, argc, argv)};
@@ -772,6 +776,12 @@ Options parse_args(int argc, char** argv) {
                       std::format("cannot infer the source language of '{}'", opts.files.front()),
                       "use `lhd compile pyrope|verilog ...` or .prp/.v/.sv extensions"};
     }
+  }
+
+  if (opts.reader != "slang" && opts.command != "compile") {
+    throw Lhd_error{"usage",
+                    "Yosys readers are only supported by lhd compile; source inputs otherwise use Slang",
+                    "for a debug comparison, run lhd compile --reader yosys SOURCE --emit-dir lg:DIR, then lhd lec with lg:DIR"};
   }
 
   // The verilog readers (`slang`, `yosys-slang`, `yosys-verilog`) can take their

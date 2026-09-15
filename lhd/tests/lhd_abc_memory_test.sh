@@ -11,8 +11,9 @@
 #
 # The guard is host-dependent by nature (the default budget is physical RAM
 # minus a reserve), so this test pins it with pass.abc.memory_budget_mb — a 1 MiB
-# budget is unsatisfiable on every host, which makes the refusal deterministic
-# and CI-safe. Asserts, in order:
+# budget is unsatisfiable for this fixture with one worker. Pin synth.threads=1
+# to test the per-color guard; parallel workers share an aggregate growth budget.
+# Asserts, in order:
 #   1. an unsatisfiable budget REFUSES: nonzero exit + the memory-oversize code
 #   2. the refusal emits NO partial netlist (the emit-dir stays empty)
 #   3. allow_oversize=true overrides it and the map succeeds
@@ -45,7 +46,7 @@ run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 # ---------------------------------------------------------------------------
 # 1. an unsatisfiable budget must refuse
 # ---------------------------------------------------------------------------
-if "$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
+if "$LHD" pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
     --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 \
     --emit diagnostics:"$W/refused.jsonl" \
     --workdir "$W/w3" -q --result-json "$W/refused.json" 2>"$W/refused.err"; then
@@ -72,7 +73,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. allow_oversize must override the guard (the documented escape hatch)
 # ---------------------------------------------------------------------------
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
+run pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
   --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 --set abc.allow_oversize=true \
   --workdir "$W/w4"
 [ -n "$(ls -A "$W/net_forced" 2>/dev/null)" ] || fail "allow_oversize=true produced no netlist"
@@ -80,14 +81,14 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
 # ---------------------------------------------------------------------------
 # 4. a generous budget must NOT false-positive on a design that plainly fits
 # ---------------------------------------------------------------------------
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
+run pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
   --set synth.liberty="$LIB" --set abc.memory_budget_mb=65536 --workdir "$W/w5"
 [ -n "$(ls -A "$W/net_ok" 2>/dev/null)" ] || fail "a 64 GiB budget produced no netlist"
 
 # ---------------------------------------------------------------------------
 # 5. a malformed budget is an error, not a silent fallback to "unlimited"
 # ---------------------------------------------------------------------------
-if "$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" \
+if "$LHD" pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" \
     --set synth.liberty="$LIB" --set abc.memory_budget_mb=lots \
     --workdir "$W/w6" -q --result-json "$W/bad.json" 2>/dev/null; then
   fail "pass.abc accepted memory_budget_mb=lots"

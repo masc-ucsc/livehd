@@ -139,6 +139,11 @@ struct Val {
 [[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
                                                           const std::vector<std::shared_ptr<Lnast>>& registry,
                                                           std::string_view                           caller_unit = {}) {
+  // Escaped Verilog module references retain LNAST backticks until tolg;
+  // registry keys carry the literal module name.
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    name = name.substr(1, name.size() - 2);
+  }
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
   int                    suffix_matches = 0;
@@ -1282,7 +1287,8 @@ private:
       // pin (graph/cell.cpp) and the Pyrope declaration attribute are the same
       // name.  (`init` was the old Pyrope-only spelling; prp2lnast now reports
       // it with a "use `initial`" hint.)  Overrides the declare's reset value.
-      info.initial_txt = std::string(val);
+      info.initial_txt    = std::string(val);
+      info.initial_is_ref = !val_n.is_invalid() && Lnast_ntype::is_ref(lnast_->get_type(val_n));
     } else if ((key == "name")) {
       // Explicit local flop name (`reg x:[name="reg_x"]`) — overrides the
       // declared variable name; finalize_regs combines it with any hier prefix.
@@ -1843,7 +1849,14 @@ private:
         return;
       }
       setup_sink_by_name(flop, "reset_pin").connect_driver(rpin);
-      if (has_init) {
+      if (has_init && info.initial_is_ref) {
+        auto initial_pin = resolve_attr_signal(init);
+        if (initial_pin.is_invalid()) {
+          error_here("upass.tolg: reg '{}' names unknown asynchronous load value '{}'", name, init);
+          return;
+        }
+        setup_sink_by_name(flop, "initial").connect_driver(initial_pin);
+      } else if (has_init) {
         // The reset value must be a compile-time constant. A body-`reg`'s
         // non-literal init is caught at the declare (lower_declare errors on
         // a ref init); an output-reg `-> (reg q = expr)` stringifies its
@@ -2447,6 +2460,7 @@ private:
     bool             has_sync        = false;
     bool             sync_val        = true;
     bool             negreset        = false;
+    bool             initial_is_ref  = false;
     std::string      initial_txt;       // explicit initial=N (overrides init_txt)
     bool             is_latch = false;  // mode "latch": Ntype_op::Latch, wire din+enable only
     // Hierarchical naming (call-site `name=` on an inlined comb / `reg
@@ -2546,16 +2560,21 @@ private:
   // declare.
   struct Mem_info {
     hhds::Node_class     node;
-    int64_t              size = 0;         // total entries (∏dims)
-    std::vector<int64_t> dims;             // outer dim first; size 1 for a flat array
-    int32_t              elem_mw     = 0;  // element max-value width
-    bool                 elem_signed = false;
-    bool                 is_array    = false;  // type=2: mut/const array (no clock, no persistence)
-    bool                 is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
-    bool                 init_wired  = false;
-    int                  n_user_wr   = 0;  // pre-scanned program write sites
-    int                  wr_next     = 0;
-    int                  rd_next     = 0;
+    int64_t              size = 0;                // total entries (∏dims)
+    std::vector<int64_t> dims;                    // outer dim first; size 1 for a flat array
+    int32_t              elem_mw            = 0;  // element max-value width
+    bool                 elem_signed        = false;
+    bool                 is_array           = false;  // type=2: mut/const array (no clock, no persistence)
+    bool                 is_pub             = false;  // pub reg: a remote regref may attach accesses — no diagnostics
+    bool                 init_wired         = false;
+    int                  n_user_wr          = 0;  // pre-scanned program write sites
+    int                  wr_next            = 0;
+    bool                 has_store_clock    = false;
+    bool                 first_store_posclk = true;
+    bool                 mixed_store_edges  = false;
+    Pin                  update_clock;
+    bool                 update_posclk = true;
+    int                  rd_next       = 0;
     // Write-port ordinals whose store carried NO chunk index. Their enable is
     // one bit, which a wensize > 1 memory reads as "chunk 0 only" — so on a
     // memory that ALSO takes chunked writes, finalize_mems has to replicate
@@ -2573,24 +2592,24 @@ private:
     // single `fwd` bit cannot make; the Verilog readers need "old" because a
     // nonblocking write is never visible to a same-timestep read.
     enum class Mem_order { program, fwd, old, none };
-    int64_t                      legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
-    bool                         has_legacy_fwd  = false;
-    std::vector<int>             rd_wr_before;  // per read port: writes minted before it
+    int64_t             legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
+    bool                has_legacy_fwd  = false;
+    std::vector<int>    rd_wr_before;  // per read port: writes minted before it
     // Declared reset value (`reg m:[N]T = <const|tuple>`), packed entry 0 in
     // the low elem_mw bits — the SAME value the `initial` pin carries. Non-null
     // => finalize_mems wires the cell's whole-array `reset` (pin 14): the reset
     // restores every entry in ONE cycle, exactly like a scalar reg. nil => none.
     // (A value, not a spool_ptr: Mem_info is copied into mem_map_, and a null
     // spool_ptr cannot be copied -- its copy bumps the pointee's refcount.)
-    std::optional<Dlop>          reset_init;
+    std::optional<Dlop> reset_init;
     // Whole-array support: a runtime `mem = <bus>` store drives the cell's
     // `update` sink (size*elem_mw bus) instead of minting per-entry write
     // ports. A whole `x = mem` read materializes the async `read_all` driver
     // pin (cached so repeated reads share one output). For a registered array
     // the reset value bus rides the (now runtime-capable) `initial` sink + the
     // `reset` cond pin.
-    bool                         has_update = false;  // an update bus is wired (whole-array memory)
-    Pin                          read_all_pin{};      // cached async read_all driver pin
+    bool                has_update = false;  // an update bus is wired (whole-array memory)
+    Pin                 read_all_pin{};      // cached async read_all driver pin
     // Accumulator for MULTIPLE conditional whole-array stores (e.g. a reset arm
     // and a flush arm). Each later store folds into one
     // `update`/`update_enable` pair via a priority mux: `update_val = en ? this
@@ -2598,8 +2617,8 @@ private:
     // = update_en | en`. The if/else-if path conditions already encode source
     // priority (later arms negate earlier conditions), so "later wins" matches
     // Verilog nonblocking semantics.
-    Pin                          update_val{};  // current accumulated update bus value
-    Pin                          update_en{};   // current accumulated update enable (invalid => always-on)
+    Pin                 update_val{};  // current accumulated update bus value
+    Pin                 update_en{};   // current accumulated update enable (invalid => always-on)
   };
 
   // Packed scalar SSA version of a combinational typed positional array.
@@ -3159,7 +3178,7 @@ private:
       return;
     }
 
-    const int  user_sites      = count_mem_write_sites(name_nid);
+    const int user_sites      = count_mem_write_sites(name_nid);
     // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
     // finalize_mems() builds once every port is minted and each read port's
     // program position is known (`rd_wr_before`). The `ordering` attr is read
@@ -3168,8 +3187,8 @@ private:
     // same reason the clock wiring is deferred). The value driven below is
     // provisional, and is the final one only for the two cases finalize_mems
     // leaves alone: a `mut`/`const` array and a legacy `fwd=` escape hatch.
-    int64_t    legacy_fwd_mask = 0;
-    bool       has_legacy_fwd  = false;
+    int64_t   legacy_fwd_mask = 0;
+    bool      has_legacy_fwd  = false;
     if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
       // Deprecated numeric `fwd=`: an explicit matrix, taken verbatim (a
       // per-WRITE-port mask still reads correctly on a 1-read memory, which is
@@ -3422,6 +3441,27 @@ private:
   // reset > per-port write > (update_enable? update : hold) is realized by
   // cgen/cgen_sim/lec.
   void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    // Bulk writes have no ordinary write-port site. Capture their process
+    // clock here too, before a later process changes the ordered attributes.
+    if (!mi.is_array) {
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+        if (auto cit = pit->second.find("__store_clock_pin"); cit != pit->second.end()) {
+          const auto cp       = resolve_attr_signal(cit->second);
+          const auto pos      = pit->second.find("__store_posclk");
+          const bool positive = pos == pit->second.end() || (pos->second != "false" && pos->second != "0");
+          if (cp.is_invalid()) {
+            error_here("upass.tolg: memory '{}' names unknown bulk-write clock '{}'", name, cit->second);
+            return;
+          }
+          if (!mi.update_clock.is_invalid() && (mi.update_clock != cp || mi.update_posclk != positive)) {
+            error_here("upass.tolg: memory '{}' bulk writes require one shared clock and edge", name);
+            return;
+          }
+          mi.update_clock  = cp;
+          mi.update_posclk = positive;
+        }
+      }
+    }
     auto v = mem_whole_value_pin(rhs, name, mi);
     if (v.is_invalid()) {
       return;  // reported, or an empty driver
@@ -3978,6 +4018,33 @@ private:
     if (chunk < 0) {
       mi.plain_wr_ports.emplace_back(mi.wr_next);
     }
+    if (!mi.is_array) {
+      if (auto pit = pending_attrs_.find(std::string(lhs_name)); pit != pending_attrs_.end()) {
+        if (auto cit = pit->second.find("__store_clock_pin"); cit != pit->second.end()) {
+          const auto cp = resolve_attr_signal(cit->second);
+          if (cp.is_invalid()) {
+            error_here("upass.tolg: memory '{}' names unknown store clock '{}'", lhs_name, cit->second);
+            return;
+          }
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 2)).connect_driver(cp);
+          const auto pos      = pit->second.find("__store_posclk");
+          const bool positive = pos == pit->second.end() || (pos->second != "false" && pos->second != "0");
+          if (mi.has_store_clock && positive != mi.first_store_posclk && !mi.mixed_store_edges) {
+            mi.mixed_store_edges = true;
+            warn_at(lhs,
+                    {"mixed-memory-clock-edges", "unsupported"},
+                    "memory '{}' mixes clock edges: write port {} differs from write port 0; formal checking requires per-port "
+                    "edge support",
+                    lhs_name,
+                    mi.wr_next);
+          }
+          if (!mi.has_store_clock) {
+            mi.first_store_posclk = positive;
+          }
+          mi.has_store_clock = true;
+        }
+      }
+    }
     ++mi.wr_next;
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);           // addr
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
@@ -4460,15 +4527,43 @@ private:
       // clock_pin=<input> (the slang reader emits it for a non-`clk`/`clock`
       // write clock) beats the implicit shared clock; posclk=false marks a
       // negedge write clock.
-      if (!mi.is_array) {
+      if (!mi.update_clock.is_invalid()) {
+        // The bulk-update bus has one clock. Combining it with entry writes
+        // on another clock/edge cannot be represented by this memory cell.
+        bool clock_wired = false;
+        for (const auto& e : mi.node.inp_edges()) {
+          if (static_cast<int>(e.sink.get_port_id()) % kMemPortStride != 2) {
+            continue;
+          }
+          if (e.driver != mi.update_clock) {
+            error_here("upass.tolg: memory '{}' bulk and entry writes require one shared clock", name);
+          }
+          clock_wired = true;
+        }
+        if (mi.has_store_clock && (mi.mixed_store_edges || mi.first_store_posclk != mi.update_posclk)) {
+          error_here("upass.tolg: memory '{}' bulk and entry writes require one shared clock edge", name);
+        }
+        if (!clock_wired) {
+          setup_sink_by_name(mi.node, "clock_pin").connect_driver(mi.update_clock);
+        }
+        setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(mi.update_posclk ? 1 : 0)));
+      } else if (mi.has_store_clock) {
+        const int polarity = mi.mixed_store_edges ? Ntype::Memory_posclk_mixed : (mi.first_store_posclk ? 1 : 0);
+        setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(polarity)));
+      } else if (!mi.is_array) {
         bool        posclk_val = true;
         std::string clock_pin_name;
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
           if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end()) {
             clock_pin_name = cit->second;
+          } else if (auto scit = pit->second.find("__store_clock_pin"); scit != pit->second.end()) {
+            // An unwritten SROA field still belongs to its declaring process.
+            clock_pin_name = scit->second;
           }
           if (auto pcit = pit->second.find("posclk"); pcit != pit->second.end()) {
             posclk_val = pcit->second != "false" && pcit->second != "0";
+          } else if (auto spit = pit->second.find("__store_posclk"); spit != pit->second.end()) {
+            posclk_val = spit->second != "false" && spit->second != "0";
           }
         }
         setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
@@ -4563,8 +4658,8 @@ private:
                                                : (mi.has_update && !rpn.empty() && rpn != "false" && static_cast<bool>(attr_init));
         if (wants_reset) {
           const auto rst_name = mem_reset_source(name);
-          Pin rst = (!rst_name.empty() && g_->get_io()->has_input(rst_name)) ? g_->get_input_pin(rst_name) : reset_pin();
-          bool neg = reset_neg_;
+          Pin        rst = (!rst_name.empty() && g_->get_io()->has_input(rst_name)) ? g_->get_input_pin(rst_name) : reset_pin();
+          bool       neg = reset_neg_;
           if (auto nv = attr_of("negreset"); !nv.empty() && nv != "false") {
             neg = true;
           }
@@ -7693,11 +7788,61 @@ private:
     }
   }
 
+  // Prove coverage from the SOURCE input declaration, never from inferred pin
+  // widths. In particular, an exhaustive match with an empty else must not
+  // retain a register's Q on an unreachable none-of path. That artificial hold
+  // otherwise leaves an always-transparent latch looking like real state.
+  bool covers_input_domain(const std::vector<Branch>& branches, int n_conds) const {
+    Pin                          selector;
+    absl::flat_hash_set<int64_t> values;
+    for (int i = 0; i < n_conds; ++i) {
+      const auto cond = branches[i].cond;
+      if (cond.is_invalid() || cond.is_const()) {
+        return false;
+      }
+      const auto node = cond.get_master_node();
+      if (livehd::graph_util::type_op_of(node) != Ntype_op::EQ) {
+        return false;
+      }
+      const auto edges = node.inp_edges();
+      if (edges.size() != 2) {
+        return false;
+      }
+      auto input = edges[0].driver;
+      auto value = edges[1].driver;
+      if (input.is_const()) {
+        std::swap(input, value);
+      }
+      if (!livehd::graph_util::is_graph_input_pin(input) || !value.is_const() || (!selector.is_invalid() && selector != input)) {
+        return false;
+      }
+      const auto& literal = livehd::graph_util::const_of(value);
+      if (literal.has_unknowns() || !literal.is_just_i64() || !values.insert(literal.to_just_i64()).second) {
+        return false;
+      }
+      selector = input;
+    }
+    for (const auto& input : lnast_->io_meta().inputs) {
+      if (g_->get_input_pin(canon_io_name(input.name)) != selector) {
+        continue;
+      }
+      const auto bits = input.kind == Io_kind::boolean ? 1 : input.bits;
+      if (bits <= 0 || bits >= 63 || (uint64_t{1} << bits) != values.size()) {
+        return false;
+      }
+      const int64_t low  = input.is_signed ? -(int64_t{1} << (bits - 1)) : 0;
+      const int64_t high = input.is_signed ? (int64_t{1} << (bits - 1)) - 1 : (int64_t{1} << bits) - 1;
+      return std::all_of(values.begin(), values.end(), [&](int64_t v) { return low <= v && v <= high; });
+    }
+    return false;
+  }
+
   // unique_if merge: direct control/value pairs plus a fall-through value.
   void lower_unique_merge(const std::vector<Branch>& branches, const std::vector<std::string>& all_vars, bool has_else,
                           const WriteMap& else_writes) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
+    const bool exhaustive = covers_input_domain(branches, n_conds);
 
     for (const auto& var : all_vars) {
       auto       base    = pin_map_.find(var);
@@ -7827,7 +7972,9 @@ private:
       // none-of slot: explicit else / pre value when present; otherwise an
       // exhaustive else-less match — drive the unreachable slot with a
       // width-matched don't-care (`mw`-bit 0sb?) so it adds no width pressure.
-      const Pin none_val = (has_ev || has_pre) ? else_val : create_const(*g_, *Dlop::unknown(mw));
+      const Pin none_val = exhaustive && !arm_values.front().is_invalid() ? arm_values.front()
+                           : (has_ev || has_pre)                          ? else_val
+                                                                          : create_const(*g_, *Dlop::unknown(mw));
       hot.create_sink_pin(static_cast<hhds::Port_id>(2 * n_conds)).connect_driver(none_val);
       auto hot_out = hot.create_driver_pin(0);
       bind_result(var, hot_out, mw);
@@ -8902,7 +9049,7 @@ private:
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
       auto tgt = lnast->get_first_child(nid);
       auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
-      if (!key.is_invalid() && lnast->get_name(key) == "clock_pin") {
+      if (!key.is_invalid() && (lnast->get_name(key) == "clock_pin" || lnast->get_name(key) == "__store_clock_pin")) {
         clocked_elsewhere.emplace(lnast->get_name(tgt));
       }
     }

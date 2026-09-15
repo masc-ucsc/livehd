@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: conditional_latch_call.top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 
 // Latches have no clock edge to suppress, so a conditional instance must

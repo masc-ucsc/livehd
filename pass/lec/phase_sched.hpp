@@ -92,7 +92,7 @@ struct Phase_endpoint {
 
 struct Phase_plan {
   // A NAMED REFUSAL (`ok == false`) decides nothing: formal must fail closed,
-  // regardless of formal.strict, exactly like an encoder refusal.
+  // unconditionally, exactly like an encoder refusal.
   bool        ok = true;
   std::string error;
 

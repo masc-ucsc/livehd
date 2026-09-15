@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: lesssign_u1_mux
 :pyrope_top: lesssign_u1_mux
-:equiv_engine: cvc5
 */
 
 // Width-contract fixture: clock/reset/comparison are u1, a four-arm selector

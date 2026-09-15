@@ -1,10 +1,4 @@
-// FIXME tracker -- a 2-flop synchronizer written with blocking `=`.
-// Every synthesis tool infers two flops here; `--reader slang` models state from
-// non-blocking `<=` only and now fail-closes (`blocking-ff-state`) rather than
-// silently lowering it to stateless logic, which used to DELETE the registers.
-// The refusal is correct behaviour for today's reader -- this pair tracks the
-// missing FEATURE. The .prp below is the hardware the Verilog means, and it PROVES
-// against the golden, so only the Verilog-reading legs are fixme.
+// Separate clocked processes retain separate registers even with blocking writes.
 module blocking_ff_state (
     input  clk,
     input  d,

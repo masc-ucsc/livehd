@@ -64,7 +64,7 @@ endmodule
 EOF
 out=$("$LHD" lec --ref "verilog:$WORK/ref/mism.v" --impl "verilog:$WORK/impl/mism.v" \
       --workdir "$WORK/w_mism" --set formal.lec.int_blast=iand --set formal.lec.cones=false \
-      --set formal.witness=true 2>&1); rc=$?
+       2>&1); rc=$?
 if ! echo "$out" | grep -q "REFUTED"; then
   echo "FAIL: mism expected REFUTED under int_blast=iand (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 elif ! echo "$out" | grep -q "counterexample: diff"; then

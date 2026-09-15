@@ -258,13 +258,33 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       if (gu::type_op_of(node) == Ntype_op::Flop) {
         constexpr std::string_view prefix   = "__lhdmem_h64617461_e.data[";  // cgen's inner `data` memory
         const auto                 old_name = gu::node_name_of(node);
+        std::string                index;
         if (old_name.starts_with(prefix) && old_name.ends_with("]")) {
-          const auto index = old_name.substr(prefix.size(), old_name.size() - prefix.size() - 1);
-          if (!index.empty() && std::ranges::all_of(index, [](char c) { return c >= '0' && c <= '9'; })) {
-            const auto local_name = "_mem" + std::string(index);
-            node.attr(hhds::attrs::name).set(local_name);
-            gu::set_pin_name(node.create_driver_pin(0), local_name);
+          index = old_name.substr(prefix.size(), old_name.size() - prefix.size() - 1);
+        } else {
+          // read_all uses cgen's packed inline array. Yosys splits its Q bus
+          // into entry-width slices; retain that exact offset instead of
+          // naming every slice after the same packed bus.
+          constexpr std::string_view packed = "__lhdmem_h64617461_e_data[";
+          if (old_name.starts_with(packed) && old_name.ends_with("]") && mem_bits > 0) {
+            auto range  = old_name.substr(packed.size(), old_name.size() - packed.size() - 1);
+            auto colon  = range.find(':');
+            auto digits = [](std::string_view v) {
+              return !v.empty() && std::ranges::all_of(v, [](char c) { return c >= '0' && c <= '9'; });
+            };
+            if (colon != std::string_view::npos && digits(range.substr(0, colon)) && digits(range.substr(colon + 1))) {
+              const auto hi = std::stoll(std::string(range.substr(0, colon)));
+              const auto lo = std::stoll(std::string(range.substr(colon + 1)));
+              if (hi - lo + 1 == mem_bits && lo % mem_bits == 0) {
+                index = std::to_string(lo / mem_bits);
+              }
+            }
           }
+        }
+        if (!index.empty() && std::ranges::all_of(index, [](char c) { return c >= '0' && c <= '9'; })) {
+          const auto local_name = "_mem" + index;
+          node.attr(hhds::attrs::name).set(local_name);
+          gu::set_pin_name(node.create_driver_pin(0), local_name);
         }
       }
       if (gu::type_op_of(node) == Ntype_op::Memory) {

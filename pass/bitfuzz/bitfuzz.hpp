@@ -32,7 +32,7 @@ enum class Mode {
 
 [[nodiscard]] std::string_view mode_name(Mode m);
 // Returns false when `s` is not a known mode spelling (`*out` untouched).
-[[nodiscard]] bool mode_from_string(std::string_view s, Mode* out);
+[[nodiscard]] bool             mode_from_string(std::string_view s, Mode* out);
 
 struct Options {
   Mode     mode           = Mode::Off;
@@ -55,9 +55,9 @@ struct Options {
 
 // How a snapshotted pin came back.
 struct Finding {
-  std::string kind;   // same | narrower | wider | sign | unrecovered | vanished
-  std::string pin;    // wire_name
-  std::string op;     // cell type
+  std::string kind;  // same | narrower | wider | sign | unrecovered | vanished
+  std::string pin;   // wire_name
+  std::string op;    // cell type
   int32_t     was_bits   = 0;
   int32_t     now_bits   = 0;
   bool        was_unsign = false;
@@ -90,7 +90,13 @@ struct Stats {
   std::vector<Finding> findings;
 };
 
-// Runs the whole clear -> infer -> classify -> repair cycle on `g` in place.
+// Pipeline perturbation only: leave eligible pins unsized for cprop/bitwidth.
+// No inference or restoration runs here. IO, constants, memories and instance
+// boundaries stay intact; Wires also preserves all register/latch outputs.
+Stats strip_annotations(const std::shared_ptr<hhds::Graph>& g, const Options& opts);
+
+// Standalone inference audit, used by the recovery unit tests. The compile
+// pipeline uses strip_annotations so recovery is exercised by its normal passes.
 Stats fuzz(const std::shared_ptr<hhds::Graph>& g, const Options& opts);
 
 }  // namespace livehd::bitfuzz

@@ -1726,8 +1726,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // a user naming one specific region always has the final say. `input_ge` is
   // invariant source-logic cost, unlike mapped gates, so cache recipes and
   // threshold decisions remain stable when the mapping flow changes.
-  bool       tool_owned_flow = opts_.flow.empty();
-  const bool control_tier    = rb.ctrl && opts_.ctrl_flow != "inherit";
+  bool tool_owned_flow = opts_.flow.empty();
   //
   // Every tier goes through resolve_flow, not the raw string: the size TIERS are
   // tool-chosen defaults like kCombFlow, so max_fanout's buffering tail applies
@@ -1739,74 +1738,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // The `*_flow selected` lines are the only external evidence that a tier fired
   // (lhd/tests/lhd_abc_test.sh greps for them); keep them on every branch that
   // substitutes a recipe.
-  if (control_tier) {
-    opts_.area_relax_pct = opts_.ctrl_area_relax;
-    opts_.flow           = resolve_flow(opts_.ctrl_flow);
-    tool_owned_flow      = true;
+  if (opts_.flow.empty() && opts_.large_ge && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
+    opts_.flow = resolve_flow(opts_.large_flow);
     if (opts_.verbose) {
-      std::print("[pass.abc] region '{}': ctrl_flow selected ({} GE)\n", rb.module_name, input_ge);
-    }
-    // Large control cones still receive the protected inexpensive tier.
-    if (opts_.large_ge && input_ge >= opts_.large_ge && !opts_.large_flow.empty()) {
-      opts_.flow = resolve_flow(opts_.large_flow);
-      if (opts_.verbose) {
-        std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
-      }
-    }
-  } else {
-    if (opts_.small_ge && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
-      opts_.flow = resolve_flow(opts_.small_flow);
-      if (opts_.verbose) {
-        std::print("[pass.abc] region '{}': small_flow selected ({} <= {} GE <= {})\n",
-                   rb.module_name,
-                   opts_.small_min_ge,
-                   input_ge,
-                   opts_.small_ge);
-      }
-    }
-    if (opts_.flow.empty() && opts_.large_ge && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
-      opts_.flow = resolve_flow(opts_.large_flow);
-      if (opts_.verbose) {
-        std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
-      }
+      std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
     }
   }
   if (!ware_trial_ && apply_region_overrides(rb)) {
     tool_owned_flow = false;
   }
   region_delay_targets_[rb.module_name] = ware_delay_target(opts_.delay);
-  struct Control_deadline {
-    std::mutex              mu;
-    std::condition_variable cv;
-    bool                    done = false;
-    std::thread             worker;
-    Control_deadline(uint64_t ms, const std::string& name) {
-      if (!ms) {
-        return;
-      }
-      worker = std::thread([this, ms, name] {
-        std::unique_lock lock(mu);
-        if (!cv.wait_for(lock, std::chrono::milliseconds(ms), [this] { return done; })) {
-          std::fprintf(stderr,
-                       "[pass.abc] control region '%s' exceeded ctrl_time_budget_ms=%llu; stopping synthesis\n",
-                       name.c_str(),
-                       static_cast<unsigned long long>(ms));
-          std::fflush(stderr);
-          std::_Exit(6);
-        }
-      });
-    }
-    ~Control_deadline() {
-      {
-        std::lock_guard lock(mu);
-        done = true;
-      }
-      cv.notify_one();
-      if (worker.joinable()) {
-        worker.join();
-      }
-    }
-  } ctrl_deadline(control_tier ? opts_.ctrl_time_budget_ms : 0, rb.module_name);
   // The region's delay BUDGET: the target minus the register margin when the
   // region holds flops (mapped or native -- a native flop is mapped to the
   // same cell by whoever times the netlist, so its overhead is on the path
@@ -1815,7 +1756,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // recipe below therefore carries it verbatim. ABC's `-D` is an integer
   // (atoi), so the budget is floored to whole picoseconds and the ladder below
   // compares against the same value it sized to.
-  float delay_target = 0.0f;
+  float delay_target                    = 0.0f;
   {
     char*       end = nullptr;
     const float t   = std::strtof(opts_.delay.c_str(), &end);
@@ -1828,7 +1769,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   budget_flag_            = budget > 0.0f ? std::format("-D {}", static_cast<int>(budget)) : std::string{};
   // Is the ABC command list this region runs the BUILT-IN one (kSeqFlow /
   // kCombFlow + tail)? Stricter than `tool_owned_flow`, which stays true under
-  // a size-tier `small_flow`/`large_flow` -- a user-authored command list that
+  // a size-tier `large_flow` -- a user-authored command list that
   // may retime (`dretime`) or sequentially sweep (`scorr`/`lcorr`). The QN
   // AIG-side encoding (Seq_flop::d_inverted) is exact only under combinational
   // transformations, so it is gated on THIS flag, not on flow ownership.
@@ -3537,10 +3478,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // that already dominates), it is switched off by `area_flow=none`, and it
   // skips the dummy-PO sentinel (nothing to compare on a region with no real
   // outputs).
-  const bool        ladder_on    = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
-  const std::string area_cmd     = area_flow();
-  const bool        candidate_on = ladder_on && !control_tier && builtin_flow && !area_cmd.empty() && !has_dummy_po
-                                   && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
+  const bool        ladder_on = tool_owned_flow && scl_timing_ok_ && budget > 0.0f;
+  const std::string area_cmd  = area_flow();
+  const bool        candidate_on
+      = ladder_on && builtin_flow && !area_cmd.empty() && !has_dummy_po && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
   // The area candidate re-maps from the SAME pre-flow logic network, so keep a
   // copy of it before the frame takes ownership of `pLogic`: every
   // Abc_FrameReplaceCurrentNetwork below DELETES the network it replaces. The
@@ -3548,7 +3489,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // point two networks are alive at once -- the mapped result and this logic
   // dup -- which the RSS admission check after the flow sees as part of the
   // region's footprint.
-  Abc_Ntk_t*        pre          = candidate_on ? Abc_NtkDup(pLogic) : nullptr;
+  Abc_Ntk_t* pre = candidate_on ? Abc_NtkDup(pLogic) : nullptr;
   struct Pre_guard {
     Abc_Ntk_t** ntk;
     ~Pre_guard() {
@@ -3611,7 +3552,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // kPutCmd and (when it is on) the buffering tail -- anything after that would
   // survive the undo and be applied twice. Derive it from the RESOLVED string
   // rather than from `tool_owned_flow`: that flag is computed before the
-  // size-tier `small_flow`/`large_flow` substitution, so a tier flow is still
+  // size-tier `large_flow` substitution, so a tier flow is still
   // "tool owned" while being an arbitrary command list.
   const std::string map_step   = subst_flow(std::string{kMapCmd});
   const std::string flow_tail  = subst_flow(std::string{kBufferTail});

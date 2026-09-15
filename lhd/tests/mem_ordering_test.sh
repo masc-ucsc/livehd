@@ -159,7 +159,7 @@ EOF
   if [ "${ok}" != "1" ] || [ ! -s "${D}/impl.v" ] || [ ! -s "${D}/ref.v" ]; then
     echo "FAIL: abc write-priority: could not build the netlist/reference pair"
     rc=1
-  elif "${LHD}" lec --set formal.solver=lgyosys --impl "verilog:${D}/impl.v" \
+  elif "${LHD}" lec --impl "verilog:${D}/impl.v" \
          --ref "verilog:${D}/ref.v" --top w --workdir "${D}/wc" >"${D}/lec.log" 2>&1; then
     echo "ok: abc same-address multi-write forwards the LAST write"
   else

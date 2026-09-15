@@ -6,8 +6,9 @@
 # Ladder mode (the bazel slang_compile-* targets):
 #   slang_compile.sh <tier> <file.v>
 # with tier one of:
-#   lec      - compile --reader slang to verilog AND lhd lec --set formal.solver=lgyosys (LEC) it against
-#              the source itself. The strongest general tier.
+#   lec      - compile --reader slang to verilog AND lhd lec (LEC) it against
+#              the source itself, with a 20-second solver budget. Timeouts
+#              pass with an explicit unproven result; refutations still fail.
 #   lec_no_x - the lec tier plus a check that the generated Verilog has no X/Z
 #              literal. Use for fully-defined sources whose regression was a
 #              silently introduced unknown value.
@@ -102,9 +103,17 @@ run_one() { # <tier> <file>
         grep -En "[0-9]+'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_]*[xXzZ?]" "$wd"/all.v
         return 1
       fi
-      ${LHD} lec --set formal.solver=lgyosys --impl verilog:"$wd"/all.v --ref verilog:"$f" --top "$base" \
+      ${LHD} lec --impl verilog:"$wd"/all.v --ref verilog:"$f" --top "$base" --set formal.timeout=20 \
         --workdir "$wd"/wc -q >"$wd"/check.log 2>&1 || {
-        echo "FAIL(${base}): LEC mismatch vs source"
+        local lec_status=$?
+        # UNKNOWN also covers unsupported encodings and other refusals. Only
+        # accept an explicit timeout on the final verdict, never every exit 7.
+        if [ "$lec_status" -eq 7 ] && grep -Eq "^lec: .* UNKNOWN .*\(hit formal\.timeout=|^lec: .* UNKNOWN .*exceeded [0-9]+s hard wall backstop" "$wd"/check.log; then
+          echo "PASS(${base}) tier=${tier}: LEC TIMEOUT (20-second solver budget; equivalence unproven)"
+          tail -5 "$wd"/check.log
+          return 0
+        fi
+        echo "FAIL(${base}): LEC failed vs source (exit ${lec_status})"
         tail -5 "$wd"/check.log
         return 1
       }

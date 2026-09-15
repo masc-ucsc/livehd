@@ -69,12 +69,30 @@ cmp "$W/cold.v" "$W/parallel.v"
 cat "$W/models/"*.v >> "$W/serial.v"
 cat "$W/models/"*.v >> "$W/parallel.v"
 "$LHD" lec --impl verilog:"$W/parallel.v" --ref verilog:"$W/serial.v" --top parallel.parallel \
-  --set formal.solver=lgyosys --workdir "$W/lec" --result-json "$W/lec.json" -q
+  --workdir "$W/lec" --result-json "$W/lec.json" -q
 python3 - "$W/lec.json" <<'PY'
 import json, sys
 q = json.load(open(sys.argv[1]))
 assert q['status'] == 'pass', q
 PY
+
+# The standalone pass uses the same worker setting and default as synth.
+"$LHD" compile "$W/parallel.prp" --top parallel --emit-dir lg:"$W/pass-input" --workdir "$W/pass-compile" -q
+for threads in 1 2 0; do
+  thread_args=()
+  [ "$threads" = "0" ] || thread_args=(--set "synth.threads=$threads")
+  "$LHD" pass abc lg:"$W/pass-input" --top parallel --emit-dir lg:"$W/pass-$threads-net" \
+    --workdir "$W/pass-$threads" --set synth.liberty="$LIB" ${thread_args[@]+"${thread_args[@]}"} \
+    --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --set abc.boundary=false -q
+  python3 - "$W/pass-$threads/qor.json" "$threads" <<'CHECK_PASS_THREADS'
+import json, os, sys
+q = json.load(open(sys.argv[1]))
+requested = int(sys.argv[2])
+assert q['parallel']['requested'] == requested, q['parallel']
+assert q['parallel']['limit'] == (requested or os.cpu_count() or 1), q['parallel']
+CHECK_PASS_THREADS
+done
+
 # A worker error must join the other workers before destroying region storage.
 if "$LHD" synth "$W/parallel.prp" --top parallel --set synth.liberty="$LIB" \
     --set synth.opentimer=false --set synth.threads=2 --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \

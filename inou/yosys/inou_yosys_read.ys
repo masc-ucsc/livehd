@@ -73,26 +73,10 @@ memory -nomap -nordff
 
 #flatten
 
-{{#techmap_alumacc}}
-alumacc
-techmap -map techmap.v
-{{/techmap_alumacc}}
-{{#techmap_full}}
-techmap
-{{/techmap_full}}
 #opt
 
-{{#abc_in_yosys}}
-abc
-{{/abc_in_yosys}}
 
-{{#rename_top}}
-rename {{rename_from}} {{rename_top}}
-{{/rename_top}}
 
-{{#techmap_alumacc}}
-maccmap -unmap
-{{/techmap_alumacc}}
 
 write_rtlil pp-mem.il
 write_verilog pp.v

@@ -50,7 +50,7 @@ run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/post.v" --workdir "$D/w4"
 [ "$(grep -c '^pat_' "$D/post.v")" = "3" ] || fail "expected the pattern instantiated 3x"
 
 # ... and the design still computes the same function. This is the whole point.
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
 echo "PASS: repeated cones extracted to one shared def, LEC-equivalent"
 
 # A second run is a no-op: everything extractable is already an instance.
@@ -78,7 +78,7 @@ run compile lg:"$D/lg" --top redc.top --emit verilog:"$D/post.v" --workdir "$D/w
 [ "$(grep -c '^module pat_' "$D/post.v")" = "1" ] || fail "const-divergent cones must share ONE def"
 [ "$(grep -c '^pat_' "$D/post.v")" = "3" ] || fail "expected the const pattern instantiated 3x"
 grep -q '\.c0(' "$D/post.v" || fail "expected a promoted const port (.c0) on the instances"
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
 echo "PASS: const-parameterized pattern extracted and LEC-equivalent"
 
 # min_count above the occurrence count leaves the library untouched.

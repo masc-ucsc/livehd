@@ -37,7 +37,7 @@ pub comb impl_top(a:u8) -> (o:u8) { o = impl_sub.sub(a=a).o }
 EOF
 
 if ! "$LHD" lec --ref "$W/ref_top.prp" --impl "$W/impl_top.prp" \
-     --ref-top ref_top --impl-top impl_top --set formal.lec.hier=true \
+     --ref-top ref_top --impl-top impl_top  \
      --set formal.engine=ind --workdir "$W/assumed_w" >"$W/assumed.out" 2>&1; then
   cat "$W/assumed.out" >&2
   fail "hierarchical LEC did not consume the child occurrence assumption"
@@ -54,7 +54,7 @@ grep -v assume_nocheck "$W/impl_sub.prp" >"$W/impl_plain_sub.prp"
 sed 's/import("ref_sub")/import("ref_plain_sub")/' "$W/ref_top.prp" >"$W/ref_plain_top.prp"
 sed 's/import("impl_sub")/import("impl_plain_sub")/' "$W/impl_top.prp" >"$W/impl_plain_top.prp"
 if "$LHD" lec --ref "$W/ref_plain_top.prp" --impl "$W/impl_plain_top.prp" \
-     --ref-top ref_top --impl-top impl_top --set formal.lec.hier=true \
+     --ref-top ref_top --impl-top impl_top  \
      --set formal.engine=ind --workdir "$W/plain_w" >"$W/plain.out" 2>&1; then
   cat "$W/plain.out" >&2
   fail "the out-of-domain implementation mismatch passed without assumptions"
@@ -124,7 +124,7 @@ pub comb contra_top(a:u8) -> (o:u8) {
 }
 EOF
 if "$LHD" lec --ref "$W/contra_top.prp" --impl "$W/contra_top.prp" \
-     --top contra_top --set formal.lec.hier=true \
+     --top contra_top  \
      --set formal.engine=ind --workdir "$W/contra_w" >"$W/contra.out" 2>&1; then
   cat "$W/contra.out" >&2
   fail "contradictory unchecked assumptions produced a vacuous pass"

@@ -39,30 +39,20 @@ void Pass_lec::setup() {
                        "auto");
   m.add_label_optional("solver",
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
-                       "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
+                       "lgyosys (debug comparison: default native LEC plus yosys/lgcheck)",
                        "cvc5");
   m.add_label_optional("assume_check",
                        "true|false check every non-top assumption before use. Top-level IO assumes cannot be "
                        "checked and are treated as disclosed assume_nocheck constraints. false keeps every "
                        "assume active but treats it as assume_nocheck",
                        "true");
-  m.add_label_optional("gold_reader",
-                       "lgyosys backend only: reader for the REFERENCE side — verilog (default; yosys "
-                       "read_verilog -sv) | slang (load the yosys-slang plugin and read_slang; needed for "
-                       "SystemVerilog packed-struct sources like CIRCT/firtool output)",
-                       "verilog");
-  m.add_label_optional("gate_reader",
-                       "lgyosys backend only: reader for the IMPLEMENTATION side — verilog (default; yosys "
-                       "read_verilog -sv) | slang (load yosys-slang and parse in parallel; recommended for "
-                       "large generated cgen Verilog)",
-                       "verilog");
   m.add_label_optional("normalize_split_ports",
-                       "lgyosys backend only: true packs/unpacks cgen's escaped dotted aggregate-port leaves "
+                       "lgcheck debug comparison only: true packs/unpacks cgen's escaped dotted aggregate-port leaves "
                        "to the reference's packed-vector top interface, using the cached RTLIL port lists; "
                        "interface preparation is outside the equivalence timeout",
                        "false");
   m.add_label_optional("descend_on_inconclusive",
-                       "lgyosys backend only: true recursively checks direct child definitions when a top is "
+                       "lgcheck debug comparison only: true recursively checks direct child definitions when a top is "
                        "inconclusive, reusing the already-read RTLIL; every child gets its own equivalence "
                        "timeout, and any child counterexample refutes the run",
                        "false");
@@ -263,12 +253,6 @@ void Pass_lec::setup() {
                        "first. Read-only analysis, so it composes across hierarchy; default true. false falls "
                        "back to the M8 graph rewrite, which refuses a latch or negedge flop inside a def",
                        "true");
-  m.add_label_optional("strict",
-                       "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard failure; "
-                       "default TRUE -- an inconclusive run proved nothing, so exiting 0 would make it "
-                       "indistinguishable from a real proof. Set false to downgrade it to a warning that exits "
-                       "cleanly (REFUTED still fails either way)",
-                       "true");
   m.add_label_optional("allow_oversize",
                        "skip the design-size gate; default false (a design over ~1M nodes is refused as "
                        "UNKNOWN because encoding it as one unit may exhaust host memory)",
@@ -311,7 +295,6 @@ void Pass_lec::lec(Eprp_var& var) {
   o.phase_sched       = parse_bool(var.get("phase_sched", "true"));
   o.int_blast         = std::string{var.get("int_blast", "auto")};
   o.box_seq           = std::string_view{var.get("box_model", "seq")} != "uf";
-  o.strict            = parse_bool(var.get("strict", "true"));
   o.semdiff           = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   o.partitions        = str_tools::to_i(var.get("partitions", "4"));
   o.split             = std::string{var.get("split", "auto")};

@@ -784,6 +784,10 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    const auto option_method = pass == "sim" ? std::string_view{"sim"} : set_pass_method(pass);
+    if (const auto hint = retired_set_hint(option_method, flag); !hint.empty()) {
+      throw Lhd_error{"usage", std::format("--set/--config '{}' is no longer a public option", key), std::string{hint}};
+    }
     if (pass == "lhd") {
       // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
       // Options by apply_lhd_settings (not consumed by any single pass). Keep
@@ -1166,7 +1170,7 @@ void apply_lhd_settings(Options& opts) {
       opts.top = value;
     } else if (key == "lhd.stats") {
       // canonical form of --stats; the flag and the set spelling both turn it on
-      opts.stats = opts.stats || (value != "false" && value != "0" && value != "off");
+      opts.stats = value != "false" && value != "0" && value != "off";
     } else if (key == "lhd.incremental") {
       opts.incremental = value != "false" && value != "0" && value != "off";
     }
@@ -1175,14 +1179,9 @@ void apply_lhd_settings(Options& opts) {
 
 // The standard compile pipeline, in (set-name, EPRP method) order.
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts) {
-  // pass.bitfuzz is a VERIFICATION CANARY, not an optimization: it strips the
-  // per-pin width/sign annotations and makes bitwidth reconstruct them, so any
-  // stage that gave those attributes semantic meaning shows up as a width
-  // disagreement (or, downstream, a LEC refutation). It is off unless the user
-  // asks for it, and it must run AFTER cprop and BEFORE bitwidth --
-  // debug_assert_cells_sized (node_util.hpp) enforces the OPPOSITE contract at
-  // cprop's entry in dbg builds, so an earlier insertion point would trip that
-  // assert by construction.
+  // Strip derived annotations immediately after graph lowering. Cprop must
+  // preserve integer semantics without them; the normal bitwidth pass recovers
+  // widths afterward. Bitfuzz itself performs no inference or repair.
   std::vector<std::pair<std::string, std::string>> fuzz;
   for (const auto& [key, value] : opts.sets) {
     if (key == "compile.bitfuzz.mode" && value != "off") {
@@ -1194,7 +1193,7 @@ std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Opti
   std::vector<std::pair<std::string, std::string>> steps{
       {"compile.cprop", "pass.cprop"}
   };
-  steps.insert(steps.end(), fuzz.begin(), fuzz.end());
+  steps.insert(steps.begin(), fuzz.begin(), fuzz.end());
   steps.emplace_back("compile.bitwidth", "pass.bitwidth");
   // Inference can resolve values that cprop could not know yet (notably
   // reads of procedurally built constant tables). Fold their consumers and
@@ -1778,6 +1777,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["debug"] = v;
     } else if (k == "sim.unknown_zero") {
       labels["unknown_zero"] = v;
+    } else if (k == "sim.live_words") {
+      labels["live_words"] = v;
     }
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path
@@ -2214,12 +2215,10 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
       labels["top"] = opts.top;
     }
     // The formal tools share the `formal.` root:
-    // formal.strict / formal.normalize apply to every emitter, and the
+    // formal.normalize applies to Isabelle, and the
     // tool-specific formal.isabelle.* overrides them.
     for (const auto& [k, v] : opts.sets) {
-      if (k == "formal.strict") {
-        labels["strict"] = v;
-      } else if (k == "formal.normalize") {
+      if (k == "formal.normalize") {
         labels["normalize"] = v;
       }
     }
@@ -2243,13 +2242,6 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
     };
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
-    }
-    for (const auto& [k, v] : opts.sets) {
-      if (k == "formal.strict") {
-        labels["strict"] = v;
-      } else if (k == "formal.normalize") {
-        labels["normalize"] = v;
-      }
     }
     merge_sets(opts, "formal.lean", labels);
     run_step("pass.lean", var, labels, opts, res);

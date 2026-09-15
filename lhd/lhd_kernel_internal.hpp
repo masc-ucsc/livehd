@@ -57,9 +57,29 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize", "assume_check",        "bound",   "engine",      "hard_timeout_mult", "ignore_memory", "jobs",   "mine",
-    "min_timeout",    "partitions",          "phase",   "report",      "reset",             "reset_cycles",  "retry",  "rlimit",
-    "solver",         "spec_mining_timeout", "simfail", "simfail_run", "split",             "stats",         "strict", "timeout",
+    "allow_oversize",
+    "assume_check",
+    "bound",
+    "engine",
+    "hard_timeout_mult",
+    "ignore_memory",
+    "jobs",
+    "mine",
+    "min_timeout",
+    "partitions",
+    "phase",
+    "report",
+    "reset",
+    "reset_cycles",
+    "retry",
+    "rlimit",
+    "solver",
+    "spec_mining_timeout",
+    "simfail",
+    "simfail_run",
+    "split",
+    "stats",
+    "timeout",
     "witness",
 };
 
@@ -101,18 +121,82 @@ inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] =
     {      "cache",
      "incremental reuse is ONE kernel switch now: `--set lhd.incremental=false` turns the compile, pass.abc and "
      "formal/lec caches off together (they are on by default under a user --workdir). The per-tier "
-     "compile.cache / pass.abc.cache / formal.cache flags are gone" },
+     "compile.cache / pass.abc.cache / formal.cache flags are gone"                                                  },
     {      "yosys",
      "yosys is linked in-process now (Yosys::Pass::call), so there is no external binary to point at. The label was "
-     "registered but never read; drop the flag"                     },
+     "registered but never read; drop the flag"                                                                      },
     {"budget_mode",
      "the budget scheduler is no longer a mode: accounting is ON whenever formal.timeout>0 and formal.rlimit==0, and "
      "the deterministic tier is selected by setting formal.rlimit (which owns the bound by itself). Drop the flag; use "
-     "--set formal.rlimit=N for the old budget_mode=rlimit behavior"},
+     "--set formal.rlimit=N for the old budget_mode=rlimit behavior"                                                 },
     {     "absorb",
      "the synth algorithms colour the flat view now, so crossing a module boundary is the default, not a size-triggered "
      "inline; min_ge no longer doubles as the absorb threshold (pass.color.max_gate bounds a `cones` region instead)"},
 };
+
+// Retired public settings, including pass labels still used by the kernel.
+// Match on method rather than spelling so aliases cannot bypass the boundary.
+struct Retired_set_option {
+  std::string_view method;
+  std::string_view flag;
+  std::string_view hint;
+};
+inline constexpr Retired_set_option kRetiredSetOptions[] = {
+    {"inou.cgen.verilog",                   "verbose",                        "This option had no implemented effect; drop the setting."},
+    {        "pass.lean",                 "normalize",                        "This option had no implemented effect; drop the setting."},
+    {        "pass.lean",           "cert_chunk_size",                        "This option had no implemented effect; drop the setting."},
+    {        "pass.lean",          "cert_chunk_limit",                        "This option had no implemented effect; drop the setting."},
+    {        "pass.lean",          "cert_wf_fallback",                        "This option had no implemented effect; drop the setting."},
+    {     "pass.semdiff",                       "alg",                        "This option had no implemented effect; drop the setting."},
+    {     "pass.semdiff",                   "verbose",                        "This option had no implemented effect; drop the setting."},
+    {       "pass.color",                   "compact",                        "This option had no implemented effect; drop the setting."},
+    {              "sim",                   "flatten",                        "This option had no implemented effect; drop the setting."},
+    {      "pass.formal",                   "enabled",            "Use --set compile.formal.mode=none to disable compile-time checking."},
+    {         "pass.abc",                       "out",                             "Use --emit-dir lg:DIR for the output graph library."},
+    {   "pass.partition",                       "out",                             "Use --emit-dir lg:DIR for the output graph library."},
+    {     "pass.liberty",                       "out",                             "Use --emit-dir lg:DIR for the output graph library."},
+    { "pass.single_edge",                       "out",                             "Use --emit-dir lg:DIR for the output graph library."},
+    {  "inou.yosys.tolg",                  "frontend",                          "Select --reader yosys-verilog or --reader yosys-slang."},
+    {       "inou.slang",                   "defines",                                "Pass -D NAME=VALUE after -- to the slang reader."},
+    {       "inou.slang",                  "includes",                                       "Pass -I DIR after -- to the slang reader."},
+    {       "inou.slang",                 "undefines",                                      "Pass -U NAME after -- to the slang reader."},
+    {         "pass.abc",                   "threads", "Use --set synth.threads=N for the shared ABC worker limit (0 = available CPUs)."},
+    {         "pass.abc",                "small_flow",                      "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",                  "small_ge",                      "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",              "small_min_ge",                      "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",                 "ctrl_flow",                      "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",           "ctrl_area_relax",                      "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",       "ctrl_time_budget_ms",                      "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                       "abc",                      "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                   "techmap",                      "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                  "elab_top",                      "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                "rename_top",                      "This unused optional policy was removed; drop the setting."},
+    {      "pass.formal",                    "active",    "The kernel manages this implementation setting internally; drop the setting."},
+    {      "pass.formal",            "hier_preflight",    "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",              "import_defer",    "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",                       "dce",    "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",                   "inherit",    "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass", "preserve_param_provenance",    "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",                "ssa_stream",    "The kernel manages this implementation setting internally; drop the setting."},
+    {       "inou.slang",               "slang_flags",         "Pass reader arguments after -- instead of setting serialized arguments."},
+    {  "inou.yosys.tolg",               "slang_flags",         "Pass reader arguments after -- instead of setting serialized arguments."},
+    {         "pass.abc",                     "stats",                             "Use --stats or --set lhd.stats=true for statistics."},
+    {       "pass.color",                     "stats",                             "Use --stats or --set lhd.stats=true for statistics."},
+    {   "pass.opentimer",                     "stats",                             "Use --stats or --set lhd.stats=true for statistics."},
+    {     "pass.semdiff",                     "stats",                             "Use --stats or --set lhd.stats=true for statistics."},
+    {         "pass.lec",                     "stats",                             "Use --stats or --set lhd.stats=true for statistics."},
+    {         "pass.lec",
+     "strict",
+     "An UNKNOWN verdict always fails now (exit 7): an inconclusive run proved nothing, so it can never exit 0. Drop the setting."                                                                                                                  },
+};
+inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
+  for (const auto& option : kRetiredSetOptions) {
+    if (option.method == method && option.flag == flag) {
+      return option.hint;
+    }
+  }
+  return {};
+}
 
 inline constexpr Set_pass kSetPasses[] = {
     {     "compile.upass",        "pass.upass",      Set_pass::List::all},
@@ -321,7 +405,6 @@ std::string locate_lgcheck();
 std::string locate_lgcheck_yosys();
 std::string materialize_verilog(Options& opts, Result& res, const std::string& kind, const std::string& path,
                                 std::string_view side);
-void        lec_lgyosys(Options& opts, Result& res);
 void        sim_command(Options& opts, Result& res);
 void        load_side_graphs(Options& opts, Result& res, const std::string& kind, const std::string& path, std::string_view side,
                              Eprp_var& var);

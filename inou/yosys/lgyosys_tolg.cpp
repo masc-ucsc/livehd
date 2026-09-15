@@ -354,8 +354,9 @@ bool operator==(const Pick_ID& lhs, const Pick_ID& rhs) {
 static absl::flat_hash_map<Pick_ID, hhds::Pin_class> picks;
 
 // Yosys process cell IDs change whenever the source is regenerated. A whole
-// public Q wire is the stable identity of a register/latch across that round
-// trip; using $procdff$123 instead gives LEC unrelated power-on state symbols.
+// public Q wire or slice is the stable identity of a register/latch across
+// that round trip; using $procdff$123 gives unrelated state symbols, while
+// dropping the slice offset aliases distinct registers onto the same name.
 static void name_state_node(const hhds::Node_class& node, const RTLIL::Cell* cell) {
   std::string name = cell->name.str();
   if (!name.empty() && name.front() == '\\') {
@@ -370,12 +371,16 @@ static void name_state_node(const hhds::Node_class& node, const RTLIL::Cell* cel
     auto chunks = cell->getPort(ID::Q).chunks();
     if (chunks.size() == 1) {
       const auto& q = chunks.at(0);
-      if (q.wire && q.offset == 0 && q.width == q.wire->width && q.wire->name.c_str()[0] == '\\') {
+      if (q.wire && q.wire->name.c_str()[0] == '\\') {
         name = q.wire->name.str().substr(1);
+        if (q.offset != 0 || q.width != q.wire->width) {
+          name += absl::StrCat("[", q.offset + q.width - 1, ":", q.offset, "]");
+        }
       }
     }
   }
   node.attr(hhds::attrs::name).set(name);
+  set_pin_name(node.create_driver_pin(0), name);
 }
 
 static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, int offset, int width, bool is_signed) {
@@ -2185,14 +2190,6 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
       name_state_node(exit_node, cell);
 
-      if (cell->hasPort(ID::Q)) {
-        const RTLIL::Wire* wire = cell->getPort(ID::Q).chunks().at(0).wire;
-        if (wire) {
-          std::string wname(&wire->name.c_str()[1]);
-          auto        dpin = exit_node.create_driver_pin(0);
-          set_pin_name(dpin, wname);
-        }
-      }
 
       if (cell->hasParam(ID::CLK_POLARITY) && !cell->getParam(ID::CLK_POLARITY).as_bool()) {
         setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(0)));
@@ -2324,13 +2321,6 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // one boundary PI per Q bit, so the pin name is what lets read-back join
       // those bits to the original bus instead of a synthetic latch_<nid> net.
       name_state_node(exit_node, cell);
-      if (cell->hasPort(ID::Q)) {
-        const RTLIL::Wire* wire = cell->getPort(ID::Q).chunks().at(0).wire;
-        if (wire) {
-          std::string wname(&wire->name.c_str()[1]);
-          set_pin_name(exit_node.create_driver_pin(0), wname);
-        }
-      }
 
       // Unsigned: EN/ARST are 1-bit gate signals, and the $adlatch folding
       // below inverts them with a 1-bit Xor. Mirror get_dpin's missing-port

@@ -12,9 +12,8 @@
 #     the explicitly selected `formal.min_timeout` floor.
 #   * spec_mining_timeout timeout-core diagnosis: under an INDEPENDENT spec_mining_timeout budget a
 #     timed-out run NAMES the toxic obligation subset ("spec_mining_timeout core (k/n ...)").
-#   * INCONCLUSIVE is a FAILURE by default (`formal.strict`, default true since
-#     2026-07-29): an UNKNOWN proves nothing, so the run EXITS 7 and says why.
-#     (`formal.strict=false` opt-out coverage lives in lhd_formal_verify_test.)
+#   * INCONCLUSIVE always fails.
+
 #   * induction + reset soundness: a true twin-register invariant proves UNBOUNDED
 #     (the induction step pins the PRIMARY reset input deasserted), while an
 #     unequal-reset twin is still REFUTED — induction never manufactures a proof.
@@ -57,14 +56,14 @@ rc=$?
 end=$(date +%s); elapsed=$((end-start))
 
 # A budget-limited UNKNOWN is still an UNKNOWN: it proves nothing and disproves
-# nothing, so the DEFAULT (`formal.strict`, flipped true 2026-07-29) is to FAIL
+# nothing, so the result is a failure
 # with the `unsupported` class (rc 7) rather than exit 0 on a warning. The
 # hardness here is real and not a tool bug: the same three obligations are
 # PROVEN inductively in ~1.5s at 4-bit operands, and only the 32-bit
 # bit-blasted nonlinear products outrun the solver (120s/obligation still
 # UNKNOWN) — exactly the budget-limited case this file exists to account for.
 # The failure must NAME that cause, not just die.
-[ "$rc" -eq 7 ] || fail "an inconclusive UNKNOWN must fail with the unsupported class rc=7 under the default formal.strict (rc=$rc): $(cat "$W/budget.out")"
+[ "$rc" -eq 7 ] || fail "an inconclusive UNKNOWN must fail with the unsupported class rc=7 (rc=$rc): $(cat "$W/budget.out")"
 grep -q "could not decide" "$W/budget.out" \
   || fail "the strict failure must explain WHY it failed (could not decide): $(cat "$W/budget.out")"
 grep -q "budget-limited depth" "$W/budget.out" \

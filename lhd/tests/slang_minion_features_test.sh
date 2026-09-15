@@ -188,7 +188,7 @@ if grep -q 'en4_q#\[0\.\.=3\]' "$W/wren_prp"/*.prp; then
 fi
 ${LHD} lec --impl pyrope:"$W/wren_prp/wren_cast.prp" \
   --ref verilog:"$W/wren.sv" --top wren_cast --set formal.engine=bmc \
-  --set formal.strict=true --workdir "$W/wren_lec" -q \
+   --workdir "$W/wren_lec" -q \
   || fail "mask-free widening cast is not equivalent to the Verilog source"
 echo "PASS: widening cast preserves range and emits no identity slice/getmask"
 
@@ -223,7 +223,7 @@ EOF
 ${LHD} compile "$W/uwiden.sv" --reader slang --top uwiden \
   --emit-dir lg:"$W/uwiden_lg/" --workdir "$W/uwiden_lgw" -q \
   || fail "unsigned-widening LGraph emission failed"
-${LHD} sim lg:"$W/uwiden_lg/" "$W/uwiden_tb.prp" --set sim.vcd=false \
+${LHD} sim lg:"$W/uwiden_lg/" "$W/uwiden_tb.prp"  \
   --workdir "$W/uwiden_sim" -q \
   || fail "mask-free unsigned widening simulated a set source msb incorrectly"
 echo "PASS: mask-free LGraph unsigned widening keeps the physical input non-negative"
@@ -244,7 +244,7 @@ ${LHD} compile "$W/unarrow.sv" --reader slang --top unarrow \
   || fail "unsigned-to-signed narrowing fixture did not compile"
 ${LHD} lec --impl pyrope:"$W/unarrow_prp/unarrow.prp" \
   --ref verilog:"$W/unarrow.sv" --top unarrow --set formal.engine=bmc \
-  --set formal.strict=true --workdir "$W/unarrow_lec" -q \
+   --workdir "$W/unarrow_lec" -q \
   || fail "unsigned-to-signed narrowing lost the destination sign bit"
 echo "PASS: unsigned-to-signed effective-width equality still reinterprets the sign bit"
 
@@ -285,7 +285,7 @@ if ! grep -q '#\[3\.\.=8\]' "$W/substruct_unpack_prp/substruct_unpack.prp"; then
 fi
 ${LHD} lec --impl pyrope:"$W/substruct_unpack_prp/substruct_unpack.prp" \
   --ref verilog:"$W/substruct_unpack.sv" --top substruct_unpack \
-  --set formal.engine=bmc --set formal.strict=true \
+  --set formal.engine=bmc  \
   --workdir "$W/substruct_unpack_lec" -q \
   || fail "packed-substruct leaf split is not equivalent to the Verilog source"
 echo "PASS: packed-substruct leaf split explicitly selects each field"
@@ -319,7 +319,7 @@ if ! grep -q '#\[0\.\.=63\]' "$W/dynamic_packed_write_prp/dynamic_packed_write.p
 fi
 ${LHD} lec --impl pyrope:"$W/dynamic_packed_write_prp/dynamic_packed_write.prp" \
   --ref verilog:"$W/dynamic_packed_write.sv" --top dynamic_packed_write \
-  --set formal.engine=bmc --set formal.strict=true \
+  --set formal.engine=bmc  \
   --workdir "$W/dynamic_packed_write_lec" -q \
   || fail "dynamic packed-lvalue boundary is not equivalent to the Verilog source"
 cat >"$W/dynamic_packed_write_tb.prp" <<'EOF'
@@ -341,7 +341,7 @@ ${LHD} compile "$W/dynamic_packed_write.sv" --reader slang --top dynamic_packed_
   --workdir "$W/dynamic_packed_write_lgw" -q \
   || fail "dynamic packed-lvalue LGraph emission failed"
 ${LHD} sim lg:"$W/dynamic_packed_write_lg/" "$W/dynamic_packed_write_tb.prp" \
-  --set sim.init_zero=true --set sim.vcd=false \
+  --set sim.init_zero=true  \
   --workdir "$W/dynamic_packed_write_sim" -q \
   || fail "dynamic packed-lvalue generated simulation failed"
 echo "PASS: dynamic packed-lvalue update keeps its declared-width boundary explicit"
@@ -388,7 +388,7 @@ if grep -qE '#\[1\.\.=5\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; t
 fi
 ${LHD} lec --impl pyrope:"$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
   --ref verilog:"$W/packed_sroa_stride.sv" --top packed_sroa_stride \
-  --set formal.engine=bmc --set formal.strict=true \
+  --set formal.engine=bmc  \
   --workdir "$W/packed_sroa_stride_lec" -q \
   || fail "packed element-stride round trip is not equivalent"
 echo "PASS: packed constant writes apply the inner element bit stride"
@@ -436,7 +436,7 @@ ${LHD} compile "$W/sub_output_boundary.sv" --reader slang --top sub_output_bound
   --workdir "$W/sub_output_boundary_lgw" -q \
   || fail "sub-output boundary LGraph emission failed"
 ${LHD} sim lg:"$W/sub_output_boundary_lg/" "$W/sub_output_boundary_tb.prp" \
-  --set sim.vcd=false --workdir "$W/sub_output_boundary_sim" -q \
+   --workdir "$W/sub_output_boundary_sim" -q \
   || fail "fused sub-output boundary generated simulation failed"
 # The child's packed value must reach the parent through an EXPLICIT boundary
 # conversion at the child's DECLARED output width (2), not as whatever carrier
@@ -585,7 +585,7 @@ if grep -Eq 'classify[[:space:]]*<[[:space:]]*classify' "$W/function_call_snapsh
 fi
 ${LHD} lec --impl pyrope:"$W/function_call_snapshot_prp/function_call_snapshot.prp" \
   --ref verilog:"$W/function_call_snapshot.sv" --top function_call_snapshot \
-  --set formal.engine=bmc --set formal.strict=true \
+  --set formal.engine=bmc  \
   --workdir "$W/function_call_snapshot_lec" -q \
   || fail "snapshotted function-call results are not equivalent to the Verilog source"
 echo "PASS: each inlined function call snapshots its return value"
@@ -624,7 +624,6 @@ grep -Eq 'req_o\.data[[:space:]]*=[[:space:]]*0' "$W/bundle_field_uncertainty_pr
   || fail "conditional opcode write erased the definite data sibling"
 ${LHD} lec --impl pyrope:"$W/bundle_field_uncertainty_prp/bundle_field_uncertainty.prp" \
   --ref verilog:"$W/bundle_field_uncertainty.sv" --top bundle_field_uncertainty \
-  --set formal.engine=auto --set formal.strict=true \
   --workdir "$W/bundle_field_uncertainty_lec" -q \
   || fail "field-precise uncertainty lowering is not equivalent to the Verilog source"
 echo "PASS: uncertain packed-field writes preserve definite siblings"

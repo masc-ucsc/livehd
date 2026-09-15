@@ -21,7 +21,7 @@ fail() {
 }
 
 "$LHD" compile "$PRP" --emit-dir pyrope:"$W/out/" \
-  --set upass.verifier=true --set upass.verifier_pass=7 --set upass.verifier_fail=0 \
+   --set upass.verifier_pass=7 --set upass.verifier_fail=0 \
   --workdir "$W/w" -q 2>/dev/null \
   || fail "compile with pyrope: emission failed (or verifier count mismatch)"
 

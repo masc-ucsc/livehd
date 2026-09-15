@@ -21,7 +21,7 @@ plan="$(ls "$work"/setup/sim/*kernel_multiwrite.color-plan.txt | head -1)"
 # Ordinary module boundaries may fuse. This fixture now checks the multi-write
 # color directly: requiring two copies of a shared pair kernel would force the
 # obsolete module-preserving partition policy.
-grep -Eq 'register-budget words=20' "$plan" || fail "live-word budget is missing from the plan"
+grep -Eq 'register-budget words=256 ' "$plan" || fail "default live-word budget is missing from the plan"
 grep -Eq 'Slop_u<[0-9]+> __color_tmp_[0-9]+ = Slop_u<[0-9]+>::from_proven' "$body" \
   || fail "proven-unsigned color values did not use the mask-free Slop_u landing by default"
 ! grep -q '::land(' "$body" || fail "default generated code retained a debug Slop_u landing mask"
@@ -49,5 +49,9 @@ grep -q 'Slop_u<1> a_zero{};' "$header" || fail "proven-unsigned output was not 
 grep -q 'eq_op(ar0, Slop<8>::create_integer(0))' "$body" || fail "unsigned state did not feed equality directly"
 ! grep -Eq 'ar0\.zext_to<8>|reset\.zext_to<1>' "$body" \
   || fail "same-width state/input conversion survived Slop_u storage"
+
+# Changing the budget in the same workdir must invalidate generated artifacts.
+"$LHD" sim "$PRP" --setup-only --set sim.debug=true --set sim.live_words=20 --workdir "$work/setup" -q >/dev/null
+grep -Eq 'register-budget words=20 ' "$plan" || fail "explicit live-word budget did not replace the cached plan"
 
 echo "PASS: fused multi-write colors preserve unsigned storage and exact values in Slop and LLVM"

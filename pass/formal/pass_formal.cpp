@@ -216,7 +216,7 @@ void Pass_formal::setup() {
                        "error|warn — a refutation at the top boundary fails the build (error, default) or is downgraded "
                        "to a warning (warn). A proven/passing property is always sound; only a 'fail' can be spurious.",
                        "error");
-  m.add_label_optional("enabled", "true|false run the pass (opt out with false, same as mode=none)", "true");
+
   m.add_label_optional("budget_k", "deterministic per-query cvc5 rlimit = budget_k * cone-node-count (0 = default 256)", "0");
   m.add_label_optional("bmc_bound",
                        "mode=normal BMC-from-reset unroll depth (default 4, tiny): caps how deep a REACHABLE refute is "
@@ -246,7 +246,7 @@ void Pass_formal::setup() {
                        "silence 'could not prove' NOISE, while this reports DEAD CODE — a project that quiets the "
                        "former still wants the latter. `lhd formal verify` sets it false for its own design load, "
                        "because the verify tier re-derives the same fact per obligation with a richer report and "
-                       "under formal.strict; without that both tiers would emit the same diagnostic code twice",
+                       "fails vacuous obligations; without that both tiers would emit the same diagnostic code twice",
                        "true");
   m.add_label_optional("warn_assume", "true|false warn on a deferred assume", "true");
   m.add_label_optional("assume_check",
@@ -266,8 +266,8 @@ void Pass_formal::setup() {
 
 void Pass_formal::work(Eprp_var& var) {
   const std::string_view mode = var.get("mode", "normal");
-  if (mode == "none" || !truthy(var.get("enabled", "true"))) {
-    return;  // opt-out: --set compile.formal.mode=none (or pass.formal.enabled=false)
+  if (mode == "none") {
+    return;  // opt-out: --set compile.formal.mode=none
   }
   if (mode != "fast" && mode != "normal") {
     livehd::diag::err("pass.formal", "bad-mode", "comptime")

@@ -134,7 +134,7 @@ std::vector<Set_option> list_set_options() {
       continue;  // defensive: every kSetPasses method registers in init_engine
     }
     for (const auto& [flag, attr] : m->labels) {
-      if (is_kernel_label(flag)) {
+      if (is_kernel_label(flag) || !retired_set_hint(sp.method, flag).empty()) {
         continue;
       }
       // `top` on any pass is the shared --top / lhd.top (set_top_label plumbs
@@ -180,7 +180,7 @@ std::vector<Set_option> list_set_options() {
                            "spelling works). Consumed by the passes that have one (pass.color, pass.abc, pass.opentimer, "
                            "pass.semdiff, pass.lec). ABC/OpenTimer add one structured row per mapped color, with "
                            "resynth=1|0 carried through incremental ABC reuse. "
-                           "For `lhd lec` / `lhd formal verify` (canonical knob formal.stats) it prints a cvc5 "
+                           "For `lhd lec` / `lhd formal verify` (canonical knob lhd.stats) it prints a cvc5 "
                            "solve-insight report (problem size, conflicts, decisions, propagations, restarts, theory "
                            "lemmas, resource units, timings) and registers a cvc5 plugin that makes the solve ~8x "
                            "SLOWER -- a diagnosis tool, not something to leave on or to time a run with"});

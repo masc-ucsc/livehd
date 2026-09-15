@@ -23,7 +23,7 @@ fail() {
 grep -Eq 'reg \[15:0\] mux_' "$W/out.v" \
   && fail "conditional one-bit update survived as a word-wide mux"
 
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/out.v" \
+"$LHD" lec --impl verilog:"$W/out.v" \
   --ref verilog:"$SRC" --top "$TOP" --workdir "$W/lec" -q >/dev/null 2>&1 \
   || fail "factored lane update is not equivalent to the source"
 

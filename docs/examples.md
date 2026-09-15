@@ -242,8 +242,8 @@ lhd formal verify DelayN_1.prp DelayN_1.verify.prp delayn.bound --top DelayN_1
 A selector matching no block FAILS and lists the real names — it never degrades
 into quietly proving only the design's own obligations.
 
-Useful knobs: `--formal 'delayn.bound'` is the flag spelling of that selector; `--set formal.strict=true`
-fails on UNKNOWN; `--set formal.spec_mining_timeout=15` diagnoses a stuck run (timeout
+UNKNOWN always fails. `--formal 'delayn.bound'` is the flag spelling of that selector;
+`--set formal.spec_mining_timeout=15` diagnoses a stuck run (timeout
 core in the report) and MINES inductive invariants into `delayn_w/formal_mined.prp`
 (pass it back as another sidecar). EVERY `assume` is a proof obligation —
 CHECKED as an assert before it is used, so a false one REFUTES instead of

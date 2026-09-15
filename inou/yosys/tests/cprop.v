@@ -1,4 +1,4 @@
-module cprop(input [7:0] a, output [127:0] c0, output [63:0] c1, output [60:0] res);
+module cprop(input [7:0] a, output reg [127:0] c0, output reg [63:0] c1, output reg [60:0] res);
 
 always @(a) begin
   res = 4;

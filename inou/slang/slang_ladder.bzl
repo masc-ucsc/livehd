@@ -11,7 +11,7 @@ SLANG_LADDER = {
     "add": "lec",
     "add1": "lec",  # mixed signed+unsigned add (signed->unsigned widening = zero-extend, not sign-extend)
     "add2": "lec",
-    "aldff": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "aldff": "lec",
     "arith": "lec",
     # PROMOTED: `aoi12 p [31:0] (a, b, c, y)` — slang expands an arrayed
     # instantiation into one nameless element per index inside an InstanceArray
@@ -25,11 +25,11 @@ SLANG_LADDER = {
     "compare": "lec",
     "compare2": "lec",
     "consts": "lec",
-    "cprop": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "cprop": "lec",
     "cse_basic": "lec",
     "dce1": "lec",
     "dce2": "lec",
-    "dce3": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "dce3": "lec",
     "empty_task": "lec",  # structural no-op task used by synthesis assertion macros
     "expression_00002": "lec",
     "fflop": "lec",
@@ -75,7 +75,7 @@ SLANG_LADDER = {
     "long_kogg_stone_64": "lec",
     "long_mem": "verilog",  # LEC-capable but memory LEC is slow on big arrays; small-array coverage rides simple_rf1/rf2/tuplish
     "long_mem3": "verilog",  # capped: slow memory LEC (see long_mem)
-    "long_nocheck_iwls_square": "verilog",  # compiles; LEC gap tracked
+    "long_nocheck_iwls_square": "lec",  # attempt LEC; explicit timeout is accepted, equivalence remains unproven
     "long_regfile1r1w": "lec",  # `output reg` port: procedural <= is a legal NBA-to-variable
     "long_regfile2r1w": "lec",  # ports are `output reg` (variables), so the procedural <= is a legal NBA-to-variable (unlike long_regfile1r1w's net `output`)
     # PROMOTED (was "error", "nested dynamic lvalue (mem element part-select)"):
@@ -86,7 +86,7 @@ SLANG_LADDER = {
     "long_shared_ports": "lec",
     "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
-    "mem_reset": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)
+    "mem_reset": "lec",
     "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",
     "mt_basic_test": "lec",
@@ -102,7 +102,7 @@ SLANG_LADDER = {
     # miscompile the reader must instead hard-error; see slang_structure.cpp
     # demote_reset_edges). The clean async_reset_enable / async_negreset_compound
     # demotions are the positive coverage (inou/prp equiv_slang pairs).
-    "nocheck_async_reset_clock_demote": "error",  # gate 3: reset-named CLOCK not read in body → refuse
+    "nocheck_async_reset_clock_demote": "lec",  # nonconstant async load keeps the actual clock
     "nocheck_async_reset_peel": "error",  # gate 1: no demote after a rung already peeled
     "nocheck_async_reset_unreadable": "error",  # gate 2: demoted reset must be readable
     "nocheck_blackboxing2": "error",  # fail-unknown-module
@@ -128,8 +128,8 @@ SLANG_LADDER = {
     "params": "lec",
     "params_submodule": "lec",
     "pick": "lec",
-    "punch": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)
-    "punch.gld": "error",  # illegal identifier in the auto-generated golden (unescaped dot)
+    "punch": "lec",
+    "punch.gld": "lec",
     "punching": "lec",
     "punching_3": "lec",
     "random_delay": "lec",

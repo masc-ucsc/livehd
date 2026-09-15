@@ -23,10 +23,10 @@ fail() {
 cat "$W/native"/*.v >"$W/native_all.v"
 
 "$LHD" lec --impl verilog:"$W/native_all.v" --ref verilog:"$SRC" \
-  --top unpacked_array_port_order --set formal.solver=lgyosys --set formal.lec.gold_reader=slang \
+  --top unpacked_array_port_order \
   --workdir "$W/lec_work" -q >"$W/lec.log" 2>&1 || {
     tail -30 "$W/lec.log" >&2
-    fail "native and yosys-slang port flattening differ"
+    fail "generated Verilog and source are not equivalent"
   }
 
 echo "PASS: unpacked array ports preserve declaration order in both directions"

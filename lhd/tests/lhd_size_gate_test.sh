@@ -86,7 +86,7 @@ LIVEHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"
 #      otherwise identical designs are dropped structurally before any encode.
 # ---------------------------------------------------------------------------
 if LIVEHD_LARGE_DESIGN_NODES=1 "$LHD" lec --impl "$PRP" --ref "$PRP" \
-    --impl-top "$TOP" --ref-top "$TOP" --set formal.solver=cvc5 --set formal.lec.semdiff=none \
+    --impl-top "$TOP" --ref-top "$TOP" --set formal.lec.semdiff=none \
     --workdir "$W/w6" -q --result-json "$W/lec.json" 2>/dev/null; then
   fail "lec accepted an over-threshold design"
 fi
@@ -94,7 +94,7 @@ grep -q 'allow_oversize' "$W/lec.json" \
   || fail "lec refusal does not name the override flag: $(cat "$W/lec.json" 2>/dev/null)"
 
 LIVEHD_LARGE_DESIGN_NODES=1 run lec --impl "$PRP" --ref "$PRP" \
-  --impl-top "$TOP" --ref-top "$TOP" --set formal.solver=cvc5 --set formal.lec.semdiff=none \
+  --impl-top "$TOP" --ref-top "$TOP" --set formal.lec.semdiff=none \
   --set formal.allow_oversize=true --workdir "$W/w7"
 
 # ---------------------------------------------------------------------------

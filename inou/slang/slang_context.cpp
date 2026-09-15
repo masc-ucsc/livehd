@@ -370,6 +370,9 @@ std::string Slang_context::reg_net_of(const slang::ast::Symbol& sym) {
 }
 
 std::string Slang_context::write_target_of(const slang::ast::Symbol& sym) {
+  if (auto it = blocking_values_.find(&sym); it != blocking_values_.end()) {
+    return it->second;
+  }
   // Only an EDGE process writes the flop. A continuous assign (and a comb
   // process, which cannot legally share bits with the flop anyway) drives the
   // composite the reads resolve to.

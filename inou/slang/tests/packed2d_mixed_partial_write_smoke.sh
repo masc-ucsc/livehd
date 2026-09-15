@@ -33,7 +33,7 @@ grep -q "cgen_memory" "$W/out.v" \
 
 # BOTH writes have to survive. A same-cycle collision is what the memory shape
 # gets wrong, so drive both enables together and let the prover compare.
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/out.v" \
+"$LHD" lec --impl verilog:"$W/out.v" \
   --ref verilog:"$SRC" --top "$TOP" --workdir "$W/lec" -q >/dev/null 2>&1 \
   || fail "the flat-bus lowering is not equivalent to the source"
 

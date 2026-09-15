@@ -28,7 +28,7 @@ for mode in default false true; do
     --set pass.abc.flatten=true --set synth.threads=1 ${flags[@]+"${flags[@]}"} \
     --emit-dir lg:"$W/$mode-lg" --emit verilog:"$W/$mode.v" --workdir "$W/$mode-work"
   run lec --impl lg:"$W/$mode-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
-    --set formal.solver=cvc5 --set formal.bound=3 --set formal.timeout=60 \
+    --set formal.bound=3 --set formal.timeout=60 \
     --workdir "$W/$mode-lec" --result-json "$W/$mode-lec.json"
 done
 python3 - "$W" <<'PY'

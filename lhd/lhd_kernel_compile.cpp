@@ -1537,6 +1537,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     if (!active->graphs.empty()) {
       Eprp_var::Eprp_dict labels;
       merge_sets(opts, "compile.formal", labels);
+      labels["hier_preflight"] = opts.compile_formal_preflight ? "true" : "false";
       Eprp_var::Eprp_dict formal_labels;
       merge_sets(opts, "formal", formal_labels);
       if (auto it = formal_labels.find("assume_check"); it != formal_labels.end()) {

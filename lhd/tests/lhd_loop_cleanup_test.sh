@@ -11,11 +11,9 @@ run compile inou/prp/tests/equiv/loop_break_leftover.prp --emit-dir lg:"$W/sourc
 run pass partition lg:"$W/source" --top top --set pass.partition.flatten=true \
   --emit-dir lg:"$W/partitioned" --workdir "$W/p"
 run compile lg:"$W/partitioned" --top top --emit-dir lg:"$W/cleaned" --emit verilog:"$W/cleaned.v" --workdir "$W/cleanup"
-for engine in cvc5 lgyosys; do
-  run lec --impl lg:"$W/cleaned" --ref pyrope:inou/prp/tests/equiv/loop_break_leftover_1.prp \
-    --impl-top loop_break_leftover.top --ref-top top --set formal.solver="$engine" \
-    --set formal.timeout=60 --workdir "$W/$engine"
-done
+run lec --impl lg:"$W/cleaned" --ref pyrope:inou/prp/tests/equiv/loop_break_leftover_1.prp \
+  --impl-top loop_break_leftover.top --ref-top top \
+  --set formal.timeout=60 --workdir "$W/default"
 # ABC must specialize its own private iteration bodies before mapping: the
 # compact source stays intact while constant indices and break conditions fold.
 LIB=inou/prp/tests/abc/test.lib
@@ -26,9 +24,7 @@ import json,sys
 q=json.load(open(sys.argv[1]))['qor']['abc']['total']; assert q['gates'] < 100,q
 PYQ
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/models-work"
-for engine in cvc5 lgyosys; do
-  run lec --impl lg:"$W/mapped" --ref pyrope:inou/prp/tests/equiv/loop_break_leftover_1.prp \
-    --lib lg:"$W/models" --impl-top loop_break_leftover.top --ref-top top --set formal.solver="$engine" \
-    --set formal.timeout=60 --workdir "$W/mapped-$engine"
-done
+run lec --impl lg:"$W/mapped" --ref pyrope:inou/prp/tests/equiv/loop_break_leftover_1.prp \
+  --lib lg:"$W/models" --impl-top loop_break_leftover.top --ref-top top \
+  --set formal.timeout=60 --workdir "$W/mapped-default"
 echo 'PASS: cleanup preserves constant carries after partitioning'

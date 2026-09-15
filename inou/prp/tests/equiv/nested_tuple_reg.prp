@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: nested_tuple_reg
 :pyrope_top: nested_tuple_reg
-:equiv_engine: cvc5
 */
 
 // 2f-nested_type — a NESTED tuple type used as register storage. It splits into

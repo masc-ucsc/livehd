@@ -64,7 +64,7 @@ private:
   // Occurrence-local color temporaries can be rebound through cloned pins whose
   // width/sign metadata is stale. Track their emitted C++ type by expression so
   // raw_operand can still account for Slop_u<W>'s W+1-bit physical carrier.
-  absl::flat_hash_map<std::string, int>        slop_u_binding_width_;
+  absl::flat_hash_map<std::string, int>       slop_u_binding_width_;
   // Get_mask nodes whose occurrence input was already narrowed to their exact
   // constant lane by the color ABI. For that occurrence the cell is an
   // identity; the set is rebuilt per emitted member because Class_index is
@@ -186,6 +186,9 @@ private:
   // sign_mode: 0 = per is_unsign(pin), +1 = force signed (Slop<W>{...}, sext),
   // -1 = force unsigned (.zext_to<W>(), zext).
   std::string operand(const hhds::Pin_class& dpin, int target_bits, int sign_mode = 0);
+  // operand() for a child `__in` field write: the source object itself when it
+  // already has the destination's exact Slop_u<W> type (no carrier copy).
+  std::string bind_operand(const hhds::Pin_class& dpin, int target_bits, bool unsign_dst);
   // Resolve a driver pin to a Slop expression AT ITS OWN WIDTH -- no width
   // conversion at all. For the mixed-width Slop ops (Slop<W>::add_op(x, y) and
   // friends), which accept operands of ANY width and materialize the result at
@@ -206,6 +209,7 @@ private:
   // low-bit Get_mask), so bits outside the declared source width cannot leak.
   std::string stored_operand(const hhds::Pin_class& dpin, int fallback_bits);
   // The RHS Slop<wbits> expression for one combinational node.
+  static int  low_lane_readers_width(const hhds::Pin_class& output);
   bool        proven_unsigned_result(const hhds::Node_class& node, const hhds::Pin_class& output) const;
   bool        proven_canonical_unsigned_result(const hhds::Node_class& node, const hhds::Pin_class& output) const;
   bool        raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits);
@@ -294,7 +298,7 @@ public:
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false,
-           bool _unknown_zero = false, bool _llvm_backend = false)
+           bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -307,7 +311,9 @@ public:
       , slop_u_(_slop_u)
       , color_dirty_(_color_dirty)
       , debug_(_debug)
-      , unknown_zero_(_unknown_zero) {}
+      , unknown_zero_(_unknown_zero)
+      , dut_(_dut)
+      , live_words_(_live_words) {}
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
@@ -337,6 +343,11 @@ private:
   // work, which defeats quiescence detection) stays false for it. true forces
   // zero, which also lets the literal fold at C++ compile time.
   bool                           unknown_zero_   = false;
+  // The driver writes this module's `__in` directly (it is the simulated DUT),
+  // so its wide inputs carry no trustworthy change version: never forward
+  // them by version (see "Versioned wide inputs" in do_from_graph).
+  bool                           dut_            = false;
+  uint32_t                       live_words_     = 0;  // sim.live_words (0 = the plan's default); folded into the key
 
 public:
   // The C++ TYPE a stored unsigned value of `bits` literal LiveHD bits is

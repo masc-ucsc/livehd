@@ -1445,7 +1445,9 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   ln.add_child(st, Lnast_node::create_ref(lname_of(*mem_sym)));
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, din);
-  builder_.add_value_child_pub(st, std::to_string(chunk));
+  if (wensize > 1) {
+    builder_.add_value_child_pub(st, std::to_string(chunk));
+  }
   return true;
 }
 
@@ -1957,7 +1959,7 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   // the selected width. Make that precision boundary explicit here: LNAST
   // integers are otherwise unbounded, so an arithmetic RHS can reach the
   // bitwidth verifier one carry bit wider than the destination slice.
-  auto val       = fit_wrap(rhs, static_cast<int>(lv.width), lv.is_signed);
+  auto val       = trunc_to(rhs, static_cast<int>(lv.width));
   // The net this RMW modifies. For a partially-registered var an edge-process
   // write lands on the FLOP, not on the combinational composite the symbol's
   // own name now denotes -- and it must also READ the flop here, because the

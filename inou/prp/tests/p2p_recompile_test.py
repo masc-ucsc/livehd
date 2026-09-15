@@ -26,8 +26,6 @@ def main():
             str(lhd),
             "compile",
             args.input,
-            "--set",
-            "compile.upass.inline=true",
             "--emit-dir",
             "pyrope:" + str(out) + "/",
             "--workdir",

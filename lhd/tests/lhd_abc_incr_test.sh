@@ -87,7 +87,7 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
   run compile lg:"$W/re$1" --top "$TOP" --emit-dir verilog:"$W/re${1}v" --workdir "$W/w_rv$1"
   cat "$W/${1}v/"*.v "$W/modelsv/"*.v > "$W/impl$1.v"
   cat "$W/re${1}v/"*.v > "$W/ref$1.v"
-  run lec --set formal.solver=lgyosys --impl verilog:"$W/impl$1.v" --ref verilog:"$W/ref$1.v" --top "$TOP" --workdir "$W/w_l$1"
+  run lec --impl verilog:"$W/impl$1.v" --ref verilog:"$W/ref$1.v" --top "$TOP" --workdir "$W/w_l$1"
   echo "PASS: $3 is LEC-equivalent"
 }
 

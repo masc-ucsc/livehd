@@ -25,17 +25,14 @@ for fixture in mem_comptime_init mem_init_tuple mem_multidim_init mem_pending_re
   fi
   run synth lg:"$d/source" --top "$top" --set synth.liberty="$LIB" --set synth.opentimer=false --set pass.abc.memory=true \
     --emit-dir lg:"$d/mapped" --emit verilog:"$d/mapped.v" --workdir "$d/synth"
-  for engine in cvc5 lgyosys; do
-    run lec --impl lg:"$d/mapped" --ref lg:"$d/source" --lib lg:"$W/models" --top "$top" \
-      --set formal.solver="$engine" --set formal.bound=2 --set formal.timeout=60 --workdir "$d/$engine" --result-json "$d/$engine.json"
-    python3 - "$d/$engine.json" "$engine" <<'PY'
+  run lec --impl lg:"$d/mapped" --ref lg:"$d/source" --lib lg:"$W/models" --top "$top" \
+    --set formal.bound=2 --set formal.timeout=60 --workdir "$d/default" --result-json "$d/default.json"
+  python3 - "$d/default.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))['lec']
-assert r['verdict'] != 'refuted',r
-if sys.argv[2]=='cvc5': assert r['verdict']=='proven',r
-print(sys.argv[2],r)
+assert r['verdict']=='proven',r
+print(r)
 PY
-  done
 done
 cat > "$W/tb.v" <<'SV'
 module tb;

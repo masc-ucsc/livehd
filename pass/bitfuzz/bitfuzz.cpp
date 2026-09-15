@@ -210,6 +210,19 @@ bool mode_from_string(std::string_view s, Mode* out) {
   return true;
 }
 
+Stats strip_annotations(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
+  Stats st;
+  if (!g || opts.mode == Mode::Off) {
+    return st;
+  }
+  for (const auto& s : collect(g.get(), opts)) {
+    strip(s);
+    ++st.cleared;
+    st.cleared_state += s.is_state;
+  }
+  return st;
+}
+
 Stats fuzz(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
   Stats st;
   if (!g || opts.mode == Mode::Off) {

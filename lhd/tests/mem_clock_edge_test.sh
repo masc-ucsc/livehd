@@ -16,8 +16,9 @@
 #
 # User ruling 2026-08-02: a memory whose ports do not all commit on the same
 # edge is a shape LiveHD does not model, but the LANGUAGE allows it -- so it is
-# a FORMAL error, not a read error. It parses and regenerates (blackbox: fine to
-# do strange things), `lhd lec` refuses it BY NAME, and the user opts back in
+# a FORMAL error, not a read error. It parses into a graph with a mixed-edge
+# marker. Verilog emission must refuse it instead of silently emitting every
+# port on posedge; `lhd lec` refuses it BY NAME, and the user opts back in
 # per memory with `--set formal.ignore_memory=<name>`, which blackboxes it: the
 # reads become one shared free symbol per (port, cycle) across the two designs
 # and the contents are never compared. (A latch may mix phases -- that is what
@@ -46,12 +47,13 @@ fail() {
   exit 1
 }
 
-# Compile through the YOSYS reader (the only front end that can express per-port
-# polarity at all) and emit Verilog, so the surviving edge is observable.
+# Compile through native Slang; emit representable edges to inspect them.
 compile_emit() { # <name> <src> <top> -> $W/<name>.log, $W/emit_<name>/ (Verilog), $W/lg_<name>/ (IR)
   rm -rf "$W/emit_$1" "$W/lg_$1"
-  "$LHD" compile "$2" --reader yosys-verilog --top "$3" \
-    --emit-dir "verilog:$W/emit_$1" --emit-dir "lg:$W/lg_$1" --workdir "$W/w_$1" >"$W/$1.log" 2>&1
+  local emits=(--emit-dir "lg:$W/lg_$1")
+  [[ "$1" == mixed* ]] || emits+=(--emit-dir "verilog:$W/emit_$1")
+  "$LHD" compile "$2" --top "$3" \
+    "${emits[@]}" --workdir "$W/w_$1" >"$W/$1.log" 2>&1
   return $?
 }
 
@@ -71,12 +73,18 @@ module mixed(input clk, input [3:0] wa, input we, input [7:0] d,
 endmodule
 EOF
 compile_emit mixed "$W/mixed.v" mixed \
-  || { tail -8 "$W/mixed.log"; fail "case 1: a mixed-edge memory must PARSE (the language allows it); only FORMAL refuses it"; }
+  || { tail -8 "$W/mixed.log"; fail "case 1: a mixed-edge memory must PARSE (the language allows it)"; }
 grep -qa "mixes clock edges" "$W/mixed.log" \
   || { tail -8 "$W/mixed.log"; fail "case 1: parsed, but SILENTLY -- the lost per-port edges must be warned about where they are lost"; }
 grep -qa "write port 1" "$W/mixed.log" \
   || { tail -8 "$W/mixed.log"; fail "case 1: the warning does not name the offending port"; }
 echo "ok: a mixed-edge memory parses, with a warning naming the disagreeing ports"
+if "$LHD" compile "lg:$W/lg_mixed" --top mixed --emit-dir "verilog:$W/emit_mixed" \
+    --workdir "$W/w_mixed_emit" > "$W/mixed_emit.log" 2>&1; then
+  fail "case 1: emitted mixed-edge memory without per-port edge support"
+fi
+grep -q 'requires per-port clock edge polarity' "$W/mixed_emit.log" \
+  || { cat "$W/mixed_emit.log"; fail "case 1: emission failed without a clock-edge diagnostic"; }
 
 # ---------------------------------------------------------------------------
 # 1b. ...and FORMAL refuses it by name, at exit 7 (could-not-decide), never 10.
@@ -179,8 +187,26 @@ fi
 grep -qa "negedge" "$W/emit_split_read/"*.v || fail "read register lost its negedge"
 # The positive write edge lives inside this RTL wrapper; the top passes clk
 # directly to its write-clock port while the read-register event stays explicit.
-grep -qa 'cgen_memory_multiclock_1rd_1wr' "$W/emit_split_read/"*.v || fail "missing memory wrapper"
-grep -qa '\.wr_clock_0(clk)' "$W/emit_split_read/"*.v || fail "memory write clock was changed"
+grep -qaE 'cgen_memory_(multiclock_)?1rd_1wr' "$W/emit_split_read/"*.v || fail "missing memory wrapper"
+grep -qaE '\.(wr_clock_0|clk)\(clk\)' "$W/emit_split_read/"*.v || fail "memory write clock was changed"
+
+# Distinct clocks on same-edge write ports must remain distinct after Slang.
+cat > "$W/two_clocks.v" <<'EOF'
+module two_clocks(input ca, cb, ea, eb, input [3:0] aa, ab, ra,
+                  input [7:0] da, db, output [7:0] q);
+  reg [7:0] m[15:0];
+  always @(posedge ca) if (ea) m[aa] <= da;
+  always @(posedge cb) if (eb) m[ab] <= db;
+  assign q = m[ra];
+endmodule
+EOF
+compile_emit two_clocks "$W/two_clocks.v" two_clocks \
+  || { cat "$W/two_clocks.log"; fail "two clock memory did not compile"; }
+grep -qa 'cgen_memory_multiclock_1rd_2wr' "$W/emit_two_clocks/"*.v \
+  || fail "distinct write clocks collapsed into one clock"
+grep -qa '\.wr_clock_0(ca)' "$W/emit_two_clocks/"*.v || fail "first write clock changed"
+grep -qa '\.wr_clock_1(cb)' "$W/emit_two_clocks/"*.v || fail "second write clock changed"
+echo "ok: distinct same-edge write clocks survive native Slang translation"
 
 echo "PASS: mem_clock_edge_test"
 exit 0

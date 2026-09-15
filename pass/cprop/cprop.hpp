@@ -22,7 +22,7 @@ protected:
   void collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
   void collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
   // Reconnect node's consumers to new_dpin and delete node. Returns false
-  // (graph untouched) when a consumer width disagrees with new_dpin's — a caller
+  // (graph untouched) when forwarding would lose a parallel operand — a caller
   // that created new_dpin's node must then clean up the orphan.
   bool collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin);
 
@@ -74,8 +74,6 @@ protected:
 public:
   Cprop() = default;
 
-  // `check_input_sized=false` is reserved for a graph produced by a later
-  // structural transform (for example LEC hierarchy collapse), not a raw
-  // front-end output. Normal compile callers keep the default invariant.
-  void do_trans(const std::shared_ptr<hhds::Graph>& g, bool check_input_sized = true);
+  // Rewrites unlimited-precision values without consulting width/sign hints.
+  void do_trans(const std::shared_ptr<hhds::Graph>& g);
 };

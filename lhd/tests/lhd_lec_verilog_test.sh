@@ -1,13 +1,8 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# `lhd lec` is the single logic-equivalence command. The former `lhd check`
-# (yosys/lgcheck) is now the `--set formal.solver=lgyosys` backend, and lec accepts
-# verilog inputs directly: a .v/.sv side elaborates through the default `slang`
-# reader (the direct SV->LNAST front-end) or, with --reader yosys-*, the yosys
-# front-end. The --set formal.solver knob selects cvc5 (default) / bitwuzla /
-# lgyosys. Fixtures: the committed inou/prp/tests/equiv trivial_if pyrope/verilog
-# golden pair, plus the merge_demo inverter (a plainly-named module).
+# Verilog and Pyrope equivalence through the default lhd lec solver, including
+# reader selection, hierarchy, aggregate ports, reset, and verdict handling.
 
 set -u
 LHD=lhd/lhd
@@ -27,34 +22,17 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 grep -q '"status":"pass"' "$W/r1.json" || fail "lec cvc5 not pass: $(cat "$W/r1.json")"
 echo "PASS: lec prp vs verilog (default cvc5, slang reader)"
 
-# 2. The same pair through the lgyosys backend (the former `lhd check`).
-"$LHD" lec --impl "$PRP" --ref "$V0" --top "$TOP" --set formal.solver=lgyosys \
-  --workdir "$W/c2" -q --result-json "$W/r2.json" \
-  || fail "lec prp vs verilog (lgyosys) not pass: $(cat "$W/r2.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/r2.json" || fail "lec lgyosys not pass: $(cat "$W/r2.json")"
-echo "PASS: lec prp vs verilog (--set formal.solver=lgyosys)"
+# Reader comparison is explicit: Yosys compilation produces graphs, while LEC
+# independently elaborates the original source through native Slang.
+"$LHD" compile "$INV" --reader yosys --top inv --emit-dir "lg:$W/yosys_inv" \
+  --workdir "$W/yosys_inv_compile" || fail "Yosys reference compilation failed"
+"$LHD" lec --impl "lg:$W/yosys_inv" --ref "$INV" --top inv \
+  --workdir "$W/c2_slang" -q --result-json "$W/r2_slang.json" \
+  || fail "Yosys graph differs from native Slang"
+grep -q '"verdict":"proven"' "$W/r2_slang.json" || fail "reader comparison was not proven"
+echo "PASS: Yosys graphs agree with native Slang LEC"
 
-# The slang reference reader is yosys's built-in read_slang (no plugin to
-# stage). Exercise it: large V2V tests use it for packed-struct SystemVerilog
-# references and must not depend on the caller cwd.
-"$LHD" lec --impl "$INV" --ref "$INV" --top inv --set formal.solver=lgyosys \
-  --set formal.lec.gold_reader=slang --workdir "$W/c2_slang" -q --result-json "$W/r2_slang.json" \
-  || fail "lec lgyosys slang reader not pass: $(cat "$W/r2_slang.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/r2_slang.json" \
-  || fail "lec lgyosys slang reader not pass: $(cat "$W/r2_slang.json")"
-echo "PASS: lgyosys gold-side read_slang reader"
-
-# The generated/implementation side can independently use read_slang. This is
-# the scalable path for large cgen Verilog (Minion/XiangShan), while keeping the
-# legacy read_verilog reader as the default for compatibility.
-"$LHD" lec --impl "$INV" --ref "$INV" --top inv --set formal.solver=lgyosys \
-  --set formal.lec.gate_reader=slang --workdir "$W/c2_gate_slang" -q --result-json "$W/r2_gate_slang.json" \
-  || fail "lec lgyosys gate slang reader not pass: $(cat "$W/r2_gate_slang.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/r2_gate_slang.json" \
-  || fail "lec lgyosys gate slang reader not pass: $(cat "$W/r2_gate_slang.json")"
-echo "PASS: lgyosys gate-side read_slang reader"
-
-# Hierarchical lgyosys fallback must detect reset per selected module, not by
+# Hierarchical default LEC fallback must detect reset per selected module, not by
 # grepping the whole concatenated source. A parent may have reset while a child
 # does not (as in Dino's DualIssueRegisterFile); constraining that child's
 # nonexistent `in_reset` turns an inconclusive/proven result into a setup error.
@@ -76,7 +54,7 @@ PORT_TOOL=inou/yosys/rtlil_children.py
   || fail "RTLIL reset inspection inherited an unrelated parent's reset"
 [ "$(python3 "$PORT_TOOL" --rtlil "$W/reset_ports.il" --top child --has-input rst_ni)" = yes ] \
   || fail "RTLIL reset inspection missed an active-low child reset"
-echo "PASS: lgyosys reset constraints are selected-module local"
+echo "PASS: RTLIL reset inspection is selected-module local"
 
 # Reset spelling and polarity are semantic. With zero-initialized SAT flops,
 # these two encodings disagree before reset (q=0 versus qn=0 => ~qn=1) but are
@@ -101,12 +79,12 @@ module reset_low(input clock, input rst_ni, input d, output o);
 endmodule
 V
 "$LHD" lec --impl "$W/reset_low_impl.v" --ref "$W/reset_low_ref.v" --top reset_low \
-  --set formal.solver=lgyosys --workdir "$W/c2_reset_low" -q \
+  --workdir "$W/c2_reset_low" -q \
   --result-json "$W/r2_reset_low.json" \
-  || fail "lgyosys did not honor active-low reset: $(cat "$W/r2_reset_low.json" 2>/dev/null)"
+  || fail "default LEC did not honor active-low reset: $(cat "$W/r2_reset_low.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2_reset_low.json" \
-  || fail "lgyosys active-low reset result not pass: $(cat "$W/r2_reset_low.json")"
-echo "PASS: lgyosys applies active-low selected-module reset polarity"
+  || fail "default LEC active-low reset result not pass: $(cat "$W/r2_reset_low.json")"
+echo "PASS: default LEC applies active-low selected-module reset polarity"
 
 # Descending a parameterized hierarchy must compare the two occurrence-
 # specialized definitions when both RTLIL caches retain them. Falling back to
@@ -140,7 +118,7 @@ mapped=$(python3 "$PORT_TOOL" --rtlil "$W/param_gate.il" --top parent \
   || fail "RTLIL child specialization mapping failed"
 [ "$mapped" = $'child$parent.u\tchild$parent.u' ] \
   || fail "RTLIL child descent discarded the parameterized occurrence: $mapped"
-echo "PASS: lgyosys descent preserves parameter-specialized child definitions"
+echo "PASS: RTLIL child mapping preserves parameter-specialized child definitions"
 
 # cgen can merge two equal generated occurrences under a different hierarchy
 # spelling than yosys-slang (Minion's u_tb/u_tb_cgen1 versus
@@ -174,7 +152,7 @@ mapped=$(python3 "$PORT_TOOL" --rtlil "$W/param_renamed_gate.il" --top parent \
   || fail "RTLIL renamed-specialization mapping failed"
 [ "$mapped" = $'child$parent.renamed\tchild$parent.original_w10' ] \
   || fail "RTLIL child descent restored a default after hierarchy renaming: $mapped"
-echo "PASS: lgyosys descent maps renamed occurrences by elaborated interface"
+echo "PASS: RTLIL child mapping maps renamed occurrences by elaborated interface"
 
 # An implementation-only helper generated during the Pyrope/cgen round trip
 # has no reference definition to select.  Report an explicit skip marker rather
@@ -199,7 +177,7 @@ mapped=$(python3 "$PORT_TOOL" --rtlil "$W/impl_only_gate.il" --top parent \
   || fail "RTLIL implementation-only child mapping failed"
 [ "$mapped" = $'helper_p1$parent.u\t-' ] \
   || fail "RTLIL implementation-only child invented a reference top: $mapped"
-echo "PASS: lgyosys descent marks implementation-only generated children as skips"
+echo "PASS: RTLIL child mapping marks implementation-only generated children as skips"
 
 # The cached proof itself must select that occurrence too. Give the two cache
 # PARENTS opposite behavior while keeping the specialized children identical:
@@ -228,16 +206,19 @@ module \child$parent.u
   connect \o 1'0
 end
 IL
-LG=inou/yosys/lgcheck
 YOSYS=inou/yosys/yosys2
-LGCHECK_EQUIV_TIMEOUT=10 "$LG" --reference "$INV" --implementation "$INV" \
-  --yosys "$YOSYS" --reference_top 'child$parent.u' --implementation_top 'child$parent.u' \
-  --gold_rtlil "$W/cache_gold.il" --gate_rtlil "$W/cache_gate.il" \
+# Read the cached RTLIL into Verilog; all equivalence checks use default lhd lec.
+for side in gold gate; do
+  "$YOSYS" -Q -T -p "read_rtlil $W/cache_$side.il; write_verilog $W/cache_$side.v" \
+    >"$W/cache_$side.log" 2>&1 || { cat "$W/cache_$side.log"; fail "RTLIL reload failed"; }
+done
+"$LHD" lec --ref "$W/cache_gold.v" --impl "$W/cache_gate.v" \
+  --top 'child$parent.u' \
+  --workdir "$W/cache_child" --result-json "$W/cache_child.json" \
   >"$W/cache_child.log" 2>&1 \
-  || { cat "$W/cache_child.log"; fail "cached descendant proof did not select the requested child top"; }
-grep -q 'Equivalence successfully proven' "$W/cache_child.log" \
-  || { cat "$W/cache_child.log"; fail "cached descendant proof lacked a proof verdict"; }
-echo "PASS: cached descendant proofs reload the selected child rather than the parent"
+  || { cat "$W/cache_child.log"; fail "reloaded descendant proof selected the wrong top"; }
+grep -q '"verdict":"proven"' "$W/cache_child.json" || fail "descendant was not proven"
+echo "PASS: reloaded descendant proofs select the child rather than the parent"
 
 # A cached occurrence name can end in the base module's own spelling, e.g.
 # ClockGate$ExuBlock.ClockGate. Source-side compatibility resolution must not
@@ -248,15 +229,16 @@ module u(output o);
   assign o = 1'b1;
 endmodule
 V
-LGCHECK_EQUIV_TIMEOUT=10 "$LG" --reference "$W/cache_source_base.v" \
-  --implementation "$W/cache_source_base.v" --yosys "$YOSYS" \
-  --reference_top 'child$parent.u' --implementation_top 'child$parent.u' \
-  --gold_rtlil "$W/cache_gold.il" --gate_rtlil "$W/cache_gate.il" \
+for side in gold gate; do
+  cat "$W/cache_source_base.v" "$W/cache_$side.v" >"$W/cache_named_$side.v"
+done
+"$LHD" lec --ref "$W/cache_named_gold.v" --impl "$W/cache_named_gate.v" \
+  --top 'child$parent.u' \
+  --workdir "$W/cache_occurrence_name" --result-json "$W/cache_occurrence_name.json" \
   >"$W/cache_occurrence_name.log" 2>&1 \
-  || { cat "$W/cache_occurrence_name.log"; fail "source fallback replaced an authoritative cached occurrence top"; }
-grep -q 'Equivalence successfully proven' "$W/cache_occurrence_name.log" \
-  || { cat "$W/cache_occurrence_name.log"; fail "cached dotted occurrence lacked a proof verdict"; }
-echo "PASS: cached occurrence tops are not rewritten to a source base name"
+  || { cat "$W/cache_occurrence_name.log"; fail "source base replaced the selected occurrence"; }
+grep -q '"verdict":"proven"' "$W/cache_occurrence_name.json" || fail "named occurrence was not proven"
+echo "PASS: selected occurrence tops are not rewritten to a source base name"
 
 # cgen exposes tuple leaves as escaped dotted top ports, while an original
 # packed-struct SystemVerilog top reaches Yosys as one vector port. Exercise the
@@ -284,14 +266,11 @@ module split_ports(
 endmodule
 V
 "$LHD" lec --impl "$W/split_impl.v" --ref "$W/split_ref.sv" --top split_ports \
-  --set formal.solver=lgyosys --set formal.lec.gold_reader=slang \
-  --set formal.lec.gate_reader=slang --set formal.lec.normalize_split_ports=true \
-  --set formal.lec.descend_on_inconclusive=true \
   --workdir "$W/c2_split_ports" -q --result-json "$W/r2_split_ports.json" \
-  || fail "lec lgyosys split-port adapter not pass: $(cat "$W/r2_split_ports.json" 2>/dev/null)"
+  || fail "lec default LEC split-port adapter not pass: $(cat "$W/r2_split_ports.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2_split_ports.json" \
-  || fail "lec lgyosys split-port adapter not pass: $(cat "$W/r2_split_ports.json")"
-echo "PASS: lgyosys normalizes packed reference ports against cgen leaf ports"
+  || fail "lec default LEC split-port adapter not pass: $(cat "$W/r2_split_ports.json")"
+echo "PASS: default LEC normalizes packed reference ports against cgen leaf ports"
 
 # A hierarchy-selected module may retain non-monotonic port IDs even though
 # write_rtlil keeps the source declaration order.  Aggregate packing follows
@@ -340,85 +319,82 @@ module relaxed_ref(input a, output y);
   assign y = a;
 endmodule
 V
-"$LHD" lec --impl "$W/relaxed_impl.v" --ref "$W/relaxed_ref.sv" --top relaxed_ref \
-  --set formal.solver=lgyosys --set formal.lec.gold_reader=slang \
-  --workdir "$W/c2_relaxed" -q --result-json "$W/r2_relaxed.json" \
-  || fail "lec lgyosys relaxed slang source not pass: $(cat "$W/r2_relaxed.json" 2>/dev/null)"
-echo "PASS: lgyosys slang reader accepts project enum and declaration-order idioms"
+# Default Slang enforces the source language: an implicit enum assignment
+# is invalid even if the assigned value is unused. Do not inherit lgcheck's
+# permissive reader switches merely to make an equivalence check run.
+if "$LHD" lec --impl "$W/relaxed_impl.v" --ref "$W/relaxed_ref.sv" --top relaxed_ref \
+  --workdir "$W/c2_relaxed" -q --result-json "$W/r2_relaxed.json"; then
+  fail "default LEC accepted an invalid implicit enum conversion"
+fi
+grep -q '"class":"syntax"' "$W/r2_relaxed.json" || fail "invalid enum source lacked a syntax error"
+grep -q 'no implicit conversion' "$W/r2_relaxed.json" || fail "invalid enum failed for the wrong reason"
+echo "PASS: default LEC diagnoses invalid enum source before equivalence"
 
-# A reader/top/setup failure has no equivalence evidence. Keep it a dependency
+# A reader/top/setup failure has no equivalence evidence. Keep it a configuration
 # error, never a synthetic REFUTED verdict (only a bounded CEX may use that).
-if "$LHD" lec --impl "$INV" --ref "$INV" --top no_such_top --set formal.solver=lgyosys \
+if "$LHD" lec --impl "$INV" --ref "$INV" --top no_such_top \
   --workdir "$W/c2_setup_fail" -q --result-json "$W/r2_setup_fail.json"; then
-  fail "lgyosys accepted a missing top"
+  fail "default LEC accepted a missing top"
 fi
-grep -q '"class":"dependency"' "$W/r2_setup_fail.json" \
-  || fail "lgyosys setup failure was not classified as dependency: $(cat "$W/r2_setup_fail.json")"
+grep -q '"class":"config"' "$W/r2_setup_fail.json" \
+  || fail "default LEC setup failure was not classified as config: $(cat "$W/r2_setup_fail.json")"
 grep -q 'REFUTED' "$W/r2_setup_fail.json" \
-  && fail "lgyosys setup failure was mislabeled REFUTED: $(cat "$W/r2_setup_fail.json")"
-echo "PASS: lgyosys setup failures stay distinct from refutations"
+  && fail "default LEC setup failure was mislabeled REFUTED: $(cat "$W/r2_setup_fail.json")"
+echo "PASS: default LEC setup failures stay distinct from refutations"
 
-# Two engines disagreeing means one of them is WRONG, and the safe reading of
-# "an engine holds a concrete counterexample" is never "the designs match".
-# Inject exit 1 at the backend seam for an identical raw-Verilog pair: cvc5
-# proves the same obligation, so lhd must announce the ENGINE DISAGREEMENT and
-# still publish REFUTED with a non-zero exit -- never downgrade it to a pass.
-cat >"$W/lgcheck_fake_refute.sh" <<'SH'
+# Default LEC must never invoke an external lgcheck override. Keep this guard
+# on a real positive proof, so accidentally restoring that backend fails.
+cat >"$W/lgcheck_unexpected.sh" <<'SH'
 #!/bin/sh
-exit 1
+echo "unexpected lgcheck invocation" >&2
+exit 99
 SH
-chmod +x "$W/lgcheck_fake_refute.sh"
-if out=$(LHD_LGCHECK="$W/lgcheck_fake_refute.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
-  --set formal.solver=lgyosys --workdir "$W/c2_refute_confirm" --result-json "$W/r2_refute_confirm.json" 2>&1); then
-  fail "an lgcheck witness was swallowed into a passing verdict: $out"
-fi
-echo "$out" | grep -q 'ENGINE DISAGREEMENT' \
-  || fail "lgyosys did not disclose the cvc5 disagreement: $out"
-grep -q '"verdict":"refuted"' "$W/r2_refute_confirm.json" \
-  || fail "a disputed lgyosys witness must stay refuted: $(cat "$W/r2_refute_confirm.json")"
-grep -q '"status":"pass"' "$W/r2_refute_confirm.json" \
-  && fail "a disputed lgyosys witness was reported as a pass: $(cat "$W/r2_refute_confirm.json")"
-echo "PASS: an lgyosys/cvc5 disagreement stays REFUTED instead of becoming a pass"
+chmod +x "$W/lgcheck_unexpected.sh"
+LHD_LGCHECK="$W/lgcheck_unexpected.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+  --workdir "$W/default_backend" --result-json "$W/default_backend.json" \
+  || fail "default LEC invoked lgcheck"
+grep -q '"verdict":"proven"' "$W/default_backend.json" || fail "default LEC did not prove identity"
+echo "PASS: default LEC proves without lgcheck"
 
 # A bounded BMC window is a counterexample search, not an equivalence proof.
 # This pair first diverges after more than five clocks: the short window must be
 # INCONCLUSIVE (never PROVEN), while a deeper window must find the real CEX.
 cat >"$W/deep_ref.v" <<'V'
-module deep(input clock, output o);
+module deep(input clock, input reset, output o);
   reg [3:0] count;
-  always @(posedge clock) count <= count + 1'b1;
+  always @(posedge clock) if (reset) count <= 0; else count <= count + 1'b1;
   assign o = count == 4'd7;
 endmodule
 V
 cat >"$W/deep_impl.v" <<'V'
-module deep(input clock, output o);
+module deep(input clock, input reset, output o);
   reg [3:0] count;
-  always @(posedge clock) count <= count + 1'b1;
+  always @(posedge clock) if (reset) count <= 0; else count <= count + 1'b1;
   assign o = 1'b0;
 endmodule
 V
-out=$(LGCHECK_BMC_STEPS=5 "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
-  --set formal.solver=lgyosys --workdir "$W/c2_bounded_short" 2>&1) \
-  || fail "short bounded lgyosys run should be inconclusive, not an error: $out"
-echo "$out" | grep -q 'INCONCLUSIVE' \
-  || fail "short bounded lgyosys run did not report INCONCLUSIVE: $out"
-echo "$out" | grep -q 'PROVEN equivalent' \
-  && fail "five counterexample-free steps were mislabeled an equivalence proof: $out"
-if out=$(LGCHECK_BMC_STEPS=10 "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
-  --set formal.solver=lgyosys --workdir "$W/c2_bounded_deep" 2>&1); then
-  fail "deeper lgyosys BMC missed the delayed mismatch: $out"
+# Bounds and engine are explicit here because this case tests bounded-result
+# classification. Solver selection still follows the default.
+"$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
+  --set formal.engine=bmc --set formal.bound=5 --workdir "$W/c2_bounded_short" \
+  --result-json "$W/bounded_short.json" >"$W/bounded_short.log" 2>&1 \
+  || { cat "$W/bounded_short.log"; fail "short bounded run failed"; }
+python3 - "$W/bounded_short.json" <<'PYBOUND'
+import json, sys
+r = json.load(open(sys.argv[1]))['lec']
+assert r['verdict'] == 'proven' and r['bounded'], r
+PYBOUND
+if "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
+  --set formal.engine=bmc --set formal.bound=10 --workdir "$W/c2_bounded_deep" \
+  --result-json "$W/bounded_deep.json" >"$W/bounded_deep.log" 2>&1; then
+  fail "deeper BMC missed the delayed mismatch"
 fi
-echo "$out" | grep -q 'REFUTED' \
-  || fail "deeper lgyosys BMC did not classify the delayed mismatch as REFUTED: $out"
-echo "PASS: bounded no-CEX stays inconclusive; a deeper BMC counterexample refutes"
+grep -q '"verdict":"refuted"' "$W/bounded_deep.json" \
+  || { cat "$W/bounded_deep.log"; fail "deeper BMC did not refute the mismatch"; }
+echo "PASS: short BMC is explicitly bounded; a deeper counterexample refutes"
 
-# The definitive lgcheck BMC initializes every surviving flop to zero. Its
-# per-side preparation must preserve don't-care startup state until then:
-# ordinary `opt` turns GOLD's resetless `if (en) q <= 1` DFFE into constant 1,
-# while the same machine behind mapped DFF instances survives as zero-initialized
-# state on GATE. That manufactured the br_amba_axil_msi netlist refutation even
-# though the next-state functions are equal. Exercise the reduced reproducer
-# directly and pin the production BMC to the same DC-preserving preparation.
+# A resetless enabled register and its mapped flop implementation must have
+# the same behavior; preparation must not invent a startup mismatch.
 cat >"$W/keepdc_gold.v" <<'V'
 module keepdc(input clk, input en, input [31:0] data, output [3:0] o);
   reg [35:0] q;
@@ -443,22 +419,11 @@ module keepdc(input clk, input en, input [31:0] data, output [3:0] o);
   keepdc_dff q3(.D(d[3]), .CLK(clk), .Q(o[3]));
 endmodule
 V
-"$YOSYS" -p "
-  read_verilog -sv $W/keepdc_gold.v; hierarchy -top keepdc; proc; bmuxmap; memory; opt -keepdc; flatten;
-  rename -top gold; prep -top gold; design -stash gold;
-  read_verilog -sv $W/keepdc_gate.v; hierarchy -top keepdc; proc; bmuxmap; memory; opt -keepdc; flatten;
-  rename -top gate; prep -top gate; design -stash gate;
-  design -copy-from gold -as gold gold; design -copy-from gate -as gate gate;
-  miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter;
-  async2sync; dffunmap; proc; opt_clean; hierarchy -top miter;
-  sat -ignore_unknown_cells -seq 1 -set-at 1 trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter
-" >"$W/keepdc.log" 2>&1 \
-  || { cat "$W/keepdc.log"; fail "DC-preserving bounded miter setup failed"; }
-grep -q 'SAT proof finished - no model found: SUCCESS' "$W/keepdc.log" \
-  || { cat "$W/keepdc.log"; fail "DC-preserving bounded miter manufactured a startup mismatch"; }
-grep -Fq 'proc; bmuxmap; memory; opt -keepdc; flatten' "$LG" \
-  || fail "lgcheck BMC no longer uses the tested DC-preserving side preparation"
-echo "PASS: lgyosys BMC preserves don't-care startup state before zero initialization"
+"$LHD" lec --ref "$W/keepdc_gold.v" --impl "$W/keepdc_gate.v" --top keepdc \
+  --workdir "$W/keepdc" --result-json "$W/keepdc.json" >"$W/keepdc.log" 2>&1 \
+  || { cat "$W/keepdc.log"; fail "mapped enabled flops differ from their source"; }
+grep -q '"verdict":"proven"' "$W/keepdc.json" || fail "enabled-flop round trip was not proven"
+echo "PASS: enabled-flop round trip preserves startup state"
 
 # 3. Bare .v paths on BOTH sides: the verilog kind is inferred from the
 #    extension; an identical netlist is trivially PROVEN (in-process cvc5).
@@ -466,12 +431,19 @@ echo "PASS: lgyosys BMC preserves don't-care startup state before zero initializ
   || fail "lec verilog identity (cvc5) not pass: $(cat "$W/r3.json" 2>/dev/null)"
 echo "PASS: lec verilog vs verilog (bare .v, kind inferred, slang)"
 
-# 4. --reader yosys-verilog override: the verilog side elaborates through the
-#    yosys front-end instead of slang (same design => still PROVEN).
-"$LHD" lec --impl "$INV" --ref "$INV" --top inv --reader yosys-verilog \
-  --workdir "$W/c4" -q --result-json "$W/r4.json" \
-  || fail "lec verilog (--reader yosys-verilog) not pass: $(cat "$W/r4.json" 2>/dev/null)"
-echo "PASS: lec verilog vs verilog (--reader yosys-verilog override)"
+# Reader bypasses are rejected outside explicit compilation.
+for reader in yosys yosys-slang yosys-verilog; do
+  if "$LHD" lec --impl "$INV" --ref "$INV" --reader "$reader" >"$W/reader_error.log" 2>&1; then
+    fail "LEC accepted the non-native reader $reader"
+  fi
+  grep -q 'only supported by lhd compile' "$W/reader_error.log" || fail "missing reader migration hint"
+done
+for option in gold_reader gate_reader; do
+  if "$LHD" lec --impl "$INV" --ref "$INV" --set "formal.lec.$option=slang" >"$W/option_error.log" 2>&1; then
+    fail "LEC accepted the retired reader option $option"
+  fi
+  grep -qi 'unknown' "$W/option_error.log" || fail "retired reader option did not report unknown option"
+done
 
 # 5. The retired `check` command points at the merged `lec`.
 out=$("$LHD" check --impl "$V0" --ref "$V0" 2>/dev/null)
@@ -485,7 +457,7 @@ echo "$out" | grep -q '"status":"fail"' || fail "bad solver should fail: $out"
 echo "$out" | grep -q 'cvc5|bitwuzla|lgyosys' || fail "bad solver error lacks the valid set: $out"
 echo "PASS: formal.solver=foo rejected"
 
-echo "ALL PASS: lhd lec verilog inputs + solver backends"
+echo "ALL PASS: lhd lec verilog inputs + default solver"
 
 # A reset in one cone must not hide the stable identity of unreset state in
 # another. Yosys assigns different $procdff IDs after the cgen round trip.
@@ -500,10 +472,46 @@ module state_identity(input clk, reset, en, input [7:0] d,
 endmodule
 V
 "$LHD" compile "$W/state_identity.v" --reader yosys-verilog --top state_identity \
-  --emit verilog:"$W/state_identity_out.v" --workdir "$W/state_compile" -q \
+  --emit-dir "lg:$W/state_identity_lg" --emit verilog:"$W/state_identity_out.v" --workdir "$W/state_compile" -q \
   || fail "Yosys state identity compile"
-"$LHD" lec --impl "$W/state_identity_out.v" --ref "$W/state_identity.v" --reader yosys-verilog \
+"$LHD" lec --impl "lg:$W/state_identity_lg" --ref "$W/state_identity.v" \
   --top state_identity --workdir "$W/state_lec" -q --result-json "$W/state_lec.json" \
   || fail "Yosys state identity round trip: $(cat "$W/state_lec.json")"
 grep -q '"verdict":"proven"' "$W/state_lec.json" || fail "state identity proof was inconclusive"
 echo "PASS: Yosys state names survive a Verilog round trip with partially reset state"
+
+# Blocking writes see earlier writes in their process; partial/conditional
+# writes retain the previous value. Compare against explicit next-state RTL.
+cat > "$W/blocking_order.v" <<'V'
+module blocking_order(input clk, input rst, input en, input [7:0] d,
+                      output reg [7:0] a, b);
+  always @(posedge clk) begin
+    if (rst) begin a = 0; b = 0; end
+    else begin
+      if (en) a[3:0] = d[3:0];
+      b = a + d;
+      a[7:4] = b[3:0];
+    end
+  end
+endmodule
+V
+cat > "$W/blocking_order_ref.v" <<'V'
+module blocking_order(input clk, input rst, input en, input [7:0] d,
+                      output reg [7:0] a, b);
+  wire [7:0] first = {a[7:4], en ? d[3:0] : a[3:0]};
+  wire [7:0] sum = first + d;
+  always @(posedge clk) begin
+    if (rst) begin a <= 0; b <= 0; end
+    else begin a <= {sum[3:0], first[3:0]}; b <= sum; end
+  end
+endmodule
+V
+"$LHD" lec --impl "$W/blocking_order.v" --ref "$W/blocking_order_ref.v" \
+  --top blocking_order --workdir "$W/blocking_order_lec" -q \
+  || fail "blocking assignments lost process order or partial-write state"
+sed 's/sum = first + d/sum = first ^ d/' "$W/blocking_order_ref.v" > "$W/blocking_order_bad.v"
+"$LHD" lec --impl "$W/blocking_order_bad.v" --ref "$W/blocking_order.v" \
+  --top blocking_order --workdir "$W/blocking_order_bad_lec" -q \
+  --result-json "$W/blocking_order_bad.json" > "$W/blocking_order_bad.log" 2>&1
+[ $? -eq 10 ] || fail "blocking assignment corruption was not refuted: $(cat "$W/blocking_order_bad.log")"
+echo "PASS: blocking process order, partial writes, and negative control"

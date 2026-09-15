@@ -84,5 +84,7 @@ PRP
 # Exercise the same value/default selection in both generated simulators.
 sed 's/hotmux_unique.dec/pairs.dec/' inou/prp/tests/equiv/hotmux_unique_tb.prp > "$W/pairs_tb.prp"
 for backend in slop llvm; do
+  backend_args=()
+  [ "$backend" = "slop" ] || backend_args=(${backend_args[@]+"${backend_args[@]}"})
   "$LHD" sim "$W/pairs_tb.prp" --set "sim.backend=$backend" --workdir "$W/sim-$backend"
 done

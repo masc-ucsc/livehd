@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: inline_const_default
 :pyrope_top: inline_const_default
-:equiv_engine: cvc5
 */
 
 // 1i-inline — the structural half of the sim fixture ../sim/inline_const_default.prp

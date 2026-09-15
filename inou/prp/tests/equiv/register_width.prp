@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: top
 :pyrope_top: top
-:equiv_engine: cvc5
 */
 
 // 2f-type_bound — a GENERIC-parameterized register width.

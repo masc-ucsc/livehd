@@ -109,12 +109,16 @@ struct Options {
   // aggregate report. Meaning is per consumer: `pass semdiff` prints the
   // node/register/memory match report, `pass color` the partition-size report,
   // `pass abc` / `pass opentimer` one row per mapped color (including resynth), and
-  // `lhd lec` / `lhd formal verify` (canonical knob `formal.stats`) a cvc5
+  // `lhd lec` / `lhd formal verify` (canonical knob `lhd.stats`) a cvc5
   // solve-insight report (problem size, conflicts = learned clauses, decisions,
   // propagations, restarts, theory lemmas, resource units, timings). The formal
   // consumer also registers a cvc5 plugin that makes the solve ~8x SLOWER, so it is a
   // diagnosis tool — never leave it on, and never time a run with it.
   bool stats = false;
+
+  // Internal design-load policy: formal verify discharges hierarchy assumptions
+  // with its own engine instead of the compile-time preflight.
+  bool compile_formal_preflight = true;
 
   // `--set lhd.incremental=true|false` (default true): the ONE switch for every
   // persistent reuse tier -- the Pyrope compile cache, pass.abc's per-region
@@ -418,6 +422,12 @@ struct Sim_set_option {
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
+    {             "live_words",
+     "0",  Sim_set_option::Kind::non_neg_num,
+     "machine words (64 bits) of live values one simulator color may keep across its members. A color boundary "
+     "costs a stored slot, a compare and a dirty mark per value, so a larger budget means fewer, bigger colors "
+     "(minion 20->256 words: 1.75x cycles/s); a smaller one keeps idle logic finer-grained. 0 (the default) means "
+     "Color_plan::kDefaultLiveWords, which is the ONE place the number lives"                                     },
     {           "compile_only",
      "false",      Sim_set_option::Kind::boolean,
      "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "
@@ -444,11 +454,6 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
      "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"            },
-    {                "flatten",
-     "0",  Sim_set_option::Kind::non_neg_num,
-     "N — structurally inline a sub-instance into its parent before occurrence-wide color planning when the "
-     "callee body has <= N nodes. 0 keeps hierarchy intact. Inlining may reduce storage-path depth but duplicates "
-     "the body per instantiation, so use it only for measured experiments"                                        },
     {                  "ninja",
      "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
@@ -528,7 +533,7 @@ inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_02
 inline constexpr Synth_set_option kSynthSetOptions[] = {
     {  "threads",
      "0", Synth_set_option::Kind::integer,
-     "maximum concurrent ABC workers: 0 selects the machine's available CPUs; 1 maps serially. "
+     "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
      "New workers require actual process memory plus outstanding and new projections below half of physical RAM"            },
     {  "liberty",
      "",    Synth_set_option::Kind::file,

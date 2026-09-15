@@ -32,7 +32,7 @@ mod fun1(a:u4, b:u4) -> (o:u5@[0]) {
 EOF
 
 # --- 1. one-process pyrope -> verilog: content comes from locator memory ----
-"$LHD" compile srcmap_in.prp --emit-dir verilog:v1 --set cgen.srcmap=1 --workdir wd1 -q --result-json r1.json \
+"$LHD" compile srcmap_in.prp --emit-dir verilog:v1 --workdir wd1 -q --result-json r1.json \
   || fail "compile: $(cat r1.json 2>/dev/null)"
 V=v1/srcmap_in.fun1.v
 M=$V.map
@@ -54,7 +54,7 @@ SEGS=$(sed 's/.*"mappings":"\([^"]*\)".*/\1/' "$M" | tr ';' '\n' | grep -c .)
 "$LHD" compile srcmap_in.prp --emit-dir lg:lgdb --workdir wd2 -q --result-json r2.json \
   || fail "compile to lg:: $(cat r2.json 2>/dev/null)"
 grep -q '^filehash ' lgdb/srcmap.txt || fail "lgdb/srcmap.txt lacks the filehash record"
-"$LHD" compile lg:lgdb --emit-dir verilog:v2 --set cgen.srcmap=1 --workdir wd3 -q --result-json r3.json \
+"$LHD" compile lg:lgdb --emit-dir verilog:v2 --workdir wd3 -q --result-json r3.json \
   || fail "compile from lg:: $(cat r3.json 2>/dev/null)"
 M2=v2/srcmap_in.fun1.v.map
 [ -f "$M2" ] || fail "missing $M2"
@@ -62,7 +62,7 @@ grep -qF 'o = a + b' "$M2" || fail "post-load map lacks sourcesContent (disk rec
 
 # --- 3. drifted source: stale content must be dropped, not embedded ---------
 echo '// drifted after the lg: save' >> srcmap_in.prp
-"$LHD" compile lg:lgdb --emit-dir verilog:v3 --set cgen.srcmap=1 --workdir wd4 -q --result-json r4.json \
+"$LHD" compile lg:lgdb --emit-dir verilog:v3 --workdir wd4 -q --result-json r4.json \
   || fail "compile from lg: (drifted source): $(cat r4.json 2>/dev/null)"
 M3=v3/srcmap_in.fun1.v.map
 [ -f "$M3" ] || fail "missing $M3"

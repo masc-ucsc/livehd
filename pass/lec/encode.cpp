@@ -29,6 +29,44 @@ using cvc5::Sort;
 using cvc5::Term;
 namespace gu = livehd::graph_util;
 
+bool memory_is_ignored(const hhds::Occurrence_node& n, const std::vector<std::string>& ignored) {
+  const std::string hier{n.get_hier_name()};
+  const std::string canon = canon_flop_name(hier);
+  const auto        leaf  = [](std::string_view v) {
+    auto d = v.rfind('.');
+    return std::string(d == std::string_view::npos ? v : v.substr(d + 1));
+  };
+  const std::string hleaf = leaf(hier);
+  const std::string dbg   = gu::debug_name(n);  // the spelling the diagnostics print
+  for (const auto& want : ignored) {
+    if (want == hier || want == canon || want == hleaf || want == dbg || canon_flop_name(want) == canon || leaf(want) == hleaf
+        || leaf(want) == leaf(dbg)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string mixed_memory_edge_error(const hhds::Occurrence_node& node, const std::vector<std::string>& ignored) {
+  if (gu::type_op_of(node) != Ntype_op::Memory || memory_is_ignored(node, ignored)) {
+    return {};
+  }
+  auto posclk = gu::get_driver_of_sink_name(node, "posclk");
+  if (posclk.is_invalid() || !posclk.is_const() || gu::const_of(posclk).to_just_i64() != Ntype::Memory_posclk_mixed) {
+    return {};
+  }
+  const std::string name{node.get_hier_name()};
+  const auto        dot     = name.rfind('.');
+  const auto        suggest = name.empty() ? gu::debug_name(node) : (dot == std::string::npos ? name : name.substr(dot + 1));
+  return std::format(
+      "memory '{}' ({}) has PER-PORT clock edge polarity: its ports do not all commit on the same clock edge. "
+      "Formal cannot model this schedule. Exclude it with '--set formal.ignore_memory={}', which BLACKBOXES its reads "
+      "and excludes its stored contents from the proof",
+      name,
+      gu::debug_name(node),
+      suggest);
+}
+
 // Keep structural-refusal diagnostics actionable on large generated designs.
 // The numeric debug id is useful for one graph instance, but changes after a
 // contextual inline.  A surviving signal name and source location let the
@@ -492,6 +530,27 @@ Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width) {
 }
 
 namespace {
+
+// Dlop's sparse runs are (start, length), whereas get_mask_range() returns
+// [begin, end). Clip infinite/sign-extended masks to the result before adding
+// widths or extracting the compacted value plane.
+std::vector<std::pair<int, int>> mask_windows(const Dlop& mask, int width) {
+  std::vector<std::pair<int, int>> windows;
+  const auto                       clipped = mask.and_op(*Dlop::get_mask_value(width - 1, 0));
+  auto [begin, end]                        = clipped->get_mask_range();
+  if (begin >= 0 && end > begin) {
+    if (begin < width) {
+      windows.emplace_back(begin, std::min(end, width));
+    }
+  } else {
+    for (const auto& [start, length] : clipped->get_mask_range_pairs()) {
+      if (start < width && length > 0) {
+        windows.emplace_back(start, start + std::min(length, width - start));
+      }
+    }
+  }
+  return windows;
+}
 
 // Exact X plane for a constant-mask Get_mask (bit EXTRACT), or a null Term when
 // the shape is anything else (caller then falls back to the conservative
@@ -1202,26 +1261,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // types whatever the diagnostic printed: the full hier name, its canonical
   // form (canon_flop_name strips the per-design instance prefix, so one entry
   // covers both sides), or the bare leaf name after the last '.'.
-  auto mem_ignored = [&](const hhds::Occurrence_node& n) -> bool {
-    if (ignore_memory_ == nullptr || ignore_memory_->empty()) {
-      return false;
-    }
-    const std::string hier{n.get_hier_name()};
-    const std::string canon = canon_flop_name(hier);
-    const auto        leaf  = [](std::string_view v) {
-      auto d = v.rfind('.');
-      return std::string(d == std::string_view::npos ? v : v.substr(d + 1));
-    };
-    const std::string hleaf = leaf(hier);
-    const std::string dbg   = gu::debug_name(n);  // the spelling the diagnostics print
-    for (const auto& want : *ignore_memory_) {
-      if (want == hier || want == canon || want == hleaf || want == dbg || canon_flop_name(want) == canon || leaf(want) == hleaf
-          || leaf(want) == leaf(dbg)) {
-        return true;
-      }
-    }
-    return false;
-  };
+  auto mem_ignored
+      = [&](const hhds::Occurrence_node& n) { return ignore_memory_ != nullptr && memory_is_ignored(n, *ignore_memory_); };
   struct MPort {
     bool                 rd = false;
     hhds::Occurrence_pin addr, din, en;
@@ -1318,22 +1359,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // commit point per memory. This is a FORMAL refusal, not a read error:
         // the language allows the shape, so it parses
         // and regenerates, and the user opts back in per memory.
-        if (!mc.ignored && e.driver.is_const() && gu::const_of(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
-          // Offer a name mem_ignored actually ACCEPTS. `debug_name` carries a
-          // node-id prefix ("memory_36:m") that differs between the two designs,
-          // so the bare leaf is the spelling that works on both sides.
-          const std::string hn = std::string{node.get_hier_name()};
-          const auto        d  = hn.rfind('.');
-          const std::string suggest
-              = hn.empty() ? std::string{gu::debug_name(node)} : (d == std::string::npos ? hn : hn.substr(d + 1));
-          return fail_unsupported(
-              "memory '" + hn + "' (" + gu::debug_name(node)
-              + ") has PER-PORT clock edge polarity: its ports do not all commit on the same clock edge, which this "
-                "encoder does not model -- it has ONE commit point per memory. The language allows the shape, so it "
-                "parses and regenerates; formal refuses it. Exclude it with '--set formal.ignore_memory="
-              + suggest
-              + "', which BLACKBOXES it: its reads become one shared free symbol per (port, cycle) on both sides and "
-                "its contents are never compared, so the proof no longer says anything about what it stores");
+        static const std::vector<std::string> no_ignored;
+        if (auto error = mixed_memory_edge_error(node, ignore_memory_ ? *ignore_memory_ : no_ignored); !error.empty()) {
+          return fail_unsupported(error);
         }
       } else if (pn == "clock_pin") {
         // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
@@ -1551,6 +1579,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // Disabled reads have an X base value in the RTL; forwarding may still
       // define individual lanes. Attach this plane before consumers are encoded.
       if (x_dontcare_ && xm.isNull() && !dout_dpin.is_invalid() && !p.en.is_invalid() && !p.en.is_known_true()) {
+        xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
+        pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
+      }
+      // A non-power-of-two array has addresses with no stored word. Publish
+      // their undefined plane before the combinational consumers are encoded.
+      if (x_dontcare_ && xm.isNull() && !dout_dpin.is_invalid()
+          && (static_cast<uint64_t>(mc.sig.size) < (uint64_t{1} << mc.sig.addr_w))) {
         xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
         pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
       }
@@ -2749,7 +2784,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (rb < 0 || re <= rb) {
             // Non-contiguous mask: insert value into each contiguous run, LSB-first
             // (value's compacted bits map onto the set positions in ascending order).
-            auto runs = mask.get_mask_range_pairs();  // ascending [begin,end) runs
+            auto runs = mask_windows(mask, Wm);  // ascending [begin,end) windows
             if (runs.empty()) {
               result = fit(a, Wm);
               break;
@@ -3020,19 +3055,38 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             }
           } else if (op == Ntype_op::Set_mask && !pid(Ntype::get_sink_pid(op, "mask")).empty()
                      && pid(Ntype::get_sink_pid(op, "mask"))[0].x_mask.isNull() && !pid(Ntype::get_sink_pid(op, "value")).empty()
-                     && pid(Ntype::get_sink_pid(op, "value"))[0].x_mask.isNull() && !pid(0).empty()) {
-            // A bit-insert is EXACT on the X plane: every lane the (constant)
-            // mask selects is OVERWRITTEN by `value`, so it stops being unknown;
-            // the rest keep `a`'s plane. The conservative smear below would mark
-            // the WHOLE result unknown — and since the readers emit a multi-bit
-            // output as `out = 0ub????????` followed by one Set_mask per bit,
-            // that smear leaves EVERY bit X and the output compares NOTHING. A
-            // real difference on such an output then comes back PROVEN (cva6's
-            // bug1 `tag_cmp.hit_way_o`, which yosys refutes). Only the exact,
-            // no-X-in-`value` case is claimed here; anything else still smears.
-            Term ax        = fit_x_mask_to(tm_, pid(0)[0], W);
-            Term keep      = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(pid(Ntype::get_sink_pid(op, "mask"))[0], W)});
-            out_val.x_mask = ax.isNull() ? zero_w : tm_.mkTerm(Kind::BITVECTOR_AND, {ax, keep});
+                     && !pid(0).empty()) {
+            // Insert the value's X plane into precisely the same windows as its
+            // value bits. A non-null plane can evaluate to zero after previous
+            // inserts; treating its presence as whole-word X hides real errors.
+            auto plane = [&](const Val& v, int width) {
+              Term x = fit_x_mask_to(tm_, v, width);
+              return x.isNull() ? tm_.mkBitVector(static_cast<uint32_t>(width), 0) : x;
+            };
+            Term ax       = plane(pid(0)[0], W);
+            auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
+            auto runs     = mask_windows(gu::const_of(mask_pin), W);
+            int  total    = 0;
+            for (const auto& [begin, end] : runs) {
+              total += end - begin;
+            }
+            Term vx     = plane(pid(Ntype::get_sink_pid(op, "value"))[0], std::max(1, total));
+            int  offset = 0;
+            for (const auto& [begin, end] : runs) {
+              int stop = std::min(end, W);
+              if (begin < W) {
+                Term inserted = bv_extract(tm_, vx, offset + stop - begin - 1, offset);
+                if (stop < W) {
+                  inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {bv_extract(tm_, ax, W - 1, stop), inserted});
+                }
+                if (begin > 0) {
+                  inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {inserted, bv_extract(tm_, ax, begin - 1, 0)});
+                }
+                ax = inserted;
+              }
+              offset += end - begin;
+            }
+            out_val.x_mask = ax;
           } else if (Term gx = exact_get_mask_x_plane(tm_, node, op, pid(0), W); !gx.isNull()) {
             // A bit-EXTRACT is exact on the X plane for exactly the reason the
             // Concat arm below is: unknowns are POSITIONAL, so a slice keeps the
@@ -3280,7 +3334,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // A REFUSAL, not a give-up: the encoder cannot ORDER this cone (a real
       // word-level combinational cycle, or a driver it cannot build), and no
       // amount of extra budget changes that. It must therefore ride
-      // `unsupported`, which hard-fails by NAME regardless of formal.strict
+      // `unsupported`, which hard-fails by NAME unconditionally
       // (exit 7, "could not decide"). It must NOT ride `nothing_compared`:
       // the driver maps that to `equiv_fail` (exit 10, "here is a
       // counterexample"), so flagging it there would report a structural
@@ -4398,11 +4452,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         } else {
           init_bus = bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
         }
-        Term  a_init = array_from_bus(mc.a_cur, init_bus);
-        a_next       = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
-        auto& rec    = out.mem_whole[mc.key];
-        rec.reset    = rst_hot;
-        rec.init     = init_bus;  // raw, as fed to array_from_bus; the consumer sort-checks
+        Term a_init = array_from_bus(mc.a_cur, init_bus);
+        a_next      = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
+        auto& rec   = out.mem_whole[mc.key];
+        rec.reset   = rst_hot;
+        rec.init    = init_bus;  // raw, as fed to array_from_bus; the consumer sort-checks
         if (!mc.a_cur_shared) {
           rec.exact = false;  // same rule as the update record: the hold arm is a per-design free array
         }
@@ -4502,6 +4556,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           Term disabled = tm_.mkTerm(Kind::EQUAL, {ev.term, bv_const(tm_, ev.width, 0)});
           Term base_x   = tm_.mkTerm(Kind::ITE, {disabled, tm_.mkTerm(Kind::BITVECTOR_NOT, {claimed}), zero});
           plane         = tm_.mkTerm(Kind::BITVECTOR_OR, {plane, base_x});
+        }
+        if (static_cast<uint64_t>(mc.sig.size) < (uint64_t{1} << mc.sig.addr_w)) {
+          Term outside = tm_.mkTerm(Kind::BITVECTOR_UGE, {addr, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(mc.sig.size))});
+          plane        = tm_.mkTerm(Kind::ITE, {outside, tm_.mkTerm(Kind::BITVECTOR_NOT, {zero}), plane});
         }
         out.equalities.emplace_back(mc.rd_xmask[k], plane);
       }

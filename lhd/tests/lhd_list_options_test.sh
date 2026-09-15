@@ -96,7 +96,7 @@ echo "$out" | grep -q '"name":"formal.timeout","method":"pass.lec","default":"12
   || fail "formal.timeout must still be pass.lec's (default 120): $out"
 "$LHD" describe compile.formal.timeout | grep -q '"method":"pass.formal","default":"10"' \
   || fail "describe compile.formal.timeout must resolve to pass.formal"
-echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"true"' || fail "formal.strict missing or no longer defaults to true: $out"
+echo "$out" | grep -q '"name":"formal.strict"' && fail "removed formal.strict is still listed"
 echo "$out" | grep -q '"name":"formal.simfail","method":"pass.lec","default":"true"' || fail "formal.simfail missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.simfail_run","method":"pass.lec","default":"true"' || fail "formal.simfail_run missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.lec.simfail"' && fail "simfail must be shared as formal.simfail, not formal.lec.simfail: $out"
@@ -183,9 +183,9 @@ EOF
 grep -q "unknown flag 'bogus' of pass 'compile.cgen'" "$W/r7.json" || fail "config typo message missing: $(cat "$W/r7.json")"
 
 # 8. Listed flags really are settable end-to-end.
-"$LHD" compile "$PRP" --set cgen.srcmap=1 --set upass.verifier=false --emit-dir verilog:"$W/v8" --workdir "$W/w8" -q \
+"$LHD" compile "$PRP" --set upass.verifier=false --emit-dir verilog:"$W/v8" --workdir "$W/w8" -q \
   >/dev/null 2>&1 || fail "valid --set flags must still compile"
-ls "$W"/v8/*.v.map >/dev/null 2>&1 || fail "cgen.srcmap=1 must still produce the .v.map sidecar"
+ls "$W"/v8/*.v.map >/dev/null 2>&1 || fail "default Verilog directory emission must produce the .v.map sidecar"
 
 # 9. Flag-order freedom: shared flags may come before the command word, with
 #    value-taking flags keeping their value; the run_id must not depend on
@@ -314,7 +314,6 @@ grep -q "maybe you meant:" "$W/r12.json" || fail "leaf-match suggestion missing:
 # so nobody has to run the second command themselves
 grep -q "sim.vcd=false" "$W/r12.json" || fail "inline sim.vcd=default line missing: $(cat "$W/r12.json")"
 "$LHD" compile "$PRP" --set cgen.strict=1 --workdir "$W/w12b" -q >"$W/r12b.json" 2>/dev/null && fail "--set cgen.strict must fail"
-grep -q "formal.strict=true" "$W/r12b.json" || fail "wrong-pass inline suggestion missing: $(cat "$W/r12b.json")"
 
 # 13. The REMOVED lec.* namespace names no lhd-printed surface: every help page
 # and describe record spells the knobs formal.* / formal.lec.* -- what --set
@@ -333,5 +332,106 @@ for m in pretty jsonl; do
   no_lec help formal --diag-fmt $m
   no_lec help --diag-fmt $m
 done
+
+
+# Retired labels are not public even when the kernel still uses their EPRP
+# counterparts. Cover discovery, direct setting, and namespace aliases.
+public_options=$("$LHD" list options)
+for retired in compile.cgen.verbose \
+  formal.lean.normalize \
+  formal.lean.cert_chunk_size \
+  formal.lean.cert_chunk_limit \
+  formal.lean.cert_wf_fallback \
+  pass.semdiff.alg \
+  pass.semdiff.verbose \
+  pass.color.compact \
+  sim.flatten \
+  compile.formal.enabled \
+  pass.abc.out \
+  pass.partition.out \
+  pass.liberty.out \
+  pass.single_edge.out \
+  compile.yosys.frontend \
+  compile.slang.defines \
+  compile.slang.includes \
+  compile.slang.undefines \
+  pass.abc.threads \
+  pass.abc.small_flow \
+  pass.abc.small_ge \
+  pass.abc.small_min_ge \
+  pass.abc.ctrl_flow \
+  pass.abc.ctrl_area_relax \
+  pass.abc.ctrl_time_budget_ms \
+  compile.yosys.abc \
+  compile.yosys.techmap \
+  compile.yosys.elab_top \
+  compile.yosys.rename_top \
+  compile.formal.active \
+  compile.formal.hier_preflight \
+  compile.upass.import_defer \
+  compile.upass.dce \
+  compile.upass.inherit \
+  compile.upass.preserve_param_provenance \
+  compile.upass.ssa_stream \
+  compile.slang.slang_flags \
+  compile.yosys.slang_flags \
+  pass.abc.stats \
+  pass.color.stats \
+  pass.opentimer.stats \
+  pass.semdiff.stats \
+  formal.stats; do
+  echo "$public_options" | grep -q "\"name\":\"$retired\"" && fail "$retired remains listed"
+  "$LHD" compile "$PRP" --set "$retired=1" -q >"$W/retired.json" 2>&1 && fail "$retired remains accepted"
+  grep -q 'no longer a public option' "$W/retired.json" || fail "$retired lacks a removal diagnostic: $(cat "$W/retired.json")"
+done
+for retired in upass.dce pass.formal.active cgen.verbose; do
+  "$LHD" compile "$PRP" --set "$retired=1" -q >"$W/retired_alias.json" 2>&1 && fail "$retired bypassed retirement"
+  grep -q 'no longer a public option' "$W/retired_alias.json" || fail "$retired lacks a removal diagnostic"
+done
+cat >"$W/internal.toml" <<'EOF'
+[upass]
+import_defer = true
+EOF
+"$LHD" compile "$PRP" --config "$W/internal.toml" -q >"$W/internal.json" 2>&1 && fail "config exposed an internal label"
+grep -q 'no longer a public option' "$W/internal.json" || fail "config lacks an internal-label diagnostic"
+
+# --stats uses the same canonical setting and duplicate-value rule as --set.
+for order in flag_first set_first; do
+  if [ "$order" = flag_first ]; then
+    set -- --stats --set lhd.stats=false
+  else
+    set -- --set lhd.stats=false --stats
+  fi
+  "$LHD" compile "$PRP" "$@" -q >"$W/stats_conflict.json" 2>&1 && fail "conflicting stats settings accepted ($order)"
+  grep -q 'given twice with different values' "$W/stats_conflict.json" || fail "stats conflict was not canonicalized"
+done
+"$LHD" compile "$PRP" --stats --set lhd.stats=true -q >"$W/stats_same.json" 2>&1 || fail "identical stats settings rejected"
+cat >"$W/stats.toml" <<'EOF'
+[lhd]
+stats = false
+EOF
+"$LHD" compile "$PRP" --config "$W/stats.toml" --stats --diag-fmt pretty --emit-dir lg:"$W/stats_lg" --workdir "$W/stats_w" \
+  >"$W/stats_override.json" 2>&1 || fail "--stats failed to override config"
+grep -q 'phases\[stats\]' "$W/stats_override.json" || fail "--stats did not override config false"
+
+
+# Preprocessor configuration uses the existing native reader argv interface.
+mkdir -p "$W/include dir"
+cat >"$W/include dir/option_header.svh" <<'EOF'
+`define HEADER_VALUE 1'b1
+EOF
+cat >"$W/reader_flags.sv" <<'EOF'
+`include "option_header.svh"
+module reader_flags(input a, output y);
+`ifdef MUST_UNDEFINE
+  nonexistent_module unexpected();
+`endif
+  assign y = a & `HEADER_VALUE & `EXTERNAL_VALUE;
+endmodule
+EOF
+"$LHD" compile "$W/reader_flags.sv" --reader slang --top reader_flags \
+  --emit-dir lg:"$W/reader_flags_lg" --workdir "$W/reader_flags_w" -q \
+  -- -I "$W/include dir" -DEXTERNAL_VALUE=1 -DMUST_UNDEFINE -UMUST_UNDEFINE \
+  >"$W/reader_flags.json" 2>&1 || fail "reader -I/-D/-U passthrough failed: $(cat "$W/reader_flags.json")"
 
 echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options / sim namespace"

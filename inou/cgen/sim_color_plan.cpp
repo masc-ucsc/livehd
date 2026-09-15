@@ -923,15 +923,20 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
   return true;  // data-gated latch: the established end-of-period update slot
 }
 
-// Live machine words a color may keep alive across its members. THE single
-// definition: the coarsener enforces it and report() prints it, so a change
-// here can never desynchronize the plan report from the plan.
-constexpr uint64_t kLiveWordBudget = 20;
-
 }  // namespace
 
-Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bool separate_runtime_calls) {
+// Live machine words a color may keep alive across its members lives on the
+// PLAN (`live_word_budget_`, set here from `sim.live_words`). THE single
+// definition still: the coarsener below enforces that member and report()
+// prints that member, so a change can never desynchronize the plan report from
+// the plan -- and, unlike a global, a second discover() at another budget
+// cannot retroactively rewrite what an earlier plan reports. The default was 20
+// until 2026-09-13, when measuring showed a boundary slot (store + compare +
+// dirty mark per value) costs more than the register pressure it avoids: 256
+// words gave minion 1.75x, matched_filter 1.15x, RenameTable -4%.
+Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bool separate_runtime_calls, uint64_t live_words) {
   Color_plan plan;
+  plan.live_word_budget_ = live_words > 0 ? live_words : kDefaultLiveWords;
   if (root == nullptr) {
     plan.summary_.complete = false;
     plan.errors_.emplace_back("null simulation root");
@@ -3418,7 +3423,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         frontier_words = 0;
         frontier.clear();
       };
-      const bool can_join = current != Color_plan::invalid_index && color_peak_words[current] <= kLiveWordBudget
+      const bool can_join = current != Color_plan::invalid_index && color_peak_words[current] <= plan.live_word_budget_
                             && plan.version_sites_[members[current].front()].slot == plan.version_sites_[version].slot
                             && !crosses_control_boundary(current, version)
                             && color_ge[current] <= kSoftColorGe - std::min<uint64_t>(color_ge[version], kSoftColorGe);
@@ -3444,7 +3449,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         output_words += pressure_values[id].words;
       }
       auto new_inputs = additional_inputs();
-      if (current != version && new_inputs + frontier_words + output_words > kLiveWordBudget) {
+      if (current != version && new_inputs + frontier_words + output_words > plan.live_word_budget_) {
         reset_color();
         new_inputs = additional_inputs();
       }
@@ -4166,10 +4171,10 @@ std::string Color_plan::report() const {
   size_t   oversized_singletons = 0;
   for (const auto& color : colors_) {
     max_live_words        = std::max(max_live_words, color.peak_live_words);
-    oversized_singletons += color.members.size() == 1 && color.peak_live_words > kLiveWordBudget;
+    oversized_singletons += color.members.size() == 1 && color.peak_live_words > live_word_budget_;
   }
   result += std::format("register-budget words={} max-estimated-live-words={} oversized-singletons={}\n",
-                        kLiveWordBudget,
+                        live_word_budget_,
                         max_live_words,
                         oversized_singletons);
   result += "identity structural-128; raw-index=false; user-name=false\n";

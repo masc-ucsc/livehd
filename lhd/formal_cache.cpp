@@ -110,7 +110,12 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
       if (!it->value.IsObject()) {
         continue;
       }
+      // Older records omitted proof scope and cannot safely be replayed.
+      if (!it->value.HasMember("bounded") || !it->value["bounded"].IsBool()) {
+        continue;
+      }
       Cached_verdict v;
+      v.bounded = it->value["bounded"].GetBool();
       if (it->value.HasMember("engine") && it->value["engine"].IsString()) {
         v.engine = it->value["engine"].GetString();
       }
@@ -246,12 +251,13 @@ void Verdict_cache::save() const {
   out += "  \"verdicts\": {\n";
   for (size_t i = 0; i < vkeys.size(); ++i) {
     const auto& v  = verdicts_.at(vkeys[i]);
-    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}}}{}\n",
-                       esc(vkeys[i]),
-                       esc(v.engine),
-                       esc(v.detail),
-                       v.elapsed_ms,
-                       i + 1 < vkeys.size() ? "," : "");
+    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}, \"bounded\": {}}}{}\n",
+                                 esc(vkeys[i]),
+                                 esc(v.engine),
+                                 esc(v.detail),
+                                 v.elapsed_ms,
+                                 v.bounded,
+                                 i + 1 < vkeys.size() ? "," : "");
   }
   out += "  },\n";
   out += "  \"unknowns\": {\n";
@@ -264,23 +270,23 @@ void Verdict_cache::save() const {
     std::sort(ukeys.begin(), ukeys.end());
     for (size_t i = 0; i < ukeys.size(); ++i) {
       const auto& a  = unknowns_.at(ukeys[i]);
-      out           += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
-                         esc(ukeys[i]),
-                         a.timeout,
-                         a.elapsed_ms,
-                         i + 1 < ukeys.size() ? "," : "");
+      out            += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
+                                    esc(ukeys[i]),
+                                    a.timeout,
+                                    a.elapsed_ms,
+                                    i + 1 < ukeys.size() ? "," : "");
     }
   }
   out += "  },\n";
   out += "  \"hints\": {\n";
   for (size_t i = 0; i < hkeys.size(); ++i) {
     const auto& h  = hints_.at(hkeys[i]);
-    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"split\": \"{}\", \"ms\": {}}}{}\n",
-                       esc(hkeys[i]),
-                       esc(h.engine),
-                       esc(h.split),
-                       h.elapsed_ms,
-                       i + 1 < hkeys.size() ? "," : "");
+    out            += std::format("    \"{}\": {{\"engine\": \"{}\", \"split\": \"{}\", \"ms\": {}}}{}\n",
+                                  esc(hkeys[i]),
+                                  esc(h.engine),
+                                  esc(h.split),
+                                  h.elapsed_ms,
+                                  i + 1 < hkeys.size() ? "," : "");
   }
   out += "  },\n";
   out += "  \"pair_hints\": {\n";

@@ -43,7 +43,7 @@ fail() {
 }
 run() {
   if [ "${1:-}" = pass ] && [ "${2:-}" = abc ] && [ -n "${ABC_TEST_THREADS:-}" ]; then
-    set -- "$@" --set "abc.threads=$ABC_TEST_THREADS"
+    set -- "$@" --set "synth.threads=$ABC_TEST_THREADS"
   fi
   "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"
 }
@@ -144,7 +144,7 @@ run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w_model
 run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w_rev"
 cat "$W/v_on/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
-run lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/w_lec"
+run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/w_lec"
 echo "PASS: boundary-sized netlist is LEC-equivalent to the partition twin"
 
 # 4. incremental: the cache holds the refined bodies; an all-hit run neither

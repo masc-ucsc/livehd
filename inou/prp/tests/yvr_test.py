@@ -1,26 +1,8 @@
 #!/usr/bin/env python3
-"""prp-yvr (yosys-verilog reader) gated test: a golden `.v` round-trips through
-LiveHD's `--reader yosys-verilog` front end and stays logically equivalent.
+"""Cross-check the explicit Yosys importer against native Slang using default LEC.
 
-    lhd compile --reader yosys-verilog foo.v --emit-dir verilog:DIR/   # yosys-verilog -> lg -> verilog
-    inou/yosys/lgcheck --reference foo.v --implementation DIR/foo.v    # LEC the reader output vs the source
-
-Unlike prp-v2prp2v (which exercises `--reader slang`), this targets the
-`--reader yosys-verilog` path (lgyosys_tolg / proc / cgen). It is the minimal
-reproducer for the two XiangShan failure classes that the slang/pyrope tests
-canNOT catch (slang reads those files correctly):
-
-  * READ-FAIL  — yosys `read_verilog` cannot parse the file at all
-                 (`'{...}` assignment pattern -> `unexpected OP_CAST`).
-  * MISCOMPILE — the reader lowers the file to a NON-equivalent netlist
-                 (terminal constant of a deep nested-ternary chain corrupted).
-
-Exit: 0 = the yosys-verilog reader handled it correctly (bug absent/fixed);
-1 = read-fail or miscompile (bug present — the expected state for the repro
-cases). A lgcheck TIMEOUT is inconclusive (exit 0, not a fail), matching
-v2prp2v_test.py's gate semantics.
-
-  python3 inou/prp/tests/yvr_test.py -i inou/prp/tests/equiv/clz_nest.v
+Compile the golden through Yosys to an LGraph, then compare that graph and its
+emitted Verilog with the source read by native Slang. Both checks must pass.
 """
 
 import argparse
@@ -31,7 +13,7 @@ import shutil
 import subprocess
 import sys
 
-CHECK_TIMEOUT = 30  # seconds; a lgcheck timeout is inconclusive, not a failure
+CHECK_TIMEOUT = 30  # seconds; each native LEC comparison must complete
 
 
 def _modules(vpath):
@@ -64,7 +46,7 @@ def main():
     # 1. golden.v -> lg -> verilog via the yosys-verilog reader.
     comp = subprocess.run(
         [lhd, "compile", "--reader", "yosys-verilog", v, "--emit-dir", "verilog:" + out + "/",
-         "--workdir", os.path.join(work, "w_yvr")],
+         "--emit-dir", "lg:" + os.path.join(work, "lg"), "--workdir", os.path.join(work, "w_yvr")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     gen = glob.glob(os.path.join(out, "*.v"))
     if comp.returncode != 0 or not gen:
@@ -74,29 +56,29 @@ def main():
         print(comp.stdout.decode("utf-8", "ignore")[-1500:])
         return 1
 
-    impl = gen[0]
-    # 2. LEC the reader's netlist against the source (yosys read_verilog parses
-    #    the plain golden fine for the miscompile class). The reference is the
-    #    golden read by yosys (keeps its `file.entity` module name); the
-    #    implementation is cgen-emitted Verilog, whose module name is FLAT (the
-    #    hierarchical internal name flattens to its entity for Verilog).
     impl_top = top.rsplit(".", 1)[-1] if "." in top else top
-    try:
-        chk = subprocess.run(
-            ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
-             "--reference_top", top, "--implementation_top", impl_top],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        print("{} - yvr - inconclusive (lgcheck timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
-        return 0
-
-    if chk.returncode == 0:
-        print("{} - yvr - success (top:{}) — yosys-verilog reader correct".format(name, top))
-        return 0
-    print("{} - yvr - FAILED: --reader yosys-verilog netlist NOT equivalent to source "
-          "(miscompile class; slang matches source) (top:{})".format(name, top))
-    print(chk.stdout.decode("utf-8", "ignore")[-1500:])
-    return 1
+    impl = os.path.join(work, "all_impl.v")
+    with open(impl, "w") as output:
+        for path in sorted(gen):
+            with open(path) as source:
+                output.write(source.read() + "\n")
+    for label, side, selected_top in [("graph", "lg:" + os.path.join(work, "lg"), top),
+                                      ("verilog", impl, impl_top)]:
+        try:
+            chk = subprocess.run(
+                [lhd, "lec", "--ref", v, "--impl", side,
+                 "--ref-top", top, "--impl-top", selected_top,
+                 "--workdir", os.path.join(work, "check_" + label)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            print("{} - yvr - FAILED: {} LEC timed out".format(name, label))
+            return 1
+        if chk.returncode != 0:
+            print("{} - yvr - FAILED: Yosys {} differs from native Slang".format(name, label))
+            print(chk.stdout.decode("utf-8", "ignore"))
+            return 1
+    print("{} - yvr - success: Yosys graph and Verilog agree with native Slang".format(name))
+    return 0
 
 
 if __name__ == "__main__":

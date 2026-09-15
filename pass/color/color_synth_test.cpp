@@ -26,10 +26,9 @@ namespace {
 // window instead of the cut rules.
 Color_opts flat_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
-  o.min_ge  = 0;
-  o.max_ge  = 0;
+  o.hier   = false;
+  o.min_ge = 0;
+  o.max_ge = 0;
   return o;
 }
 

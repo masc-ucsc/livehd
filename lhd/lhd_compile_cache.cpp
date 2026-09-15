@@ -840,7 +840,7 @@ std::string scope_name(const Options& opts, const std::vector<std::string>& seed
 }
 
 std::string context_descriptor(const Options& opts) {
-  std::string text = std::format("top={}|pipeline=cprop,bitwidth", opts.top);
+  std::string text = std::format("top={}|pipeline=cprop,bitwidth|formal_preflight={}", opts.top, opts.compile_formal_preflight);
   // Seed identity: scope_name alone is a stem/--top, so two different designs
   // in one workdir would otherwise alias one scope and inherit each other's
   // prior_units — which ghost pruning may then delete from a shared lg: dir.
@@ -850,7 +850,9 @@ std::string context_descriptor(const Options& opts) {
   auto sets = opts.sets;
   std::sort(sets.begin(), sets.end());
   for (const auto& [key, value] : sets) {
-    if (key == "compile.cache") {
+    // Reporting does not change the compiled graph; toggling --stats must keep
+    // the same cache identity now that the flag is stored as lhd.stats.
+    if (key == "compile.cache" || key == "lhd.stats") {
       continue;
     }
     text += std::format("|{}={}", key, value);

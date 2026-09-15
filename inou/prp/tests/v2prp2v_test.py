@@ -1,48 +1,9 @@
 #!/usr/bin/env python3
-"""Verilog -> Pyrope -> Verilog gated test with two equivalence checks.
+"""Verilog -> Pyrope -> Verilog regression using the default LEC solver.
 
-A golden `.v` goes all the way THROUGH Pyrope and back. The emitted Pyrope is
-first checked against the hand-written Pyrope twin, then inou/yosys/lgcheck
-checks the generated Verilog against the ORIGINAL Verilog:
-
-    lhd compile foo.v      --emit-dir pyrope:P/   --workdir W1   # slang -> lg -> prp_writer
-    lhd compile P/*.prp    --emit-dir verilog:V/  --workdir W2   # inou.prp -> tolg -> cgen
-    lhd lec --impl P/<top>.prp --ref equiv/foo.prp ...
-    lgcheck --reference foo.v --implementation V/all.v \
-            --reference_top <vtop> --implementation_top <flat vtop>
-
-The Pyrope leg is deliberate. The old harness went slang -> lg -> cgen DIRECTLY,
-which skipped upass/prp_writer and the Pyrope re-read entirely, so a writer that
-emitted un-re-parseable or lossy Pyrope was invisible here (three such bugs --
-a dropped array type, an undeclared `_mux_N`, an unescaped module name -- passed
-this test while failing everywhere else). Routing through the writer makes ONE
-run cover the whole `v -> prp -> v` path, which is the path the corpus fuzzing
-actually exercises.
-
-The native LEC check used to be a separate `prp-v2prp-*` target which repeated
-the Verilog -> Pyrope conversion. Keeping it here preserves that check without
-running the conversion twice. The original-Verilog check remains independent:
-yosys read_verilog (or yosys-slang via the sibling .prp's `:gold_reader: slang`
-header) reads the reference, so a slang misread or a lowering miscompile that
-reaches the emitted netlist refutes the miter.
-
-Per-side tops: the reference top is the sibling .prp's `:verilog_top:` header
-(the golden module name) or the first module declared in the .v. The
-implementation top is the same name FLATTENED to its entity (cgen emits flat
-module names: `file.entity` -> `entity`).
-
-Gate semantics:
-  native LEC equivalent -> pass
-  native LEC not-equivalent -> FAIL
-  native LEC refusal/unknown/timeout -> INCONCLUSIVE
-  lgcheck exit 0 -> pass
-  lgcheck exit 1 -> FAIL (bounded counterexample or a hard yosys error: the
-                    designs are not equivalent, or cannot even be compared)
-  lgcheck exit 2 -> INCONCLUSIVE: pass with an honest note (no proof, but no
-                    counterexample either)
-  wall-clock timeout -> inconclusive, NOT a fail
-
-  python3 inou/prp/tests/v2prp2v_test.py -i inou/prp/tests/equiv/trivial_if.v
+Both emitted Pyrope versus its handwritten twin and emitted Verilog versus
+its original source must pass. Source Verilog is always read by native Slang;
+unknown results, refusals, and timeouts fail the regression.
 """
 
 import argparse
@@ -54,13 +15,8 @@ import subprocess
 import sys
 
 NATIVE_CHECK_TIMEOUT = 60
-# lgcheck budget for the SECOND, independent oracle. A REFUTATION arrives in
-# about a second (measured: a one-XOR corruption of
-# comb_array_const_index_read's netlist refutes in 0.9s), so this budget only
-# ever buys a longer wait before a hard PROOF gives up. A fixture whose shape
-# lgcheck provably cannot close sets `:verilog_check_timeout: N` to stop paying
-# for that wait on every run -- it keeps the fast refutation check and drops
-# only the dead time.
+# Budget for comparing emitted Verilog with its source using default LEC.
+# A fixture can override it with :verilog_check_timeout:; timeouts fail.
 VERILOG_CHECK_TIMEOUT = 240
 
 
@@ -163,18 +119,7 @@ def main():
              "--workdir", os.path.join(work, "w_native_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             timeout=NATIVE_CHECK_TIMEOUT)
-    # OUR ENGINE MUST DECIDE (user ruling 2026-08-02). The two legs have
-    # DIFFERENT contracts on purpose:
-    #
-    #   lgcheck  an INDEPENDENT oracle. A definitive FAIL is always an error --
-    #            it caught a real difference. Its INCONCLUSIVE is NOT an error:
-    #            lgcheck simply could not decide, which says nothing about us.
-    #
-    #   lhd lec  OUR engine, on OUR corpus. It must PROVE. Anything else --
-    #            UNKNOWN, an encoder refusal, a timeout -- is a gap in the tool
-    #            that this corpus exists to surface, so it FAILS the test rather
-    #            than printing a note nobody reads. PASS(n) counts as proven (a
-    #            complete BMC is a real result, just annotated with its depth).
+    # The default engine must decide both legs; a bounded pass retains its depth.
     except subprocess.TimeoutExpired:
         print("{} - v2prp2v - FAILED: lhd lec TIMED OUT >{}s on our own corpus "
               "(our engine must decide these)".format(name, NATIVE_CHECK_TIMEOUT))
@@ -238,16 +183,7 @@ def main():
                 out.write(f.read())
                 out.write("\n")
 
-    # 2. lgcheck: reference = the ORIGINAL .v (independent yosys read).
-    # Like the direct equiv harness, skip this posedge-only oracle when the
-    # fixture explicitly selects cvc5 for latch/opposite-edge structure.
-    # lgcheck cannot represent the intervening close phase and otherwise burns
-    # through its SAT cascade before returning inconclusive.
-    if (_header(ref_prp, "equiv_engine") or "").strip() == "cvc5":
-        print("{} - v2prp2v - original Verilog check skipped "
-              "(:equiv_engine: cvc5; latch/edge structure)".format(name))
-        return 1 if native_failed else 0
-
+    # 2. Compare the round-trip Verilog with its source using native Slang LEC.
     verilog_timeout = VERILOG_CHECK_TIMEOUT
     hdr_timeout = _header(ref_prp, "verilog_check_timeout")
     if hdr_timeout:
@@ -258,33 +194,23 @@ def main():
                   "integer (got '{}')".format(name, hdr_timeout))
             return 1
 
-    cmd = ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
-           "--reference_top", vtop, "--implementation_top", impl_top]
-    if (_header(ref_prp, "gold_reader") or "") == "slang":
-        # read_slang is built into the bundled yosys; no plugin to load.
-        cmd += ["--gold_reader", "slang"]
+    cmd = [lhd, "lec", "--ref", v, "--impl", impl,
+           "--ref-top", vtop, "--impl-top", impl_top,
+           "--workdir", os.path.join(work, "w_verilog_check")]
     try:
         chk = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              timeout=verilog_timeout)
     except subprocess.TimeoutExpired:
-        print("{} - v2prp2v - original Verilog check inconclusive "
-              "(lgcheck timeout >{}s, NOT a fail)".format(name, verilog_timeout))
-        return 1 if native_failed else 0
+        print("{} - v2prp2v - FAILED: Verilog LEC timeout >{}s".format(name, verilog_timeout))
+        return 1
 
     out = chk.stdout.decode("utf-8", "ignore")
     if chk.returncode == 0:
         print("{} - v2prp2v - original Verilog check success "
               "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
         return 1 if native_failed else 0
-    if chk.returncode == 2:
-        # lgcheck's explicit INCONCLUSIVE: no proof but NO counterexample.
-        print("{} - v2prp2v - original Verilog check inconclusive "
-              "(no proof, no counterexample; ref_top:{} impl_top:{})".format(
-            name, vtop, impl_top))
-        return 1 if native_failed else 0
-    print("{} - v2prp2v - FAILED: round-trip not equivalent "
-          "(ref_top:{} impl_top:{})".format(
-        name, vtop, impl_top))
+    print("{} - v2prp2v - FAILED: round-trip did not prove equivalent "
+          "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
     print(out)
     return 1
 

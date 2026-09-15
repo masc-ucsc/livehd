@@ -54,19 +54,7 @@ struct Map_options {
   // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.
   // Nets driven by native (unblasted) nodes are outside ABC and keep their
   // fanout regardless. Default 16.
-  uint32_t          max_fanout          = 16;
-  // Optional size-tiered flow. Regions in [`small_min_ge`, `small_ge`] use it;
-  // explicit color-keyed region_opts still win. This lets large replicated
-  // logic use a deliberately cheap mapper without sacrificing the QoR of
-  // small timing-sensitive cones. Disabled when empty or small_ge == 0.
-  // Control groups inherit the ordinary recipe by default. A custom ctrl_flow
-  // opts into the delay-only tier and its whole-region time backstop.
-  std::string       ctrl_flow           = "inherit";
-  uint32_t          ctrl_area_relax     = 0;
-  uint64_t          ctrl_time_budget_ms = 5000;
-  std::string       small_flow;
-  uint64_t          small_min_ge = 0;
-  uint64_t          small_ge     = 0;
+  uint32_t          max_fanout = 16;
   // Indivisible wide operations can exceed color.max_gate by orders of
   // magnitude. The default large tier skips ABC's unbounded structural-choice
   // synthesis and maps the already bit-blasted AIG directly. Empty or

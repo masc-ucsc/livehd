@@ -41,7 +41,7 @@ C "$WORK/B.v" --top top --emit-dir "lg:$WORK/B" --workdir "$WORK/cb"
 C "$WORK/C.v" --top top --emit-dir "lg:$WORK/C" --workdir "$WORK/cc"
 
 H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top top --set formal.lec.hier=true --set formal.lec.semdiff=structural \
+  OUT=$("$LHD" lec "${@:2}" --top top   \
         --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 

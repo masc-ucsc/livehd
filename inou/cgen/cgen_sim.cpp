@@ -768,6 +768,22 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   return absl::StrCat("Slop<", tw, ">{", base, "}");  // signed sext via the hlop cross-width ctor
 }
 
+// The value bound into a child instance's `__in` field. When the source is
+// already the destination's exact type -- a `Slop_u<W>` object of the same
+// unsigned width -- name it directly: `operand()` would spell `.zext_to<W>()`,
+// a full carrier copy that `slop_update` then masked into a second temporary
+// before comparing. A loop body forwarding a 7,800-bit invariant to its inner
+// loop paid two 1 KB copies per iteration for a value that never changed.
+std::string Cgen_sim::bind_operand(const hhds::Pin_class& dpin, int target_bits, bool unsign_dst) {
+  if (unsign_dst && slop_u_ && !dpin.is_invalid() && !dpin.is_const() && is_unsign(dpin) && wbits_of(dpin) == target_bits
+      && slop_u_values_.contains(dpin.get_class_index())) {
+    if (const auto it = pin2var.find(dpin.get_class_index()); it != pin2var.end()) {
+      return it->second;
+    }
+  }
+  return operand(dpin, target_bits);
+}
+
 std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits) {
   const std::string fw = std::to_string(fallback_bits);
   if (dpin.is_invalid()) {
@@ -827,6 +843,59 @@ std::string Cgen_sim::stored_operand(const hhds::Pin_class& dpin, int fallback_b
     return absl::StrCat("Slop<", fw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");
   }
   return it->second;
+}
+
+// The widest low lane any reader of `output` keeps -- every reader is a
+// Get_mask, or a two-input And, with a constant contiguous mask [0, W) -- or 0
+// when some reader keeps more. The bits above max(W) of that value are never
+// observed, so its producer may compute only the low lane.
+int Cgen_sim::low_lane_readers_width(const hhds::Pin_class& output) {
+  if (output.is_invalid()) {
+    return 0;
+  }
+  int  wmax   = 0;
+  bool anyone = false;
+  for (const auto& edge : output.out_edges()) {
+    const auto consumer = edge.sink.get_master_node();
+    if (consumer.is_invalid()) {
+      return 0;
+    }
+    const auto      op = type_op_of(consumer);
+    hhds::Pin_class mask;
+    if (op == Ntype_op::Get_mask) {
+      if (edge.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+        return 0;
+      }
+      mask = get_driver_of_sink_name(consumer, "mask");
+    } else if (op == Ntype_op::And) {
+      int count = 0;
+      for (const auto& in : consumer.inp_edges()) {
+        ++count;
+        if (in.driver.is_const()) {
+          mask = in.driver;
+        }
+      }
+      if (count != 2) {
+        return 0;
+      }
+    } else {
+      return 0;
+    }
+    if (mask.is_invalid() || !mask.is_const()) {
+      return 0;
+    }
+    const auto& mv = const_of(mask);
+    if (mv.has_unknowns() || mv.is_negative()) {
+      return 0;
+    }
+    const auto [mb, me] = mv.get_mask_range();
+    if (mb != 0 || me <= 0) {
+      return 0;
+    }
+    wmax   = std::max<int>(wmax, me);
+    anyone = true;
+  }
+  return anyone ? wmax : 0;
 }
 
 bool Cgen_sim::proven_unsigned_result(const hhds::Node_class& node, const hhds::Pin_class& output) const {
@@ -1011,6 +1080,254 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     return land_operation(std::move(s));
   };
 
+  // The shift count of a SHL/SRA as a C++ int expression: a literal, or the
+  // single word of an amount narrow enough that `lo + width` stays inside an
+  // int. A signed count is read as is: hlop's shift asserts a non-negative
+  // amount, so the literal `sra_op` lowering never saw a negative one either
+  // (a loop ordinal times a lane width is stamped signed by the index port).
+  // Empty = not usable that way.
+  const auto shift_count_expr = [&](const hhds::Pin_class& n) -> std::string {
+    if (n.is_invalid()) {
+      return {};
+    }
+    if (n.is_const()) {
+      const auto& nv = const_of(n);
+      if (!nv.is_integer() || !nv.is_just_i64() || nv.to_just_i64() < 0 || nv.to_just_i64() > (int64_t{1} << 30)) {
+        return {};
+      }
+      return std::to_string(nv.to_just_i64());
+    }
+    if (wbits_of(n) > 30 || !pin2var.contains(n.get_class_index())) {
+      return {};
+    }
+    return absl::StrCat("static_cast<int>((", operation_operand(n), ").to_i64_low())");
+  };
+  // `(x >> n) & (2^W - 1)` / `Get_mask(x >> n, 2^W - 1)` with a RUNTIME `n` is
+  // the shape upass.tolg lowers a constant-width slice at a runtime offset to
+  // (`x#[(i*W) ..+ W]`, the per-entry read of a packed register file).
+  // Evaluated literally it shifts and masks `x` at ITS width to keep W bits --
+  // XiangShan's RenameTable does that on a 7,800-bit `diff_writes` (122 words)
+  // for every entry x lane iteration. `get_mask_op_opt` accepts a runtime `lo`
+  // and reads only the one or two source words the range touches. `shift_drv`
+  // is the SRA output; `me` the mask's width. Empty = not that shape.
+  const auto dynamic_extract = [&](const hhds::Pin_class& shift_drv, int me) -> std::string {
+    const auto output = node.get_driver_pin(0);
+    if (output.is_invalid() || !is_unsign(output) || wbits < 2 || shift_drv.is_invalid() || shift_drv.is_const()) {
+      return {};
+    }
+    const auto shift = shift_drv.get_master_node();
+    if (shift.is_invalid() || type_op_of(shift) != Ntype_op::SRA) {
+      return {};
+    }
+    const auto x = get_driver_of_sink_name(shift, "a");
+    const auto n = get_driver_of_sink_name(shift, "b");
+    if (x.is_invalid() || x.is_const() || !pin2var.contains(x.get_class_index())) {
+      return {};
+    }
+    // An unsigned source arrives canonical -- raw_operand names a tracked
+    // Slop_u object or re-lands anything else through its zero-extend -- so
+    // nothing above its width leaks; a signed source keeps its storage sign,
+    // which is what `>>` fills with.
+    const auto lo = shift_count_expr(n);
+    if (lo.empty()) {
+      return {};
+    }
+    const int len = std::min<int>(me, wbits - 1);
+    if (len <= 0) {
+      return {};
+    }
+    std::string carrier;
+    if (slop_u_ && wbits == wbits_of(output) + 1) {
+      slop_u_expr_ = true;
+      carrier      = absl::StrCat("Slop_u<", wbits - 1, ">");
+    } else {
+      carrier = absl::StrCat("Slop<", tw, ">");
+    }
+    return absl::StrCat("([&]{ const int __lo = ",
+                        lo,
+                        "; return ",
+                        carrier,
+                        "::get_mask_op_opt(",
+                        operation_operand(x),
+                        ", __lo, __lo + ",
+                        len,
+                        "); }())");
+  };
+  // `(base & ~(K << n)) | ((v << n) & (K << n))` with K = 2^W - 1 and a RUNTIME
+  // `n`: upass.tolg's lower_dynamic_mask_rmw for the packed write
+  // `base#[(i*W) ..+ W] = v`. Seven full-width operations plus their temporaries
+  // per write, on a 376-bit table three times per RenameTable entry;
+  // `set_mask_op_opt` copies the base once and rewrites the one or two words
+  // the range touches. Empty = not that shape.
+  const auto dynamic_insert = [&]() -> std::string {
+    if (e.size() != 2) {
+      return {};
+    }
+    const auto output = node.get_driver_pin(0);
+    if (output.is_invalid() || !is_unsign(output) || wbits < 2) {
+      return {};
+    }
+    // One And keeps `base & inverted`, the other places `shifted & placed_mask`.
+    struct Half {
+      hhds::Pin_class value;  // base, or the shifted value
+      hhds::Pin_class mask;   // Xor(M, all-ones), or M
+    };
+    const auto and_halves = [&](const hhds::Pin_class& drv) -> std::optional<Half> {
+      if (drv.is_invalid() || drv.is_const()) {
+        return std::nullopt;
+      }
+      const auto andn = drv.get_master_node();
+      if (andn.is_invalid() || type_op_of(andn) != Ntype_op::And) {
+        return std::nullopt;
+      }
+      std::vector<hhds::Pin_class> ins;
+      for (const auto& edge : andn.inp_edges()) {
+        ins.push_back(edge.driver);
+      }
+      if (ins.size() != 2) {
+        return std::nullopt;
+      }
+      return Half{ins[0], ins[1]};
+    };
+    // M = SHL(K, n) with K a low-contiguous constant mask: returns (K width, n).
+    const auto placed_mask = [&](const hhds::Pin_class& m) -> std::optional<std::pair<int, hhds::Pin_class>> {
+      if (m.is_invalid() || m.is_const()) {
+        return std::nullopt;
+      }
+      const auto shl = m.get_master_node();
+      if (shl.is_invalid() || type_op_of(shl) != Ntype_op::SHL) {
+        return std::nullopt;
+      }
+      const auto k = get_driver_of_sink_name(shl, "a");
+      const auto n = get_driver_of_sink_name(shl, "b");
+      if (k.is_invalid() || !k.is_const() || n.is_invalid()) {
+        return std::nullopt;
+      }
+      const auto& kv = const_of(k);
+      if (kv.has_unknowns() || kv.is_negative()) {
+        return std::nullopt;
+      }
+      const auto [kb, ke] = kv.get_mask_range();
+      if (kb != 0 || ke <= 0) {
+        return std::nullopt;
+      }
+      return std::pair{static_cast<int>(ke), n};
+    };
+    const auto inverted_of = [&](const hhds::Pin_class& inv) -> hhds::Pin_class {  // Xor(M, all-ones) -> M
+      if (inv.is_invalid() || inv.is_const()) {
+        return {};
+      }
+      const auto xorn = inv.get_master_node();
+      if (xorn.is_invalid() || type_op_of(xorn) != Ntype_op::Xor) {
+        return {};
+      }
+      hhds::Pin_class m;
+      bool            all_ones = false;
+      int             count    = 0;
+      for (const auto& edge : xorn.inp_edges()) {
+        ++count;
+        if (edge.driver.is_const()) {
+          const auto& cv = const_of(edge.driver);
+          if (cv.has_unknowns() || cv.is_negative()) {
+            return {};
+          }
+          const auto [cb, ce] = cv.get_mask_range();
+          all_ones            = cb == 0 && ce >= wbits_of(output);
+        } else {
+          m = edge.driver;
+        }
+      }
+      return count == 2 && all_ones ? m : hhds::Pin_class{};
+    };
+    for (int keep_index = 0; keep_index < 2; ++keep_index) {
+      const auto keep  = and_halves(e[keep_index].driver);
+      const auto place = and_halves(e[1 - keep_index].driver);
+      if (!keep || !place) {
+        continue;
+      }
+      for (int ki = 0; ki < 2; ++ki) {
+        const auto& base = ki == 0 ? keep->value : keep->mask;
+        const auto  m    = inverted_of(ki == 0 ? keep->mask : keep->value);
+        if (m.is_invalid()) {
+          continue;
+        }
+        for (int pi = 0; pi < 2; ++pi) {
+          const auto& shifted = pi == 0 ? place->value : place->mask;
+          const auto& pm      = pi == 0 ? place->mask : place->value;
+          if (!(pm == m)) {
+            continue;
+          }
+          const auto placed = placed_mask(m);
+          if (!placed || shifted.is_invalid() || shifted.is_const()) {
+            continue;
+          }
+          const auto shl = shifted.get_master_node();
+          if (shl.is_invalid() || type_op_of(shl) != Ntype_op::SHL) {
+            continue;
+          }
+          const auto v  = get_driver_of_sink_name(shl, "a");
+          const auto vn = get_driver_of_sink_name(shl, "b");
+          if (v.is_invalid() || vn.is_invalid() || !(vn == placed->second) || base.is_invalid() || base.is_const()
+              || !pin2var.contains(base.get_class_index())) {
+            continue;
+          }
+          const auto lo = shift_count_expr(placed->second);
+          if (lo.empty()) {
+            continue;
+          }
+          const int width = placed->first;
+          const int bw    = wbits_of(base);
+          const int vw    = v.is_const() ? static_cast<int>(const_of(v).get_bits()) : wbits_of(v);
+          if (bw <= 0 || vw <= 0 || vw > bw) {
+            continue;
+          }
+          const bool canonical_base = is_unsign(base) && slop_u_values_.contains(base.get_class_index());
+          if (canonical_base && slop_u_ && wbits == bw + 1 && wbits_of(output) == bw) {
+            // Slop_u<bw>::set_mask_op_opt keeps the base canonical; the value
+            // rides its Slop<bw+1> carrier.
+            slop_u_expr_ = true;
+            return absl::StrCat("([&]{ const int __lo = ",
+                                lo,
+                                "; return ",
+                                operation_operand(base),
+                                ".set_mask_op_opt(__lo, std::min(__lo + ",
+                                width,
+                                ", ",
+                                bw,
+                                "), Slop<",
+                                bw + 1,
+                                ">{",
+                                operation_operand(v),
+                                "}); }())");
+          }
+          // A SIGNED base only at the SAME width: `set_mask_op_opt` returns a
+          // Slop<bw> that keeps the base's sign bit, and the Or node this
+          // replaces is unsigned (checked above), so its bits at and above `bw`
+          // must be ZERO. The `Slop<tw>{...}` cross-width ctor sign-extends
+          // instead, which for a negative base lands a negative carrier where
+          // the `|` yields a positive value. Widening is left to the generic
+          // or_op fold rather than spelled with the wrong extension here.
+          if (!is_unsign(base) && !canonical_.contains(base.get_class_index()) && wbits == bw) {
+            return absl::StrCat("([&]{ const int __lo = ",
+                                lo,
+                                "; return ",
+                                operation_operand(base),
+                                ".set_mask_op_opt(__lo, std::min(__lo + ",
+                                width,
+                                ", ",
+                                bw,
+                                "), Slop<",
+                                bw,
+                                ">{",
+                                operation_operand(v),
+                                "}); }())");
+          }
+        }
+      }
+    }
+    return {};
+  };
+
   switch (op) {
     case Ntype_op::Sum: {
       std::string result = absl::StrCat("Slop<", tw, ">::create_integer(0)");
@@ -1027,8 +1344,34 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       return land_operation(std::move(result));
     }
-    case Ntype_op::And : return fold("and_op", true);
-    case Ntype_op::Or  : return fold("or_op", true);
+    case Ntype_op::And: {
+      if (e.size() == 2) {
+        for (int mask_index = 0; mask_index < 2; ++mask_index) {
+          const auto& mask_drv = e[mask_index].driver;
+          if (!mask_drv.is_const()) {
+            continue;
+          }
+          const auto& mv = const_of(mask_drv);
+          if (mv.has_unknowns() || mv.is_negative()) {
+            continue;
+          }
+          const auto [mb, me] = mv.get_mask_range();
+          if (mb != 0 || me <= 0) {
+            continue;
+          }
+          if (auto extract = dynamic_extract(e[1 - mask_index].driver, me); !extract.empty()) {
+            return extract;
+          }
+        }
+      }
+      return fold("and_op", true);
+    }
+    case Ntype_op::Or: {
+      if (auto insert = dynamic_insert(); !insert.empty()) {
+        return insert;
+      }
+      return fold("or_op", true);
+    }
     case Ntype_op::Xor : return fold("xor_op", true);
     case Ntype_op::Mult: return fold("mult_op", false);
     case Ntype_op::Div : {
@@ -1149,6 +1492,43 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                                              ")"));
         }
       }
+      // A materialized `x >> n` whose every reader keeps only its low W bits
+      // (the Get_mask lanes of a runtime slice that the color ABI pre-extracts
+      // at the boundary, so the shift itself became a boundary member) needs
+      // only max(W) bits: extract those directly instead of shifting the whole
+      // word. Bits above are never observed by any consumer. Not under
+      // observation: a VCD/probe would show the narrowed value.
+      if (!is_shl && !observation_on && e[1].driver.is_valid() && !e[1].driver.is_const() && is_unsign(e[0].driver)) {
+        const auto output        = node.get_driver_pin(0);
+        const bool all_low_masks = !output.is_invalid() && is_unsign(output) && wbits >= 2;
+        const int  wmax          = all_low_masks ? low_lane_readers_width(output) : 0;
+        if (all_low_masks && wmax > 0 && pin2var.contains(e[0].driver.get_class_index())) {
+          if (const auto lo = shift_count_expr(e[1].driver); !lo.empty()) {
+            const int len = std::min<int>(wmax, wbits - 1);
+            if (slop_u_ && wbits == wbits_of(output) + 1) {
+              slop_u_expr_ = true;
+              return absl::StrCat("([&]{ const int __lo = ",
+                                  lo,
+                                  "; return Slop_u<",
+                                  wbits - 1,
+                                  ">::get_mask_op_opt(",
+                                  operation_operand(e[0].driver),
+                                  ", __lo, __lo + ",
+                                  len,
+                                  "); }())");
+            }
+            return absl::StrCat("([&]{ const int __lo = ",
+                                lo,
+                                "; return Slop<",
+                                tw,
+                                ">::get_mask_op_opt(",
+                                operation_operand(e[0].driver),
+                                ", __lo, __lo + ",
+                                len,
+                                "); }())");
+          }
+        }
+      }
       // Runtime amount width is independent of the datapath width. SRA is
       // arithmetic for signed inputs and logical for unsigned inputs, just as
       // cgen.verilog selects $signed only for a signed driver.
@@ -1231,6 +1611,11 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
             // `me <= wbits` -- 64 <= 4 -- and fell into a 64-iteration bit loop
             // that measured 47% of total simulation time, before AND after
             const bool in_width = me <= wbits_of(e[0].driver);
+            if (mb == 0 && me > 0) {
+              if (auto extract = dynamic_extract(e[0].driver, me); !extract.empty()) {
+                return extract;
+              }
+            }
             if (mb >= 0 && me > mb && (in_width || is_unsign(e[0].driver))) {
               // get_mask packs the selected bits LSB-FIRST. Keep the contiguous
               // range as Get_mask and pass its literal bounds to HLOP. The
@@ -1473,6 +1858,34 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // i.e. the sign bit is at b-1. Slop::sext_op(fb) takes fb as the sign-bit
         // position, so pass b-1 (NOT b) or the value stays unsigned/off-by-one.
         frombit = static_cast<int>(const_of(e[1].driver).to_just_i64()) - 1;
+      }
+      // `x#sext[lo..=hi]`: a contiguous Get_mask lane whose width IS the
+      // sign-extension width. `Slop<W>::get_mask_op_opt` sign-extends when the
+      // range fills the carrier (len == N), so the lane lands signed in one
+      // bitfield extract instead of extract + re-sign (matched_filter's 64
+      // multiplier operands paid the pair twice per tap).
+      if (frombit >= 0 && frombit + 1 <= wbits && !e[0].driver.is_invalid() && !e[0].driver.is_const()) {
+        const auto extract = e[0].driver.get_master_node();
+        if (!extract.is_invalid() && type_op_of(extract) == Ntype_op::Get_mask
+            && !preextracted_get_masks_.contains(extract.get_class_index())) {
+          const auto x    = get_driver_of_sink_name(extract, "a");
+          const auto mask = get_driver_of_sink_name(extract, "mask");
+          if (!x.is_invalid() && !mask.is_invalid() && mask.is_const() && (x.is_const() || pin2var.contains(x.get_class_index()))) {
+            const auto& mv = const_of(mask);
+            if (!mv.has_unknowns() && !mv.is_negative()) {
+              const auto [mb, me] = mv.get_mask_range();
+              // Same admissibility the ordinary Get_mask lowering requires of
+              // this cell: a range reaching past a SIGNED source's width is not
+              // a bitfield extract there, so it must not become one here.
+              const bool in_width = me <= wbits_of(x);
+              if (mb >= 0 && me - mb == frombit + 1 && (in_width || is_unsign(x))) {
+                const auto lane
+                    = absl::StrCat("Slop<", frombit + 1, ">::get_mask_op_opt(", operation_operand(x), ", ", mb, ", ", me, ")");
+                return frombit + 1 == wbits ? lane : absl::StrCat("Slop<", tw, ">{", lane, "}");
+              }
+            }
+          }
+        }
       }
       // read the source wide enough to preserve the sign bit before extending
       int sw = std::max({wbits, frombit + 1, wbits_of(e[0].driver)});
@@ -2397,7 +2810,13 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
   gd          = fnv1a(gd, debug_ ? 1u : 0u);
   gd          = fnv1a(gd, unknown_zero_ ? 1u : 0u);
   gd          = fnv1a(gd, llvm_backend_ ? 1u : 0u);
-  gd          = fnv1a(gd, (color_root ? 2u : 0u) | (observation_on ? 1u : 0u));
+  // `dut_` is NOT implied by `is_top`: with an empty --top every module reports
+  // is_top, while dut_ additionally requires the module not to be instantiated.
+  // It selects version-gated `__in` forwarding and the `__color_port_ver_*`
+  // boundary refresh, so a body generated for one must never be reused as the
+  // other (a dut_=false body reused as the DUT ignores every driver poke).
+  gd          = fnv1a(gd, (color_root ? 2u : 0u) | (observation_on ? 1u : 0u) | (dut_ ? 4u : 0u));
+  gd          = fnv1a(gd, live_words_);
   char hex[17];
   std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
   return hex;
@@ -3852,6 +4271,110 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
 
   // ---- sub-module instances (Ntype_op::Sub -> nested struct member) ----
+  // ---- Versioned wide inputs ---------------------------------------------
+  // Every In field wider than one machine word carries `__ver_<field>`, a
+  // change counter that EVERY generated writer bumps when the value changed:
+  // the sub-call binding below, the compact-loop wrapper's broadcast and
+  // per-ordinal lane binding, and load_state. A module that forwards such an
+  // input UNCHANGED into a child instance then re-binds it only when its own
+  // copy's version moved, instead of comparing the whole bus on every
+  // evaluation -- XiangShan's RenameTable re-bound a 7,800-bit loop invariant
+  // 228 times per period, one memcmp each, for 20% of its cycle.
+  //
+  // The DUT's inputs are written by the driver, which does not version them,
+  // so the DUT (dut_) never forwards by version; every other writer of an
+  // `__in` field is generated here.
+  const auto versioned_bits = [](int bits) { return bits > 64; };
+  const auto ver_path       = [](std::string_view field) -> std::string {
+    const auto dot = field.rfind('.');
+    return dot == std::string_view::npos ? absl::StrCat("__ver_", field)
+                                         : absl::StrCat(field.substr(0, dot + 1), "__ver_", field.substr(dot + 1));
+  };
+  const auto fwd_member
+      = [](std::string_view inst, std::string_view field) { return absl::StrCat("__fwd_", inst, "_", cpp_id(field)); };
+  // The input port of THIS module that `drv` reads directly, when both it and
+  // the `bits`-wide destination are versioned; nullptr otherwise.
+  const auto forward_io_of = [&](const hhds::Pin_class& drv, int bits) -> const Io* {
+    if (dut_ || drv.is_invalid() || drv.is_const() || !versioned_bits(bits) || !livehd::graph_util::is_graph_input_pin(drv)) {
+      return nullptr;
+    }
+    const auto name = pin_name_of(drv);
+    for (const auto& io : ios) {
+      if (io.is_input && io.raw == name && versioned_bits(io.bits)) {
+        return &io;
+      }
+    }
+    return nullptr;
+  };
+  // The `__fwd_*` members declared in this struct, and what each one STANDS FOR.
+  // Not a plain set of names: `fwd_member` joins two already-sanitized names
+  // with '_' and `cpp_id` flattens a tuple leaf's '.', so the name is NOT
+  // injective -- instance `u` + field `a_b` and instance `u_a` + field `b` mint
+  // the same member, and so do the fields `io.data` and `io_data` of ONE
+  // instance (cpp_port_path keeps the dot, cpp_id turns it into '_'). Two pairs
+  // sharing one counter is a SILENT stale forward: whichever binds first stamps
+  // the version, the other then sees it already stamped and skips a bind it
+  // owed, leaving a wide bus a period behind with no diagnostic. Record the
+  // pair so every binding site can CHECK it -- a collision, or a site whose
+  // source port the pre-scan did not predict, falls back to the ungated bump,
+  // which is always correct and only slower.
+  struct Forward_stamp {
+    std::string field;      // the child input field this member stamps
+    std::string src_field;  // this module's input port whose version it holds
+  };
+  absl::flat_hash_map<std::string, Forward_stamp> forward_stamps;
+  // `<inst>.__in.<field>` <- rhs, maintaining the field's version. `io` non-null
+  // = a pure forward of this module's own versioned input: gate on its version.
+  const auto                                      emit_in_binding =
+      [&](std::string_view indent, std::string_view inst, std::string_view field, int bits, const std::string& rhs, const Io* io) {
+        if (!versioned_bits(bits)) {
+          fout->append(absl::StrCat(indent, inst, ".__gen += slop_update(", inst, ".__in.", field, ", ", rhs, ");\n"));
+          return;
+        }
+        const auto bump = absl::StrCat("if (slop_update(",
+                                       inst,
+                                       ".__in.",
+                                       field,
+                                       ", ",
+                                       rhs,
+                                       ")) { ++",
+                                       inst,
+                                       ".__gen; ++",
+                                       inst,
+                                       ".__in.",
+                                       ver_path(field),
+                                       "; }");
+        // The member has to be one the pre-scan declared AND has to stand for
+        // THIS (field, source port): gating against a counter that belongs to
+        // some other pair skips a bind that was owed. Refusing here costs one
+        // full bus compare per evaluation; getting it wrong costs a stale value.
+        const auto fwd  = fwd_member(inst, field);
+        const auto it   = forward_stamps.find(fwd);
+        if (io == nullptr || it == forward_stamps.end() || it->second.field != field || it->second.src_field != io->field) {
+          fout->append(absl::StrCat(indent, bump, "\n"));
+          return;
+        }
+        const auto ver = absl::StrCat("__in.", ver_path(io->field));
+        fout->append(absl::StrCat(indent,
+                                  "if (",
+                                  fwd,
+                                  " != ",
+                                  ver,
+                                  ") {\n",
+                                  indent,
+                                  "  ",
+                                  fwd,
+                                  " = ",
+                                  ver,
+                                  ";\n",
+                                  indent,
+                                  "  ",
+                                  bump,
+                                  "\n",
+                                  indent,
+                                  "}\n"));
+      };
+
   struct Sub {
     hhds::Node_class                                 node;
     std::string                                      inst;           // member name
@@ -4020,6 +4543,38 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hout->append(absl::StrCat("#include \"", h, "\"\n"));
   }
 
+  // Which child inputs this module forwards straight from its own versioned
+  // inputs (see emit_in_binding). Decided here, before the struct header, so
+  // the `__fwd_*` members exist by the time the bodies bind them.
+  for (const auto& s : subs) {
+    auto sio = s.node.get_subnode_io();
+    if (!sio) {
+      continue;
+    }
+    for (const auto& d : sio->get_input_pin_decls()) {
+      const int  bits = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+      const auto sink = find_sink_pin(s.node, d.name);
+      if (sink.is_invalid()) {
+        continue;
+      }
+      for (const auto& edge : sink.inp_edges()) {
+        if (edge.driver.get_master_node() == s.node) {
+          continue;
+        }
+        if (const auto* fio = forward_io_of(edge.driver, bits); fio != nullptr) {
+          auto field  = cpp_port_path(d.name);
+          auto member = fwd_member(s.inst, field);  // before `field` is moved from: argument order is unsequenced
+          // try_emplace, never overwrite: on a name collision the FIRST pair
+          // keeps the member and every binding site of the loser fails the
+          // check above and bumps ungated. Nothing correct is lost, and the
+          // winner's gate stays exact.
+          forward_stamps.try_emplace(std::move(member), Forward_stamp{std::move(field), fio->field});
+        }
+        break;
+      }
+    }
+  }
+
   // Stateless loops have no autonomous child transitions: their wrapper
   // generation already tracks every change to inputs and outputs. Leaf bodies
   // can additionally reuse one scratch callee across ordinals. Keep per-ordinal
@@ -4136,6 +4691,29 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                  "> lanes{};\n  In __in{};\n  Out __last_out{};\n  Out __out{};\n");
     hout->append("  uint64_t __gen = 1, __kids = 0;\n");
     hout->append("  bool __broadcast_valid = false;\n");
+    // `cpp_id` flattens a tuple leaf's '.', so the member name is NOT injective:
+    // the ports `io.data` and `io_data` mint the same `__bcast_ver_io_data`.
+    // Declaring it twice is a hard C++ error, so count first and keep the
+    // counter only for names that are unique -- a colliding port falls back to
+    // the ungated whole-bus compare below, which is always correct.
+    absl::flat_hash_map<std::string, int> bcast_ver_uses;
+    for (const auto& d : sio->get_input_pin_decls()) {
+      if (versioned_bits(d.bits > 0 ? static_cast<int>(d.bits) : 1)) {
+        ++bcast_ver_uses[cpp_id(cpp_port_path(d.name))];
+      }
+    }
+    {
+      std::vector<std::string> bcast_members;  // flat_hash_map order is not reproducible across runs
+      for (const auto& [member, uses] : bcast_ver_uses) {
+        if (uses == 1) {
+          bcast_members.push_back(member);
+        }
+      }
+      std::ranges::sort(bcast_members);
+      for (const auto& member : bcast_members) {
+        hout->append("  uint32_t __bcast_ver_", member, " = 0;  // version last broadcast\n");
+      }
+    }
     const bool gate_loop = vcd_file.empty() && ::getenv("LIVEHD_SIM_NOGATE") == nullptr;
     if (gate_loop) {
       hout->append("  uint64_t __done_publish = 0, __kids_publish = 0, __done_advance = 0, __kids_advance = 0;\n");
@@ -4161,17 +4739,40 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         continue;
       }
       const auto field = cpp_port_path(d.name);
-      hout->append(absl::StrCat("      if (!__broadcast_valid || !lanes[0].__in.",
-                                field,
-                                ".identical(__in.",
-                                field,
-                                ")) {\n"
-                                "        LHD_SIM_PRESERVE_LOOP for (auto& lane : lanes) lane.__gen += slop_update(lane.__in.",
-                                field,
-                                ", __in.",
-                                field,
-                                ");\n"
-                                "      }\n"));
+      if (versioned_bits(d.bits > 0 ? static_cast<int>(d.bits) : 1) && bcast_ver_uses[cpp_id(field)] == 1) {
+        // A versioned invariant: the parent's binding bumped `__in.__ver_F`
+        // when the bus changed, so one counter compare replaces the bus scan.
+        const auto bver = absl::StrCat("__bcast_ver_", cpp_id(field));
+        hout->append(absl::StrCat("      if (!__broadcast_valid || ",
+                                  bver,
+                                  " != __in.",
+                                  ver_path(field),
+                                  ") {\n        ",
+                                  bver,
+                                  " = __in.",
+                                  ver_path(field),
+                                  ";\n"
+                                  "        LHD_SIM_PRESERVE_LOOP for (auto& lane : lanes) { if (slop_update(lane.__in.",
+                                  field,
+                                  ", __in.",
+                                  field,
+                                  ")) { ++lane.__gen; ++lane.__in.",
+                                  ver_path(field),
+                                  "; } }\n"
+                                  "      }\n"));
+      } else {
+        hout->append(absl::StrCat("      if (!__broadcast_valid || !lanes[0].__in.",
+                                  field,
+                                  ".identical(__in.",
+                                  field,
+                                  ")) {\n"
+                                  "        LHD_SIM_PRESERVE_LOOP for (auto& lane : lanes) lane.__gen += slop_update(lane.__in.",
+                                  field,
+                                  ", __in.",
+                                  field,
+                                  ");\n"
+                                  "      }\n"));
+      }
       if (auto cg = s.node.get_subnode_graph();
           cg && clock_guard_ports(cg, port_cache).contains(static_cast<uint32_t>(d.port_id))) {
         hout->append(absl::StrCat("      if (!__broadcast_valid || lanes[0].__in.",
@@ -4214,7 +4815,23 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             continue;  // already broadcast once, outside the ordinal walk
           }
         }
-        hout->append(absl::StrCat("      ", lane, ".__gen += slop_update(", lane, ".__in.", field, ", ", rhs, ");\n"));
+        if (versioned_bits(d.bits > 0 ? static_cast<int>(d.bits) : 1)) {
+          hout->append(absl::StrCat("      if (slop_update(",
+                                    lane,
+                                    ".__in.",
+                                    field,
+                                    ", ",
+                                    rhs,
+                                    ")) { ++",
+                                    lane,
+                                    ".__gen; ++",
+                                    lane,
+                                    ".__in.",
+                                    ver_path(field),
+                                    "; }\n"));
+        } else {
+          hout->append(absl::StrCat("      ", lane, ".__gen += slop_update(", lane, ".__in.", field, ", ", rhs, ");\n"));
+        }
         if (auto cg = s.node.get_subnode_graph();
             cg && clock_guard_ports(cg, port_cache).contains(static_cast<uint32_t>(d.port_id))) {
           hout->append(
@@ -5077,6 +5694,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // kernel body must name the SAME type -- this is what keeps them in step.
   std::vector<bool>                                 direct_slot_is_u;
   std::vector<std::string>                          direct_input_prev_storage;
+  // Root input ports sliced into MANY boundary slots (XiangShan's RenameTable
+  // splits a 10,400-bit commit bundle into 3,640 lanes): one whole-port compare
+  // gates the per-slot refresh, so an idle wide port costs one memcmp per
+  // period instead of one extract+compare per lane. port_id -> prev storage.
+  absl::flat_hash_map<uint32_t, std::string>        direct_port_gate_storage;
+  std::vector<std::string>                          direct_port_gate_decls;
+  // Wide (versioned) inputs of a non-DUT color root: their writers bump
+  // `__ver_<field>`, so the refresh compares one counter instead of the bus
+  // (an LLVM-mode loop body re-scanned its 7,800-bit invariant every period).
+  absl::flat_hash_map<uint32_t, std::string>        direct_port_ver_storage;
   // Slots are pooled into one array per storage TYPE, so the key carries the
   // canonical-unsigned bit as well as the width: `Slop_u<7>` and `Slop<8>` have
   // the same carrier layout but are different C++ types and cannot share an
@@ -5498,6 +6125,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         } else {
           hout->append("    ", type, " ", io.field, "{};\n");
         }
+        if (want_input && versioned_bits(io.bits)) {
+          hout->append("    uint32_t ", ver_path(io.field), " = 0;  // change count, see versioned wide inputs\n");
+        }
         if (want_input && clock_in_fields.contains(io.field)) {
           hout->append("    bool ", io.field, "__tick = true;  // did this clock port tick? false == the parent gated it off\n");
         }
@@ -5505,6 +6135,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // nested leaf: the segment after the group prefix (io.field is
         // "<group>.<leaf>", so take what follows its dot)
         hout->append("      ", value_type(io.bits, io.unsign), " ", io.field.substr(io.field.find('.') + 1), "{};\n");
+        if (want_input && versioned_bits(io.bits)) {
+          hout->append("      uint32_t __ver_", io.field.substr(io.field.find('.') + 1), " = 0;\n");
+        }
       }
     }
     if (!open_group.empty()) {
@@ -5533,6 +6166,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // entry value), so the run is skipped. This is what lets an idle or
   // clock-gated cone quiesce to a couple of integer compares per cycle.
   hout->append("  uint64_t __gen = 1;  // observable-change generation (inputs + state commits)\n");
+  {
+    std::vector<std::string> forward_members;
+    forward_members.reserve(forward_stamps.size());
+    for (const auto& entry : forward_stamps) {
+      forward_members.push_back(entry.first);
+    }
+    std::ranges::sort(forward_members);  // flat_hash_map order is not reproducible across runs
+    for (const auto& member : forward_members) {
+      hout->append("  uint32_t ", member, " = 0;  // version of the input last forwarded to this child field\n");
+    }
+  }
   if (staged_flat && !subs.empty()) {
     hout->append("  uint64_t __color_kids_before = 0;  // child generation snapshot across pre-rise -> commit\n");
   }
@@ -5819,6 +6463,39 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  bool observe_mem(const std::string& _n, long _i, std::string& _o) const;\n");
   hout->append("};\n");
 
+  // ---- Dirty bitset ------------------------------------------------------
+  // Color activation flags are bits in execution order, 64 per word, not one
+  // bool per color: a schedule function can then skip a whole idle 64-color
+  // group with one word test (minion walked 11,659 flags per period, 28% of
+  // its cycle), and a commit function ORs its marks into a local per word
+  // instead of storing the same dirty bytes once per committed flop.
+  std::vector<size_t> direct_color_pos(color_plan_ != nullptr ? color_plan_->colors().size() : 0, 0);
+  if (color_plan_ != nullptr) {
+    std::vector<size_t> ordered(color_plan_->colors().size());
+    std::iota(ordered.begin(), ordered.end(), 0);
+    std::ranges::sort(ordered, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
+    for (size_t pos = 0; pos < ordered.size(); ++pos) {
+      direct_color_pos[ordered[pos]] = pos;
+    }
+  }
+  const size_t direct_dirty_words = (direct_color_pos.size() + 63) / 64;
+  const auto   dirty_word         = [&](size_t color) { return direct_color_pos[color] / 64; };
+  const auto   dirty_mask = [&](size_t color) { return absl::StrCat("(uint64_t{1} << ", direct_color_pos[color] % 64, ")"); };
+  // While a commit function runs, marks accumulate into `__dacc_<word>` locals
+  // that the function flushes once; the set records the words it touched.
+  std::optional<absl::flat_hash_set<size_t>> dirty_accumulator;
+  const auto                                 dirty_mark = [&](size_t color) -> std::string {
+    if (dirty_accumulator) {
+      dirty_accumulator->insert(dirty_word(color));
+      return absl::StrCat("__dacc_", dirty_word(color), " |= ", dirty_mask(color), ";");
+    }
+    return absl::StrCat("__rt.__color_dirty[", dirty_word(color), "] |= ", dirty_mask(color), ";");
+  };
+  const auto dirty_test
+      = [&](size_t color) { return absl::StrCat("(__rt.__color_dirty[", dirty_word(color), "] & ", dirty_mask(color), ") != 0"); };
+  const auto dirty_clear
+      = [&](size_t color) { return absl::StrCat("__rt.__color_dirty[", dirty_word(color), "] &= ~", dirty_mask(color), ";"); };
+
   if (color_runtime_root) {
     const std::string runtime_header_name = fstem + ".color-runtime.hpp";
     auto              runtime_header      = open_out(runtime_header_name);
@@ -5842,13 +6519,54 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           canonical ? absl::StrCat("  std::array<Slop_u<", width, ">, ", count, "> __color_input_prev_u", width, "{};\n")
                     : absl::StrCat("  std::array<Slop<", width, ">, ", count, "> __color_input_prev_", width, "{};\n"));
     }
+    {
+      std::map<uint32_t, size_t> sliced_slots_per_port;
+      for (const auto& slot : color_plan_->boundary_slots()) {
+        if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input && slot.producer_extract_hi > slot.producer_extract_lo) {
+          ++sliced_slots_per_port[static_cast<uint32_t>(slot.public_port)];
+        }
+      }
+      for (const auto& [port, count] : sliced_slots_per_port) {
+        if (count < 2) {
+          continue;
+        }
+        const Io* io = nullptr;
+        for (const auto& candidate : ios) {
+          if (candidate.is_input && candidate.port_id == port) {
+            io = &candidate;
+            break;
+          }
+        }
+        if (io == nullptr || io->bits <= 0 || clock_in_fields.contains(io->field)) {
+          continue;
+        }
+        const auto name = absl::StrCat("__color_port_prev_", direct_port_gate_storage.size());
+        direct_port_gate_storage.emplace(port, absl::StrCat("__rt.", name));
+        direct_port_gate_decls.push_back(absl::StrCat("  ", value_type(io->bits, io->unsign), " ", name, "{};\n"));
+      }
+      for (const auto& decl : direct_port_gate_decls) {
+        runtime_header->append(decl);
+      }
+      if (!dut_) {
+        for (const auto& io : ios) {
+          if (!io.is_input || !versioned_bits(io.bits) || clock_in_fields.contains(io.field)) {
+            continue;
+          }
+          const auto name = absl::StrCat("__color_port_ver_", direct_port_ver_storage.size());
+          direct_port_ver_storage.emplace(io.port_id, absl::StrCat("__rt.", name));
+          runtime_header->append("  uint32_t ", name, " = 0;  // version of this wide input at its last refresh\n");
+        }
+      }
+    }
     runtime_header->append("  bool __color_state_changed = false;\n");
     for (size_t site = 0; site < color_plan_->sites().size(); ++site) {
       if (color_plan_->sites()[site].kind == livehd::sim::Color_plan::Site_kind::loop_control) {
         runtime_header->append("  bool __loop_advanced_", std::to_string(site), " = false;\n");
       }
     }
-    runtime_header->append("  std::array<bool, ", std::to_string(color_plan_->colors().size()), "> __color_dirty{};\n");
+    runtime_header->append("  std::array<uint64_t, ",
+                           std::to_string(std::max<size_t>(direct_dirty_words, 1)),
+                           "> __color_dirty{};  // activation bits in execution order\n");
     if (direct_commit_shards.empty()) {
       runtime_header->append("  std::array<bool, ", std::to_string(direct_state_commit_count), "> __state_commit{};\n");
     } else {
@@ -5860,7 +6578,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     runtime_header->append("  std::array<std::vector<void*>, ",
                            std::to_string(color_plan_->colors().size()),
                            "> __color_bindings{};\n");
-    runtime_header->append("  __Color_runtime() { __color_dirty.fill(true); }\n};\n");
+    runtime_header->append("  __Color_runtime() { __color_dirty.fill(~uint64_t{0}); }\n};\n");
     fout->append("#include \"", runtime_header_name, "\"\n");
   }
 
@@ -7220,15 +7938,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 .emit();
             cycle_reported_ = true;
           }
-          fout->append(absl::StrCat("    ",
-                                    s.inst,
-                                    ".__gen += slop_update(",
-                                    s.inst,
-                                    ".__in.",
-                                    cpp_port_path(d.name),
-                                    ", ",
-                                    operand(value_drv, wb),
-                                    ");\n"));
+          emit_in_binding("    ",
+                          s.inst,
+                          cpp_port_path(d.name),
+                          wb,
+                          bind_operand(value_drv, wb, d.unsign),
+                          forward_io_of(value_drv, wb));
           emit_child_tick(ensure_fn, s, d.name, static_cast<uint32_t>(d.port_id), drv);
         }
         // In settle mode the child is re-settled against the inputs just rebuilt
@@ -7526,8 +8241,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       absl::flat_hash_map<uint32_t, const void*>                 bound_pids;  // pid -> decl (dedupe)
       absl::flat_hash_map<uint32_t, std::pair<std::string, int>> pid2in;
+      absl::flat_hash_map<uint32_t, bool>                        pid2unsign;
       for (const auto& d : dsio->get_input_pin_decls()) {
-        pid2in[static_cast<uint32_t>(d.port_id)] = {d.name, d.bits > 0 ? static_cast<int>(d.bits) : 1};
+        pid2in[static_cast<uint32_t>(d.port_id)]     = {d.name, d.bits > 0 ? static_cast<int>(d.bits) : 1};
+        pid2unsign[static_cast<uint32_t>(d.port_id)] = d.unsign;
       }
       const std::string run_condition = sub_run_condition(ensure_ready, s);
       if (!run_condition.empty()) {
@@ -7557,15 +8274,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // tuple port as a nested struct, so the leaf is `io_data.instruction`.
         auto value_drv = child_clock_data_driver(s, pid, e.driver);
         ensure_ready(value_drv);
-        fout->append(absl::StrCat("    ",
-                                  s.inst,
-                                  ".__gen += slop_update(",
-                                  s.inst,
-                                  ".__in.",
-                                  cpp_port_path(it->second.first),
-                                  ", ",
-                                  operand(value_drv, it->second.second),
-                                  ");\n"));
+        emit_in_binding("    ",
+                        s.inst,
+                        cpp_port_path(it->second.first),
+                        it->second.second,
+                        bind_operand(value_drv, it->second.second, pid2unsign[pid]),
+                        forward_io_of(value_drv, it->second.second));
         emit_child_tick(ensure_ready, s, it->second.first, pid, e.driver);
       }
       fout->append(absl::StrCat("    ", s.inst, ".__compact_advance();  // deferred compact-kernel state advance\n"));
@@ -8307,15 +9021,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           int  wb        = d.bits > 0 ? static_cast<int>(d.bits) : 1;
           auto value_drv = child_clock_data_driver(s, static_cast<uint32_t>(d.port_id), drv);
           ensure_ready(value_drv);
-          fout->append(absl::StrCat("    ",
-                                    s.inst,
-                                    ".__gen += slop_update(",
-                                    s.inst,
-                                    ".__in.",
-                                    cpp_port_path(d.name),
-                                    ", ",
-                                    operand(value_drv, wb),
-                                    ");\n"));
+          emit_in_binding("    ",
+                          s.inst,
+                          cpp_port_path(d.name),
+                          wb,
+                          bind_operand(value_drv, wb, d.unsign),
+                          forward_io_of(value_drv, wb));
           emit_child_tick(ensure_ready, s, d.name, static_cast<uint32_t>(d.port_id), drv);
         }
         fout->append(absl::StrCat("    ", s.inst, ".__compact_advance();\n"));
@@ -8573,11 +9284,24 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto type = value_type(io.bits, io.unsign);
         fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"__in.",
                                   io.field,
-                                  "\"); _it != _r.end()) __in.",
+                                  "\"); _it != _r.end()) { __in.",
                                   io.field,
                                   " = ",
                                   type,
-                                  "::from_pyrope(_it->second);\n"));
+                                  "::from_pyrope(_it->second); }\n"));
+        // Bump the version OUTSIDE the key-present guard. `<inst>.load_state`
+        // just above has already overwritten this child subtree's own `__in`
+        // from the checkpoint, while the parent's `__fwd_*` forward stamps (and
+        // a compact wrapper's `__bcast_ver_*`) only ever invalidate when the
+        // version MOVES. A checkpoint that carries the child's key but not the
+        // parent's -- the cross-version reload this function is built to
+        // tolerate -- would otherwise leave the parent believing it had already
+        // forwarded the value the child no longer holds, and the gate would skip
+        // that bind forever. `++__gen` below cannot cover this: it invalidates
+        // gated EVALUATION, not the per-field forward stamps.
+        if (versioned_bits(io.bits)) {
+          fout->append(absl::StrCat("  ++__in.", ver_path(io.field), ";  // restored: re-arm every version-gated forward\n"));
+        }
       }
     }
     fout->append("  ++__gen;  // loaded state: every gated evaluation must recompute\n");
@@ -9612,7 +10336,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (consumer.color == livehd::sim::Color_plan::invalid_index || !emitted.insert(consumer.color).second) {
           continue;
         }
-        fout->append(indent, "__rt.__color_dirty[", std::to_string(consumer.color), "] = true;\n");
+        fout->append(indent, dirty_mark(consumer.color), "\n");
       }
     };
     const auto emit_serial_dirty_site_colors = [&](size_t site_index, std::string_view indent) {
@@ -9620,7 +10344,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return;
       }
       for (const size_t color_index : direct_site_colors[site_index]) {
-        fout->append(indent, "__rt.__color_dirty[", std::to_string(color_index), "] = true;\n");
+        fout->append(indent, dirty_mark(color_index), "\n");
       }
     };
     const auto build_direct_kernel_abi = [&](size_t color_index) {
@@ -11021,6 +11745,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (operands.size() != 2) {
                 return reject("shift does not have two operands");
               }
+              // `x >> n` read only through low lanes (see low_lane_readers_width):
+              // two word loads + a funnel shift instead of a variable shift of
+              // the whole value -- the i7800 `lshr` was the hottest LLVM kernel.
+              if (type_op_of(node) == Ntype_op::SRA && !observation_on && operands[0].unsign && !edges[1].driver.is_const()) {
+                const int wmax = low_lane_readers_width(node.get_driver_pin(0));
+                if (wmax > 0 && wmax <= 64) {
+                  result = llvm_kernel.dynamic_extract(operands[0],
+                                                       operands[1],
+                                                       static_cast<uint32_t>(wmax),
+                                                       result_width,
+                                                       result_unsign);
+                  break;
+                }
+              }
               const auto operation = type_op_of(node) == Ntype_op::SHL ? Cgen_llvm::Binary_op::shl
                                      : operands[0].unsign              ? Cgen_llvm::Binary_op::lshr
                                                                        : Cgen_llvm::Binary_op::ashr;
@@ -12080,15 +12818,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 continue;  // descriptor-only carry/activation input
               }
               const int width = decl.bits > 0 ? static_cast<int>(decl.bits) : 1;
-              fout->append(absl::StrCat("  ",
-                                        sub_member,
-                                        ".__gen += slop_update(",
-                                        sub_member,
-                                        ".__in.",
-                                        cpp_port_path(decl.name),
-                                        ", ",
-                                        operand(driver, width),
-                                        ");\n"));
+              emit_in_binding("  ",
+                              sub_member,
+                              cpp_port_path(decl.name),
+                              width,
+                              bind_operand(driver, width, decl.unsign),
+                              forward_io_of(driver, width));
               if (const auto child = node.get_subnode_graph();
                   child && clock_guard_ports(child, port_cache).contains(static_cast<uint32_t>(decl.port_id))) {
                 const auto root_pin = livehd::latch_contract::control_root(driver).net;
@@ -13166,7 +13901,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       if (color_dirty_) {
         fout->append("    if (__changed) {\n");
-        fout->append("      __rt.__color_dirty[", std::to_string(color_idx), "] = true;\n");
+        fout->append("      ", dirty_mark(color_idx), "\n");
         if (op == Ntype_op::Memory) {
           emit_serial_dirty_site_colors(version.base_site, "      ");
         }
@@ -13182,18 +13917,69 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append("  }\n");
     };
 
+    // The dirty words a commit member can mark: its own color, a memory's site
+    // colors, and the consumers of its state-current slots -- the same targets
+    // emit_commit_member emits, known up front so the accumulator locals can
+    // be declared before the members that OR into them.
+    const auto commit_member_dirty_words = [&](size_t member, absl::flat_hash_set<size_t>& words) {
+      if (!color_dirty_) {
+        return;
+      }
+      const auto& version = color_plan_->version_sites()[member];
+      words.insert(dirty_word(direct_version_color[member]));
+      const auto& site = color_plan_->sites()[version.base_site];
+      // Same bounds guard emit_serial_dirty_site_colors applies to this index:
+      // the pre-scan must not read further than the emission it mirrors.
+      if (type_op_of(site.node.base_node()) == Ntype_op::Memory && version.base_site < direct_site_colors.size()) {
+        for (const size_t color_index : direct_site_colors[version.base_site]) {
+          words.insert(dirty_word(color_index));
+        }
+      }
+      for (const size_t state_slot : direct_state_current_slots[version.base_site]) {
+        for (const auto& consumer : color_plan_->boundary_slots()[state_slot].consumers) {
+          if (consumer.color != livehd::sim::Color_plan::invalid_index) {
+            words.insert(dirty_word(consumer.color));
+          }
+        }
+      }
+    };
+    const auto emit_commit_members = [&](const std::vector<size_t>& members, std::string_view indent) {
+      absl::flat_hash_set<size_t> words;
+      for (const size_t member : members) {
+        commit_member_dirty_words(member, words);
+      }
+      std::vector<size_t> ordered_words(words.begin(), words.end());
+      std::ranges::sort(ordered_words);
+      for (const size_t word : ordered_words) {
+        fout->append(indent, "uint64_t __dacc_", std::to_string(word), " = 0;\n");
+      }
+      dirty_accumulator.emplace();
+      for (const size_t member : members) {
+        emit_commit_member(member);
+      }
+      for (const size_t word : *dirty_accumulator) {
+        I(words.contains(word));  // the pre-scan must cover every mark the members emit
+      }
+      dirty_accumulator.reset();
+      for (const size_t word : ordered_words) {
+        fout->append(indent, "__rt.__color_dirty[", std::to_string(word), "] |= __dacc_", std::to_string(word), ";\n");
+      }
+    };
+
     fout->append("void ", mod, "::__color_commit(std::size_t __slot) {\n");
     if (direct_commit_shards.empty()) {
       fout->append("  assert(__color_runtime);\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
       for (const auto slot :
            {livehd::sim::Color_plan::Execution_slot::rise_commit, livehd::sim::Color_plan::Execution_slot::fall_commit}) {
         fout->append("  if (__slot == ", std::to_string(static_cast<size_t>(slot)), ") {\n");
+        std::vector<size_t> members;
         for (size_t member = 0; member < color_plan_->version_sites().size(); ++member) {
           const auto& version = color_plan_->version_sites()[member];
           if (version.role == livehd::sim::Color_plan::Version_role::state_update && version.slot == slot) {
-            emit_commit_member(member);
+            members.push_back(member);
           }
         }
+        emit_commit_members(members, "    ");
         fout->append("    return;\n  }\n");
       }
       fout->append("}\n");
@@ -13222,9 +14008,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout = out;
         fout->append("void ", mod, "::__color_commit_part_", std::to_string(shard), "() {\n");
         fout->append("  assert(__color_runtime);\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
-        for (const size_t member : direct_commit_shards[shard].members) {
-          emit_commit_member(member);
-        }
+        emit_commit_members(direct_commit_shards[shard].members, "  ");
         fout->append("}\n");
       }
       fout = root_fout;
@@ -13232,12 +14016,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
     const auto emit_color_refresh_inputs = [&] {
       if (color_dirty_) {
-        for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
-          const auto& slot = color_plan_->boundary_slots()[slot_index];
-          if (slot.kind != livehd::sim::Color_plan::Boundary_kind::top_input) {
-            continue;
-          }
-          const auto field = input_field(slot.public_port);
+        const auto emit_top_input_slot = [&](size_t slot_index, std::string_view indent) {
+          const auto& slot  = color_plan_->boundary_slots()[slot_index];
+          const auto  field = input_field(slot.public_port);
           I(!field.empty());
           std::string current = direct_read_expr(slot, slot_index);
           I(!current.empty());
@@ -13262,9 +14043,60 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               break;
             }
           }
-          fout->append(absl::StrCat("  if (slop_update(", direct_input_prev_storage[slot_index], ", ", current, ")) {\n"));
-          fout->append("    __rt.__color_input_changed = true;\n");
-          emit_serial_dirty_consumers(slot_index, "    ");
+          fout->append(absl::StrCat(indent, "if (slop_update(", direct_input_prev_storage[slot_index], ", ", current, ")) {\n"));
+          fout->append(indent, "  __rt.__color_input_changed = true;\n");
+          emit_serial_dirty_consumers(slot_index, absl::StrCat(indent, "  "));
+          fout->append(indent, "}\n");
+        };
+        std::map<uint32_t, std::vector<size_t>> gated_slots;
+        std::map<uint32_t, std::vector<size_t>> versioned_slots;
+        for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
+          const auto& slot = color_plan_->boundary_slots()[slot_index];
+          if (slot.kind != livehd::sim::Color_plan::Boundary_kind::top_input) {
+            continue;
+          }
+          if (direct_port_ver_storage.contains(static_cast<uint32_t>(slot.public_port))) {
+            versioned_slots[static_cast<uint32_t>(slot.public_port)].push_back(slot_index);
+            continue;
+          }
+          const auto gate = direct_port_gate_storage.find(static_cast<uint32_t>(slot.public_port));
+          if (gate != direct_port_gate_storage.end() && slot.producer_extract_hi > slot.producer_extract_lo) {
+            gated_slots[gate->first].push_back(slot_index);
+            continue;
+          }
+          emit_top_input_slot(slot_index, "  ");
+        }
+        // One whole-port compare guards every lane of a sliced port: the lane
+        // shadows only move when the port did, so an unchanged port skips them
+        // all. The port shadow and the lane shadows advance in lockstep (both
+        // start zeroed with the port), which keeps the guard exact.
+        for (const auto& [port, slots] : gated_slots) {
+          const auto field = input_field(port);
+          I(!field.empty());
+          fout->append(absl::StrCat("  if (slop_update(", direct_port_gate_storage.at(port), ", __in.", field, ")) {\n"));
+          for (const size_t slot_index : slots) {
+            emit_top_input_slot(slot_index, "    ");
+          }
+          fout->append("  }\n");
+        }
+        // A versioned port: every writer of `__in.<field>` bumped its version
+        // counter on change, so one integer compare stands in for the bus scan.
+        for (const auto& [port, slots] : versioned_slots) {
+          const auto field = input_field(port);
+          I(!field.empty());
+          const auto ver = absl::StrCat("__in.", ver_path(field));
+          fout->append(absl::StrCat("  if (",
+                                    direct_port_ver_storage.at(port),
+                                    " != ",
+                                    ver,
+                                    ") {\n    ",
+                                    direct_port_ver_storage.at(port),
+                                    " = ",
+                                    ver,
+                                    ";\n"));
+          for (const size_t slot_index : slots) {
+            emit_top_input_slot(slot_index, "    ");
+          }
           fout->append("  }\n");
         }
       }
@@ -13443,7 +14275,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     fout->append("  __color_refresh_inputs();\n");
     if (color_dirty_) {
-      fout->append("  __rt.__color_dirty.fill(true);  // reset/load invalidates the serial activation cache\n");
+      fout->append("  __rt.__color_dirty.fill(~uint64_t{0});  // reset/load invalidates the serial activation cache\n");
     }
     std::vector<size_t> reset_colors;
     reset_colors.reserve(color_plan_->colors().size());
@@ -13514,16 +14346,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     std::iota(serial_colors.begin(), serial_colors.end(), 0);
     std::ranges::sort(serial_colors, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
 
-    const auto emit_scheduled_color = [&](size_t color) {
+    // `snapshot` non-empty = the caller holds this color's dirty word in that
+    // local (grouped emission): TEST the bit there -- one word load stands in
+    // for a load per color -- but still CLEAR it in memory at the point the
+    // color actually runs. The clear cannot be hoisted to the end of the group:
+    // a color whose condition-phase predicate is false never runs and must keep
+    // its activation for the next period, and a color that re-marks itself
+    // while running must keep the mark it just wrote.
+    // THE one definition of "this color is gated by its activation bit", shared
+    // by the emitter and the word grouping below: a color grouped by one and
+    // emitted unguarded by the other would never test its bit.
+    const auto dirty_guarded        = [&](size_t color) { return color_dirty_ && !direct_random_color[color]; };
+    const auto emit_scheduled_color = [&](size_t color, std::string_view snapshot = {}) {
       const size_t condition_phase = direct_color_condition_phase[color];
       if (condition_phase != livehd::sim::Color_plan::invalid_index) {
         fout->append("  if (", direct_condition_phases[condition_phase].predicate, ") {\n");
       }
       const std::string indent      = condition_phase == livehd::sim::Color_plan::invalid_index ? "  " : "    ";
-      const bool        dirty_guard = color_dirty_ && !direct_random_color[color];
+      const bool        dirty_guard = dirty_guarded(color);
       if (dirty_guard) {
-        fout->append(indent, "if (__rt.__color_dirty[", std::to_string(color), "]) {\n");
-        fout->append(indent, "  __rt.__color_dirty[", std::to_string(color), "] = false;\n");
+        const auto test = snapshot.empty() ? dirty_test(color) : absl::StrCat("(", snapshot, " & ", dirty_mask(color), ") != 0");
+        fout->append(indent, "if (", test, ") {\n");
+        fout->append(indent, "  ", dirty_clear(color), "\n");
       }
       const std::string call_indent = dirty_guard ? indent + "  " : indent;
       if (direct_kernel[color] != nullptr) {
@@ -13538,6 +14382,51 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("  }\n");
       }
     };
+    // Colors in execution order, grouped by dirty word: a run of dirty-guarded
+    // colors sharing one word is skipped with a single word test when none of
+    // them is active. An idle group then costs ONE load and ONE test; only the
+    // colors that actually run pay the per-color clear, exactly as the
+    // ungrouped form does.
+    const auto emit_scheduled_colors = [&](const std::vector<size_t>& colors) {
+      const auto& guarded = dirty_guarded;
+      for (size_t begin = 0; begin < colors.size();) {
+        size_t end = begin;
+        if (guarded(colors[begin])) {
+          while (end < colors.size() && guarded(colors[end]) && dirty_word(colors[end]) == dirty_word(colors[begin])) {
+            ++end;
+          }
+        } else {
+          end = begin + 1;
+        }
+        const bool grouped = end - begin > 1;
+        if (!grouped) {
+          emit_scheduled_color(colors[begin]);
+          begin = end;
+          continue;
+        }
+        const size_t word       = dirty_word(colors[begin]);
+        uint64_t     group_mask = 0;
+        for (size_t index = begin; index < end; ++index) {
+          group_mask |= uint64_t{1} << (direct_color_pos[colors[index]] % 64);
+        }
+        const auto mask_literal = absl::StrCat("0x", absl::Hex(group_mask), "ULL");
+        fout->append("  { uint64_t __w = __rt.__color_dirty[", std::to_string(word), "];\n");
+        fout->append("  if ((__w & ", mask_literal, ") != 0) {\n");
+        // An evaluated color marks its consumers in memory; later colors of
+        // this word must see those marks, so fold the word back in after each
+        // color (a plain load: the store it may depend on only happened when
+        // that color actually ran). Bits already consumed stay set in `__w`,
+        // which is harmless -- each color is tested exactly once.
+        for (size_t index = begin; index < end; ++index) {
+          emit_scheduled_color(colors[index], "__w");
+          if (index + 1 < end) {
+            fout->append("  __w |= __rt.__color_dirty[", std::to_string(word), "];\n");
+          }
+        }
+        fout->append("  } }\n");
+        begin = end;
+      }
+    };
     // direct_run_shards is only populated when direct_color_eval_shards (and so
     // color_eval_outputs) is non-empty; assert that coupling rather than trust
     // it at a modulo two thousand lines away from where it is established.
@@ -13546,9 +14435,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout = color_eval_outputs[shard % color_eval_outputs.size()];
       fout->append("void ", mod, "::__color_run_part_", std::to_string(shard), "() {\n");
       fout->append("  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
-      for (const size_t color : direct_run_shards[shard]) {
-        emit_scheduled_color(color);
-      }
+      emit_scheduled_colors(direct_run_shards[shard]);
       fout->append("}\n");
     }
     fout = root_fout;
@@ -13585,11 +14472,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     for (size_t slot = 0; slot < 5; ++slot) {
       if (direct_run_shards.empty()) {
+        std::vector<size_t> slot_colors;
         for (const size_t color : serial_colors) {
           if (static_cast<size_t>(color_plan_->colors()[color].slot) == slot) {
-            emit_scheduled_color(color);
+            slot_colors.push_back(color);
           }
         }
+        emit_scheduled_colors(slot_colors);
       } else {
         for (size_t shard = 0; shard < direct_run_shards.size(); ++shard) {
           if (static_cast<size_t>(color_plan_->colors()[direct_run_shards[shard].front()].slot) != slot) {

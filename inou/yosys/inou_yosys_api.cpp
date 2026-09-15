@@ -308,8 +308,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     return;
   }
 
-  const auto techmap{var.get("techmap")};
-  const auto abc{var.get("abc")};
   const auto top{var.get("top")};
   const auto frontend{var.get("frontend")};
   const auto setundef{var.get("setundef")};
@@ -408,8 +406,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     return;
   }
 
-  const auto elab_top{var.get("elab_top")};
-
   if (!top.empty()) {
     vars.set("hierarchy", mustache::data::type::bool_true);
     if (top != "-auto-top") {
@@ -421,24 +417,8 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     vars.set("hierarchy", mustache::data::type::bool_false);
   }
 
-  // Set slang_top for read_slang: use elab_top if provided, otherwise use top
-  if (!elab_top.empty()) {
-    vars.set("slang_top", absl::StrCat("--top ", elab_top));
-  } else if (!top.empty() && top != "-auto-top") {
+  if (!top.empty() && top != "-auto-top") {
     vars.set("slang_top", absl::StrCat("--top ", top));
-  }
-
-  if (!techmap.empty()) {
-    if (techmap == "alumacc") {
-      vars.set("techmap_alumacc", mustache::data::type::bool_true);
-    } else if (techmap == "full") {
-      vars.set("techmap_full", mustache::data::type::bool_true);
-    } else {
-      livehd::diag::err("inou.yosys", "bad-option", "io")
-          .msg("unrecognized techmap {} option. Either full or alumacc", techmap)
-          .fatal();
-      return;
-    }
   }
 
   if (!setundef.empty()) {
@@ -463,22 +443,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
           .fatal();
       return;
     }
-  }
-
-  const auto rename_top{var.get("rename_top")};
-  if (!rename_top.empty()) {
-    vars.set("rename_top", std::string(rename_top));
-    if (!top.empty() && top != "-auto-top") {
-      vars.set("rename_from", std::string(top));
-    }
-  }
-
-  if (abc == "true" || abc == "1") {
-    vars.set("abc_in_yosys", mustache::data::type::bool_true);
-  } else if (abc == "false" || abc == "0") {
-    // Nothing to do
-  } else {
-    livehd::diag::err("inou.yosys", "bad-option", "io").msg("unrecognized abc {} option. Either true or false", abc).fatal();
   }
 
   auto& lib = livehd::Hhds_graph_library::instance(path);
@@ -511,7 +475,7 @@ void Inou_yosys_api::fromlg(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    Cgen_verilog cgen(false, p.odir);
+    Cgen_verilog cgen(p.odir);
     cgen.do_from_graph(g);
   }
 }
@@ -527,12 +491,9 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("memory_mode", "memory lowering mode before graph import: default|nomap|collect|preserve", "");
   m1.add_label_optional("macrolib", "comma-separated Liberty files read as hard-macro declarations before elaboration", "");
   m1.add_label_optional("blackbox", "comma-separated Verilog files read as blackbox declarations before elaboration", "");
-  m1.add_label_optional("techmap", "yosys techmap before graph import: full|alumacc (empty = none)", "");
-  m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
+
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
   m1.add_label_required("top", "define top module for synthesis, will call yosys hierarchy pass (-auto-top allowed)");
-  m1.add_label_optional("elab_top", "define top module for elaboration (read_slang). If not provided, uses 'top' value");
-  m1.add_label_optional("rename_top", "rename the top module to the given name after synthesis");
 
   register_inou("yosys", m1);
 

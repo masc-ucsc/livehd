@@ -6,7 +6,9 @@
 #include <memory>
 #include <string>
 
+#include "bitwidth.hpp"
 #include "cell.hpp"
+#include "cprop.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -29,6 +31,57 @@ livehd::bitfuzz::Options wires_opts() {
   livehd::bitfuzz::Options o;
   o.mode = livehd::bitfuzz::Mode::Wires;
   return o;
+}
+
+TEST(Bitfuzz, PipelineLeavesRecoveryToNormalPasses) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitfuzz_test");
+  auto  io  = lib.create_io("bf_pipeline");
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->add_input("b", 2);
+  io->set_bits("b", 8);
+  io->add_output("out", 3);
+  io->set_bits("out", 8);
+  auto g  = io->create_graph();
+  auto op = gu::create_typed_node(*g, Ntype_op::And, 8);
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  auto out = op.create_driver_pin(0);
+  gu::set_sign(out);
+  out.connect_sink(g->get_output_pin("out"));
+  const auto stripped = livehd::bitfuzz::strip_annotations(g, wires_opts());
+  ASSERT_EQ(stripped.cleared, 1);
+  EXPECT_EQ(stripped.repaired, 0);
+  EXPECT_EQ(gu::bits_of(out), 0);
+  EXPECT_FALSE(out.attr(livehd::attrs::pin_signed).has());
+  Cprop{}.do_trans(g);
+  EXPECT_EQ(gu::bits_of(out), 0);
+  Bitwidth{10}.do_trans(g);
+  EXPECT_EQ(gu::bits_of(out), 8);
+  EXPECT_EQ(io->get_bits("a"), 8);
+  EXPECT_EQ(io->get_bits("out"), 8);
+}
+
+TEST(Bitfuzz, PipelinePreservesStateMemoryAndInstanceBoundaries) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitfuzz_test");
+  auto  io  = lib.create_io("bf_pipeline_boundaries");
+  io->add_input("in", 1);
+  io->set_bits("in", 8);
+  auto                         g = io->create_graph();
+  std::vector<hhds::Pin_class> boundaries{g->get_input_pin("in")};
+  for (auto op : {Ntype_op::Flop, Ntype_op::Fflop, Ntype_op::Latch, Ntype_op::Memory, Ntype_op::Sub}) {
+    auto node = gu::create_typed_node(*g, op);
+    boundaries.push_back(node.create_driver_pin(0));
+  }
+  for (auto pin : boundaries) {
+    gu::set_sbits(pin, 8);
+  }
+  const auto st = livehd::bitfuzz::strip_annotations(g, wires_opts());
+  EXPECT_EQ(st.cleared, 0);
+  for (auto pin : boundaries) {
+    EXPECT_EQ(gu::bits_of(pin), 8);
+    EXPECT_FALSE(gu::is_unsign(pin));
+  }
 }
 
 // Every finding on one line, so a failing expectation says WHICH pin misbehaved

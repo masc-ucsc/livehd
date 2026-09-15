@@ -6,8 +6,16 @@ extracted unit form (`top -> [io, stmts]`, `lambda_kind="mod"`, exact Verilog
 module names) so the standard upass pipeline (SSA → io_meta → tolg) compiles
 it like any Pyrope unit. This is the default SystemVerilog reader and supports
 compilation and synthesis as well as `ln:`/`lnast-dump:` inspection. Use
-`--reader yosys` for the integrated Yosys SystemVerilog frontend when native
-lowering is unsupported; `yosys-slang` remains its compatibility alias.
+an explicit `lhd compile --reader yosys ... --emit-dir lg:comparison/`
+for importer debugging. Compare those graphs against a native Slang `lhd lec`
+run; Yosys is an additional cross-check, not a substitute for native coverage.
+
+Clocked scalar blocking assignments keep a process-local current value: later
+statements see earlier writes, and the process commits the final value to its
+registers. Loop counters remain elaboration controls. Memory write ports retain
+the clock of their owning process. Mixed write-edge polarities are represented
+with the Memory IR's mixed-edge marker and diagnosed; formal refuses that
+unsupported schedule by name rather than silently collapsing its edges.
 
 Pyrope-only emission preserves integer and string module parameters as generic
 defaults (`pub mod core<N=8, MODE="fast">...`). Each Slang-elaborated
@@ -106,8 +114,12 @@ strongest passing tier; `tests/slang_compile.sh <tier> <file>` enforces it
 both ways (a regression fails, and an outgrown `error` entry fails until the
 ladder is promoted). Tiers:
 
-- `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd lec --set formal.solver=lgyosys`) against
-  the source. The strongest tier.
+- `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd lec`, default solver) against
+  the source. The strongest tier. Slang tests leave the solver at its default;
+  `lgyosys` is reserved for explicit cross-checks of the native LEC engine.
+  The ladder uses `formal.timeout=20` (a solver budget, not a total test wall
+  limit). An explicit LEC timeout passes with a `LEC TIMEOUT` message and
+  equivalence remains unproven; refutations and other errors fail.
 - `verilog` — compiles to Verilog; a known LEC gap is tracked in the ladder
   comment next to the entry.
 - `lnast` — LNAST + `ln:` save/reload round-trip only.
@@ -123,10 +135,12 @@ procedural writes to nets; the rest are tracked feature gaps: instance arrays,
 hierarchical punch-through references, `'bx` golden arms, dynamic
 mem-element part-selects). The 7 `verilog`-capped entries are LEC-slow or
 genuine gaps: four big-memory / wide-arith tests (`long_mem`, `long_mem3`,
-`fixme_mem_offset`, `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
+`fixme_mem_offset`, historically `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
 `mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.
+`long_nocheck_iwls_square` now attempts LEC with the 20-second budget and
+accepts an explicit timeout as described above.
 Correct mixed signed/unsigned arithmetic and narrow (1- and 2-bit) signed
 port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
 operand in an unsigned expression zero-extends, and `materialize_conversion`

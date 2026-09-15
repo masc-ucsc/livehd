@@ -263,7 +263,7 @@ EOF
   || fail "compile of member_dep failed: $(cat "$W/member_dep.log")"
 "$LHD" lec --impl "pyrope:$W/member_dep_prp/member_dep.prp" \
   --ref "verilog:$W/member_dep.sv" --top member_dep \
-  --set formal.strict=true --workdir "$W/lec_member_dep" >"$W/member_dep_lec.log" 2>&1 \
+   --workdir "$W/lec_member_dep" >"$W/member_dep_lec.log" 2>&1 \
   || fail "aggregate member dependency was lost on the Pyrope round trip: $(cat "$W/member_dep_lec.log")"
 echo "PASS: aggregate member reads order their producer before the consumer"
 
@@ -337,7 +337,7 @@ grep -Fq 'always @(posedge clock or posedge reset)' "$W/nonuniform_array_reset_r
   || fail "cgen packed-array async reset edge was lost on reread: $(grep -n 'always @' "$W/nonuniform_array_reset_reread.v")"
 "$LHD" lec --impl "pyrope:$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
   --ref "verilog:$W/nonuniform_array_reset.sv" --top nonuniform_array_reset \
-  --set formal.strict=true --workdir "$W/lec_nonuniform_array_reset" \
+   --workdir "$W/lec_nonuniform_array_reset" \
   >"$W/nonuniform_array_reset_lec.log" 2>&1 \
   || fail "nonuniform array reset failed LEC: $(cat "$W/nonuniform_array_reset_lec.log")"
 echo "PASS: nonuniform whole-array reset value and async edge survive Pyrope"
@@ -369,7 +369,7 @@ grep -q '"code":"unresolved-ref"' "$W/struct_sibling_dep.log" \
   && fail "sibling field read resolved before its driver: $(cat "$W/struct_sibling_dep.log")"
 "$LHD" lec --impl "pyrope:$W/struct_sibling_dep_prp/struct_sibling_dep.prp" \
   --ref "verilog:$W/struct_sibling_dep.sv" --top struct_sibling_dep \
-  --set formal.strict=true --workdir "$W/lec_struct_sibling_dep" \
+   --workdir "$W/lec_struct_sibling_dep" \
   >"$W/struct_sibling_dep_lec.log" 2>&1 \
   || fail "sibling-dependent struct pattern failed LEC: $(cat "$W/struct_sibling_dep_lec.log")"
 echo "PASS: sibling-dependent struct pattern emits its leaf drivers in dependency order"

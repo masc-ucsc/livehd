@@ -185,7 +185,7 @@ sh_test(
     srcs = ["tests/lec_stats_test.sh"],
     size = "small",  # ~4s: the fixture is proven in ms; the report, not the solve, is under test
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # formal.stats: the cvc5 solve-insight report must cross the fork/wire codec
+    tags = ["no-sandbox"],  # lhd.stats: the cvc5 solve-insight report must cross the fork/wire codec
 )
 
 sh_test(
@@ -236,8 +236,8 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver under a time limit
 )
 
-# Verdict -> exit-code policy: PROVEN/UNKNOWN exit 0 (UNKNOWN with a loud
-# inconclusive warning), REFUTED and `--set lec.strict` UNKNOWN exit non-zero.
+# Verdict -> exit-code policy: PROVEN exits 0; UNKNOWN and REFUTED always
+# exit non-zero, with distinct error classes.
 sh_test(
     name = "lec_verdict_policy_test",
     srcs = ["tests/lec_verdict_policy_test.sh"],

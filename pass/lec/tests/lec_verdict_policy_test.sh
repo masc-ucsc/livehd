@@ -7,20 +7,8 @@
 #              (a real counterexample: the designs DIFFER)
 #   UNKNOWN -> exit 7  / error class `unsupported`                        [hard fail]
 #              (the solver could not complete the proof and found NO counterexample)
-#   UNKNOWN + --set formal.strict=false -> exit 0 + a loud "INCONCLUSIVE" WARNING
-#                                                                         [explicit opt-out]
-#   UNKNOWN + a WITNESS -> hard fail regardless of formal.strict (still undecided, but a
-#              concrete CEX is in hand — never report that as a pass, and never let the
-#              opt-out forgive it).
-# RULING (2026-07-29): `formal.strict` now DEFAULTS TO TRUE — "an inconclusive should be
-# a fail; the user can ignore it, but that must not be the default". An undecided run that
-# exits 0 is indistinguishable from a real proof to any gate built on it, so could-not-prove
-# now FAILS by default and is downgraded to a warning only when a run explicitly asks for
-# that with `--set formal.strict=false`. This REPLACES the old deferred-warning default
-# (could-not-prove => warning) that cases 1-2 used to pin.
-# The two failures stay DISTINCT and must never be conflated: an UNKNOWN disproves nothing.
-# rc 7 means "could not decide — raise the budget"; rc 10 means "here is a counterexample".
-# That is why the strict opt-out moves rc 7 to 0 but leaves rc 10 untouched (case 5).
+# UNKNOWN always fails; the removed formal.strict opt-out is rejected.
+# An UNKNOWN is not a disproof: its exit class remains distinct from REFUTED.
 # The ind/bmc trust asymmetry: an ind Refute is NOT a disproof (its step case starts from
 # an ARBITRARY, possibly unreachable state), so `auto` must let bmc clear it — case 7 pins
 # that a bmc bounded-proof still WINS over an ind refute.
@@ -46,13 +34,6 @@
 set -u
 LHD=./bazel-bin/lhd/lhd
 
-# BOUNDED-RESCUE: several cases here assert that a BMC pass CLEARS a spurious
-# inductive refutation (an ind CEX on an UNREACHABLE state). That rescue is by
-# construction a BOUNDED claim, so the cases opt in explicitly rather than
-# relying on the default -- which is now "a bounded proof is INCONCLUSIVE".
-# Keeping the opt-in visible here is the point: it says out loud that the rescue
-# buys a k-cycle result, not equivalence. `lhd` warns on every run that sets it.
-BOUNDED="--set formal.strict=false"
 if [ ! -x "$LHD" ]; then
   if [ -x ./lhd/lhd ]; then LHD=./lhd/lhd; else
     echo "FAIL: could not find the lhd binary in $(pwd)"; exit 1; fi
@@ -157,29 +138,13 @@ elif ! echo "$OUT" | grep -q "NOT a disproof"; then
   echo "FAIL: UNKNOWN default: failure does not distinguish itself from a disproof"; fail=1
 elif ! echo "$OUT" | grep -q "formal.timeout"; then
   echo "FAIL: UNKNOWN default: failure does not point at the budget knob"; fail=1
-elif ! echo "$OUT" | grep -q "formal.strict=false"; then
-  echo "FAIL: UNKNOWN default: failure does not name the opt-out"; fail=1
 else echo "ok: UNKNOWN default -> exit $RC + an actionable could-not-decide message"; fi
 
-# 2) UNKNOWN + the EXPLICIT opt-out -> exit 0 + a loud inconclusive WARNING (the old
-#    default, now reachable only on request). The warning must not read as a proof.
-run unkl --set formal.strict=false --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
-if [ "$RC" -ne 0 ]; then echo "FAIL: UNKNOWN strict=false rc=$RC (want 0)"; fail=1
-elif ! echo "$OUT" | grep -q "UNKNOWN"; then echo "FAIL: UNKNOWN strict=false: verdict not UNKNOWN"; fail=1
-elif ! echo "$OUT" | grep -qi "INCONCLUSIVE"; then echo "FAIL: UNKNOWN strict=false: no inconclusive warning"; fail=1
-elif ! echo "$OUT" | grep -q '"severity":"warning"'; then
-  echo "FAIL: UNKNOWN strict=false: inconclusive was not raised as a warning diagnostic"; fail=1
-elif ! echo "$OUT" | grep -q "NOT a proof of equivalence"; then
-  echo "FAIL: UNKNOWN strict=false: warning does not disclaim being a proof"; fail=1
-else echo "ok: UNKNOWN + --set formal.strict=false -> exit 0 + inconclusive warning"; fi
-
-# 3) UNKNOWN + an EXPLICIT formal.strict=true -> same hard fail as the default. Pins that
-#    the flag still means what it says now that true is also the default value.
-run unks --set formal.strict=true --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
-if [ "$RC" -eq 0 ]; then echo "FAIL: UNKNOWN strict=true rc=0 (want non-zero)"; fail=1
-elif [ "$RC" -ne "$RC_UNK" ]; then
-  echo "FAIL: UNKNOWN explicit strict=true rc=$RC != default rc=$RC_UNK (strict must BE the default)"; fail=1
-else echo "ok: UNKNOWN explicit strict=true -> exit $RC (same as the default)"; fi
+# The old opt-out must be rejected before any proof runs.
+run retired --set formal.strict=false --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
+if [ "$RC" -eq 0 ] || ! echo "$OUT" | grep -qi 'unknown'; then
+  echo "FAIL: removed formal.strict option was accepted"; fail=1
+fi
 
 # 4) REFUTED -> hard fail for a DIFFERENT reason than an UNKNOWN: a real counterexample.
 #    Both fail now, so the exit codes are what keeps them apart — a gate must be able to
@@ -196,13 +161,6 @@ elif echo "$OUT" | grep -q "could not decide equivalence"; then
   echo "FAIL: REFUTED: reported as an undecided run"; fail=1
 else echo "ok: REFUTED -> exit $RC (counterexample), distinct from UNKNOWN exit $RC_UNK"; fi
 
-# 5) REFUTED + --set formal.strict=false -> STILL a hard fail. The opt-out forgives an
-#    UNDECIDED run, never a disproof; nothing downgrades a counterexample.
-run refl --set formal.strict=false --ref "$WORK/diff_ref.v" --impl "$WORK/diff_impl.v"
-if [ "$RC" -eq 0 ]; then echo "FAIL: REFUTED strict=false rc=0 — the opt-out must NOT forgive a counterexample"; fail=1
-elif [ "$RC" -ne "$RC_REF" ]; then echo "FAIL: REFUTED strict=false rc=$RC != strict rc=$RC_REF"; fail=1
-elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: REFUTED strict=false: verdict not REFUTED"; fail=1
-else echo "ok: REFUTED + --set formal.strict=false -> still exit $RC"; fi
 
 # 6) PROVEN -> exit 0
 run prv --ref "$WORK/diff_ref.v" --impl "$WORK/eq_impl.v"
@@ -214,9 +172,8 @@ else echo "ok: PROVEN -> exit 0"; fi
 #    Guards the soundness rationale AND the exit-code policy: an ind Refute must never
 #    on its own fail a design bmc can prove — the `auto` race only escalates an ind CEX
 #    to a failure when bmc could NOT settle the query.
-# The rescue is a BOUNDED claim, so it is now INCONCLUSIVE by default; this
-# case asserts the rescue MECHANISM, so it opts out of strict explicitly.
-run unreach --ref "$WORK/unreach_ref.v" --impl "$WORK/unreach_impl.v" --set formal.timeout=20 $BOUNDED
+# The rescue is a BOUNDED claim, disclosed in the result.
+run unreach --ref "$WORK/unreach_ref.v" --impl "$WORK/unreach_impl.v" --set formal.timeout=20
 if [ "$RC" -ne 0 ]; then
   echo "FAIL: unreachable-state ind-refute rc=$RC (want 0: bmc clears a spurious ind CEX)"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then

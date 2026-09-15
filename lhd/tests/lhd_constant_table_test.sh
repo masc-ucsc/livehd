@@ -42,9 +42,7 @@ nodes = [row for line in open(sys.argv[1]) if (row := json.loads(line)).get("t")
 assert len(nodes) < 32, f"constant table still builds hardware: {len(nodes)} nodes"
 assert not any(row["kind"] == "shl" for row in nodes), nodes
 PYCOUNT
-for engine in cvc5 lgyosys; do
-  "$LHD" lec --impl lg:"$W/lg" --ref verilog:"$W/gold.v" --top table_columns \
-    --set formal.solver="$engine" --set formal.timeout=60 --workdir "$W/$engine" \
-    --result-json "$W/$engine.json" -q
-  grep -q '"verdict":"proven"' "$W/$engine.json"
-done
+"$LHD" lec --impl lg:"$W/lg" --ref verilog:"$W/gold.v" --top table_columns \
+  --set formal.timeout=60 --workdir "$W/default" \
+  --result-json "$W/default.json" -q
+grep -q '"verdict":"proven"' "$W/default.json"

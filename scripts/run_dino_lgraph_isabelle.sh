@@ -7,7 +7,7 @@ set -euo pipefail
 # (order matters):
 #   1. LiveHD compile   RTL -> LGraph
 #   2. LEC gate         prove/classify RTL == LGraph   (run_dino_lgraph_lec_gate.sh)
-#                       REFUTED aborts; INCONCLUSIVE warns (LEC_STRICT=true = hard)
+#                       REFUTED and INCONCLUSIVE both abort
 #   3. pass.isabelle    LGraph -> <Top>_Lgraph.thy + <Top>_Lgraph_Cert.thy
 #   4. isabelle build   typecheck the model (and cert) sessions   (RUN_ISABELLE=true)
 #   5. cert bridge      generated fast model = graph certificate  (pass/isabelle/BRIDGE_BUGS.md)
@@ -128,7 +128,6 @@ run_design() {
     --emit-dir isabelle:"$ISA_DIR" \
     --set yosys.setundef=zero \
     --set formal.isabelle.strict="$STRICT" \
-    --set formal.isabelle.normalize=true \
     --set formal.isabelle.max_width="$MAX_WIDTH" \
     --set formal.isabelle.cert_wf="$CERT_WF_MODE" \
     --set formal.isabelle.cert_wf_fallback="$CERT_WF_FALLBACK" \
@@ -195,9 +194,9 @@ EOF
 
 if [[ "$RUN_LEC_GATE" == "true" ]]; then
   echo "[pipeline] step 2/5: LEC gate (RTL == LGraph) before pass.isabelle"
-  if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" LEC_STRICT="${LEC_STRICT:-false}" \
+  if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" \
        bash "$SCRIPT_DIR/run_dino_lgraph_lec_gate.sh"; then
-    echo "FATAL: LEC gate reported REFUTED (or strict INCONCLUSIVE); not generating Isabelle" >&2
+    echo "FATAL: LEC gate reported REFUTED or INCONCLUSIVE; not generating Isabelle" >&2
     exit 3
   fi
 else

@@ -74,8 +74,7 @@ been explicitly classified by LEC.  The gate runs BEFORE `pass.lean`:
 ```
 
 `scripts/run_dino_lgraph_lean.sh` runs step 2 automatically before step 3 unless
-`RUN_LEC_GATE=false`.  A REFUTED design aborts the run; INCONCLUSIVE is a
-recorded warning (set `LEC_STRICT=true` to make it a hard gate for CI).  The
+`RUN_LEC_GATE=false`. REFUTED and INCONCLUSIVE both abort the run. The
 RTL-to-LGraph equivalence proven here is what lets steps 3-5 restrict their claim
 to "generated model = LGraph certificate" instead of re-proving RTL semantics.
 

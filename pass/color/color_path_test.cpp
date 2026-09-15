@@ -2,8 +2,9 @@
 //
 // Ported from the old pass/label path test (2c-color) onto the current hhds::Graph API.
 
-#include "color_common.hpp"
 #include "color_path.hpp"
+
+#include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
@@ -19,8 +20,7 @@ namespace {
 
 Color_opts flat_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
+  o.hier = false;
   return o;
 }
 

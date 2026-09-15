@@ -73,7 +73,7 @@ run() {  # $1=impl-lg -> the whole verdict line
   # graph here, and the structural shortcut then returns PROVEN with no solver
   # and no cone pass at all -- which would make the assertion below vacuous.
   $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/ref" --top wholearr --set formal.lec.semdiff=none \
-       --workdir "$WORK/q_$1_$$" --set formal.strict=false 2>&1 | grep -a "^lec: " | head -1
+       --workdir "$WORK/q_$1_$$" 2>&1 | grep -a "^lec: " | head -1
 }
 
 good_line=$(run impl)

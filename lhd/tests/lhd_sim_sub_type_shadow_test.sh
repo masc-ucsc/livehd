@@ -31,7 +31,7 @@ test top.run {
 }
 EOF
 
-"$LHD" sim "$W/shadow.prp" --set sim.vcd=false --workdir "$W/w" -q \
+"$LHD" sim "$W/shadow.prp"  --workdir "$W/w" -q \
   || fail "a repeated child whose first instance shadows the module type did not simulate"
 
 grep -q 'struct shadow_leaf leaf;' "$W/w/sim/shadow.top.hpp" \

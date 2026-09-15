@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: bitset_mut_branch_mem_top
 :pyrope_top: foo
-:gold_reader: slang
 */
 
 // Whole-array `q` is copied into a packed mut before the conditional partial

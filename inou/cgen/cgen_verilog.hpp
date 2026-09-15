@@ -24,7 +24,6 @@
 
 class Cgen_verilog {
 private:
-  const bool        verbose;
   std::string_view  odir;
   const bool        srcmap;  // emit an ECMA-426 .map sidecar
   static inline int trace_module_cnt = 0;
@@ -231,6 +230,6 @@ private:
 public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
 
-  Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap = false,
+  Cgen_verilog(std::string_view _odir, bool _srcmap = false,
                const absl::flat_hash_map<std::string, std::string>* _flat_names = nullptr);
 };

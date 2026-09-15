@@ -448,7 +448,7 @@ void put_trace(std::string& b, const Witness_trace& tr) {
   put_str(b, tr.root_src);
 }
 
-// ── Cvc5_stats codec (formal.stats) ─────────────────────────────────────────
+// ── Cvc5_stats codec (lhd.stats) ─────────────────────────────────────────
 // Shared by BOTH result codecs, for the reason spelled out at serialize_result's
 // tail: the solve runs in a FORKED CHILD that _exit(0)s, so a field that is not
 // on the wire comes back all-zeros in the parent with no warning. The stats
@@ -549,7 +549,7 @@ std::string serialize_result(const Query_result& r) {
   // trap: lose it in the fork and the parent sees an UNBOUNDED Proven for a
   // 6-cycle claim -- and hierarchically discharges a parent's premise with it.
   b.push_back(static_cast<char>(r.bounded ? 1 : 0));
-  // cvc5 solve statistics (formal.stats). Same tail discipline, and the same
+  // cvc5 solve statistics (lhd.stats). Same tail discipline, and the same
   // silent-loss trap: the whole solve happens in the child, so WITHOUT this the
   // parent's `--stats` report is all zeros on every forked path. Strict tail,
   // no version byte: an older/truncated blob just leaves Cvc5_stats{}.
@@ -943,7 +943,7 @@ std::string serialize_verify(const Verify_result& v) {
   for (const auto& sc : v.vacuous_scopes) {
     put_str(b, sc);
   }
-  // cvc5 solve statistics (formal.stats) — TAIL, same trap as every field above:
+  // cvc5 solve statistics (lhd.stats) — TAIL, same trap as every field above:
   // the F3 verify strategy race forks, so a stats struct missing here comes back
   // ALL ZEROS in the parent and `--stats` silently prints a wall of zeros on the
   // default (forking) path while being correct under --workdir.
@@ -2685,7 +2685,7 @@ inline void merge_top_in(Top_in& slot, int w, bool sgn) {
 // a generated region wrapper, and sometimes a single anonymous model flop.
 // Recover a candidate key while retaining the actual key for solver lookups.
 // Ambiguous aliases are rejected by find_mem_entry_bank below.
-std::string memory_bank_correspondence_name(std::string_view name) {
+std::string memory_bank_correspondence_name(std::string_view name, bool strip_region = true) {
   const auto key    = canon_flop_name(name);
   const auto marker = key.find(cgen_memory_state_marker);
   const auto entry  = key.find("_e__mem", marker);
@@ -2703,7 +2703,7 @@ std::string memory_bank_correspondence_name(std::string_view name) {
   auto       digits = [](std::string_view text) {
     return !text.empty() && std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; });
   };
-  if (region != std::string::npos && prefix.ends_with('_')
+  if (strip_region && region != std::string::npos && prefix.ends_with('_')
       && digits(std::string_view(prefix).substr(region + 3, prefix.size() - region - 4))) {
     auto start = prefix.rfind("_u_", region);
     if (start != std::string::npos) {
@@ -2730,14 +2730,21 @@ struct Mem_bank_index {
     // Build once per side, rather than rescanning every flop for every memory.
     // Several actual states with the same alias cannot direct a total tie.
     for (const auto& [key, width] : bank_flops) {
-      auto [it, fresh] = candidates.emplace(memory_bank_correspondence_name(key), std::pair{key, width});
-      if (!fresh) {
-        it->second.second = -1;
+      // Preserve the complete hierarchy when both sides passed through the
+      // same partition wrapper. Also index the region-free alias for a raw
+      // Memory compared with a newly partitioned/mapped implementation.
+      for (bool strip_region : {false, true}) {
+        auto alias       = memory_bank_correspondence_name(key, strip_region);
+        auto [it, fresh] = candidates.emplace(alias, std::pair{key, width});
+        if (!fresh && it->second.first != key) {
+          it->second.second = -1;  // two actual states: no unique correspondence
+        }
       }
     }
     for (const auto& [key, width] : mem_side_flops) {
       (void)width;
-      matched.insert(memory_bank_correspondence_name(key));
+      matched.insert(memory_bank_correspondence_name(key, false));
+      matched.insert(memory_bank_correspondence_name(key, true));
     }
   }
 };
@@ -3024,7 +3031,7 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
 
 // The real engine. `acc` is the caller-owned cvc5 statistics accumulator
-// (formal.stats): NULL when stats are off, which makes every Solve_probe /
+// (lhd.stats): NULL when stats are off, which makes every Solve_probe /
 // Stats_guard / capture_cvc5_stats call below a no-op, so no call site needs an
 // `if (stats)` guard and the off path costs nothing. The public prove_equal()
 // wrapper below owns the accumulator and merges it into the result -- it must
@@ -3039,8 +3046,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // Top-level ports where the two sides differ by exactly a sign slot, so the
   // shared symbol's spare bit was forced to 0 (see Top_in). The verdict has to
   // say so: a PROVEN that rests on this holds only where that bit really is 0.
-  // Disclosure is UNCONDITIONAL -- not gated on formal.strict, which defaults
-  // true and would turn the ruling's intended PROVEN into Unknown by default.
+  // Disclosure is unconditional; it qualifies the proof without changing its verdict.
   absl::flat_hash_set<std::string> reconciled_ports;
   // Idempotent by INSPECTING res.detail rather than by a latch: THREE engine
   // arms ASSIGN res.detail rather than appending to it -- bmc, phase-step
@@ -3325,7 +3331,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
 
-  // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER of
+  // cvc5 solve-insight instrumentation (lhd.stats). The DECLARATION ORDER of
   // these four lines is mandatory and load-bearing (verified empirically; none
   // of it is documented in cvc5.h):
   //   * Solve_probe BEFORE the Solver -- the plugin must OUTLIVE it, or the
@@ -3944,7 +3950,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   };
   // Run one solver query against the remaining allowance and accumulate only
   // time spent inside cvc5. The counter includes every check even when the wall
-  // budget is disabled so formal.stats remains accurate.
+  // budget is disabled so lhd.stats remains accurate.
   //
   // INVARIANT (verified by grep, and the reason the counter lives here): every
   // solver.checkSat() in this function goes through solve_check. cvc5 exposes NO checkSat
@@ -7690,7 +7696,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // merge-assisted cut retry) the full `cone_deadline_ms` would let the
     // pre-pass spend 75% of formal.timeout before cvc5 is asked anything --
     // enough to turn a PROVEN run into an inconclusive (and, with
-    // formal.strict, nonzero-exit) one.
+    // nonzero-exit) one.
     auto          cone_budget_left = [&]() -> int64_t {
       const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       return std::max<int64_t>(1, cone_deadline_ms - spent);
@@ -10073,7 +10079,7 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
     // Unknown adds nothing (int-blast lands in undecidable nonlinear arithmetic
     // on mask/extract/memory-heavy cones, so its give-up is the EXPECTED case).
     first.detail   += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
-    first.cvc5     += r2.cvc5;  // the retry really ran (formal.stats)
+    first.cvc5     += r2.cvc5;  // the retry really ran (lhd.stats)
     first.solve_ms += r2.solve_ms;
     return first;
   }
@@ -10177,7 +10183,7 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
 }  // namespace
 
 // The real property engine. `acc` is the caller-owned cvc5 statistics
-// accumulator (formal.stats), NULL when stats are off -- see prove_equal_impl's
+// accumulator (lhd.stats), NULL when stats are off -- see prove_equal_impl's
 // note; the public prove_properties() wrapper below owns it and merges.
 static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_options& opts,
                                            const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
@@ -10450,7 +10456,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     return m;
   }
 
-  // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER is
+  // cvc5 solve-insight instrumentation (lhd.stats). The DECLARATION ORDER is
   // mandatory and load-bearing -- probe BEFORE the Solver (the plugin must
   // outlive it), attach() BEFORE any assertFormula/push (cvc5 throws otherwise),
   // Stats_guard AFTER the Solver (its dtor snapshots getStatistics() and must run
@@ -12185,7 +12191,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // inconclusive answer there must void the verdict. A vacuous antecedent leaves
   // the obligation genuinely TRUE — it just proved nothing interesting — so this
   // never touches `verdict`, and an inconclusive query stays silent rather than
-  // accusing. The CLI decides warning vs failure (formal.strict).
+  // accusing. The CLI reports UNKNOWN as a failure.
   //
   // The free frame is also why no env assume applies: the guard is judged on its
   // own logic, so an assume can never make this fire. Conservative direction.

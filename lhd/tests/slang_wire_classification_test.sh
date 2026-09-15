@@ -65,7 +65,7 @@ $LHD compile "$W/bv"/*.prp --top bedge.bedge --workdir "$W/brc" -q \
   || fail "emitted Pyrope (with wire split) did not recompile"
 # …and be PROVEN equivalent to the original Verilog.
 $LHD lec --impl pyrope:"$W/bv"/ --impl-top bedge.bedge --ref verilog:"$W/bedge.sv" --ref-top bedge \
-  --set formal.solver=cvc5 --workdir "$W/blec" -q --result-json "$W/blec.json" \
+  --workdir "$W/blec" -q --result-json "$W/blec.json" \
   || fail "wire-split design not proven equivalent: $(cat "$W/blec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/blec.json" || fail "bedge lec not pass: $(cat "$W/blec.json")"
 echo "PASS: false-SCC multi-write net splits (mut accumulator + wire bridge), recompiles, and LECs"
@@ -158,7 +158,7 @@ $LHD compile "$W/output_alias.sv" --top output_alias --emit-dir pyrope:"$W/av" -
   || fail "generated child-output alias fixture did not emit Pyrope"
 $LHD lec --impl pyrope:"$W/av"/ --impl-top output_alias.output_alias \
   --ref verilog:"$W/output_alias.sv" --ref-top output_alias \
-  --set formal.solver=cvc5 --workdir "$W/alec" -q --result-json "$W/alec.json" \
+  --workdir "$W/alec" -q --result-json "$W/alec.json" \
   || fail "generated child-output alias was not preserved: $(cat "$W/alec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/alec.json" || fail "output-alias lec not pass: $(cat "$W/alec.json")"
 # Recompile that correct Pyrope through cgen. Its stable node order deliberately
@@ -170,7 +170,7 @@ $LHD compile "$W/av"/*.prp --top output_alias.output_alias \
   || fail "output-alias Pyrope did not regenerate Verilog"
 $LHD lec --impl verilog:"$W/output_alias_all.v" --impl-top output_alias \
   --ref pyrope:"$W/av"/ --ref-top output_alias.output_alias \
-  --set formal.solver=cvc5 --workdir "$W/artlec" -q --result-json "$W/artlec.json" \
+  --workdir "$W/artlec" -q --result-json "$W/artlec.json" \
   || fail "generated always_comb temporary order was not recovered: $(cat "$W/artlec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/artlec.json" || fail "output-alias round-trip lec not pass: $(cat "$W/artlec.json")"
 echo "PASS: generated child-output alias survives a false cross-instance SCC and Verilog re-read"
@@ -209,7 +209,7 @@ if grep -q 'unresolved ref' "$W/cp.log" "$W/cpr.log"; then
 fi
 $LHD lec --impl lg:"$W/cplg" --impl-top const_cond_tmp.const_cond_tmp \
   --ref verilog:"$W/const_cond_tmp.sv" --ref-top const_cond_tmp \
-  --set formal.solver=cvc5 --workdir "$W/cplec" -q --result-json "$W/cplec.json" \
+  --workdir "$W/cplec" -q --result-json "$W/cplec.json" \
   || fail "constant-conditional temporary changed behavior: $(cat "$W/cplec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/cplec.json" || fail "constant-conditional temporary LEC not pass: $(cat "$W/cplec.json")"
 echo "PASS: module variable first assigned in if (0) stays declared, recompiles, and LECs"

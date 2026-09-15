@@ -7,6 +7,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cprop.hpp"
+#include "cprop_value.hpp"
 
 namespace {
 namespace gu            = livehd::graph_util;
@@ -138,7 +139,7 @@ class Mux_sharing {
     if (p.is_const()) {
       return gu::const_of(p).is_known_zero() ? zero : one;
     }
-    if (gu::bits_of(p) == 1 && gu::is_unsign(p)) {
+    if (livehd::cprop_value::is_bool01(p)) {
       return p;
     }
     auto n = gu::create_typed_node(graph, Ntype_op::Ror, 1);
@@ -196,8 +197,8 @@ class Mux_sharing {
   void collect() {
     for (auto node : graph.body().nodes(hhds::Node_order::forward)) {
       const auto op = gu::type_op_of(node);
-      if ((op != Ntype_op::Mux && op != Ntype_op::Hotmux) || !node.has_out_edges() || gu::bits_of(node.get_driver_pin(0)) < 4
-          || gu::has_color(node) || gu::has_runtime_check(node)) {
+      if ((op != Ntype_op::Mux && op != Ntype_op::Hotmux) || !node.has_out_edges() || gu::has_color(node)
+          || gu::has_runtime_check(node)) {
         continue;
       }
       // Dense pid indexing avoids sorting high-fanin Hotmuxes. Reject malformed
@@ -238,7 +239,7 @@ class Mux_sharing {
       candidates.push_back(std::move(c));
     }
     // One ownership decision per candidate. Shared outputs, controls, color,
-    // and width/sign boundaries stop a region. Every candidate then belongs
+    // and explicit value operations stop a region. Every candidate then belongs
     // to exactly one tree, even if the enclosing dataflow is a reconvergent DAG.
     for (auto& c : candidates) {
       const auto consumer = sole_consumer(c.node);
@@ -250,13 +251,8 @@ class Mux_sharing {
         continue;
       }
       const auto& parent = candidates[it->second];
-      auto        p      = parent.node.get_driver_pin(0);
-      auto        q      = c.node.get_driver_pin(0);
-      if (gu::bits_of(p) != gu::bits_of(q) || gu::is_unsign(p) != gu::is_unsign(q)) {
-        continue;
-      }
-      const auto pid  = consumer->sink.get_port_id();
-      const bool data = gu::type_op_of(parent.node) == Ntype_op::Mux ? pid != 0 : (pid % 2 != 0 || pid == parent.arms.size() * 2);
+      const auto  pid    = consumer->sink.get_port_id();
+      const bool  data = gu::type_op_of(parent.node) == Ntype_op::Mux ? pid != 0 : (pid % 2 != 0 || pid == parent.arms.size() * 2);
       if (data) {
         c.parent = it->second;
       }
@@ -271,11 +267,6 @@ class Mux_sharing {
     auto flop = consumer->sink.get_master_node();
     if (gu::type_op_of(flop) != Ntype_op::Flop || gu::has_color(flop)
         || consumer->sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "din")) {
-      return {};
-    }
-    auto q = flop.get_driver_pin(0);
-    auto d = root.node.get_driver_pin(0);
-    if (gu::bits_of(q) != gu::bits_of(d) || gu::is_unsign(q) != gu::is_unsign(d)) {
       return {};
     }
     // A depth-d Flop is a shift register. Feeding back its LAST Q is not the
@@ -302,14 +293,12 @@ class Mux_sharing {
     absl::flat_hash_map<size_t, size_t> group_ids;
     size_t                              old_cost  = 0;
     size_t                              terminals = 0;
-    size_t                              branches  = 0;
     for (size_t i = 0; i < visits.size(); ++i) {
       const auto  id  = visits[i].candidate;
       const auto& c   = candidates[id];
       old_cost       += c.arms.size();
       std::vector<Target> targets;
       auto                append = [&](Pin p) {
-        ++branches;
         auto child = candidate_ids.find(p.get_master_node().get_class_index());
         if (!p.is_const() && child != candidate_ids.end() && candidates[child->second].parent == id) {
           targets.push_back({visits.size(), true});
@@ -344,11 +333,10 @@ class Mux_sharing {
       return;
     }
     const size_t new_cost = data_count - 1;
-    // Charge only private, actually removable data muxes, and conservatively
-    // allow two new one-bit gates per branch. No graph mutation before this
-    // check. Repeated alternatives must pay for their shared control logic.
-    if ((terminals == groups.size() && hold == absent) || old_cost <= new_cost
-        || static_cast<uint64_t>(gu::bits_of(root.node.get_driver_pin(0))) * (old_cost - new_cost) <= 2 * branches) {
+    // Count only private, removable word muxes. Width annotations cannot
+    // influence this structural heuristic; repeated alternatives or a hold
+    // must reduce the number of data selections.
+    if ((terminals == groups.size() && hold == absent) || old_cost <= new_cost) {
       return;
     }
 

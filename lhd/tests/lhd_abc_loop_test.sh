@@ -16,9 +16,11 @@ run pass liberty gensim "$LIB" --emit-dir verilog:"$W/models" --workdir "$W/mode
 # Run synthesis serially. Repeat after each option change to exercise cache
 # readback as well as the fresh mapping and final physical stitching.
 for mode in true false off; do
+  option_args=()
+  [ "$mode" = "true" ] || option_args=(--set "pass.abc.unroll_carry=$mode")
   for iteration in 1 2; do
     run pass abc lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" \
-      --set pass.abc.unroll_carry="$mode" --stats --emit-dir lg:"$W/net" \
+      ${option_args[@]+"${option_args[@]}"} --stats --emit-dir lg:"$W/net" \
       --emit verilog:"$W/net.v" --workdir "$W/map" --result-json "$W/map.json"
     # The source stays compact; the mapped netlist has physical occurrences.
     grep -q '^has_loop_subnodes 1$' "$W/src/library.txt"
@@ -27,7 +29,7 @@ for mode in true false off; do
       grep -q 'u_loop_0__li5' "$W/net.v"
     fi
     cat "$W/net.v" "$W/models/"*.v > "$W/impl.v"
-    run lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" \
+    run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" \
       --top "$TOP" --workdir "$W/lec_${mode}_${iteration}"
   done
 done

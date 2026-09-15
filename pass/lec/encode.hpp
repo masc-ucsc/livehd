@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -14,6 +15,11 @@
 #include "phase_sched.hpp"
 
 namespace livehd::lec {
+
+// Shared with the CLI preflight: graph-only shortcuts must obey the same
+// unsupported memory schedule and explicit exclusion policy as the encoder.
+bool        memory_is_ignored(const hhds::Occurrence_node& node, const std::vector<std::string>& ignored);
+std::string mixed_memory_edge_error(const hhds::Occurrence_node& node, const std::vector<std::string>& ignored);
 
 // Port/signal names are matched case-sensitively (LiveHD/Pyrope name policy):
 // the ref/impl IO pairing requires identical spelling, so a port `Clk` on one
@@ -36,8 +42,9 @@ struct Val {
   // value's bit i is unknown/don't-care). A NULL term means fully known — the
   // common case pays nothing. Only populated when the encoder runs with
   // x_dontcare (the REFERENCE side under lec.gold_x=ignore): sourced at
-  // constants with '?' bits, propagated exactly through Mux arms and
-  // conservatively (whole-value smear) through every other op, and consumed by
+  // constants with '?' bits, propagated positionally through slices, inserts,
+  // concatenation and bitwise operations (and through selected Mux arms).
+  // Other operations conservatively smear unknowns across the result. Consumed by
   // the query-side miters, which exclude ref-unknown bits from the compare —
   // the cvc5 analogue of yosys `miter -ignore_gold_x`.
   cvc5::Term x_mask{};  // ('undef' avoided: C-preprocessor collision risk)
@@ -52,11 +59,10 @@ struct Encoded {
   //   * unsupported == true  — the encoder REFUSES: a cell/shape it does not
   //     model (a Latch, a non-constant Get_mask, an unknown op). Re-running with
   //     a bigger budget cannot help; the query decided NOTHING and every gate
-  //     built on it is VACUOUS. The CLI hard-fails these regardless of
-  //     `formal.strict`, because a silent exit-0 here reads as "verified".
+  //     built on it is VACUOUS. The CLI hard-fails these unconditionally, because a silent exit-0 here reads as "verified".
   //   * unsupported == false — the encoder ran out of BUDGET (formal.timeout).
   //     That is the ordinary inconclusive: a bigger budget may decide it, and
-  //     the deferred-warning policy (could-not-prove => warning) applies.
+  //     the CLI reports UNKNOWN and exits non-zero.
   bool unsupported = false;
 
   // Graph IO, by declared port name (case-sensitive ref/impl pairing).

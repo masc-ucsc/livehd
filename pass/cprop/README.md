@@ -3,6 +3,10 @@
 `Cprop::do_trans` folds constants and scalar identities, canonicalizes packed
 wiring, merges identical combinational expressions, and then runs mux sharing
 before final dead-node cleanup. Bitwidth inference remains a separate pass.
+Cprop does not read pin width or sign annotations, including IO and state annotations. Constants retain their
+integer values; narrowing and sign extension must be explicit Get_mask,
+Set_mask, Concat or Sext operations. Local mask/boolean proofs inspect those
+operations and literal operands, and refuse when the expression is unknown.
 
 ## Mux sharing
 
@@ -13,8 +17,7 @@ graph expressions. The pass never enumerates paths or expands Boolean expression
 into sums of products. Conditions reaching the same terminal are ORed together,
 and the region root becomes a Hotmux over the distinct values.
 
-Regions stop at shared outputs, non-mux data operators, width/sign changes, and
-colored nodes. Each eligible internal mux has exactly one outgoing edge, which
+Regions stop at shared outputs, non-mux data operators, and colored nodes. Each eligible internal mux has exactly one outgoing edge, which
 must feed a data arm of its parent. Ownership is computed once before rewriting,
 so a reconvergent graph cannot trigger repeated overlapping cone walks. The
 implementation uses iterative walks and dense port indexing, without sorting
@@ -27,18 +30,14 @@ distinct integer equality tests against the same selector. Other Hotmuxes,
 including deferred runtime checks, retain their original overlap obligation.
 There is no solver call. New Hotmux predicates are exclusive by construction.
 
-Only data widths of at least four bits are considered. A rewrite must remove
-repeated alternatives or a hold value, reduce estimated word-mux cost, and save
-more bit-mux work than a conservative allowance of two one-bit gates per visited
-branch. This is an area heuristic, not a timing guarantee: shared predicate
-chains can still have substantial depth. Shared source muxes are not counted as
-removable work.
+A rewrite must remove repeated alternatives or a hold value and reduce the
+number of word muxes. This is a structural heuristic independent of width
+annotations. Shared source muxes are not counted as removable work.
 
 When a root exclusively feeds a single-stage Flop's `din`, a terminal equal to
 that Flop's `Q` can become an enable: `old_enable & OR(non_hold_conditions)`.
 Clock, reset, initialization, and the state width/sign are preserved. Pipeline
-Flops, latches, shared `din` cones, and width/sign mismatches do not receive this
-enable transformation. Index Muxes and unknown constant operands are also left
+Flops, latches, and shared `din` cones do not receive this enable transformation. Index Muxes and unknown constant operands are also left
 outside the rewrite.
 
 Regression coverage includes exhaustive small control spaces, decoded and

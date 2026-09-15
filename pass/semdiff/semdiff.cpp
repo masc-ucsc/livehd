@@ -39,9 +39,10 @@ bool is_state(Ntype_op op) {
   return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory;
 }
 
-// A Sub whose body holds state is a cut point TOO. hhds encodes is_loop_break in
-// bit 0 of Ntype_op (graph/cell.hpp:109 static_asserts; IO=39, Memory=41, Flop=43,
-// Latch=45, Fflop=47, Sub=49 are the odd ones) and HOISTS every loop_break node to
+// A Sub whose body holds state is a cut point TOO. hhds owns bit 0 of the stored
+// node type as its own is_loop_break flag (LiveHD writes `(op << 1) | loop_last`;
+// see graph/node_util.hpp set_type_op / type_op_of, and the loop_last BAND in
+// graph/cell.hpp) and HOISTS every loop_break node to
 // a topological SOURCE — emitted before its drivers, exactly like a Flop
 // (hhds/graph.cpp:2451-2453 "cut point: no ordering edges lead INTO it"). A Flop
 // survives that only because we PRE-SEED its fsig/bsig, which makes the emission
@@ -53,7 +54,7 @@ bool is_state(Ntype_op op) {
 // seed). IO is NOT here: it is two singleton nodes below kFirstUserNodeIdx that
 // forward_class never emits, and its pins already resolve by name.
 bool is_cut(const hhds::Node_class& node, bool blackbox_subs = false) {
-  auto op = gu::type_op_of(node);  // LINK-based: set_subnode re-stamps the raw type
+  auto op = gu::type_op_of(node);  // set_subnode rewrites only bit 0, so the op survives it
   // blackbox_subs (incremental region reuse): EVERY Sub is a cut point, not just
   // loop_break ones -- its inputs are still folded here (input rewiring is caught)
   // but its outputs are seeded sources, so a comb loop through a submodule breaks

@@ -435,6 +435,13 @@ void uPass_attributes::process_attr_set() {
   }
   move_to_parent();
 
+  // Internal Slang process markers select the clock for subsequent memory
+  // stores. They are ordered wiring statements, not immutable type facts:
+  // leave them in the IR for tolg without propagating them through aliases.
+  if (attr_name == "__store_clock_pin" || attr_name == "__store_posclk") {
+    return;
+  }
+
   // Phase 2 side-state writes — keep these BEFORE dispatch so handlers can
   // see the updated maps.
   if (!target.empty() && !attr_name.empty()) {

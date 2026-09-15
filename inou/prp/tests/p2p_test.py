@@ -3,7 +3,7 @@
 must recompile and stay logically equivalent to its golden `.v`.
 
     lhd compile foo.prp --emit-dir pyrope:DIR/                          # prp -> upass -> prp
-    lhd lec --set formal.solver=lgyosys --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
+    lhd lec --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
 
 This is the FORWARD-direction companion of v2prp2v_test.py (which round-trips a
 `.v`). It exists to lock in the constructs the writer fully supports — notably
@@ -12,7 +12,7 @@ The prp_writer safety net makes the first step fail the compile if it hits an
 unimplemented construct (rather than silently emitting a /* TODO */ stub), so a
 construct gap surfaces here as a hard failure, not a false pass.
 
-`lhd lec --set formal.solver=lgyosys` (yosys/lgcheck) is the authoritative gate:
+`lhd lec` (default solver) is the equivalence gate:
 equivalent => pass, not-equivalent => fail, TIMEOUT => inconclusive (exit 0).
 
   python3 inou/prp/tests/p2p_test.py -i inou/prp/tests/equiv/mod_call_pipe.prp
@@ -62,14 +62,10 @@ def main():
 
     # 1. Pyrope -> upass -> Pyrope via pass.prp_writer (safety net fails on any
     #    unimplemented construct).
-    #    Pin compile.upass.inline=true: this gate recompiles only the single
-    #    emitted `<top>.prp`, so it needs a self-contained (flat) re-emission.
-    #    With the default (inline=false) a `comb` called with runtime args is
-    #    emitted as a separate Sub module, and the single-file recompile cannot
-    #    resolve it (the hierarchical multi-file roundtrip is a separate flow).
+    #    Default comb inlining produces the self-contained source this
+    #    single-file round trip recompiles.
     comp = subprocess.run(
-        [lhd, "compile", prp, "--set", "compile.upass.inline=true",
-         "--emit-dir", "pyrope:" + out_dir + "/", "--workdir", os.path.join(work, "w_emit")],
+        [lhd, "compile", prp, "--emit-dir", "pyrope:" + out_dir + "/", "--workdir", os.path.join(work, "w_emit")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if comp.returncode != 0:
         print("{} - p2p - FAILED: prp->prp emission rc={}".format(name, comp.returncode))
@@ -99,7 +95,7 @@ def main():
         ref_top  = top
         impl_top = top.rsplit(".", 1)[-1]
         chk = subprocess.run(
-            [lhd, "lec", "--set", "formal.solver=lgyosys", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
+            [lhd, "lec", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
              "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:

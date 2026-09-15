@@ -41,7 +41,7 @@ grep -qE '"kind":"(flop|memory)"' "$wd"/state.jsonl || {
 }
 
 cat "$wd"/v/*.v >"$wd"/all.v
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$wd"/all.v \
+"$LHD" lec --impl verilog:"$wd"/all.v \
   --ref verilog:"$src" --top packed_array_loop_reg_sroa --workdir "$wd"/wc -q \
   >"$wd"/lec.log 2>&1 || {
     tail -20 "$wd"/lec.log

@@ -1,7 +1,6 @@
 /*
 :name: generic_alias_register
 :type: equiv
-:equiv_engine: cvc5
 :verilog_top: generic_alias_register
 :pyrope_top: generic_alias_register
 */

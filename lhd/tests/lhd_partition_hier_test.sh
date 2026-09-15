@@ -10,7 +10,7 @@
 #   lhd pass color <alg>                  (colors EVERY def: top + sub-defs)
 #   lhd pass partition --emit-dir lg:dir2 (partitions every def + re-links Subs)
 #   lg:dir2 -> verilog
-#   lhd lec --set formal.solver=lgyosys (partitioned vs original): must be LEC-equivalent
+#   lhd lec (partitioned vs original): must be LEC-equivalent
 #
 # Fixtures (inou/prp/tests/pyrope):
 #   hier_comb  - combinational, top instances `adder` x2 + `bitmix`
@@ -68,7 +68,7 @@ for entry in "${DESIGNS[@]}"; do
     # -- is pinned below.
     grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
     # 6. LEC: the partitioned hierarchical design must equal the original
-    run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+    run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"
   done
 done
@@ -91,7 +91,7 @@ run pass partition --top hier_comb.top lg:"$FD/lg" --emit-dir lg:"$FD/lg2" --wor
 run compile lg:"$FD/lg2" --top hier_comb.top --emit verilog:"$FD/part.v" --workdir "$FD/w5"
 grep -q "^module adder" "$FD/part.v" || fail "pipe: child def 'adder' dropped (hierarchy lost)"
 grep -q "__c" "$FD/part.v" && fail "pipe: single-region defs must not get a __c wrapper"
-run lec --set formal.solver=lgyosys --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
+run lec --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
 echo "PASS: single-region-per-def partition needs no __c wrapper and is LEC-equivalent"
 
 # stats-only mode on a hierarchical input must succeed (per-def region stats).

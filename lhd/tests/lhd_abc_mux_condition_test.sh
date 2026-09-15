@@ -17,11 +17,9 @@ run synth inou/prp/tests/equiv/instance_out_struct_ident.prp --top top \
   --set synth.liberty="$LIB" --set synth.opentimer=false \
   --emit-dir lg:"$W/mapped" --emit verilog:"$W/mapped.v" --workdir "$W/synth"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --emit verilog:"$W/models.v" --workdir "$W/models-work"
-for engine in cvc5 lgyosys; do
-  run lec --impl lg:"$W/mapped" --ref verilog:"$W/ref.v" --lib lg:"$W/models" \
-    --impl-top instance_out_struct_ident.top --ref-top reference \
-    --set formal.solver="$engine" --set formal.timeout=60 --workdir "$W/$engine"
-done
+run lec --impl lg:"$W/mapped" --ref verilog:"$W/ref.v" --lib lg:"$W/models" \
+  --impl-top instance_out_struct_ident.top --ref-top reference \
+  --set formal.timeout=60 --workdir "$W/default"
 cat > "$W/tb.v" <<'SV'
 module tb;
   reg [7:0] a;

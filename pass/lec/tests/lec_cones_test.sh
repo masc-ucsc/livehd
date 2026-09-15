@@ -54,8 +54,10 @@ netlist bad "$WORK/abc_seq_bad.prp" || { echo "FAIL: could not build the broken 
 # run NET CONES [ENGINE] -> OUT/RC
 run_lec() {
   local eng=${3:-auto}
+  engine_args=()
+  [ "$eng" = "auto" ] || engine_args=(--set "formal.engine=$eng")
   "$LHD" lec --ref "$SRC" --impl lg:"$WORK/$1.net" --lib lg:"$WORK/models" --top "$TOP" \
-         --set formal.lec.cones="$2" --set formal.engine="$eng" > "$WORK/lec_$1_$2_$eng.txt" 2>&1
+         --set formal.lec.cones="$2" ${engine_args[@]+"${engine_args[@]}"} > "$WORK/lec_$1_$2_$eng.txt" 2>&1
   RC=$?; OUT=$(cat "$WORK/lec_$1_$2_$eng.txt")
 }
 

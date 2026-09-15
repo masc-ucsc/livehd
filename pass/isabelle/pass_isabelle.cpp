@@ -176,7 +176,7 @@ void Pass_isabelle::setup() {
   m1.add_label_optional("path", "Output directory for emitted *_Lgraph.thy");
   m1.add_label_optional("top", "Top module name (informational only)");
   m1.add_label_optional("strict",
-                        "true|false. Abort on unsupported ops (formal.strict applies too; formal.isabelle.strict wins)",
+                        "true|false. Abort on unsupported ops",
                         "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");

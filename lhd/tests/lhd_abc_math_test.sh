@@ -58,13 +58,8 @@ ls "$W/net"/graph_* >/dev/null 2>&1 || fail "no mapped netlist emitted"
 # Cell models from --lib supply the mapped standard-cell implementations.
 run lec --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec"
 
-# The Yosys-backed solver consumes cgen Verilog rather than LGraphs.  --lib
-# must therefore materialize the cell-model modules into both sides; otherwise
-# lgcheck fails setup on the first mapped standard cell.
-run lec --set formal.solver=lgyosys --impl lg:"$W/net" --ref lg:"$W/re" \
-  --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_lgyosys"
 grep -q '"verdict":"proven"' "$W/r.json" \
-  || fail "lgyosys did not prove mapped hierarchy with --lib models: $(cat "$W/r.json")"
+  || fail "default LEC did not prove mapped hierarchy with --lib models: $(cat "$W/r.json")"
 
 # A non-default adder still proves equivalent (the multiplier's partial-product
 # additions use pass.abc.adder).
@@ -80,7 +75,6 @@ run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TO
 # refute), which exits 0 unless strict — so run the control strict, where any
 # non-Proven outcome is a hard failure exit.
 if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$TOP" \
-    --set formal.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi

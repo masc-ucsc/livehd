@@ -183,11 +183,15 @@ pub mod inline_box(a:u8) -> (y:u8@[1]) {
 }
 EOF
 for inline in false true; do
+  inline_args=()
+  [ "$inline" = "true" ] || inline_args=(${inline_args[@]+"${inline_args[@]}"})
   "$LHD" compile "$W/inline_box.prp" --top inline_box --set "compile.upass.inline=$inline" \
     --emit-dir "lg:$W/inline-$inline" --workdir "$W/inline-compile-$inline" > "$W/inline-$inline.log" 2>&1 \
     || fail "inline fixture compile failed ($inline): $(cat "$W/inline-$inline.log")"
 done
 for order in top_down bottom_up; do
+  order_args=()
+  [ "$order" = "top_down" ] || order_args=(${order_args[@]+"${order_args[@]}"})
   "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-true" --top inline_box \
     --set formal.engine=ind --set "formal.lec.hier_order=$order" --workdir "$W/inline-lec-$order" \
     > "$W/inline-$order.out" 2>&1 || fail "asymmetric inlining failed ($order): $(cat "$W/inline-$order.out")"
@@ -198,7 +202,7 @@ for order in top_down bottom_up; do
 done
 echo "PASS(inline): asymmetric inlining descends directly under both hierarchy orders"
 sed 's/q = helper(a)/q = helper(a ^ 1)/' "$W/inline_box.prp" > "$W/inline_box_bug.prp"
-"$LHD" compile "$W/inline_box_bug.prp" --top inline_box --set compile.upass.inline=true \
+"$LHD" compile "$W/inline_box_bug.prp" --top inline_box  \
   --emit-dir "lg:$W/inline-bug" --workdir "$W/inline-compile-bug" > "$W/inline-bug.log" 2>&1 \
   || fail "inlined negative control did not compile: $(cat "$W/inline-bug.log")"
 if "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-bug" --top inline_box \

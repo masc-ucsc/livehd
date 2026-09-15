@@ -286,9 +286,7 @@ void synth_command(Options& opts, Result& res) {
     labels["top"]     = top;
     labels["out"]     = net_dir;
     labels["qor"]     = qor_path;
-    // BEFORE merge_sets: unlike `library`, `pass.abc.threads` is a legal user
-    // knob, so synth.threads is the DEFAULT an explicit `--set abc.threads=N`
-    // still overrides rather than a value that silently discards it.
+    // synth.threads is the shared ABC worker limit for every command.
     labels["threads"] = synth_set(opts, "threads", "0");
     merge_sets(opts, "pass.abc", labels);
     labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)

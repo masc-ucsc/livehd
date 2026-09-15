@@ -1,0 +1,40 @@
+/*
+:name: runtime_slice_wide
+:type: simulation
+*/
+// A constant-width slice at a RUNTIME offset of a wide packed value, and the
+// matching partial write into a wide packed register. `x#[(i*W) ..+ W]` lowers
+// to `(x >> (i*W)) & (2^W - 1)` with a width `(i*W + W - 1) + 1 - i*W` that
+// cprop must fold to the literal W (the shared `i*W` cancels), after which
+// cgen.sim extracts the W bits directly instead of shifting the whole word.
+pub mod runtime_slice_wide(bus:u520, idx:u5, wdata:u8, wen:bool, reset:bool) -> (lane:u15@[0], word:u8@[0], top:u8@[0]) {
+  reg table:u256:[reset_pin = ref reset, async = true] = 0
+  lane = bus#[(idx*15) ..+ 15]
+  word = table#[(idx*8) ..+ 8]
+  if wen { table#[(idx*8) ..+ 8] = wdata }
+  top = table#[248 ..+ 8]
+}
+test runtime_slice_wide.reads_and_writes {
+  mut dut = runtime_slice_wide
+  const pattern:u520 = 0x5a0123456789abcdef0fedcba9876543210f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff13579bdf02468ace2468ace013579bdf
+  tick 40 {
+    // Lane 7*clock mod 32 is addressed every cycle and written on odd cycles.
+    // 7 is invertible mod 32, so a lane is revisited only every 32 cycles with
+    // the same parity: an odd cycle reads back what it just wrote, an even
+    // cycle reads a lane nothing has written. Lane 31 is written at cycle 9
+    // only (7*9 = 63 = 31 mod 32).
+    // Closed forms on purpose: a wide golden table updated through shifts of
+    // the typed lane index misbehaved in the test DSL (open DSL issue).
+    const i:u5 = (clock * 7) & 31
+    dut.reset = clock < 1
+    dut.bus   = pattern
+    dut.idx   = i
+    dut.wdata = (clock * 13 + 5) & 0xff
+    dut.wen   = clock >= 1 and (clock & 1) == 1
+    step
+    const expected_word = if (clock & 1) == 1 { (clock * 13 + 5) & 0xff } else { 0 }
+    assert(dut.lane == ((pattern >> (i*15)) & 0x7fff))
+    assert(dut.word == expected_word)
+    assert(dut.top == (if clock >= 9 { 122 } else { 0 }))
+  }
+}

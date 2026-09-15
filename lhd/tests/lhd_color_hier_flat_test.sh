@@ -70,7 +70,7 @@ for entry in "${DESIGNS[@]}"; do
   grep -q "^ *${CHILD} " "$D/part.v" && fail "$FIX: '$CHILD' survived the downstream flatten -- hier_flat did not fire"
 
   # ... and the design still computes the same function. This is the whole point.
-  run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+  run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
   echo "PASS: $FIX coloured across '$CHILD' virtually and stayed LEC-equivalent"
 done
 

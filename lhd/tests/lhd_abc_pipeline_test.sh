@@ -32,5 +32,5 @@ PYCOUNT
   run lec --impl lg:"$D/net" --ref lg:"$W/ref" --lib lg:"$D/models" --top pipeline \
     --set formal.timeout=60 --workdir "$D/native" --result-json "$D/native.json"
   run lec --impl verilog:"$D/impl.v" --ref verilog:"$W/ref.v" --top pipeline \
-    --set formal.solver=lgyosys --workdir "$D/yosys" --result-json "$D/yosys.json"
+    --workdir "$D/yosys" --result-json "$D/yosys.json"
 done

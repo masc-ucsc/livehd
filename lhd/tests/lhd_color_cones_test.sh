@@ -52,7 +52,7 @@ for entry in "${DESIGNS[@]}"; do
   run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
 
   run pass color synth --top "$TOP" --stats \
-      --set color.synth_alg=cones --set color.max_gate=40 \
+       --set color.max_gate=40 \
       lg:"$D/lg" --workdir "$D/w3"
 
   # The coloring descriptor must say what actually ran: downstream readers
@@ -78,7 +78,7 @@ for entry in "${DESIGNS[@]}"; do
     || fail "$FIX: partition emitted no <def>__c<id> region module"
   grep -qE "__c[0-9]+_r[0-9]+" "$D/post.v" && fail "$FIX: packed color was split into per-cloud _r modules"
 
-  run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+  run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
   echo "PASS: $FIX cones -> partition -> LEC-equivalent"
 done
 
@@ -86,21 +86,23 @@ done
 # stay LEC-equivalent. `all` is what the CLI picks when `forward` is omitted --
 # the runs above -- so `false` is spelled out here to keep the off path covered.
 for MODE in false pair all; do
+  forward_args=()
+  [ "$MODE" = all ] || forward_args=(--set "color.forward=$MODE")
   D="$W/fwd_$MODE"
   mkdir -p "$D"
   run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
   run compile lg:"$D/lg" --top hier_seq.top --emit verilog:"$D/ref.v" --workdir "$D/w2"
-  run pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate=40 \
-      --set color.forward="$MODE" lg:"$D/lg" --workdir "$D/w3"
+  run pass color synth --top hier_seq.top  --set color.max_gate=40 \
+      ${forward_args[@]+"${forward_args[@]}"} lg:"$D/lg" --workdir "$D/w3"
   LC_ALL=C grep -raq -- "\"forward\":\"$MODE\"" "$D/lg" || fail "forward=$MODE not recorded in coloring_info"
   run pass partition --top hier_seq.top lg:"$D/lg" --emit-dir lg:"$D/part" --workdir "$D/w4"
   run compile lg:"$D/part" --top hier_seq.top --emit verilog:"$D/post.v" --workdir "$D/w5"
-  run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top hier_seq.top --workdir "$D/c"
+  run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top hier_seq.top --workdir "$D/c"
   echo "PASS: cones forward=$MODE -> partition -> LEC-equivalent"
 done
 
 # A typo must be refused, not silently treated as off.
-if "$LHD" pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.forward=maybe \
+if "$LHD" pass color synth --top hier_seq.top  --set color.forward=maybe \
      lg:"$W/hier_seq/lg" --workdir "$W/negf" -q --result-json "$W/negf.json" 2>/dev/null; then
   fail "an unknown forward mode was accepted"
 fi
@@ -122,7 +124,7 @@ run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir l
 count_colors() {  # $1 = max_gate
   rm -rf "$D/lg_$1"
   cp -R "$D/lg0" "$D/lg_$1"
-  "$LHD" pass color synth --top hier_seq.top --set color.synth_alg=cones --set color.max_gate="$1" --stats \
+  "$LHD" pass color synth --top hier_seq.top  --set color.max_gate="$1" --stats \
       lg:"$D/lg_$1" -q --result-json "$D/r_$1.json" 2>&1 \
     | grep -o -- '-- [0-9]* partition' | grep -o '[0-9]*'
 }
@@ -147,7 +149,7 @@ D="$W/synth"
 mkdir -p "$D"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 "$LHD" synth "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --workdir "$D/w" \
-   --set synth.liberty="$LIB" --set color.synth_alg=cones --set color.max_gate=40 \
+   --set synth.liberty="$LIB"  --set color.max_gate=40 \
    --set synth.opentimer=false \
    -q --result-json "$D/r.json" || fail "lhd synth with cones -> $(cat "$D/r.json" 2>/dev/null)"
 grep -q '"regions":' "$D/w/synth/qor.json" || fail "lhd synth --set color.synth_alg=cones produced no abc regions"
@@ -177,10 +179,10 @@ for FIX in hier_comb hier_seq; do
   D="$W/ctrl_$FIX"; TOP="$FIX.top"; mkdir -p "$D"
   run compile "inou/prp/tests/pyrope/$FIX.prp" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
   run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
-  run pass color synth lg:"$D/lg" --top "$TOP" --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w3"
+  run pass color synth lg:"$D/lg" --top "$TOP"   --set color.max_gate=40 --workdir "$D/w3"
   run pass partition lg:"$D/lg" --top "$TOP" --emit-dir lg:"$D/part" --workdir "$D/w4"
   run compile lg:"$D/part" --top "$TOP" --emit verilog:"$D/post.v" --workdir "$D/w5"
-  run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/lec"
+  run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/lec"
 done
 D="$W/ctrl_shared"; mkdir -p "$D"
 cat > "$D/ref.v" <<'VERILOG'
@@ -200,9 +202,9 @@ run compile "$D/ref.v" --top ctrl_shared --emit-dir lg:"$D/lg" --workdir "$D/w1"
 # retune must not turn the overlap assertion red. Colour a copy so the
 # partition/ABC/LEC leg below keeps its deliberately tiny cap.
 cp -R "$D/lg" "$D/lg_merged"
-run pass color synth lg:"$D/lg_merged" --top ctrl_shared --set color.synth_alg=cones --set color.max_gate=5000 --workdir "$D/w2m"
+run pass color synth lg:"$D/lg_merged" --top ctrl_shared  --set color.max_gate=5000 --workdir "$D/w2m"
 LC_ALL=C grep -raq '"mux_groups":1,' "$D/lg_merged" || fail 'overlapping mux selects were not merged'
-run pass color synth lg:"$D/lg" --top ctrl_shared --set color.synth_alg=cones --set color.max_gate=40 --workdir "$D/w2"
+run pass color synth lg:"$D/lg" --top ctrl_shared  --set color.max_gate=40 --workdir "$D/w2"
 # The same closure under a cap far below it must PARTITION into two or more
 # control colors. Nothing here can assert "the split copied no node": a node
 # carries exactly one control color by construction, so the old duplication
@@ -211,18 +213,19 @@ run pass color synth lg:"$D/lg" --top ctrl_shared --set color.synth_alg=cones --
 LC_ALL=C grep -raqE '"ctrl_colors":\[[0-9]+,' "$D/lg" || fail 'max_gate=40 did not split the oversized control group'
 # The default enables groups, while the explicit opt-out remains available.
 cp -R "$D/lg" "$D/lg_off"
-run pass color synth lg:"$D/lg_off" --top ctrl_shared --set color.synth_alg=cones --set color.ctrl_cones=false --workdir "$D/off"
+run pass color synth lg:"$D/lg_off" --top ctrl_shared  --set color.ctrl_cones=false --workdir "$D/off"
 LC_ALL=C grep -raq '"ctrl_cones":false' "$D/lg_off" || fail 'explicit ctrl_cones=false ignored'
 run pass partition lg:"$D/lg" --top ctrl_shared --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_shared --emit verilog:"$D/post.v" --workdir "$D/w4"
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
-run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
+run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false  --set color.max_gate=40 --emit verilog:"$D/mapped.v"
 python3 - "$D/syn/synth/qor.json" <<'PY' || fail 'missing control-tier QoR rows'
 import json,sys
 q=json.load(open(sys.argv[1]));assert any(r['ctrl'] for r in q['regions'])
 PY
-run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/models-work"
-run lec --lib lg:"$D/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/mapped_lec"
+run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --emit verilog:"$D/models.v" --workdir "$D/models-work"
+cat "$D/models.v" >> "$D/mapped.v"
+run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/mapped_lec"
 echo 'PASS: merged mux groups, partition and ABC remain equivalent'
 
 
@@ -249,15 +252,16 @@ run compile "$D/ref.v" --top ctrl_families --emit-dir lg:"$D/lg" --workdir "$D/w
 # 88 predicted AIG of control: cap above it, so the budget split does not hide
 # the property under test (see ctrl_shared above).
 cp -R "$D/lg" "$D/lg_merged"
-run pass color synth lg:"$D/lg_merged" --top ctrl_families --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=5000 --workdir "$D/w2m"
+run pass color synth lg:"$D/lg_merged" --top ctrl_families   --set color.max_gate=5000 --workdir "$D/w2m"
 LC_ALL=C grep -raq '"mux_groups":1,' "$D/lg_merged" || fail 'mux and enable closures did not share one control group'
 LC_ALL=C grep -raq '"enable_groups":0' "$D/lg_merged" || fail 'the enable closure minted a second group instead of joining'
-run pass color synth lg:"$D/lg" --top ctrl_families --set color.synth_alg=cones --set color.ctrl_cones=true --set color.max_gate=40 --workdir "$D/w2"
+run pass color synth lg:"$D/lg" --top ctrl_families   --set color.max_gate=40 --workdir "$D/w2"
 run pass partition lg:"$D/lg" --top ctrl_families --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_families --emit verilog:"$D/post.v" --workdir "$D/w4"
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
-run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --set color.ctrl_cones=true --set color.synth_alg=cones --set color.max_gate=40 --emit verilog:"$D/mapped.v"
-run lec --lib lg:"$W/ctrl_shared/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
+run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false   --set color.max_gate=40 --emit verilog:"$D/mapped.v"
+cat "$W/ctrl_shared/models.v" >> "$D/mapped.v"
+run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
 echo 'PASS: mux chains and shared mux/enable control groups remain equivalent after partition and ABC'
 
 # Constant shifts between muxes are internal wiring of the same control group.
@@ -278,11 +282,12 @@ module ctrl_normalizer(input [15:0] a, output [15:0] y);
 endmodule
 VERILOG
 run compile "$D/ref.v" --top ctrl_normalizer --emit-dir lg:"$D/lg" --workdir "$D/w1"
-run pass color synth lg:"$D/lg" --top ctrl_normalizer --set color.synth_alg=cones --workdir "$D/w2"
+run pass color synth lg:"$D/lg" --top ctrl_normalizer  --workdir "$D/w2"
 run pass partition lg:"$D/lg" --top ctrl_normalizer --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_normalizer --emit verilog:"$D/post.v" --workdir "$D/w4"
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
 run synth "$D/ref.v" --top ctrl_normalizer --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$D/mapped.v"
-run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/models-work"
-run lec --lib lg:"$D/models" --set formal.solver=lgyosys --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
+run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --emit verilog:"$D/models.v" --workdir "$D/models-work"
+cat "$D/models.v" >> "$D/mapped.v"
+run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
 echo 'PASS: default mux groups preserve normalizer wiring through partition and ABC'

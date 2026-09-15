@@ -12,7 +12,7 @@ ODIR="${TEST_TMPDIR}/prp_out"
 
 # Pass 1: read -> upass (verifier on, as the lgshell default pipeline ran) ->
 # emit Pyrope through pass.prp_writer.
-"${LHD}" compile "${PRP_FILE}" --set upass.verifier=true \
+"${LHD}" compile "${PRP_FILE}"  \
   --emit-dir pyrope:"${ODIR}/" --workdir "${TEST_TMPDIR}/w1" -q \
   --result-json "${TEST_TMPDIR}/r1.json" || {
   echo "FAIL: pass 1 exited non-zero"
@@ -30,7 +30,7 @@ echo "Pass 1 output:"
 cat "${ODIR}/trivial_if.prp"
 
 # Pass 2: re-read the emitted Pyrope -> upass (must succeed with no errors).
-"${LHD}" compile "${ODIR}/trivial_if.prp" --set upass.verifier=true \
+"${LHD}" compile "${ODIR}/trivial_if.prp"  \
   --workdir "${TEST_TMPDIR}/w2" -q --result-json "${TEST_TMPDIR}/r2.json" || {
   echo "FAIL: pass 2 produced errors when re-parsing the emitted Pyrope"
   cat "${TEST_TMPDIR}/r2.json"

@@ -58,17 +58,17 @@ const char* to_string(Color_defect d) {
 
 bool sim_can_lower(Clock_kind k) {
   switch (k) {
-    case Clock_kind::implicit:
-    case Clock_kind::plain_input:
+    case Clock_kind::implicit      :
+    case Clock_kind::plain_input   :
     case Clock_kind::plain_internal:
-    case Clock_kind::gated_inline:
+    case Clock_kind::gated_inline  :
     case Clock_kind::gated_chain:
     // A Sub whose def is a RECOGNIZED ICG cell is inlined by
     // `inline_clock_gate_cells` before scheduling, so it folds like any inline
     // gate. Reporting it as unlowerable was this pass's own first answer and it
     // was wrong by 372 sites — every one of them emits clean.
-    case Clock_kind::gate_cell     : return true;
-    default                        : return false;
+    case Clock_kind::gate_cell: return true;
+    default                   : return false;
   }
 }
 
@@ -478,8 +478,7 @@ void check_colors(hhds::Graph* g, std::string_view def_name, bool node_graph_cyc
   livehd::color::clear_coloring(g);
 
   livehd::color::Color_opts copts;
-  copts.hier    = false;
-  copts.compact = true;
+  copts.hier = false;
   livehd::color::Color_acyclic alg(copts, 1, /*merge_en=*/false);
   alg.label(g);
 

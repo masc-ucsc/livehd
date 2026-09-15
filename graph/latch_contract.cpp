@@ -319,9 +319,13 @@ void comb_reach(const hhds::Pin_class& start, const hhds::Node_class& hold_owner
     if (op == Ntype_op::Sub) {
       continue;  // opaque instance: not traversed (conservative, may under-report)
     }
+    const auto control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(n) : 0;
     for (const auto& e : n.inp_edges()) {
-      // The hold-mux exemption, applied narrowly (see above).
-      if (has_owner && op == Ntype_op::Mux && !owner_q.is_invalid() && !e.driver.is_invalid()
+      // The hold-mux exemption applies to data arms of either mux encoding.
+      const auto pid = e.sink.get_port_id();
+      const bool data_arm
+          = (op == Ntype_op::Mux && pid != 0) || (op == Ntype_op::Hotmux && !gu::is_hotmux_control(pid, control_end));
+      if (has_owner && data_arm && !owner_q.is_invalid() && !e.driver.is_invalid()
           && e.driver.get_class_index() == owner_q.get_class_index()) {
         continue;
       }
@@ -1584,7 +1588,11 @@ public:
     }
     auto       n  = d.get_master_node();
     const auto op = gu::type_op_of(n);
-    if (Ntype::is_loop_last(op) || op == Ntype_op::Sub || op == Ntype_op::Memory) {
+    // IO is listed explicitly: it is loop_FIRST, not loop_last, so the band test
+    // alone would clone a boundary node into the parent graph. Every reachable
+    // IO driver pin is caught by the is_graph_input_pin arm above; this keeps
+    // the refusal total for any that is not.
+    if (Ntype::is_loop_last(op) || op == Ntype_op::IO) {
       failed_ = true;  // state or hierarchy in the enable cone: not a plain function of the ports
       return {};
     }

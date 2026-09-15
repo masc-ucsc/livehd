@@ -305,6 +305,48 @@ Cgen_llvm::Value Cgen_llvm::sign_extend_from(Value value, uint32_t sign_bit, uin
   return impl_->remember(operand, result_width, result_unsign);
 }
 
+Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t len, uint32_t result_width, bool result_unsign) {
+  auto& builder = impl_->builder;
+  if (len == 0 || len > 64 || result_width == 0 || source.width == 0) {
+    return {};
+  }
+  auto* raw_count = impl_->get(count);
+  if (raw_count == nullptr) {
+    return {};
+  }
+  const size_t nwords = word_count(source.width);
+  llvm::Value* base   = nullptr;
+  size_t       offset = 0;
+  if (impl_->inputs != nullptr && source.id < impl_->input_types.size() && impl_->input_types[source.id].first == source.width) {
+    base   = impl_->inputs;  // a kernel input: its packed words are already in the input buffer
+    offset = impl_->input_word_offsets[source.id];
+  } else {
+    auto* value = impl_->get(source);
+    if (value == nullptr) {
+      return {};
+    }
+    base = impl_->packed_alloca(cast_integer(builder, value, source.width, source.unsign), source.width, "extract.words");
+  }
+  auto* i64       = builder.getInt64Ty();
+  auto* n64       = cast_integer(builder, raw_count, 64, true);
+  auto* word      = builder.CreateLShr(n64, llvm::ConstantInt::get(i64, 6), "extract.word");
+  auto* shift     = builder.CreateAnd(n64, llvm::ConstantInt::get(i64, 63), "extract.shift");
+  auto* limit     = llvm::ConstantInt::get(i64, nwords);
+  auto  load_word = [&](llvm::Value* index) -> llvm::Value* {
+    auto* in_range = builder.CreateICmpULT(index, limit);
+    auto* clamped  = builder.CreateSelect(in_range, index, llvm::ConstantInt::get(i64, nwords - 1));
+    auto* ptr      = builder.CreateInBoundsGEP(i64, base, builder.CreateAdd(clamped, llvm::ConstantInt::get(i64, offset)));
+    auto* loaded   = builder.CreateLoad(i64, ptr, "extract.load");
+    return builder.CreateSelect(in_range, loaded, llvm::ConstantInt::get(i64, 0));
+  };
+  auto* low  = load_word(word);
+  auto* high = load_word(builder.CreateAdd(word, llvm::ConstantInt::get(i64, 1)));
+  auto* fshr = llvm::Intrinsic::getOrInsertDeclaration(impl_->module.get(), llvm::Intrinsic::fshr, {i64});
+  auto* lane = builder.CreateCall(fshr, {high, low, shift}, "extract.lane");
+  auto* bits = cast_integer(builder, lane, len, true);
+  return impl_->remember(cast_integer(builder, bits, result_width, true), result_width, result_unsign);
+}
+
 Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t result_width, bool result_unsign) {
   auto* left  = impl_->get(lhs);
   auto* right = impl_->get(rhs);

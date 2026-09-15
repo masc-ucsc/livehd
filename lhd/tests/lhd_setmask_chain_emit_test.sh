@@ -23,7 +23,7 @@ fail() {
 COPIES=$(grep -Ec '=[[:space:]]*set_mask_[[:alnum:]_]*[[:space:]]*;' "$W/out.v" || true)
 [ "$COPIES" -le 1 ] || fail "emitted $COPIES full-width Set_mask copies: $(cat "$W/out.v")"
 
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/out.v" --ref pyrope:"$FIX" --top "$TOP" \
+"$LHD" lec --impl verilog:"$W/out.v" --ref pyrope:"$FIX" --top "$TOP" \
   --workdir "$W/lec" -q || fail "collapsed Set_mask chain is not equivalent"
 
 echo "PASS: single-use Set_mask chain shares one wide accumulator"
@@ -43,7 +43,7 @@ if [ "$MASKS" -gt 0 ] && [ "$MASKS" -lt 2 ]; then
   fail "instance-split Set_mask chain incorrectly shares one procedural accumulator: $(cat "$W/cycle.v")"
 fi
 
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/cycle.v" --ref verilog:"$CYCLE_FIX" --top "$CYCLE" \
+"$LHD" lec --impl verilog:"$W/cycle.v" --ref verilog:"$CYCLE_FIX" --top "$CYCLE" \
   --workdir "$W/cycle_lec" -q || fail "instance-split Set_mask chain is not equivalent"
 
 echo "PASS: instance-split Set_mask chain keeps distinct procedural carriers"

@@ -131,10 +131,9 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
 
 // Load one --impl/--ref side into `var.graphs` WITHOUT cgen. lg: libraries load
 // directly; pyrope:/ln: parse/load then lower (upass + tolg + recipe) to
-// graphs; verilog: elaborates through --reader — slang (the default: direct
-// SV -> LNAST, the pyrope flow) or yosys-slang/yosys-verilog (yosys ->
-// LGraphs). The in-process lec engine consumes the graphs directly; the
-// lgyosys backend re-emits them through cgen (materialize_verilog).
+// graphs; verilog: always elaborates through native Slang (SV -> LNAST).
+// A Yosys debug comparison must compile each source to lg: explicitly first. The in-process lec engine consumes the graphs
+// directly; the lgyosys backend re-emits them through cgen (materialize_verilog).
 void load_side_graphs(Options& opts, Result& res, const std::string& kind, const std::string& path, std::string_view side,
                       Eprp_var& var) {
   res.inputs.push_back(path);
@@ -160,106 +159,89 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       }
     }
   } else if (kind == "pyrope" || kind == "ln" || kind == "verilog") {
-    // Verilog through a yosys reader elaborates straight to LGraphs; every
-    // other path (pyrope, ln:, verilog via slang) yields LNAST that lowers
-    // through upass + tolg + the recipe.
-    const bool yosys_reader = kind == "verilog" && opts.reader != "slang";
-    auto       lib_path     = std::format("{}/lec_{}_lgdb", workdir(opts), side);
-    if (yosys_reader) {
-      check_inputs_exist({path});
-      // --top rides RAW to yosys: source module names may contain '.' via
-      // escaped identifiers (cgen emits `file.entity` that way).
-      Eprp_var::Eprp_dict labels{
-          {    "path",                                                                       lib_path},
-          {   "files",                                                                           path},
-          {     "top",                         opts.top.empty() ? std::string{"-auto-top"} : opts.top},
-          {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}},
-      };
-      run_step("inou.yosys.tolg", var, labels, opts, res);
-    } else {
-      if (kind == "pyrope") {
-        // A pyrope: input can be a single .prp OR an emit DIRECTORY holding one
-        // .prp per module (the slang->pyrope multi-module emission). inou.prp
-        // splits `files` on comma and loads each as its own LNAST; the runner
-        // then resolves the top's import() of its sibling modules. Enumerate the
-        // dir's *.prp so a multi-file library recompiles (a lone top file would
-        // fail import-no-progress with its callees absent).
-        std::string files = path;
-        if (fs::is_directory(path)) {
-          std::vector<std::string> prps;
-          for (const auto& de : fs::directory_iterator(path)) {
-            if (de.is_regular_file() && de.path().extension() == ".prp") {
-              prps.push_back(de.path().string());
-            }
+    auto lib_path = std::format("{}/lec_{}_lgdb", workdir(opts), side);
+    if (kind == "pyrope") {
+      // A pyrope: input can be a single .prp OR an emit DIRECTORY holding one
+      // .prp per module (the slang->pyrope multi-module emission). inou.prp
+      // splits `files` on comma and loads each as its own LNAST; the runner
+      // then resolves the top's import() of its sibling modules. Enumerate the
+      // dir's *.prp so a multi-file library recompiles (a lone top file would
+      // fail import-no-progress with its callees absent).
+      std::string files = path;
+      if (fs::is_directory(path)) {
+        std::vector<std::string> prps;
+        for (const auto& de : fs::directory_iterator(path)) {
+          if (de.is_regular_file() && de.path().extension() == ".prp") {
+            prps.push_back(de.path().string());
           }
-          if (prps.empty()) {
-            throw Lhd_error{"missing_file", std::format("pyrope: directory has no .prp files: {}", path), ""};
-          }
-          std::sort(prps.begin(), prps.end());
-          files.clear();
-          for (const auto& p : prps) {
-            files += (files.empty() ? "" : ",") + p;
-          }
-        } else {
-          check_inputs_exist({path});
         }
-        run_step("inou.prp",
-                 var,
-                 {
-                     {"files", files}
-        },
-                 opts,
-                 res);
-        // A Pyrope side resolves its own import() dependencies (sibling .prp in
-        // the importing file's directory, to a fixpoint) — no pre-compile to lg:
-        // is ever needed just to satisfy imports (Verilog still needs its own
-        // elaboration; this is the same discovery `lhd compile` runs).
-        {
-          std::vector<std::string> seeds;
-          for (size_t b = 0; b <= files.size();) {
-            auto e = files.find(',', b);
-            if (e == std::string::npos) {
-              e = files.size();
-            }
-            if (e > b) {
-              seeds.emplace_back(files.substr(b, e - b));
-            }
-            b = e + 1;
-          }
-          discover_imports(var, res, /*n_imports=*/0, seeds);
+        if (prps.empty()) {
+          throw Lhd_error{"missing_file", std::format("pyrope: directory has no .prp files: {}", path), ""};
         }
-      } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
+        std::sort(prps.begin(), prps.end());
+        files.clear();
+        for (const auto& p : prps) {
+          files += (files.empty() ? "" : ",") + p;
+        }
+      } else {
         check_inputs_exist({path});
-        run_step("inou.slang",
-                 var,
-                 {
-                     {"files", path}
-        },
-                 opts,
-                 res);
-      } else {  // ln:
-        if (!fs::is_directory(path)) {
-          throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
-        }
-        for (auto& ln : load_ln_dir(path)) {
-          var.add(ln);
-        }
       }
-      // Each side's selected top also controls ELABORATION: a generic entry
-      // needs its defaults instantiated before there is a graph to select.
-      // Scope that to lower_lnasts only -- pass.formal reads `opts.top` as the
-      // design's COMMITTED top boundary (is_top => an IO assume becomes an
-      // unchecked hypothesis, an assert must hold unconditionally), so letting a
-      // per-side `--ref-top`/`--impl-top` submodule reach the graph pipeline
-      // fails the run on contracts the real parent discharges.
-      auto        side_opts    = opts;
-      const auto& selected_top = side == "ref" ? opts.ref_top : opts.impl_top;
-      if (!selected_top.empty()) {
-        side_opts.top = selected_top;
+      run_step("inou.prp",
+               var,
+               {
+                   {"files", files}
+      },
+               opts,
+               res);
+      // A Pyrope side resolves its own import() dependencies (sibling .prp in
+      // the importing file's directory, to a fixpoint) — no pre-compile to lg:
+      // is ever needed just to satisfy imports (Verilog still needs its own
+      // elaboration; this is the same discovery `lhd compile` runs).
+      {
+        std::vector<std::string> seeds;
+        for (size_t b = 0; b <= files.size();) {
+          auto e = files.find(',', b);
+          if (e == std::string::npos) {
+            e = files.size();
+          }
+          if (e > b) {
+            seeds.emplace_back(files.substr(b, e - b));
+          }
+          b = e + 1;
+        }
+        discover_imports(var, res, /*n_imports=*/0, seeds);
       }
-      lower_lnasts(side_opts, res, var, lib_path, /*need_graphs=*/true);
-      graph_pipeline_and_emits(opts, res, var, lib_path);
+    } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
+      check_inputs_exist({path});
+      run_step("inou.slang",
+               var,
+               {
+                   {"files", path}
+      },
+               opts,
+               res);
+    } else {  // ln:
+      if (!fs::is_directory(path)) {
+        throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
+      }
+      for (auto& ln : load_ln_dir(path)) {
+        var.add(ln);
+      }
     }
+    // Each side's selected top also controls ELABORATION: a generic entry
+    // needs its defaults instantiated before there is a graph to select.
+    // Scope that to lower_lnasts only -- pass.formal reads `opts.top` as the
+    // design's COMMITTED top boundary (is_top => an IO assume becomes an
+    // unchecked hypothesis, an assert must hold unconditionally), so letting a
+    // per-side `--ref-top`/`--impl-top` submodule reach the graph pipeline
+    // fails the run on contracts the real parent discharges.
+    auto        side_opts    = opts;
+    const auto& selected_top = side == "ref" ? opts.ref_top : opts.impl_top;
+    if (!selected_top.empty()) {
+      side_opts.top = selected_top;
+    }
+    lower_lnasts(side_opts, res, var, lib_path, /*need_graphs=*/true);
+    graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     throw Lhd_error{"usage",
                     std::format("lec accepts verilog:, lg:, pyrope:, or ln: inputs, got {}:", kind),
@@ -352,7 +334,7 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
     um_pairs.push_back(mk + "=" + mv);
   }
   return std::format(
-      "{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};st={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={}",
+      "{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={}",
       dref.h0,
       dref.h1,
       dimpl.h0,
@@ -361,7 +343,6 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
       o.gold_x,
       o.bound,
       o.decompose,
-      o.strict ? 1 : 0,
       o.phase,
       o.reset_cycles,
       o.reset,
@@ -573,7 +554,7 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
 // resolves, so an agent stream-parses the long run. Returns the TOP def's result,
 // or — when a descendant REFUTED — that descendant's (see the fail-fast gate in
 // run_def and the aggregate below).
-// `cvc5_hot` (formal.stats, optional): filled with the top few (def, conflicts)
+// `cvc5_hot` (lhd.stats, optional): filled with the top few (def, conflicts)
 // pairs, hardest first — the per-def ranking the run-total report appends. The
 // summed Cvc5_stats itself rides the returned Query_result's `cvc5` member.
 static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var, Eprp_var& impl_var, const std::string& top_name,
@@ -676,7 +657,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
       }
     }
-    absl::flat_hash_set<std::string> seen, wrappers;
+    absl::flat_hash_set<std::string>  seen, wrappers;
     // A ROLLED loop's lifted body (`__loop<n>`, uPass `roll`) exists on THIS
     // side only, so it is never a shared child -- but the shared defs BELOW it
     // (`lane` under `u_loop_0`) must still be enumerated, or this parent is
@@ -1260,7 +1241,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::atomic<int>                             defs_floored{0};  // defs dispatched past the soft total, on the min_timeout floor
   std::atomic<int>                             defs_solved{0};   // defs actually handed to the solver (the "units" of the report)
   livehd::lec::Query_result                    top_result;
-  // formal.stats: the RUN total. Every def gets its own cvc5::Solver (several,
+  // lhd.stats: the RUN total. Every def gets its own cvc5::Solver (several,
   // under the portfolio), so no single Query_result holds the run's effort —
   // fold each def's accounting in as it resolves, under report_mutex.
   livehd::lec::Cvc5_stats                      run_cvc5;
@@ -1612,12 +1593,14 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       ckey = lec_pair_cache_key(dr, di, o);
       if (auto hit = vcache->lookup(ckey); hit.has_value()) {
         livehd::lec::Query_result cr;
-        cr.verdict       = Verdict::Proven;
-        cr.engine        = "cache";
-        cr.elapsed_ms    = 0;
-        cr.detail        = std::format("verdict cache hit (was {} in {}ms: {})", hit->engine, hit->elapsed_ms, hit->detail);
-        proven[def_ix]   = 1;
-        by_cache[def_ix] = 1;
+        cr.verdict            = Verdict::Proven;
+        cr.bounded            = hit->bounded;
+        bounded_proof[def_ix] = hit->bounded ? 1 : 0;
+        cr.engine             = "cache";
+        cr.elapsed_ms         = 0;
+        cr.detail             = std::format("verdict cache hit (was {} in {}ms: {})", hit->engine, hit->elapsed_ms, hit->detail);
+        proven[def_ix]        = 1;
+        by_cache[def_ix]      = 1;
         ++cache_count;
         std::lock_guard report_lock(report_mutex);
         emit_lec_block_progress(name, cr, o, 0);
@@ -1697,7 +1680,6 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if ((o.semdiff != "none" && kids_proven) || want_pairing) {
       auto                             t0 = std::chrono::steady_clock::now();
       livehd::semdiff::Semdiff_options so;
-      so.alg                        = o.semdiff == "none" ? "structural" : o.semdiff;
       so.matching_names             = true;  // anchor flops/mems by hier name (lec's correspondence basis)
       so.state_pairing              = want_pairing;
       so.seed_pairs                 = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
@@ -1743,7 +1725,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           }
         }
         if (vcache != nullptr && !ckey.empty()) {
-          vcache->insert(ckey, {sr.engine, sr.detail, ms});
+          vcache->insert(ckey, {sr.engine, sr.detail, ms, sr.bounded});
         }
         if (name == top_key) {
           top_result = sr;
@@ -1775,17 +1757,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         sr.verdict         = Verdict::Proven;
         sr.engine          = "semdiff";
         sr.elapsed_ms      = ms;
-        sr.detail          = std::format("structurally identical ({}: {} matched node(s), no solver call)", so.alg, m.a_matched);
+        sr.detail          = std::format("structurally identical (structural: {} matched node(s), no solver call)", m.a_matched);
         proven[def_ix]     = 1;
         by_semdiff[def_ix] = 1;
         ++semdiff_count;
         {
           std::lock_guard report_lock(report_mutex);
           emit_lec_block_progress(name, sr, o, ms);
-          std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
+          std::print("lec[hier]: '{}' MATCHED (semdiff structural, no solver)\n", name);
         }
         if (vcache != nullptr && !ckey.empty()) {
-          vcache->insert(ckey, {sr.engine, sr.detail, ms});  // a structural match is a definitive Proven
+          vcache->insert(ckey, {sr.engine, sr.detail, ms, sr.bounded});  // a structural match is a definitive Proven
         }
         if ((name == top_key)) {
           top_result = sr;
@@ -1990,7 +1972,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                     ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
                                     : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
       // The collapsed run really ran cvc5, so its effort is part of what this def
-      // cost: carry it into the survivor BEFORE the move discards `r` (formal.stats).
+      // cost: carry it into the survivor BEFORE the move discards `r` (lhd.stats).
       // A BOUNDED flat pass ("no CEX up to bound k") cannot by itself overrule
       // a collapsed REFUTE: it cannot tell "the collapsed counterexample was an
       // artifact of the boxes" (instance_state_anon: mispaired lanes, the
@@ -2005,7 +1987,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // most cycles a divergence can be delayed by flat). A REFUTE there is
       // real; a pass there is the spurious-box case and stands under the
       // ordinary bounded-proof policy; an Unknown stays inconclusive, keeping
-      // the collapsed witness (a hard fail under strict), and must NOT fall
+      // the collapsed witness (a hard failure), and must NOT fall
       // through to the collapsed int-blast retry below.
       auto deepen_if_bounded = [&](livehd::lec::Query_result& cand) -> bool {  // true = demoted to Unknown
         if (!(cand.verdict == Verdict::Proven && cand.bounded)) {
@@ -2019,7 +2001,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           // bound, same options), so the re-solve buys no coverage and can only
           // flake: an identical query that happens to exceed formal.timeout the
           // second time would demote a settled bounded PROVEN to INCONCLUSIVE,
-          // a hard fail under the default formal.strict=true.
+          // a hard failure.
           return false;
         }
         livehd::lec::Lec_options odeep = oflat;
@@ -2144,7 +2126,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     // A refute that turns on a TRUSTED box input is not a sound disproof (the
     // trusted leaf may ignore that input): degrade it to Unknown, keeping the
-    // witness for diagnosis. Under strict (and any witness-carrying Unknown) this
+    // witness for diagnosis. An UNKNOWN
     // is still a hard fail — just an honest "inconclusive at a trusted boundary",
     // not a false "not equivalent".
     if (r.verdict == Verdict::Refuted) {
@@ -2164,7 +2146,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       solve_spent_ms += r.solve_ms;
       defs_solved.fetch_add(1);
     }
-    // formal.stats run total. OUTSIDE the budget_on gate (accounting is on iff
+    // lhd.stats run total. OUTSIDE the budget_on gate (accounting is on iff
     // timeout>0 && rlimit==0, which has nothing to do with stats), and under
     // report_mutex: the taskflow executor runs run_def concurrently under
     // formal.jobs, so both the sum and the by-def vector would otherwise race.
@@ -2180,7 +2162,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       bounded_proof[def_ix] = r.bounded ? 1 : 0;
       if (vcache != nullptr) {
         if (!ckey.empty()) {
-          vcache->insert(ckey, {r.engine, r.detail, ms});  // definitive Proven only (rule F; v1 skips Refuted)
+          vcache->insert(ckey, {r.engine, r.detail, ms, r.bounded});  // definitive Proven only (rule F; v1 skips Refuted)
         }
         // Strategy hint keyed by entity NAME so it survives the design edit
         // that misses the digest-keyed verdict cache.
@@ -2641,7 +2623,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   if (any_unsupported.load()) {
     top_result.unsupported = true;
   }
-  // formal.stats: the run total, ASSIGNED not accumulated — top_result is a copy
+  // lhd.stats: the run total, ASSIGNED not accumulated — top_result is a copy
   // of some def's Query_result (the top's, or a refuted descendant's), so its
   // `cvc5` already counts that def and a += would double it.
   if (base.stats) {
@@ -4158,10 +4140,8 @@ void lec_command(Options& opts, Result& res) {
                     "sides: verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path"};
   }
 
-  // The solver selects the backend: cvc5 (default) / bitwuzla discharge
-  // in-process (pass/lec, no yosys); lgyosys shells out to inou/yosys/lgcheck
-  // (the former `lhd check`) — the only backend that reads Verilog without a
-  // front-end reader and the path for gate-level / yosys-origin netlists.
+  // lgyosys is a debug comparison request: native Slang/default LEC always
+  // runs first, followed by the independent lgcheck oracle.
   Eprp_var::Eprp_dict labels;
   merge_sets(opts, "formal", labels);      // the shared formal.* vocabulary
   merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
@@ -4169,19 +4149,14 @@ void lec_command(Options& opts, Result& res) {
     auto it = labels.find(std::string{k});
     return it == labels.end() ? std::string{def} : it->second;
   };
-  const std::string solver = label("solver", "cvc5");
-  if (solver != "cvc5" && solver != "bitwuzla" && solver != "lgyosys") {
+  const std::string requested_solver = label("solver", "cvc5");
+  if (requested_solver != "cvc5" && requested_solver != "bitwuzla" && requested_solver != "lgyosys") {
     throw Lhd_error{"usage",
-                    std::format("--set formal.solver expects cvc5|bitwuzla|lgyosys, got '{}'", solver),
-                    "cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | lgyosys (yosys/lgcheck)"};
+                    std::format("--set formal.solver expects cvc5|bitwuzla|lgyosys, got '{}'", requested_solver),
+                    "cvc5 (default) | bitwuzla | lgyosys (default native LEC plus lgcheck comparison)"};
   }
-  if (solver == "lgyosys") {
-    if (!opts.files.empty() || !opts.formal_filter.empty()) {
-      throw Lhd_error{"unsupported", "formal-block LEC helpers require the cvc5 backend", "use --set formal.solver=cvc5"};
-    }
-    lec_lgyosys(opts, res);
-    return;
-  }
+  const bool        yosys_comparison = requested_solver == "lgyosys";
+  const std::string solver           = yosys_comparison ? "cvc5" : requested_solver;
 
   // Formal BLOCKS are a `lhd formal verify` construct, not a lec one: a block
   // is an independent test, while lec has a single
@@ -4234,7 +4209,7 @@ void lec_command(Options& opts, Result& res) {
   auto ref_g  = pick_top_graph(ref_var, opts.ref_top, opts.top, "ref", "lec", "pass.lec");
   auto impl_g = pick_top_graph(impl_var, opts.impl_top, opts.top, "impl", "lec", "pass.lec");
 
-  bool cross = label("cross", "false") != "false" && label("cross", "false") != "0";
+  const bool cross = yosys_comparison || (label("cross", "false") != "false" && label("cross", "false") != "0");
 
   // Discharge in-process via pass/lec (L1). The engine is the authority on the
   // non-cross path; in cross mode we additionally run lgcheck and assert
@@ -4290,19 +4265,7 @@ void lec_command(Options& opts, Result& res) {
   o.phase_sched = label("phase_sched", "true") != "false" && label("phase_sched", "true") != "0";
   o.box_seq     = label("box_model", "seq") != "uf";
   o.int_blast   = label("int_blast", "auto");
-  o.strict      = label("strict", "true") != "false" && label("strict", "true") != "0";
-  if (!o.strict) {
-    // ALWAYS warn: with strict off, an INCONCLUSIVE run exits 0 and reads as a
-    // pass to anything checking the exit code -- including a run that proved
-    // nothing at all. It is a legitimate "quick check" mode, but it must never
-    // be silent, because the failure it hides looks exactly like success.
-    livehd::diag::warn("pass.lec", "strict-off", "unsupported")
-        .msg("formal.strict=false: an INCONCLUSIVE verdict will exit 0 and be indistinguishable from a real proof")
-        .hint(
-            "this is a QUICK-CHECK mode, not an equivalence gate -- a run that decided nothing also passes. Leave "
-            "formal.strict=true (the default) for anything that gates a commit")
-        .emit();
-  }
+
   o.allow_oversize      = label("allow_oversize", "false") != "false" && label("allow_oversize", "false") != "0";
   o.semdiff             = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
   o.state_pairing       = label("state_pairing", "true") != "false" && label("state_pairing", "true") != "0";
@@ -4324,14 +4287,8 @@ void lec_command(Options& opts, Result& res) {
   o.phase               = label("phase", "after_reset");
   o.reset_cycles        = std::atoi(label("reset_cycles", "2").c_str());
   o.reset               = label("reset", "");
-  // formal.stats: cvc5 solve-insight report. `--stats` is CLI sugar for the same
-  // knob, so OR the two (the semdiff pattern) — a bare --stats must not be erased
-  // by the registry default, and an explicit --set formal.stats=true must survive
-  // without the flag.
-  {
-    const std::string stats_label = label("stats", "false");
-    o.stats                       = opts.stats || (stats_label != "false" && stats_label != "0");
-  }
+  // Statistics are selected once by --stats / lhd.stats.
+  o.stats               = opts.stats;
 
   // formal.lec.match: explicit register correspondence, inline or @FILE.
   if (std::string match_spec = label("match", ""); !match_spec.empty()) {
@@ -4585,7 +4542,7 @@ void lec_command(Options& opts, Result& res) {
           // carrier has no standalone width stamp.  The normal cprop entry
           // assertion is specifically a tolg/upass contract, so skip that
           // assertion here while retaining every value-preserving fold.
-          cprop.do_trans(sp, /*check_input_sized=*/false);
+          cprop.do_trans(sp);
         }
       };
       simplify_after_inline(ref_var.graphs);
@@ -4771,6 +4728,17 @@ void lec_command(Options& opts, Result& res) {
     }
   }
 
+  // A mixed-edge marker has already lost per-port polarity in the IR.
+  // Even structural identity or a cache hit cannot establish its behavior.
+  // Apply the encoder's refusal before either shortcut can bypass it.
+  for (auto* side : {ref_g.get(), impl_g.get()}) {
+    for (auto node : side->grouped_hierarchy().nodes()) {
+      if (auto error = livehd::lec::mixed_memory_edge_error(node, o.ignore_memory); !error.empty()) {
+        throw Lhd_error{"unsupported", "lec cannot model a mixed-edge memory", error};
+      }
+    }
+  }
+
   // Phase 1/3 of the lec-on-failure flow (detect -> testbench -> waveform):
   // announce the (possibly long, quiet) SMT detection up front so a slow solve is
   // legible instead of looking like a hang.
@@ -4808,7 +4776,7 @@ void lec_command(Options& opts, Result& res) {
   }
 
   livehd::lec::Query_result                    r;
-  // formal.stats: per-def (name, conflicts) ranking, filled by the hierarchical
+  // lhd.stats: per-def (name, conflicts) ranking, filled by the hierarchical
   // driver only (the flat path is one def, so the totals already say it all).
   std::vector<std::pair<std::string, int64_t>> cvc5_hot;
   if (label("hier", "true") != "false" && label("hier", "true") != "0") {
@@ -5018,6 +4986,7 @@ void lec_command(Options& opts, Result& res) {
         flat_ckey      = lec_pair_cache_key(dref_flat, dimpl_flat, o);
         if (auto hit = vcache->lookup(flat_ckey); hit.has_value()) {
           r.verdict    = livehd::lec::Verdict::Proven;
+          r.bounded    = hit->bounded;
           r.engine     = "cache";
           r.detail     = hit->detail.empty() ? "verdict cache hit" : hit->detail;
           r.elapsed_ms = 0;
@@ -5055,7 +5024,7 @@ void lec_command(Options& opts, Result& res) {
         // REFUTE whose witness may need up to the flush depth more cycles to
         // reach an output flat -- but with no flush depth the "deepened" options
         // are byte-identical to the run that just finished, so the re-solve buys
-        // nothing and can only flake a settled bounded PROVEN into a strict hard
+        // nothing and can only flake a settled bounded PROVEN into a hard
         // failure. reset_hold is 0 for every phase but after_reset.
         const int flush = std::max(rf.reset_hold, r.reset_hold);
         if (rf.verdict == livehd::lec::Verdict::Proven && rf.bounded && flush > 0) {
@@ -5091,7 +5060,7 @@ void lec_command(Options& opts, Result& res) {
         rf.detail      = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                          + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms  = -1;          // the progress record carries the combined wall-clock below
-        rf.cvc5       += r.cvc5;      // the collapsed run's cvc5 effort was still spent (formal.stats)
+        rf.cvc5       += r.cvc5;      // the collapsed run's cvc5 effort was still spent (lhd.stats)
         rf.solve_ms   += r.solve_ms;  // and so was its solve time
         r              = std::move(rf);
       }
@@ -5125,7 +5094,7 @@ void lec_command(Options& opts, Result& res) {
     if (!settled_by_cache && vcache != nullptr) {
       if (r.verdict == livehd::lec::Verdict::Proven) {
         if (flat_cacheable && !flat_ckey.empty()) {
-          vcache->insert(flat_ckey, {r.engine, r.detail, ms});  // definitive Proven only (rule F)
+          vcache->insert(flat_ckey, {r.engine, r.detail, ms, r.bounded});  // definitive Proven only (rule F)
         }
         vcache->set_hint(std::string{impl_g->get_name()}, {r.engine, r.split_used, ms});
         lec_store_pair_hint(vcache.get(), lec_entity_of(impl_g->get_name()), r.uncertain_pairs_used);
@@ -5154,12 +5123,12 @@ void lec_command(Options& opts, Result& res) {
     emit_lec_block_progress(impl_g->get_name(), r, o, ms);
   }
 
-  // formal.stats: the cvc5 solve-insight report, one run total. Both paths funnel
+  // lhd.stats: the cvc5 solve-insight report, one run total. Both paths funnel
   // into `r` — the hierarchical driver already summed every def into r.cvc5 (and
   // filled cvc5_hot); the flat path carries its single solver's numbers.
   //
   // BEFORE every throwing arm below (pass_lec.cpp:293 does the same for the same
-  // reason): the oversize refusal, the encoder refusal and the strict-unknown
+  // reason): the oversize refusal, the encoder refusal and the unknown
   // failure all exit the process, and a report printed after them is lost in
   // exactly the runs where knowing how hard the solver worked matters most —
   // after the user already paid the ~8x plugin cost for it.
@@ -5168,7 +5137,7 @@ void lec_command(Options& opts, Result& res) {
   }
 
   // Design-size refusal is a hard admission failure (like pass.abc), not a
-  // solver-inconclusive UNKNOWN: exit non-zero regardless of formal.strict, naming
+  // solver-inconclusive UNKNOWN: exit non-zero unconditionally, naming
   // the override. (`lhd pass lec` already fatals on any UNKNOWN; this makes the
   // `lhd lec` CLI path consistent for the size case specifically.)
   if (r.oversize_refused) {
@@ -5180,17 +5149,15 @@ void lec_command(Options& opts, Result& res) {
   // VERDICT TAXONOMY:
   //
   //   REFUTED   BMC found a counterexample                       -> exit 10
-  //   UNKNOWN   the solver TIMED OUT / gave up, decided nothing  -> formal.strict
+  //   UNKNOWN   the solver TIMED OUT / gave up, decided nothing  -> exit 7
   //   PASS      proved INDUCTIVELY: holds for all cycles          -> exit 0
   //   PASS(n)   BMC ran to completion, no counterexample, and is
   //             EXHAUSTIVE OVER INPUTS for n cycles from reset    -> exit 0
   //
   // PASS(n) is a real pass, not an "undecided": it decided something definitive
   // and complete, just to a depth. Reporting it as UNKNOWN conflated it with a
-  // solver give-up, which is the distinction `formal.strict` is meant to act on
-  // -- strict is about TIMEOUTS, not about proof depth. The depth is carried in
-  // the verdict word so a reader can see exactly what was established; a pair
-  // that first diverges at cycle 40 reports PASS(6) and is honest about it.
+  // solver give-up. The depth is carried in the verdict and persisted in the
+  // cache so a warm run cannot promote a bounded result to an unbounded proof.
 
   // A PROVEN verdict obtained with a non-empty trust list is CONDITIONAL on those
   // assumptions — disclose it on the verdict line and in the machine-readable
@@ -5227,7 +5194,7 @@ void lec_command(Options& opts, Result& res) {
   // is the conflation the verdict-discipline contract exists to prevent.
   //
   // So it gets its own headline. The EXIT CLASS is still the inconclusive one
-  // (formal.strict decides, and it is never the exit-10 "here is a
+  // (it is never the exit-10 "here is a
   // counterexample"), because a k-cycle result must not gate a commit as though
   // it were equivalence -- measured, a pair diverging at cycle 40 is exhaustively
   // equal for the first 39.
@@ -5284,7 +5251,7 @@ void lec_command(Options& opts, Result& res) {
     }
   }
 
-  if (!cross) {
+  auto require_native_verdict = [&]() {
     if (r.verdict == livehd::lec::Verdict::Refuted) {
       throw Lhd_error{"equiv_fail",
                       std::format("'{}' is not equivalent ({} vs {})", impl_g->get_name(), opts.impl_path, opts.ref_path),
@@ -5294,7 +5261,7 @@ void lec_command(Options& opts, Result& res) {
     // on both sides, so not one compare point was checked. This used to surface
     // as PROVEN (exit 0, zero warnings) or as the tolerated inconclusive warning
     // — either way a gate reading the exit code read "verified" for a run that
-    // verified nothing. Hard-fail regardless of formal.strict, like the encoder
+    // verified nothing. Hard-fail unconditionally, like the encoder
     // refusal below. Checked ahead of the verdict split on purpose: the flag, not
     // the verdict, is what says nothing was compared.
     if (r.nothing_compared) {
@@ -5310,17 +5277,11 @@ void lec_command(Options& opts, Result& res) {
       // UNKNOWN is the solver giving up: it found NO counterexample but could not
       // complete the proof. It is STILL a hard failure, because it PROVED NOTHING and
       // an exit-0 inconclusive is indistinguishable from a real proof to any gate
-      // built on this run. `formal.strict` defaults TRUE and is the
-      // opt-out: setting it false downgrades this to the loud warning below. A
-      // non-empty witness fails regardless of the knob — the miter surfaced an actual
-      // diff (an incomplete-correspondence partial miter, or an `auto` run whose ind
-      // refuted while bmc could not clear it), which is a potential discrepancy, not
-      // mere ignorance. The exit CLASS still distinguishes the two: an undecided run
-      // exits `unsupported` (7), a disproof exits `equiv_fail` (10) — UNKNOWN must
-      // never be conflated with REFUTED even though both now fail.
+      // built on this run. UNKNOWN exits unsupported (7), while a disproof
+      // exits equiv_fail (10); the two outcomes remain distinct.
       // An encoder REFUSAL (a cell the encoder does not model) is NOT the solver
       // giving up: nothing was compared, so the miter decided nothing and no
-      // extra budget can change it. Hard-fail regardless of `formal.strict`, or
+      // extra budget can change it. Hard-fail unconditionally, or
       // the exit-0 "inconclusive" reads as a PASS and every gate built on this
       // run is vacuous (2f-latch M0).
       if (r.unsupported) {
@@ -5330,29 +5291,18 @@ void lec_command(Options& opts, Result& res) {
                                     "nothing. Raising formal.timeout cannot help.",
                                     r.detail)};
       }
-      if (o.strict || !r.witness.empty()) {
-        throw Lhd_error{"unsupported",
-                        std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
-                        std::format("{}{}. This is NOT a disproof either — the solver ran out of budget or hit "
-                                    "something it cannot complete. Raise formal.timeout/formal.bound, or pass "
-                                    "--set formal.strict=false to accept an undecided run as a warning.",
-                                    r.detail,
-                                    r.witness.empty() ? std::string{} : std::format("; witness: {}", r.witness))};
-      }
-      // Only reachable when the caller explicitly opted OUT of strict: the default is
-      // strict=true, so an undecided run fails above rather than exiting 0 (an
-      // inconclusive that exits 0 is indistinguishable from a real proof to any gate
-      // built on this run).
-      livehd::diag::warn("pass.lec", "inconclusive", "io")
-          .msg(
-              "lec INCONCLUSIVE: '{}' — the solver could not complete the proof and found NO counterexample ({}). "
-              "This is NOT a proof of equivalence; it is only a warning because this run set formal.strict=false.",
-              impl_g->get_name(),
-              r.detail)
-          .emit();
-      return;  // clean exit: inconclusive (warning), not a hard error
+      throw Lhd_error{
+          "unsupported",
+          std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
+          std::format(
+              "{}{}. This is NOT a disproof either. Raise formal.timeout/formal.bound or fix the unsupported proof obligation.",
+              r.detail,
+              r.witness.empty() ? std::string{} : std::format("; witness: {}", r.witness))};
     }
-    return;  // Proven
+  };
+  if (!cross) {
+    require_native_verdict();
+    return;
   }
 
   auto impl_v = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
@@ -5372,7 +5322,7 @@ void lec_command(Options& opts, Result& res) {
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
   auto rundir  = fs::absolute(workdir(opts)).string();
-  auto cmd     = std::format("cd {} && {} --implementation {} --reference {}",
+  auto cmd     = std::format("cd {} && {} --implementation {} --reference {} --gold_reader slang --gate_reader slang",
                              shell_quote(rundir),
                              shell_quote(lgcheck),
                              shell_quote(impl_v),
@@ -5383,26 +5333,49 @@ void lec_command(Options& opts, Result& res) {
   if (!opts.top.empty()) {
     cmd += std::format(" --top {}", shell_quote(opts.top));
   }
-  auto log       = next_log_path(opts, "lec.lgcheck");
-  cmd           += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
-  int  rc        = std::system(cmd.c_str());
-  bool lg_equiv  = rc == 0;
+  if (!opts.impl_top.empty()) {
+    cmd += std::format(" --implementation_top {}", shell_quote(opts.impl_top));
+  }
+  if (!opts.ref_top.empty()) {
+    cmd += std::format(" --reference_top {}", shell_quote(opts.ref_top));
+  }
+  if (setting_enabled(label("normalize_split_ports", "false"))) {
+    cmd += " --normalize_split_ports";
+  }
+  if (setting_enabled(label("descend_on_inconclusive", "false"))) {
+    cmd += " --descend_on_inconclusive";
+  }
+  res.recipe_steps.emplace_back("pass.lec cross-check:lgcheck");
+  auto log               = next_log_path(opts, "lec.lgcheck");
+  cmd                   += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
+  const int  status      = std::system(cmd.c_str());
+  const int  code        = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  const bool lg_known    = code == 0 || code == 1;
+  const bool lg_equiv    = code == 0;
+  const auto lg_verdict  = lg_known ? (lg_equiv ? "equivalent" : "different") : "unknown";
 
   std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n",
              o.engine,
              lec_known ? (lec_equiv ? "equivalent" : "different") : "unknown",
-             lg_equiv ? "equivalent" : "different");
+             lg_verdict);
 
-  if (lec_known && lec_equiv != lg_equiv) {
-    throw Lhd_error{"internal",
-                    std::format("lec engine and lgcheck DISAGREE (engine={}, lgcheck={})",
-                                lec_equiv ? "equivalent" : "different",
-                                lg_equiv ? "equivalent" : "different"),
-                    std::format("see {}", log)};
+  // Cross-checking supplies an additional oracle, never a replacement for a
+  // missing native proof. UNKNOWN and setup failures are not counterexamples.
+  if (!lec_known || r.nothing_compared) {
+    require_native_verdict();
   }
-  if (!lg_equiv) {
-    throw Lhd_error{"equiv_fail", std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path), ""};
+  if (!lg_known) {
+    throw Lhd_error{code == 2 ? "unsupported" : "dependency",
+                    code == 2 ? "lgcheck cross-check did not decide equivalence" : "lgcheck cross-check failed to run",
+                    std::format("lgcheck exit status {}; see {}. This is not a disproof.", code, log)};
   }
+  if (lec_equiv != lg_equiv) {
+    throw Lhd_error{
+        "internal",
+        std::format("lec engine and lgcheck DISAGREE (engine={}, lgcheck={})", lec_equiv ? "equivalent" : "different", lg_verdict),
+        std::format("see {}", log)};
+  }
+  require_native_verdict();
 }
 
 // simfail_<formal-test>.prp: on a REFUTED obligation with --workdir, write a
@@ -5943,7 +5916,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
       r.budget_spent_ms,
       r.budget_units,
       r.budget_floored);
-  // formal.stats only: the cvc5 solve-insight object. Carries its OWN trailing
+  // lhd.stats only: the cvc5 solve-insight object. Carries its OWN trailing
   // comma — assume_counts below is the last member of "run" and deliberately has
   // none, so this must be inserted before it, never after.
   if (o.stats) {
@@ -6113,7 +6086,7 @@ static void emit_mined_block(const std::string& path, const std::string& design_
 // checkSatAssuming with frontier assumes, a per-assert/per-cycle verdict table,
 // and per-obligation timeout isolation. Exit policy mirrors lec: only a
 // REACHABLE violation hard-fails; bounded-proven passes; unknown is a loud
-// warning unless formal.strict. Knobs: formal.* (shared engine), formal.lec.*
+// failure if undecided. Knobs: formal.* (shared engine), formal.lec.*
 // (lec-only), formal.verify.* (verify-only), with lec.* accepted as aliases.
 void formal_verify_command(Options& opts, Result& res) {
   // Captured before any workdir() call fabricates a scratch dir: the simfail
@@ -6276,11 +6249,13 @@ void formal_verify_command(Options& opts, Result& res) {
     // requested bound. The local pass still emits the required top-IO warning.
     const size_t saved_sets = opts.sets.size();
     opts.sets.emplace_back("compile.formal.warn_vacuous", "false");
-    opts.sets.emplace_back("compile.formal.hier_preflight", "false");
+    const bool saved_preflight    = opts.compile_formal_preflight;
+    opts.compile_formal_preflight = false;
     if (label("assume_check", "true") == "false" || label("assume_check", "true") == "0") {
       opts.sets.emplace_back("compile.formal.assume_check", "false");
     }
     load_side_graphs(opts, res, kind, path, "impl", var);
+    opts.compile_formal_preflight = saved_preflight;
     opts.sets.resize(saved_sets);
   }
 
@@ -6316,7 +6291,6 @@ void formal_verify_command(Options& opts, Result& res) {
   o.phase               = label("phase", "after_reset");
   o.reset_cycles        = std::atoi(label("reset_cycles", "2").c_str());
   o.reset               = label("reset", "");
-  o.strict              = label("strict", "true") != "false" && label("strict", "true") != "0";
   o.allow_oversize      = label("allow_oversize", "false") != "false" && label("allow_oversize", "false") != "0";
   o.partitions          = std::atoi(label("partitions", "4").c_str());
   o.jobs                = std::max(1, std::atoi(label("jobs", "4").c_str()));
@@ -6334,12 +6308,8 @@ void formal_verify_command(Options& opts, Result& res) {
   o.hard_timeout_mult   = std::atoi(label("hard_timeout_mult", "3").c_str());
   o.spec_mining_timeout = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.mine                = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
-  // formal.stats: cvc5 solve-insight report; `--stats` is CLI sugar for the same
-  // knob, so OR the two rather than letting either spelling clobber the other.
-  {
-    const std::string stats_label = label("stats", "false");
-    o.stats                       = opts.stats || (stats_label != "false" && stats_label != "0");
-  }
+  // Statistics are selected once by --stats / lhd.stats.
+  o.stats               = opts.stats;
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && opts.incremental) {
@@ -7280,7 +7250,7 @@ void formal_verify_command(Options& opts, Result& res) {
     vacuity_note();
   }
 
-  // formal.stats: the cvc5 solve-insight report for the whole verify run (one
+  // lhd.stats: the cvc5 solve-insight report for the whole verify run (one
   // solver per strategy, every obligation), printed under the obligation table.
   if (o.stats) {
     livehd::lec::report_cvc5_stats("formal", r.cvc5);
@@ -7398,15 +7368,9 @@ void formal_verify_command(Options& opts, Result& res) {
   // R1 Phase 2 — ANTECEDENT vacuity. Independent of the run verdict (the usual
   // case is a PROVEN run), so this sits ahead of the verdict ladder below.
   //
-  // Severity ruling: WARNING by default, failure under `formal.strict`. It is
-  // deliberately NOT the hard error a contradictory assume set gets: that one
-  // makes every proof it governed unsound to rely on, whereas a vacuous
-  // antecedent leaves the obligation genuinely true — it just proved nothing.
-  // And a guard unreachable at THIS top can be perfectly reachable under a
-  // different parent instantiation, which is a legitimate design pattern; a
-  // hard error would punish it. `formal.strict` is the existing "treat a
-  // proves-nothing outcome as a failure" knob, so it is the right lever.
-  std::string strict_vacuous;  // set below; thrown only after the verdict ladder
+  // A vacuous assert or internal assume checks no reachable behavior and
+  // fails the run. Report all obligations before returning that failure.
+  std::string vacuous_failure;  // set below; thrown only after the verdict ladder
   {
     std::string vac_list;
     int         n_vac = 0;
@@ -7415,7 +7379,7 @@ void formal_verify_command(Options& opts, Result& res) {
         continue;
       }
       // A non-internal assume whose guard is dead constrains nothing — worth
-      // the row and the warning, but it must NOT gate `formal.strict`: the
+      // the row and the warning, but it must NOT fail the run: the
       // compile tier does not count assumes in its vacuity accounting, and the
       // two tiers must agree on whether the same source is clean (an
       // input-class assume is checked as an obligation now, but its dead-guard
@@ -7429,19 +7393,18 @@ void formal_verify_command(Options& opts, Result& res) {
     }
     if (n_vac > 0) {
       // The WARNING is emitted here so it is visible even on a run that goes on
-      // to fail for a worse reason. The strict FAILURE is deferred to after the
+      // to fail for a worse reason. The failure is deferred to after the
       // verdict ladder below: throwing here pre-empted every more severe exit
       // class, so a design with BOTH a reachable violation and a dead branch
       // exited "unsupported: 1 VACUOUS obligation(s)" and the equiv_fail plus
       // its counterexample trace were never printed. Same masking applied to an
       // encoder refusal and to a contradictory assume set.
-      strict_vacuous = std::format("formal verify: {} VACUOUS obligation(s) in '{}' — {}", n_vac, g->get_name(), vac_list);
+      vacuous_failure = std::format("formal verify: {} VACUOUS obligation(s) in '{}' — {}", n_vac, g->get_name(), vac_list);
       livehd::diag::warn("pass.formal", "formal-vacuous-guard", "io")
           .msg(
               "formal verify: {} obligation(s) proved VACUOUSLY in '{}' ({}) — the `if`/`match` guard can never be "
               "true, so the property is never exercised and its PROVEN means nothing. Fix the guard condition or drop "
-              "the dead branch; under the default formal.strict=true this also FAILS the run (pass --set "
-              "formal.strict=false to keep it a warning).",
+              "the dead branch; a vacuous obligation fails the run.",
               n_vac,
               g->get_name(),
               vac_list)
@@ -7468,7 +7431,7 @@ void formal_verify_command(Options& opts, Result& res) {
   if (r.verdict == livehd::lec::Verdict::Unknown) {
     // An encoder REFUSAL is not a solver give-up: no obligation was ever
     // encoded, so the run proved nothing and a bigger budget cannot change
-    // that. It must be a hard error regardless of `formal.strict` — an exit-0
+    // that. It must be a hard error unconditionally — an exit-0
     // warning here reads downstream as "verified" and makes every gate built on
     // this run vacuous (2f-latch M0). The report is already written above, so
     // the agent-loop artifact still exists on this path.
@@ -7482,7 +7445,7 @@ void formal_verify_command(Options& opts, Result& res) {
     // A CONTRADICTORY assume set is not a solver give-up either: every proof it
     // governed was vacuous, so the run proved nothing, and it is the USER's
     // input that is wrong — a bigger budget cannot help. Hard error regardless
-    // of `formal.strict`, for the same reason an encoder refusal is: an exit-0
+    // unconditionally, for the same reason an encoder refusal is: an exit-0
     // warning here reads downstream as "verified", and it silently turns a
     // genuinely REFUTED design green (the assumes prune the counterexample away).
     if (r.vacuous) {
@@ -7496,31 +7459,18 @@ void formal_verify_command(Options& opts, Result& res) {
                       "no obligation was really discharged: an unsatisfiable assume set proves anything. Fix the "
                       "conflicting assumes (each block is scoped independently, so only the named one needs it)"};
     }
-    if (o.strict) {
-      throw Lhd_error{"unsupported",
-                      std::format("formal verify could not decide '{}'", g->get_name()),
-                      std::format("{}. This is NOT a disproof either — the solver ran out of budget or hit something it "
-                                  "cannot complete. Raise formal.timeout/formal.bound, or pass --set formal.strict=false "
-                                  "to accept an undecided run as a warning.",
-                                  r.detail)};
-    }
-    // Only reachable when the caller explicitly opted OUT of strict: the default is
-    // strict=true, so an undecided run fails above rather than exiting 0 (an
-    // inconclusive that exits 0 is indistinguishable from a real proof to any gate
-    // built on this run).
-    livehd::diag::warn("pass.formal", "formal-inconclusive", "io")
-        .msg(
-            "formal verify INCONCLUSIVE: '{}' — {}. This proves nothing and disproves nothing; it is only a warning "
-            "because this run set formal.strict=false.",
-            g->get_name(),
-            r.detail)
-        .emit();
+    throw Lhd_error{
+        "unsupported",
+        std::format("formal verify could not decide '{}'", g->get_name()),
+        std::format("{}. This is NOT a disproof either. Raise formal.timeout/formal.bound or fix the unsupported proof obligation.",
+                    r.detail)};
   }
-  // LAST: a vacuous obligation under formal.strict fails the run, but only once
-  // nothing more severe has claimed the exit (see where strict_vacuous is set).
-  if (!strict_vacuous.empty() && o.strict) {
+
+  // LAST: a vacuous obligation fails the run, but only once
+  // nothing more severe has claimed the exit (see where vacuous_failure is set).
+  if (!vacuous_failure.empty()) {
     throw Lhd_error{"unsupported",
-                    strict_vacuous,
+                    vacuous_failure,
                     "each proved only because its `if`/`match` guard can never be true, so it checked nothing: the "
                     "branch is dead. Fix the guard condition, or drop the branch"};
   }

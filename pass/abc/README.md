@@ -60,10 +60,9 @@ and validation. Set `pass.abc.satopt=false` to compare mapping without this pass
 
 ## Parallel synthesis
 
-`lhd synth` defaults to `--set synth.threads=0`: use the machine's available
-logical CPUs as the maximum worker count. A positive value caps that count;
-`1` selects serial mapping. Standalone `lhd pass abc` keeps its serial default
-and exposes the same policy through `--set abc.threads=N`.
+`lhd synth` and standalone `lhd pass abc` share `--set synth.threads=0`:
+use the machine's available logical CPUs as the maximum worker count.
+A positive value caps that count; `1` selects serial mapping.
 
 Independent regions within a definition can optimize concurrently in private
 ABC sessions. Graph translation, netlist read-back, cache access and graph
@@ -241,7 +240,7 @@ binary, asap7: br_credit_sender comb 67.0 -> 60.2 um^2, br_arb_rr 14.7 -> 18.0)
 but costs only +52 um^2 of comb over the 10-test set against ~560 um^2 of flop
 savings. That encoding is exact only under combinational transformations (the
 machine ABC sees is `BO' = ~F(BO,x)`), so it is gated on the built-in flow; a
-user `flow` (or a `small_flow`/`large_flow` tier), which may retime, keeps the
+user `flow` (or a `large_flow` tier), which may retime, keeps the
 AIG honest and the read-back absorbs the inversion locally: a mapped root
 inverter feeding only that latch is dropped, any other single-fanout root gate
 is swapped for the cheapest Liberty cell computing its complement over the same

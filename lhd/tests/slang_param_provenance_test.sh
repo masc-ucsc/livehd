@@ -96,7 +96,7 @@ $LHD compile "$W/p1"/*.prp --top tmod.tmod --workdir "$W/rc" -q \
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir lg:"$W/ref_lg" --workdir "$W/refw" -q \
   || fail "reference SV did not compile to lg"
 $LHD lec --impl pyrope:"$W/p1"/ --impl-top tmod.tmod --ref lg:"$W/ref_lg" --ref-top tmod \
-  --set formal.solver=cvc5 --workdir "$W/lec" -q --result-json "$W/lec.json" \
+  --workdir "$W/lec" -q --result-json "$W/lec.json" \
   || fail "provenance Pyrope not proven equivalent: $(cat "$W/lec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec.json" || fail "lec not pass: $(cat "$W/lec.json")"
 echo "PASS: provenance Pyrope recompiles and is LEC-proven vs the source SV"

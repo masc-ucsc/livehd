@@ -62,13 +62,13 @@ struct Query_result {
   // The design-size gate refused this design (too large to encode as one unit,
   // lec.allow_oversize unset). Distinct from a solver-inconclusive UNKNOWN: it is
   // a hard admission failure, so a driver must exit non-zero regardless of
-  // lec.strict, exactly as pass.abc does. See Lec_options::allow_oversize.
+  // any solver outcome, exactly as pass.abc does. See Lec_options::allow_oversize.
   bool oversize_refused = false;
 
   // The ENCODER refused a cell/shape it does not model (Encoded::unsupported) —
   // e.g. a Latch, an unknown op. Like oversize_refused (and unlike a solver
   // give-up) this decided NOTHING and no extra budget can change it, so a driver
-  // must exit non-zero regardless of formal.strict: an exit-0 "inconclusive"
+  // must exit non-zero unconditionally: an exit-0 "inconclusive"
   // here is read downstream as "verified", which makes every gate built on this
   // run vacuous (2f-latch M0).
   bool unsupported = false;
@@ -77,7 +77,7 @@ struct Query_result {
   // either side has no outputs/state at all, or no output could be paired across
   // the two sides. Like `unsupported` (and unlike a solver give-up) this decided
   // NOTHING, and no extra budget can change it, so a driver must exit non-zero
-  // regardless of formal.strict. Before this flag existed the empty miter was
+  // unconditionally. Before this flag existed the empty miter was
   // reported as `Proven` with detail "no comparable outputs": `lhd lec` on an
   // empty module printed "PROVEN equivalent", status "pass", exit 0, with ZERO
   // warnings. A check that compares nothing is not a proof of anything.
@@ -87,13 +87,9 @@ struct Query_result {
   // `formal.bound`, which says nothing about deeper cycles. An INDUCTIVE proof
   // leaves this false -- that one is unbounded.
   //
-  // It is a verdict QUALIFIER, not a verdict: the CLI reports a bounded proof
-  // as INCONCLUSIVE (exit 7 -- "could not decide", NEVER exit 10, since no
-  // counterexample was found), and `formal.strict=false` is the single escape.
-  // It also propagates through hierarchical composition: a bounded
-  // child must NOT discharge a parent's box premise, because the box contract
-  // (see box_model=seq) is explicitly "from reset, identical input sequences
-  // produce identical output sequences" -- unbounded.
+  // A bounded success reports its depth rather than claiming an unbounded
+  // inductive proof. This qualifier must survive cache replay and hierarchical
+  // composition: a bounded child makes the composed result bounded too.
   bool bounded = false;
 
   // A name-independent packed-register <-> scalar-replica relation can prove
@@ -169,7 +165,7 @@ struct Query_result {
   // recurrence was summarized.
   std::vector<std::string> loop_certificates;
 
-  // cvc5 solve-insight accounting (formal.stats / --stats). Empty (solvers == 0)
+  // cvc5 solve-insight accounting (lhd.stats / --stats). Empty (solvers == 0)
   // when stats are off or no cvc5 query ran. Summed, never assigned, at every
   // point that merges two results (the auto portfolio, the case split, the
   // `full` phase pair) — a losing racer really did burn that CPU.
@@ -342,14 +338,6 @@ struct Lec_options {
                                              //   false: skip the ABC pass entirely.
   int         conelimit           = 10000;   // per-cone ABC SAT conflict budget (0 = ABC's own default).
                                              // Bounds a hard cone so it falls back to cvc5 instead of hanging.
-  bool        strict              = true;    // treat an inconclusive UNKNOWN (no counterexample, the
-                                             // solver merely could not complete the proof) as a hard
-                                             // failure. DEFAULT TRUE: an inconclusive run PROVED
-                                             // NOTHING, and exiting 0 makes it indistinguishable from
-                                             // a real proof to any gate built on top of it. Opting out
-                                             // (`--set formal.strict=false`) downgrades it to a
-                                             // deferred warning that exits cleanly -- a deliberate
-                                             // choice the caller makes, never the default.
 
   bool allow_oversize = false;  // skip the design-size gate (lec.allow_oversize). The
                                 // encoder materializes the whole flattened design (minus
@@ -580,7 +568,7 @@ struct Lec_options {
   // contract explicit in the verdict detail.
   bool                             _init_no_reset              = false;
 
-  // formal.stats / --stats: capture + report cvc5 solve statistics (also
+  // lhd.stats / --stats: capture + report cvc5 solve statistics (also
   // registers the cvc5::Plugin -- makes the solve ~8x slower). OFF by default
   // and strictly zero-cost when off: with stats false the engines pass a NULL
   // accumulator, so no Solve_probe impl is built, no plugin is registered and
@@ -923,7 +911,7 @@ struct Verify_result {
   std::vector<Mined_invariant> mined;
   long long                    elapsed_ms = -1;
 
-  // cvc5 solve-insight accounting (formal.stats / --stats) — the verify twin of
+  // cvc5 solve-insight accounting (lhd.stats / --stats) — the verify twin of
   // Query_result::cvc5, with the same TAIL-of-the-wire-codec discipline: the F3
   // verify strategy race FORKS, so a field the serialize_verify /
   // deserialize_verify pair does not carry comes back ALL ZEROS in the parent

@@ -78,7 +78,7 @@ EOF
   --emit-dir lg:"$W/lg" --workdir "$W/compile" -q -- "$W/design.sv" \
   || fail "packed child design did not compile"
 "$LHD" sim lg:"$W/lg" "$W/tb.prp" --set sim.init_zero=true \
-  --set sim.unknown_zero=true --set sim.vcd=false --workdir "$W/sim" -q \
+  --set sim.unknown_zero=true  --workdir "$W/sim" -q \
   || fail "packed child simulation selected the wrong concat lane"
 
 echo "PASS: packed child input keeps constant concat lanes at their absolute offsets"

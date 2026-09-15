@@ -30,14 +30,12 @@ endmodule
 ''')
 PY
 run compile "$W/source.v" --reader slang --emit-dir lg:"$W/lg" --emit verilog:"$W/compiled.v" --workdir "$W/compile"
-for engine in cvc5 lgyosys; do
-  run lec --impl lg:"$W/lg" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
-    --set formal.solver="$engine" --set formal.timeout=60 --workdir "$W/$engine"
-  python3 - "$W/result.json" <<'PY'
+run lec --impl lg:"$W/lg" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
+  --set formal.timeout=60 --workdir "$W/default"
+python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))['lec']; assert r['verdict']=='proven',r
 PY
-done
 cat > "$W/tb.v" <<'SV'
 module tb;
 reg [6:0] addr;

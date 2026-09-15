@@ -49,8 +49,8 @@ _FLOWS = [
     ("pyrope", "ln", "pass"),
     ("pyrope", "lg", "pass"),
     ("verilog", "verilog", "pass"),
-    ("verilog", "pyrope", "unsupported"),  # no LGraph -> LNAST decompiler
-    ("verilog", "ln", "unsupported"),  # verilog elaborates to LGraphs
+    ("verilog", "pyrope", "pass"),  # native Slang retains LNAST
+    ("verilog", "ln", "pass"),  # native Slang elaborates to LNAST
     ("verilog", "lg", "pass"),
     ("ln", "verilog", "pass"),
     ("ln", "pyrope", "pass"),
@@ -109,8 +109,8 @@ sh_test(
 )
 
 # `lhd lec` as the single equivalence command: verilog inputs (slang default +
-# --reader yosys-* override), the cvc5 (default) and lgyosys backends via
-# --set formal.solver, and the retired `check` command's migration error.
+# explicit Yosys-to-lg frontend comparison), the default solver, and the retired `check`
+# command's migration error.
 sh_test(
     name = "lhd_lec_verilog_test",
     size = "large",
@@ -389,7 +389,7 @@ sh_test(
 # 2f-verify V1: `lhd formal verify` — single-design assert/assume BMC on the
 # pass/lec engine: per-assert bounded-proven / refuted-at-cycle-with-trace
 # verdict table, assume-as-disclosed-constraint, per-obligation timeout
-# isolation (+ formal.strict), formal.*/lec.* knob aliases, `formal lec` alias.
+# isolation and unconditional UNKNOWN failure, formal.*/lec.* knob aliases, `formal lec` alias.
 sh_test(
     name = "lhd_formal_verify_test",
     size = "large",
@@ -1020,12 +1020,10 @@ sh_test(
     name = "sim_color_llvm_smoke",
     size = "large",
     srcs = ["sim_color_llvm_smoke.sh"],
-    # The script builds its independent sim drivers in parallel waves
-    # (SIM_COLOR_SMOKE_JOBS, default 6). Declare that to Bazel so the test
-    # scheduler reserves the cores instead of stacking this test on top of a
-    # full slate of others -- the wall-clock-sensitive formal budget tests
-    # measure solver seconds and go flaky on an oversubscribed machine.
-    tags = ["cpu:6"],
+    # Two batched drivers (4 compiler jobs each), plus the shard and backend
+    # switch checks (2 jobs each). Reserve their actual host compiler fan-out
+    # so the test does not oversubscribe concurrent solver tests.
+    tags = ["cpu:12"],
     data = [
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",
@@ -1049,14 +1047,8 @@ sh_test(
     ],
 )
 
-# LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
-# latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
-# DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and
-# genuinely DISCRIMINATES latch enable polarity (a port-matched
-# transparent-high vs transparent-low flip REFUTES with a counterexample).
-# This is the independent latch oracle the 2f-latch cross-model gating rule
-# uses. Note the power is latch-polarity only: for FLOP clock/edge differences
-# lgcheck is as blind as the native encoder (lec_clock_blindness_test above).
+# The default LEC solver proves identical latches and refutes a port-matched
+# transparent-high versus transparent-low pair.
 sh_test(
     name = "lec_latch_polarity_test",
     size = "large",
@@ -1115,7 +1107,7 @@ sh_test(
 # shape it covers used to report SUCCESS while silently doing the wrong thing,
 # which makes every downstream gate vacuous: a latch design under `lhd formal
 # verify` exited 0 on an ENCODER REFUSAL (distinct from a solver give-up — no
-# budget can help, so `formal.strict` must not be needed to see it); `lhd sim`
+# budget can help, so it must fail immediately); `lhd sim`
 # on a latch died with a misleading `combinational-loop` error naming an
 # internal node; and a gated-clock or two-clock design simulated to a
 # plausible-looking WRONG waveform at exit 0. Asserts the diagnostic CODE, not
@@ -1487,8 +1479,8 @@ sh_test(
 
 # pass.abc memory=true (explicitly enabled) bit-blast, on the shapes the constant-
 # address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
-# (32x8 guards on ABC input nodes + mapped cells; 8x8 LEC'd with cvc5 AND
-# lgyosys against the source memory through gensim cell models), a whole-array
+# (32x8 guards on ABC input nodes + mapped cells; 8x8 LEC'd on graphs and
+# Verilog against the source memory through gensim cell models), a whole-array
 # read_all memory (was refused), memory=false / memory_max_bits keeping a memory
 # native, and the wide-constant EQ (`x[3:0] == 8'd100` -> constant 0).
 sh_test(
@@ -1506,7 +1498,7 @@ sh_test(
 # file bit-blasted by pass.abc memory=true (one-bit DFF cells on a Q cell, on a
 # QN-only cell through the Flop(Not(D)) model, and whole native storage flops
 # under register_max_bits=1) is PROVEN unbounded with cvc5 against its Memory
-# through gensim models, lgyosys does not refute, and the same bank shape with
+# through gensim models and emitted Verilog, and the same bank shape with
 # a corrupted write address still REFUTES.
 sh_test(
     name = "lhd_lec_membank_test",
@@ -1835,16 +1827,10 @@ sh_test(
     data = ["//lhd"],
 )
 
-# LIVE fail-closed test: a variable BLOCKING-assigned in an EDGE-sensitive
-# process and read outside it is persistent flop state that `--reader slang`
-# does not model. collect_state_vars documented the refusal, but it only ever
-# fired for module OUTPUTS and unpacked arrays -- an internal scalar fell
-# through, was declared a plain `mut`, and the REGISTER VANISHED: a
-# `always @(posedge p) ms = ms + 1;` counter read by `assign o = ms` lowered to
-# a stateless `comb` whose output folded to a constant, exit 0 with no warning,
-# and lgcheck refuted it. Pins the diagnostic CODE (a crash also exits nonzero)
-# and the acceptance half: a process-LOCAL blocking temp and an ordinary `<=`
-# register must both still compile, with the register still real state.
+# A blocking-assigned variable in an edge process is persistent state when
+# observed outside that process. Slang previously lost internal scalar state,
+# turning counters into constant combinational outputs. Check native emission
+# and LEC against nonblocking RTL, plus local temporaries and loop controls.
 sh_test(
     name = "blocking_ff_state_test",
     size = "small",

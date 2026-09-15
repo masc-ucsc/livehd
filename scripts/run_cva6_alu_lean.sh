@@ -129,8 +129,6 @@ set +e
   --emit-dir lg:"$LG_DIR" \
   --emit-dir lean:"$LEAN_DIR" \
   --set yosys.setundef=zero \
-  --set formal.lean.strict=true \
-  --set formal.lean.normalize=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \

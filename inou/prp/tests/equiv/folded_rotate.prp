@@ -3,7 +3,6 @@
 :type: equiv
 :pyrope_top: folded_rotate
 :verilog_top: folded_rotate
-:equiv_engine: cvc5
 */
 // Inlining a one-bit count into this two-stage rotate makes the second
 // selector false. Its EQ folds to 1 feeding XOR 1: both operands must remain.

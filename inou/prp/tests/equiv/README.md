@@ -8,7 +8,7 @@ Two axes live here, and a design can sit on both:
 | Pyrope ↔ **Pyrope** | `foo.prp` + `foo_1.prp`, `foo_2.prp`, … | `prp-lec-foo_1`, … |
 
 For the Verilog axis, `prp-equiv-foo` lowers the Pyrope to Verilog and proves the
-two equivalent (`lhd lec`, then yosys `lgcheck`). The golden is written by hand
+two equivalent with the default `lhd lec` solver and native Slang reader. The golden is written by hand
 from the same specification, never generated, so it is an independent statement
 of what the design must compute.
 
@@ -17,21 +17,37 @@ Imported helpers may live in a same-stem directory, for example
 equivalence, state-matching, and Verilog round-trip targets stage those helpers;
 only top-level `.prp` files are discovered as fixtures.
 
+## Bitfuzz coverage
+
+Each `prp-equiv-*` and `prp-lec-*` target also has a `-bitfuzz` companion.
+The companion enables `compile.bitfuzz.mode=wires` for explicit compilation
+and the source compilations inside `lhd lec`. It strips internal combinational
+width/sign annotations after lowering, before cprop. IO, constants, register
+and memory outputs, and instance boundaries are preserved. Cprop must preserve
+integer semantics without consulting annotations; the ordinary bitwidth pass
+recovers them. The fuzz pass does not infer or restore missing annotations.
+Both configurations run under `bazel test //...` with the same equivalence
+expectations. A bitfuzz failure remains a failing test.
+
+Run one manually with:
+
+```
+python3 inou/prp/tests/pyrope_test.py -i inou/prp/tests/equiv/trivial_if.prp --bitfuzz
+```
+
 ## Header tags
 
 Every tag is a `:name: value` line inside the leading `/* … */` block.
 
 | tag | meaning |
 | --- | --- |
-| `:type: equiv` | run the LEC pair (`equiv_slang` for a golden `read_slang` cannot read) |
+| `:type: equiv` | run the LEC pair (`equiv_slang` compares both emitted Verilog sides) |
 | `:verilog_top:` | module to compare on the GOLDEN side (default: first module in the `.v`) |
 | `:pyrope_top:` | generated module to compare on the Pyrope side |
 | `:compile_top:` | optional source top to materialize explicitly during Pyrope compilation, including a defaulted generic among multiple public templates |
 | `:set: k=v …` | extra `--set` flags, applied to every mode |
 | `:reset_style: async` | elaborate implicit resets as async, so the golden can spell an async `always` |
-| `:equiv_engine: cvc5` | prove with `lhd lec` only; skip lgcheck (latch/edge shapes it calls different) |
-| `:verilog_check_timeout: N` | v2prp2v only: seconds for the lgcheck oracle (default 240). Cap it for a shape lgcheck provably cannot close — a refutation still lands in ~1s, so only dead wait is dropped |
-| `:gold_reader: slang` | read the golden with yosys's built-in `read_slang` |
+| `:verilog_check_timeout: N` | v2prp2v only: seconds for the original-Verilog LEC leg (default 240); a timeout fails the test |
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |
 
@@ -110,7 +126,10 @@ FAILURE, not a skip — the equivalence proof goes through yosys/lgcheck and can
 stay green while `lhd compile` refuses the very same file, which is exactly the
 hole this check exists to expose. (A refusal that is the WHOLE point of a
 fixture belongs in `../errors/`, not here — that is where `latch_rule_a`,
-`latch_rule_b` and `reg_clock_from_logic` went.)
+`latch_rule_b` and `reg_clock_from_logic` live.) The old exhaustive-match
+false-positive reproducer is now `latch_match_exhaustive`, paired with a
+combinational reference; `latch_match_partial` checks that a reachable hold
+path still retains its latch.
 
 **There is no header tag for "this one does not match."** A pair whose state
 finds no counterpart FAILS, and the known-broken set is carried by the bazel

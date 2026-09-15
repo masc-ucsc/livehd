@@ -225,24 +225,14 @@ const Dlop&                      const_of(const hhds::Occurrence_node&) = delete
   return std::max<int32_t>(1, carrier);
 }
 
-// HHDS stores the user-supplied type in NodeEntry::type with the low bit
-// reserved for HHDS's own `is_loop_last` semantics. The Ntype_op encoding
-// is designed so that bit 0 of the underlying value already encodes
-// is_loop_last (see cell.hpp), so the stored HHDS type round-trips
-// directly into an Ntype_op without any shift. Returns Ntype_op::Invalid
-// (== 0) for nodes that were never typed.
-//
-// Gotcha: `Graph::set_subnode` RE-STAMPS the raw type to HHDS's
-// own 2/3 loop-last-hint encoding (graph.cpp), silently overwriting the
-// Ntype_op::Sub a caller stored — and 2 collides with Ntype_op::Sum. The
-// authoritative Sub discriminator is therefore the subnode LINK, not the
-// stored type. Every Sub on every path (yosys + Pyrope tolg) goes through
-// set_subnode, so this check is complete.
+// hhds `NodeEntry::type` is 16 bits whose bit 0 is hhds's own per-node
+// `is_loop_break` cut flag. LiveHD stores `(op << 1) | loop_last` (see
+// set_type_op) and reads the op back with one shift. hhds's `set_subnode`
+// rewrites ONLY bit 0 (per instance: set iff the child body holds state), so
+// the op survives it and a Sub reads as Sub with no link check. Returns
+// Ntype_op::Invalid (== 0) for nodes that were never typed.
 [[nodiscard]] inline Ntype_op type_op_of(const hhds::Node_class& node) {
-  if (node.get_subnode_gid() != hhds::Gid_invalid) {
-    return Ntype_op::Sub;
-  }
-  return static_cast<Ntype_op>(static_cast<uint16_t>(node.get_type()));
+  return static_cast<Ntype_op>(static_cast<uint16_t>(node.get_type()) >> 1);
 }
 
 [[nodiscard]] inline Ntype_op type_op_of(const hhds::Occurrence_node& node) { return type_op_of(node.base_node()); }
@@ -411,10 +401,8 @@ template <typename Node_like>
     const auto nm = sio->get_name();
     return nm == fproperty_module_name || nm == lgassert_module_name;
   }
-  // No subnode binding left -- and then it is not even an `Ntype_op::Sub` any
-  // more, since type_op_of derives that from the subnode gid. A marker still
-  // identifies itself by the payload it
-  // packs into its NAME attr -- "<kind>\x1f<loc>\x1f<msg>" for fproperty,
+  // No subnode binding left. A marker still identifies itself by the payload
+  // it packs into its NAME attr -- "<kind>\x1f<loc>\x1f<msg>" for fproperty,
   // "<loc>\x1f<node>" for lgassert -- which is the same signature
   // Sub_inliner/Flattener use to know they must not prefix that name. \x1f is
   // not a legal identifier character, so a genuine body-less black box (external
@@ -968,11 +956,15 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   return drivers.front();
 }
 
-// Cell-type mutation. The Ntype_op encoding values already bake in the
-// is_loop_last low bit (see cell.hpp), so storing the raw value into HHDS
-// round-trips correctly with type_op_of(). Do NOT shift.
+// Cell-type mutation. hhds owns bit 0 of `NodeEntry::type` (its per-node
+// `is_loop_break` cut flag), so the op is stored SHIFTED LEFT by one with that
+// bit seeded from Ntype::is_loop_last; type_op_of() shifts it back. Keep the
+// two in step. Call this BEFORE `set_subnode` on a Sub: set_subnode rewrites
+// only bit 0 (per instance, set iff the child body holds state) and this write
+// would otherwise clobber that decision back to the conservative 1.
 inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
-  node.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op)));
+  const uint16_t cut = Ntype::is_loop_last(op) ? 1u : 0u;  // hhds bit 0 = is_loop_break
+  node.set_type(static_cast<hhds::Type>((static_cast<uint16_t>(op) << 1) | cut));
 }
 
 // Create a new node of the given Ntype_op in `graph`. Returns the node;
@@ -1434,8 +1426,7 @@ struct Concat_lane {
     // enormous to the size windows.
     case Ntype_op::Concat:
     case Ntype_op::Get_mask:
-    case Ntype_op::Set_mask:
-    case Ntype_op::Nconst  : return 0;
+    case Ntype_op::Set_mask: return 0;
 
     case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));
 

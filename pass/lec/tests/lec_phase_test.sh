@@ -45,7 +45,7 @@ endmodule
 EOF
 
 compile() {  # $1=src $2=lgdir $3=top
-  $LHD compile "$WORK/$1" --reader yosys-verilog --top "$3" --emit-dir "lg:$WORK/$2" --workdir "$WORK/w_$2" >/dev/null 2>&1 \
+  $LHD compile "$WORK/$1" --top "$3" --emit-dir "lg:$WORK/$2" --workdir "$WORK/w_$2" >/dev/null 2>&1 \
     || { echo "FAIL: compile $1"; exit 1; }
 }
 compile a1.v a1_lg cnt
@@ -55,6 +55,8 @@ compile b2.v b2_lg dut
 
 # verdict $impl $ref $top $phase  -> echoes PROVEN | REFUTED | UNKNOWN
 verdict() {
+  phase_args=()
+  [ "$4" = "after_reset" ] || phase_args=(${phase_args[@]+"${phase_args[@]}"})
   $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
        --set formal.lec.hier=false --set formal.engine=bmc --set formal.bound=8 --set "formal.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \

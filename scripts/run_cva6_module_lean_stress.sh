@@ -147,8 +147,6 @@ set +e
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
-  --set formal.lean.strict=true \
-  --set formal.lean.normalize=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \

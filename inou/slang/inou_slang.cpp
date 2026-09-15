@@ -88,11 +88,7 @@ void Inou_slang::setup() {
 
   m1.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m1.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m1.add_label_optional(
-      "includes",
-      "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
-  m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
-  m1.add_label_optional("undefines", "comma separated undefines");
+
   m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m1.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
   m1.add_label_optional("roll_loops",
@@ -115,11 +111,7 @@ void Inou_slang::setup() {
   Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
   m2.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m2.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m2.add_label_optional(
-      "includes",
-      "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
-  m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
-  m2.add_label_optional("undefines", "comma separated undefines");
+
   m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m2.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
   m2.add_label_optional("roll_loops",
@@ -212,7 +204,7 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
-  // Include search path, in priority order: explicit `includes`, then the
+  // Default include search path: the
   // directory of every input source file (the documented "verilog paths"
   // default — lets a source ``\`include`` a header sitting next to a sibling
   // input), then LiveHD's built-in `ware/rtl` library (so cgen-generated
@@ -230,11 +222,6 @@ void Inou_slang::work(Eprp_var& var) {
     }
   };
 
-  if (var.has_label("includes")) {
-    for (const auto f : absl::StrSplit(var.get("includes"), ',')) {
-      add_inc(std::string(f));
-    }
-  }
   for (const auto& f : file_list) {
     add_inc(fs::path(f).parent_path().string());
   }
@@ -244,22 +231,6 @@ void Inou_slang::work(Eprp_var& var) {
   for (const auto& dir : inc_dirs) {
     argv.push_back(strdup("-I"));
     argv.push_back(strdup(dir.c_str()));
-  }
-
-  if (var.has_label("defines")) {
-    auto txt = var.get("defines");
-    for (const auto f : absl::StrSplit(txt, ',')) {
-      argv.push_back(strdup("-D"));
-      argv.push_back(strdup(std::string(f).c_str()));
-    }
-  }
-
-  if (var.has_label("undefines")) {
-    auto txt = var.get("undefines");
-    for (const auto f : absl::StrSplit(txt, ',')) {
-      argv.push_back(strdup("-U"));
-      argv.push_back(strdup(std::string(f).c_str()));
-    }
   }
 
   // Raw slang driver args (e.g. `-F filelist.f`) passed through verbatim from

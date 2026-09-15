@@ -321,7 +321,7 @@ sh_test(
 # 2f-lgimport: the lg: import (compiled lgraph) two-step flow + LEC, plus the
 # not-found / port-mismatch diagnostics, exercised from a self-contained script
 # (it generates its own .v / .prp fixtures and drives `lhd compile` + `lhd
-# check`). Needs the yosys scripts (lgcheck) on top of the lhd binary.
+# check`) through native Slang and the default LEC solver.
 sh_test(
     name = "prp-import-lg",
     srcs = ["tests/imports/lg_import_test.sh"],
@@ -530,14 +530,14 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
 
 [
     sh_test(
-        name = "prp-lec-%s" % variant,
+        name = "prp-lec-%s%s" % (variant, suffix),
         srcs = ["tests/pyrope_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:tests/equiv/%s.prp)" % variant,
             "--mode",
             "lec",
-        ],
+        ] + (["--bitfuzz"] if suffix else []),
         data = [
             "//inou/prp:tests/prplec.py",
             "//inou/prp:tests/prplib.py",
@@ -548,21 +548,21 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
         ],
     )
     for variant in _PRPLEC_VARIANTS
+    for suffix in ["", "-bitfuzz"]
 ]
 
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
-# golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on
-# top of the plain-prp data. Distinct `prp-equiv-` prefix: equiv/trivial_if
+# golden with default lhd lec and native Slang. Distinct `prp-equiv-` prefix: equiv/trivial_if
 # would otherwise collide with the comptime/trivial_if target name.
 [
     sh_test(
-        name = "prp-equiv-%s" % prp_file.split("/")[-1].split(".")[0],
+        name = "prp-equiv-%s%s" % (prp_file.split("/")[-1].split(".")[0], suffix),
         srcs = ["tests/pyrope_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:%s)" % prp_file,
-        ],
+        ] + (["--bitfuzz"] if suffix else []),
         data = [
             "//inou/prp:tests/prplib.py",
             # An equiv fixture may also carry `simulation` in its `:type:`
@@ -639,17 +639,7 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
             "tests/equiv/async_mem_reset_demoted.prp",
             "tests/equiv/reg_decl_init_dropped.prp",
             "tests/equiv/selfref_concat_assign.prp",
-            # NOTE: the three phase_* pairs (phase_latch_flop_edges,
-            # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
-            # this exclude list (2f-lec / 2f-latch M10). They compare normalized
-            # Pyrope state against Verilog that RETAINS latch-close or
-            # Clock_cell timing, and lgcheck's bounded miter -- which steps one
-            # posedge per step -- cannot represent either, so it reported a
-            # mismatch between equivalent designs. Each now carries
-            # `:equiv_engine: cvc5` in its header and is discharged by the
-            # phase-aware `lhd lec` instead; the INDEPENDENT oracle for the pair
-            # is the v2prp2v original-Verilog leg (still lgcheck) plus
-            # lhd/tests/single_edge_four_classes_test.sh under Icarus.
+            # Phase-aware default LEC handles the promoted phase_* pairs.
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
             # divided_clock_decl_order has TWO clock domains (a register clocked
@@ -674,27 +664,11 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
             # its VALUE operand on the stale base name after the def had been
             # renamed; see upass_ssa.cpp's is_store arm. All three prove now and
             # run as ordinary prp-equiv-* pairs.
-            # NOTE: the six latch_* pairs (latch_enable_hold, latch_hold_basic,
-            # latch_active_low, latch_master_slave, latch_icg, latch_mixed_flop)
-            # used to be excluded here as todo/livehd/2f-latch trackers. They
-            # were PROMOTED into the glob (2026-07-20): lgcheck's cascade ends
-            # in a bounded miter that DECIDES latch designs (equiv_simple alone
-            # cannot discharge $dlatch), so the forward equivalence proves
-            # today. The still-broken latch surfaces (sim, native cvc5 LEC,
-            # Verilog round-trip through slang) are tracked by the sim/verify
-            # fixtures and lhd/tests scripts named in todo/livehd/2f-latch.html,
-            # NOT by these equiv pairs.
-            # NOTE: struct_init_whole_read / instance_conn_struct_ident /
-            # struct_selfref_pattern / instance_out_struct_ident used to be
-            # excluded here (their SystemVerilog '{...} / struct-typed-wire
-            # goldens exceed yosys read_verilog, so the forward miter was
-            # INCONCLUSIVE). They now run in the glob (2026-07-03): the header
-            # `:gold_reader: slang` has lgcheck read the golden through the
-            # yosys-slang plugin, and each golden's top is an UNDOTTED plain
-            # identifier (dotted escaped `\a.b ` names break yosys-slang's
-            # --top/RTLIL naming).
+            # The promoted latch and packed-struct pairs run through the
+            # same default native Slang LEC path as every other pair.
         ] + _PRPLEC_SKIP,
     )
+    for suffix in ["", "-bitfuzz"]
 ]
 
 # The two M6 compact-loop LEC regressions that used to live here as hand-written
@@ -793,13 +767,11 @@ _STATEMATCH_FIXME = [
         # compound `if (reset || arst)` guard (proc_dff multi-edge).
         # The six latch_* pairs were PROMOTED out of this list (2026-07-20):
         # rewritten to `pub mod` + the shipped `reg NAME:TYPE:[latch=true]`
-        # spelling (latch_enable_hold included), and the lgcheck bounded-miter
-        # stage proves every pair today — see the equiv-glob note above.
+        # spelling (latch_enable_hold included); they use default native LEC.
         # struct_init_whole_read / instance_conn_struct_ident /
         # struct_selfref_pattern / instance_out_struct_ident were PROMOTED out
-        # of this list (2026-07-03): `:gold_reader: slang` reads their goldens
-        # through the yosys-slang plugin (see the equiv-glob note above), so
-        # the forward direction proves; they run as ordinary prp-equiv-* now.
+        # of this list (2026-07-03); native Slang reads their goldens in
+        # ordinary prp-equiv-* tests.
         #
         # The three comb-array store-loss trackers (array_store_stale_rhs,
         # arr_comb_mux_const, arr_comb_tmp) were PROMOTED out of this list
@@ -845,7 +817,7 @@ _STATEMATCH_FIXME = [
         # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
         # and negedge endpoints over four microsteps per source period, so all
         # three PROVE. See the equiv-glob note above for why they run under
-        # `:equiv_engine: cvc5`.
+        # the default native LEC solver.
     ]
 ]
 
@@ -968,19 +940,14 @@ _V2PRP2V_NATIVE_FIXME = [
 # v2prp2v: the Verilog ROUND TRIP over the same equiv corpus. Each golden <name>.v
 # goes all the way THROUGH Pyrope and back --
 #   v -> (slang) -> lg -> prp_writer -> .prp -> (inou.prp) -> tolg -> cgen -> v
-# -- and inou/yosys/lgcheck proves the result equivalent to the ORIGINAL .v.
+# -- and default lhd lec compares the result against the ORIGINAL .v.
 # The Pyrope legs were added 2026-07-29: the harness used to go slang -> lg ->
 # cgen DIRECTLY, skipping upass/prp_writer and the Pyrope re-read, so a writer
 # that emitted lossy or un-re-parseable Pyrope passed here while failing
 # everywhere else (three such trackers had to be left untagged for exactly that
-# reason; they refute now). One run therefore covers the whole path the corpus
-# fuzzing exercises. This is the only harness whose reference side is read
-# INDEPENDENTLY of LiveHD (yosys read_verilog, or yosys-slang via the sibling
-# .prp's `:gold_reader: slang` header). The harness also runs the former
-# v2prp native LEC check against the hand-written .prp, reusing the emitted
-# Pyrope rather than repeating the conversion. lgcheck INCONCLUSIVE (exit 2)
-# and timeouts pass with an honest note; only a counterexample or a hard yosys
-# error fails.
+# reason; they refute now). One run covers the whole corpus round trip.
+# Both the emitted-Pyrope check and the original-Verilog check use default
+# LEC. Native Slang reads Verilog; unknown results and timeouts fail.
 #
 # Census 2026-07-27 (lhdsuite array_problem.md): 169 of 179 pairs prove, 5 are
 # honest-inconclusive (array_selfref, assign_pattern, io_bundle_nested,

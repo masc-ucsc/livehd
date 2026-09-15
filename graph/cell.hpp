@@ -21,114 +21,40 @@ namespace livehd {
 inline constexpr hhds::Port_id Port_invalid = (hhds::Port_id{1} << hhds::Port_bits) - 1;
 }  // namespace livehd
 
-// Encoding invariant: bit 0 of the underlying value is `is_loop_last`.
-// HHDS reserves the low bit of NodeEntry::type for its own loop-last flag,
-// so making the Ntype_op encoding match means LiveHD can store the enum
-// value directly into hhds::Node_class without a shift on either side.
+// Ntype_op is a DENSE sequence grouped in BANDS, so the loop-first / loop-last
+// / combinational questions are contiguous RANGE tests (see Ntype below), and
+// the `Last_invalid`-sized tables in Ntype have no holes.
 //
-// Layout: non-loop-last ops take EVEN values, loop-last ops take ODD values.
-// Each op-line below has its underlying value next to it. The implied
-// neighbour (value ± 1) is the unused slot for the opposite loop-last
-// polarity; `cell_name_sv[]` keeps "invalid" there and `cell.cpp`'s init
-// loop skips it. Don't renumber to a packed sequence — the bit-0 invariant
-// is what lets the round-trip through `hhds::Node_class::set_type` /
-// `get_type` work without a shift.
-//
-// Value ranges (each "..." is a non-loop-last slot whose +1 odd neighbour
-// is empty by construction):
-//   0  Invalid            -- the empty slot at value 1 is never used
-//   2  Sum                3 unused
-//   4  Mult               5 unused
-//   ...
-//  16  Not               17 unused
-//   ...
-//  36  Mux               37 unused
-//  38  Hotmux            -- one-hot select mux (non-loop-last; even slot
-//                            between Mux and IO).
-//
-//  39  IO  ← FIRST LOOP-LAST OP. Note the jump from 38→39 keeps the
-//                        even/odd bit-0 invariant.
-//  41  Memory   (loop_last)
-//  43  Flop     (loop_last)
-//  45  Latch    (loop_last)
-//  47  Fflop    (loop_last)
-//  49  Sub      (loop_last)
-//  50  Nconst             -- non-loop-last; sits next to Sub on purpose so
-//                            is_loop_first(Nconst||IO) is the obvious pair.
-//   ...
-//  56  AttrSet
-//  58  Concat            59 reserved for Last_invalid sentinel
+// Storage in hhds: `NodeEntry::type` is 16 bits and hhds reserves its bit 0 as
+// the per-node `is_loop_break` flag (a forward/backward iterator cut point).
+// LiveHD stores `(op << 1) | loop_last` and reads back `type >> 1` -- see
+// node_util.hpp `set_type_op` / `type_op_of`. The op never depends on that bit,
+// so a Sub instance keeps reading as `Sub` while hhds's `set_subnode` decides
+// per INSTANCE whether the cut bit is set (only when the child body holds
+// state). No value below is persisted by name: an lgdb stores the raw type, so
+// inserting an op in the middle invalidates every existing lgdb.
 enum class Ntype_op : uint8_t {
-  Invalid = 0,  // Detect bugs/unset (not used anywhere). Bit 0 == 0.
-  Sum     = 2,
-  Mult    = 4,
-  Div     = 6,
+  Invalid = 0,  // Detect bugs/unset (not used anywhere).
 
-  And = 8,
-  Or  = 10,
-  Xor = 12,
-  Ror = 14,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
-
-  Not      = 16,  // bitwise not
-  Get_mask = 18,  // To positive signed
-  Set_mask = 20,  // To positive signed
-  Sext     = 22,  // Sign extend from a given bit (b) position
-
-  LT = 24,  // Less Than   , also GE = !LT
-  GT = 26,  // Greater Than, also LE = !GT
-  EQ = 28,  // Equal       , also NE = !EQ
-
-  SHL = 30,  // Shift Left Logical
-  SRA = 32,  // Shift Right Arithmetic
-
-  LUT    = 34,  // LUT
-  Mux    = 36,  // Multiplexor with many options
-  Hotmux = 38,  // Interleaved (control, value) pairs, optional trailing default.
-                // Controls are one-bit and mutually exclusive (one-hot-or-zero).
-
-  IO = 39,  // Graph Input or Output  -- loop_last (first odd slot)
-
-  //------------------BEGIN PIPELINED (break LOOPS) -- all loop_last (odd)
-  Memory = 41,
-
-  Flop  = 43,  // Asynchronous & sync reset flop
-  Latch = 45,  // Latch
-  Fflop = 47,  // Fluid flop
-
-  Sub    = 49,  // Sub module instance
-  //------------------END PIPELINED (break LOOPS)
-  Nconst = 50,  // Constant -- non-loop-last; paired with IO via is_loop_first.
-
-  // The ONE recognized clock operator (2f-latch M9): gate / invert / divide.
-  // COMBINATIONAL by construction, hence an EVEN slot -- the enable-sampling
-  // latch of a real ICG is NOT in the graph, because the cell encodes the
-  // glitch-free CONTRACT ("en is sampled at clk_ref's active edge") rather than
-  // the implementation. That is what keeps every latch-counting consumer from
-  // seeing ICG latches at all.
-  Clock_cell = 52,
-
+  //------------------BEGIN COMBINATIONAL, COMPUTED: [Sum .. Clock_cell]
+  Sum,
+  Mult,
+  Div,
   // Truncated REMAINDER, `a % b` (sign follows the DIVIDEND, like Verilog `%`
   // and Dlop::rem_op -- NOT a floored modulo). One op: every LNAST/LGraph value
   // is signed, and unsigned is just the non-negative subset, so there is no
   // second unsigned flavour and nothing downstream switches on a sign flag.
-  //
-  // Slot 54 was the last free EVEN slot below AttrSet, and even is required:
-  // bit 0 is is_loop_last, and a remainder is combinational. Growing past
-  // AttrSet moves Last_invalid, which resizes the three `Last_invalid`-sized
-  // tables below.
-  //
-  // It does NOT invalidate serialized lgdbs: `Last_invalid` is a compile-time
-  // sentinel that is never
-  // stored in a node and never serialized, and appending a slot leaves every
-  // existing op's raw value unchanged. Only the reverse direction breaks -- an
-  // lgdb written WITH the new op and read by an OLDER binary indexes past the
-  // end of that build's `cell_name_sv`.
-  Rem = 54,
+  Rem,
 
-  // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
-  // Tuple-related ops (TupAdd, TupGet) and AttrGet were dropped along with
-  // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
-  AttrSet = 56,
+  And,
+  Or,
+  Xor,
+  Ror,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
+
+  Not,       // bitwise not
+  Get_mask,  // To positive signed
+  Set_mask,  // To positive signed
+  Sext,      // Sign extend from a given bit (b) position
 
   // n-ary bit CONCATENATION, MSB-first (Verilog `{a, b, c}`), combinational.
   //
@@ -152,30 +78,56 @@ enum class Ntype_op : uint8_t {
   // rule. Unknowns are per-lane and positional (no whole-plane smearing). The
   // result is ALWAYS non-negative, so the driver pin stamps the exact literal
   // width bits = sum(w_i) and is `unsign`.
-  //
-  // 58 keeps the even/odd invariant (combinational => even). 40..48 are also
-  // free evens but are reserved by construction as the opposite-polarity twins
-  // of Memory/Flop/Latch/Fflop/Sub -- and cprop's several `op > Ntype_op::Hotmux`
-  // ordered tests read that band as state/boundary.
-  Concat = 58,
+  Concat,
 
-  Last_invalid = 59
+  LT,  // Less Than   , also GE = !LT
+  GT,  // Greater Than, also LE = !GT
+  EQ,  // Equal       , also NE = !EQ
+
+  SHL,  // Shift Left Logical
+  SRA,  // Shift Right Arithmetic
+
+  LUT,     // LUT
+  Mux,     // Multiplexor with many options
+  Hotmux,  // Interleaved (control, value) pairs, optional trailing default.
+           // Controls are one-bit and mutually exclusive (one-hot-or-zero).
+
+  // The ONE recognized clock operator (2f-latch M9): gate / invert / divide.
+  // COMBINATIONAL by construction -- the enable-sampling latch of a real ICG
+  // is NOT in the graph, because the cell encodes the glitch-free CONTRACT
+  // ("en is sampled at clk_ref's active edge") rather than the implementation.
+  // That is what keeps every latch-counting consumer from seeing ICG latches.
+  Clock_cell,
+  //------------------END COMBINATIONAL
+
+  IO,  // Graph Input or Output -- the ONE loop-first op (constants live in the
+       // const pool as pins of the builtin const node, never as a typed node).
+
+  //------------------BEGIN LOOP-LAST (break LOOPS): [Memory .. Sub]
+  Memory,
+  Flop,   // Asynchronous & sync reset flop
+  Latch,  // Latch
+  Fflop,  // Fluid flop
+  Sub,    // Sub module instance. Conservatively loop-last at the op level; the
+          // per-instance hhds cut bit is cleared when the child body is pure.
+  //------------------END LOOP-LAST
+
+  // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
+  // Tuple-related ops (TupAdd, TupGet) and AttrGet were dropped along with
+  // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
+  AttrSet,
+
+  Last_invalid
 };
 
-// Encoding invariant: bit 0 == is_loop_last.
-static_assert((static_cast<uint8_t>(Ntype_op::IO) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Memory) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Flop) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Latch) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Fflop) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Sub) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Clock_cell) & 1) == 0);  // combinational
-static_assert((static_cast<uint8_t>(Ntype_op::Rem) & 1) == 0);         // combinational
-static_assert((static_cast<uint8_t>(Ntype_op::Concat) & 1) == 0);      // combinational
-static_assert((static_cast<uint8_t>(Ntype_op::Sum) & 1) == 0);
-static_assert((static_cast<uint8_t>(Ntype_op::Nconst) & 1) == 0);
-static_assert((static_cast<uint8_t>(Ntype_op::Invalid) & 1) == 0);
-static_assert((static_cast<uint8_t>(Ntype_op::Hotmux) & 1) == 0);
+// Band endpoints the range predicates below rely on. An op added INSIDE a band
+// keeps these true; one appended past AttrSet only grows the tables.
+static_assert(static_cast<uint8_t>(Ntype_op::Sum) == 1);
+static_assert(Ntype_op::Clock_cell < Ntype_op::IO);
+static_assert(Ntype_op::IO < Ntype_op::Memory);
+static_assert(Ntype_op::Memory < Ntype_op::Sub);
+static_assert(Ntype_op::Sub < Ntype_op::AttrSet);
+static_assert(Ntype_op::AttrSet < Ntype_op::Last_invalid);
 
 class Ntype {
 public:
@@ -210,8 +162,7 @@ public:
   static constexpr int Memory_posclk_mixed = 2;
 
 protected:
-  // Sparse: indexed by Ntype_op underlying value. Unused slots ("invalid")
-  // never round-trip through cell_name_map (see the init in cell.cpp).
+  // Dense: indexed by Ntype_op underlying value.
   inline static constexpr auto cell_name_sv = []() {
     std::array<std::string_view, static_cast<size_t>(Ntype_op::Last_invalid) + 1> a{};
     for (auto& s : a) {
@@ -242,7 +193,6 @@ protected:
     a[static_cast<size_t>(Ntype_op::Latch)]    = "latch";
     a[static_cast<size_t>(Ntype_op::Fflop)]    = "fflop";
     a[static_cast<size_t>(Ntype_op::Sub)]      = "sub";
-    a[static_cast<size_t>(Ntype_op::Nconst)]   = "const";
     a[static_cast<size_t>(Ntype_op::Clock_cell)] = "clock_cell";
     a[static_cast<size_t>(Ntype_op::Rem)]      = "rem";
     a[static_cast<size_t>(Ntype_op::Concat)]   = "concat";
@@ -269,11 +219,12 @@ protected:
   static constexpr std::string_view get_sink_name_slow(Ntype_op op, hhds::Port_id pid);
 
 public:
-  static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Nconst || op == Ntype_op::IO; }
-  // Bit 0 of the underlying value encodes loop_last (see the Ntype_op
-  // declaration). This matches the bit HHDS already reserves for its own
-  // is_loop_last flag, so a LiveHD-stored type round-trips both meanings.
-  static inline constexpr bool is_loop_last(Ntype_op op) { return (static_cast<uint8_t>(op) & 1) != 0; }
+  // Band tests over the Ntype_op declaration order (see the enum comment).
+  static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::IO; }
+  static inline constexpr bool is_loop_last(Ntype_op op) { return op >= Ntype_op::Memory && op <= Ntype_op::Sub; }
+  // A computed combinational cell: every op in [Sum .. Clock_cell]. Not the
+  // boundary (IO), not state, not the AttrSet marker.
+  static inline constexpr bool is_comb(Ntype_op op) { return op >= Ntype_op::Sum && op <= Ntype_op::Clock_cell; }
 
   // Ops that only MOVE bits: a pin-tracker maps each result bit back to the
   // (source pin, source bit) it came from, so these mint no gate and add no

@@ -73,15 +73,13 @@ struct Slang_module_state {
   // the width-taking `0sb?` wildcard, so no width/signedness is kept here.
   absl::flat_hash_set<const slang::ast::Symbol*>              output_info_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;  // clocked state vars
-  using Memory_clock = std::pair<const slang::ast::ValueSymbol*, bool>;
-  // LNAST memory clock attributes apply to the whole array, not individual ports.
-  absl::flat_hash_map<const slang::ast::Symbol*, Memory_clock> memory_clocks_;
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> blocking_values_;
   // Symbols that ALSO have a continuous-assign driver. A packed array whose
   // element 0 is `assign`ed while [1..N] are flops (the cvfpu pipeline idiom,
   // `assign q[0] = in; FFL(q[i+1], q[i], …)`) is only PARTLY register, so its
   // async-reset slices can never cover the whole symbol -- see
   // finalize_pending_async_resets.
-  absl::flat_hash_set<const slang::ast::Symbol*>               cont_assign_syms_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              cont_assign_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>
       wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   // A `wire` net that is MULTIPLY written (a case/priority-if or bit-slice
@@ -120,12 +118,6 @@ struct Slang_module_state {
   //   <name>___q   the actual flop -- what an EDGE-PROCESS WRITE targets.
   // Maps the symbol to the flop's net name; empty for everything else.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> partial_reg_shadow_;
-  // Vars BLOCKING-written by an edge process and READ OUTSIDE it. Such a var is
-  // persistent flop state (`always @(posedge p) ms = ms + 1;` + `assign o = ms`)
-  // that this reader does not model; without the diagnostic it lowered to a
-  // stateless `mut`, i.e. the whole register vanished. Filled by
-  // collect_blocking_ff_state, refused by lower_ff_process.
-  absl::flat_hash_set<const slang::ast::Symbol*>              blocking_ff_state_;
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;             // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
   // CLOCKED memories that already took a read-modify-write partial store, per
@@ -483,7 +475,6 @@ private:
   std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
   void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
   void        collect_state_vars(const slang::ast::Scope& body);
-  void        collect_blocking_ff_state(const slang::ast::Scope& body);
   // Module bodies emit DRIVERS (continuous assigns, processes, instances) in
   // dataflow dependency order, not source order: LNAST/tolg resolve reads
   // sequentially, while verilog wires are order-free nets. Combinational
@@ -491,18 +482,18 @@ private:
   void        lower_members(const slang::ast::Scope& scope);
   void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
   void        lower_comb_process(const slang::ast::Statement& body);
-  void        lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
-                               std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
-  void        emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
-                                   bool edge_pos);
-  void        finalize_pending_async_resets();
-  void        lower_instance(const slang::ast::InstanceSymbol& inst);
+  void lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
+                        std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
+  void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref, bool edge_pos,
+                            bool initial_is_ref = false);
+  void finalize_pending_async_resets();
+  void lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
   // no definition, so port directions come from the collect-pass inference
   // (`conn_is_out`, aligned with getPortConnections()). Lowered as a func_call
   // to the definition name; the callee is recorded as an external module on
   // the unit's Lnast so the pyrope emission writes its `import` + call.
-  void        lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
+  void lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
   // Unknown-module definition names already diagnosed (one warning per name,
   // not per instance — XS-scale designs instantiate one SRAM macro x100s).
   absl::flat_hash_set<std::string> unknown_warned_;

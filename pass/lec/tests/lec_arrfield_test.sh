@@ -51,7 +51,7 @@ EOF
 
 compile() {  # $1=src $2=dir $3=reader
   rm -rf "$WORK/$2"; mkdir -p "$WORK/$2"
-  $LHD compile "$WORK/$1" --reader "$3" --top m --emit-dir "verilog:$WORK/$2" --workdir "$WORK/w_$2" \
+  $LHD compile "$WORK/$1" --reader "$3" --top m --emit-dir "verilog:$WORK/$2" --emit-dir "lg:$WORK/${2}_lg" --workdir "$WORK/w_$2" \
        -- --allow-use-before-declare >/dev/null 2>&1 || { echo "FAIL: compile $1 ($3)"; exit 1; }
   cat "$WORK/$2"/*.v > "$WORK/$2_all.v"
 }
@@ -60,7 +60,7 @@ compile good.sv g_ys     yosys-slang
 compile bad.sv  b_native slang
 
 check() {  # $1 $2 (impl ref dirs) -> pass|fail
-  $LHD lec --set formal.lec.hier=false --set formal.solver=lgyosys --impl "verilog:$WORK/$1_all.v" --ref "verilog:$WORK/$2_all.v" --impl-top m --ref-top m \
+  $LHD lec --set formal.lec.hier=false --impl "verilog:$WORK/$1_all.v" --ref "verilog:$WORK/$2_all.v" --impl-top m --ref-top m \
        --workdir "$WORK/c_${1}_${2}_$$" 2>&1 | grep -o '"status":"[a-z]*"' | head -1
 }
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }
