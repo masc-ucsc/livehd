@@ -6,7 +6,7 @@ module scalar_initial_no_reset (
 );
   logic [7:0] decl_q = 8'hA5;
   logic [7:0] block_q;
-  logic [7:0] reset_q = 8'h55;
+  logic [7:0] reset_q;  // explicit reset below; a clashing declaration init is refused
 
   initial block_q = 8'h3C;
 

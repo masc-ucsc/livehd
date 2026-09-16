@@ -1753,7 +1753,43 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // definitive. The obligations close exactly that hole. The predicate is
       // is_structural_identity (semdiff.hpp) -- the SAME one structural_identical()
       // and abc's reuse gate read, so this soundness-critical skip cannot drift.
-      if (o.semdiff != "none" && kids_proven && !o.design_assumes && livehd::semdiff::is_structural_identity(m)) {
+      // A node-set bijection says nothing about the two INTERFACES. Two defs can
+      // match structurally while declaring a top port at different widths or
+      // signedness (`input signed [1:0] a` vs `input a`): the solver path
+      // reconciles that to the domain BOTH declarations can hold and DISCLOSES
+      // it in the verdict, because a proof there does not cover values only the
+      // wider side admits. A bare "structurally identical" would drop that
+      // qualifier, so hand such a pair to the solver instead. Only the skip is
+      // declined -- the def is still proven, just with the disclosure attached.
+      const bool same_interface = [&] {
+        auto* a = ref_by_name[name];
+        auto* b = impl_by_name[name];
+        if (a == nullptr || b == nullptr || a->get_io() == nullptr || b->get_io() == nullptr) {
+          return true;  // nothing to compare; the existing guards decide
+        }
+        auto same = [](const auto& da, const auto& db) {
+          if (da.size() != db.size()) {
+            return false;
+          }
+          for (const auto& pa : da) {
+            bool found = false;
+            for (const auto& pb : db) {
+              if (pa.name != pb.name) {
+                continue;
+              }
+              found = pa.bits == pb.bits && pa.unsign == pb.unsign;
+              break;
+            }
+            if (!found) {
+              return false;
+            }
+          }
+          return true;
+        };
+        return same(a->get_io()->get_input_pin_decls(), b->get_io()->get_input_pin_decls())
+               && same(a->get_io()->get_output_pin_decls(), b->get_io()->get_output_pin_decls());
+      }();
+      if (o.semdiff != "none" && kids_proven && !o.design_assumes && same_interface && livehd::semdiff::is_structural_identity(m)) {
         livehd::lec::Query_result sr;
         sr.verdict         = Verdict::Proven;
         sr.engine          = "semdiff";
@@ -2593,10 +2629,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                        refuted_def,
                                        skipped ? "" : " (top itself inconclusive)",
                                        top_result.detail);
-      have_top = true;
+      have_top           = true;
     } else if (have_top) {
-      top_result.detail += std::format("; child '{}' differs at its boundary, but the top-level discrepancy is unconfirmed",
-                                        refuted_def);
+      top_result.detail
+          += std::format("; child '{}' differs at its boundary, but the top-level discrepancy is unconfirmed", refuted_def);
     }
   }
   if (have_top && top_result.verdict == Verdict::Proven && top_down) {
@@ -3292,15 +3328,15 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   const std::string simfail_path = opts.workdir + "/" + simfail;
   // Preserve the full counterexample even when a graph-only side has no LNAST
   // and cannot be re-emitted as a Pyrope simulation testbench.
-  const std::string json_path = simfail_path.substr(0, simfail_path.size() - 4) + ".json";
+  const std::string json_path    = simfail_path.substr(0, simfail_path.size() - 4) + ".json";
   emit_witness_json(json_path, "simfail", opts.impl_path, opts.ref_path, r.trace);
   if (fs::exists(json_path)) {
     res.outputs.push_back(json_path);
   }
   // Test name = the .prp basename stem, sanitized to a Pyrope identifier; it is
   // also the sole sim instance's VCD stem (`<workdir>/<stem>.vcd`).
-  std::string       stem         = fs::path(simfail_path).stem().string();
-  std::string       test_name;
+  std::string stem = fs::path(simfail_path).stem().string();
+  std::string test_name;
   for (char c : stem) {
     test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
   }
@@ -6916,11 +6952,11 @@ void formal_verify_command(Options& opts, Result& res) {
         // Port list + widths from the FIRST context (same module def => same
         // widths in every instance); binds built per instance below.
         livehd::lec::Monitor mon;
-        mon.block = blk.name;
+        mon.block         = blk.name;
         // Assume scope = the authored block. Every instance context below copies
         // it unchanged (only `block` gains the @instance label), so one block's
         // N instances share one assume set while a sibling block never sees it.
-        mon.scope = blk.name;
+        mon.scope         = blk.name;
         // A tuple-typed port arrives DETUPLED: `io_data:(pc:u64, ..)` is carried as
         // the leaf ports `io_data.pc`, .., and a Bind names exactly ONE signal, so
         // a block that reads the tuple PREFIX cannot bind. The generic message
@@ -6928,8 +6964,8 @@ void formal_verify_command(Options& opts, Result& res) {
         // wire, which sent every such block looking for a compile bug instead of
         // at the one-line spelling fix; so name the leaves when they exist.
         auto tuple_leaves = [&](const std::string& sig_path) {
-          const std::string              pfx = sig_path + ".";
-          std::vector<std::string>       leaves;
+          const std::string        pfx = sig_path + ".";
+          std::vector<std::string> leaves;
           for (const auto* tbl : {&in_tbl, &out_tbl}) {
             for (const auto& [k, v] : *tbl) {
               if (k.compare(0, pfx.size(), pfx) == 0) {
@@ -6950,14 +6986,16 @@ void formal_verify_command(Options& opts, Result& res) {
             const auto  leaves = tuple_leaves(in.path);
             std::string hint;
             if (leaves.empty()) {
-              hint = "blocks reach top input/output ports, registers (dotted through instances), and — for a "
-                     "submodule-bound block — the target instance's ports; internal wires and memory "
-                     "elements come later";
+              hint
+                  = "blocks reach top input/output ports, registers (dotted through instances), and — for a "
+                    "submodule-bound block — the target instance's ports; internal wires and memory "
+                    "elements come later";
             } else {
-              hint = std::format("'{}' is a TUPLE port, carried as its leaf ports; a block binds one signal per "
-                                 "read, so name a leaf: {}",
-                                 in.path,
-                                 absl::StrJoin(leaves, ", "));
+              hint = std::format(
+                  "'{}' is a TUPLE port, carried as its leaf ports; a block binds one signal per "
+                  "read, so name a leaf: {}",
+                  in.path,
+                  absl::StrJoin(leaves, ", "));
             }
             throw Lhd_error{
                 "usage",

@@ -5704,121 +5704,11 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     // slices must be constant. Validate-and-collect first, emit after — a partial
     // emit would leave stray reset attrs behind when a later statement fails
     // the walk and the demote fallback lowers the arm synchronously instead.
-    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>>                   reset_stores;
-    std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> async_loads;
-    // PARTIAL (bit-range) reset writes: `if (!rst_b) begin q[9:1] <= 0; q[0] <= 1; end`
-    // is one constant reset value spelled across several slices. Requiring a
-    // whole-reg NamedValue write rejected it, and the whole always block then
-    // demoted to a SYNCHRONOUS reset -- a real behaviour change (the reset no
-    // longer takes effect off the clock edge), which LEC refutes. Accumulate the
-    // slices per reg and fold them into one `initial=` value once every bit of
-    // the reg is covered; anything short of full coverage still demotes, because
-    // the uncovered bits would have to HOLD, which a reset value cannot express.
-    struct Partial {
-      uint64_t value = 0;
-      uint64_t mask  = 0;  // bits written so far
-      uint64_t full  = 0;  // all bits of the reg
-    };
-    std::vector<std::pair<const slang::ast::ValueSymbol*, Partial>> partials;
-    auto partial_of = [&](const slang::ast::ValueSymbol* sym) -> Partial* {
-      for (auto& [s, p] : partials) {
-        if (s == sym) {
-          return &p;
-        }
-      }
-      partials.emplace_back(sym, Partial{});
-      return &partials.back().second;
-    };
-    std::function<bool(const slang::ast::Statement&)> harvest = [&](const slang::ast::Statement& s) -> bool {
-      switch (s.kind) {
-        case StatementKind::Empty: return true;
-        case StatementKind::Block: return harvest(s.as<slang::ast::BlockStatement>().body);
-        case StatementKind::List : {
-          for (const auto* sub : s.as<slang::ast::StatementList>().list) {
-            if (!harvest(*sub)) {
-              return false;
-            }
-          }
-          return true;
-        }
-        case StatementKind::Conditional: {
-          // Reset arms commonly guard config-dependent regs with a compile-time
-          // `if` (e.g. `if (CVA6Cfg.RVZCMT) ...`, `if (FPGA_ALTERA) ...`). Fold
-          // the constant condition and harvest only the taken branch.
-          const auto& cs = s.as<slang::ast::ConditionalStatement>();
-          if (cs.conditions.size() != 1 || cs.conditions[0].pattern != nullptr) {
-            return false;
-          }
-          auto cv = try_eval(*cs.conditions[0].expr);
-          if (!cv || !cv->isInteger()) {
-            return false;  // a non-constant reset guard has no flop lowering
-          }
-          if (cv->isTrue()) {
-            return harvest(cs.ifTrue);
-          }
-          return cs.ifFalse == nullptr ? true : harvest(*cs.ifFalse);
-        }
-        case StatementKind::ExpressionStatement: {
-          const auto& e = s.as<slang::ast::ExpressionStatement>().expr;
-          if (e.kind != ExpressionKind::Assignment) {
-            return false;
-          }
-          const auto& as  = e.as<slang::ast::AssignmentExpression>();
-          const auto* sym = lhs_base_symbol(as.left());
-          if (sym == nullptr || !reg_syms_.contains(sym)) {
-            return false;
-          }
-          // NOTE (provenance, deferred): a bare `q <= PKG_PARAM` reset load
-          // still FOLDS here — carrying the name through the `initial` attr as
-          // a ref mis-resolves on recompile (LEC-refuted), so it needs the
-          // attr-resolution work first (see provenance.md M6).
-          auto cv = try_eval_const_net(as.right());
-          if (!cv || !cv->isInteger()) {
-            if (as.isNonBlocking() && as.left().kind == ExpressionKind::NamedValue && !sym->getType().isUnpackedArray()
-                && !packed_mem_regs_.contains(sym)) {
-              async_loads.emplace_back(sym, &as.right());
-              return true;
-            }
-            return false;
-          }
-          if (as.left().kind == ExpressionKind::NamedValue) {
-            reset_stores.emplace_back(sym, const_text(cv->integer()));
-            return true;
-          }
-          // A constant SLICE of the reg: use the normal packed-lvalue resolver
-          // so multi-dimensional packed arrays get the same flattened offset
-          // as their ordinary writes (`q[1]` in `[1:0][3:0] q` starts at bit
-          // four, not bit one).
-          const auto& lhs_e = as.left();
-          if (lhs_e.kind != ExpressionKind::ElementSelect && lhs_e.kind != ExpressionKind::RangeSelect) {
-            return false;
-          }
-          Packed_lv lv;
-          if (!resolve_packed_lvalue(lhs_e, lv) || lv.base != sym || !lv.dyn_off.empty()) {
-            return false;
-          }
-          const uint64_t reg_bits = sym->getType().getBitWidth();
-          const int64_t  slice_w  = lv.width;
-          const int64_t  lo       = lv.const_off;
-          if (reg_bits == 0 || reg_bits > 63 || slice_w <= 0 || lo < 0 || static_cast<uint64_t>(lo + slice_w) > reg_bits) {
-            return false;  // >63 bits does not fit the uint64 accumulator
-          }
-          const uint64_t slice_mask = slice_w >= 64 ? ~uint64_t{0} : ((uint64_t{1} << slice_w) - 1);
-          const uint64_t slice_val  = cv->integer().as<uint64_t>().value_or(0) & slice_mask;
-          auto*          p          = partial_of(sym);
-          p->full                   = (uint64_t{1} << reg_bits) - 1;
-          const uint64_t placed     = slice_mask << static_cast<uint64_t>(lo);
-          if ((p->mask & placed) != 0) {
-            return false;  // overlapping writes: last-wins ordering is not modelled here
-          }
-          p->mask  |= placed;
-          p->value |= slice_val << static_cast<uint64_t>(lo);
-          return true;
-        }
-        default: return false;
-      }
-    };
-    bool harvested = harvest(cond_stmt.ifTrue);
+    Reset_arm arm;
+    auto&     reset_stores = arm.stores;
+    auto&     async_loads  = arm.loads;
+    auto&     partials     = arm.partials;
+    bool      harvested    = harvest_reset_arm(cond_stmt.ifTrue, arm, /*allow_loads=*/true);
     // A symbol that ALSO has a continuous-assign driver is only PARTLY a
     // register, so `full` (its whole declared width) is a denominator the reset
     // slices can never reach — queueing it would only guarantee a spurious
@@ -5910,12 +5800,314 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     peeled_any = true;  // a demote after this point would drop this reset — gate (1)
   }
 
+  // ── Synchronous reset: the typical Verilog spelling ──────────────────────
+  //     always_ff @(posedge clk) if (rst) q <= C; else q <= d;
+  // carries no extra edge trigger to key on, so the rung loop above never sees
+  // it and this reader lowered the guard as ordinary clocked logic. The
+  // register then had NO reset in LiveHD's vocabulary: `initial-without-reset`
+  // fired on a register that is plainly reset, latch_contract's
+  // reset_input_ports reported no reset port for the definition, and a
+  // declaration initializer that CONTRADICTS the reset value could not be
+  // diagnosed (emit_reg_reset_attrs never ran for it) -- the initializer
+  // silently won, so `reg [7:0] r = 8'hA5;` + `if (rst) r <= 8'h00;` reset the
+  // compiled model to a5 where the source resets to 00.
+  //
+  // Peel it into the same per-reg attrs the async rungs use, with `sync=true`.
+  // The guard is deliberately conservative, and every rejection falls through
+  // to the previous lowering rather than erroring -- recognition may not turn a
+  // legal design into a failure:
+  //   * nothing was peeled asynchronously (one Flop has ONE reset_pin);
+  //   * the condition reduces to a plain, module-visible 1-bit signal whose
+  //     name is reset-like by the SHARED token test (str_tools, the same one
+  //     the async demotion and the LEC reset harness use) -- so an ordinary
+  //     `if (enable) q <= 0; else ...` is NOT reclassified as a reset;
+  //   * there is an else arm to carry the residual body;
+  //   * the arm assigns only CONSTANTS, covering each register exactly (a
+  //     runtime value under a clocked `if` is data, not a reset value);
+  //   * no register in the arm already carries a reset.
+  if (!peeled_any) {
+    std::vector<const slang::ast::Statement*> sync_pre;
+    const slang::ast::Statement*              cand = body;
+    while (true) {
+      if (cand->kind == StatementKind::Block) {
+        cand = &cand->as<slang::ast::BlockStatement>().body;
+        continue;
+      }
+      if (cand->kind == StatementKind::List) {
+        // Same shape the rung loop accepts: local declarations may precede the
+        // lone conditional and lower with the clocked body.
+        const slang::ast::Statement*              only = nullptr;
+        std::vector<const slang::ast::Statement*> pre;
+        bool                                      ok = true;
+        for (const auto* sub : cand->as<slang::ast::StatementList>().list) {
+          if (sub->kind == StatementKind::Empty) {
+            continue;
+          }
+          if (sub->kind == StatementKind::VariableDeclaration) {
+            pre.push_back(sub);
+          } else if (sub->kind == StatementKind::Conditional && only == nullptr) {
+            only = sub;
+          } else {
+            ok = false;
+            break;
+          }
+        }
+        if (ok && only != nullptr) {
+          sync_pre.insert(sync_pre.end(), pre.begin(), pre.end());
+          cand = only;
+          continue;
+        }
+      }
+      break;
+    }
+    const slang::ast::ConditionalStatement* cs
+        = cand->kind == StatementKind::Conditional ? &cand->as<slang::ast::ConditionalStatement>() : nullptr;
+    if (cs != nullptr && cs->conditions.size() == 1 && cs->conditions[0].pattern == nullptr && cs->ifFalse != nullptr) {
+      // Normalize to (signal, active-high polarity), as the async rung does.
+      const slang::ast::Expression* cond     = cs->conditions[0].expr;
+      bool                          polarity = true;
+      while (true) {
+        if (cond->kind == ExpressionKind::UnaryOp) {
+          const auto& un = cond->as<slang::ast::UnaryExpression>();
+          if (un.op == slang::ast::UnaryOperator::LogicalNot || un.op == slang::ast::UnaryOperator::BitwiseNot) {
+            polarity = !polarity;
+            cond     = &un.operand();
+            continue;
+          }
+        }
+        if (cond->kind == ExpressionKind::Conversion) {
+          cond = &cond->as<slang::ast::ConversionExpression>().operand();
+          continue;
+        }
+        if (cond->kind == ExpressionKind::BinaryOp) {
+          const auto& bin = cond->as<slang::ast::BinaryExpression>();
+          if (bin.op == slang::ast::BinaryOperator::Equality || bin.op == slang::ast::BinaryOperator::Inequality) {
+            if (auto cv = try_eval(bin.right()); cv && cv->isInteger()) {
+              const bool rhs_true = cv->isTrue();
+              if (bin.op == slang::ast::BinaryOperator::Inequality ? rhs_true : !rhs_true) {
+                polarity = !polarity;
+              }
+              cond = &bin.left();
+              continue;
+            }
+          }
+        }
+        break;
+      }
+      auto        sig     = plain_event_signal(*cond);
+      const auto* rst_sym = (sig && !sig->bit) ? sig->sym : nullptr;
+      const bool  visible = rst_sym != nullptr && (input_syms_.contains(rst_sym) || is_module_level(*rst_sym));
+      if (visible && rst_sym->getType().getBitWidth() == 1 && is_reset_like_name(rst_sym->name)) {
+        Reset_arm arm;
+        bool      ok = harvest_reset_arm(cs->ifTrue, arm, /*allow_loads=*/false) && arm.loads.empty();
+        // Fold the constant slices; unlike the async twin there is no
+        // cross-process queue here, so an incompletely covered register simply
+        // declines the peel (the uncovered bits would have to HOLD, which one
+        // reset value cannot express).
+        for (const auto& [sym, p] : arm.partials) {
+          if (p.mask != p.full) {
+            ok = false;
+            break;
+          }
+          arm.stores.emplace_back(sym, std::to_string(p.value));
+        }
+        for (const auto& [sym, value] : arm.stores) {
+          (void)value;
+          if (reset_attr_syms_.contains(sym) || cont_assign_syms_.contains(sym)) {
+            ok = false;  // already reset, or only PARTLY a register
+            break;
+          }
+        }
+        if (ok && !arm.stores.empty()) {
+          if (!input_syms_.contains(rst_sym) && !declared_.contains(rst_sym)) {
+            declare_value_symbol(*rst_sym, /*force_reg=*/false);
+          }
+          const std::string reset_ref_name = lname_of(*rst_sym);
+          for (const auto& [sym, value] : arm.stores) {
+            emit_reg_reset_attrs(*sym, value, reset_ref_name, /*edge_pos=*/polarity, /*initial_is_ref=*/false, /*async=*/false);
+          }
+          // The residual body must still not write while reset is held: a
+          // register the arm does NOT reset (a memory, say) only updates in the
+          // else arm. Same gate the async peel installs, and harmlessly
+          // redundant on the reset-bearing flops (their reset attr wins).
+          auto inactive_guard = booleanize(reset_ref_name);
+          if (polarity) {
+            inactive_guard = mark_bool(builder_.create_log_not_stmts(inactive_guard));
+          }
+          inactive_async_guards.push_back(std::move(inactive_guard));
+          for (const auto* p : sync_pre) {
+            prologue.push_back(p);
+          }
+          body = cs->ifFalse;
+        }
+      }
+    }
+  }
+
   lower_ff_process(*edges[0], *body, prologue, inactive_async_guards);
 }
 
+// Harvest a reset ARM: every statement must store a CONSTANT into a register
+// (whole-register, or constant slices that together cover it). Shared by the
+// asynchronous rung peel and the synchronous-reset recognition below so the two
+// cannot drift apart. `allow_loads` admits an async LOAD (a runtime value the
+// reset arm drives); a synchronous arm rejects it, because a runtime value
+// under a clocked `if` is ordinary data with no `initial` to ride on.
+// Validate-and-collect: the caller emits nothing until the whole arm harvests,
+// so a partial walk leaves no stray reset attrs behind.
+bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads) {
+  using slang::ast::ExpressionKind;
+  using slang::ast::StatementKind;
+  // PARTIAL (bit-range) reset writes: `if (!rst_b) begin q[9:1] <= 0; q[0] <= 1; end`
+  // is one constant reset value spelled across several slices. Requiring a
+  // whole-reg NamedValue write rejected it, and the whole always block then
+  // demoted to a SYNCHRONOUS reset -- a real behaviour change (the reset no
+  // longer takes effect off the clock edge), which LEC refutes. Accumulate the
+  // slices per reg and fold them into one `initial=` value once every bit of
+  // the reg is covered; anything short of full coverage still demotes, because
+  // the uncovered bits would have to HOLD, which a reset value cannot express.
+  auto partial_of = [&](const slang::ast::ValueSymbol* sym) -> Reset_arm::Partial* {
+    for (auto& [s, p] : out.partials) {
+      if (s == sym) {
+        return &p;
+      }
+    }
+    out.partials.emplace_back(sym, Reset_arm::Partial{});
+    return &out.partials.back().second;
+  };
+  std::function<bool(const slang::ast::Statement&)> harvest = [&](const slang::ast::Statement& s) -> bool {
+    switch (s.kind) {
+      case StatementKind::Empty: return true;
+      case StatementKind::Block: return harvest(s.as<slang::ast::BlockStatement>().body);
+      case StatementKind::List : {
+        for (const auto* sub : s.as<slang::ast::StatementList>().list) {
+          if (!harvest(*sub)) {
+            return false;
+          }
+        }
+        return true;
+      }
+      case StatementKind::Conditional: {
+        // Reset arms commonly guard config-dependent regs with a compile-time
+        // `if` (e.g. `if (CVA6Cfg.RVZCMT) ...`, `if (FPGA_ALTERA) ...`). Fold
+        // the constant condition and harvest only the taken branch.
+        const auto& cs = s.as<slang::ast::ConditionalStatement>();
+        if (cs.conditions.size() != 1 || cs.conditions[0].pattern != nullptr) {
+          return false;
+        }
+        auto cv = try_eval(*cs.conditions[0].expr);
+        if (!cv || !cv->isInteger()) {
+          return false;  // a non-constant reset guard has no flop lowering
+        }
+        if (cv->isTrue()) {
+          return harvest(cs.ifTrue);
+        }
+        return cs.ifFalse == nullptr ? true : harvest(*cs.ifFalse);
+      }
+      case StatementKind::ExpressionStatement: {
+        const auto& e = s.as<slang::ast::ExpressionStatement>().expr;
+        if (e.kind != ExpressionKind::Assignment) {
+          return false;
+        }
+        const auto& as  = e.as<slang::ast::AssignmentExpression>();
+        const auto* sym = lhs_base_symbol(as.left());
+        if (sym == nullptr || !reg_syms_.contains(sym)) {
+          return false;
+        }
+        // NOTE (provenance, deferred): a bare `q <= PKG_PARAM` reset load
+        // still FOLDS here — carrying the name through the `initial` attr as
+        // a ref mis-resolves on recompile (LEC-refuted), so it needs the
+        // attr-resolution work first (see provenance.md M6).
+        auto cv = try_eval_const_net(as.right());
+        if (!cv || !cv->isInteger()) {
+          if (as.isNonBlocking() && as.left().kind == ExpressionKind::NamedValue && !sym->getType().isUnpackedArray()
+              && !packed_mem_regs_.contains(sym)) {
+            if (!allow_loads) {
+              return false;  // a runtime SYNC reset value is ordinary data, not a reset
+            }
+            out.loads.emplace_back(sym, &as.right());
+            return true;
+          }
+          return false;
+        }
+        if (as.left().kind == ExpressionKind::NamedValue) {
+          out.stores.emplace_back(sym, const_text(cv->integer()));
+          return true;
+        }
+        // A constant SLICE of the reg: use the normal packed-lvalue resolver
+        // so multi-dimensional packed arrays get the same flattened offset
+        // as their ordinary writes (`q[1]` in `[1:0][3:0] q` starts at bit
+        // four, not bit one).
+        const auto& lhs_e = as.left();
+        if (lhs_e.kind != ExpressionKind::ElementSelect && lhs_e.kind != ExpressionKind::RangeSelect) {
+          return false;
+        }
+        Packed_lv lv;
+        if (!resolve_packed_lvalue(lhs_e, lv) || lv.base != sym || !lv.dyn_off.empty()) {
+          return false;
+        }
+        const uint64_t reg_bits = sym->getType().getBitWidth();
+        const int64_t  slice_w  = lv.width;
+        const int64_t  lo       = lv.const_off;
+        if (reg_bits == 0 || reg_bits > 63 || slice_w <= 0 || lo < 0 || static_cast<uint64_t>(lo + slice_w) > reg_bits) {
+          return false;  // >63 bits does not fit the uint64 accumulator
+        }
+        const uint64_t slice_mask = slice_w >= 64 ? ~uint64_t{0} : ((uint64_t{1} << slice_w) - 1);
+        const uint64_t slice_val  = cv->integer().as<uint64_t>().value_or(0) & slice_mask;
+        auto*          p          = partial_of(sym);
+        p->full                   = (uint64_t{1} << reg_bits) - 1;
+        const uint64_t placed     = slice_mask << static_cast<uint64_t>(lo);
+        if ((p->mask & placed) != 0) {
+          return false;  // overlapping writes: last-wins ordering is not modelled here
+        }
+        p->mask  |= placed;
+        p->value |= slice_val << static_cast<uint64_t>(lo);
+        return true;
+      }
+      default: return false;
+    }
+  };
+  return harvest(arm);
+}
+
 void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
-                                         bool edge_pos, bool initial_is_ref) {
+                                         bool edge_pos, bool initial_is_ref, bool async) {
   declare_reg(sym);  // ensure declared (hoisting normally did)
+  // A declaration initializer and an explicit reset value both ride the ONE
+  // `initial` pin -- power-on value IS the reset value, the same contract
+  // upass.tolg already enforces for a reg ARRAY (`= <const>` next to
+  // `initial=`: "two different values is a contradiction, not an override").
+  // Two DIFFERENT values cannot both be represented, and silently keeping one
+  // of them is a miscompile in whichever direction the path happens to take:
+  //   reg [7:0] r = 8'hA5;
+  //   always_ff @(posedge clk or posedge rst) if (rst) r <= 8'h00; else ...
+  // dropped the a5 here, while the synchronous spelling of the same clash kept
+  // the a5 and reset to it instead of to 00 (measured: the source resets to 00,
+  // the compiled model to a5). Refuse it rather than pick.
+  if (auto it = reg_init_vals_.find(&sym); it != reg_init_vals_.end()) {
+    // A runtime async-LOAD value is never the constant power-on value, so it
+    // clashes by construction; two constants clash only when they differ.
+    bool agrees = false;
+    if (!initial_is_ref) {
+      auto decl_val  = Dlop::from_pyrope(it->second);
+      auto reset_val = Dlop::from_pyrope(initial);
+      agrees         = decl_val && reset_val && !decl_val->is_invalid() && !reset_val->is_invalid()
+                       && decl_val->eq_op(*reset_val)->is_known_true();
+    }
+    if (!agrees) {
+      emit_unsupported(slang::SourceRange(sym.location, sym.location),
+                       "reset-init-mismatch",
+                       std::string("register '") + std::string(sym.name) + "' declares the power-on value " + it->second
+                           + " but is reset to " + std::string(initial)
+                           + "; a register has ONE initial value (its power-on value IS its reset value), so the two must agree",
+                       "drop the declaration initializer, or give it the same value as the reset");
+      // The reg DOES carry an explicit reset -- that is what clashed -- so keep
+      // the `initial-without-reset` warning off the same register: it would
+      // report the opposite of the error just emitted.
+      reset_attr_syms_.insert(&sym);
+      return;
+    }
+  }
   auto name = reg_net_of(sym);
   struct Reset_target {
     std::string name;
@@ -5984,7 +6176,7 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
       }
     }
     emit_attr(target.name, "reset_pin", reset_ref, true);
-    emit_attr(target.name, "sync", "false", false);
+    emit_attr(target.name, "sync", async ? "false" : "true", false);
     if (!edge_pos) {
       emit_attr(target.name, "negreset", "true", false);
     }

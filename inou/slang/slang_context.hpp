@@ -23,8 +23,8 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "slang_location.hpp"
 #include "absl/container/flat_hash_set.h"
+#include "slang_location.hpp"
 
 // clang-format off
 #include "slang/ast/Compilation.h"
@@ -485,8 +485,24 @@ private:
   void        lower_comb_process(const slang::ast::Statement& body);
   void lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
                         std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
+  // Constant register values collected from one reset arm. `stores` are
+  // whole-register writes, `partials` accumulate constant SLICES of one
+  // register, and `loads` are runtime values an ASYNC arm may drive.
+  struct Reset_arm {
+    struct Partial {
+      uint64_t value = 0;
+      uint64_t mask  = 0;  // bits written so far
+      uint64_t full  = 0;  // all bits of the reg
+    };
+    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>>                   stores;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> loads;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, Partial>>                       partials;
+  };
+  bool harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads);
+  // `async` picks the reset FLAVOUR: an edge-triggered rung (the default) emits
+  // `sync=false`, a recognized synchronous `if (rst)` guard emits `sync=true`.
   void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref, bool edge_pos,
-                            bool initial_is_ref = false);
+                            bool initial_is_ref = false, bool async = true);
   void finalize_pending_async_resets();
   void lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
@@ -947,7 +963,7 @@ private:
   static std::string ref_name_of_raw(std::string_view raw);
 
   // ── provenance + diagnostics (all through the slang_loc seam) ─────────────
-  hhds::SourceId mint_loc(slang::SourceRange range);
+  hhds::SourceId                  mint_loc(slang::SourceRange range);
   // Files already ingested by mint_loc in THIS read. Lives on the context (one
   // per compilation) rather than on a locator, because the reader builds one
   // Lnast -- and so one Source_locator -- per module: without a shared cache
@@ -956,15 +972,15 @@ private:
   // are handed to the caller by pick_lnast) stay valid; nothing points BACK at
   // the context, which is why this is a cache and not a Source_locator base.
   livehd::slang_loc::Ingest_cache src_ingest_;
-  hhds::SourceId mint_loc(slang::SourceLocation loc) { return mint_loc(slang::SourceRange(loc, loc)); }
-  void           set_pending_loc(slang::SourceRange range);
-  void           set_pending_loc(slang::SourceLocation loc) { set_pending_loc(slang::SourceRange(loc, loc)); }
-  void           clear_pending_loc();
+  hhds::SourceId                  mint_loc(slang::SourceLocation loc) { return mint_loc(slang::SourceRange(loc, loc)); }
+  void                            set_pending_loc(slang::SourceRange range);
+  void                            set_pending_loc(slang::SourceLocation loc) { set_pending_loc(slang::SourceRange(loc, loc)); }
+  void                            clear_pending_loc();
   // Located `category=unsupported` error: an SV construct the direct reader
   // does not lower. Nothing falls through silently (CIRCT's default-visit
   // policy); expression-level callers return "0" afterwards to keep lowering
   // so one run reports every unsupported site.
-  void           emit_unsupported(slang::SourceRange range, std::string_view code, std::string message, std::string_view hint = {});
+  void emit_unsupported(slang::SourceRange range, std::string_view code, std::string message, std::string_view hint = {});
   void emit_unsupported(slang::SourceLocation loc, std::string_view code, std::string message, std::string_view hint = {}) {
     emit_unsupported(slang::SourceRange(loc, loc), code, std::move(message), hint);
   }
