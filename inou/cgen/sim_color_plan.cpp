@@ -96,7 +96,7 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
       return kPacked_footprint_bail;
     }
     if (value.has_unknowns()) {
-      return {0, value.get_bits()};
+      return {0, value.get_signed_bits()};
     }
     const int first = value.get_first_bit_set();
     const int last  = value.get_last_bit_set();
@@ -1627,11 +1627,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           bool transparent = false;
           if (!value.is_invalid() && !mask.is_invalid()) {
             const auto& constant = gu::const_of(mask);
-            transparent          = constant.is_just_i64() && constant.to_just_i64() == -1;
+            transparent          = gu::is_whole_value_mask(constant);
             if (!transparent && gu::is_unsign(value)) {
-              const auto [mask_lo, mask_hi] = constant.get_mask_range();
-              const auto value_bits         = gu::bits_of(value);
-              transparent                   = mask_lo == 0 && value_bits > 0 && mask_hi >= value_bits;
+              if (auto window = gu::mask_window_of(constant); window) {
+                const auto value_bits = gu::bits_of(value);
+                transparent           = window->first == 0 && value_bits > 0 && window->second >= value_bits;
+              }
             }
           }
           if (!transparent || value.is_invalid()) {
@@ -1712,11 +1713,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             if (value.is_invalid() || mask.is_invalid() || !mask.is_const()) {
               break;
             }
-            const auto& constant          = gu::const_of(mask);
-            const auto [mask_lo, mask_hi] = constant.get_mask_range();
-            if (constant.has_unknowns() || !constant.is_positive() || mask_lo < 0 || mask_hi <= mask_lo || hi > mask_hi - mask_lo) {
+            const auto window = gu::mask_window_of(gu::const_of(mask));
+            if (!window || hi > window->second - window->first) {
               break;
             }
+            const auto [mask_lo, mask_hi] = *window;
             // Compose nested constant slices before crossing a packed child
             // output. A wide child field may span several Or/SHL lanes even
             // though its parent consumes only one narrow subfield; tracing the
@@ -1793,14 +1794,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           if (mask.is_invalid() || !mask.is_const()) {
             break;
           }
-          const auto& constant = gu::const_of(mask);
-          if (constant.has_unknowns() || constant.is_negative()) {
+          const auto window = gu::mask_window_of(gu::const_of(mask));
+          if (!window) {
             break;
           }
-          const auto [write_lo, write_hi] = constant.get_mask_range();
-          if (write_lo < 0 || write_hi <= write_lo) {
-            break;
-          }
+          const auto [write_lo, write_hi] = *window;
           if (lo >= write_lo && hi <= write_hi) {
             if (value.is_invalid()) {
               break;
@@ -1829,8 +1827,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           // false hierarchy cycle. This common tail covers Concat, Set_mask,
           // and shift/Or packed spellings alike.
           auto selected = gu::const_of(crossing);
-          if (lo != 0 || hi < std::max(selected.get_bits(), 1)) {
-            selected = *selected.get_mask_op(*Dlop::get_mask_value(hi - 1, lo));
+          if (lo != 0 || hi < std::max(selected.get_signed_bits(), 1)) {
+            selected = *selected.get_mask_op_opt(lo, hi);
           }
           producer_literal = selected.to_pyrope();
           producer_width   = static_cast<uint32_t>(hi - lo);
@@ -4119,6 +4117,29 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   plan.summary_.color_merges   = plan.summary_.fine_colors - plan.summary_.colors;
 
   return plan;
+}
+
+const std::vector<size_t>& Color_plan::colors_in_execution_order() const {
+  if (colors_in_execution_order_.size() != colors_.size()) {
+    colors_in_execution_order_.assign(colors_.size(), 0);
+    for (size_t color = 0; color < colors_.size(); ++color) {
+      const auto rank = colors_[color].execution_order;
+      // A dense rank: place directly. A malformed (out-of-range or repeated)
+      // rank cannot happen for a plan assign_color_order built, but fall back
+      // to a sort rather than write out of bounds if one ever does.
+      if (rank >= colors_.size()) {
+        colors_in_execution_order_.clear();
+        break;
+      }
+      colors_in_execution_order_[rank] = color;
+    }
+    if (colors_in_execution_order_.size() != colors_.size()) {
+      colors_in_execution_order_.resize(colors_.size());
+      std::iota(colors_in_execution_order_.begin(), colors_in_execution_order_.end(), 0);
+      std::ranges::sort(colors_in_execution_order_, {}, [&](size_t color) { return colors_[color].execution_order; });
+    }
+  }
+  return colors_in_execution_order_;
 }
 
 bool Color_plan::validate_retained_handles() const {

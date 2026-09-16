@@ -58,13 +58,18 @@ const q:yy = (a=3, b=1)
 cassert(p == q)                // structural — same field names + values
 
 
-// ── 4. `comptime` is non-sticky on copy. Assigning a comptime value
-//       into a runtime mut variable drops the flag.
+// ── 4. `comptime` on copy. RULING PENDING (2026-09-14): the spec example in
+//       04b-attributes.md (`yyy = xx` after `comptime const foo = xx`, then
+//       `cassert(yyy.[comptime])`) says a value copied FROM a comptime value
+//       reads comptime, and that is what the compiler does. This section
+//       originally claimed the opposite ("non-sticky on copy") but never
+//       checked it: the old bitwise `!` made `cassert(!(x))` pass for every
+//       x. Asserting the implemented + spec'd behavior until ruled.
 comptime const k = 5
 cassert(k.[comptime])
 mut r:u4 = k
 cassert(r == 5)
-cassert(!(r.[comptime]))        // comptime not inherited
+cassert(r.[comptime])           // inherited from the comptime const
 
 
 // ── 5. Recursive bundle. The deep-copy of nested complex types is fully

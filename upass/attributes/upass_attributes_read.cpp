@@ -183,9 +183,9 @@ std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
     // source of truth: `:u8` lowers to `int(0,255)` so a width type already
     // carries it; reconstructing a max FROM `bits` here would be the inverted
     // dependency the review (cat 1) calls out (bits is derived from max/min,
-    // not the other way round). bool keeps its own {-1,0} envelope.
+    // not the other way round). bool is the hardware u1: envelope {0,1}.
     if (ti->kind == Numeric_kind::boolean) {
-      return *Dlop::create_integer(0);
+      return *Dlop::create_integer(1);
     }
   }
   return std::nullopt;
@@ -202,10 +202,10 @@ std::optional<Dlop> uPass_attributes::derive_min(std::string_view base) const {
     }
     // No range_min pinned ⇒ min is unbounded (nil). range_min is the single
     // source of truth (`:u8` lowers to `int(0,255)`); reconstructing a min FROM
-    // `bits` is the inverted dependency the review (cat 1) calls out. bool keeps
-    // its own {-1,0} envelope.
+    // `bits` is the inverted dependency the review (cat 1) calls out. bool is
+    // the hardware u1: envelope {0,1}, so it is never signed.
     if (ti->kind == Numeric_kind::boolean) {
-      return *Dlop::create_integer(-1);
+      return *Dlop::create_integer(0);
     }
   }
   return std::nullopt;
@@ -232,13 +232,13 @@ std::optional<Dlop> uPass_attributes::derive_bits(std::string_view base, std::st
   std::optional<Dlop> min_v = lookup_attr_value(base, "min");
   if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
     // Derive bits from the bound Consts directly (handles >64-bit, no to_i).
-    // get_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
+    // get_signed_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
     // sign bit, for a signed range take the widest signed bound.
     int64_t bits;
     if (!min_v->is_negative()) {
-      bits = max_v->is_known_zero() ? 0 : static_cast<int64_t>(max_v->get_bits() - 1);
+      bits = static_cast<int64_t>(max_v->get_payload_bits());
     } else {
-      bits = std::max<int64_t>(max_v->get_bits(), min_v->get_bits());
+      bits = std::max<int64_t>(max_v->get_signed_bits(), min_v->get_signed_bits());
     }
     return *Dlop::create_integer(bits);
   }
@@ -528,16 +528,16 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
     }
     // Recover the legacy kind/bits view from the range so wrap/sat narrowing
     // (which reads `kind`+`bits`) keeps working. Signedness from min<0; bits
-    // derived from the bound Consts via get_bits() (signed width; drop the sign
+    // derived from the bound Consts via get_signed_bits() (signed width; drop the sign
     // bit for unsigned) — no to_i, handles >64-bit bounds.
     if (range_min) {
       kind = range_min->is_negative() ? Numeric_kind::signed_int : Numeric_kind::unsigned_int;
     }
     if (range_max && range_min && range_max->is_integer() && range_min->is_integer()) {
       if (!range_min->is_negative()) {
-        bits = range_max->is_known_zero() ? 0 : static_cast<uint32_t>(range_max->get_bits() - 1);
+        bits = static_cast<uint32_t>(range_max->get_payload_bits());
       } else {
-        bits = static_cast<uint32_t>(std::max<int64_t>(range_max->get_bits(), range_min->get_bits()));
+        bits = static_cast<uint32_t>(std::max<int64_t>(range_max->get_signed_bits(), range_min->get_signed_bits()));
       }
     }
   } else if (Lnast_ntype::is_prim_type_bool(t)) {

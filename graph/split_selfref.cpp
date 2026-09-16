@@ -132,7 +132,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       if (c.has_unknowns()) {
         // a '?'-const (the slang->prp X-seed idiom) still occupies FIXED bit
         // positions: its declared width is a sound upper bound
-        return {0, static_cast<int>(c.get_bits())};
+        return {0, static_cast<int>(c.get_signed_bits())};
       }
       int lo = c.get_first_bit_set();
       int hi = c.get_last_bit_set();
@@ -234,12 +234,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         }
         // mask == -1 is the "to-unsigned" idiom: the RESULT is the non-negative
         // low sig bits of the output pin (fall through to the unsigned bound).
-        if (!(mc.is_just_i64() && mc.to_just_i64() == -1)) {
-          auto [a, b] = mc.get_mask_range();
-          if (a < 0 || b < 0 || b > (1 << 28)) {
-            return kBail;  // noncontiguous / open / negative mask
+        if (!gu::is_whole_value_mask(mc)) {
+          auto window = gu::mask_window_of(mc);
+          if (!window || window->second > (1 << 28)) {
+            return kBail;
           }
-          int w = b - a;
+          const auto [a, b] = *window;
+          int        w      = b - a;
           if (w <= 1) {
             // The EMITTED single-bit Get_mask clamps to a 0/1 magnitude
             // (node_expr appends .zext_to<1>() for a popcount-1 mask), so at
@@ -287,7 +288,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   //  * Concat -> re-based descent into the lane(s) the slice lands in (the
   //    disjointness the Or spelling must PROVE is a cell invariant here)
   auto mask_const
-      = [&](int lo, int hi) -> hhds::Pin_class { return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo)); };
+      = [&](int lo, int hi) -> hhds::Pin_class { return livehd::graph_util::create_const(*g, gu::mask_window_const(lo, hi)); };
   // Node-creation budget, split into a PER-READER cap (reset at the reader-loop
   // head below) and a GLOBAL ceiling proportional to the design. The old code
   // had ONE global counter that was never reset: a big def's early readers burnt
@@ -705,7 +706,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         auto n2 = gu::create_typed_node(*g, Ntype_op::And);
         ++created;
         np.connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
-        livehd::graph_util::create_const(*g, *Dlop::get_mask_value(w - 1, 0))
+        livehd::graph_util::create_const(*g, gu::mask_window_const(0, w))
             .connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
         auto dp = n2.create_driver_pin(0);
         gu::set_ubits(dp, w);
@@ -742,15 +743,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             } else {
               res = self(self, drv_at(m, 0), lo, hi, depth + 1);
             }
-          } else {
-            auto [a, b] = mc.get_mask_range();
-            if (a >= 0 && b > a) {
-              const int width = b - a;  // packed extraction width
-              if (lo >= width) {
-                res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
-              } else {
-                res = self(self, drv_at(m, 0), a + lo, a + std::min(hi, width), depth + 1);  // re-base + cap
-              }
+          } else if (auto window = gu::mask_window_of(mc); window) {
+            const auto [a, b] = *window;
+            const int  width  = b - a;  // packed extraction width
+            if (lo >= width) {
+              res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
+            } else {
+              res = self(self, drv_at(m, 0), a + lo, a + std::min(hi, width), depth + 1);  // re-base + cap
             }
           }
         }
@@ -771,26 +770,23 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // what the per-leaf (flattened) form would have given for free.
       auto md = drv_at(m, 2);
       if (md.is_const()) {
-        const auto& mc = gu::const_of(md);
-        if (!mc.has_unknowns() && mc.is_positive()) {
-          auto [a, b] = mc.get_mask_range();  // {-1,-1} = noncontiguous
-          if (a >= 0 && b > a) {
-            if (hi <= a || lo >= b) {
-              res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // disjoint lane: `a` is untouched here
-            } else if (lo >= a && hi <= b) {
-              // Contained in the lane: the slice reads back exactly what
-              // `value` put there, LSB-aligned to the lane's low bit. Guard on
-              // a bounded NON-NEGATIVE footprint — that is what makes the two
-              // forms agree ABOVE `value`'s significant width (Get_mask reads
-              // 0 there, and a zero-extended `value` is what the lane holds).
-              auto vd = drv_at(m, 4);
-              if (!vd.is_invalid() && footprint(footprint, vd, 0).first >= 0) {
-                res = self(self, vd, lo - a, hi - a, depth + 1);
-              }
+        if (auto window = gu::mask_window_of(gu::const_of(md)); window) {
+          const auto [a, b] = *window;
+          if (hi <= a || lo >= b) {
+            res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // disjoint lane: `a` is untouched here
+          } else if (lo >= a && hi <= b) {
+            // Contained in the lane: the slice reads back exactly what `value`
+            // put there, LSB-aligned to the lane's low bit. Guard on a bounded
+            // NON-NEGATIVE footprint — that is what makes the two forms agree
+            // ABOVE `value`'s significant width (Get_mask reads 0 there, and a
+            // zero-extended `value` is what the lane holds).
+            auto vd = drv_at(m, 4);
+            if (!vd.is_invalid() && footprint(footprint, vd, 0).first >= 0) {
+              res = self(self, vd, lo - a, hi - a, depth + 1);
             }
-            // A slice STRADDLING the lane boundary would need a concat of two
-            // sources; leave it unresolved rather than grow the graph here.
           }
+          // A slice STRADDLING the lane boundary would need a concat of two
+          // sources; leave it unresolved rather than grow the graph here.
         }
       }
     } else if (op == Ntype_op::Concat) {
@@ -887,14 +883,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       if (md.is_invalid() || !md.is_const()) {
         continue;  // needs a constant slice mask
       }
-      const auto& mc = gu::const_of(md);
-      if (mc.has_unknowns() || (mc.is_just_i64() && mc.to_just_i64() == -1)) {
-        continue;  // a full read, not a bit-field slice
+      const auto& mc     = gu::const_of(md);
+      auto        window = gu::mask_window_of(mc);  // empty for the -1 full read
+      if (!window || window->second > (1 << 28)) {
+        continue;  // not a bit-field slice
       }
-      auto [rlo, rhi] = mc.get_mask_range();
-      if (rlo < 0 || rhi <= rlo || rhi > (1 << 28)) {
-        continue;  // noncontiguous / open slice
-      }
+      const auto [rlo, rhi] = *window;
       auto vd = drv_at(R, 0);
       if (vd.is_invalid() || vd.is_const()) {
         continue;

@@ -801,6 +801,17 @@ void write_result(const Options& opts, const Result& res) {
       w.Key("solver");
       w.String(res.lec.solver.c_str());
     }
+    if (!res.lec.crosscheck_verdict.empty()) {
+      w.Key("crosscheck");
+      w.StartObject();
+      w.Key("solver");
+      w.String("lgyosys");
+      w.Key("verdict");
+      w.String(res.lec.crosscheck_verdict.c_str());
+      w.Key("exit_code");
+      w.Int(res.lec.crosscheck_exit_code);
+      w.EndObject();
+    }
     w.Key("bounded");
     w.Bool(res.lec.bounded);
     if (res.lec.bounded) {

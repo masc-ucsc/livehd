@@ -27,6 +27,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
+#include "hhds/hash_mix.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "str_tools.hpp"
@@ -195,17 +196,16 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     if (resolved.contains(*it)) {
       continue;
     }
-    std::vector<uint64_t> operands;
-    bool                  tainted = false;
+    // Each operand term carries its own SINK PID, so the fold needs no order:
+    // a commutative pin's drivers agree whatever order they arrive in, while an
+    // operand can never migrate to another pin.
+    hhds::Commutative_combiner operands;
+    bool                       tainted = false;
     for (const auto& e : it->get_master_node().inp_edges()) {
-      operands.push_back(sig_mix(resolved.at(e.driver), static_cast<uint64_t>(e.sink.get_port_id())));
+      operands.add(sig_mix(resolved.at(e.driver), static_cast<uint64_t>(e.sink.get_port_id())));
       tainted = tainted || (coarse != nullptr && coarse->contains(e.driver));
     }
-    std::sort(operands.begin(), operands.end());
-    uint64_t node = producer_shape(*it);
-    for (uint64_t operand : operands) {
-      node = sig_mix(node, operand);
-    }
+    const uint64_t node = sig_mix(producer_shape(*it), operands.value());
     resolved.emplace(*it, sig_mix(node, static_cast<uint64_t>(it->get_port_id())));
     if (tainted) {
       coarse->insert(*it);
@@ -230,8 +230,10 @@ void each_fwd_child(const hhds::Node_class& consumer, Fn&& fn) {
 }
 
 uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
-  constexpr uint64_t               kSeed = 0x84222325cbf29ce4ULL;
-  absl::InlinedVector<uint64_t, 4> uses;
+  // A driver's USES are a multiset: the out-edge walk order is storage order,
+  // not a contract, and the combiner already folds the count in.
+  constexpr uint64_t         kSeed = 0x84222325cbf29ce4ULL;
+  hhds::Commutative_combiner uses;
   for (const auto& e : driver.out_edges()) {
     const auto& snk = e.sink;
     uint64_t    u;
@@ -244,41 +246,32 @@ uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
       } else {
         u = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
         u = sig_mix(u, static_cast<uint64_t>(snk.get_port_id()));
-        absl::InlinedVector<uint64_t, 4> cin;
+        hhds::Commutative_combiner cin;
         for (const auto& ie : cm.inp_edges()) {
           if (ie.driver.is_const()) {
-            cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
-                                  static_cast<uint64_t>(ie.sink.get_port_id())));
+            cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
+                            static_cast<uint64_t>(ie.sink.get_port_id())));
           }
         }
-        std::sort(cin.begin(), cin.end());
-        for (uint64_t c : cin) {
-          u = sig_mix(u, c);
-        }
+        u = sig_mix(u, cin.value());
         // This is deliberately a local, coarse anchor: it is used only for a
         // cyclic tail. Port ids retain useful discrimination without walking
         // back around the cycle.
-        absl::InlinedVector<uint64_t, 4> outs;
-        each_fwd_child(cm, [&](const auto& child) { outs.push_back(static_cast<uint64_t>(child.get_port_id())); });
-        std::sort(outs.begin(), outs.end());
-        for (uint64_t out : outs) {
-          u = sig_mix(u, out);
-        }
+        hhds::Commutative_combiner outs;
+        each_fwd_child(cm, [&](const auto& child) { outs.add(static_cast<uint64_t>(child.get_port_id())); });
+        u = sig_mix(u, outs.value());
       }
     }
-    uses.push_back(u);
+    uses.add(u);
   }
-  std::sort(uses.begin(), uses.end());
-  uint64_t h = sig_mix(kSeed, uses.size());
-  for (uint64_t u : uses) {
-    h = sig_mix(h, u);
-  }
-  return h;
+  return sig_mix(kSeed, uses.value());
 }
 
 uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_map<hhds::Pin_class, uint64_t>& resolved) {
-  constexpr uint64_t               kSeed = 0x84222325cbf29ce4ULL;
-  absl::InlinedVector<uint64_t, 4> uses;
+  // A driver's USES are a multiset: the out-edge walk order is storage order,
+  // not a contract, and the combiner already folds the count in.
+  constexpr uint64_t         kSeed = 0x84222325cbf29ce4ULL;
+  hhds::Commutative_combiner uses;
   for (const auto& e : driver.out_edges()) {
     const auto& snk = e.sink;
     uint64_t    u;
@@ -291,38 +284,26 @@ uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_m
       } else {
         uint64_t cnode = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
         cnode          = sig_mix(cnode, static_cast<uint64_t>(snk.get_port_id()));
-        absl::InlinedVector<uint64_t, 4> cin;
+        hhds::Commutative_combiner cin;
         for (const auto& ie : cm.inp_edges()) {
           if (ie.driver.is_const()) {
-            cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
-                                  static_cast<uint64_t>(ie.sink.get_port_id())));
+            cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
+                            static_cast<uint64_t>(ie.sink.get_port_id())));
           }
         }
-        std::sort(cin.begin(), cin.end());
-        for (uint64_t c : cin) {
-          cnode = sig_mix(cnode, c);
-        }
-        absl::InlinedVector<uint64_t, 4> outs;
+        cnode = sig_mix(cnode, cin.value());
+        hhds::Commutative_combiner outs;
         each_fwd_child(cm, [&](const auto& child) {
           auto it = resolved.find(child);
           I(it != resolved.end());
-          outs.push_back(it->second);
+          outs.add(it->second);
         });
-        std::sort(outs.begin(), outs.end());
-        for (uint64_t o : outs) {
-          cnode = sig_mix(cnode, o);
-        }
-        u = cnode;
+        u = sig_mix(cnode, outs.value());
       }
     }
-    uses.push_back(u);
+    uses.add(u);
   }
-  std::sort(uses.begin(), uses.end());
-  uint64_t h = sig_mix(kSeed, uses.size());
-  for (uint64_t u : uses) {
-    h = sig_mix(h, u);
-  }
-  return h;
+  return sig_mix(kSeed, uses.value());
 }
 
 // Compute the complete forward signatures in one graph walk. Kahn's order

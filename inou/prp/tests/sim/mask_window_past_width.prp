@@ -1,0 +1,41 @@
+/*
+:name: mask_window_past_width
+:type: simulation
+*/
+// A Get_mask WINDOW that reaches past the value's declared width selects the
+// value's SIGN bits, and what those are depends on the value's sign:
+//
+//   * a SIGNED source replicates its sign there, so `s#[0..=15]` on an s8 is
+//     the sign-extended pattern;
+//   * an UNSIGNED source has zeros there, so `u#[0..=15]` on a u8 zero-fills.
+//
+// cgen_sim reads the two through different arms (the unsigned one takes the
+// bitfield-extract fast path; the signed one has to materialize the sign first
+// by reading the operand at a carrier wide enough to hold the window), and a
+// window that stays INSIDE the width takes a third. Nothing else in the sim
+// fixtures pins the out-of-width pair, and getting it wrong is silent: the
+// high half simply reads as zero.
+
+mod mask_window_past_width(s:s8, u:u8) -> (sext_bits:u16@[0], zext_bits:u16@[0], in_width:u4@[0]) {
+  sext_bits = s#[0..=15]  // past a SIGNED width: sign bits
+  zext_bits = u#[0..=15]  // past an UNSIGNED width: zeros
+  in_width  = u#[4..=7]   // inside the width: a plain bitfield extract
+}
+
+test mask_window_past_width.windows {
+  mut dut = mask_window_past_width
+  tick 2 {
+    dut.s = if clock == 0 { -3 } else { 5 }
+    dut.u = if clock == 0 { 0xa5 } else { 0 }
+    step
+    if clock == 0 {
+      assert(dut.sext_bits == 0xfffd, "a window past a SIGNED width must replicate the sign")
+      assert(dut.zext_bits == 0x00a5, "a window past an UNSIGNED width must read zeros")
+      assert(dut.in_width == 0xa, "a window inside the width is a plain bitfield extract")
+    } else {
+      assert(dut.sext_bits == 5, "a non-negative signed source zero-fills above its width")
+      assert(dut.zext_bits == 0)
+      assert(dut.in_width == 0)
+    }
+  }
+}

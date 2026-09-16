@@ -109,14 +109,11 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
       if (msk.is_invalid() || val.is_invalid() || !msk.is_const()) {
         return {};
       }
-      const auto& mv = gu::const_of(msk);
-      if (mv.has_unknowns() || mv.is_negative()) {
+      auto window = gu::mask_window_of(gu::const_of(msk));
+      if (!window) {
         return {};
       }
-      auto [mb, me] = mv.get_mask_range();
-      if (mb < 0 || me <= mb) {
-        return {};
-      }
+      const auto [mb, me] = *window;
       leaves.push_back({static_cast<uint32_t>(mb), static_cast<uint32_t>(me - mb), val});
       if (!base.is_invalid() && !base.is_const()) {
         work.emplace_back(0, base);  // keep unwinding the chain
@@ -284,14 +281,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         val = peel_ident(val);
         if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
-          const auto& mv = gu::const_of(msk);
-          if (!mv.has_unknowns() && !mv.is_negative()) {
-            auto [mb, me] = mv.get_mask_range();
-            if (mb >= 0 && me > mb) {
-              add_atom(atoms, static_cast<uint32_t>(val.get_port_id()), static_cast<uint32_t>(mb),
-                       static_cast<uint32_t>(me - mb));
-              return true;
-            }
+          if (auto window = gu::mask_window_of(gu::const_of(msk)); window) {
+            add_atom(atoms, static_cast<uint32_t>(val.get_port_id()), static_cast<uint32_t>(window->first),
+                     static_cast<uint32_t>(window->second - window->first));
+            return true;
           }
         }
         return false;
@@ -324,14 +317,11 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         if (cnt != 2 || msk.is_invalid() || other.is_invalid()) {
           return false;
         }
-        const auto& mv = gu::const_of(msk);
-        if (mv.has_unknowns() || mv.is_negative()) {
-          return false;
-        }
-        auto [mb, me] = mv.get_mask_range();
-        if (mb != 0 || me <= 0) {
+        auto window = gu::mask_window_of(gu::const_of(msk));
+        if (!window || window->first != 0) {
           return false;  // only a LOW mask trims a slice read; anything else is data
         }
+        const auto me = window->second;
         if (sra_of(other, &pid, &k)) {
           const uint32_t w = in_bits.contains(pid) ? in_bits[pid] : 0;
           if (w <= k) {
@@ -384,14 +374,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             }
           }
           if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
-            const auto& mv = gu::const_of(msk);
-            if (!mv.has_unknowns() && !mv.is_negative()) {
-              auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
-              if (mb >= 0 && me > mb) {
-                add_atom(atoms, static_cast<uint32_t>(val.get_port_id()), static_cast<uint32_t>(mb),
-                         static_cast<uint32_t>(me - mb));
-                continue;
-              }
+            if (auto window = gu::mask_window_of(gu::const_of(msk)); window) {
+              add_atom(atoms, static_cast<uint32_t>(val.get_port_id()), static_cast<uint32_t>(window->first),
+                       static_cast<uint32_t>(window->second - window->first));
+              continue;
             }
           }
           if (expanded.insert(m).second) {

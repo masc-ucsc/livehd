@@ -481,7 +481,7 @@ hhds::SourceId Slang_context::mint_loc(slang::SourceRange range) {
   if (sm_ == nullptr || builder_.lnast == nullptr) {
     return hhds::SourceId_invalid;
   }
-  return livehd::slang_loc::mint(builder_.lnast->source_locator(), *sm_, range);
+  return livehd::slang_loc::mint(builder_.lnast->source_locator(), *sm_, range, &src_ingest_);
 }
 
 void Slang_context::set_pending_loc(slang::SourceRange range) {

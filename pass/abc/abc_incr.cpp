@@ -339,14 +339,14 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
         // cached name falls through to whatever fresh decl happens to carry an
         // invalid port id, which is a GUESS at the critical output -- the same
         // "a missing port is a miss, never a guess" rule the stitch above keeps.
-        hhds::Port_id crit_pid = livehd::Port_invalid;
+        hhds::Port_id crit_pid = hhds::Port_invalid;
         for (const auto& decl : cached_io->get_output_pin_decls()) {
           if (decl.name == row.crit_output) {
             crit_pid = decl.port_id;
             break;
           }
         }
-        if (crit_pid != livehd::Port_invalid) {
+        if (crit_pid != hhds::Port_invalid) {
           for (const auto& decl : fresh_io->get_output_pin_decls()) {
             if (decl.port_id == crit_pid) {
               res.crit_output = decl.name;

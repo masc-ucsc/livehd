@@ -184,6 +184,60 @@ done
 cmp -s "$W/packed_direct.v" "$W/packed_staged.v" || fail "source and lg: synthesis produce different mapped Verilog"
 echo "PASS: source and compile+synth produce identical packed-lane mapping"
 
+# A small br_ram_flops-shaped memory must survive default synthesis. Storage
+# is uninitialized, while reset clears the pipelined controls and read output.
+# Keep byte enables: they create one memory with two partial write ports.
+cat >"$W/ram128_repro.sv" <<'SV'
+// One 8 x 16-bit memory, with byte enables and registered read/write controls.
+// Reset clears the pipeline registers, but deliberately does not reset storage.
+module ram128_repro(
+  input clk, rst, wr_valid, rd_valid,
+  input [2:0] wr_addr, rd_addr,
+  input [15:0] wr_data,
+  input [1:0] wr_word_en,
+  output reg [15:0] rd_data
+);
+  reg [15:0] mem [0:7];
+  reg [2:0] wr_addr_q;
+  reg [15:0] wr_data_q;
+  reg [1:0] wr_word_en_q;
+  reg wr_valid_q;
+  always @(posedge clk) begin
+    if (rst) begin
+      wr_addr_q <= 0;
+      wr_data_q <= 0;
+      wr_word_en_q <= 0;
+      wr_valid_q <= 0;
+      rd_data <= 0;
+    end else begin
+      wr_addr_q <= wr_addr;
+      wr_data_q <= wr_data;
+      wr_word_en_q <= wr_word_en;
+      wr_valid_q <= wr_valid;
+      if (rd_valid) rd_data <= mem[rd_addr];
+    end
+    if (wr_valid_q) begin
+      if (wr_word_en_q[0]) mem[wr_addr_q][7:0] <= wr_data_q[7:0];
+      if (wr_word_en_q[1]) mem[wr_addr_q][15:8] <= wr_data_q[15:8];
+    end
+  end
+endmodule
+SV
+run compile "$W/ram128_repro.sv" --top ram128_repro \
+    --emit-dir lg:"$W/ram128_source" --workdir "$W/ram128_compile"
+run pass liberty gensim "$LIB" --emit-dir lg:"$W/ram128_models" --workdir "$W/ram128_gensim"
+# No pass.abc.memory override: this must exercise the default lowering policy.
+run synth lg:"$W/ram128_source" --top ram128_repro --set synth.liberty="$LIB" \
+    --emit-dir lg:"$W/ram128_mapped" --emit verilog:"$W/ram128_mapped.v" \
+    --workdir "$W/ram128_synth"
+[ "$(grep -c '^module cgen_memory_.*_lowered_' "$W/ram128_mapped.v")" = 1 ] \
+    || fail "128-bit fixture must synthesize exactly one lowered memory"
+run lec --ref lg:"$W/ram128_source" --impl lg:"$W/ram128_mapped" \
+    --lib lg:"$W/ram128_models" --top ram128_repro --set formal.timeout=30 \
+    --workdir "$W/ram128_lec"
+[ "$(jget "$W/r.json" lec.verdict)" = proven ] || fail "128-bit memory synthesis is not equivalent"
+echo "PASS: default synthesis preserves one 128-bit memory with byte writes"
+
 # --- 6. negative controls ----------------------------------------------------
 expect_fail() {  # CLASS PATTERN ARGS...
   local cls=$1 pat=$2

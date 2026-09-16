@@ -86,4 +86,27 @@ run compile "$W/x.prp" "$W/y.prp" --emit-dir lg:"$W/amb" --workdir "$W/w4"
 "$LHD" tool tree lg:"$W/amb" --top x.adder >"$W/amb.out" 2>&1 || fail "exact full --top failed on ambiguous library"
 grep -q 'x.adder' "$W/amb.out" || fail "exact full --top did not select x.adder"
 
+# A selected Verilog export includes its child definitions but no unrelated
+# library modules. LEC's materialization must honor the same selection.
+cat >"$W/selection.sv" <<'SV'
+module selection_leaf(input clk, input [7:0] a, output reg [7:0] y);
+  always @(posedge clk) y <= a + 8'd1;
+endmodule
+module selection_top(input clk, input [7:0] a, output [7:0] y);
+  selection_leaf child(clk, a, y);
+endmodule
+module selection_unused(input a, output y);
+  assign y = ~a;
+endmodule
+SV
+run compile "$W/selection.sv" --emit-dir lg:"$W/selection-lg" --workdir "$W/selection-compile"
+run compile lg:"$W/selection-lg" --top selection_top --emit-dir verilog:"$W/selected-v" --workdir "$W/selection-emit"
+grep -q 'module selection_top(' "$W/selected-v/"*.v || fail "selected top missing"
+grep -q 'module selection_leaf(' "$W/selected-v/"*.v || fail "selected child missing"
+! grep -q 'module selection_unused' "$W/selected-v/"*.v || fail "unrelated module emitted"
+run lec --ref lg:"$W/selection-lg" --impl lg:"$W/selection-lg" --top selection_top \
+  --set formal.solver=lgyosys --workdir "$W/selection-lec"
+! grep -q 'module selection_unused' "$W/selection-lec/check_ref.v" || fail "LEC emitted unrelated module"
+! grep -q 'module selection_unused' "$W/selection-lec/check_impl.v" || fail "LEC emitted unrelated module"
+
 echo "PASS: --top entity fallback resolves XXX to XXX.XXX across commands, safely"

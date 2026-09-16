@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
+#include "hhds/hash_mix.hpp"
 #include "node_util.hpp"
 #include "str_tools.hpp"
 #include "waterhash.hpp"
@@ -195,8 +196,9 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
       if (i_hash.empty()) {
         break;
       }
-      std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h_mffc  = lh::woothash64(i_hash.data(), i_hash.size() * 8);
+      // The operand hashes are a MULTISET: order-independent by construction,
+      // with no sort (each term already carries its own sink pid).
+      uint64_t h_mffc  = hhds::commutative_combine(i_hash);
       h_mffc          ^= mffc_depth_tree[id].back().h;
       mffc_depth_tree[id].push_back({h_mffc, mffc_size});
       max_mffc_depth = std::max(max_mffc_depth, mffc_depth);
@@ -287,8 +289,7 @@ void pass_submatch::find_subs(hhds::Graph* g) {
       if (depth != max_depth) {
         break;
       }
-      std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h = lh::woothash64(i_hash.data(), i_hash.size() * 8);
+      uint64_t h = hhds::commutative_combine(i_hash);
       uint64_t n = static_cast<uint64_t>(type_op_of(node));
       h          = lh::waterhash(&n, 4, h & 0xFFFF);
       if (depth == 0) {

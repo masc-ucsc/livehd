@@ -2904,8 +2904,9 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   } else {
     Eprp_var var;
     load_side_graphs(opts, res, kind, path, side, var);  // lg/pyrope/ln -> graphs (throws if empty)
-    auto          scratch = std::format("{}/check_{}", workdir(opts), side);
-    auto          names   = cgen_into(opts, res, var, scratch);
+    auto          scratch  = std::format("{}/check_{}", workdir(opts), side);
+    const auto&   side_top = side == "ref" ? opts.ref_top : opts.impl_top;
+    auto          names    = cgen_into(opts, res, var, scratch, false, side_top.empty() ? opts.top : side_top);
     std::ofstream ofs(out);
     for (const auto& n : names) {
       append_file(ofs, std::format("{}/{}.v", scratch, livehd::unit_file_stem(n)));
@@ -2936,6 +2937,5 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   }
   return out;
 }
-
 
 }  // namespace lhd

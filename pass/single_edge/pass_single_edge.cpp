@@ -100,7 +100,7 @@ hhds::Pin_class sink_driver(const hhds::Node_class& n, std::string_view pin) { r
 
 void drop_sink(const hhds::Node_class& n, std::string_view pin) {
   const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), pin);
-  if (pid == livehd::Port_invalid) {
+  if (pid == hhds::Port_invalid) {
     return;
   }
   std::vector<hhds::Edge_class> doomed;

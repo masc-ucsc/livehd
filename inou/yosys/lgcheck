@@ -459,6 +459,8 @@ elif ${YOSYS} -p "$(gold_read_cmds); write_rtlil ${gold_rtlil}" >lgcheck_read_go
   GOLD_RTLIL="$gold_rtlil"
 else
   echo "WARN: could not pre-read the reference design; each strategy re-reads the source"
+  # Slang can print thousands of warnings after the actual error.
+  grep -m20 -E '(^ERROR|: error:)' lgcheck_read_gold.err || true
   tail -20 lgcheck_read_gold.err
 fi
 echo "INFO: preparing implementation RTLIL (source-read time is outside the equivalence budget)"
@@ -481,6 +483,8 @@ elif ${YOSYS} -p "$(gate_read_cmds); write_rtlil ${gate_rtlil}" >lgcheck_read_ga
   GATE_RTLIL="$gate_rtlil"
 else
   echo "WARN: could not pre-read the implementation design; each strategy re-reads the source"
+  # Slang can print thousands of warnings after the actual error.
+  grep -m20 -E '(^ERROR|: error:)' lgcheck_read_gate.err || true
   tail -20 lgcheck_read_gate.err
 fi
 BASE_GOLD_RTLIL="$GOLD_RTLIL"
@@ -537,6 +541,15 @@ if ! [[ "$LGCHECK_EQUIV_TIMEOUT" =~ ^[0-9]+$ ]]; then
   echo "lgcheck: LGCHECK_EQUIV_TIMEOUT must be a non-negative integer (got '$LGCHECK_EQUIV_TIMEOUT')"
   exit 5
 fi
+# A guessed internal correspondence can leave equiv_simple solving a very
+# expensive false cut. Give each matching attempt a bounded share so it cannot
+# consume the entire shared budget before temporal induction/BMC can run.
+# The overall equivalence budget is unchanged; zero still disables all limits.
+LGCHECK_HEURISTIC_TIMEOUT="${LGCHECK_HEURISTIC_TIMEOUT:-90}"
+if ! [[ "$LGCHECK_HEURISTIC_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  echo "lgcheck: LGCHECK_HEURISTIC_TIMEOUT must be a non-negative integer (got '$LGCHECK_HEURISTIC_TIMEOUT')"
+  exit 5
+fi
 equiv_start=$SECONDS
 # coreutils `timeout` is NOT guaranteed to exist: macOS ships none, and bazel's
 # test PATH (/bin:/usr/bin:/usr/local/bin) does not carry the homebrew prefix
@@ -552,6 +565,11 @@ for _t in timeout gtimeout; do
   fi
 done
 run_equiv_yosys() {
+  local heuristic=0
+  if [ "$1" = --heuristic ]; then
+    heuristic=1
+    shift
+  fi
   if [ "$LGCHECK_EQUIV_TIMEOUT" -eq 0 ]; then
     "$YOSYS" "$@"
     return
@@ -560,6 +578,10 @@ run_equiv_yosys() {
   local remaining=$((LGCHECK_EQUIV_TIMEOUT - elapsed))
   if [ "$remaining" -le 0 ]; then
     return 124
+  fi
+  if [ "$heuristic" -eq 1 ] && [ "$LGCHECK_HEURISTIC_TIMEOUT" -gt 0 ] \
+      && [ "$remaining" -gt "$LGCHECK_HEURISTIC_TIMEOUT" ]; then
+    remaining=$LGCHECK_HEURISTIC_TIMEOUT
   fi
   if [ "$TIMEOUT_BIN" != "" ]; then
     "$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$remaining" "$YOSYS" "$@"
@@ -611,7 +633,13 @@ echo "INFO: starting equivalence checks (shared budget ${LGCHECK_EQUIV_TIMEOUT}s
 
 yosys_read="$(gold_read_cmds); proc; bmuxmap; flatten; rename -top gold; design -stash gold;
             $(gate_read_cmds); proc; bmuxmap; flatten; rename -top gate; design -stash gate;
-            design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
+            design -copy-from gold -as gold gold; design -copy-from gate -as gate gate"
+# In Yosys, an empty command (;; or ;;;) requests cleanup. Do not accidentally
+# clean before memory lowering when no cell library was requested: that can
+# discard correspondence names differently on the two sides.
+if [ -n "${lib}" ]; then
+  yosys_read="${yosys_read}; ${lib}"
+fi
 
 yosys_prep="proc; bmuxmap; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; bmuxmap; opt_clean;"
 
@@ -619,7 +647,7 @@ yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
 
-run_equiv_yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
+run_equiv_yosys --heuristic -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
   2>/dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
@@ -627,11 +655,122 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
+# Generated combinational names encode local node numbers, not correspondence.
+# The same mux_528 can denote different expressions after independent lowering.
+# Retry with only architectural ports and state outputs named; all remaining
+# output and state obligations must still be proven, without guessed cutpoints.
+# Track definedness too: cgen preserves don't-care padding and uninitialized
+# memory lanes; independent two-state guesses for those bits block valid proofs.
+# %co walks one edge from state cells to their output wires (including aliases).
+# Split internal packed state names to the mapper spelling (state_0, state_1,
+# ...). Ports stay intact. Every proposed state match is still an equiv proof
+# obligation; this gives induction the relation lost during register bitblasting.
+yosys_state_prep="${yosys_read}; memory; opt -full;
+    select -set state_outputs t:\$*ff* t:\$*latch* %u %co w:* %i;
+    rename -hide w:* @state_outputs %d; select -unset state_outputs;
+    splitnets -format _"
+rm -f lgcheck1n.json lgcheck_memory_names.ys
+run_equiv_yosys --heuristic -p "${yosys_state_prep};
+    equiv_make gold gate equiv; hierarchy -top equiv;
+    equiv_simple -undef; equiv_induct -undef -seq 4;
+    write_json lgcheck1n.json; equiv_status -assert" \
+  2>lgcheck1n.err | tee lgcheck1n.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ]; then
+  echo "1n.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
+# Mapping can also change the meaning of a retained state name (for example,
+# an inverted register encoding). An unproven internal name match must not
+# prevent proving the public outputs. Read the unresolved pairs from Yosys JSON,
+# hide their internal names, then rebuild and reprove the ENTIRE comparison.
+# No previously proved cut is assumed, and rename -hide never hides ports.
+# This is a new proof attempt, not deletion of failed obligations from a proof.
+state_retry_names=$(python3 - <<'PYSTATE_RETRY'
+import json
+import re
+from pathlib import Path
+try:
+    module = json.loads(Path("lgcheck1n.json").read_text())["modules"]["equiv"]
+except (OSError, ValueError, KeyError):
+    raise SystemExit(0)
+unproven = set()
+for cell in module.get("cells", {}).values():
+    if cell.get("type") != "$equiv":
+        continue
+    connections = cell["connections"]
+    for a, b in zip(connections["A"], connections["B"]):
+        if a != b:
+            unproven.add((a, b))
+nets = module.get("netnames", {})
+names = set()
+for name, net in nets.items():
+    if not name.endswith("_gold"):
+        continue
+    base = name[:-5]
+    other = nets.get(base + "_gate")
+    # Restrict to literal names; never interpolate Yosys selection wildcards.
+    if other and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*", base):
+        if any((a, b) in unproven for a, b in zip(net["bits"], other["bits"])):
+            names.add("w:" + base)
+# Cgen encodes the source Memory name reversibly in its wrapper instance.
+# memory_module.cpp preserves <source>._mem<word>_<bit> after mapping.
+# Restore only existing pairs, without collisions or port changes. A fresh
+# comparison below must prove every proposed memory state and public output.
+memory_commands = []
+ports = module.get("ports", {})
+for name in nets:
+    match = re.fullmatch(
+        r"(.*?)__lhdmem_h([0-9a-f]+)_e\.data\[([0-9]+)\]_([0-9]+)_(gold|gate)", name
+    )
+    if not match:
+        continue
+    prefix, encoded, word, bit, side = match.groups()
+    try:
+        decoded = bytes.fromhex(encoded).decode("utf-8")
+    except (ValueError, UnicodeError):
+        continue
+    old = name[:-(len(side) + 1)]
+    new = f"{prefix}{decoded}._mem{word}_{bit}"
+    other = "gate" if side == "gold" else "gold"
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*", new):
+        continue
+    if new + "_" + other not in nets or new + "_" + side in nets:
+        continue
+    if old in ports or new in ports:
+        continue
+    memory_commands += [f"cd {side}", f"rename {old} {new}", "cd .."]
+Path("lgcheck_memory_names.ys").write_text(";\n".join(memory_commands))
+print(" ".join(sorted(names)))
+PYSTATE_RETRY
+)
+if [ -s lgcheck_memory_names.ys ]; then
+  run_equiv_yosys --heuristic -p "${yosys_state_prep}; script lgcheck_memory_names.ys;
+      equiv_make gold gate equiv; hierarchy -top equiv;
+      equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
+    2>lgcheck1r.err | tee lgcheck1r.log | grep "Equivalence successfully proven!"
+  if [ $? -eq 0 ]; then
+    echo "1r.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+    exit 0
+  fi
+fi
+
+if [ -n "$state_retry_names" ]; then
+  run_equiv_yosys --heuristic -p "${yosys_state_prep}; rename -hide ${state_retry_names};
+      equiv_make gold gate equiv; hierarchy -top equiv;
+      equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
+    2>lgcheck1p.err | tee lgcheck1p.log | grep "Equivalence successfully proven!"
+  if [ $? -eq 0 ]; then
+    echo "1p.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+    exit 0
+  fi
+fi
+
 # A cgen memory wrapper gives the same state a different hierarchical name.
 # Map memories and propose structural correspondence, then PROVE every added
 # $equiv obligation. Leaving $mem cells opaque makes equiv_simple inconclusive;
 # a monolithic temporal SAT query also misses this useful state correspondence.
-run_equiv_yosys -p "${yosys_read}; memory; opt -full;
+run_equiv_yosys --heuristic -p "${yosys_read}; memory; opt -full;
     equiv_make gold gate equiv; hierarchy -top equiv;
     equiv_struct -icells; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
   2>lgcheck1m.err | tee lgcheck1m.log | grep "Equivalence successfully proven!"
@@ -644,7 +783,7 @@ fi
 # clock model, including transparency/hold behavior, and prove the original
 # public comparison points. Structural guesses at a latch's D input are too
 # strong: D is deliberately don't-care while the latch is closed.
-run_equiv_yosys -p "${yosys_read}; memory; opt -full; clk2fflogic; opt -full;
+run_equiv_yosys --heuristic -p "${yosys_read}; memory; opt -full; clk2fflogic; opt -full;
     equiv_make gold gate equiv; hierarchy -top equiv;
     equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
   2>lgcheck1c.err | tee lgcheck1c.log | grep "Equivalence successfully proven!"
@@ -724,6 +863,9 @@ else
   RESET_STMT=""
 fi
 
+# Primary hardware inputs are defined bit vectors, as in cvc5 and the BMC
+# check below. Allowing X inputs makes equivalent mux/gate implementations
+# disagree only in undefined propagation and prematurely fails the base case.
 run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
               $(gate_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
@@ -734,7 +876,7 @@ run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; re
               memory_map
               opt_clean
               write_verilog trace2.v
-              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -show-ports miter
+              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -set-def-inputs -show-ports miter
               " \
   2>lgcheck2.err | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
@@ -876,7 +1018,12 @@ if [ "$DESCEND_ON_INCONCLUSIVE" -eq 1 ]; then
     echo "lgcheck: could not inspect implementation children of $BASE_GATE_TOP"
     exit 5
   fi
-  mapfile -t direct_children <"$children_file"
+  # macOS /bin/bash is 3.2 and has no mapfile. Read every child with builtins
+  # available there too, or an inconclusive parent silently skips its children.
+  direct_children=()
+  while IFS= read -r child_pair || [ -n "$child_pair" ]; do
+    direct_children+=("$child_pair")
+  done <"$children_file"
   if [ "${#direct_children[@]}" -eq 0 ]; then
     echo "INFO: $GOLD_TOP is an inconclusive leaf; no lower module remains to check"
   else

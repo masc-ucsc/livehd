@@ -101,7 +101,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "1e3f4045d0c5e60082e32b71a38e417697d0a3d5",
+    commit = "68c1cfb28c71cdfbf6d45b64eb6fd63eacaaabbe",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -130,14 +130,13 @@ http_archive(
 )
 
 # HHDS (plain git repo — see the iassert/hlop note above)
-# TEMPORARILY on the local checkout: set_subnode's bit-0-only type stamp is not
-# pushed yet. Restore the git pin (bump past a10278bdf) once it lands.
-local_repository(name = "hhds", path = "../hhds")
-# git_repository(
-#     name = "hhds",
-#     commit = "a10278bdf4e5f7d1a4914e625b5be04c8afd887b",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-# )
+git_repository(
+    name = "hhds",
+    commit = "68f46ab164ef6539821a1c7a849f1575b8e703f9",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+)
+# For local co-development swap the git_repository above for:
+# local_repository(name = "hhds", path = "../hhds")
 
 # emhash — @hhds//hhds:core|graph dep on it. hhds's own MODULE.bazel declares
 # this wrapper, but a plain-repo fetch does not evaluate MODULE.bazel, so the

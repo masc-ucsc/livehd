@@ -150,7 +150,7 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     // and whichever edge iterated first would win. When that is the constant the
     // walk lands on it and gives up, order-dependently.
     Pin           a;
-    hhds::Port_id a_pid = Port_invalid;
+    hhds::Port_id a_pid = hhds::Port_invalid;
     for (const auto& e : p.get_master_node().inp_edges()) {
       const auto spid = e.sink.get_port_id();
       if (a.is_invalid() || spid < a_pid) {
@@ -531,25 +531,19 @@ Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width) {
 
 namespace {
 
-// Dlop's sparse runs are (start, length), whereas get_mask_range() returns
-// [begin, end). Clip infinite/sign-extended masks to the result before adding
-// widths or extracting the compacted value plane.
-std::vector<std::pair<int, int>> mask_windows(const Dlop& mask, int width) {
-  std::vector<std::pair<int, int>> windows;
-  const auto                       clipped = mask.and_op(*Dlop::get_mask_value(width - 1, 0));
-  auto [begin, end]                        = clipped->get_mask_range();
-  if (begin >= 0 && end > begin) {
-    if (begin < width) {
-      windows.emplace_back(begin, std::min(end, width));
-    }
-  } else {
-    for (const auto& [start, length] : clipped->get_mask_range_pairs()) {
-      if (start < width && length > 0) {
-        windows.emplace_back(start, start + std::min(length, width - start));
-      }
-    }
+// The [begin, end) window a mask selects, CLIPPED to `width`; empty when it
+// selects nothing inside it. graph/cell.hpp guarantees the mask is one window
+// or the -1 "whole value" spelling, and the clip turns -1 into [0, width).
+std::optional<std::pair<int, int>> mask_window_clipped(const Dlop& mask, int width) {
+  if (width <= 0) {
+    return std::nullopt;
   }
-  return windows;
+  const auto clipped   = mask.and_op(*Dlop::get_mask_value(width - 1, 0));
+  auto [begin, end]    = clipped->get_mask_range();
+  if (begin < 0 || end <= begin || begin >= width) {
+    return std::nullopt;
+  }
+  return std::pair<int, int>{begin, std::min(end, width)};
 }
 
 // Exact X plane for a constant-mask Get_mask (bit EXTRACT), or a null Term when
@@ -888,14 +882,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // bit-vector literal of `width` bits from a constant pin's Dlop.
   auto const_val = [&](const auto& dpin) -> Val {
     Dlop c     = gu::const_of(dpin);
-    int  width = std::max(1, c.get_bits());
+    int  width = std::max(1, c.get_signed_bits());
     bool sgn   = c.is_negative();
     Term t;
     if (c.is_just_i64()) {
       t = bv_const(tm_, width, static_cast<uint64_t>(c.to_just_i64()));
     } else {
       // Wide / partially-unknown constant: build from the MSB-first binary string
-      // (get_bits() chars, no prefix). Unknown (X / don't-care) bits are masked
+      // (get_signed_bits() chars, no prefix). Unknown (X / don't-care) bits are masked
       // to 0 — consistent across two designs reading the same source constant.
       // Under x_dontcare (formal.lec.gold_x=ignore, REF side) the '?' positions ALSO
       // source the undef bit-plane, so the miter can exclude ref-unknown bits
@@ -2741,10 +2735,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             result = fit(zext, W);
             break;
           }
+          // graph/cell.hpp: the -1 spelling was handled above, so this is ONE
+          // window. Still fails CLOSED rather than asserting -- this is the
+          // verification oracle, and an unencodable cell must not silently
+          // become a vacuous PROVEN.
           auto range = mask.get_mask_range();  // [begin, end)
           int  rb = range.first, re = range.second;
           if (rb < 0 || re <= rb) {
-            return fail_unsupported("Get_mask non-contiguous mask not supported (M1)");
+            return fail_unsupported("Get_mask mask is neither a window nor -1 (M1)");
           }
           // Bits at/above the operand width are its sign/zero extension (matching
           // the bit-blast's per-bit extension, lec.md bit-width trap), so widen
@@ -2775,55 +2773,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             result = fit(a, W);  // nothing replaced
             break;
           }
-          // Full contiguous-mask bit-insert (the bit-blast's output concat): out[i]
-          // = (rb<=i<re) ? value[i-rb] : a[i]. `a` and `value` are already stored
-          // at their own literal widths; fit() reconciles them to the window/result widths.
+          // ONE-window bit-insert (the bit-blast's output concat): out[i] =
+          // (rb<=i<re) ? value[i-rb] : a[i]. `a` and `value` are already stored
+          // at their own literal widths; fit() reconciles them to the window /
+          // result widths. graph/cell.hpp guarantees one window or -1, and -1
+          // means "replace everything", i.e. the window [0, Wm).
           int  Wm    = std::max(1, W);
-          auto range = mask.get_mask_range();
+          auto range = gu::is_whole_value_mask(mask) ? std::pair<int, int>{0, Wm} : mask.get_mask_range();
           int  rb = range.first, re = range.second;
           if (rb < 0 || re <= rb) {
-            // Non-contiguous mask: insert value into each contiguous run, LSB-first
-            // (value's compacted bits map onto the set positions in ascending order).
-            auto runs = mask_windows(mask, Wm);  // ascending [begin,end) windows
-            if (runs.empty()) {
-              result = fit(a, Wm);
-              break;
-            }
-            auto& vvec = pid(Ntype::get_sink_pid(op, "value"));
-            if (vvec.empty()) {
-              return fail("Set_mask missing value");
-            }
-            int total = 0;
-            for (auto& pr : runs) {
-              total += pr.second - pr.first;
-            }
-            Term aw  = fit(a, Wm);
-            Term val = fit(vvec[0], std::max(1, total));
-            int  vi  = 0;
-            for (auto& pr : runs) {
-              int b = pr.first, e = std::min(pr.second, Wm);
-              int w = pr.second - pr.first;
-              if (b >= Wm) {
-                vi += w;
-                continue;
-              }
-              std::vector<Term> parts;  // MSB first
-              if (e < Wm) {
-                parts.push_back(bv_extract(tm_, aw, Wm - 1, e));
-              }
-              parts.push_back(bv_extract(tm_, val, vi + (e - b) - 1, vi));
-              if (b > 0) {
-                parts.push_back(bv_extract(tm_, aw, b - 1, 0));
-              }
-              Term r = parts.front();
-              for (size_t k = 1; k < parts.size(); ++k) {
-                r = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {r, parts[k]});
-              }
-              aw  = r;
-              vi += w;
-            }
-            result = fit(Val{aw, Wm, false}, W);
-            break;
+            return fail_unsupported("Set_mask mask is neither a window nor -1 (M1)");
           }
           if (rb >= Wm) {
             result = fit(a, Wm);  // replaced region entirely above the result
@@ -3065,26 +3024,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             };
             Term ax       = plane(pid(0)[0], W);
             auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
-            auto runs     = mask_windows(gu::const_of(mask_pin), W);
-            int  total    = 0;
-            for (const auto& [begin, end] : runs) {
-              total += end - begin;
-            }
-            Term vx     = plane(pid(Ntype::get_sink_pid(op, "value"))[0], std::max(1, total));
-            int  offset = 0;
-            for (const auto& [begin, end] : runs) {
-              int stop = std::min(end, W);
-              if (begin < W) {
-                Term inserted = bv_extract(tm_, vx, offset + stop - begin - 1, offset);
-                if (stop < W) {
-                  inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {bv_extract(tm_, ax, W - 1, stop), inserted});
-                }
-                if (begin > 0) {
-                  inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {inserted, bv_extract(tm_, ax, begin - 1, 0)});
-                }
-                ax = inserted;
+            if (auto window = mask_window_clipped(gu::const_of(mask_pin), W); window) {
+              const auto [begin, end] = *window;
+              Term inserted           = plane(pid(Ntype::get_sink_pid(op, "value"))[0], std::max(1, end - begin));
+              if (end < W) {
+                inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {bv_extract(tm_, ax, W - 1, end), inserted});
               }
-              offset += end - begin;
+              if (begin > 0) {
+                inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {inserted, bv_extract(tm_, ax, begin - 1, 0)});
+              }
+              ax = inserted;
             }
             out_val.x_mask = ax;
           } else if (Term gx = exact_get_mask_x_plane(tm_, node, op, pid(0), W); !gx.isNull()) {

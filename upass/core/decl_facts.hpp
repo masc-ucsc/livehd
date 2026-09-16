@@ -106,9 +106,9 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
   }
   if (ti.range_max && ti.range_min && ti.range_max->is_integer() && ti.range_min->is_integer()) {
     if (!ti.range_min->is_negative()) {
-      ti.bits = ti.range_max->is_known_zero() ? 0 : static_cast<uint32_t>(ti.range_max->get_bits() - 1);
+      ti.bits = static_cast<uint32_t>(ti.range_max->get_payload_bits());
     } else {
-      ti.bits = static_cast<uint32_t>(std::max<int64_t>(ti.range_max->get_bits(), ti.range_min->get_bits()));
+      ti.bits = static_cast<uint32_t>(std::max<int64_t>(ti.range_max->get_signed_bits(), ti.range_min->get_signed_bits()));
     }
   }
   if (e.comptime) {
@@ -168,9 +168,9 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
       }
       if (ti.range_max && ti.range_min && ti.range_max->is_integer() && ti.range_min->is_integer()) {
         if (!ti.range_min->is_negative()) {
-          ti.bits = ti.range_max->is_known_zero() ? 0 : static_cast<uint32_t>(ti.range_max->get_bits() - 1);
+          ti.bits = static_cast<uint32_t>(ti.range_max->get_payload_bits());
         } else {
-          ti.bits = static_cast<uint32_t>(std::max<int64_t>(ti.range_max->get_bits(), ti.range_min->get_bits()));
+          ti.bits = static_cast<uint32_t>(std::max<int64_t>(ti.range_max->get_signed_bits(), ti.range_min->get_signed_bits()));
         }
       }
       if (pf.comptime) {

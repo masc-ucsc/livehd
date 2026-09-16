@@ -31,6 +31,22 @@ PYCOUNT
   cat "$D/net.v" "$D/models.v" > "$D/impl.v"
   run lec --impl lg:"$D/net" --ref lg:"$W/ref" --lib lg:"$D/models" --top pipeline \
     --set formal.timeout=60 --workdir "$D/native" --result-json "$D/native.json"
+  # The mapped cells may also be on the reference side; model expansion must
+  # preserve their state and pipeline delay in either comparison direction.
+  run lec --ref lg:"$D/net" --impl lg:"$W/ref" --lib lg:"$D/models" --top pipeline \
+    --set formal.timeout=60 --workdir "$D/native_reverse" --result-json "$D/native_reverse.json"
+  python3 - "$D/native_reverse.json" "$D/native.json" <<'PYREVERSE'
+import json, sys
+with open(sys.argv[1]) as f:
+    result = json.load(f)
+with open(sys.argv[2]) as f:
+    forward = json.load(f)
+assert result["lec"]["verdict"] == "proven", result
+# This pipeline fixture establishes six-cycle evidence in both directions.
+assert result["lec"]["bounded"] == forward["lec"]["bounded"], (forward, result)
+if result["lec"]["bounded"]:
+    assert result["lec"]["bound"] >= forward["lec"]["bound"], (forward, result)
+PYREVERSE
   run lec --impl verilog:"$D/impl.v" --ref verilog:"$W/ref.v" --top pipeline \
     --workdir "$D/yosys" --result-json "$D/yosys.json"
 done

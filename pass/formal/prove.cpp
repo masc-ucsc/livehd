@@ -119,7 +119,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
       enc_unsupported_ = true;
       return std::nullopt;
     }
-    int  width = std::max(1, c.get_bits());
+    int  width = std::max(1, c.get_signed_bits());
     bool sgn   = c.is_negative();
     Term t;
     if (c.is_just_i64()) {
@@ -483,51 +483,15 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
         result = lec::fit_to(tm_, a, W);
         break;
       }
+      // graph/cell.hpp: the mask is ONE window, or -1 == "replace everything",
+      // i.e. the window [0, Wm). Fails CLOSED (enc_unsupported_) on anything
+      // else -- this is a proof encoder, not a codegen path.
       int  Wm    = std::max(1, W);
-      auto range = mask.get_mask_range();
+      auto range = gu::is_whole_value_mask(mask) ? std::pair<int, int>{0, Wm} : mask.get_mask_range();
       int  rb = range.first, re = range.second;
       if (rb < 0 || re <= rb) {
-        auto runs = mask.get_mask_range_pairs();
-        if (runs.empty()) {
-          result = lec::fit_to(tm_, a, Wm);
-          break;
-        }
-        auto& vvec = pid(Ntype::get_sink_pid(op, "value"));
-        if (vvec.empty()) {
-          enc_unsupported_ = true;
-          return std::nullopt;
-        }
-        int total = 0;
-        for (auto& pr : runs) {
-          total += pr.second - pr.first;
-        }
-        Term aw  = lec::fit_to(tm_, a, Wm);
-        Term val = lec::fit_to(tm_, vvec[0], std::max(1, total));
-        int  vi  = 0;
-        for (auto& pr : runs) {
-          int b = pr.first, e = std::min(pr.second, Wm);
-          int w = pr.second - pr.first;
-          if (b >= Wm) {
-            vi += w;
-            continue;
-          }
-          std::vector<Term> parts;
-          if (e < Wm) {
-            parts.push_back(bv_extract(aw, Wm - 1, e));
-          }
-          parts.push_back(bv_extract(val, vi + (e - b) - 1, vi));
-          if (b > 0) {
-            parts.push_back(bv_extract(aw, b - 1, 0));
-          }
-          Term r = parts.front();
-          for (size_t k = 1; k < parts.size(); ++k) {
-            r = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {r, parts[k]});
-          }
-          aw  = r;
-          vi += w;
-        }
-        result = lec::fit_to(tm_, Val{aw, Wm, false}, W);
-        break;
+        enc_unsupported_ = true;
+        return std::nullopt;
       }
       if (rb >= Wm) {
         result = lec::fit_to(tm_, a, Wm);

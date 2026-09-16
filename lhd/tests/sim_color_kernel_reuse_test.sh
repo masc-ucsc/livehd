@@ -46,7 +46,11 @@ grep -Eq 'Slop_u<[0-9]+> __color_tmp_[0-9]+ = Slop_u<[0-9]+>::land' "$body" \
 grep -q 'Slop_u<8> ar0{};  // flop' "$header" || fail "proven-unsigned flop was not stored as Slop_u"
 grep -q 'Slop_u<8> d{};' "$header" || fail "proven-unsigned input was not stored as Slop_u"
 grep -q 'Slop_u<1> a_zero{};' "$header" || fail "proven-unsigned output was not stored as Slop_u"
-grep -q 'eq_op(ar0, Slop<8>::create_integer(0))' "$body" || fail "unsigned state did not feed equality directly"
+# `x == 0` is lnot_op: the compare reads the unsigned state DIRECTLY and never
+# materializes a full-width zero to compare it against.
+grep -q 'lnot_op(ar0)' "$body" || fail "unsigned state did not feed the zero test directly"
+! grep -q 'eq_op(ar0, Slop<8>::create_integer(0))' "$body" \
+  || fail "the zero test still materializes a full-width zero constant"
 ! grep -Eq 'ar0\.zext_to<8>|reset\.zext_to<1>' "$body" \
   || fail "same-width state/input conversion survived Slop_u storage"
 

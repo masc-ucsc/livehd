@@ -17,6 +17,7 @@
 #include "color_common.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
+#include "hhds/hash_mix.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
@@ -72,23 +73,20 @@ Sig sig_str(Sig h, std::string_view s) {
 // Fold a port-grouped operand list, commutative-normalizing WITHIN each
 // sink-port class (the semdiff/abc_incr fold_operands rule: `a+b == b+a` on
 // one port class, but operands never trade places across ports).
+//
+// hhds::Commutative_combiner128 removes both sorts: each term carries its own
+// sink pid, so no term can migrate across ports and the map's iteration order
+// stops mattering.
 Sig fold_operands(Sig base, absl::flat_hash_map<int, std::vector<Sig>>& by_port) {
-  std::vector<int> ports;
-  ports.reserve(by_port.size());
-  for (auto& [p, vs] : by_port) {
-    (void)vs;
-    ports.emplace_back(p);
-  }
-  std::sort(ports.begin(), ports.end());
-  for (int p : ports) {
-    auto& vs = by_port[p];
-    std::sort(vs.begin(), vs.end());
-    base = sig_u64(base, static_cast<uint64_t>(static_cast<uint32_t>(p)));
+  hhds::Commutative_combiner128 c;
+  for (const auto& [p, vs] : by_port) {
+    const auto port_term = hhds::hash_mix128(static_cast<uint64_t>(static_cast<uint32_t>(p)));
     for (const auto& v : vs) {
-      base = sig_comb(base, v);
+      c.add(hhds::hash_combine128({v.a, v.b}, port_term));
     }
   }
-  return base;
+  const auto folded = c.value();
+  return sig_comb(base, Sig{folded.a, folded.b});
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +211,7 @@ bool const_value_is_structural(const Node& n, const Pin& sink) {
 Sig const_token(const Pin& d, bool value_sensitive) {
   const auto& v = gu::const_of(d);
   Sig        h = sig_seed(0xc0157e2ULL);
-  h            = sig_u64(h, static_cast<uint64_t>(v.get_bits()));
+  h            = sig_u64(h, static_cast<uint64_t>(v.get_signed_bits()));
   h            = sig_u64(h, (v.is_negative() ? 2ULL : 0ULL) | (v.has_unknowns() ? 1ULL : 0ULL));
   if (value_sensitive) {
     h = sig_str(h, v.serialize());
@@ -981,7 +979,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
   std::vector<std::pair<uint32_t, bool>> cshape(plan.const_ports.size());
   for (size_t c = 0; c < plan.const_ports.size(); ++c) {
     const auto& v = gu::const_of(slots[plan.const_ports[c]].rep_pin);
-    cshape[c]    = {static_cast<uint32_t>(v.get_bits()) + 1U, !v.is_negative()};
+    cshape[c]    = {static_cast<uint32_t>(v.get_signed_bits()) + 1U, !v.is_negative()};
     auto nm      = std::format("c{}", c);
     gio->add_input(nm, pid++);
     gio->set_bits(nm, cshape[c].first);

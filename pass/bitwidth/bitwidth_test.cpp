@@ -841,12 +841,9 @@ TEST(BitwidthInfer, NotOfBooleanIsTwoBitSignedNeverZero) {
       << "Not of a boolean is always negative -- it is NOT a logical negation";
 }
 
-// Or of two 1-bit SIGNED values. Each spans [-1..0] (get_sbits 1), so the
-// old process_bit_or built its lower bound from
-// Dlop::get_neg_mask_value(max_bits - 1) == get_neg_mask_value(0), which
-// returns +1 rather than a negative value -- producing the inverted range
-// [1..0] and aborting inside Bitwidth_range::set_range. It must infer a
-// bounded width instead.
+// Or of two 1-bit SIGNED values. Each spans [-1..0] (get_sbits 1); the old
+// process_bit_or pinned the result's max at 0, which is unsound. It must infer
+// a bounded width instead.
 TEST(BitwidthInfer, BitOrOfOneBitSignedValues) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_or_1bit_signed");
@@ -1172,4 +1169,46 @@ TEST(BitwidthMemory, BackwardAddressSeedPreservesUnsignedConcat) {
   Bitwidth(10).do_trans(g);
   EXPECT_TRUE(gu::is_unsign(addr.create_driver_pin(0)));
   EXPECT_EQ(gu::bits_of(addr.create_driver_pin(0)), 3);
+}
+
+TEST(BitwidthMemory, WriteDataDoesNotWidenSharedMaskedExpression) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  io     = lib.create_io("memory_masked_write_range");
+  io->add_input("data", 1);
+  io->set_bits("data", 32);
+  io->set_unsign("data", true);
+  io->add_input("select", 2);
+  io->set_bits("select", 1);
+  io->set_unsign("select", true);
+  io->add_output("q", 3);
+  io->set_bits("q", 16);
+  io->add_output("read", 4);
+  io->set_bits("read", 32);
+  auto g        = io->create_graph();
+  auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
+  // A memory is a traversal cut and sees its write-data expression first.
+  auto memory   = gu::create_typed_node(*g, Ntype_op::Memory);
+  constant(32).connect_sink(gu::setup_sink_by_name(memory, "bits"));
+  constant(16).connect_sink(gu::setup_sink_by_name(memory, "size"));
+  constant(0).connect_sink(gu::setup_sink_by_name(memory, "addr"));
+  gu::set_ubits(memory.create_driver_pin(0), 32);
+  memory.create_driver_pin(0).connect_sink(g->get_output_pin("read"));
+  auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
+  g->get_input_pin("data").connect_sink(gu::setup_sink_by_name(mask, "a"));
+  constant(255).connect_sink(gu::setup_sink_by_name(mask, "mask"));
+  mask.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(memory, "din"));
+  auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
+  g->get_input_pin("select").connect_sink(mux.create_sink_pin(0));
+  constant(0).connect_sink(mux.create_sink_pin(1));
+  mask.create_driver_pin(0).connect_sink(mux.create_sink_pin(2));
+  auto concat = gu::create_typed_node(*g, Ntype_op::Concat);
+  constant(165).connect_sink(concat.create_sink_pin(0));
+  constant(8).connect_sink(concat.create_sink_pin(1));
+  mux.create_driver_pin(0).connect_sink(concat.create_sink_pin(2));
+  constant(8).connect_sink(concat.create_sink_pin(3));
+  concat.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  Bitwidth(10).do_trans(g);
+  EXPECT_EQ(gu::bits_of(mux.create_driver_pin(0)), 8);
+  EXPECT_TRUE(gu::concat_lane_violation(gu::concat_lanes(concat)).empty());
 }

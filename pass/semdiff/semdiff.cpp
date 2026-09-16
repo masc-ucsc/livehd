@@ -19,6 +19,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
 #include "hash_util.hpp"
+#include "hhds/hash_mix.hpp"
 #include "node_util.hpp"
 
 namespace livehd::semdiff {
@@ -193,15 +194,13 @@ uint64_t loop_descriptor_key(const hhds::Node_class& node) {
   h          = hcombine(h, loop->activation_input ? port_key(*loop->activation_input, true) : hstr("\x01no-active"));
   h          = hcombine(h, loop->next_active_output ? port_key(*loop->next_active_output, false) : hstr("\x01no-next-active"));
 
-  std::vector<uint64_t> carries;
+  // The carries are a MULTISET of (input port, output port) pairs; order is
+  // the group's storage order, not a contract.
+  hhds::Commutative_combiner carries;
   for (const auto& c : node.subnode_group().carries()) {
-    carries.push_back(hcombine(port_key(c.input_port(), true), port_key(c.output_port(), false)));
+    carries.add(hcombine(port_key(c.input_port(), true), port_key(c.output_port(), false)));
   }
-  std::sort(carries.begin(), carries.end());
-  for (uint64_t c : carries) {
-    h = hcombine(h, c);
-  }
-  return h;
+  return hcombine(h, carries.value());
 }
 
 // op + width + subnode identity: the local "kind" part of a node's key, shared
@@ -220,26 +219,21 @@ uint64_t node_kind_key(const hhds::Node_class& node) {
 }
 
 // Fold a port-grouped operand list into a signature: commutative-normalize
-// WITHIN each sink-port class (sort the operand sigs that share a port) but
-// never across ports — so Sum's added (port A) and subtracted (port B) operands
-// stay distinct while `a+b == b+a`.
+// WITHIN each sink-port class but never across ports — so Sum's added (port A)
+// and subtracted (port B) operands stay distinct while `a+b == b+a`.
+//
+// hhds::Commutative_combiner is what makes the ports need no sort either: each
+// term carries its OWN sink pid, so a term cannot migrate across ports and the
+// order the map hands the ports back in stops mattering.
 uint64_t fold_operands(uint64_t base, absl::flat_hash_map<int, std::vector<uint64_t>>& by_port) {
-  std::vector<int> ports;
-  ports.reserve(by_port.size());
-  for (auto& [p, _] : by_port) {
-    ports.push_back(p);
-  }
-  std::sort(ports.begin(), ports.end());
-  uint64_t h = base;
-  for (int p : ports) {
-    h        = hcombine(h, static_cast<uint64_t>(static_cast<uint32_t>(p)) | (1ULL << 40U));  // port marker
-    auto& vs = by_port[p];
-    std::sort(vs.begin(), vs.end());
+  hhds::Commutative_combiner c;
+  for (const auto& [p, vs] : by_port) {
+    const auto port_term = static_cast<uint64_t>(static_cast<uint32_t>(p)) | (1ULL << 40U);
     for (uint64_t v : vs) {
-      h = hcombine(h, v);
+      c.add(hhds::hash_combine64(v, port_term));
     }
   }
-  return h;
+  return hcombine(base, c.value());
 }
 
 // ---- tier-2 state pairing (full-match, the simplified SynAlign scheme) ------
@@ -1143,18 +1137,12 @@ std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& n
     return std::nullopt;
   }
   const auto& value = gu::const_of(mask);
-  if (value.has_unknowns()) {
-    return std::nullopt;
-  }
   // -1 is the explicit all-source-bits sentinel used by Get_mask.
-  if (value.is_just_i64() && value.to_just_i64() == -1) {
+  if (gu::is_whole_value_mask(value)) {
     return a;
   }
-  if (value.is_negative()) {
-    return std::nullopt;
-  }
-  const auto [first, end] = value.get_mask_range();
-  if (first != 0 || end != bits) {
+  auto window = gu::mask_window_of(value);
+  if (!window || window->first != 0 || window->second != bits) {
     return std::nullopt;
   }
   return a;
@@ -2281,21 +2269,18 @@ private:
       }
       by_port[edge.sink.get_port_id()].push_back(*child);
     }
-    std::vector<int> ports;
-    ports.reserve(by_port.size());
-    for (const auto& [port, _] : by_port) {
-      ports.push_back(port);
-    }
-    std::sort(ports.begin(), ports.end());
-    for (int port : ports) {
-      key          = fold_join(key, static_cast<uint64_t>(static_cast<uint32_t>(port)) | (1ULL << 40U));
-      auto& values = by_port[port];
-      std::sort(values.begin(), values.end());
+    // Same rule as fold_operands above: commutative WITHIN a sink port, never
+    // across ports. Each term carries its own pid, so neither the ports nor the
+    // operands sharing one need a sort.
+    hhds::Commutative_combiner128 operands;
+    for (const auto& [port, values] : by_port) {
+      const auto port_term = hhds::hash_mix128(static_cast<uint64_t>(static_cast<uint32_t>(port)) | (1ULL << 40U));
       for (const auto& value : values) {
-        key = fold_join(key, value);
+        operands.add(hhds::hash_combine128({value.h0, value.h1}, port_term));
       }
     }
-    return key;
+    const auto folded = operands.value();
+    return fold_join(key, Fold_key{folded.a, folded.b});
   }
 
   hhds::Graph*                                graph_ = nullptr;

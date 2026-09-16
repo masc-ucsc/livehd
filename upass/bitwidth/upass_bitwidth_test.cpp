@@ -32,8 +32,8 @@ TEST(LnastRangeLattice, Boolean) {
   auto r = Lnast_range::boolean();
   EXPECT_FALSE(r.is_unbounded());
   EXPECT_FALSE(r.is_constant());
-  EXPECT_EQ(r.min, -1);
-  EXPECT_EQ(r.max, 0);
+  EXPECT_EQ(r.min, 0);
+  EXPECT_EQ(r.max, 1);
 }
 
 // ── sbits ─────────────────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ TEST(LnastRangeLattice, SbitsRange0To15) {
   EXPECT_EQ(r.get_sbits(), 5);
 }
 
-TEST(LnastRangeLattice, SbitsBoolean) { EXPECT_EQ(Lnast_range::boolean().get_sbits(), 1); }
+TEST(LnastRangeLattice, SbitsBoolean) { EXPECT_EQ(Lnast_range::boolean().get_sbits(), 2); }  // u1 needs a sign slot as signed
 
 TEST(LnastRangeLattice, SbitsUnbounded) { EXPECT_EQ(Lnast_range::make_unbounded().get_sbits(), 64); }
 
@@ -141,7 +141,7 @@ TEST(LnastRangeLattice, ContainsBounded) {
   EXPECT_TRUE(u8.contains(Lnast_range::constant(0)));
   EXPECT_FALSE(u8.contains(Lnast_range::constant(256)));  // over max
   EXPECT_FALSE(u8.contains(Lnast_range::constant(-1)));   // under min (signed -1)
-  EXPECT_FALSE(u8.contains(Lnast_range::boolean()));      // [-1,0] not ⊆ [0,255]
+  EXPECT_TRUE(u8.contains(Lnast_range::boolean()));       // [0,1] ⊆ [0,255]
 }
 
 TEST(LnastRangeLattice, ContainsUnbounded) {
@@ -261,8 +261,8 @@ TEST(BitwidthIntegration, EqResultBoolean) {
   const auto& meta = ln->bw_meta().ranges;
   auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end()) << "Expected 'x' in bw_meta after eq";
-  EXPECT_EQ(it->second.min, -1);
-  EXPECT_EQ(it->second.max, 0);
+  EXPECT_EQ(it->second.min, 0);  // a compare is the hardware u1
+  EXPECT_EQ(it->second.max, 1);
   EXPECT_FALSE(it->second.unbounded);
 }
 

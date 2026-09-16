@@ -22,7 +22,7 @@
 // exists to consume the published ranges.
 //
 // Invariant: when `unbounded` is false, `min <= max`.
-// Boolean / comparison results use the signed-1-bit lattice point {-1, 0}.
+// Boolean / comparison results use the hardware u1 lattice point {0, 1}.
 struct Lnast_range {
   int64_t min{0};
   int64_t max{0};
@@ -44,8 +44,9 @@ struct Lnast_range {
     return r;
   }
 
-  // Signed 1-bit: range [-1, 0].  Used for boolean and comparison results.
-  static constexpr Lnast_range boolean() noexcept { return bounded(-1, 0); }
+  // The hardware u1: range [0, 1]. Used for boolean and comparison results
+  // (true == 1, never the signed all-ones).
+  static constexpr Lnast_range boolean() noexcept { return bounded(0, 1); }
 
   // Bit selection and reduction produce integer 0/1, distinct from bool.
   static constexpr Lnast_range unsigned_bit() noexcept { return bounded(0, 1); }

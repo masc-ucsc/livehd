@@ -19,6 +19,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_join.h"
 #include "cprop.hpp"
 #include "diag.hpp"
 #include "encode.hpp"
@@ -2579,24 +2580,24 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                             cache_proven,
                                             semdiff_proven));
 
-  // A REFUTED def anywhere in the hierarchy is the run's verdict unless the TOP
-  // itself settled. Without this the driver returns top_result alone, so a block
-  // the solver refuted outright is dropped on the floor: the top is skipped
-  // (fail-fast) or — since a non-collapsible child forces a whole-design flat
-  // miter — comes back UNKNOWN, and a witness-free UNKNOWN exits 0 under the
-  // inconclusive-is-a-warning policy. That reported a design with a known
-  // counterexample as a PASS.
-  //   A top that PROVED outranks it (escalate mode's whole point: the child's
-  // block-boundary CEX was unreachable in context), and a top that REFUTED
-  // already carries a more direct counterexample.
+  // A child counterexample is a boundary obligation, not a top-level trace.
+  // In escalate mode the parent must confirm it in context. If that proof is
+  // inconclusive, keep Unknown: the child may require an input combination
+  // its caller never supplies. Only the explicit fail-fast debug mode promotes
+  // an unconfirmed child refutation to the run verdict.
   if (have_refuted && (!have_top || (top_result.verdict != Verdict::Proven && top_result.verdict != Verdict::Refuted))) {
-    const bool skipped = !have_top;
-    top_result         = refuted_result;
-    top_result.detail  = std::format("hierarchical: block '{}' REFUTED{}; {}",
-                                     refuted_def,
-                                     skipped ? "" : " (top itself inconclusive)",
-                                     top_result.detail);
-    have_top           = true;
+    if (fail_fast_refute) {
+      const bool skipped = !have_top;
+      top_result         = refuted_result;
+      top_result.detail  = std::format("hierarchical: block '{}' REFUTED{}; {}",
+                                       refuted_def,
+                                       skipped ? "" : " (top itself inconclusive)",
+                                       top_result.detail);
+      have_top = true;
+    } else if (have_top) {
+      top_result.detail += std::format("; child '{}' differs at its boundary, but the top-level discrepancy is unconfirmed",
+                                        refuted_def);
+    }
   }
   if (have_top && top_result.verdict == Verdict::Proven && top_down) {
     if (auto ti = order_ix.find(top_key); ti != order_ix.end() && bounded_proof[ti->second] != 0) {
@@ -3289,6 +3290,13 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
 
   const std::string simfail_path = opts.workdir + "/" + simfail;
+  // Preserve the full counterexample even when a graph-only side has no LNAST
+  // and cannot be re-emitted as a Pyrope simulation testbench.
+  const std::string json_path = simfail_path.substr(0, simfail_path.size() - 4) + ".json";
+  emit_witness_json(json_path, "simfail", opts.impl_path, opts.ref_path, r.trace);
+  if (fs::exists(json_path)) {
+    res.outputs.push_back(json_path);
+  }
   // Test name = the .prp basename stem, sanitized to a Pyrope identifier; it is
   // also the sole sim instance's VCD stem (`<workdir>/<stem>.vcd`).
   std::string       stem         = fs::path(simfail_path).stem().string();
@@ -3662,12 +3670,6 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   res.outputs.push_back(simfail_path);
   res.recipe_steps.push_back(std::format("formal.simfail simulation test -> {}", simfail_path));
   std::print("lec: wrote counterexample simulation test {}\n", simfail_path);
-
-  // F7: machine-readable sibling artifact, keyed off the same trace (so its input
-  // sequence matches the .prp `_drv_*` arrays by construction).
-  std::string json_path = simfail_path.substr(0, simfail_path.size() - 4) + ".json";
-  emit_witness_json(json_path, "simfail", opts.impl_path, opts.ref_path, r.trace);
-  res.outputs.push_back(json_path);
 
   if (!run_sim) {
     return;
@@ -4577,14 +4579,20 @@ void lec_command(Options& opts, Result& res) {
         }
       }
     }
-    inline_stateful_lib_cells(sub_lib, impl_g.get());
-    inline_clock_lib_cells(sub_lib, impl_g.get());
-    for (auto* d : impl_defs) {
-      if (d != nullptr && d != impl_g.get() && sub_lib.find(d->get_gid()) == sub_lib.end()) {
-        inline_stateful_lib_cells(sub_lib, d);
-        inline_clock_lib_cells(sub_lib, d);
+    // Either input may be a mapped netlist. Expand explicit state/clock models
+    // symmetrically before collecting cuts, including cells inside retained defs.
+    auto inline_lib_cells = [&](hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
+      inline_stateful_lib_cells(sub_lib, top);
+      inline_clock_lib_cells(sub_lib, top);
+      for (auto* d : defs) {
+        if (d != nullptr && d != top && sub_lib.find(d->get_gid()) == sub_lib.end()) {
+          inline_stateful_lib_cells(sub_lib, d);
+          inline_clock_lib_cells(sub_lib, d);
+        }
       }
-    }
+    };
+    inline_lib_cells(ref_g.get(), ref_defs);
+    inline_lib_cells(impl_g.get(), impl_defs);
     // CLOCK-GATE CELLS first. A real design instantiates its ICG
     // (`prim_clk_gate u_cg(.clk_i(clk), .en_i(en), .clk_o(gclk));`), so the
     // gate sits one module level away and the flop's clock_pin is an opaque Sub
@@ -4807,7 +4815,7 @@ void lec_command(Options& opts, Result& res) {
     if (hier_refute != "fail" && hier_refute != "escalate") {
       throw Lhd_error{"usage",
                       std::format("--set formal.lec.hier_refute expects fail|escalate, got '{}'", hier_refute),
-                      "fail (default; a refuted block fails the run, its parents are skipped) | escalate (prove the "
+                      "fail (debug; a refuted block fails the run, its parents are skipped) | escalate (default; prove the "
                       "parents anyway, to confirm the block-boundary counterexample is reachable at the top)"};
     }
     // DEFAULT: top_down. Prove every def with EVERY child BOXED, then discharge
@@ -5346,13 +5354,15 @@ void lec_command(Options& opts, Result& res) {
     cmd += " --descend_on_inconclusive";
   }
   res.recipe_steps.emplace_back("pass.lec cross-check:lgcheck");
-  auto log               = next_log_path(opts, "lec.lgcheck");
-  cmd                   += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
-  const int  status      = std::system(cmd.c_str());
-  const int  code        = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-  const bool lg_known    = code == 0 || code == 1;
-  const bool lg_equiv    = code == 0;
-  const auto lg_verdict  = lg_known ? (lg_equiv ? "equivalent" : "different") : "unknown";
+  auto log                      = next_log_path(opts, "lec.lgcheck");
+  cmd                          += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
+  const int status              = std::system(cmd.c_str());
+  const int code                = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  res.lec.crosscheck_verdict    = code == 0 ? "proven" : code == 1 ? "refuted" : "unknown";
+  res.lec.crosscheck_exit_code  = code;
+  const bool lg_known           = code == 0 || code == 1;
+  const bool lg_equiv           = code == 0;
+  const auto lg_verdict         = lg_known ? (lg_equiv ? "equivalent" : "different") : "unknown";
 
   std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n",
              o.engine,
@@ -6911,6 +6921,25 @@ void formal_verify_command(Options& opts, Result& res) {
         // it unchanged (only `block` gains the @instance label), so one block's
         // N instances share one assume set while a sibling block never sees it.
         mon.scope = blk.name;
+        // A tuple-typed port arrives DETUPLED: `io_data:(pc:u64, ..)` is carried as
+        // the leaf ports `io_data.pc`, .., and a Bind names exactly ONE signal, so
+        // a block that reads the tuple PREFIX cannot bind. The generic message
+        // ("internal wires .. come later") reads as if the name were an internal
+        // wire, which sent every such block looking for a compile bug instead of
+        // at the one-line spelling fix; so name the leaves when they exist.
+        auto tuple_leaves = [&](const std::string& sig_path) {
+          const std::string              pfx = sig_path + ".";
+          std::vector<std::string>       leaves;
+          for (const auto* tbl : {&in_tbl, &out_tbl}) {
+            for (const auto& [k, v] : *tbl) {
+              if (k.compare(0, pfx.size(), pfx) == 0) {
+                leaves.push_back(k);
+              }
+            }
+          }
+          std::sort(leaves.begin(), leaves.end());
+          return leaves;
+        };
         std::string ports;
         for (const auto& in : blk_inputs) {
           livehd::lec::Monitor::Bind b;
@@ -6918,6 +6947,18 @@ void formal_verify_command(Options& opts, Result& res) {
           b.delay      = in.delay;
           const Sig* s = resolve(in.path, inst_prefixes.front(), b);
           if (s == nullptr) {
+            const auto  leaves = tuple_leaves(in.path);
+            std::string hint;
+            if (leaves.empty()) {
+              hint = "blocks reach top input/output ports, registers (dotted through instances), and — for a "
+                     "submodule-bound block — the target instance's ports; internal wires and memory "
+                     "elements come later";
+            } else {
+              hint = std::format("'{}' is a TUPLE port, carried as its leaf ports; a block binds one signal per "
+                                 "read, so name a leaf: {}",
+                                 in.path,
+                                 absl::StrJoin(leaves, ", "));
+            }
             throw Lhd_error{
                 "usage",
                 std::format("formal block '{}': signal path '{}' does not resolve in '{}'{}",
@@ -6925,9 +6966,7 @@ void formal_verify_command(Options& opts, Result& res) {
                             in.path,
                             g->get_name(),
                             inst_prefixes.front().empty() ? std::string{} : " instance '" + inst_prefixes.front() + "'"),
-                "blocks reach top input/output ports, registers (dotted through instances), and — for a "
-                "submodule-bound block — the target instance's ports; internal wires and memory "
-                "elements come later"};
+                hint};
           }
           mon.binds.push_back(std::move(b));
           ports += std::format("{}{}:{}{}", ports.empty() ? "" : ", ", in.ident, s->sgn ? "s" : "u", s->w);

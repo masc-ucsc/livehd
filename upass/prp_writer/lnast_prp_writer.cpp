@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <charconv>
 #include <format>
 #include <limits>
@@ -1553,8 +1555,8 @@ void Lnast_prp_writer::write_module() {
             auto dmin = Dlop::from_pyrope(std::string(lnast->get_name(mn)));
             if (dmax && dmin && dmax->is_integer() && dmin->is_integer() && !dmax->has_unknowns() && !dmin->has_unknowns()) {
               const bool    sgn  = dmin->is_negative();
-              const int64_t bits = sgn ? std::max<int64_t>(dmax->get_bits(), dmin->get_bits())
-                                       : (dmax->is_known_zero() ? 0 : dmax->get_bits() - 1);
+              const int64_t bits = sgn ? std::max<int64_t>(dmax->get_signed_bits(), dmin->get_signed_bits())
+                                       : dmax->get_payload_bits();
               if (bits > 0) {
                 array_decl_elem_[nm] = Array_elem{bits, sgn};
               }
@@ -3877,6 +3879,13 @@ static int pow2_width(std::string_view s) {
   return -1;
 }
 
+// True when `s` parses as a mask with at least one set bit that is NOT one
+// contiguous run. graph/cell.hpp says that shape does not exist -- prp2lnast
+// rejects a tuple index and slang emits one set_mask per concat-lvalue operand
+// -- and write_set_mask's single bit-range assign would silently DROP the bits
+// outside the bounding run if one ever appeared, so it is checked, not assumed.
+static bool sparse_mask(std::string_view s);
+
 // If `s` is a single contiguous run of set bits [lo..hi] (lo may be > 0),
 // returns (lo, hi); else nullopt.  Works at ARBITRARY width via the hex string
 // (decimal narrow via int64) — a get_mask packs the selected bits LSB-first, so
@@ -3925,6 +3934,28 @@ static std::optional<std::pair<int, int>> contiguous_run(std::string_view s) {
     }
   }
   return std::make_pair(lo, hi);
+}
+
+static bool sparse_mask(std::string_view s) {
+  if (contiguous_run(s)) {
+    return false;
+  }
+  // Not a run: sparse only if something IS set. A `0` mask and an unparsable
+  // one (a range temp's NAME, say) are both legitimately not runs.
+  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    for (size_t i = 2; i < s.size(); ++i) {
+      const int d = hex_digit(s[i]);
+      if (d < 0) {
+        return false;
+      }
+      if (d != 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const auto v = parse_int_const(s);
+  return v && *v > 0;
 }
 
 // True if `n` is a declare initializer made only of compile-time constants: a
@@ -4068,7 +4099,7 @@ std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_d
     if (d == nullptr) {
       return std::nullopt;
     }
-    return d->get_bits() > 0 ? d->get_bits() - 1 : 0;  // get_bits() counts the sign slot
+    return d->get_payload_bits();
   }
   if (N::is_ref(t)) {
     const std::string nm(lnast->get_name(n));
@@ -4268,7 +4299,7 @@ std::optional<std::string> Lnast_prp_writer::const_lane_value(Lnast_nid n, int64
   if (d == nullptr) {
     return std::nullopt;  // negative / unknown-bit lane: the window mask is real
   }
-  const int w = d->get_bits() > 0 ? d->get_bits() - 1 : 0;
+  const int w = d->get_payload_bits();
   if (w > bits) {
     return std::nullopt;  // over-wide literal: the window mask is what truncates it
   }
@@ -5206,56 +5237,15 @@ void Lnast_prp_writer::write_delay_assign() {
 // a closed `[lo..hi]` bit range.  set_mask places the inserted value LSB-first
 // across all selected bits, so run k consumes the next (hi-lo+1) bits of the
 // insert value after the runs below it.
-static std::vector<std::pair<int, int>> mask_runs(std::string_view s) {
-  std::vector<bool> bits;
-  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-    std::string_view h = s.substr(2);
-    for (size_t i = h.size(); i-- > 0;) {  // LSB hex digit first
-      int d = hex_digit(h[i]);
-      if (d < 0) {
-        return {};
-      }
-      for (int b = 0; b < 4; ++b) {
-        bits.push_back((d >> b) & 1);
-      }
-    }
-  } else {
-    auto v = parse_int_const(s);
-    if (!v || *v <= 0) {
-      return {};
-    }
-    unsigned long long m = static_cast<unsigned long long>(*v);
-    for (int b = 0; b < 64; ++b) {
-      bits.push_back((m >> b) & 1ULL);
-    }
-  }
-  std::vector<std::pair<int, int>> runs;
-  int                              lo = -1;
-  for (int i = 0; i < static_cast<int>(bits.size()); ++i) {
-    if (bits[i]) {
-      if (lo < 0) {
-        lo = i;
-      }
-    } else if (lo >= 0) {
-      runs.emplace_back(lo, i - 1);
-      lo = -1;
-    }
-  }
-  if (lo >= 0) {
-    runs.emplace_back(lo, static_cast<int>(bits.size()) - 1);
-  }
-  return runs;
-}
-
 // set_mask( dst, val, mask, ins ) — dst = val with the bits selected by the
 // constant `mask` replaced by `ins` (placed LSB-first across the selected bits).
 // Reparsable spelling: a bit-range LHS assign `dst#[lo..=hi] = ins`, which
 // prp2lnast re-lowers to exactly this set_mask shape (read-modify-write).  The
 // slang reader emits dst==val (in-place RMW); when they differ (e.g. prp2lnast
 // minted a fresh result temp) a `dst = val` base copy is emitted first.  A
-// non-contiguous mask is split into one bit-range assign per contiguous run,
-// each consuming the next slice of `ins` (LSB-first), so scattered set_masks
-// stay correct rather than dropping logic.
+// The mask is ONE contiguous window (graph/cell.hpp; the LNAST producers spell
+// nothing else -- prp2lnast rejects a tuple index and slang emits one set_mask
+// per concat-lvalue operand), so this is a single bit-range assign.
 void Lnast_prp_writer::write_set_mask() {
   if (!move_to_child()) {
     return;
@@ -5282,10 +5272,9 @@ void Lnast_prp_writer::write_set_mask() {
   }
   std::string ins;
   if (move_to_sibling()) {  // insert value — may be a single-use temp to inline
-    // A single contiguous run consumes `ins` WHOLE (`dst#[lo..=hi] = ins`), so a
-    // loose expression needs no parens there. Several runs each append a
-    // `#[..]` slice to it, which does.
-    ins = render_value(cur, /*operand_ctx=*/dyn_range == nullptr && mask_runs(mask_txt).size() != 1);
+    // The window consumes `ins` WHOLE (`dst#[lo..=hi] = ins`), so a loose
+    // expression needs no parens there.
+    ins = render_value(cur, /*operand_ctx=*/dyn_range == nullptr && !contiguous_run(mask_txt).has_value());
   }
   move_to_parent();
 
@@ -5296,12 +5285,12 @@ void Lnast_prp_writer::write_set_mask() {
   // from the source value, copy it in first.
   std::string target   = dst;
   bool        need_sep = false;
-  auto        runs     = mask_runs(mask_txt);
+  const auto  window   = contiguous_run(mask_txt);
   if (dst != val) {
-    // The copy is followed by one lane write per run, so the target is assigned
-    // TWICE even though the LNAST defines it once — it must not be declared
-    // `const` ("const `t` rebind (assigned 2 times)" on recompile).
-    if (!runs.empty() || dyn_range != nullptr) {
+    // The copy is followed by the lane write, so the target is assigned TWICE
+    // even though the LNAST defines it once — it must not be declared `const`
+    // ("const `t` rebind (assigned 2 times)" on recompile).
+    if (window || dyn_range != nullptr) {
       multi_def_tmp_.insert(target);
       single_store_.erase(target);
     }
@@ -5331,7 +5320,17 @@ void Lnast_prp_writer::write_set_mask() {
     return;
   }
 
-  if (runs.empty()) {
+  if (!window) {
+    // A mask with set bits that is not ONE run has no single bit-range assign,
+    // and emitting the base copy below would silently drop the write. No LNAST
+    // producer makes one (see sparse_mask); fail loudly rather than miscompile.
+    if (sparse_mask(mask_txt)) {
+      std::fprintf(stderr,
+                   "livehd: prp_writer: set_mask mask '%s' is not one contiguous bit range; a sparse mask has no "
+                   "Pyrope spelling (write one set_mask per range)\n",
+                   std::string(mask_txt).c_str());
+      std::abort();
+    }
     // Zero / unparsable mask: nothing to overwrite.  Emit a base copy if we
     // haven't already (keeps the statement non-empty and the value flowing).
     if (!need_sep) {
@@ -5340,22 +5339,12 @@ void Lnast_prp_writer::write_set_mask() {
     return;
   }
 
-  int ins_off = 0;  // LSB-first cursor into the insert value across runs
-  for (auto [lo, hi] : runs) {
-    if (need_sep) {
-      os << "\n";
-      print_indent();
-    }
-    int w = hi - lo + 1;
-    if (ins_off == 0 && runs.size() == 1) {
-      // Single run from bit 0 of `ins`: the slice width truncates `ins` itself.
-      os << std::format("{} = {}", fmt_bit_range(target, lo, hi), ins);
-    } else {
-      os << std::format("{} = {}", fmt_bit_range(target, lo, hi), fmt_bit_range(ins, ins_off, ins_off + w - 1));
-    }
-    ins_off  += w;
-    need_sep  = true;
+  if (need_sep) {
+    os << "\n";
+    print_indent();
   }
+  // The window consumes `ins` from its bit 0: the slice width truncates it.
+  os << std::format("{} = {}", fmt_bit_range(target, window->first, window->second), ins);
 }
 
 // ── Single-use temp folding ─────────────────────────────────────────────────

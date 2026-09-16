@@ -2,6 +2,7 @@
 // Unified LNAST/LGraph inspection tools: cat, grep, diff, and tree.
 
 #include <algorithm>
+#include <iterator>
 #include <cstdio>
 #include <filesystem>
 #include <format>
@@ -653,17 +654,102 @@ bool tool_same_io(const hhds::GraphIO& a, const hhds::GraphIO& b) {
 // names, color/partitionability, widths, signs, and edge presentation to agree.
 // SourceId/srcmap and match annotations are intentionally absent: locations may
 // move on a comment-only edit, and match is a diagnostic artifact.
-bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
+// `why` (optional) receives the FIRST mismatch, naming the check and the node.
+// A bare bool is unactionable on a large design: H5 compares two whole compiles
+// of a 500k-LoC core, the line diff refuses such trees as too large, and the
+// bodies here are already known structurally identical -- so without this the
+// only report is "semantic attributes differ" with nothing to look at.
+// The H5 key must not carry a DEBUG NID. `nid` is deliberately absent from the
+// compared columns below -- a debug nid is allocation order, not design data,
+// and a warm compile numbers the same design differently because it allocated
+// its ids after loading the cached bodies. But `ident` is built from
+// `graph_util::debug_name`, which splices that same nid in as `<celltype>_<nid>`,
+// so the key carried it anyway. On xiangshan's Rob that made 135,095 edge
+// records differ between the warm and the cold compile of an IDENTICAL design:
+// stripping the numeric suffixes made the two difference lists equal, and
+// semdiff's isomorphism check (run just before this, with matching_names) had
+// already agreed. Only a `<celltype>_<digits>` at a token start is rewritten --
+// the cell-type set is exactly what debug_name uses -- so a user name that
+// happens to end in digits is left alone, and every user name is still compared
+// exactly through the `name` column and the per-node `attrs::name` check.
+std::string tool_ident_without_nids(std::string_view ident) {
+  static const auto* kCellNames = [] {
+    auto* v = new std::vector<std::string>;
+    for (auto op = static_cast<int>(Ntype_op::Invalid); op < static_cast<int>(Ntype_op::Last_invalid); ++op) {
+      auto nm = Ntype::get_name(static_cast<Ntype_op>(op));
+      if (!nm.empty()) {
+        v->emplace_back(nm);
+      }
+    }
+    return v;
+  }();
+  const auto token_start = [&](size_t i) {
+    if (i == 0) {
+      return true;
+    }
+    const char p = ident[i - 1];
+    return (std::isalnum(static_cast<unsigned char>(p)) == 0) && p != '_';
+  };
+  std::string out;
+  out.reserve(ident.size());
+  for (size_t i = 0; i < ident.size();) {
+    bool rewrote = false;
+    if (token_start(i)) {
+      for (const auto& cell : *kCellNames) {
+        if (ident.compare(i, cell.size(), cell) != 0 || i + cell.size() >= ident.size() || ident[i + cell.size()] != '_') {
+          continue;
+        }
+        size_t d = i + cell.size() + 1;
+        while (d < ident.size() && (std::isdigit(static_cast<unsigned char>(ident[d])) != 0)) {
+          ++d;
+        }
+        if (d == i + cell.size() + 1) {
+          continue;  // `<cell>_` with no digits: not a debug_name
+        }
+        out.append(cell).append("_#");
+        i       = d;
+        rewrote = true;
+        break;
+      }
+    }
+    if (!rewrote) {
+      out.push_back(ident[i]);
+      ++i;
+    }
+  }
+  return out;
+}
+
+bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) {
+  const auto no = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  const auto node_id = [](const hhds::Node_class& n) {
+    auto nm = n.attr(hhds::attrs::name);
+    // The match id says HOW the two sides were paired; without it a report on a
+    // design whose two runs number nodes differently is unreadable (and, before
+    // the correspondence pairing below, was not even about the same node).
+    return std::format("n{}{} [{}]",
+                       n.get_debug_nid(),
+                       nm.has() ? std::format(" '{}'", nm.get()) : std::string{},
+                       livehd::graph_util::has_match(n) ? std::format("match={}", livehd::graph_util::match_of(n))
+                                                        : std::string{"no-match"});
+  };
   std::vector<Tool_record> ar;
   std::vector<Tool_record> br;
   tool_flat_records(a, Tool_target::all, ar);
   tool_flat_records(b, Tool_target::all, br);
   if (ar.size() != br.size()) {
-    return false;
+    return no(std::format("record count {} vs {}", ar.size(), br.size()));
   }
   const std::vector<std::string> cols{"kind", "name", "color", "partitionable", "bits", "signed"};
   const auto                     record_key
-      = [&](const Tool_record& r) { return std::format("{}|{}|{}", r.type, r.ident, tool_render_pretty(r, cols)); };
+      = [&](const Tool_record& r) {
+          return std::format("{}|{}|{}", r.type, tool_ident_without_nids(r.ident), tool_ident_without_nids(tool_render_pretty(r, cols)));
+        };
   // Materialize each key once: computing format+render inside the sort
   // comparator costs O(n log n) renders per side for no benefit.
   const auto sorted_keys = [&](const std::vector<Tool_record>& records) {
@@ -675,26 +761,99 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
     std::sort(keys.begin(), keys.end());
     return keys;
   };
-  if (sorted_keys(ar) != sorted_keys(br)) {
-    return false;
+  {
+    const auto ak = sorted_keys(ar);
+    const auto bk = sorted_keys(br);
+    if (ak != bk) {
+      // The MULTISET difference, not the first positional mismatch: these are
+      // two sorted lists of tens of thousands of records, so one extra record
+      // early on shifts every later position and the first mismatch then names
+      // two unrelated records. Report what is actually present on one side
+      // only, which is the whole answer.
+      std::vector<std::string> only_a;
+      std::vector<std::string> only_b;
+      std::set_difference(ak.begin(), ak.end(), bk.begin(), bk.end(), std::back_inserter(only_a));
+      std::set_difference(bk.begin(), bk.end(), ak.begin(), ak.end(), std::back_inserter(only_b));
+      const auto brief = [](const std::vector<std::string>& v) {
+        constexpr size_t kShow = 3;
+        std::string       out;
+        for (size_t i = 0; i < v.size() && i < kShow; ++i) {
+          out += std::format("{}'{}'", out.empty() ? "" : ", ", v[i]);
+        }
+        if (v.size() > kShow) {
+          out += std::format(", +{} more", v.size() - kShow);
+        }
+        return out.empty() ? std::string{"(none)"} : out;
+      };
+      // LHD_H5_DUMP=<prefix>: write the two difference lists in full, for
+      // deciding whether a large difference is semantic or just renaming.
+      if (const char* dump = std::getenv("LHD_H5_DUMP"); dump != nullptr && *dump != '\0') {
+        const auto spill = [&](const char* side, const std::vector<std::string>& v) {
+          std::ofstream ofs(std::format("{}.{}.txt", dump, side));
+          for (const auto& line : v) {
+            ofs << line << '\n';
+          }
+        };
+        spill("first_only", only_a);
+        spill("second_only", only_b);
+      }
+      return no(std::format("{} record(s) only in the first, {} only in the second; first-only {}; second-only {}",
+                            only_a.size(),
+                            only_b.size(),
+                            brief(only_a),
+                            brief(only_b)));
+    }
   }
 
-  auto same_attr = [](auto ahost, auto bhost, auto tag) {
+  // Each helper reports the attribute NAME of the first mismatch through
+  // `detail`, so the caller can prefix it with whatever host it was checking.
+  std::string detail;
+  auto        same_attr = [&detail](auto ahost, auto bhost, auto tag, std::string_view label) {
     auto aa = ahost.attr(tag);
     auto ba = bhost.attr(tag);
-    return aa.has() == ba.has() && (!aa.has() || aa.get() == ba.get());
+    if (aa.has() != ba.has()) {
+      detail = std::format("{} present on {} side only", label, aa.has() ? "first" : "second");
+      return false;
+    }
+    if (aa.has() && !(aa.get() == ba.get())) {
+      detail = std::format("{} differs", label);
+      return false;
+    }
+    return true;
   };
-  auto same_range_attr = [](auto ahost, auto bhost, auto tag) {
+  auto same_range_attr = [&detail](auto ahost, auto bhost, auto tag, std::string_view label) {
     auto aa = ahost.attr(tag);
     auto ba = bhost.attr(tag);
-    return aa.has() == ba.has() && (!aa.has() || (aa.get().min == ba.get().min && aa.get().max == ba.get().max));
+    if (aa.has() != ba.has()) {
+      detail = std::format("{} present on {} side only", label, aa.has() ? "first" : "second");
+      return false;
+    }
+    if (aa.has() && (aa.get().min != ba.get().min || aa.get().max != ba.get().max)) {
+      detail = std::format("{} differs ([{}..{}] vs [{}..{}])", label, aa.get().min, aa.get().max, ba.get().min, ba.get().max);
+      return false;
+    }
+    return true;
   };
   auto same_pin_attrs = [&](auto ap, auto bp) {
-    return same_attr(ap, bp, livehd::attrs::bits) && same_attr(ap, bp, livehd::attrs::pin_offset)
-           && same_attr(ap, bp, livehd::attrs::pin_name) && same_attr(ap, bp, livehd::attrs::pin_delay)
-           && ap.attr(livehd::attrs::pin_signed).has() == bp.attr(livehd::attrs::pin_signed).has() && ap.is_const() == bp.is_const()
-           && (!ap.is_const() || ap.const_value()->same_repr(*bp.const_value()))
-           && same_range_attr(ap, bp, livehd::attrs::time_range) && same_range_attr(ap, bp, livehd::attrs::pending_time);
+    if (!same_attr(ap, bp, livehd::attrs::bits, "pin bits") || !same_attr(ap, bp, livehd::attrs::pin_offset, "pin_offset")
+        || !same_attr(ap, bp, livehd::attrs::pin_name, "pin_name") || !same_attr(ap, bp, livehd::attrs::pin_delay, "pin_delay")
+        || !same_range_attr(ap, bp, livehd::attrs::time_range, "pin time_range")
+        || !same_range_attr(ap, bp, livehd::attrs::pending_time, "pin pending_time")) {
+      return false;
+    }
+    if (ap.attr(livehd::attrs::pin_signed).has() != bp.attr(livehd::attrs::pin_signed).has()) {
+      detail = "pin_signed present on one side only";
+      return false;
+    }
+    if (ap.is_const() != bp.is_const()) {
+      detail = "constness differs";
+      return false;
+    }
+    if (ap.is_const() && !ap.const_value()->same_repr(*bp.const_value())) {
+      detail = std::format("const {} vs {}", ap.const_value()->serialize(), bp.const_value()->serialize());
+      return false;
+    }
+    return true;
   };
 
   std::vector<hhds::Node_class> anodes;
@@ -705,21 +864,61 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
   for (auto node : b->body().nodes(hhds::Node_order::forward)) {
     bnodes.push_back(node);
   }
-  const auto node_less
-      = [](const hhds::Node_class& lhs, const hhds::Node_class& rhs) { return lhs.get_debug_nid() < rhs.get_debug_nid(); };
-  std::sort(anodes.begin(), anodes.end(), node_less);
-  std::sort(bnodes.begin(), bnodes.end(), node_less);
   if (anodes.size() != bnodes.size()) {
-    return false;
+    return no(std::format("node count {} vs {}", anodes.size(), bnodes.size()));
+  }
+  // PAIR BY THE SEMDIFF CORRESPONDENCE, not by debug nid. `structural_identical`
+  // ran immediately before this (and stamps `attrs::match` on every node by
+  // default), so the two graphs come with a real correspondence. Sorting both
+  // sides by debug nid instead -- allocation order -- silently paired UNRELATED
+  // nodes whenever the two runs numbered the design differently, which is
+  // exactly what a warm compile does: it allocates its ids after loading the
+  // cached bodies. Every attribute verdict below was then meaningless.
+  // Fall back to the nid order only when the correspondence is absent (match id
+  // 0 means "no counterpart" and is a real value, so require a non-zero id on
+  // every node before trusting it).
+  const auto match_usable = [](const std::vector<hhds::Node_class>& v) {
+    std::set<uint32_t> ids;
+    for (const auto& n : v) {
+      if (!livehd::graph_util::has_match(n)) {
+        return false;
+      }
+      const uint32_t id = livehd::graph_util::match_of(n);
+      if (id == 0 || !ids.insert(id).second) {
+        return false;  // unmatched, or not a bijection -- do not trust it
+      }
+    }
+    return true;
+  };
+  if (match_usable(anodes) && match_usable(bnodes)) {
+    const auto by_match = [](const hhds::Node_class& lhs, const hhds::Node_class& rhs) {
+      return livehd::graph_util::match_of(lhs) < livehd::graph_util::match_of(rhs);
+    };
+    std::sort(anodes.begin(), anodes.end(), by_match);
+    std::sort(bnodes.begin(), bnodes.end(), by_match);
+    for (size_t i = 0; i < anodes.size(); ++i) {
+      if (livehd::graph_util::match_of(anodes[i]) != livehd::graph_util::match_of(bnodes[i])) {
+        return no(std::format("correspondence ids differ ({} vs {})",
+                              livehd::graph_util::match_of(anodes[i]),
+                              livehd::graph_util::match_of(bnodes[i])));
+      }
+    }
+  } else {
+    const auto node_less
+        = [](const hhds::Node_class& lhs, const hhds::Node_class& rhs) { return lhs.get_debug_nid() < rhs.get_debug_nid(); };
+    std::sort(anodes.begin(), anodes.end(), node_less);
+    std::sort(bnodes.begin(), bnodes.end(), node_less);
   }
   for (size_t i = 0; i < anodes.size(); ++i) {
     auto an = anodes[i];
     auto bn = bnodes[i];
-    if (!same_attr(an, bn, hhds::attrs::name) || !same_attr(an, bn, livehd::attrs::color)
-        || !same_attr(an, bn, livehd::attrs::place) || !same_attr(an, bn, livehd::attrs::proven)
-        || !same_attr(an, bn, livehd::attrs::runtime_check) || !same_attr(an, bn, livehd::attrs::lut)
-        || !same_range_attr(an, bn, livehd::attrs::time_range) || !same_range_attr(an, bn, livehd::attrs::pending_time)) {
-      return false;
+    if (!same_attr(an, bn, hhds::attrs::name, "name") || !same_attr(an, bn, livehd::attrs::color, "color")
+        || !same_attr(an, bn, livehd::attrs::place, "place") || !same_attr(an, bn, livehd::attrs::proven, "proven")
+        || !same_attr(an, bn, livehd::attrs::runtime_check, "runtime_check")
+        || !same_attr(an, bn, livehd::attrs::lut, "lut")
+        || !same_range_attr(an, bn, livehd::attrs::time_range, "time_range")
+        || !same_range_attr(an, bn, livehd::attrs::pending_time, "pending_time")) {
+      return no(std::format("{}: {}", node_id(an), detail));
     }
     // CONSTANT operands, compared from the SINK side. Constants are pool pins
     // on the CONST_NODE singleton, which body().nodes() skips, so a const ->
@@ -736,7 +935,31 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
       return v;
     };
     if (const_operands(an) != const_operands(bn)) {
-      return false;
+      const auto av = const_operands(an);
+      const auto bv = const_operands(bn);
+      // A serialized Dlop can hold unknown bits and padding that render as blanks
+      // (or as control bytes), so "[0:    ] vs [0:    ]" is a useless report.
+      // Escape anything not printable-ASCII.
+      const auto esc = [](const std::string& v) {
+        std::string o;
+        for (const unsigned char c : v) {
+          if (c >= 0x20 && c < 0x7f) {
+            o.push_back(static_cast<char>(c));
+          } else {
+            o += std::format("\\x{:02x}", c);
+          }
+        }
+        return o;
+      };
+      std::string as;
+      std::string bs;
+      for (const auto& [pid, v] : av) {
+        as += std::format("{}{}:{}", as.empty() ? "" : " ", pid, esc(v));
+      }
+      for (const auto& [pid, v] : bv) {
+        bs += std::format("{}{}:{}", bs.empty() ? "" : " ", pid, esc(v));
+      }
+      return no(std::format("{}: const operands [{}] vs [{}]", node_id(an), as, bs));
     }
     std::vector<hhds::Edge_class> ae;
     std::vector<hhds::Edge_class> be;
@@ -758,19 +981,23 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
     std::sort(ae.begin(), ae.end(), edge_less);
     std::sort(be.begin(), be.end(), edge_less);
     if (ae.size() != be.size()) {
-      return false;
+      return no(std::format("{}: out-edge count {} vs {}", node_id(an), ae.size(), be.size()));
     }
     for (size_t e = 0; e < ae.size(); ++e) {
       const auto aedge = ae[e];
       const auto bedge = be[e];
-      if (!same_pin_attrs(aedge.driver, bedge.driver) || !same_pin_attrs(aedge.sink, bedge.sink)) {
-        return false;
+      if (!same_pin_attrs(aedge.driver, bedge.driver)) {
+        return no(std::format("{}: out-edge {} driver: {}", node_id(an), e, detail));
+      }
+      if (!same_pin_attrs(aedge.sink, bedge.sink)) {
+        return no(std::format("{}: out-edge {} sink {}: {}", node_id(an), e, node_id(aedge.sink.get_master_node()), detail));
       }
     }
   }
-  auto ac = a->get_input_node().attr(livehd::attrs::coloring_info);
-  auto bc = b->get_input_node().attr(livehd::attrs::coloring_info);
-  return ac.has() == bc.has() && (!ac.has() || ac.get() == bc.get());
+  if (!same_attr(a->get_input_node(), b->get_input_node(), livehd::attrs::coloring_info, "coloring_info")) {
+    return no(detail);
+  }
+  return true;
 }
 
 bool tool_structural_h5(const std::vector<std::string>& lg_dirs, const Options& opts, std::string& why) {
@@ -832,8 +1059,9 @@ bool tool_structural_h5(const std::vector<std::string>& lg_dirs, const Options& 
                         traversal_identical ? "agrees" : "also differs");
       return false;
     }
-    if (!tool_same_semantic_attrs(ag.get(), bg.get())) {
-      why = std::format("{}: semantic attributes differ", name);
+    std::string attr_why;
+    if (!tool_same_semantic_attrs(ag.get(), bg.get(), &attr_why)) {
+      why = std::format("{}: semantic attributes differ ({})", name, attr_why);
       return false;
     }
   }

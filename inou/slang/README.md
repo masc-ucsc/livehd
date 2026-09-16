@@ -135,7 +135,7 @@ procedural writes to nets; the rest are tracked feature gaps: instance arrays,
 hierarchical punch-through references, `'bx` golden arms, dynamic
 mem-element part-selects). The 7 `verilog`-capped entries are LEC-slow or
 genuine gaps: four big-memory / wide-arith tests (`long_mem`, `long_mem3`,
-`fixme_mem_offset`, historically `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
+`fixme_mem_offset`, `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
 `mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.

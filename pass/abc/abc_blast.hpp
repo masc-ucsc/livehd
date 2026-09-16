@@ -60,31 +60,25 @@ public:
           fail("set_mask needs a known constant mask");
           return finish(zero());
         }
-        const auto& mask     = gu::const_of(mask_pin);
-        bool        negative = mask.is_negative();
-        int         prefix   = std::max(0, static_cast<int>(mask.get_bits()) - (negative ? 1 : 0));
-        int         width = gu::bits_of(pin), limit = width == 0 ? prefix : std::min(prefix, width);
-        int         lo = -1, selected = 0;
-        for (int b = 0; b < limit; ++b) {
-          bool take = negative ? !mask.bit_test(b) : mask.bit_test(b);
-          if (take && lo < 0) {
-            lo = b;
-          } else if (!take && lo >= 0) {
-            alias.runs.push_back({lo, b, selected});
-            selected += b - lo;
-            lo        = -1;
+        // graph/cell.hpp: the mask is ONE window [lo, hi), or -1 == "replace
+        // everything", i.e. the whole declared width. So there is exactly one
+        // run and `value` is read from its bit 0 -- no per-bit scan.
+        const auto& mask  = gu::const_of(mask_pin);
+        const int   width = gu::bits_of(pin);
+        int         lo = 0, hi = 0;
+        if (gu::is_whole_value_mask(mask)) {
+          hi = width;  // an unwidthed pin leaves the window empty, as before
+        } else {
+          const auto window = gu::mask_window_of(mask);
+          if (!window) {
+            fail("set_mask needs a contiguous constant mask");
+            return finish(zero());
           }
+          lo = window->first;
+          hi = width > 0 ? std::min(window->second, width) : window->second;
         }
-        if (lo >= 0) {
-          alias.runs.push_back({lo, limit, selected});
-          selected += limit - lo;
-        }
-        if (negative && prefix < width) {
-          if (!alias.runs.empty() && alias.runs.back().hi == prefix) {
-            alias.runs.back().hi = width;
-          } else {
-            alias.runs.push_back({prefix, width, selected});
-          }
+        if (hi > lo) {
+          alias.runs.push_back({lo, hi, 0});
         }
       }
       if (fresh) {
@@ -144,7 +138,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
   const auto abc_mux    = [&](Bit sel, Bit t, Bit f) { return ops.or_(ops.and_(sel, t), ops.and_(ops.inv(sel), f)); };
   const auto real_width = [](const hhds::Pin_class& p) { return std::max(1, gu::real_width(p)); };
   const auto eff_width  = [&](const hhds::Pin_class& p) {
-    return p.is_const() ? std::max(1, static_cast<int>(gu::const_of(p).get_bits())) : real_width(p);
+    return p.is_const() ? std::max(1, static_cast<int>(gu::const_of(p).get_signed_bits())) : real_width(p);
   };
   const auto arm_bit = [&](int arm, int bit, const hhds::Pin_class& original) {
     if (facts != nullptr) {
@@ -393,36 +387,39 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
              m_drv,
              "mask driven here");
     } else {
-      const auto& mask   = gu::const_of(m_drv);
-      bool        neg    = mask.is_negative();
-      int         mb     = mask.get_bits();
-      int         pmb    = neg ? mb - 1 : mb;
+      // graph/cell.hpp: the mask is ONE window [lo, hi), or -1 == the whole
+      // source. Either way the selected positions are CONSECUTIVE, so output
+      // bit j reads source bit lo + j -- no per-bit scan and no position list.
+      const auto& mask = gu::const_of(m_drv);
       int         a_bits = gu::bits_of(a_drv);
       if (a_bits == 0 && a_drv.is_const()) {
         // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
         // eff_width above — create_const stamps only the value, never a width).
-        // The zero-extend idiom Get_mask(a, -1) puts EVERY source position in
-        // the negative fill loop below, which is bounded by a_bits: left at 0
-        // it yields an empty `pos` and the final loop writes const0 into every
-        // output bit, silently replacing the literal with 0. Note abc_bit is
-        // never reached, so its unmaterialized-driver diagnostic cannot warn.
-        // Size the literal from its VALUE, exactly as eff_width does.
-        a_bits = std::max(1, static_cast<int>(gu::const_of(a_drv).get_bits()));
+        // The zero-extend idiom Get_mask(a, -1) selects EVERY source position,
+        // and that window is bounded by a_bits: left at 0 it would write const0
+        // into every output bit, silently replacing the literal with 0. Note
+        // abc_bit is never reached, so its unmaterialized-driver diagnostic
+        // cannot warn. Size the literal from its VALUE, exactly as eff_width does.
+        a_bits = std::max(1, static_cast<int>(gu::const_of(a_drv).get_signed_bits()));
       }
-      std::vector<int> pos;
-      for (int k = 0; k < pmb; ++k) {
-        bool sel = neg ? !mask.bit_test(k) : mask.bit_test(k);
-        if (sel) {
-          pos.push_back(k);
+      const auto window = gu::is_whole_value_mask(mask) ? std::optional<std::pair<int, int>>{{0, a_bits}}
+                                                        : gu::mask_window_of(mask);
+      if (!window) {
+        // REFUSE rather than abort: this is a mapping pass, and its answer to a
+        // cell it cannot express is a diagnostic naming the pin, not a crash.
+        refuse(n,
+               "unsupported-cell",
+               "unsupported",
+               "get_mask has a mask that is neither a contiguous window nor -1, which cannot be technology-mapped",
+               {},
+               m_drv,
+               "mask driven here");
+      } else {
+        const auto [lo, hi] = *window;
+        const int  span     = hi - lo;
+        for (int b = 0; b < out_bits; ++b) {
+          slots[b] = b < span ? abc_bit(a_drv, lo + b) : abc_const_bit(false);
         }
-      }
-      if (neg) {
-        for (int k = pmb; k < a_bits; ++k) {
-          pos.push_back(k);
-        }
-      }
-      for (int b = 0; b < out_bits; ++b) {
-        slots[b] = b < static_cast<int>(pos.size()) ? abc_bit(a_drv, pos[b]) : abc_const_bit(false);
       }
     }
   } else if (op == Ntype_op::Set_mask) {
@@ -672,7 +669,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         const int wanted = std::max(0, real_width(sink_node.create_driver_pin(0)));
         int       found  = 0;
         int       hi     = 0;
-        for (int bit = 0; bit < static_cast<int>(mask.get_bits()) && found < wanted; ++bit) {
+        for (int bit = 0; bit < static_cast<int>(mask.get_signed_bits()) && found < wanted; ++bit) {
           if (mask.bit_test(bit)) {
             hi = bit + 1;
             ++found;

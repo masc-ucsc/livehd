@@ -1018,7 +1018,7 @@ namespace {
 //
 // The width and the unknown count are not decoration. Dlop's carrier is SIGNED,
 // so a non-negative value always renders with one leading `0` beyond its payload
-// (`literal_payload_bits`): a u6 whose every bit is unknown prints as
+// (`Dlop::get_payload_bits`): a u6 whose every bit is unknown prints as
 // `0ub0??????`, and that leading digit reads as a seventh value bit -- or, worse,
 // as a sign -- to anyone who did not write the renderer. Spelling out
 // "(6 bits, 6 unknown)" says plainly that this is a six-bit value, entirely
@@ -1033,7 +1033,7 @@ namespace {
   if (s.size() > 44) {
     s = std::format("{}...{}", s.substr(0, 28), s.substr(s.size() - 6));
   }
-  return std::format("{} ({} bits, {} unknown)", s, gu::literal_payload_bits(v), unk);
+  return std::format("{} ({} bits, {} unknown)", s, std::max(1, v.get_payload_bits()), unk);
 }
 
 // "<cell>_<nid>" plus the nearest named signal: `shl_10620 (feeds 'mshr_d')`.
@@ -1294,13 +1294,13 @@ void bypass_setmask_bit_reads(hhds::Graph* g) {
         resolved = false;
         break;
       }
-      const auto& mv    = gu::const_of(mask);
-      auto [begin, end] = mv.get_mask_range();
-      if (mv.has_unknowns() || begin < 0 || end <= begin) {
+      auto window = gu::mask_window_of(gu::const_of(mask));
+      if (!window) {
         resolved = false;
         break;
       }
-      resolved = true;
+      const auto [begin, end] = *window;
+      resolved                = true;
       if (bit >= begin && bit < end) {
         source  = value;
         bit    -= begin;

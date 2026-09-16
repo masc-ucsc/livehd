@@ -1651,7 +1651,67 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
 // --set is merged, so the directory emit path (where each `.map` lands adjacent
 // to its `.v`) ships the source map by default while `--set cgen.srcmap=0` can
 // still turn it off.
-std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir, bool default_srcmap) {
+std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& input, const std::string& odir, bool default_srcmap,
+                                   std::string_view top) {
+  Eprp_var selected;
+  if (!top.empty()) {
+    const auto root = pick_top_graph(input, "", std::string(top), "", "compile", "inou.cgen.verilog");
+    std::vector<std::shared_ptr<hhds::Graph>> pending{root};
+    absl::flat_hash_set<const hhds::Graph*>   seen;
+    while (!pending.empty()) {
+      auto graph = std::move(pending.back());
+      pending.pop_back();
+      if (!graph || !seen.insert(graph.get()).second) {
+        continue;
+      }
+      selected.add(graph);
+      for (auto node : graph->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+          if (auto child = node.get_subnode_graph()) {
+            pending.push_back(std::move(child));
+          }
+        }
+      }
+    }
+    // Reachability alone is not the design. A module this compile ELABORATED
+    // FROM SOURCE belongs in the emit even when no Sub instance survives to
+    // point at it: an empty sink module (`module obs(input d); endmodule`) has
+    // its instance removed as dead once lowered, and pruning on reachability
+    // then dropped a module the source declared -- silently, on a round trip
+    // (//lhd/tests:slang_struct_net_wire_test section 8; the real case is a DPI
+    // wrapper that is only empty under SYNTHESIS). An entry that arrived purely
+    // as a pre-compiled `lg:` library input has no unit here, so it is still
+    // pruned, which is what the --top filter is for.
+    absl::flat_hash_set<std::string> own_units;
+    for (const auto& ln : input.lnasts) {
+      if (!ln) {
+        continue;
+      }
+      const std::string name{ln->get_top_module_name()};
+      own_units.insert(name);
+      // A graph is named `<unit>.<entity>`; a unit-level lnast carries just the
+      // file, so accept a graph whose file half matches too.
+      if (const auto dot = name.rfind('.'); dot != std::string::npos) {
+        own_units.insert(name.substr(0, dot));
+      }
+    }
+    if (!own_units.empty()) {
+      for (const auto& graph : input.graphs) {
+        if (!graph || seen.contains(graph.get())) {
+          continue;
+        }
+        const std::string gname{graph->get_name()};
+        const auto        dot = gname.rfind('.');
+        if (own_units.contains(gname) || (dot != std::string::npos && own_units.contains(gname.substr(0, dot)))) {
+          seen.insert(graph.get());
+          selected.add(graph);
+        }
+      }
+    }
+  }
+  // --top selects the design and its callees, not unrelated library entries.
+  // A library emission (no top) deliberately retains every supplied graph.
+  auto& var = top.empty() ? input : selected;
   ensure_dir(odir);
   Eprp_var::Eprp_dict labels{
       {"odir", odir}
@@ -1692,7 +1752,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (e.kind != "verilog") {
       continue;
     }
-    auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true);
+    auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true, opts.top);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
       const auto content = livehd::file_utils::read_file(std::format("{}/{}.v", e.path, livehd::unit_file_stem(n)));
@@ -1709,7 +1769,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     // One declared file: per-module cgen into scratch, then a deterministic
     // (name-sorted) concatenation.
     auto          scratch = std::format("{}/cgen_{:03d}", workdir(opts), ++step_counter);
-    auto          names   = cgen_into(opts, res, var, scratch);
+    auto          names   = cgen_into(opts, res, var, scratch, /*default_srcmap=*/false, opts.top);
     std::ofstream ofs(e.path);
     if (!ofs.is_open()) {
       throw Lhd_error{"config", std::format("could not write {}", e.path), ""};

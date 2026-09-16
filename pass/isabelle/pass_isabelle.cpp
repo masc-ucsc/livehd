@@ -70,13 +70,10 @@ bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_inp
 bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
 livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
+  // Ports are ascending by hhds contract; only several drivers sharing one sink
+  // pin need an order, and that one is for deterministic emission.
   auto edges = node.inp_edges();
-  std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
-    const auto ap = a.sink.get_port_id();
-    const auto bp = b.sink.get_port_id();
-    if (ap != bp) {
-      return ap < bp;
-    }
+  livehd::graph_util::sort_drivers_within_pin(edges, [](const Edge& a, const Edge& b) {
     return a.driver.get_class_index().value < b.driver.get_class_index().value;
   });
   return edges;
@@ -758,7 +755,7 @@ std::string driver_expr(const Ctx& ctx, const Node_pin& dpin) {
     auto v = pin_const_value(dpin);
     auto w = raw_pin_width(dpin);
     if (w == 0) {
-      w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+      w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
     }
     return lit_const_at(ctx, driver_node, v, w);
   }
@@ -775,7 +772,7 @@ std::string driver_expr_at(const Ctx& ctx, const Node_pin& dpin, uint32_t expect
 
 uint32_t minimal_unsigned_const_width(const Dlop& v) {
   if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
   }
   const int64_t iv = v.to_just_i64();
   if (iv <= 0) {

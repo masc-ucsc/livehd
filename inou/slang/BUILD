@@ -112,9 +112,11 @@ sh_test(
         "//inou/yosys:tests/%s.v" % t,
         "//lhd",
     ],
+    # `long1` is one of the tags .bazelrc excludes from the default `bazel test`
+    # sweep: long_nocheck_iwls_square takes far too long for the default run.
     tags = [
         "slang_compile",
-    ],
+    ] + (["long1"] if t == "long_nocheck_iwls_square" else []),
 ) for t in SLANG_LADDER.keys()]
 
 # Legacy no-argument mode: the sky130 cell-instance set (unknown-module policy).

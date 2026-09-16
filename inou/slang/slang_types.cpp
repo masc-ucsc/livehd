@@ -32,10 +32,6 @@ std::string Slang_context::int_max_str(int bits, bool is_signed) const {
     return std::string(Dlop::get_mask_value(bits)->to_pyrope());  // 2^bits - 1
   }
   // signed max = 2^(bits-1) - 1; a 1-bit signed maxes at 0 (range {-1,0}).
-  // get_mask_value(0) returns 1 (narrow-arg wart), so special-case bits<=1.
-  if (bits <= 1) {
-    return "0";
-  }
   return std::string(Dlop::get_mask_value(bits - 1)->to_pyrope());
 }
 
@@ -46,16 +42,7 @@ std::string Slang_context::int_min_str(int bits, bool is_signed) const {
   if (bits <= 0) {
     bits = 1;
   }
-  // signed min = -2^(bits-1). get_neg_mask_value(arg) returns the correct
-  // -2^arg for arg >= 2, but +1 for arg <= 1 (the narrow wart), so the two
-  // narrow widths are special-cased; bits >= 3 (arg >= 2) delegates and stays
-  // exact even past 64 bits.
-  if (bits == 1) {
-    return "-1";
-  }
-  if (bits == 2) {
-    return "-2";
-  }
+  // signed min = -2^(bits-1); exact even past 64 bits.
   return std::string(Dlop::get_neg_mask_value(bits - 1)->to_pyrope());
 }
 

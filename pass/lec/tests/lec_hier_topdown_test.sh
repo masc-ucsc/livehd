@@ -437,6 +437,32 @@ elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
   echo "FAIL: case 11 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
 else echo "ok: synthetic partition hierarchy collapses to packed/scalar machine state and proves"; fi
 
+# An unconfirmed child CEX must not overwrite an inconclusive top verdict.
+# The child differs only when b=1, but its caller always supplies b=0. The
+# unmatched extra output keeps the top inconclusive without relying on timing.
+for side in ref impl; do
+  if [ "$side" = ref ]; then op='^'; else op='|'; fi
+  cat > "$W/unconfirmed_$side.v" <<EOF
+module child(input a,b, output y); assign y=a $op b; endmodule
+module top(input a,b,output y,output extra_$side);
+  child u(a,1'b0,y); assign extra_$side=a;
+endmodule
+EOF
+  C "unconfirmed_$side"
+done
+for order in top_down bottom_up; do
+  "$LHD" lec --ref "lg:$W/unconfirmed_ref" --impl "lg:$W/unconfirmed_impl" --top top \
+    --set "formal.lec.hier_order=$order" --workdir "$W/unconfirmed_$order" \
+    --result-json "$W/unconfirmed_$order.json" > "$W/unconfirmed_$order.log" 2>&1
+  python3 - "$W/unconfirmed_$order.json" <<'PYVERDICT'
+import json, sys
+with open(sys.argv[1]) as f:
+    result = json.load(f)
+assert result["lec"]["verdict"] == "unknown", result
+PYVERDICT
+  if [ "$?" -ne 0 ]; then echo "FAIL: unconfirmed child CEX changed the $order top verdict"; fail=1; fi
+done
+
 if [ "$fail" -ne 0 ]; then echo "lec_hier_topdown_test: FAILED"; exit 1; fi
 echo "PASS: lec_hier_topdown_test"
 exit 0

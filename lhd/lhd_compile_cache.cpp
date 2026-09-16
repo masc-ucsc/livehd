@@ -2715,13 +2715,62 @@ Overlay_status compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, co
       }
     }
 
-    const std::set<std::string> wanted(res.compile_cache_overlay_graphs.begin(), res.compile_cache_overlay_graphs.end());
+    auto&                 dst_pre = livehd::Hhds_graph_library::instance(lib_path);
+    std::set<std::string> wanted(res.compile_cache_overlay_graphs.begin(), res.compile_cache_overlay_graphs.end());
+    // A cached body carries the `proven` / `runtime_check` that pass.formal
+    // stamped in the invocation that STORED it, and those are properties of the
+    // WHOLE design, not of this unit: pass.formal's budget is a total wall clock
+    // (default 10 s) that runs out partway through a large core, so which
+    // obligations get an answer moves when any sibling changes. This run's live
+    // body already carries the annotations for THIS design, so transplanting the
+    // cached one would replace a fresh, correct annotation with a stale one --
+    // and in the dangerous direction a stale `proven` makes cgen elide a runtime
+    // check the edited design no longer proves. Overlay is exactness, not
+    // correctness, so a unit whose annotations disagree simply keeps its live
+    // body (the same downgrade `decline()` takes wholesale).
+    {
+      const auto formal_attrs = [](const hhds::Graph* g) {
+        std::vector<std::tuple<uint64_t, uint32_t, uint32_t>> v;
+        for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+          const bool p = livehd::graph_util::has_proven(node);
+          const bool r = livehd::graph_util::has_runtime_check(node);
+          if (!p && !r) {
+            continue;  // the overwhelming majority -- only annotated nodes matter
+          }
+          v.emplace_back(static_cast<uint64_t>(node.get_debug_nid()),
+                         p ? livehd::graph_util::proven_of(node) : ~uint32_t{0},
+                         r ? livehd::graph_util::runtime_check_of(node) : ~uint32_t{0});
+        }
+        std::sort(v.begin(), v.end());
+        return v;
+      };
+      std::vector<std::string> stale;
+      for (const auto& name : wanted) {
+        auto cio = cache.find_io(name);
+        auto lio = dst_pre.find_io(name);
+        if (!cio || !lio || !cio->has_graph() || !lio->has_graph()) {
+          continue;  // the row check above already proved the shapes agree
+        }
+        if (formal_attrs(cio->get_graph().get()) != formal_attrs(lio->get_graph().get())) {
+          stale.push_back(name);
+        }
+      }
+      for (const auto& name : stale) {
+        wanted.erase(name);
+        std::erase(res.compile_cache_overlay_graphs, name);
+        ++res.compile_cache.refused;
+      }
+      if (wanted.empty()) {
+        res.compile_cache_overlay_graphs.clear();
+        return Overlay_status::ok;  // nothing left to transplant; live result stands
+      }
+    }
     std::vector<std::string>    var_names;
     var_names.reserve(var.graphs.size());
     for (const auto& graph : var.graphs) {
       var_names.emplace_back(graph ? std::string(graph->get_name()) : std::string{});
     }
-    auto& dst = livehd::Hhds_graph_library::instance(lib_path);
+    auto& dst = dst_pre;
     mutated   = true;  // past this point a failure is not cosmetic
     for (const auto& name : wanted) {
       dst.delete_graphio(name);

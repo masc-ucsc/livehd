@@ -36,11 +36,10 @@ using livehd::graph_util::type_op_of;
 
 namespace {
 
+// The ports are already ascending (hhds contract); only the several drivers of
+// one sink pin need a deterministic order.
 void sort_inp(livehd::graph_util::Edge_vec& edges) {
-  std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
-    if (a.sink.get_port_id() != b.sink.get_port_id()) {
-      return a.sink.get_port_id() < b.sink.get_port_id();
-    }
+  livehd::graph_util::sort_drivers_within_pin(edges, [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
     const auto an = a.driver.get_master_node().get_debug_nid();
     const auto bn = b.driver.get_master_node().get_debug_nid();
     if (an != bn) {
@@ -408,7 +407,6 @@ struct Hold_mux_match {
 }
 
 constexpr std::pair<int, int> kFpBail{-1, -1};
-constexpr int                 kPackedSliceWalkLimit  = 64;
 constexpr int                 kPackedSliceFanInLimit = 64;
 // Canonicalizing one flat, disjoint Or/SHL pack is a bounded linear scan, not
 // the recursive slice walk guarded above. Chisel-generated state bundles can
@@ -431,22 +429,15 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
   return (k < 0 || k > (1 << 28)) ? -1 : static_cast<int>(k);
 }
 
-// The half-open [begin,end) bit range of a Get_mask's CONSTANT mask, or kFpBail.
-// Rejects the `-1` to-unsigned idiom and noncontiguous/negative masks.
+// The half-open [begin,end) window of a Get_mask's CONSTANT mask, or kFpBail
+// for the `-1` to-unsigned spelling (which has no window).
 [[nodiscard]] std::pair<int, int> const_mask_range(const hhds::Node_class& m) {
   auto md = drv_at(m, 2);
   if (md.is_invalid() || !md.is_const()) {
     return kFpBail;
   }
-  const auto& mc = const_of(md);
-  if (mc.has_unknowns() || !mc.is_positive()) {
-    return kFpBail;  // includes mask == -1
-  }
-  auto [b, e] = mc.get_mask_range();  // {-1,-1} also signals noncontiguous
-  if (b < 0 || e <= b) {
-    return kFpBail;
-  }
-  return {b, e};
+  auto window = livehd::graph_util::mask_window_of(const_of(md));
+  return window ? *window : kFpBail;
 }
 
 // footprint(p): a sound OVER-approximation [lo,hi) of the bit positions where `p`
@@ -465,7 +456,7 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
       return kFpBail;
     }
     if (c.has_unknowns()) {
-      return {0, c.get_bits()};  // a '?'-const still occupies its declared width
+      return {0, c.get_signed_bits()};  // a '?'-const still occupies its declared width
     }
     int fb = c.get_first_bit_set();
     int lb = c.get_last_bit_set();
@@ -526,14 +517,8 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
 // The width n of a low-contiguous mask 2^n-1 (n>=1), or -1 for anything else
 // (negative, unknown-bit, zero, or a run not anchored at bit 0).
 [[nodiscard]] int low_mask_width(const Dlop& mask) {
-  if (mask.is_negative() || mask.has_unknowns()) {
-    return -1;
-  }
-  auto [mb, me] = mask.get_mask_range();  // {-1,-1} = noncontiguous
-  if (mb != 0 || me <= 0) {
-    return -1;
-  }
-  return me;
+  auto window = livehd::graph_util::mask_window_of(mask);
+  return (window && window->first == 0) ? window->second : -1;
 }
 
 // "Is `op` a COMPUTED combinational cell (as opposed to an IO/state/Sub/const/
@@ -1775,7 +1760,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
       }
     }
 
-    if (result.get_bits() == 0) {
+    if (result.get_signed_bits() == 0) {
       result = Dlop::create_integer(0);
 #ifndef NDEBUG
       Pass::info("WARNING: mux:{} selector:{} goes for disconnected pin in mux. Using zero\n", debug_name(node), sel);
@@ -1871,18 +1856,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
       }
       return;
     }
-    auto v = a.get_mask_op(mask);
-    if (v->is_integer() && !v->has_unknowns() && v->is_negative()) {
-      // Dlop's single-set-bit quirk returns the signed 1-bit -1; the cell
-      // zero-extends, so the selected set bit is the unsigned 1 (same fix as
-      // try_find_single_driver_pin and pass/bitwidth's `gm`).
-      auto [qb, qe] = mask.get_mask_range();
-      if (qb < 0 || qe != qb + 1) {
-        return;  // negative pack from a multi-bit mask: unexpected, keep the node
-      }
-      v = Dlop::create_integer(1);
-    }
-    replace_node(node, *v);
+    replace_node(node, *a.get_mask_op(mask));
   } else if (op == Ntype_op::Concat) {
     // Every lane VALUE is constant, so the whole assembly is one non-negative
     // sum(w_i)-bit constant.
@@ -1909,10 +1883,10 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
       const int w = lanes[i].width;
       // Dlop::concat_op DEBUG-asserts that a lane fits its window -- an
       // over-wide lane is a caller bug there, even though
-      // the CELL truncates it. get_bits() over-approximates once the sign bit
+      // the CELL truncates it. get_signed_bits() over-approximates once the sign bit
       // itself is unknown, so this refuses slightly more than the assert would:
       // the safe direction, since an unfolded Concat still computes.
-      if (values[i].get_bits() > (values[i].is_negative() ? w : w + 1)) {
+      if (values[i].get_payload_bits() > w) {
         return;
       }
     }
@@ -2352,9 +2326,9 @@ bool Cprop::scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& i
   // SHL(SRA(x,inner), outer): SRA drops the low `inner` bits, so only the
   // exact-rebuild case outer == inner is a pure mask: x & ~(2^inner - 1).
   if (outer == inner && inner == 0) {
-    // Both shifts are identities. Dlop::get_mask_value(0) returns 1 (not 0),
-    // so the And rewrite below would build ~1 = -2 and clear bit 0; compose
-    // to a zero-amount shift instead and let the constant sweep collapse it.
+    // Both shifts are identities. The And rewrite below would build the
+    // all-ones mask ~0 == -1, a node that says nothing; compose to a
+    // zero-amount shift instead and let the constant sweep collapse it.
     retarget(op, 0);
     return true;
   }
@@ -2494,18 +2468,7 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
     auto [range_begin, range_end] = mask_const.get_mask_range();
     if (pos >= range_end || pos < range_begin) {
       if (a_pin.is_const()) {
-        // get_mask is Pyrope's default-ZEXT bit-select: a non-negative mask packs
-        // the selected bits LSB-first as an UNSIGNED value. Dlop::get_mask_op has a
-        // single-bit quirk that returns the signed 1-bit -1 for a lone set bit;
-        // `#[N]` zero-extends (a set bit is the unsigned 1), so correct it here to
-        // match cgen's plain `a[N]` part-select — same fix as upass get_mask_zext
-        // and pass/bitwidth's `gm`.
-        const auto pos_mask = Dlop::get_mask_value(static_cast<int>(pos), static_cast<int>(pos));
-        auto       v        = const_of(a_pin).get_mask_op(*pos_mask);
-        if (!pos_mask->is_negative() && v->is_integer() && !v->has_unknowns() && v->is_negative()) {
-          v = Dlop::create_integer(1);
-        }
-        return create_const(*current_graph, *v);
+        return create_const(*current_graph, *const_of(a_pin).get_mask_op_opt(static_cast<int>(pos), static_cast<int>(pos) + 1));
       }
       auto a_master = a_pin.get_master_node();
       if (type_op_of(a_master) != Ntype_op::Set_mask) {
@@ -2553,27 +2516,33 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
 // Returns true iff `node` was deleted (folded to a constant). A `false` return
 // may still have REWIRED `node`, so callers must re-read its input edges.
 bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_const) {
-  if (!mask_const.is_positive()) {
-    return false;  // -1 (to-unsigned) is consumed by Rule 4 before we get here
-  }
-  auto [lo, hi] = mask_const.get_mask_range();  // half-open; {-1,-1} = noncontiguous
-  if (lo < 0 || hi <= lo) {
+  // -1 (to-unsigned) is consumed by Rule 4 before we get here, so this is a
+  // window; mask_window_of returns nothing for the -1 spelling.
+  auto window = livehd::graph_util::mask_window_of(mask_const);
+  if (!window) {
     return false;
   }
+  auto [lo, hi] = *window;
 
   auto cur = drv_at(node, 0);
 
-  // No decreasing measure exists: the Or rule descends with [lo,hi) UNCHANGED, so
-  // an Or->operand->Or chain inside a word-level SCC can revisit the same slice
-  // and spin forever. A repeat means the slice depends on itself -- a GENUINE
-  // bit-level cycle -- so stop and leave the node alone.
+  // Follow the entire dependency chain once. A fixed walk budget caused a long
+  // packed writer to advance only a few links per whole-graph fixed-point
+  // sweep, so there is no step limit here -- the VISITED SET bounds the walk.
+  //
+  // The key is (pin, lo, hi), NOT the pin alone. Reaching the same pin again at
+  // a DIFFERENT bit window is ordinary progress, not a cycle: that is exactly
+  // what a packed whole-array copy looks like (`d = q` unpacks q at eight
+  // windows), and keying on the pin alone made the second lane abort the whole
+  // rewrite, leaving an unpack-then-repack that reconstructs its own source --
+  // two dead 24-bit nets per array copy in the emitted Verilog
+  // (//lhd/tests:width_scoreboard_test caught it on comb_array_const_index_read).
+  // Only the same pin at the SAME slice is a genuine bit-level cycle, and there
+  // `break` is right rather than `return false`: the walk keeps the invariant
+  // `cur[lo:hi)` == the original read at every step, so stopping and rewriting
+  // with what we have is correct -- it just stops early.
   absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>> seen;
-  int                                                          walk_depth = 0;
-
   for (;;) {
-    if (++walk_depth > kPackedSliceWalkLimit) {
-      break;  // keep the original graph instead of charging an unbounded chain walk
-    }
     if (cur.is_invalid() || cur.is_const()) {
       break;
     }
@@ -2817,7 +2786,7 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
     }
   }
   setup_sink_by_name(node, "a").connect_driver(cur);
-  setup_sink_by_name(node, "mask").connect_driver(create_const(*current_graph, *Dlop::get_mask_value(hi - 1, lo)));
+  setup_sink_by_name(node, "mask").connect_driver(create_const(*current_graph, livehd::graph_util::mask_window_const(lo, hi)));
 
   // The bypassed pack/wire-buffer chain is usually dead now; bwd_del_node also
   // sweeps the inputs that become dead behind it.
@@ -3022,14 +2991,13 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
     return false;
   }
 
-  const auto& base = const_of(base_pin);
-  const auto& mask = const_of(mask_pin);
-  if (!base.is_known_zero() || mask.has_unknowns() || mask.is_negative()) {
+  const auto& base   = const_of(base_pin);
+  auto        window = livehd::graph_util::mask_window_of(const_of(mask_pin));
+  if (!base.is_known_zero() || !window || window->first != 0) {
     return false;
   }
-
-  const auto [mb, me] = mask.get_mask_range();
-  if (mb != 0 || me <= 0 || value_pin.is_const() || is_graph_input_pin(value_pin)) {
+  const int me = window->second;
+  if (value_pin.is_const() || is_graph_input_pin(value_pin)) {
     return false;
   }
 
@@ -3160,7 +3128,18 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     if (!usable || key.second.empty()) {
       continue;
     }
-    std::sort(key.second.begin(), key.second.end());
+    // The key must stay EXACT (it is a map key, not a digest -- a collision
+    // would merge two different cells), so this canonicalizes rather than
+    // hashes. inp_edges() is already sink-port ascending, so only the several
+    // DRIVERS OF ONE SINK PIN need ordering.
+    for (auto it = key.second.begin(); it != key.second.end();) {
+      auto run_end = it;
+      while (run_end != key.second.end() && run_end->first == it->first) {
+        ++run_end;
+      }
+      std::sort(it, run_end);
+      it = run_end;
+    }
 
     auto [it, inserted] = seen.try_emplace(key, node);
     if (inserted) {

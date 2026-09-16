@@ -54,13 +54,6 @@ int wbits_of(const hhds::Pin_class& pin) {
   return b <= 0 ? 1 : b;
 }
 
-// Edges of a node sorted by sink port_id (selector/operand order).
-auto sorted_inp(const hhds::Node_class& node) {
-  auto edges = node.inp_edges();
-  std::sort(edges.begin(), edges.end(), [](const auto& a, const auto& b) { return a.sink.get_port_id() < b.sink.get_port_id(); });
-  return edges;
-}
-
 const char* op_name(Ntype_op op) { return Ntype::get_name(op).data(); }
 
 // ---- Dead-temporary sweep over ONE finished method body ----
@@ -405,11 +398,400 @@ void inline_single_use_temps(std::string& body) {
   body = join_live_lines(lines, alive);
 }
 
-// Both peepholes over one finished body: drop what nothing reads, then fold
-// what exactly one adjacent statement reads.
+// Walk `s` from `open` (which holds `oc`) to the MATCHING `cc`, skipping string
+// literals; npos when unbalanced. The generated body carries `"..."` literals
+// (assert texts, from_pyrope constants), so a naive bracket count can pair the
+// wrong delimiters and a textual peephole would then rewrite across them.
+size_t match_delim(std::string_view s, size_t open, char oc, char cc) {
+  int  depth  = 0;
+  bool in_str = false;
+  for (size_t i = open; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (c == '\\') {
+        ++i;
+      } else if (c == '"') {
+        in_str = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_str = true;
+      continue;
+    }
+    depth += c == oc;
+    depth -= c == cc;
+    if (depth == 0) {
+      return i;
+    }
+  }
+  return std::string_view::npos;
+}
+
+// True when `s` is EXACTLY one `oc`..`cc` group spanning the whole view.
+bool is_whole_delimited(std::string_view s, char oc, char cc) {
+  return s.size() >= 2 && s.front() == oc && match_delim(s, 0, oc, cc) == s.size() - 1;
+}
+
+// `s` with any redundant wrapping parens removed.
+std::string_view unwrap_parens(std::string_view s) {
+  while (is_whole_delimited(s, '(', ')')) {
+    s = s.substr(1, s.size() - 2);
+  }
+  return s;
+}
+
+// `Slop<N>{Slop<N>{x}}` is a copy construct wrapped in a copy construct: the
+// landing restates a conversion the operation already made. The constructor
+// analogue of append_zext's fuse, and like it a textual pass because the two
+// wraps come from different emitters (land_operation puts one on, the landing
+// the other).
+void collapse_same_width_wraps(std::string& body) {
+  // A `Slop<N>` / `Slop_u<N>` token ending at `at` (exclusive), or empty.
+  const auto type_before = [&](size_t at) -> std::string_view {
+    if (at == 0 || body[at - 1] != '>') {
+      return {};
+    }
+    const auto lt = body.rfind('<', at - 1);
+    if (lt == std::string::npos || lt + 1 >= at - 1) {
+      return {};
+    }
+    for (size_t i = lt + 1; i + 1 < at; ++i) {
+      if (body[i] < '0' || body[i] > '9') {
+        return {};
+      }
+    }
+    for (const std::string_view name : {std::string_view{"Slop_u"}, std::string_view{"Slop"}}) {
+      if (lt >= name.size() && body.compare(lt - name.size(), name.size(), name) == 0) {
+        return std::string_view{body}.substr(lt - name.size(), at - (lt - name.size()));
+      }
+    }
+    return {};
+  };
+  const auto match_brace = [&](size_t open) { return match_delim(body, open, '{', '}'); };
+
+  // Only braces OUTSIDE a string literal are structure; a `{` inside an assert
+  // message or a from_pyrope constant is text. Collected in ONE forward scan --
+  // these bodies are large, so a per-brace rescan would be quadratic.
+  std::vector<size_t> opens;
+  {
+    bool in_str = false;
+    for (size_t i = 0; i < body.size(); ++i) {
+      if (in_str) {
+        if (body[i] == '\\') {
+          ++i;
+        } else if (body[i] == '"') {
+          in_str = false;
+        }
+      } else if (body[i] == '"') {
+        in_str = true;
+      } else if (body[i] == '{') {
+        opens.push_back(i);
+      }
+    }
+  }
+
+  // Collapsing shifts everything after the outer `{`, so walk the positions
+  // from the LAST one back: the earlier offsets stay valid.
+  for (auto it = opens.rbegin(); it != opens.rend(); ++it) {
+    const auto open1 = *it;
+    if (open1 >= body.size() || body[open1] != '{') {
+      continue;
+    }
+    const auto outer = type_before(open1);
+    if (outer.empty()) {
+      continue;
+    }
+    const auto close1 = match_brace(open1);
+    if (close1 == std::string::npos) {
+      continue;
+    }
+    size_t inner_start = open1 + 1;
+    while (inner_start < close1 && body[inner_start] == ' ') {
+      ++inner_start;
+    }
+    if (body.compare(inner_start, outer.size(), outer) != 0 || body[inner_start + outer.size()] != '{') {
+      continue;
+    }
+    const auto open2  = inner_start + outer.size();
+    const auto close2 = match_brace(open2);
+    if (close2 == std::string::npos) {
+      continue;
+    }
+    size_t after = close2 + 1;
+    while (after < close1 && body[after] == ' ') {
+      ++after;
+    }
+    if (after != close1) {
+      continue;  // the inner wrap is not the whole operand
+    }
+    // A triple wrap collapses one level per position, and the NEXT position out
+    // is still ahead in this reverse walk, so it sees the collapsed form.
+    body.replace(open1, close1 + 1 - open1, std::string_view{body}.substr(open2, close2 + 1 - open2));
+  }
+}
+
+// `a != b`, `a <= b` and `a >= b` have NO LGraph cell: upass_tolg lowers each to
+// Xor(EQ/GT/LT(a, b), 1) (lower_negated; inou/slang emits Not(EQ), which cprop
+// rewrites to the same shape). The fused statics say it in one call, with no
+// intermediate compare and no 1-constant to xor against.
+//
+// A textual pass, and deliberately AFTER forestation: the compare only appears
+// inside the xor once forestation has folded it there, and it only folds a
+// SINGLE-USE temp -- which is exactly the condition under which re-deriving the
+// compare here is free rather than a second evaluation.
+void fold_negated_compares(std::string& body) {
+  static constexpr std::string_view kXor = "::xor_op(";
+  static constexpr std::pair<std::string_view, std::string_view> kNeg[]
+      = {{"eq_op(", "ne_op("}, {"lt_op(", "ge_op("}, {"gt_op(", "le_op("}};
+
+  // Everything between `at` and the matching close paren of the call that opens
+  // at `open`, split on TOP-LEVEL commas (string literals skipped).
+  const auto split_args = [](std::string_view in) {
+    std::vector<std::string_view> args;
+    int                           depth  = 0;
+    bool                          in_str = false;
+    size_t                        start  = 0;
+    for (size_t i = 0; i < in.size(); ++i) {
+      const char c = in[i];
+      if (in_str) {
+        if (c == '\\') {
+          ++i;
+        } else if (c == '"') {
+          in_str = false;
+        }
+        continue;
+      }
+      if (c == '"') {
+        in_str = true;
+      } else if (c == '(' || c == '<' || c == '{') {
+        ++depth;
+      } else if (c == ')' || c == '>' || c == '}') {
+        --depth;
+      } else if (c == ',' && depth == 0) {
+        args.push_back(in.substr(start, i - start));
+        start = i + 1;
+      }
+      if (depth < 0) {
+        // `->` in a lambda return type unbalances the `<`/`>` count kept for
+        // template arguments. Give up rather than split in the wrong place.
+        return std::vector<std::string_view>{};
+      }
+    }
+    if (depth != 0) {
+      return std::vector<std::string_view>{};
+    }
+    args.push_back(in.substr(start));
+    for (auto& a : args) {
+      while (!a.empty() && a.front() == ' ') {
+        a.remove_prefix(1);
+      }
+      while (!a.empty() && a.back() == ' ') {
+        a.remove_suffix(1);
+      }
+    }
+    return args;
+  };
+  for (size_t scan = 0;;) {
+    const auto at = body.find(kXor, scan);
+    if (at == std::string::npos) {
+      break;
+    }
+    scan             = at + kXor.size();
+    const size_t open = at + kXor.size() - 1;
+    const auto close = match_delim(body, open, '(', ')');
+    if (close == std::string::npos) {
+      break;
+    }
+    // The receiver: `Slop<N>` (or `Slop_u<N>`) immediately before `::xor_op`.
+    const auto recv_start = body.rfind("Slop", at);
+    if (recv_start == std::string::npos || body.find("::", recv_start) != at) {
+      continue;
+    }
+    const auto args = split_args(std::string_view{body}.substr(open + 1, close - open - 1));
+    if (args.size() != 2) {
+      continue;
+    }
+    for (int ci = 0; ci < 2; ++ci) {
+      const auto konst = unwrap_parens(args[ci]);
+      const auto cmp   = unwrap_parens(args[1 - ci]);
+      if (!konst.ends_with("::create_integer(1)") || !konst.starts_with("Slop")) {
+        continue;
+      }
+      const auto scope = cmp.find(">::");
+      if (!cmp.starts_with("Slop") || scope == std::string_view::npos || !cmp.ends_with(")")) {
+        continue;
+      }
+      const auto tail = cmp.substr(scope + 3);
+      for (const auto& [from, to] : kNeg) {
+        if (!tail.starts_with(from)) {
+          continue;
+        }
+        // The compare must BE the whole operand, not a sub-term.
+        if (match_delim(tail, from.size() - 1, '(', ')') != tail.size() - 1) {
+          break;
+        }
+        // Keep the XOR's own receiver width: the negated compare lands where
+        // the xor did.
+        auto replacement = absl::StrCat(std::string_view{body}.substr(recv_start, at - recv_start), "::", to,
+                                        tail.substr(from.size()));
+        body.replace(recv_start, close + 1 - recv_start, replacement);
+        scan = recv_start;
+        break;
+      }
+      break;
+    }
+  }
+
+  // Second spelling of the same chain. `Xor(x, 1)` on a ONE-BIT x IS the
+  // all-ones complement at that width, so the Xor arm emits it as
+  // `Slop_u<1>::not_op(x)` -- still the negated compare when x is one, and only
+  // at width 1 (a wider Slop_u complement is 2^N-1-x, not 1-x).
+  static constexpr std::string_view kNot1 = "Slop_u<1>::not_op(";
+  for (size_t scan = 0;;) {
+    const auto at = body.find(kNot1, scan);
+    if (at == std::string::npos) {
+      break;
+    }
+    scan               = at + kNot1.size();
+    const size_t open  = at + kNot1.size() - 1;
+    const auto   close = match_delim(body, open, '(', ')');
+    if (close == std::string::npos) {
+      break;
+    }
+    const auto cmp   = unwrap_parens(std::string_view{body}.substr(open + 1, close - open - 1));
+    const auto scope = cmp.find(">::");
+    if (!cmp.starts_with("Slop") || scope == std::string_view::npos || !cmp.ends_with(")")) {
+      continue;
+    }
+    const auto tail = cmp.substr(scope + 3);
+    for (const auto& [from, to] : kNeg) {
+      if (!tail.starts_with(from)) {
+        continue;
+      }
+      if (match_delim(tail, from.size() - 1, '(', ')') != tail.size() - 1) {
+        break;
+      }
+      body.replace(at, close + 1 - at, absl::StrCat("Slop_u<1>::", to, tail.substr(from.size())));
+      scan = at;
+      break;
+    }
+  }
+}
+
+// `(Slop<2>::eq_op(a, b)).is_known_true()` materializes a compare only to read
+// it straight back as a C++ bool. That pair is what single-use forestation
+// leaves behind whenever a compare temp folds into its one condition -- a mux
+// or hotmux selector, a clock gate, a commit guard. The *_bool statics answer
+// the same question with no intermediate Slop.
+//
+// A textual pass for the same reason forestation is one: the compare is emitted
+// by node_expr and the condition by a different emitter, and they only meet
+// once the body is finished.
+void fold_compare_bools(std::string& body) {
+  static constexpr std::string_view kSuffix = ".is_known_true()";
+  static constexpr std::string_view kCmp[]  = {"eq_op(", "ne_op(", "lt_op(", "gt_op(", "le_op(", "ge_op("};
+
+  // Forward scan (string literals skipped) pairing every '(' with its ')', so
+  // the parenthesized expression a `.is_known_true()` reads is known exactly.
+  std::vector<size_t>                   open;
+  std::vector<std::pair<size_t, size_t>> spans;  // (open, close) followed by kSuffix
+  bool                                  in_str = false;
+  for (size_t i = 0; i < body.size(); ++i) {
+    const char c = body[i];
+    if (in_str) {
+      if (c == '\\') {
+        ++i;
+      } else if (c == '"') {
+        in_str = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_str = true;
+    } else if (c == '(') {
+      open.push_back(i);
+    } else if (c == ')' && !open.empty()) {
+      const size_t o = open.back();
+      open.pop_back();
+      if (body.compare(i + 1, kSuffix.size(), kSuffix) == 0) {
+        spans.emplace_back(o, i);
+      }
+    }
+  }
+
+  // A trailing `.zext_to<..>()` between the compare and the truth test is the
+  // width landing cgen puts on a 1-bit selector read. A compare produces 0/1,
+  // and zero-extending 0/1 keeps it 0/1, so the test is unchanged by it.
+  const auto strip_zext = [](std::string_view in) {
+    static constexpr std::string_view kZext = ".zext_to<";
+    while (in.ends_with(">()")) {
+      const auto at = in.rfind(kZext);
+      if (at == std::string_view::npos) {
+        break;
+      }
+      const auto args = in.substr(at + kZext.size(), in.size() - (at + kZext.size()) - 3);
+      if (args.empty()
+          || args.find_first_not_of("0123456789, ") != std::string_view::npos) {
+        break;
+      }
+      in = in.substr(0, at);
+    }
+    return in;
+  };
+
+  // Last span first, so the earlier offsets stay valid -- for DISJOINT spans.
+  // Spans can also NEST (a forested mux condition inside a compare operand),
+  // and rewriting the outer one shifts the text under the inner one's recorded
+  // bounds, so re-validate every span against the CURRENT body before using it.
+  for (auto it = spans.rbegin(); it != spans.rend(); ++it) {
+    const auto [o, close] = *it;
+    if (close + kSuffix.size() >= body.size() || body[o] != '(' || body.compare(close + 1, kSuffix.size(), kSuffix) != 0
+        || match_delim(body, o, '(', ')') != close) {
+      continue;  // an outer rewrite moved this span; leave it alone
+    }
+    auto inner = unwrap_parens(std::string_view{body}.substr(o + 1, close - o - 1));
+    for (auto stripped = unwrap_parens(strip_zext(inner)); stripped != inner; stripped = unwrap_parens(strip_zext(inner))) {
+      inner = stripped;
+    }
+    const bool unsign     = inner.starts_with("Slop_u<");
+    if (!unsign && !inner.starts_with("Slop<")) {
+      continue;
+    }
+    const auto scope = inner.find(">::");
+    if (scope == std::string_view::npos) {
+      continue;
+    }
+    const auto tail = inner.substr(scope + 3);
+    for (const auto cmp : kCmp) {
+      if (!tail.starts_with(cmp)) {
+        continue;
+      }
+      // The call's paren must close at the very end: the compare has to BE the
+      // whole expression, not a sub-term of a wider one.
+      if (match_delim(tail, cmp.size() - 1, '(', ')') != tail.size() - 1) {
+        break;
+      }
+      // The *_bool statics compare at the operands' own common width, so the
+      // receiver width is irrelevant and an unsigned receiver maps onto Slop.
+      const std::string receiver = unsign ? std::string{"Slop<2>::"} : absl::StrCat(inner.substr(0, scope + 3));
+      body.replace(o,
+                   close + 1 + kSuffix.size() - o,
+                   absl::StrCat(receiver, cmp.substr(0, cmp.size() - 4), "_bool(", tail.substr(cmp.size())));
+      break;
+    }
+  }
+}
+
+// Peepholes over one finished body: drop what nothing reads, fold what exactly
+// one adjacent statement reads, then fuse the compare/condition pairs that
+// folding just brought together.
 void compact_body_temps(std::string& body) {
   strip_dead_temps(body);
   inline_single_use_temps(body);
+  fold_negated_compares(body);
+  fold_compare_bools(body);
+  collapse_same_width_wraps(body);
 }
 }  // namespace
 
@@ -648,6 +1030,11 @@ std::string cpp_string_literal(std::string_view text) {
 // Deliberately a STRING fuse rather than a canonical_ policy change: it is valid
 // for every producer of the inner zext without having to prove, per call site,
 // that the glue's width and the driver pin's declared width agree.
+// A 1-bit control read as a C++ condition. Named because 18 call sites spell
+// it, and because fold_compare_bools (above) rewrites exactly this shape when
+// the value folded into it turns out to be a compare.
+static std::string emit_known_true(std::string_view expr) { return absl::StrCat("(", expr, ").is_known_true()"); }
+
 static std::string append_zext(std::string expr, int target_bits) {
   const std::string_view tail = expr;
   if (tail.ends_with(">()")) {
@@ -703,7 +1090,7 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   }
   if (dpin.is_const()) {
     const auto& c = const_of(dpin);
-    if (c.is_integer() && c.is_just_i64()) {  // fast path -- the overwhelmingly common case
+    if (c.is_numeric() && c.is_just_i64()) {  // fast path -- the overwhelmingly common case
       return absl::StrCat("Slop<", tw, ">::create_integer(", c.to_just_i64(), ")");
     }
     return sim_const_expr(sim_const_text(c, unknown_zero_), tw);
@@ -791,7 +1178,7 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
   }
   if (dpin.is_const()) {
     const auto& c = const_of(dpin);
-    if (c.is_integer() && c.is_just_i64()) {
+    if (c.is_numeric() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
     return sim_const_expr(sim_const_text(c, unknown_zero_), fw);
@@ -829,7 +1216,7 @@ std::string Cgen_sim::stored_operand(const hhds::Pin_class& dpin, int fallback_b
   }
   if (dpin.is_const()) {
     const auto& c = const_of(dpin);
-    if (c.is_integer() && c.is_just_i64()) {
+    if (c.is_numeric() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
     return sim_const_expr(sim_const_text(c, unknown_zero_), fw);
@@ -951,7 +1338,7 @@ bool Cgen_sim::proven_canonical_unsigned_result(const hhds::Node_class& node, co
       if ((op == Ntype_op::SHL || op == Ntype_op::SRA) && edge.sink.get_port_id() != 0) {
         continue;
       }
-      const auto width = edge.driver.is_const() ? const_of(edge.driver).get_bits() : wbits_of(edge.driver);
+      const auto width = edge.driver.is_const() ? const_of(edge.driver).get_signed_bits() : wbits_of(edge.driver);
       if (width > wbits_of(output)) {
         return false;  // a narrowed carrier still needs its unsigned landing mask
       }
@@ -1018,11 +1405,11 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   slop_u_expr_  = false;
   const auto op = type_op_of(node);
   const auto tw = std::to_string(wbits);
-  auto       e  = sorted_inp(node);
+  auto       e  = node.inp_edges();
 
   const auto operation_width = [&](const hhds::Pin_class& pin) {
     if (pin.is_const()) {
-      return std::max({wbits_of(pin), static_cast<int>(const_of(pin).get_bits()), 1});
+      return std::max({wbits_of(pin), static_cast<int>(const_of(pin).get_signed_bits()), 1});
     }
     const int bits = std::max(wbits_of(pin), 1);
     return is_unsign(pin) ? bits + 1 : bits;
@@ -1277,7 +1664,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           }
           const int width = placed->first;
           const int bw    = wbits_of(base);
-          const int vw    = v.is_const() ? static_cast<int>(const_of(v).get_bits()) : wbits_of(v);
+          const int vw    = v.is_const() ? static_cast<int>(const_of(v).get_signed_bits()) : wbits_of(v);
           if (bw <= 0 || vw <= 0 || vw > bw) {
             continue;
           }
@@ -1372,7 +1759,33 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       return fold("or_op", true);
     }
-    case Ntype_op::Xor : return fold("xor_op", true);
+    case Ntype_op::Xor: {
+      // Verilog `~x` reaches LGraph as Xor(x, all-ones-at-the-result-width) --
+      // there is no Not cell on that path -- and cgen used to emit the xor
+      // against a materialized constant (every wide `constexpr` literal in the
+      // measured corpus was one of these). `Slop_u<W>::not_op` is the same
+      // value in one call, mask included, with no constant at all.
+      if (e.size() == 2 && slop_u_) {
+        const auto output = node.get_driver_pin(0);
+        const int  ow     = output.is_invalid() ? 0 : wbits_of(output);
+        if (ow > 0 && wbits == ow + 1 && proven_unsigned_result(node, output)) {
+          for (int ci = 0; ci < 2; ++ci) {
+            if (!e[ci].driver.is_const() || e[1 - ci].driver.is_const()) {
+              continue;
+            }
+            // A mask covering [0, ow) flips exactly the bits the unsigned
+            // result keeps; anything it selects above ow the landing drops.
+            const auto window = livehd::graph_util::mask_window_of(const_of(e[ci].driver));
+            if (!window || window->first != 0 || window->second < ow) {
+              continue;
+            }
+            slop_u_expr_ = true;
+            return absl::StrCat("Slop_u<", ow, ">::not_op(", operation_operand(e[1 - ci].driver), ")");
+          }
+        }
+      }
+      return fold("xor_op", true);
+    }
     case Ntype_op::Mult: return fold("mult_op", false);
     case Ntype_op::Div : {
       // Binary, order-sensitive, and sign-aware (slop div_op dispatches on the
@@ -1408,25 +1821,36 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       return cw == wbits ? expression : absl::StrCat("Slop<", tw, ">{", expression, "}");
     }
     case Ntype_op::Ror: {
-      // OR-reduction: 1 iff ANY bit of ANY operand is set. Each operand must be
-      // read at its OWN full width (not the 1-bit node width), then reduced --
-      // `a.ror_op()` is the unary reduce, `a.ror_op(b)` reduces both. Matches the
-      // Verilog cgen `|a` / `|{a|b|...}`.
+      // OR-reduction: 1 iff ANY bit of ANY operand is set. ONE variadic call --
+      // the Ror cell folds every driver of its single sink pin, and the static
+      // materializes the 0/1 MAGNITUDE at the node width, so the member chain's
+      // trailing clamp (the member reduce returned a Boolean at the OPERAND
+      // width) is gone. Each operand is still read at its OWN full width, not
+      // the 1-bit node width. Matches the Verilog cgen `|a` / `|{a|b|...}`.
       if (e.empty()) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
-      auto        ow = [&](size_t i) { return operand(e[i].driver, std::max(wbits_of(e[i].driver), 1)); };
-      std::string s  = (e.size() == 1) ? absl::StrCat(ow(0), ".ror_op()") : ow(0);
-      for (size_t i = 1; i < e.size(); ++i) {
-        s = absl::StrCat(s, ".ror_op(", ow(i), ")");
+      std::string args;
+      for (size_t i = 0; i < e.size(); ++i) {
+        absl::StrAppend(&args, i == 0 ? "" : ", ", operand(e[i].driver, std::max(wbits_of(e[i].driver), 1)));
       }
-      // Unary Slop reduction returns Bool true as all ones. Keep its one
-      // semantic bit before landing in a wider unsigned arithmetic carrier.
-      return absl::StrCat("(", s, ").zext_to<1,", tw, ">()");
+      return absl::StrCat("Slop<", tw, ">::ror_op(", args, ")");
     }
-    case Ntype_op::Not:
-      return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
-                       : land_operation(absl::StrCat("Slop<", otw, ">::not_op(", operation_operand(e[0].driver), ")"));
+    case Ntype_op::Not: {
+      if (e.empty()) {
+        return absl::StrCat("Slop<", tw, ">::create_integer(0)");
+      }
+      // `~x` sets every bit above the operand's magnitude, so an UNSIGNED result
+      // has to be re-masked. Slop_u<W>::not_op does that inside the call, which
+      // is the same one mask the `land_operation` brace-wrap costs -- and one
+      // fewer operation in the emitted text.
+      const auto output = node.get_driver_pin(0);
+      if (slop_u_ && !output.is_invalid() && proven_unsigned_result(node, output) && wbits == wbits_of(output) + 1) {
+        slop_u_expr_ = true;
+        return absl::StrCat("Slop_u<", wbits - 1, ">::not_op(", operation_operand(e[0].driver), ")");
+      }
+      return land_operation(absl::StrCat("Slop<", otw, ">::not_op(", operation_operand(e[0].driver), ")"));
+    }
     case Ntype_op::LT:
     case Ntype_op::GT:
     case Ntype_op::EQ: {
@@ -1443,29 +1867,39 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (op != Ntype_op::EQ && (!is_unsign(e[0].driver) || !is_unsign(e[1].driver))) {
         cw += 1;
       }
-      const char* m      = (op == Ntype_op::LT) ? "lt_op" : (op == Ntype_op::GT) ? "gt_op" : "eq_op";
+      const char* m = (op == Ntype_op::LT) ? "lt_op" : (op == Ntype_op::GT) ? "gt_op" : "eq_op";
+      // `!x` lowers to EQ(x, 0) (upass_tolg's lower_log_not), and so does a
+      // written `x == 0`. Both are lnot_op, which asks the question without
+      // materializing a FULL-WIDTH zero to compare against -- on a 512-bit
+      // operand that constant was the whole cost of the cell.
+      int  lnot_side = -1;
+      if (op == Ntype_op::EQ) {
+        for (int i = 0; i < 2; ++i) {
+          if (e[i].driver.is_const() && const_of(e[i].driver).is_known_zero()) {
+            lnot_side = 1 - i;
+            break;
+          }
+        }
+      }
       // 1-to-1: the mixed-width compare reads both operands at their own widths
       // (sign-extending each into the compare, so a narrow signed operand still
       // compares signed) and materializes a 0/1 MAGNITUDE at the node width.
       // That replaces three emitted conversions -- two operand reads plus the
       // `.zext_to<1>().zext_to<tw>()` clamp that existed only because the member
-      // form returns create_bool's all-ones (-1). The `cw += 1` headroom above is
+      // form used to return an all-ones true. The `cw += 1` headroom above is
       // likewise unnecessary here: it existed only to force cw != operand width so
       // the cross-width ctor would fire instead of the copy ctor.
       const auto  output = node.get_driver_pin(0);
+      const auto  args   = lnot_side >= 0 ? raw_operand(e[lnot_side].driver, cw)
+                                          : absl::StrCat(raw_operand(e[0].driver, cw), ", ", raw_operand(e[1].driver, cw));
+      if (lnot_side >= 0) {
+        m = "lnot_op";
+      }
       if (slop_u_ && !output.is_invalid() && proven_unsigned_result(node, output) && wbits == wbits_of(output) + 1) {
         slop_u_expr_ = true;
-        return absl::StrCat("Slop_u<",
-                            wbits - 1,
-                            ">::",
-                            m,
-                            "(",
-                            raw_operand(e[0].driver, cw),
-                            ", ",
-                            raw_operand(e[1].driver, cw),
-                            ")");
+        return absl::StrCat("Slop_u<", wbits - 1, ">::", m, "(", args, ")");
       }
-      return absl::StrCat("Slop<", tw, ">::", m, "(", raw_operand(e[0].driver, cw), ", ", raw_operand(e[1].driver, cw), ")");
+      return absl::StrCat("Slop<", tw, ">::", m, "(", args, ")");
     }
     case Ntype_op::SHL:
     case Ntype_op::SRA: {
@@ -1561,62 +1995,73 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         }
         return operand(e[0].driver, wbits, /*unsigned=*/-1);
       }
-      // FAST PATHS for the two mask shapes that dominate real designs. Both
-      // replace a call to Slop::get_mask_op -- which is a PER-BIT LOOP
-      // (bit_test + set for every selected bit, plus every bit up to
-      // get_bits() for a negative mask) -- with a single mask instruction.
-      // A profile of the dino CPU put 68.9% of simulation time inside
-      // get_mask_op and another 27.8% inside from_pyrope parsing the wide mask
-      // CONSTANTS it is called with, against 2.2% in the actual module bodies.
-      if (e[1].driver.is_const()) {
+      // graph/cell.hpp: the mask pin is a CONSTANT that is either -1 ("the
+      // whole value", the to-positive idiom) or ONE window [mb, me). Both land
+      // on a single mask instruction, so nothing here builds a mask VALUE --
+      // which used to mean a per-bit gather loop plus a from_pyrope parse of a
+      // wide literal every cycle (68.9% + 27.8% of dino's simulation time,
+      // against 2.2% in the actual module bodies).
+      {
+        // The contract says the mask pin is a constant, but the emitter is not
+        // where that is enforced (upass/tolg refuses a runtime mask; the yosys,
+        // abc and legalize paths never mint one). A pin that is not a constant
+        // here would make const_of abort, so keep the general lowering as the
+        // fallback: one mask VALUE operand and the member call, exactly what
+        // this arm emitted for every mask before the windows.
+        if (!e[1].driver.is_const() || const_of(e[1].driver).has_unknowns()) {
+          const int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), wbits, 1});
+          return append_zext(
+              absl::StrCat("(", operand(e[0].driver, cw, 0), ".get_mask_op(", operand(e[1].driver, cw, -1), "))"),
+              wbits);
+        }
         const auto& mv = const_of(e[1].driver);
-        if (!mv.has_unknowns()) {
+        {
           // (a) mask == -1 is the to-positive idiom. The value is read UNSIGNED
           // (zext_to), which already yields a non-negative value, so making it
           // positive is the identity -- as is the trailing trim. The whole
           // `x.zext_to<W>().get_mask_op(-1).zext_to<W>()` sequence collapses to
           // `x.zext_to<W>()`.
-          if (mv.is_just_i64() && mv.to_just_i64() == -1) {
+          if (livehd::graph_util::is_whole_value_mask(mv)) {
             if (raw_width_adjust_ok(e[0].driver, wbits)) {  // same raw pass-through as the unary arm above
               return raw_operand(e[0].driver, wbits);
             }
             return operand(e[0].driver, wbits, /*unsigned=*/-1);
           }
-          // (b) a LOW-CONTIGUOUS mask 2^n-1 keeps the low n bits and zeroes the
-          // rest, packed LSB-first in place -- which is exactly what zext_to<n>
-          // does, in one masking step instead of n loop iterations. It also
-          // deletes the mask constant itself, so a >64-bit mask no longer costs
-          // a from_pyrope string parse per cycle.
-          //
-          // n == 1 needs no special case: the member form returns the signed -1
-          // for a lone selected bit and cgen clamps it with .zext_to<1>();
-          // zext_to<1> produces the same 0/1 directly.
-          //
-          // GUARDED to masks that stay INSIDE the value's declared width. A mask
-          // reaching past it (e.g. `(x#sext[..])#[0..=63]` on a narrower x)
-          // selects the value's SIGN bits, which the slow path below gets by
-          // reading the value per its declared sign; zext_to would read those
-          // positions as 0 instead. Dropping this guard breaks bitset_imm and
-          // bitset_nil.
-          if (!mv.is_negative()) {
-            auto [mb, me]       = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
-            // ...and a mask that DOES reach past the width is still fine when the
-            // value is UNSIGNED: the positions above it select sign bits, which
-            // are all zero there, and a zero-extended read reproduces exactly
-            // that. Only a signed value needs the slow path's sign replication.
+          // (b) otherwise the mask is ONE window [mb, me), packed LSB-first in
+          // place -- one bitfield extract, and no mask CONSTANT at all, so a
+          // >64-bit mask no longer costs a from_pyrope string parse per cycle.
+          {
+            auto [mb, me] = livehd::graph_util::mask_window(mv);  // half-open
+            // A window that reaches past the value's declared width selects its
+            // SIGN bits. For an UNSIGNED value those are all zero, so a
+            // zero-extended read already reproduces them; only a signed value
+            // needs the sign actually replicated.
             //
-            // This is not a corner case. dino's ImmediateGenerator and top level
-            // mask 4- and 15-bit intermediates with the 64-bit all-ones constant
-            // (a plain "keep the low 64 bits"). Every one of those failed
-            // `me <= wbits` -- 64 <= 4 -- and fell into a 64-iteration bit loop
-            // that measured 47% of total simulation time, before AND after
+            // Not a corner case: dino's ImmediateGenerator and top level mask
+            // 4- and 15-bit intermediates with the 64-bit all-ones constant (a
+            // plain "keep the low 64 bits"), and every one of those is out of
+            // width.
             const bool in_width = me <= wbits_of(e[0].driver);
             if (mb == 0 && me > 0) {
               if (auto extract = dynamic_extract(e[0].driver, me); !extract.empty()) {
                 return extract;
               }
             }
-            if (mb >= 0 && me > mb && (in_width || is_unsign(e[0].driver))) {
+            if (!in_width && !is_unsign(e[0].driver)) {
+              // A window reaching past a SIGNED value's declared width selects
+              // its SIGN bits. Read the value at a carrier wide enough to hold
+              // the window -- a signed read replicates the sign all the way up
+              // -- and the same bitfield extract then produces those bits.
+              // The lane lands one bit wider than the span so `len == N` never
+              // makes get_mask_op_opt sign-extend the top extracted bit: a
+              // Get_mask result is an UNSIGNED pack.
+              const int span    = me - mb;
+              const int read_cw = std::max({me, wbits_of(e[0].driver), 1});
+              auto      lane    = absl::StrCat("Slop<", span + 1, ">::get_mask_op_opt(",
+                                               operand(e[0].driver, read_cw, /*signed=*/1), ", ", mb, ", ", me, ")");
+              return span + 1 == wbits ? lane : absl::StrCat("Slop<", tw, ">{", lane, "}");
+            }
+            {
               // get_mask packs the selected bits LSB-FIRST. Keep the contiguous
               // range as Get_mask and pass its literal bounds to HLOP. The
               // optimized implementation lowers a sub-word range to a direct
@@ -1660,44 +2105,6 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           }
         }
       }
-      int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), wbits, 1});
-      // A constant mask can select bits ABOVE the value's declared width (e.g.
-      // `b#[12..=15]` on a 9-bit `b`, reaching into the sign region). Widen the
-      // compare width to the mask's true span so the value operand undergoes a
-      // genuine SIGNED cross-width widen (sign-extend) rather than a same-width
-      // no-op copy that would read the out-of-range bits as 0.
-      if (e[1].driver.is_const()) {
-        cw = std::max(cw, static_cast<int>(const_of(e[1].driver).get_bits()));
-      }
-      // The value is normally read UNSIGNED (get_mask yields a non-negative
-      // magnitude). Two corrections, both keyed off a CONSTANT mask:
-      //  * A finite mask that reaches past the value width extracts the value's
-      //    SIGN bits (e.g. `(x#sext[..])#[0..=63]`), so read the value per its
-      //    declared sign -- EXCEPT the mask==-1 "to positive" idiom stays unsigned.
-      //  * A single selected bit makes get_mask_op return the SIGNED 1-bit value
-      //    (-1 when set), so clamp the packed result to one bit -> magnitude 0/1.
-      //
-      // NOT converted to the mixed-width Slop<W>::get_mask_op. That call reads
-      // each operand at its own width and sign-extends internally, but the
-      // `operand(..., cw, -1)` below is a ZERO-extend: it masks the value to its
-      // declared width and clears everything above. The two differ for a negative
-      // value under the to-positive idiom, which broke 131 simeq goldens when
-      // tried. Converting this arm needs the mixed-width op to take the source's
-      // declared width into account, not just its storage sign.
-      int  val_sign   = -1;
-      bool single_bit = false;
-      if (e[1].driver.is_const()) {
-        const auto& mv = const_of(e[1].driver);
-        val_sign       = (mv.is_just_i64() && mv.to_just_i64() == -1) ? -1 : 0;
-        single_bit     = !mv.is_negative() && mv.popcount() == 1;
-      }
-      std::string gm = absl::StrCat("(", operand(e[0].driver, cw, val_sign), ".get_mask_op(", operand(e[1].driver, cw, -1), "))");
-      if (single_bit) {
-        gm = absl::StrCat(gm, ".zext_to<1>()");
-      }
-      // Fused: a single-bit Get_mask already appended `.zext_to<1>()`, and
-      // the landing restates it -- one call, not two.
-      return append_zext(gm, wbits);
     }
     case Ntype_op::Set_mask: {
       // value.set_mask_op(mask, newbits) — best effort at the node width. The
@@ -1871,14 +2278,16 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           const auto x    = get_driver_of_sink_name(extract, "a");
           const auto mask = get_driver_of_sink_name(extract, "mask");
           if (!x.is_invalid() && !mask.is_invalid() && mask.is_const() && (x.is_const() || pin2var.contains(x.get_class_index()))) {
-            const auto& mv = const_of(mask);
-            if (!mv.has_unknowns() && !mv.is_negative()) {
-              const auto [mb, me] = mv.get_mask_range();
+            // The window reader is shared with every other Get_mask consumer;
+            // it answers nothing for the -1 whole-value spelling, which is not
+            // a bitfield extract and so is not fusable here either.
+            if (const auto window = livehd::graph_util::mask_window_of(const_of(mask)); window) {
+              const auto [mb, me] = *window;
               // Same admissibility the ordinary Get_mask lowering requires of
               // this cell: a range reaching past a SIGNED source's width is not
               // a bitfield extract there, so it must not become one here.
               const bool in_width = me <= wbits_of(x);
-              if (mb >= 0 && me - mb == frombit + 1 && (in_width || is_unsign(x))) {
+              if (me - mb == frombit + 1 && (in_width || is_unsign(x))) {
                 const auto lane
                     = absl::StrCat("Slop<", frombit + 1, ">::get_mask_op_opt(", operation_operand(x), ", ", mb, ", ", me, ")");
                 return frombit + 1 == wbits ? lane : absl::StrCat("Slop<", tw, ">{", lane, "}");
@@ -1908,9 +2317,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // and it keeps a (contract-violating) multi-hot run agreeing with them
         // instead of silently reporting a different arm.
         absl::StrAppend(&result,
-                        " if ((",
-                        raw_operand(control, std::max(wbits_of(control), 1)),
-                        ").is_known_true()) { assert(__hotmux_arm == -1 && \"hotmux controls overlap\");"
+                        " if (",
+                        emit_known_true(raw_operand(control, std::max(wbits_of(control), 1))),
+                        ") { assert(__hotmux_arm == -1 && \"hotmux controls overlap\");"
                         " if (__hotmux_arm == -1) { __hotmux_arm = ",
                         i,
                         "; } }");
@@ -1957,9 +2366,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // forestation each arm is a whole inlined tree, and the call form's
         // `vals` + result-width `sel` would be built and thrown away for every
         // one of the 2-arm muxes that dominate a real design.
-        return absl::StrCat("((",
-                            raw_operand(e[0].driver, std::max(wbits_of(e[0].driver), 1)),
-                            ").is_known_true() ? ",
+        return absl::StrCat("(",
+                            emit_known_true(raw_operand(e[0].driver, std::max(wbits_of(e[0].driver), 1))),
+                            " ? ",
                             operand(e[2].driver, wbits),
                             " : ",
                             operand(e[1].driver, wbits),
@@ -1968,7 +2377,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
 
       // Indexed Mux selectors keep their full width so an out-of-range
       // high bit cannot be truncated into range.
-      const int   sel_w = e[0].driver.is_const() ? std::max({wbits_of(e[0].driver), const_of(e[0].driver).get_bits(), 1})
+      const int   sel_w = e[0].driver.is_const() ? std::max({wbits_of(e[0].driver), const_of(e[0].driver).get_signed_bits(), 1})
                                                  : std::max(wbits_of(e[0].driver), 1);
       const auto  sel   = operand(e[0].driver, sel_w, /*unsigned=*/-1);
       std::string vals;
@@ -2328,7 +2737,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
       if (type_op_of(n) != Ntype_op::Get_mask) {
         break;
       }
-      auto e = sorted_inp(n);  // e[0]=value, e[1]=optional mask (node_expr's convention)
+      auto e = n.inp_edges();  // e[0]=value, e[1]=optional mask (node_expr's convention)
       if (e.empty()) {
         break;
       }
@@ -2983,7 +3392,7 @@ bool Cgen_sim::plain_clock_cone(const hhds::Pin_class& clock_driver, const liveh
     }
     auto       n  = p.get_master_node();
     const auto op = type_op_of(n);
-    auto       e  = sorted_inp(n);
+    auto       e  = n.inp_edges();
     if (op == Ntype_op::Get_mask && !e.empty()) {
       if (e.size() >= 2) {
         if (!e[1].driver.is_const()) {
@@ -3358,11 +3767,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // path stay the same text; only the individual segments are mangled.
   std::vector<Io> ios;
   if (gio) {
-    for (const auto& d : gio->get_input_pin_decls()) {
-      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, d.unsign, true, static_cast<uint32_t>(d.port_id)});
-    }
-    for (const auto& d : gio->get_output_pin_decls()) {
-      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, d.unsign, false, static_cast<uint32_t>(d.port_id)});
+    for (const auto& [d, is_input] : gio->decls_in_port_order()) {
+      ios.push_back({cpp_port_path(d->name), std::string{d->name}, 0, d->unsign, is_input, static_cast<uint32_t>(d->port_id)});
     }
   }
   for (auto& io : ios) {
@@ -3372,7 +3778,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       io.bits = 1;
     }
   }
-  std::sort(ios.begin(), ios.end(), [](const Io& a, const Io& b) { return a.port_id < b.port_id; });
 
   // ---- fail closed on a clock this scheduler cannot honor (2f-latch M0) ----
   // One step() == one full clock period and EVERY flop commits in ONE unified
@@ -3397,7 +3802,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (type_op_of(n) != Ntype_op::Get_mask) {
           break;
         }
-        auto e = sorted_inp(n);
+        auto e = n.inp_edges();
         if (e.empty()) {
           break;
         }
@@ -3723,7 +4128,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     if (pin.is_const()) {
       const auto& value = const_of(pin);
-      if (value.is_integer() && value.is_just_i64()) {
+      if (value.is_numeric() && value.is_just_i64()) {
         return absl::StrCat("Slop_u<", bits, ">::create_integer(", value.to_just_i64(), ")");
       }
     }
@@ -3857,7 +4262,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (type_op_of(cn) != Ntype_op::Get_mask) {
           break;
         }
-        auto ce = sorted_inp(cn);
+        auto ce = cn.inp_edges();
         if (ce.empty()) {
           break;
         }
@@ -5086,7 +5491,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   auto mem_gate_cond = [&](const Mem& m) -> std::string {
     std::string cond;
     for (const auto& gp : m.clock_guards) {
-      absl::StrAppend(&cond, cond.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
+      absl::StrAppend(&cond, cond.empty() ? "" : " && ", emit_known_true(operand(gp, 1)));
     }
     if (!m.tick_field.empty()) {
       absl::StrAppend(&cond, cond.empty() ? "" : " && ", "__in.", m.tick_field, "__tick");
@@ -5905,9 +6310,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // optimizer's function size and the number of repeated header parses bounded.
   std::vector<std::vector<size_t>> direct_run_shards;
   if (!direct_color_eval_shards.empty()) {
-    std::vector<size_t> ordered(color_plan_->colors().size());
-    std::iota(ordered.begin(), ordered.end(), 0);
-    std::ranges::sort(ordered, {}, [&](size_t color) { return color_plan_->colors()[color].execution_order; });
+    const auto& ordered = color_plan_->colors_in_execution_order();
     for (size_t slot = 0; slot < 5; ++slot) {
       for (const auto color : ordered) {
         if (static_cast<size_t>(color_plan_->colors()[color].slot) != slot) {
@@ -6471,9 +6874,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // instead of storing the same dirty bytes once per committed flop.
   std::vector<size_t> direct_color_pos(color_plan_ != nullptr ? color_plan_->colors().size() : 0, 0);
   if (color_plan_ != nullptr) {
-    std::vector<size_t> ordered(color_plan_->colors().size());
-    std::iota(ordered.begin(), ordered.end(), 0);
-    std::ranges::sort(ordered, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
+    const auto& ordered = color_plan_->colors_in_execution_order();
     for (size_t pos = 0; pos < ordered.size(); ++pos) {
       direct_color_pos[ordered[pos]] = pos;
     }
@@ -7744,7 +8145,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (!active.is_const() && !pin2var.contains(active.get_class_index())) {
         return {};  // unresolved feedback: the ordinary call path diagnoses it
       }
-      std::string cond = absl::StrCat("(", operand(active, 1), ").is_known_true()");
+      std::string cond = emit_known_true(operand(active, 1));
 
       const auto& resets = reset_guard_ports(cdef, port_cache);
       if (!resets.complete || resets.ports.size() > 1) {
@@ -7814,7 +8215,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!cone->enables.empty() && !cone->clock_inverted && cone->div == 1) {
           for (const auto& gp : cone->enables) {
             ensure_fn(gp);
-            absl::StrAppend(&cond, cond.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
+            absl::StrAppend(&cond, cond.empty() ? "" : " && ", emit_known_true(operand(gp, 1)));
           }
           root = cone->clock;
         } else if (!cone->enables.empty()) {
@@ -8346,10 +8747,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       ensure_ready(f.sec_clock);
       std::string cen;
       for (const auto& gp : f.clock_guards) {
-        absl::StrAppend(&cen, cen.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
+        absl::StrAppend(&cen, cen.empty() ? "" : " && ", emit_known_true(operand(gp, 1)));
       }
       if (!f.sec_clock.is_invalid()) {
-        const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
+        const std::string cur = emit_known_true(operand(f.sec_clock, 1));
         absl::StrAppend(
             &cen,
             cen.empty() ? "" : " && ",
@@ -8948,7 +9349,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // which is the same silent miscompile one level up.
           std::string ucond;
           if (!m.update_enable.is_invalid()) {
-            absl::StrAppend(&ucond, "(", raw_operand(m.update_enable, 1), ").is_known_true()");
+            absl::StrAppend(&ucond, emit_known_true(raw_operand(m.update_enable, 1)));
           }
           if (const std::string gc = mem_gate_cond(m); !gc.empty()) {
             absl::StrAppend(&ucond, ucond.empty() ? "" : " && ", gc);
@@ -9700,18 +10101,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // operand() materializes a literal AT the width it is asked for, so the
     // C++ type is Slop<1>; the VALUE keeps the literal's own width.
     //
-    // `mag` is the LITERAL container width, which is NOT Dlop::get_bits(): that
-    // is the SIGNED significant-bit count, one wider than the container for
-    // every non-negative literal (3 stamps 3 bits, container 2). A const pin
-    // carries no `bits` attr, so wbits_of() floors at 1 and contributes
-    // nothing -- get_bits() alone would decide, and the inflated width is a
-    // silent wrong value under `Slop_u<mag>::not_op`, whose extra bit always
-    // complements to 1.
+    // `mag` is the LITERAL container width (Dlop::get_payload_bits), NOT the
+    // signed carrier, which is one wider for every non-negative literal (3
+    // stamps 3 bits, container 2). A const pin carries no `bits` attr, so
+    // wbits_of() floors at 1 and contributes nothing -- the literal alone
+    // decides, and an inflated width is a silent wrong value under
+    // `Slop_u<mag>::not_op`, whose extra bit always complements to 1.
     const auto bool_const_expr = [&](const hhds::Occurrence_pin& pin) {
       const auto  cpin  = pin.base_pin();
       const auto& value = const_of(cpin);
-      const int   gb    = static_cast<int>(value.get_bits());
-      const int   mag   = std::max({wbits_of(cpin), value.is_negative() ? gb : gb - 1, 1});
+      const int   mag   = std::max({wbits_of(cpin), static_cast<int>(value.get_payload_bits()), 1});
       return Bool_expr{operand(cpin, 1), 1, mag};
     };
     // `~x` used as a boolean has to be complemented at the VALUE's width and
@@ -9863,7 +10262,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           gate.complete = false;
           break;
         }
-        absl::StrAppend(&gate.expression, gate.expression.empty() ? "" : " && ", "(", value, ").is_known_true()");
+        absl::StrAppend(&gate.expression, gate.expression.empty() ? "" : " && ", emit_known_true(value));
       }
       if (gate.complete && !memory->tick_field.empty()) {
         absl::StrAppend(&gate.expression,
@@ -9994,7 +10393,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (guard_value.empty()) {
           continue;
         }
-        const auto test = absl::StrCat("(", guard_value, ").is_known_true()");
+        const auto test = emit_known_true(guard_value);
         activation      = activation.empty() ? test : absl::StrCat("(", activation, " && ", test, ")");
       }
       return activation;
@@ -10023,7 +10422,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (guard_value.empty()) {
         return {};
       }
-      std::string predicate = absl::StrCat("(", guard_value, ").is_known_true()");
+      std::string predicate = emit_known_true(guard_value);
 
       const auto child = control.node.get_subnode_graph();
       const auto sio   = control.node.get_subnode_io();
@@ -11278,30 +11677,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             continue;
           }
           const bool                         result_unsign = proven_unsigned_result(node, output);
-          std::vector<hhds::Occurrence_edge> original_edges;
+          // Occurrence_node::inp_edges() walks the class node's already
+          // sink-port-ascending inp_edges() one sink pin at a time, so the
+          // operand order is the pin order with nothing to sort.
+          std::vector<hhds::Occurrence_edge> edges;
           for (const auto& edge : occurrence.inp_edges()) {
-            original_edges.push_back(edge);
-          }
-          auto                edges = original_edges;
-          std::vector<size_t> edge_inputs;
-          edge_inputs.reserve(original_edges.size());
-          for (size_t input = 0; input < original_edges.size(); ++input) {
-            edge_inputs.push_back(input);
-          }
-          std::stable_sort(edge_inputs.begin(), edge_inputs.end(), [&](size_t lhs, size_t rhs) {
-            return original_edges[lhs].sink.get_port_id() < original_edges[rhs].sink.get_port_id();
-          });
-          for (size_t input = 0; input < edges.size(); ++input) {
-            edges[input] = original_edges[edge_inputs[input]];
+            edges.push_back(edge);
           }
           const auto constant_of = [&](const hhds::Occurrence_pin& pin) -> Cgen_llvm::Value {
             if (pin.is_const()) {
               const auto& constant = const_of(pin);
-              if (!constant.is_integer()) {
+              if (!constant.is_numeric()) {  // a Boolean const is the u1 `1`/`0`, minted with its tag
                 return {};
               }
               const auto width
-                  = static_cast<uint32_t>(std::max({wbits_of(pin.base_pin()), static_cast<int>(constant.get_bits()), 1}));
+                  = static_cast<uint32_t>(std::max({wbits_of(pin.base_pin()), static_cast<int>(constant.get_signed_bits()), 1}));
               // Unknown constants are resolved by the shared runtime literal
               // cache after the driver sets its seed. LLVM must not draw them
               // during setup, or silently select the Slop circuit backend.
@@ -11320,7 +11710,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               auto simulated = constant;
               if (constant.has_unknowns()) {
                 const auto parsed = Dlop::from_pyrope(sim_const_text(constant, unknown_zero_));
-                if (!parsed || !parsed->is_integer() || parsed->has_unknowns()) {
+                if (!parsed || !parsed->is_numeric() || parsed->has_unknowns()) {
                   return {};
                 }
                 simulated = *parsed;
@@ -11382,7 +11772,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               value = llvm_kernel.constant(1, 0, true);  // the boundary already applied this mask
             }
             if (!edge.driver.is_const()) {
-              const auto  key               = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
+              const auto  key               = input_key(member, static_cast<uint32_t>(input));
               const auto* use_ptr           = select_internal_use(key, edge);
               bool        bound_to_internal = false;
               if (use_ptr != nullptr) {
@@ -11425,7 +11815,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
             }
             if (value.width == 0) {
-              const auto  key          = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
+              const auto  key          = input_key(member, static_cast<uint32_t>(input));
               const auto* producer_use = select_internal_use(key, edge);
               std::string available_reads;
               for (const auto& read : abi.reads) {
@@ -11462,7 +11852,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   "`, ",
                   op_name(type_op_of(node)),
                   ") input ",
-                  edge_inputs[input],
+                  input,
                   " has no LLVM value; internal producer=",
                   producer_use == nullptr ? "none" : std::to_string(producer_use->producer_version),
                   producer_use != nullptr && !llvm_outputs.contains(producer_use->producer_version) ? " (not emitted yet)" : "",
@@ -11785,21 +12175,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (operands.size() != 2 || !edges[1].driver.is_const()) {
                 return reject("get-mask is not a constant slice");
               }
-              const auto& mask = const_of(edges[1].driver);
-              if (mask.has_unknowns()) {
-                return reject("get-mask contains unknown bits");
-              }
-              auto packed = llvm_kernel.resize(operands[0], operands[0].width, true);
-              if (mask.is_just_i64() && mask.to_just_i64() == -1) {
+              const auto& mask   = const_of(edges[1].driver);
+              auto        packed = llvm_kernel.resize(operands[0], operands[0].width, true);
+              if (livehd::graph_util::is_whole_value_mask(mask)) {  // to-unsigned
                 result = llvm_kernel.resize(packed, result_width, result_unsign);
                 break;
               }
-              if (mask.is_negative()) {
-                return reject("negative get-mask is unsupported");
+              const auto window = livehd::graph_util::mask_window_of(mask);
+              if (!window) {
+                return reject("get-mask is not a constant window");
               }
-              const auto [lo, hi] = mask.get_mask_range();
-              if (lo < 0 || hi <= lo || (hi > static_cast<int64_t>(operands[0].width) && !operands[0].unsign)) {
-                return reject("get-mask range is outside its operand");
+              const auto [lo, hi] = *window;
+              if (hi > static_cast<int64_t>(operands[0].width) && !operands[0].unsign) {
+                // Positions above a SIGNED operand's width are its sign bits;
+                // the Slop backend replicates them, the JIT path would not.
+                return reject("get-mask range reaches past a signed operand");
               }
               const auto work_width = static_cast<uint32_t>(std::max<int64_t>(operands[0].width, hi));
               packed                = llvm_kernel.resize(packed, work_width, true);
@@ -11815,12 +12205,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (operands.size() != 3 || !edges[1].driver.is_const()) {
                 return reject("set-mask is not a constant slice");
               }
+              // graph/cell.hpp: ONE window, or -1 == "replace everything", i.e.
+              // the whole result. The -1 spelling used to fall back to the Slop
+              // backend for the entire color.
               const auto& mask = const_of(edges[1].driver);
-              if (mask.has_unknowns() || mask.is_negative()) {
-                return reject("set-mask is not a positive contiguous slice");
+              auto        window
+                  = livehd::graph_util::is_whole_value_mask(mask)
+                        ? std::optional<std::pair<int, int>>{{0, static_cast<int>(result_width)}}
+                        : livehd::graph_util::mask_window_of(mask);
+              if (!window) {
+                return reject("set-mask is not a constant window");
               }
-              const auto [lo, hi] = mask.get_mask_range();
-              if (lo < 0 || hi <= lo || hi > static_cast<int64_t>(result_width)) {
+              const auto [lo, hi] = *window;
+              if (hi > static_cast<int64_t>(result_width)) {
                 return reject("set-mask range is outside its result");
               }
               result = llvm_kernel.bitfield_insert(operands[0],
@@ -11907,7 +12304,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (!table_value || !table_value->is_integer() || table_value->has_unknowns()) {
                 return reject("lut table is not a known integer");
               }
-              const auto            table_width = static_cast<uint32_t>(std::max(table_value->get_bits(), 1));
+              const auto            table_width = static_cast<uint32_t>(std::max(table_value->get_signed_bits(), 1));
               std::vector<uint64_t> table_words((static_cast<size_t>(table_width) + 63) / 64, 0);
               for (uint32_t bit = 0; bit < table_width; ++bit) {
                 if (table_value->bit_test(static_cast<int>(bit))) {
@@ -12954,7 +13351,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                 : stored_value_operand(memory->init, width, memory->unsign);
                 std::string       enable;
                 if (!memory->update_enable.is_invalid()) {
-                  enable = absl::StrCat("(", raw_operand(memory->update_enable, 1), ").is_known_true()");
+                  enable = emit_known_true(raw_operand(memory->update_enable, 1));
                 }
                 if (const auto gate = mem_gate_cond(*memory); !gate.empty()) {
                   enable = enable.empty() ? gate : absl::StrCat("(", enable, " && ", gate, ")");
@@ -12964,7 +13361,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
                 std::string reset;
                 if (!memory->reset.is_invalid()) {
-                  reset = absl::StrCat("(", raw_operand(memory->reset, 1), ").is_known_true()");
+                  reset = emit_known_true(raw_operand(memory->reset, 1));
                 }
                 if (reset.empty()) {
                   fout->append("  ", pending, "_din = ", update, ";\n");
@@ -13158,7 +13555,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
                 const auto root       = livehd::latch_contract::control_root(resolved_input->driver);
                 const auto activation = occurrence_guard_expr(resolved_input->driver, root.net.base_pin(), version.slot, 0);
-                commit_test = absl::StrCat("(", activation.empty() ? operand(state_clock, 1) : activation, ").is_known_true()");
+                commit_test = emit_known_true(activation.empty() ? operand(state_clock, 1) : activation);
                 break;
               }
             } else if (local_flop != nullptr && !local_flop->clock_guards.empty()) {
@@ -13169,7 +13566,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // bind graph inputs and state Qs explicitly before falling back to
               // the ordinary expression resolver.
               for (const auto& guard : local_flop->clock_guards) {
-                commit_test = combine_activation(commit_test, absl::StrCat("(", guard_expr(guard), ").is_known_true()"));
+                commit_test = combine_activation(commit_test, emit_known_true(guard_expr(guard)));
               }
             }
             if (commit_test.empty() && node.get_graph() != g) {
@@ -13202,7 +13599,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 if (((local_flop != nullptr && local_flop->sec_clock.is_invalid()) || definition_reference_clock)
                     && !resolved_root.net.is_invalid()) {
                   const auto activation = occurrence_guard_expr(resolved, resolved_root.net.base_pin(), version.slot, 0);
-                  commit_test           = activation.empty() ? std::string{} : absl::StrCat("(", activation, ").is_known_true()");
+                  commit_test           = activation.empty() ? std::string{} : emit_known_true(activation);
                   break;
                 }
                 bool       resolved_fall   = false;
@@ -13223,7 +13620,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                     if (guard_value.empty()) {
                       guard_value = guard_expr(guard);
                     }
-                    commit_test = combine_activation(commit_test, absl::StrCat("(", guard_value, ").is_known_true()"));
+                    commit_test = combine_activation(commit_test, emit_known_true(guard_value));
                   }
                   break;
                 }
@@ -13245,7 +13642,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             }
             commit_test = combine_activation(commit_test, conditional_activation_expr(site.node));
             if (local_flop != nullptr && !local_flop->sec_clock.is_invalid()) {
-              const std::string current = absl::StrCat("(", guard_expr(local_flop->sec_clock), ").is_known_true()");
+              const std::string current = emit_known_true(guard_expr(local_flop->sec_clock));
               const std::string edge    = local_flop->posedge ? absl::StrCat("(", current, " && !", local_flop->prev_member, ")")
                                                               : absl::StrCat("(!", current, " && ", local_flop->prev_member, ")");
               commit_test               = combine_activation(commit_test, edge);
@@ -13340,7 +13737,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               I(cone.has_value());
               std::string enabled;
               for (const auto& enable : cone->enables) {
-                enabled = combine_activation(enabled, absl::StrCat("(", operand(enable, 1), ").is_known_true()"));
+                enabled = combine_activation(enabled, emit_known_true(operand(enable, 1)));
               }
               const auto output = node.get_driver_pin(0);
               I(!output.is_invalid());
@@ -14277,11 +14674,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (color_dirty_) {
       fout->append("  __rt.__color_dirty.fill(~uint64_t{0});  // reset/load invalidates the serial activation cache\n");
     }
-    std::vector<size_t> reset_colors;
-    reset_colors.reserve(color_plan_->colors().size());
     std::vector<bool> reset_required(color_plan_->colors().size(), false);
     for (size_t color = 0; color < color_plan_->colors().size(); ++color) {
-      reset_colors.push_back(color);
       reset_required[color] = color_plan_->colors()[color].slot == livehd::sim::Color_plan::Execution_slot::post_fall_publish;
     }
     bool reset_changed = true;
@@ -14294,8 +14688,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
       }
     }
-    std::ranges::sort(reset_colors, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
-    for (const size_t color : reset_colors) {
+    for (const size_t color : color_plan_->colors_in_execution_order()) {
       if (reset_required[color]) {
         fout->append("  __color_eval(", std::to_string(color), ");\n");
       }
@@ -14342,9 +14735,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     };
 
-    std::vector<size_t> serial_colors(color_plan_->colors().size());
-    std::iota(serial_colors.begin(), serial_colors.end(), 0);
-    std::ranges::sort(serial_colors, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
+    const auto& serial_colors = color_plan_->colors_in_execution_order();
 
     // `snapshot` non-empty = the caller holds this color's dirty word in that
     // local (grouped emission): TEST the bit there -- one word load stands in

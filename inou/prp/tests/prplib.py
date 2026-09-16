@@ -520,7 +520,7 @@ class PrpRunner:
         # Every equivalence pair uses native Slang and the default LEC solver.
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
                    '--impl-top', pyrope_top, '--ref-top', verilog_top,
-                   '--workdir', os.path.join(odir, 'w_lec')] + self.equiv_set_args()
+                   '--workdir', os.path.join(odir, 'w_lec')] + self._extra_sets(test) + self.equiv_set_args()
         lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             llog, _ = lec.communicate()

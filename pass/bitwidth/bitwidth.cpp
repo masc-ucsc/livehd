@@ -49,16 +49,6 @@ using livehd::graph_util::wire_name;
 
 namespace {
 
-// Sort inp_edges by sink port_id (LiveHD's inp_edges_ordered behaviour).
-// Container-agnostic: inp_edges() now returns absl::InlinedVector (heap-free for
-// the common low-degree pin); accept any edge container by reference.
-template <typename EdgeVec>
-void sort_inp(EdgeVec& edges) {
-  std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
-    return a.sink.get_port_id() < b.sink.get_port_id();
-  });
-}
-
 using livehd::graph_util::const_of;
 
 bool is_finite_low_mask(const Dlop& value) {
@@ -676,7 +666,6 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   std::vector<hhds::Pin_class> addr_drivers;
 
   auto inp = node.inp_edges();
-  sort_inp(inp);
   for (auto& e : inp) {
     auto raw_pid = static_cast<int>(e.sink.get_port_id());
     auto n       = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % Ntype::Memory_port_stride);
@@ -863,7 +852,12 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   }
   for (auto& dpin : din_drivers) {
     auto it = bwmap.find(dpin.get_class_index());
-    if (it == bwmap.end()) {
+    // A memory input is an assignment boundary, not a range constraint on
+    // its producer. Internal expressions derive their range from operands.
+    // Seeding an 8-bit Get_mask with a 32-bit element range leaves that wide
+    // range in the monotone map even though its pin is correctly capped at 8;
+    // another consumer (a mux feeding a concat lane) then inherits 32 bits.
+    if (it == bwmap.end() && !infer_internal_range(type_op_of(dpin.get_master_node()))) {
       bwmap.insert_or_assign(dpin.get_class_index(), data_bw);
     }
   }
@@ -1054,9 +1048,9 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
     // on the shifted signed value would mis-sign and undersize the assembly.
     Bitwidth_range result;
     if (bw.is_always_positive()) {
-      result.set_ubits_range(std::max(bw.get_ubits(), static_cast<int32_t>(mask.get_bits() - 1)));
+      result.set_ubits_range(std::max(bw.get_ubits(), static_cast<int32_t>(mask.get_payload_bits())));
     } else {
-      result.set_sbits_range(std::max(bw.get_sbits(), static_cast<int32_t>(mask.get_bits())));
+      result.set_sbits_range(std::max(bw.get_sbits(), static_cast<int32_t>(mask.get_signed_bits())));
     }
     adjust_bw(node.create_driver_pin(0), result);
     return;
@@ -1065,7 +1059,10 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
   // A negative mask overwrites the infinite high tail, so the result's sign
   // follows the inserted value. The finite prefix can still contain base bits;
   // even inserting constant zero does not make the whole result constant zero.
-  const int32_t  prefix = mask.get_bits() - 1;
+  // `get_payload_bits()` drops the sign slot only for a NON-NEGATIVE value, and
+  // this branch is the NEGATIVE-mask one, so it would return the full signed
+  // width and inflate the result by a bit. The prefix is the mask's finite part.
+  const int32_t  prefix = mask.get_signed_bits() - 1;
   Bitwidth_range result;
   if (value_bw.is_always_positive()) {
     result.set_ubits_range(prefix + value_bw.get_ubits());
@@ -1117,18 +1114,9 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     return;
   }
 
-  // get_mask is the zext (force) bit-select: a non-negative mask yields a
-  // non-negative result. Dlop::get_mask_op returns the signed 1-bit -1 for a
-  // lone selected set bit, but Pyrope `#[N]` zero-extends (a set bit is the
-  // unsigned 1; only `#sext` may be negative). Correct the quirk so a single-
-  // bit slice derives the [0,1] range instead of an inverted [0,-1].
-  auto gm = [](const Dlop& v, const Dlop& m) -> Dlop {
-    Dlop r = *v.get_mask_op(m);
-    if (!m.is_negative() && r.is_integer() && !r.has_unknowns() && r.is_negative()) {
-      return *Dlop::create_integer(1);
-    }
-    return r;
-  };
+  // get_mask is the zext (force) bit-select: the packed result is never
+  // negative, a lone selected set bit included (only `#sext` may be negative).
+  auto gm = [](const Dlop& v, const Dlop& m) -> Dlop { return *v.get_mask_op(m); };
 
   Dlop res_max;
   if (a_max.same_repr(a_min)) {
@@ -1146,23 +1134,22 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     //
     // The literal -1 expresses that only for a NON-negative mask. A negative
     // (carve-out) mask makes Dlop::get_mask_op copy bits [positive_mask_bits,
-    // src_bits) of the SOURCE, and src_bits is the source's OWN get_bits() --
-    // and -1 is one bit wide, so exactly one bit gets selected and
-    // get_mask_op's single-bit rule hands back the signed -1 rather than an
-    // all-ones pattern (dlop.cpp: get_mask(-1,-1) == -1). The probe then never
-    // raised res_max and the bound fell back to a_min.neg_op(), i.e. 2^(N-1)
-    // instead of 2^N-1: an 8-bit port zero-extended by `x & 8'hff` was modelled
-    // as [0..128] instead of [0..255]. bits_of hides it (get_bits(128) ==
-    // get_bits(255) == 9), so the Get_mask pin looks identical and only a
-    // consumer reveals it -- `+1` needs 9 bits for 128 but 10 for 255, and the
-    // one-bit-narrow sum truncated: `r(ref=256 impl=0) @ x=255`.
+    // src_bits) of the SOURCE, and src_bits is the source's OWN
+    // get_signed_bits() -- and -1 is one bit wide, so exactly one bit gets
+    // selected and the pack is the 1-bit value, not an all-ones pattern. The
+    // probe then never raised res_max and the bound fell back to a_min.neg_op(),
+    // i.e. 2^(N-1) instead of 2^N-1: an 8-bit port zero-extended by `x & 8'hff`
+    // was modelled as [0..128] instead of [0..255]. bits_of hides it
+    // (get_bits(128) == get_bits(255) == 9), so the Get_mask pin looks identical
+    // and only a consumer reveals it -- `+1` needs 9 bits for 128 but 10 for
+    // 255, and the one-bit-narrow sum truncated: `r(ref=256 impl=0) @ x=255`.
     //
     // For a negative mask, probe at the OPERAND's width instead. The positive
     // branch keeps -1: for a sparse mask like 0xf00 that is the bound that
     // yields the right envelope.
     Dlop tmp;
     if (mask_val.is_negative()) {
-      const auto a_bits = std::max(a_max.get_bits(), a_min.get_bits());
+      const auto a_bits = std::max(a_max.get_signed_bits(), a_min.get_signed_bits());
       tmp               = gm(*Dlop::get_mask_value(a_bits), mask_val);
     } else {
       tmp = gm(*Dlop::create_integer(-1), mask_val);
@@ -1246,7 +1233,6 @@ void Bitwidth::process_concat(hhds::Node_class& node) {
 
 void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   // inp_edges may not be in pid order — sort by sink port_id so [0]==a, [1]==b.
-  sort_inp(inp_edges);
   I(inp_edges.size() >= 2);
   auto wire_dpin = inp_edges[0].driver;
   auto pos_dpin  = inp_edges[1].driver;
@@ -1389,14 +1375,9 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
   if (any_negative) {
     // The full signed range of max_bits, NOT [-2^(max_bits-1) .. 0].
     //
-    // Two things were wrong with the old bound. It was UNSOUND: an operand that
-    // *can* be negative only sets the result's sign bit when it actually is, so
-    // `a | b` is perfectly capable of being positive and pinning max at 0 said
-    // otherwise. And it CRASHED: the lower bound came from
-    // Dlop::get_neg_mask_value(max_bits - 1), which returns +1 rather than a
-    // negative value for an argument <= 1 -- so an Or of 1-bit signed values
-    // ([-1..0], sbits 1) built the inverted range [1..0] and tripped
-    // Bitwidth_range::set_range's max >= min assertion.
+    // The old bound was UNSOUND: an operand that *can* be negative only sets
+    // the result's sign bit when it actually is, so `a | b` is perfectly
+    // capable of being positive and pinning max at 0 said otherwise.
     bw.set_sbits_range(max_bits);
   } else {
     bw.set_range(*Dlop::create_integer(0), *Dlop::get_mask_value(max_bits));
@@ -1834,7 +1815,6 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         continue;
       }
       auto inp_edges = node.inp_edges();
-      sort_inp(inp_edges);
       auto op = type_op_of(node);
 
       if (inp_edges.empty() && op != Ntype_op::Sub && op != Ntype_op::LUT) {
@@ -2008,7 +1988,65 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       if (source.has() && source.get() != 0) {
         span = g->source_locator().resolve_span(source.get());
       }
-      livehd::diag::err("pass.bitwidth", "concat-lane-width", "internal").at(span).msg("{}", bad).fatal();
+      // Name the DEFINITION and the node: this fires on a whole-design read
+      // where the srcid often resolves to nothing (a generated .v carries no
+      // usable span), and "some Concat somewhere" is not actionable across a
+      // thousand modules -- localizing it was otherwise a bisect over the
+      // module set.
+      livehd::diag::err("pass.bitwidth", "concat-lane-width", "internal")
+          .at(span)
+          .msg("{}", bad)
+          .note(std::format("in definition '{}', node {}", g->get_name(), livehd::graph_util::debug_name(node)))
+          .note(std::format("lane table (MSB-first): {}", [&] {
+            std::string t;
+            for (size_t li = 0; li < lanes.size(); ++li) {
+              const auto& l = lanes[li];
+              t += std::format("{}[{}] drv={} bits={} window={}",
+                               t.empty() ? "" : ", ",
+                               li,
+                               livehd::graph_util::wire_name(l.value),
+                               livehd::graph_util::lane_value_bits(l.value),
+                               l.width);
+            }
+            return t;
+          }()))
+          // The offending lane driver's OWN operands and their inferred ranges.
+          // A too-wide lane driver is always inherited from an operand, so the
+          // lane table alone stops one link short of the cause.
+          .note(std::format("offending driver's operands: {}", [&] {
+            std::string t;
+            for (const auto& l : lanes) {
+              if (livehd::graph_util::concat_lane_fits(l)) {
+                continue;
+              }
+              auto drv = l.value.get_master_node();
+              if (drv.is_invalid()) {
+                return std::string{"<invalid master>"};
+              }
+              t += std::format("{} <= ", livehd::graph_util::debug_name(drv));
+              for (const auto& ie : drv.inp_edges()) {
+                const auto  it  = bwmap.find(ie.driver.get_class_index());
+                std::string rng = "unmapped";
+                if (it != bwmap.end()) {
+                  rng = std::format("[{}..{}] ubits={} sbits={} pos={}",
+                                    it->second.get_min().to_pyrope(),
+                                    it->second.get_max().to_pyrope(),
+                                    it->second.get_ubits(),
+                                    it->second.get_sbits(),
+                                    it->second.is_always_positive());
+                }
+                t += std::format("{{pid={} drv={} bits={} unsign={} {}}} ",
+                                 static_cast<int>(ie.sink.get_port_id()),
+                                 livehd::graph_util::wire_name(ie.driver),
+                                 livehd::graph_util::bits_of(ie.driver),
+                                 livehd::graph_util::is_unsign(ie.driver),
+                                 rng);
+              }
+              break;
+            }
+            return t;
+          }()))
+          .fatal();
     }
   }
   report_unbounded(g);

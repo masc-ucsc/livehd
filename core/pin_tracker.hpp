@@ -125,51 +125,50 @@ public:
       it = full_map.find(a_pin);
     }
 
-    auto pairs = mask.get_mask_range_pairs();
-    for (const auto& p : pairs) {
-      auto start = static_cast<size_t>(p.first);
-      auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
-      auto pos   = start;
-      if (end > it->second.size()) {
-        end = it->second.size();
-      }
-
-      while (pos < end) {
-        pv.emplace_back(it->second[pos]);
-        ++pos;
-      }
+    // ONE window (graph/cell.hpp: a mask pin is [lo,hi) or the -1 whole-value
+    // spelling). The -1 form carries no window, and the tracker models bit
+    // IDENTITY -- to-unsigned clears the sign bit, so the result's top bit is
+    // not the source's -- so it contributes no tracked bits, as before.
+    if (mask.is_negative()) {
+      return;
+    }
+    const auto [lo, hi] = mask.get_mask_range();  // half-open
+    if (lo < 0 || hi <= lo) {
+      return;
+    }
+    const auto end = std::min(static_cast<size_t>(hi), it->second.size());
+    for (auto pos = static_cast<size_t>(lo); pos < end; ++pos) {
+      pv.emplace_back(it->second[pos]);
     }
   }
 
   void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask, Pin v_pin) {
     Pin_vector pv   = get_or_create_pv(a_pin, a_sbits);
-    Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_bits());
+    Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_signed_bits());
 
     if (pv.size() < v_pv.size()) {
       pv.resize(v_pv.size(), {zero_, -1});
     }
 
-    size_t pick_v_pos = 0;
-    auto   pairs      = mask.get_mask_range_pairs();
-    for (const auto& p : pairs) {
-      auto start = static_cast<size_t>(p.first);
-      auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
-      auto pos   = start;
-
-      if (pv.size() <= end) {
-        pv.resize(end, {zero_, -1});
-      }
-
-      while (pos < end) {
-        if (v_pv.empty()) {
-          pv[pos] = {zero_, 0};
-        } else if (v_pv.size() <= pick_v_pos) {
-          pv[pos] = v_pv.back();
-        } else {
-          pv[pos] = v_pv[pick_v_pos];
+    // ONE window, same contract as add_get_mask above; the -1 whole-value
+    // spelling writes no tracked bit.
+    if (!mask.is_negative()) {
+      const auto [lo, hi] = mask.get_mask_range();  // half-open
+      if (lo >= 0 && hi > lo) {
+        const auto end = static_cast<size_t>(hi);
+        if (pv.size() <= end) {
+          pv.resize(end, {zero_, -1});
         }
-        ++pos;
-        ++pick_v_pos;
+        size_t pick_v_pos = 0;
+        for (auto pos = static_cast<size_t>(lo); pos < end; ++pos, ++pick_v_pos) {
+          if (v_pv.empty()) {
+            pv[pos] = {zero_, 0};
+          } else if (v_pv.size() <= pick_v_pos) {
+            pv[pos] = v_pv.back();
+          } else {
+            pv[pos] = v_pv[pick_v_pos];
+          }
+        }
       }
     }
 

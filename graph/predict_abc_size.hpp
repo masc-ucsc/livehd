@@ -85,17 +85,17 @@ struct Fanin_shape {
 // debug assert instead of returning invalid. Flop and Latch share pids by
 // construction (cell.cpp); an Fflop has no enable and keeps reset_pin at 7.
 struct Ctrl_pids {
-  hhds::Port_id enable = livehd::Port_invalid;
-  hhds::Port_id reset  = livehd::Port_invalid;
+  hhds::Port_id enable = hhds::Port_invalid;
+  hhds::Port_id reset  = hhds::Port_invalid;
 };
 
 [[nodiscard]] inline Ctrl_pids ctrl_pids(Ntype_op op) {
   switch (op) {
     case Ntype_op::Mux   :
-    case Ntype_op::Hotmux: return {0, livehd::Port_invalid};
+    case Ntype_op::Hotmux: return {0, hhds::Port_invalid};
     case Ntype_op::Flop  :
     case Ntype_op::Latch : return {4, 7};
-    case Ntype_op::Fflop : return {livehd::Port_invalid, 7};
+    case Ntype_op::Fflop : return {hhds::Port_invalid, 7};
     default              : return {};
   }
 }
@@ -114,10 +114,10 @@ struct Ctrl_pids {
     if (const auto b = bits_of(e.driver); b > 0 && static_cast<uint64_t>(b) > sh.widest) {
       sh.widest = static_cast<uint64_t>(b);
     }
-    if (en_pid != livehd::Port_invalid && pid == en_pid) {
+    if (en_pid != hhds::Port_invalid && pid == en_pid) {
       sh.has_enable = true;
     }
-    if (rp_pid != livehd::Port_invalid && pid == rp_pid) {
+    if (rp_pid != hhds::Port_invalid && pid == rp_pid) {
       sh.has_reset = true;
     }
   }
@@ -162,7 +162,7 @@ struct Ctrl_pids {
   }
   // Exactly one set bit == a power of two.
   int set = 0;
-  for (int bit = 0; bit < static_cast<int>(v.get_bits()); ++bit) {
+  for (int bit = 0; bit < static_cast<int>(v.get_signed_bits()); ++bit) {
     if (v.bit_test(bit) && ++set > 1) {
       return false;
     }

@@ -314,6 +314,9 @@ struct Result {
     std::string solver;          // cvc5 | bitwuzla | lgyosys | …
     bool        bounded{false};  // proven only to `bound` cycles from reset
     int64_t     bound{0};        // the depth `bounded` refers to
+    // Independent oracle result; a native proof cannot stand in for this.
+    std::string crosscheck_verdict;  // empty until invoked; proven | refuted | unknown
+    int         crosscheck_exit_code{-1};
   } lec;
 
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)

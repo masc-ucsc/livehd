@@ -51,13 +51,24 @@ fs::path memory_rtl_dir() {
   for (auto env : {"LIVEHD_SOURCE_ROOT", "BUILD_WORKSPACE_DIRECTORY", "RUNFILES_DIR", "TEST_SRCDIR"}) {
     if (const auto* p = std::getenv(env); p && *p) {
       roots.emplace_back(p);
-      roots.emplace_back(fs::path(p) / "_main");
+      // livehd's own repo directory inside the runfiles tree. `_main` is the
+      // ROOT module, so it is only right when livehd IS the root; as a
+      // DEPENDENCY (lhdsuite, lhdtrack) the data lands under the repo name
+      // instead, and the exe walk below cannot find it either because the
+      // runfiles `lhd` is a symlink into bazel-out/external/<repo>, which holds
+      // build outputs and no `ware/`. Same probe list as inou.yosys's bundled
+      // script resolver, for the same reason.
+      for (auto workspace : {"livehd+", "livehd", "_main"}) {
+        roots.emplace_back(fs::path(p) / workspace);
+      }
     }
   }
   auto exe = fs::path(file_utils::get_exe_path());
   for (int i = 0; i < 6 && !exe.empty(); ++i, exe = exe.parent_path()) {
     roots.push_back(exe);
-    roots.push_back(exe / "lhd.runfiles/_main");
+    for (auto workspace : {"livehd+", "livehd", "_main"}) {
+      roots.push_back(exe / "lhd.runfiles" / workspace);
+    }
   }
   for (const auto& root : roots) {
     auto dir = root / "ware/rtl";
@@ -65,7 +76,19 @@ fs::path memory_rtl_dir() {
       return fs::absolute(dir);
     }
   }
-  diag::err("pass.abc", "memory-rtl", "io").msg("could not locate ware/rtl/cgen_memory_*.v for memory lowering").fatal();
+  // Name what was probed: the failure mode is a LAYOUT mismatch, and without
+  // the list the next reader has to re-derive the whole root set by hand.
+  std::string tried;
+  for (const auto& root : roots) {
+    if (!tried.empty()) {
+      tried += ", ";
+    }
+    tried += (root / "ware/rtl").string();
+  }
+  diag::err("pass.abc", "memory-rtl", "io")
+      .msg("could not locate ware/rtl/cgen_memory_*.v for memory lowering")
+      .note(std::format("probed: {}", tried))
+      .fatal();
   return {};
 }
 
@@ -87,10 +110,209 @@ struct Connection {
   hhds::Pin_class pin;
 };
 
+// cgen wraps a stateful Memory in a `cgen_memory_*` instance whose storage
+// array is named `data`; the instance name encodes the source Memory name
+// (inou/cgen/cgen_verilog.cpp, decoded back in pass/lec/query.cpp).
+constexpr std::string_view kEntryPrefix = "__lhdmem_h64617461_e.data[";
+
+bool all_digits(std::string_view v) {
+  return !v.empty() && std::ranges::all_of(v, [](char c) { return c >= '0' && c <= '9'; });
+}
+
+// `__lhdmem_h64617461_e.data[<idx>][<hi>:<lo>]` -> (idx, [lo, hi+1)). A
+// whole-word entry (`...data[<idx>]`) and every other name yield nullopt.
+struct Lane_name {
+  int64_t entry = 0;
+  int     lo    = 0;
+  int     hi    = 0;  // exclusive
+};
+std::optional<Lane_name> parse_entry_lane(std::string_view name) {
+  if (!name.starts_with(kEntryPrefix) || !name.ends_with("]")) {
+    return std::nullopt;
+  }
+  const auto rest = name.substr(kEntryPrefix.size(), name.size() - kEntryPrefix.size() - 1);  // "<idx>][<hi>:<lo>"
+  const auto sep  = rest.find("][");
+  if (sep == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const auto idx   = rest.substr(0, sep);
+  const auto range = rest.substr(sep + 2);
+  const auto colon = range.find(':');
+  if (colon == std::string_view::npos || !all_digits(idx) || !all_digits(range.substr(0, colon))
+      || !all_digits(range.substr(colon + 1))) {
+    return std::nullopt;
+  }
+  Lane_name out;
+  out.entry = std::stoll(std::string(idx));
+  out.hi    = static_cast<int>(std::stoll(std::string(range.substr(0, colon)))) + 1;
+  out.lo    = static_cast<int>(std::stoll(std::string(range.substr(colon + 1))));
+  if (out.lo < 0 || out.hi <= out.lo) {
+    return std::nullopt;
+  }
+  return out;
+}
+
+// yosys `memory_map` writes a byte-enabled entry with one $dffe per write lane
+// (`data[N][15:8] <= ...`), so inou.yosys lands one PARTIAL-RANGE flop per lane
+// (`<inst>.data[N][hi:lo]`) where a single-enable memory lands the whole word
+// (`<inst>.data[N]`). Merge an entry's lanes back into ONE `bits`-wide flop --
+// D is the lane data with each lane's own enable folded into a hold mux, Q is
+// sliced back out to the lane's readers -- so the `_mem<N>` naming contract
+// below holds for every write shape.
+//
+// Without it a byte-enabled memory keeps the yosys spelling, pass/lec's
+// Memory <-> storage-bank bridge (find_mem_entry_bank) finds no bank, and the
+// netlist's storage bits face the reference's array as INDEPENDENT free
+// symbols: a read of a never-written entry then refutes an equivalent netlist
+// at the first checked step (lhd/tests/lhd_synth_test.sh ram128_repro).
+void merge_entry_lanes(hhds::Graph& g, int64_t mem_bits) {
+  if (mem_bits <= 0) {
+    return;
+  }
+  struct Lane {
+    hhds::Node_class flop;
+    int              lo = 0;
+    int              hi = 0;
+  };
+  std::map<int64_t, std::vector<Lane>> by_entry;
+  for (const auto node : g.body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::Flop) {
+      continue;
+    }
+    if (auto ln = parse_entry_lane(gu::node_name_of(node))) {
+      by_entry[ln->entry].push_back({node, ln->lo, ln->hi});
+    }
+  }
+  for (auto& [entry, lanes] : by_entry) {
+    std::ranges::sort(lanes, [](const Lane& a, const Lane& b) { return a.lo < b.lo; });
+    // Merge only a TOTAL, gap-free tiling of the word at the declared widths:
+    // a partially written entry holds fewer state bits than the Memory it came
+    // from and has no honest whole-word flop to become.
+    hhds::Pin_class clk, posclk;
+    int             cursor   = 0;
+    bool            ok       = true;
+    bool            any_init = false;
+    bool            all_init = true;
+    for (size_t i = 0; i < lanes.size() && ok; ++i) {
+      const auto& l = lanes[i];
+      auto        q = l.flop.get_driver_pin(0);
+      if (l.lo != cursor || q.is_invalid() || gu::bits_of(q) != l.hi - l.lo) {
+        ok = false;
+        break;
+      }
+      cursor = l.hi;
+      // The whole-array reset is re-applied on the merged flop further down;
+      // nothing may already carry one here.
+      if (!gu::get_driver_of_sink_name(l.flop, "reset_pin").is_invalid()
+          || !gu::get_driver_of_sink_name(l.flop, "async").is_invalid()) {
+        ok = false;
+        break;
+      }
+      auto lclk = gu::get_driver_of_sink_name(l.flop, "clock_pin");
+      auto lpos = gu::get_driver_of_sink_name(l.flop, "posclk");
+      if (lclk.is_invalid()) {
+        ok = false;
+        break;
+      }
+      if (i == 0) {
+        clk    = lclk;
+        posclk = lpos;
+      } else if (clk != lclk || posclk != lpos) {
+        ok = false;
+        break;
+      }
+      auto init = gu::get_driver_of_sink_name(l.flop, "initial");
+      if (init.is_invalid()) {
+        all_init = false;
+      } else {
+        any_init = true;
+        ok       = init.is_const();
+      }
+    }
+    if (!ok || cursor != mem_bits || lanes.size() < 2 || (any_init && !all_init)) {
+      continue;
+    }
+    auto merged = gu::create_typed_node(g, Ntype_op::Flop);
+    auto q      = merged.create_driver_pin(0);
+    gu::set_bits(q, static_cast<int>(mem_bits));
+    gu::set_unsign(q);
+    gu::setup_sink_by_name(merged, "clock_pin").connect_driver(clk);
+    if (!posclk.is_invalid()) {
+      gu::setup_sink_by_name(merged, "posclk").connect_driver(posclk);
+    }
+    if (any_init) {  // MSB-first, each lane's power-on value at its own offset
+      std::string text(static_cast<size_t>(mem_bits), '0');
+      for (const auto& l : lanes) {
+        const auto& lane_init = gu::const_of(gu::get_driver_of_sink_name(l.flop, "initial"));
+        for (int b = l.lo; b < l.hi; ++b) {
+          const auto o                                = static_cast<size_t>(b - l.lo);
+          text[static_cast<size_t>(mem_bits - 1 - b)] = lane_init.unknown_bit_test(o) ? '?' : lane_init.bit_test(o) ? '1' : '0';
+        }
+      }
+      gu::setup_sink_by_name(merged, "initial")
+          .connect_driver(gu::create_const(g, *Dlop::from_binary(text, /*unsigned_result=*/true)));
+    }
+    // Per lane: the merged Q sliced back out, and the lane's D with its own
+    // enable folded in (the merged flop has ONE enable pin and the lanes do not
+    // agree on it).
+    std::vector<hhds::Pin_class> q_slice(lanes.size()), d_lane(lanes.size());
+    for (size_t i = 0; i < lanes.size(); ++i) {
+      const auto& l  = lanes[i];
+      const int   w  = l.hi - l.lo;
+      auto        gm = gu::create_typed_node(g, Ntype_op::Get_mask);
+      gu::setup_sink_by_name(gm, "a").connect_driver(q);
+      gu::setup_sink_by_name(gm, "mask").connect_driver(gu::create_const(g, gu::mask_window_const(l.lo, l.hi)));
+      q_slice[i] = gm.create_driver_pin(0);
+      gu::set_bits(q_slice[i], w);
+      gu::set_unsign(q_slice[i]);
+      auto din = gu::get_driver_of_sink_name(l.flop, "din");
+      auto en  = gu::get_driver_of_sink_name(l.flop, "enable");
+      if (en.is_invalid()) {
+        d_lane[i] = din;
+        continue;
+      }
+      auto mx = gu::create_typed_node(g, Ntype_op::Mux);  // Y = s ? p2 : p1
+      gu::setup_sink_by_name(mx, "s").connect_driver(en);
+      gu::setup_sink_by_name(mx, "p1").connect_driver(q_slice[i]);
+      gu::setup_sink_by_name(mx, "p2").connect_driver(din);
+      d_lane[i] = mx.create_driver_pin(0);
+      gu::set_bits(d_lane[i], w);
+      gu::set_unsign(d_lane[i]);
+    }
+    // Concat sinks are interleaved (value, width) pairs MSB-FIRST
+    // (graph/node_util.hpp), created in descending pid order so hhds does not
+    // rescan the growing pin list per pin.
+    auto      cat = gu::create_typed_node(g, Ntype_op::Concat);
+    const int n   = static_cast<int>(lanes.size());
+    for (int i = n - 1; i >= 0; --i) {
+      const auto slot = static_cast<size_t>(n - 1 - i);
+      const auto pid  = static_cast<hhds::Port_id>(2 * i);
+      gu::create_const(g, *Dlop::create_integer(lanes[slot].hi - lanes[slot].lo)).connect_sink(cat.create_sink_pin(pid + 1));
+      d_lane[slot].connect_sink(cat.create_sink_pin(pid));
+    }
+    auto packed = cat.create_driver_pin(0);
+    gu::set_bits(packed, static_cast<int>(mem_bits));
+    gu::set_unsign(packed);
+    gu::setup_sink_by_name(merged, "din").connect_driver(packed);
+    // Hand every lane reader its slice of the merged Q, then drop the lane flop.
+    for (size_t i = 0; i < lanes.size(); ++i) {
+      auto                         lq = lanes[i].flop.get_driver_pin(0);
+      std::vector<hhds::Pin_class> sinks;
+      for (const auto& e : lq.out_edges()) {
+        sinks.push_back(e.sink);
+      }
+      for (const auto& sink : sinks) {
+        q_slice[i].connect_sink(sink);
+      }
+      lanes[i].flop.del_node();
+    }
+    merged.attr(hhds::attrs::name).set(std::format("{}{}]", kEntryPrefix, entry));  // the whole-word spelling
+  }
+}
+
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& mem, bool lower, const fs::path& scratch,
                                      const fs::path& rtl_dir) {
-  auto edges = mem.inp_edges();
-  std::sort(edges.begin(), edges.end(), [](const auto& a, const auto& b) { return a.sink.get_port_id() < b.sink.get_port_id(); });
+  auto                       edges = mem.inp_edges();  // sink-port ascending by contract
   std::map<int, bool>        read;
   std::map<int, std::string> port_names;
   hhds::Pin_class            clock;
@@ -142,11 +364,11 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   std::optional<Dlop>                    init_const;
   int64_t                                mem_bits = 0;
   for (const auto& e : edges) {
-    const int       pid = e.sink.get_port_id(), off = pid % Ntype::Memory_port_stride;
+    const int  pid = e.sink.get_port_id(), off = pid % Ntype::Memory_port_stride;
     // Configuration is specialized into the child. init may instead be a
     // runtime reset-value bus, so only a constant init is a parameter.
-    const bool      config = off == 1 || off == 5 || off == 6 || off == 7 || off == 8 || off == 9 || off == 10 || off == 15
-                             || (off == 11 && e.driver.is_const());
+    const bool config = off == 1 || off == 5 || off == 6 || off == 7 || off == 8 || off == 9 || off == 10 || off == 15
+                        || (off == 11 && e.driver.is_const());
     if (off == 1 && e.driver.is_const()) {
       mem_bits = gu::const_of(e.driver).to_just_i64();
     }
@@ -158,7 +380,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     if (config) {
       driver = gu::create_const(*body, gu::const_of(e.driver));
     } else {
-      const auto  field = off == 0 ? "addr" : off == 2 ? "clock" : off == 3 ? "din" : off == 4 ? "enable" : "";
+      const auto field = off == 0 ? "addr" : off == 2 ? "clock" : off == 3 ? "din" : off == 4 ? "enable" : "";
       if (off == 2 && single_clock) {
         pname = "clk";
       } else if (*field && port_names.contains(pid / Ntype::Memory_port_stride)) {
@@ -250,17 +472,19 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     if (!result || !result->get_graph()) {
       diag::err("pass.abc", "memory-lowering", "internal").msg("memory RTL lowering did not produce '{}'", name).fatal();
     }
+    // A byte-enabled write leaves one partial-range flop per lane; fold each
+    // entry back into the whole-word flop the rename below expects.
+    merge_entry_lanes(*result->get_graph(), mem_bits);
     for (const auto node : result->get_graph()->body().nodes()) {
       // The parent instance carries the source memory name. Keep an entry's
       // local name _mem<N>, so hierarchical canonicalization yields the same
       // <memory>__mem<N> bank keys as the legacy flat lowering. LEC still proves
       // the transition relation; the names only propose its state pairing.
       if (gu::type_op_of(node) == Ntype_op::Flop) {
-        constexpr std::string_view prefix   = "__lhdmem_h64617461_e.data[";  // cgen's inner `data` memory
-        const auto                 old_name = gu::node_name_of(node);
-        std::string                index;
-        if (old_name.starts_with(prefix) && old_name.ends_with("]")) {
-          index = old_name.substr(prefix.size(), old_name.size() - prefix.size() - 1);
+        const auto  old_name = gu::node_name_of(node);
+        std::string index;
+        if (old_name.starts_with(kEntryPrefix) && old_name.ends_with("]")) {
+          index = old_name.substr(kEntryPrefix.size(), old_name.size() - kEntryPrefix.size() - 1);
         } else {
           // read_all uses cgen's packed inline array. Yosys splits its Q bus
           // into entry-width slices; retain that exact offset instead of
@@ -295,8 +519,8 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       // Re-apply the whole-array reset on the lowered storage flops (see the
       // edge loop above): entry N resets to lane N of the init contents (0
       // when the memory has none), asynchronously when the memory says so.
-      auto  lowered = result->get_graph();
-      auto  rst     = lowered->get_input_pin(reset_input_name);
+      auto lowered = result->get_graph();
+      auto rst     = lowered->get_input_pin(reset_input_name);
       if (rst.is_invalid()) {
         diag::err("pass.abc", "memory-lowering", "internal")
             .msg("memory RTL lowering of '{}' lost its reset input '{}'", name, reset_input_name)
@@ -319,7 +543,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         if (index_txt.empty() || !std::ranges::all_of(index_txt, [](char c) { return c >= '0' && c <= '9'; })) {
           continue;
         }
-        const int64_t index = std::stoll(std::string(index_txt));
+        const int64_t                 index = std::stoll(std::string(index_txt));
         // memory_map seeded the power-on value from INIT on the `initial`
         // sink; the same pin is the reset value on a reset flop, so redrive it
         // with the entry's lane (they agree by construction).
@@ -334,7 +558,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         }
         Dlop lane = *Dlop::create_integer(0);
         if (init_const && mem_bits > 0) {
-          lane = *init_const->get_mask_op(*Dlop::get_mask_value(static_cast<int>((index + 1) * mem_bits - 1), static_cast<int>(index * mem_bits)));
+          lane = *init_const->get_mask_op_opt(static_cast<int>(index * mem_bits), static_cast<int>((index + 1) * mem_bits));
         }
         gu::create_const(*lowered, lane).connect_sink(gu::setup_sink_by_name(node, "initial"));
         rst.connect_sink(gu::setup_sink_by_name(node, "reset_pin"));
@@ -403,7 +627,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       bool     inline_array = false;
       // Every read/write port block carries exactly one address pin (offset 0
       // of its Memory_port_stride block), so counting those edges counts ports.
-      uint64_t ports = 0;
+      uint64_t ports        = 0;
       for (const auto& e : mem.inp_edges()) {
         auto off = e.sink.get_port_id() % Ntype::Memory_port_stride;
         if (off == 0) {
@@ -444,28 +668,30 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
           // Folded on port count alone. Say so: the storage is above the
           // threshold the user set, and this is the reason it folded anyway.
           diag::info("pass.abc", "memory-ports", "unsupported")
-              .msg("memory '{}': {} ports (over {}) has no macro realization; bit-blasting its {} x {} = {} bits despite "
-                   "memory_max_bits={}",
-                   gu::default_instance_name(mem),
-                   ports,
-                   kAutoFoldPortsAbove,
-                   size,
-                   bits,
-                   size * bits,
-                   max_bits)
+              .msg(
+                  "memory '{}': {} ports (over {}) has no macro realization; bit-blasting its {} x {} = {} bits despite "
+                  "memory_max_bits={}",
+                  gu::default_instance_name(mem),
+                  ports,
+                  kAutoFoldPortsAbove,
+                  size,
+                  bits,
+                  size * bits,
+                  max_bits)
               .emit();
         } else if (!map) {
           // The documented `auto` outcome, so a note and not a warning -- the
           // user just needs to see WHICH memory it was to raise the limit (or
           // pass memory=true) deliberately.
           diag::info("pass.abc", "memory-max-bits", "unsupported")
-              .msg("memory '{}': {} x {} = {} bits exceeds memory_max_bits={}; keeping its native instance (memory=true folds "
-                   "it anyway)",
-                   gu::default_instance_name(mem),
-                   size,
-                   bits,
-                   size * bits,
-                   max_bits)
+              .msg(
+                  "memory '{}': {} x {} = {} bits exceeds memory_max_bits={}; keeping its native instance (memory=true folds "
+                  "it anyway)",
+                  gu::default_instance_name(mem),
+                  size,
+                  bits,
+                  size * bits,
+                  max_bits)
               .emit();
         }
       }

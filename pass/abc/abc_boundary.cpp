@@ -715,7 +715,7 @@ static bool import_def(Refine& R, Imp_def& d) {
           continue;
         }
         seed(a);
-        const int a_bits = a.is_const() ? std::max(static_cast<int>(gu::const_of(a).get_bits()), 1) : width_of(a);
+        const int a_bits = a.is_const() ? std::max(static_cast<int>(gu::const_of(a).get_signed_bits()), 1) : width_of(a);
         if (a.is_const()) {
           trk.add_constant(a, a_bits);
         }
@@ -724,7 +724,7 @@ static bool import_def(Refine& R, Imp_def& d) {
           trk.add_get_mask(out, a, a_bits, k);
         } else if (op == Ntype_op::Set_mask) {
           if (v.is_const()) {
-            trk.add_constant(v, std::max(static_cast<int>(k.get_bits()), 1));
+            trk.add_constant(v, std::max(static_cast<int>(k.get_signed_bits()), 1));
           } else {
             seed(v);
           }

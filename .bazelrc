@@ -13,9 +13,16 @@ build --action_env=BAZEL_CXXOPTS="-std=c++23"
 build --per_file_copt=external/gmp[+~].*@-O2,-g0
 # build --action_env=PATH
 
+# Use Command Line Tools without auto-selecting a separate Xcode installation.
+build:macos --xcode_version_config=//tools:command_line_tools
+
 # Set minimum macOS version to support the C++23 library features used by LiveHD
 # (floating-point std::from_chars requires macOS 26.0+ with current libc++).
 # Only applies to macOS builds, ignored on other platforms
+# Keep Bazel's target triples aligned with the compiler flags, including tools
+# built in the exec configuration (for example, the autoconf feature checker).
+build:macos --macos_minimum_os=26.0
+build:macos --host_macos_minimum_os=26.0
 build:macos --linkopt="-mmacosx-version-min=26.0"
 build:macos --copt="-mmacosx-version-min=26.0"
 build:macos --cxxopt="-mmacosx-version-min=26.0"

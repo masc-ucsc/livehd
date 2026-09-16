@@ -11,8 +11,8 @@ TEST(Cell, InitialPinIsScopedToCellType) {
     EXPECT_EQ(Ntype::get_sink_pid(op, "initial"), 1);
     EXPECT_EQ(Ntype::get_sink_name(op, 1), "initial");
   }
-  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Memory, "init"), livehd::Port_invalid);
-  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::And, "initial"), livehd::Port_invalid);
+  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Memory, "init"), hhds::Port_invalid);
+  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::And, "initial"), hhds::Port_invalid);
 }
 
 TEST(Cell, SameLeadingCharacterUsesCellTypeLookup) {
@@ -20,6 +20,6 @@ TEST(Cell, SameLeadingCharacterUsesCellTypeLookup) {
   EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Flop, "pipe_min"), 8);
   EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Flop, "pipe_max"), 9);
   EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Memory, "posclk"), 6);
-  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Memory, "pipe_min"), livehd::Port_invalid);
-  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Latch, "pipe_max"), livehd::Port_invalid);
+  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Memory, "pipe_min"), hhds::Port_invalid);
+  EXPECT_EQ(Ntype::get_sink_pid(Ntype_op::Latch, "pipe_max"), hhds::Port_invalid);
 }

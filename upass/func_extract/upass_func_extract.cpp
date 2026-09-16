@@ -63,14 +63,13 @@ std::optional<Dlop> resolve_child_scalar(const std::string& name, bool is_ref, b
 // A concat lane must FIT its declared window: Dlop::concat_op debug-asserts it
 // ("concat_op lane does not fit its declared width"), so an over-wide lane
 // would ABORT a -c dbg build instead of leaving the temp unfolded. The kernel
-// measures the BASE plane's signed width; Dlop::get_bits() is that same count,
-// only ever rounded UP for unknowns, so this test is always at least as strict
-// as the assert. A negative lane spends its top bit on the sign (that is how -1
-// lands as 0b111 in a 3-bit window); a non-negative one is magnitude plus the
-// zero sign slot.
+// measures the BASE plane's signed width; Dlop::get_payload_bits() is that
+// count minus the zero sign slot of a non-negative lane, only ever rounded UP
+// for unknowns, so this test is always at least as strict as the assert. A
+// negative lane spends its top bit on the sign (that is how -1 lands as 0b111
+// in a 3-bit window).
 bool concat_lane_fits(const Dlop& v, int bits) {
-  const int gb = v.get_bits();
-  return v.is_negative() ? gb <= bits : gb <= bits + 1;
+  return v.get_payload_bits() <= bits;
 }
 
 // The split is a stateful single DFS over the module tree (mirroring the old

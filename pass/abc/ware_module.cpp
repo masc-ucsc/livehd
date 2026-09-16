@@ -110,11 +110,8 @@ std::string section_info(hhds::Graph& graph, int color, Ware_policy policy) {
 
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& node, const std::string& kind,
                                      Ware_policy policy) {
-  auto edges = node.inp_edges();
-  std::stable_sort(edges.begin(), edges.end(), [](const auto& a, const auto& b) {
-    if (a.sink.get_port_id() != b.sink.get_port_id()) {
-      return a.sink.get_port_id() < b.sink.get_port_id();
-    }
+  auto edges = node.inp_edges();  // sink-port ascending by contract
+  gu::sort_drivers_within_pin(edges, [](const auto& a, const auto& b) {
     const auto key = [](const auto& pin) {
       return std::tuple{gu::bits_of(pin), gu::is_unsign(pin), pin.is_const() ? gu::const_of(pin).to_pyrope() : std::string{}};
     };

@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -37,6 +38,29 @@ namespace livehd::graph_util {
 // drift out of sync with the accessor it must bind to.
 using Edge_vec = decltype(std::declval<hhds::Node_class>().inp_edges());
 
+// hhds guarantees inp_edges() is SINK-PORT ASCENDING, but says nothing about
+// the order of SEVERAL DRIVERS OF ONE SINK PIN (a Sum's `as` fed by three
+// nodes, an Or's `a`) -- that is edge storage order. A consumer that needs a
+// deterministic emission or hash order there imposes `less` inside each
+// sink-pin RUN and leaves the port order hhds already fixed alone.
+//
+// O(n) when every pin has a single driver, which is nearly every pin.
+template <typename Edges, typename Less>
+inline void sort_drivers_within_pin(Edges& edges, Less less) {
+  auto it = edges.begin();
+  while (it != edges.end()) {
+    const auto pid     = it->sink.get_port_id();
+    auto       run_end = it;
+    while (run_end != edges.end() && run_end->sink.get_port_id() == pid) {
+      ++run_end;
+    }
+    if (std::distance(it, run_end) > 1) {
+      std::sort(it, run_end, less);
+    }
+    it = run_end;
+  }
+}
+
 // Hotmux has contiguous (one-bit control, value) pairs at p(2*i), p(2*i+1).
 // An optional trailing even pin is the default value when every control is
 // zero. Without a default the zero-control result is zero. Multiple active
@@ -49,12 +73,16 @@ struct Hotmux_inputs {
 
 template <typename Node>
 [[nodiscard]] inline auto hotmux_inputs(const Node& node) {
+  // inp_edges() is sink-port ascending by contract (hhds graph.hpp), so the
+  // pairs come out in pin order with no sort; the assert below pins the
+  // stronger property this cell needs -- that the pids are also CONTIGUOUS
+  // from 0, which is what makes index i the pid. The copy is for the indexing
+  // alone: an Occurrence node's inp_edges() is a range, not a vector.
   auto                                                range = node.inp_edges();
   std::vector<std::decay_t<decltype(*range.begin())>> edges;
   for (const auto& edge : range) {
     edges.push_back(edge);
   }
-  std::sort(edges.begin(), edges.end(), [](const auto& a, const auto& b) { return a.sink.get_port_id() < b.sink.get_port_id(); });
   Hotmux_inputs<std::decay_t<decltype(edges[0].driver)>> result;
   for (size_t i = 0; i < edges.size(); ++i) {
     I(edges[i].sink.get_port_id() == i);
@@ -142,38 +170,16 @@ inline constexpr uint32_t kFormalAssumeHier   = 5;
 // carry values; a node has none (port 0 is the node, and it is never a
 // constant), so probing a node does not compile.
 
-// Create-or-find the canonical const pin for `value`. Canonicalized HERE,
-// once, so structural dedup and every consumer see one spelling:
-//  * Boolean -> unsigned Integer (`true` = 1, `false` = 0). Booleans are a
-//    front-end type; graph consumers need the 0/1 value, including mux arm
-//    selection and loop activation. Dlop's signed Boolean payload is not the
-//    graph value.
-//  * a known integer that fits 62 bits is re-built at its minimal (size-1)
-//    width, so a wide-operand fold and a literal dedup to ONE pin (Dlop::hash
-//    mixes size).
-//  * everything else (unknown planes, wider values, strings) verbatim.
+// Create-or-find the const pin for `value`. Nothing is canonicalized here:
+// hlop already makes every spelling the graph needs the ONLY spelling --
+//  * a Boolean IS the hardware u1 (`true` = 1, `false` = 0, an unknown bool =
+//    `0ub?`), never a signed all-ones payload;
+//  * Dlop::hash keys on the minimal (sign-extension-trimmed) representation,
+//    the same equivalence same_repr() uses, so a wide-operand fold and a
+//    literal dedup to ONE pin without a rebuild.
 // Invalid / Nil are not values: hhds refuses them (std::invalid_argument) --
 // a producer that computed "no value" must keep its node, not mint a 0.
-[[nodiscard]] inline hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) {
-  if (value.is_bool()) {
-    Dlop canonical;
-    if (value.has_unknowns()) {
-      canonical.init_unknown_positive(1);
-    } else {
-      canonical.init_integer(value.is_known_true() ? 1 : 0);
-    }
-    return g.create_constant(canonical);
-  }
-  if (value.is_numeric() && value.is_just_i64()) {
-    // Build the canonical form on the STACK: create_constant copies it into the
-    // pool anyway, so the spool_ptr round-trip Dlop::create_integer needs is
-    // pure overhead on the hottest constant-minting path.
-    Dlop canonical;
-    canonical.init_integer(value.to_just_i64());
-    return g.create_constant(canonical);
-  }
-  return g.create_constant(value);
-}
+[[nodiscard]] inline hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) { return g.create_constant(value); }
 
 [[noreturn]] inline void not_a_constant(const hhds::Pin_class& pin) {
   std::fprintf(stderr,
@@ -201,29 +207,6 @@ inline constexpr uint32_t kFormalAssumeHier   = 5;
 const Dlop&                      const_of(const hhds::Node_class&)      = delete;
 const Dlop&                      const_of(const hhds::Occurrence_node&) = delete;
 
-// LITERAL PAYLOAD WIDTH of a constant: the bits a graph pin has to carry to
-// hold it, which is NOT Dlop::get_bits().
-//
-// get_bits() is a SIGNED carrier width, so every NON-NEGATIVE value reports one
-// leading zero beyond its payload (`1` -> 2, `255` -> 9, `0ub?` -> 2). Graph
-// width hints are literal unsigned payloads, so that headroom must not widen a
-// Mux/Hotmux arm, an enclosing Concat lane, or a lossless-carrier requirement.
-// An UNKNOWN plane does not change this: `0ub?` occupies exactly its declared
-// payload bits. A negative (or non-numeric) value keeps the full carrier --
-// its top bit is the sign, not headroom.
-//
-// ONE definition on purpose: upass/tolg stamps a merge with it, pass/cprop
-// enforces carriers with it, and inou/cgen/cgen_sim rejects a narrow mux with
-// it. Three private copies drifted -- cgen_sim demanded the carrier for an
-// unknown literal that tolg had already stamped at the payload, and the
-// resulting `mux-width-loss` fatal fired on a graph that was correct.
-[[nodiscard]] inline int32_t literal_payload_bits(const Dlop& value) {
-  const auto carrier = static_cast<int32_t>(value.get_bits());
-  if (value.is_numeric() && !value.is_negative()) {
-    return std::max<int32_t>(1, carrier - 1);
-  }
-  return std::max<int32_t>(1, carrier);
-}
 
 // hhds `NodeEntry::type` is 16 bits whose bit 0 is hhds's own per-node
 // `is_loop_break` cut flag. LiveHD stores `(op << 1) | loop_last` (see
@@ -516,7 +499,7 @@ inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
     // (2) The value must fit the declared literal container. An unsigned b-bit
     // hint represents [0,2^b-1]; a signed one represents
     // [-2^(b-1),2^(b-1)-1].
-    const int need = is_uns ? c.get_last_bit_set() + 1 : static_cast<int>(c.get_bits());
+    const int need = is_uns ? c.get_last_bit_set() + 1 : static_cast<int>(c.get_signed_bits());
     I(need <= nbits,
       std::format("const pin '{}' needs {} bits but is declared {} {}signed bits", wire_name(dpin), need, nbits, is_uns ? "un" : "")
           .c_str());
@@ -593,7 +576,7 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
         inputs += std::format("p{}:{}b", edge.sink.get_port_id(), bits_of(edge.driver));
         if (edge.driver.is_const()) {
           const auto& value  = const_of(edge.driver);
-          inputs            += std::format(":const({}b,{})", value.get_bits(), value.is_negative() ? "neg" : "nonneg");
+          inputs            += std::format(":const({}b,{})", value.get_signed_bits(), value.is_negative() ? "neg" : "nonneg");
         } else if (is_graph_input_pin(edge.driver)) {
           inputs += ":$" + std::string(edge.driver.get_pin_name());
         } else {
@@ -672,7 +655,7 @@ inline void set_sign(const hhds::Pin_class& pin) {
     return;
   }
   assert_pin_attr_role<livehd::attrs::pin_signed_t>(pin);
-  pin.attr(livehd::attrs::pin_signed).set(livehd::attrs::pin_signed_t::value_type{});
+  pin.attr(livehd::attrs::pin_signed).set();
 }
 
 // Set one complete realization hint. `bits` is always the literal physical
@@ -814,41 +797,40 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
 // Sink-pin lookup by LiveHD-style name ("a", "din", "0addr", ...).
 // ---------------------------------------------------------------------------
 // HHDS does not carry the LiveHD sink-name convention. We translate the name
-// to a port_id via Ntype, then walk inp_edges() to find a sink pin with the
-// matching port_id. This emulates LiveHD's "invalid pin on missing pin"
-// behaviour (HHDS asserts when get_sink_pin is called on an unmaterialized
-// pin). Sub nodes get the SAME invalid-on-miss contract: the name resolves via
-// the sub-graph's GraphIO decls, and a declared input that was never connected
-// has no materialized pin, so it comes back invalid instead of asserting.
+// to a port_id via Ntype (or, for a Sub, via the sub-graph's GraphIO decls) and
+// ask hhds for that pin with try_get_sink_pin, which answers with an invalid
+// pin instead of asserting the way get_sink_pin does.
+//
+// A pin with NO DRIVER reads as a miss too. That is the LiveHD contract these
+// callers have always had -- the lookup used to be an inp_edges() walk, so a
+// pin left dangling by a del_edge() (cprop does this constantly) was invisible
+// -- and `is_sink_connected` below is exactly that question. The difference
+// from a pure existence test is one InlinedVector of the pin's own fan-in,
+// against the whole node's fan-in the walk used to materialize.
 
 [[nodiscard]] inline hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name) {
   if (node.is_invalid()) {
     return {};
   }
-  auto op = type_op_of(node);
+  auto          op  = type_op_of(node);
+  hhds::Port_id pid = hhds::Port_invalid;
   if (op == Ntype_op::Sub) {
     auto sub_io = node.get_subnode_io();
     if (!sub_io || !sub_io->has_input(name)) {
       return {};
     }
-    const auto pid = sub_io->get_input_port_id(name);
-    for (const auto& edge : node.inp_edges()) {
-      if (edge.sink.get_port_id() == pid) {
-        return edge.sink;
-      }
-    }
+    pid = sub_io->get_input_port_id(name);
+  } else {
+    pid = Ntype::get_sink_pid(op, name);
+  }
+  if (pid == hhds::Port_invalid) {
     return {};
   }
-  auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
+  auto pin = node.try_get_sink_pin(pid);
+  if (pin.is_invalid() || pin.inp_edges().empty()) {
     return {};
   }
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.sink;
-    }
-  }
-  return {};
+  return pin;
 }
 
 [[nodiscard]] inline hhds::Occurrence_pin find_sink_pin(const hhds::Occurrence_node& node, std::string_view name) {
@@ -872,7 +854,7 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
     return {};
   }
   auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
+  if (pid == hhds::Port_invalid) {
     return {};
   }
   for (const auto& e : node.inp_edges()) {
@@ -984,10 +966,85 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
     return node.create_sink_pin(name);
   }
   auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
+  if (pid == hhds::Port_invalid) {
     return {};
   }
   return node.create_sink_pin(pid);
+}
+
+// ---------------------------------------------------------------------------
+// Get_mask / Set_mask mask pin: the contiguous-window contract (graph/cell.hpp)
+// ---------------------------------------------------------------------------
+// The mask constant is either the window [lo, hi) or the literal -1 ("the whole
+// value"). These are the ONLY spellings the IR accepts, so every consumer reads
+// a window instead of scanning for runs.
+
+// The window CONSTANT for bits [lo, hi). `lo == 0 && hi <= 0` is rejected: a
+// mask that selects nothing is not a cell, it is a constant 0 the producer
+// should have folded.
+[[nodiscard]] inline Dlop mask_window_const(int lo, int hi) {
+  I(lo >= 0 && hi > lo, "Get_mask/Set_mask window must be a non-empty [lo, hi) with lo >= 0");
+  return *Dlop::get_mask_value(hi - 1, lo);
+}
+
+// "The whole value": Get_mask(a, -1) is to-unsigned, Set_mask(a, -1, v) is v.
+[[nodiscard]] inline Dlop mask_whole_const() { return *Dlop::create_integer(-1); }
+[[nodiscard]] inline bool is_whole_value_mask(const Dlop& mask) {
+  return mask.is_integer() && !mask.has_unknowns() && mask.is_just_i64() && mask.to_just_i64() == -1;
+}
+
+// True for either legal spelling. A producer minting a mask pin passes through
+// here; a consumer normally asks mask_window() instead.
+[[nodiscard]] inline bool is_legal_mask(const Dlop& mask) {
+  if (!mask.is_integer() || mask.has_unknowns()) {
+    return false;
+  }
+  if (is_whole_value_mask(mask)) {
+    return true;
+  }
+  if (mask.is_negative()) {
+    return false;  // a carve-out other than -1 is not part of the IR
+  }
+  const auto [lo, hi] = mask.get_mask_range();  // {-1,-1} == noncontiguous
+  return lo >= 0 && hi > lo;
+}
+
+// The window as an OPTIONAL: empty for the -1 whole-value spelling (which has
+// no window) and for anything the contract forbids. This is the form for a
+// caller whose answer to "not a bit-field slice" is to DECLINE -- an analysis
+// that only ever refuses an optimization stays correct whatever it is handed,
+// so it needs no assert of its own and no hand-rolled contiguity test.
+[[nodiscard]] inline std::optional<std::pair<int, int>> mask_window_of(const Dlop& mask) {
+  if (!mask.is_integer() || mask.has_unknowns() || mask.is_negative()) {
+    return std::nullopt;
+  }
+  const auto [lo, hi] = mask.get_mask_range();  // {-1,-1} == noncontiguous
+  if (lo < 0 || hi <= lo) {
+    return std::nullopt;
+  }
+  return std::pair<int, int>{lo, hi};
+}
+
+[[noreturn]] inline void not_a_mask_window(const Dlop& mask) {
+  std::fprintf(stderr,
+               "livehd: Get_mask/Set_mask mask constant '%s' is neither a contiguous window nor the -1 whole-value "
+               "spelling (graph/cell.hpp)\n",
+               std::string(mask.to_pyrope()).c_str());
+  std::abort();
+}
+
+// The half-open [lo, hi) window of a mask constant. FAILS CLOSED on the -1
+// spelling (a caller that can handle "the whole value" must test for it first)
+// and on anything the contract forbids -- unconditionally, NOT through I():
+// silently treating a sparse mask as its bounding window would select bits the
+// cell never asked for, and that is a miscompile a release build must not make
+// quietly. A caller that simply declines uses mask_window_of instead.
+[[nodiscard]] inline std::pair<int, int> mask_window(const Dlop& mask) {
+  const auto window = mask_window_of(mask);
+  if (!window) {
+    not_a_mask_window(mask);
+  }
+  return *window;
 }
 
 // Create a new node of `op` in `graph` and stamp port-0 driver bits.

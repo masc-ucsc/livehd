@@ -73,15 +73,13 @@ struct pin_delay_t {
 };
 inline constexpr pin_delay_t pin_delay{};
 
-// Per-pin "is signed" marker (present = signed, absent = unsigned).
-// Stored as a marker value because HHDS attributes currently require a
-// value_type; callers should use graph_util::set_sign/set_unsign instead of
-// setting this attr directly.
+// Per-pin "is signed" marker (present = signed, absent = unsigned). A
+// PRESENCE-ONLY attribute: hhds::flag stores one bit per pin and there is no
+// value to read back. Callers should use graph_util::set_sign/set_unsign
+// instead of touching this attr directly.
 struct pin_signed_t {
-  struct value_type {
-    uint8_t marker = 1;
-  };
-  using storage = hhds::flat_storage;
+  using value_type = hhds::flag;
+  using storage    = hhds::flat_storage;
 };
 inline constexpr pin_signed_t pin_signed{};
 

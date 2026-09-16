@@ -319,15 +319,10 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
 
 // get_mask is Pyrope's default-zext bit-select (the "force" operator): with a
 // non-negative mask the extracted bits are packed LSB-first as an UNSIGNED
-// value, so the fold is never negative. Dlop::get_mask_op carries a single-bit
-// quirk that returns the signed 1-bit -1 for a lone selected SET bit; per the
-// spec `#[N]` (and `#[n..=n]`, `#zext[n]`) zero-extends — a set bit reads as the
-// unsigned 1 — and only the explicit `#sext` form may be negative. Restore the
-// unsigned value here so the comptime fold matches the RTL (cgen emits a plain
-// `a[N]` part-select) and the [0,1] bitwidth. A positive mask can only fold
-// negative via this quirk (the lone bit's zext value is 1); unknown and
-// negative-mask (carve-out) results pass through untouched.
-static Dlop get_mask_zext(const Dlop& value, const Dlop& mask) {
+// value, so the fold is never negative (only the explicit `#sext` form may be).
+// Dlop::get_mask_op produces exactly that; this wrapper exists only for the
+// X-plane rebuild below.
+static Dlop get_mask_x_plane(const Dlop& value, const Dlop& mask) {
   // Dlop's multiword get_mask path historically lost the extra (unknown) plane
   // for a wide positive mask: selecting bits 361..721 from a u1008 all-X value
   // returned 361 known ones.  Besides being a needlessly hostile X refinement,
@@ -342,7 +337,7 @@ static Dlop get_mask_zext(const Dlop& value, const Dlop& mask) {
   // their existing specialized semantics.
   if (value.has_unknowns() && !mask.has_unknowns() && !mask.is_negative()) {
     std::string low_to_high;
-    const int   mask_bits = mask.get_bits();
+    const int   mask_bits = mask.get_signed_bits();
     low_to_high.reserve(static_cast<size_t>(std::max(mask_bits, 0)));
     for (int pos = 0; pos < mask_bits; ++pos) {
       if (!mask.bit_test(pos)) {
@@ -357,11 +352,7 @@ static Dlop get_mask_zext(const Dlop& value, const Dlop& mask) {
     return *Dlop::from_pyrope(std::string{"0ub"} + low_to_high);
   }
 
-  Dlop r = *value.get_mask_op(mask);
-  if (!mask.is_negative() && r.is_integer() && !r.has_unknowns() && r.is_negative()) {
-    return *Dlop::create_integer(1);
-  }
-  return r;
+  return *value.get_mask_op(mask);
 }
 
 Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end) {
@@ -414,7 +405,7 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
   auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);
-  return get_mask_zext(value, *mask);
+  return get_mask_x_plane(value, *mask);
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
@@ -1072,11 +1063,11 @@ void uPass_constprop::process_assign() {
     // under those.
     //
     // Without the fill the value keeps an unknown SIGN, which Dlop can only
-    // bound conservatively (get_bits() -> 65 for ANY sign-unknown value): every
+    // bound conservatively (get_signed_bits() -> 65 for ANY sign-unknown value): every
     // net carrying an x-poison came out 65 bits wide, and a destination wider
     // than that read 0 above bit 64 instead of `?`.
     if (const auto umax = decl_unsigned_max_of(lhs_text); !umax.is_invalid() && !umax.has_unknowns() && v.is_integer()) {
-      const int w = umax.get_bits() - 1;  // uN's max is 2^N-1, and get_bits() counts the sign slot
+      const int w = umax.get_payload_bits();  // uN's max is 2^N-1
       if (w > 0 && v.unknown_bit_test(w)) {
         v = *v.and_op(umax);
       }
@@ -1134,15 +1125,18 @@ void uPass_constprop::process_declare() {
   note_var_span(current_text());  // the declared var, at its declaration line
   // The runner's declare bake already wrote mode/type_name/decl
   // ranges onto the binding (declare_bare created it) — EXCEPT for a dotted
-  // wire leaf (`declare(io.a,…,wire)`, the runner detupler's split of a bundle
-  // wire): its root was never declared, so the bake drops the facts and no
-  // binding ever answers for the field. Record those here — they are the
-  // declared-field enumeration for the unset-unused-field warning (a leaf
-  // never read or written has no other trace in the symbol table).
+  // wire or mut leaf: its root may never have been declared, so the bake
+  // drops the facts and no binding answers for the field. Retain these modes
+  // so wire drivers and mutable defaults survive constant folding. The wire
+  // fields also enumerate declarations for the unset-unused-field warning.
   if (const auto var = current_text(); !bundle_key::is_single_level(var) && var[0] != '%') {
     std::string path(var);
-    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const) && current_text() == "wire") {
-      declared_wire_fields_.insert(std::move(path));
+    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const)) {
+      if (current_text() == "wire") {
+        declared_wire_fields_.insert(std::move(path));
+      } else if (current_text() == "mut") {
+        declared_mut_fields_.insert(std::move(path));
+      }
     }
   }
   move_to_parent();
@@ -1258,7 +1252,7 @@ upass::Vote uPass_constprop::process_mult(std::string_view dst_name, Bundle& dst
         if (r.is_invalid()) {
           return;
         }
-        if (static_cast<long long>(r.get_bits()) + n.get_bits() > kMaxFoldBits) {
+        if (static_cast<long long>(r.get_signed_bits()) + n.get_signed_bits() > kMaxFoldBits) {
           r = Dlop{};  // invalid -> store skipped, Mult kept structural
           return;
         }
@@ -1494,17 +1488,6 @@ upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst,
   return classify_vote();
 }
 
-// log_* results are bool-TYPED in Pyrope; Dlop's bitwise ops return integer
-// payloads (true == ~0 == -1). Re-type a known result so downstream
-// bool-sensitive folds (`int(true) == 1`, bool-typed bundle fields) see a
-// real bool instead of `-1`. Unknown/invalid/nil results pass through.
-static Dlop log_result_as_bool(const Dlop& r) {
-  if (r.is_invalid() || r.is_nil() || r.has_unknowns()) {
-    return r;
-  }
-  return *Dlop::from_pyrope(r.is_known_true() ? "true" : "false");
-}
-
 upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Pyrope's type rule: `and` operands must already be bool — with bool
   // operands, bitwise AND equals logical AND; Dlop handles unknowns. A nil
@@ -1518,7 +1501,8 @@ upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& 
   if (short_circuit_logical(dst_name, src, /*is_and=*/true)) {
     return classify_vote();
   }
-  return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); });
+  // Bool operands keep the Boolean tag through Dlop::and_op (0/1 bitwise == logical).
+  return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.and_op(n2); });
 }
 
 upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -1526,13 +1510,14 @@ upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& d
   if (short_circuit_logical(dst_name, src, /*is_and=*/false)) {  // 2c-shortcircuit, see process_log_and
     return classify_vote();
   }
-  return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); });
+  return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.or_op(n2); });
 }
 
 upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // `not` operand must be bool; bitwise NOT over a 1-bit bool flips it.
-  // nil stays nil (the cassert escape hatch for unset attrs), so a nil operand
-  // is NOT an error (nil_operand_error=false) — it propagates for the verifier.
+  // `not` operand must be bool: Dlop::lnot_op is the LOGICAL not (`x == false`,
+  // the same EQ(x, 0) tolg lowers it to), never the bitwise not_op. nil stays
+  // nil (the cassert escape hatch for unset attrs), so a nil operand is NOT an
+  // error (nil_operand_error=false) — it propagates for the verifier.
   (void)dst;
   return push_unary(
       dst_name,
@@ -1541,7 +1526,7 @@ upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& 
         if (r.is_nil()) {
           return;
         }
-        r = log_result_as_bool(*r.not_op());
+        r = *r.lnot_op();
       },
       /*nil_operand_error=*/false);
 }
@@ -2144,6 +2129,7 @@ void uPass_constprop::process_stmts_post() {
       }
     }
     declared_wire_fields_.clear();  // per-unit state: the next file walk starts fresh
+    declared_mut_fields_.clear();
   }
   if (st().stack.size() == 2 && !lm->get_lnast()->get_pub_list().empty()) {
     const auto unit = std::string(lm->get_top_module_name());
@@ -2609,8 +2595,8 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
   Does_operand op;
   if (name == "bool") {
     op.kind = Does_operand::Kind::boolean;
-    op.min  = *Dlop::create_integer(-1);
-    op.max  = *Dlop::create_integer(0);
+    op.min  = *Dlop::create_integer(0);
+    op.max  = *Dlop::create_integer(1);
     return op;
   }
   if (name == "string") {
@@ -2660,8 +2646,8 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
     }
     if (txt == "true" || txt == "false") {
       op.kind      = Does_operand::Kind::boolean;
-      op.min       = *Dlop::create_integer(-1);
-      op.max       = *Dlop::create_integer(0);
+      op.min       = *Dlop::create_integer(0);
+      op.max       = *Dlop::create_integer(1);
       op.value     = *Dlop::create_bool(txt == "true");
       op.has_value = true;
       return op;
@@ -2679,8 +2665,8 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
     }
     if (v->is_bool()) {
       op.kind      = Does_operand::Kind::boolean;
-      op.min       = *Dlop::create_integer(-1);
-      op.max       = *Dlop::create_integer(0);
+      op.min       = *Dlop::create_integer(0);
+      op.max       = *Dlop::create_integer(1);
       op.value     = *v;
       op.has_value = true;
       return op;
@@ -2749,8 +2735,8 @@ uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass:
   switch (q.kind) {
     case Io_kind::boolean:
       op.kind = Does_operand::Kind::boolean;
-      op.min  = *Dlop::create_integer(-1);
-      op.max  = *Dlop::create_integer(0);
+      op.min  = *Dlop::create_integer(0);
+      op.max  = *Dlop::create_integer(1);
       return op;
     case Io_kind::string: op.kind = Does_operand::Kind::string; return op;
     case Io_kind::integer:
@@ -2782,8 +2768,8 @@ uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass:
       op.kind = Does_operand::Kind::string;
     } else if (folded.is_bool()) {
       op.kind = Does_operand::Kind::boolean;
-      op.min  = *Dlop::create_integer(-1);
-      op.max  = *Dlop::create_integer(0);
+      op.min  = *Dlop::create_integer(0);
+      op.max  = *Dlop::create_integer(1);
     } else if (folded.is_integer()) {
       op.kind    = Does_operand::Kind::integer;
       op.max_inf = true;  // untyped → unbounded
@@ -3463,7 +3449,7 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
     hhds::Port_id pid;
     if (a.is_named) {
       pid = Ntype::get_sink_pid(nop, a.name);
-      if (pid == livehd::Port_invalid) {
+      if (pid == hhds::Port_invalid) {
         return false;
       }
     } else {
@@ -3524,16 +3510,13 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
 // A concat lane must FIT its declared window: Dlop::concat_op debug-asserts it
 // ("concat_op lane does not fit its declared width"), so an over-wide lane
 // would ABORT a -c dbg build instead of leaving the node unfolded. The kernel
-// measures the BASE plane's signed width; Dlop::get_bits() is that same count,
-// only ever rounded UP for unknowns (it returns max(base_bits, …)), so this
-// test is always at least as strict as the assert — it may decline a fold the
-// kernel would have accepted, never the reverse. A negative lane spends its top
-// bit on the sign (that is how -1 lands as 0b111 in a 3-bit window); a
-// non-negative one is magnitude plus the zero sign slot.
-static bool concat_lane_fits(const Dlop& v, int bits) {
-  const int gb = v.get_bits();
-  return v.is_negative() ? gb <= bits : gb <= bits + 1;
-}
+// measures the BASE plane's signed width; Dlop::get_payload_bits() is that
+// count minus the zero sign slot of a non-negative lane, only ever rounded UP
+// for unknowns, so this test is always at least as strict as the assert — it
+// may decline a fold the kernel would have accepted, never the reverse. A
+// negative lane spends its top bit on the sign (that is how -1 lands as 0b111
+// in a 3-bit window).
+static bool concat_lane_fits(const Dlop& v, int bits) { return v.get_payload_bits() <= bits; }
 
 bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
   // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
@@ -3588,7 +3571,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
           return false;
         }
         pid = Ntype::get_sink_pid(nop, a.name);
-        if (pid == livehd::Port_invalid) {
+        if (pid == hhds::Port_invalid) {
           return false;
         }
       } else {
@@ -3686,7 +3669,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "get_mask") {
     if (need_n(2)) {
-      result  = get_mask_zext(args[0], args[1]);
+      result  = get_mask_x_plane(args[0], args[1]);
       matched = true;
     }
   } else if (op == "set_mask") {
@@ -4098,7 +4081,7 @@ void uPass_constprop::process_func_call() {
           // annotation was written. Include its sign bit so signed(Enum.x)
           // preserves a positive encoding; explicitly sized entries use the
           // declared width above.
-          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_bits()));
+          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_signed_bits()));
         }
         if (W == 0 && v.has_unknowns()) {
           // A value with unknown bits (a compare/expression over a poison/X
@@ -4106,7 +4089,7 @@ void uPass_constprop::process_func_call() {
           // emits later): its ?-pattern already has a definite width, so
           // reinterpret within it instead of erroring — the unknowns stay
           // unknowns either way.
-          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_bits() - 1));
+          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_payload_bits()));
         }
         if (W == 0) {
           livehd::diag::sink().emit(livehd::diag::Diagnostic{
@@ -5237,11 +5220,11 @@ static std::optional<int> positional_array_elem_bits(const Bundle* b) {
   if (!elem_max.is_integer() || !elem_min.is_integer()) {
     return std::nullopt;
   }
-  // `get_bits()` counts the sign slot, so a non-negative envelope states one
+  // `get_signed_bits()` counts the sign slot, so a non-negative envelope states one
   // bit more than the lane holds. A signed envelope needs the wider of the two.
-  const int64_t elem_bits = elem_min.is_negative()     ? std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits())
+  const int64_t elem_bits = elem_min.is_negative()     ? std::max<int64_t>(elem_max.get_signed_bits(), elem_min.get_signed_bits())
                             : elem_max.is_known_zero() ? 0
-                                                       : static_cast<int64_t>(elem_max.get_bits()) - 1;
+                                                       : static_cast<int64_t>(elem_max.get_payload_bits());
   if (elem_bits <= 0 || elem_bits > std::numeric_limits<int>::max()) {
     return std::nullopt;
   }
@@ -5432,11 +5415,10 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   // get_mask is the default zext select, so a single set bit reads as the
-  // unsigned 1 (never -1; `#sext` sign-extends via a separate sext node) —
-  // get_mask_zext restores that for Dlop::get_mask_op's single-bit quirk. We
+  // unsigned 1 (never -1; `#sext` sign-extends via a separate sext node). We
   // store whatever it returns (invalid included): the fold is real and
   // downstream code shouldn't silently drop it.
-  store_trivial(var, get_mask_zext(value, mask));
+  store_trivial(var, get_mask_x_plane(value, mask));
   return classify_vote();
 }
 
@@ -5632,8 +5614,8 @@ upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& d
       const auto& elem_min        = b->get_attr("__elem_min");
       if (elem_max.is_integer() && elem_min.is_integer()) {
         array_elem_bits = elem_min.is_negative()
-                              ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()))
-                              : (elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1));
+                              ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_signed_bits(), elem_min.get_signed_bits()))
+                              : (static_cast<uint32_t>(elem_max.get_payload_bits()));
       }
       // Collected separately so the whole lane can be appended REVERSED: the
       // enclosing lane list is MSB-first (Verilog `{a,b}` order, which is what

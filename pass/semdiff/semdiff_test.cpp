@@ -313,13 +313,13 @@ TEST(Semdiff, IdentityGetMaskIsTransparent) {
 TEST(Semdiff, NonIdentityGetMaskNeverDisappears) {
   auto direct = build_mask_boundary("lgdb_semdiff_gm_bad_direct", std::nullopt);
   auto narrow = build_mask_boundary("lgdb_semdiff_gm_narrow", 0x7f);
-  auto sparse = build_mask_boundary("lgdb_semdiff_gm_sparse", 0xf7);
+  auto offset = build_mask_boundary("lgdb_semdiff_gm_offset", 0xfe);  // bits [1,8): a slice, not a wrapper
   auto wider  = build_mask_boundary("lgdb_semdiff_gm_wider", 0x1ff);
   auto fit_lo = build_mask_boundary("lgdb_semdiff_gm_fit_lo", -1, 7);
   auto fit_hi = build_mask_boundary("lgdb_semdiff_gm_fit_hi", -1, 9);
 
   EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), narrow.get()));
-  EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), sparse.get()));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), offset.get()));
   EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), wider.get()));
   EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), fit_lo.get()));
   EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), fit_hi.get()));

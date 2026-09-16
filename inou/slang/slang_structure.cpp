@@ -888,6 +888,48 @@ Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym) {
   return out;
 }
 
+// Driver lookup is shared by the self-reference queries for one module. A
+// large reconvergent cone visits the same nets from many candidates; scanning
+// every declaration for each visited net made Backend spend minutes here.
+// Index each scope once, preserving whole_net_driver's initializer priority,
+// first-assignment order, and exclusion of partial/select assignments.
+struct Driver_read_cache {
+  absl::flat_hash_set<const slang::ast::Scope*>                                      indexed_scopes;
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, const slang::ast::Expression*> drivers;
+
+  const slang::ast::Expression* driver(const slang::ast::ValueSymbol& sym) {
+    if (const auto* init = sym.getInitializer()) {
+      return init;
+    }
+    const auto* scope = sym.getParentScope();
+    if (scope == nullptr) {
+      return nullptr;
+    }
+    if (indexed_scopes.insert(scope).second) {
+      for (const auto& member : scope->members()) {
+        if (member.kind != slang::ast::SymbolKind::ContinuousAssign) {
+          continue;
+        }
+        const auto& asn = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+        if (asn.kind != ExpressionKind::Assignment) {
+          continue;
+        }
+        const auto& ax = asn.as<slang::ast::AssignmentExpression>();
+        if (ax.left().kind == ExpressionKind::NamedValue) {
+          const auto& assigned = ax.left().as<slang::ast::NamedValueExpression>().symbol;
+          // A generated scope may assign a parent net. The original lookup
+          // only searches the symbol's own scope; keep that same boundary.
+          if (assigned.getParentScope() == scope) {
+            drivers.try_emplace(&assigned, &ax.right());
+          }
+        }
+      }
+    }
+    const auto it = drivers.find(&sym);
+    return it == drivers.end() ? nullptr : it->second;
+  }
+};
+
 // True iff `expr` reads `target` — directly, or transitively through the whole-net
 // driver of any wire it references (bounded depth). Used to decide whether a
 // per-element packed-array `'{...}`/`{...}` assignment is SELF-REFERENCING: an
@@ -899,7 +941,7 @@ Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym) {
 // later inline away leaves a write-only tuple the prp_writer round-trip cannot
 // recompile — the DivUnit `mNeg` / DataPath `fpRfWdata` regression).
 bool driver_reads_target(const slang::ast::Expression& expr, const slang::ast::ValueSymbol& target,
-                         absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, int depth) {
+                         absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, Driver_read_cache& cache, int depth) {
   if (depth > 16) {
     return false;
   }
@@ -912,8 +954,8 @@ bool driver_reads_target(const slang::ast::Expression& expr, const slang::ast::V
     if (!visiting.insert(s).second) {
       continue;
     }
-    if (const auto* d = whole_net_driver(*s)) {
-      if (driver_reads_target(*d, target, visiting, depth + 1)) {
+    if (const auto* d = cache.driver(*s)) {
+      if (driver_reads_target(*d, target, visiting, cache, depth + 1)) {
         return true;
       }
     }
@@ -1710,6 +1752,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       }
     };
     seed_net_init_arrays(*body);
+    Driver_read_cache driver_read_cache;
     // TYPE-C SELF-REFERENCE. A packed-array net whose own whole-array driver
     // reads one of its OWN elements (`assign vec = '{vec[0] ^ a, b}`) is
     // acyclic at BIT level -- substituting the sibling lane's driver resolves
@@ -1749,7 +1792,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         continue;
       }
       absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
-      if (driver_reads_target(*drv, *sym, visiting, 0)) {
+      if (driver_reads_target(*drv, *sym, visiting, driver_read_cache, 0)) {
         wire_syms_.insert(sym);
       }
     }
@@ -1806,7 +1849,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
           continue;
         }
         absl::flat_hash_set<const slang::ast::ValueSymbol*> vvisiting;
-        if (driver_reads_target(*vdrv, ns, vvisiting, 0)) {
+        if (driver_reads_target(*vdrv, ns, vvisiting, driver_read_cache, 0)) {
           wire_syms_.insert(&ns);
         }
       }
@@ -2028,7 +2071,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         for (int64_t k = 0; k < n; ++k) {
           const int64_t pos = descending ? k : (n - 1 - k);
           const int     lsb = static_cast<int>(pos * w);
-          lanes.emplace_back(packed->get_mask_op(*Dlop::get_mask_value(lsb + w - 1, lsb))->to_pyrope());
+          lanes.emplace_back(packed->get_mask_op_opt(lsb, lsb + w)->to_pyrope());
         }
         if (std::all_of(lanes.begin(), lanes.end(), [&](const std::string& l) { return l == lanes.front(); })) {
           continue;  // uniform: the scalar `initial` attr broadcasts correctly
@@ -2920,7 +2963,7 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     // The fill refuses a signed destination and there is nothing to fill TO:
     // Dlop has no bounded-width all-unknown signed value — the sign bit is
     // itself the unknown, so an honest x sign-extends without bound and
-    // Dlop::get_bits() can only bound it (at 65). Narrowing the poison to the
+    // Dlop::get_signed_bits() can only bound it (at 65). Narrowing the poison to the
     // declared width instead would make the sign bit a KNOWN 0: the net of a
     // signed local holds its SIGN-EXTENDED value (every store is fit_wrap'd,
     // every read is the plain net), so a non-negative `0ub????` pattern is the
@@ -2979,7 +3022,8 @@ bool Slang_context::whole_copied_selfref_pattern(const slang::ast::ValueSymbol& 
       }
       if (n_elems == n_fields) {  // assign_struct_whole's pattern branch will split per leaf
         absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
-        ok = driver_reads_target(*drv, sym, visiting, 0);
+        Driver_read_cache                                   cache;
+        ok = driver_reads_target(*drv, sym, visiting, cache, 0);
       }
     }
   }

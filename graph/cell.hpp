@@ -13,14 +13,6 @@
 #include "likely.hpp"
 #include "str_tools.hpp"
 
-namespace livehd {
-// Sentinel for `hhds::Port_id` returned by Ntype::get_sink_pid on an
-// unrecognised name. HHDS itself does not declare an invalid-port constant;
-// it just sizes the port_id field to Port_bits (22) bits. Anything outside
-// that range is fine to use as the "no such pin" marker.
-inline constexpr hhds::Port_id Port_invalid = (hhds::Port_id{1} << hhds::Port_bits) - 1;
-}  // namespace livehd
-
 // Ntype_op is a DENSE sequence grouped in BANDS, so the loop-first / loop-last
 // / combinational questions are contiguous RANGE tests (see Ntype below), and
 // the `Last_invalid`-sized tables in Ntype have no holes.
@@ -51,10 +43,28 @@ enum class Ntype_op : uint8_t {
   Xor,
   Ror,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
 
-  Not,       // bitwise not
-  Get_mask,  // To positive signed
-  Set_mask,  // To positive signed
-  Sext,      // Sign extend from a given bit (b) position
+  Not,  // bitwise not
+
+  // Get_mask(a, mask): the bits of `a` selected by `mask`, packed LSB-first as
+  // an UNSIGNED value (`#[..]` zero-extends; only an explicit `#sext` may be
+  // negative). Set_mask(a, mask, value) replaces them.
+  //
+  // CONTRACT on the `mask` pin -- see livehd::graph_util::mask_window:
+  //   * it is a CONSTANT. A runtime mask has never been representable (tolg
+  //     lowers a dynamic part-select to And/Or/Ror and errors on a mask pin
+  //     that is not const), and
+  //   * that constant is either the CONTIGUOUS window Dlop::get_mask_value(hi-1,
+  //     lo) with 0 <= lo < hi, or the literal -1 meaning "the whole value":
+  //     Get_mask(a, -1) is to-unsigned, Set_mask(a, -1, v) is v.
+  //
+  // A SPARSE mask (0x0f0f) is not part of the IR. Nothing produces one -- a
+  // concat lvalue `{a[3],a[0]} = x` becomes one Set_mask per operand, every
+  // `#[...]` form is a single window, and yosys hands over one SigChunk at a
+  // time -- and consumers that had to tolerate one paid for it with per-bit
+  // gather loops and with bail arms that declined real rewrites.
+  Get_mask,
+  Set_mask,
+  Sext,  // Sign extend from a given bit (b) position
 
   // n-ary bit CONCATENATION, MSB-first (Verilog `{a, b, c}`), combinational.
   //
@@ -275,7 +285,7 @@ public:
   }
 
   // Returns the hhds::Port_id for a LiveHD sink name on the given op, or
-  // livehd::Port_invalid when the name is not a valid sink for this op.
+  // hhds::Port_invalid when the name is not a valid sink for this op.
   // The per-op first-char table is the fast path; same-op sink names that
   // share a leading char (e.g. Flop posclk/pipe_min/pipe_max, all 'p')
   // resolve through that cell type's name2pid map — the
@@ -299,7 +309,7 @@ public:
     }
 
     auto pid = sink_name2pid[str.front()][static_cast<std::size_t>(op)];
-    if (pid != livehd::Port_invalid && sink_pid2name[pid][static_cast<std::size_t>(op)] == str) {
+    if (pid != hhds::Port_invalid && sink_pid2name[pid][static_cast<std::size_t>(op)] == str) {
       return pid;
     }
     // Slow path: first-char miss or a same-first-char sibling pin.
@@ -308,7 +318,7 @@ public:
     if (it != names.end()) {
       return it->second;
     }
-    return livehd::Port_invalid;
+    return hhds::Port_invalid;
   }
 
   static inline std::string get_sink_name(Ntype_op op, hhds::Port_id pid) {

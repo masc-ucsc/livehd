@@ -307,6 +307,18 @@ protected:
   // Declared facts read from the BINDING (the runner bake writes
   // mode/type_name/decl ranges at the declare node, before any store):
   upass::Mode decl_mode_of(std::string_view var) {
+    // Detuple can declare a wire leaf without declaring its tuple root. Such
+    // a field has no symbol-table binding or pending facts to consult. Keep
+    // its driver even when it is constant: a preceding read still names the
+    // wire, and dropping the store leaves generated Pyrope undriven.
+    if (declared_wire_fields_.contains(var)) {
+      return upass::Mode::wire_kind;
+    }
+    // Untyped dotted mut leaves can lose their root binding too. Their
+    // constant defaults must survive for later conditional partial writes.
+    if (declared_mut_fields_.contains(var)) {
+      return upass::Mode::mut_kind;
+    }
     const auto b = st().get_bundle(var);
     const auto m = b ? b->get_mode() : upass::Mode::unknown;
     if (m != upass::Mode::unknown || bundle_key::is_single_level(var)) {
@@ -371,6 +383,8 @@ protected:
   // never in st().field_touched is declared but never set and never used.
   // Cleared at each file-scope pop (per-unit state).
   absl::flat_hash_set<std::string> declared_wire_fields_;
+  // Storage facts for untyped mutable leaves with no declared tuple root.
+  absl::flat_hash_set<std::string> declared_mut_fields_;
 
   // Record an explicit non-nil field store into st().field_touched (the
   // unset-unused-field warning's "was set" evidence). See the .cpp.

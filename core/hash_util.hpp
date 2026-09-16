@@ -5,7 +5,16 @@
 #include <cstdint>
 #include <string_view>
 
+// The ORDER-INDEPENDENT combiners live in hhds (hhds/hash_mix.hpp) because the
+// rule they encode is about graph shape; they are re-exported here so a
+// non-graph multiset key (an option set, a file list, an SMT assertion set) can
+// reach them without pulling in the graph header.
+#include "hhds/hash_mix.hpp"
+
 namespace livehd::hash_util {
+
+using hhds::Commutative_combiner;
+using hhds::commutative_combine;
 
 // Canonical 64-bit FNV-1a parameters. Every digest built on these is an
 // internal cache key or uniquifier, so a parameter change only costs a

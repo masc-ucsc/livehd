@@ -108,7 +108,7 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   auto dst = gu::create_typed_node(*g, Ntype_op::Or).create_driver_pin(0);
 
   src.attr(la::bits).set(int32_t{13});
-  src.attr(la::pin_signed).set(la::pin_signed_t::value_type{});
+  src.attr(la::pin_signed).set();
   src.attr(la::pin_delay).set(float{2.5});
   src.attr(la::match).set(uint32_t{42});
   src.attr(la::pin_name).set(std::string{"wire_x"});

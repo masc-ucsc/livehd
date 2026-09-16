@@ -247,6 +247,11 @@ public:
   [[nodiscard]] const std::vector<Value_use>&           value_uses() const noexcept { return value_uses_; }
   [[nodiscard]] const std::vector<Boundary_slot>&       boundary_slots() const noexcept { return boundary_slots_; }
   [[nodiscard]] const std::vector<Color>&               colors() const noexcept { return colors_; }
+  // Color indices in EXECUTION ORDER. `Color::execution_order` is already a
+  // DENSE rank (assign_color_order stamps 0..N-1), so this is an O(n)
+  // placement, not a sort -- and it is computed once instead of at each of the
+  // emitter's five "walk the colors in order" sites.
+  [[nodiscard]] const std::vector<size_t>&              colors_in_execution_order() const;
   [[nodiscard]] const std::vector<Color_dependency>&    color_dependencies() const noexcept { return color_dependencies_; }
   [[nodiscard]] const std::vector<Kernel_class>&        kernel_classes() const noexcept { return kernel_classes_; }
   // Per color, version-site indices in the canonical rank order used by its
@@ -276,6 +281,9 @@ private:
   // across return-value moves and later lazy edge resolution.
   std::shared_ptr<Policy> outer_policy_;
   std::shared_ptr<Policy> discovery_policy_;
+
+  // Cache for colors_in_execution_order(); built on first use.
+  mutable std::vector<size_t>        colors_in_execution_order_;
 
   std::vector<hhds::Occurrence_node> outer_nodes_;
   std::vector<Site>                  sites_;

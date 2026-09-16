@@ -704,9 +704,12 @@ TEST(LecState, CpropMuxSharingPreservesTransition) {
   }
 }
 
-TEST(CombEquiv, SparseMaskInsertionPreservesAndClearsPositionalUnknowns) {
+// Positional X-plane insertion: each Set_mask writes ONE window (graph/cell.hpp),
+// so the unknown bits it covers become known and the ones outside it stay
+// unknown -- and a window that is not [0, W) is what makes that positional.
+TEST(CombEquiv, WindowInsertionPreservesAndClearsPositionalUnknowns) {
   hhds::GraphLibrary lib;
-  auto               io = lib.create_io("sparse_mask");
+  auto               io = lib.create_io("window_mask");
   io->add_output("partial", 0);
   io->add_output("complete", 1);
   io->add_output("negative", 2);
@@ -724,9 +727,13 @@ TEST(CombEquiv, SparseMaskInsertionPreservesAndClearsPositionalUnknowns) {
     graph_util::set_ubits(out, 8);
     return out;
   };
-  auto partial  = insert(graph_util::create_const(*g, *Dlop::from_binary("????????", true)), 0xcc, "10?1");
-  auto complete = insert(partial, 0x3b, "10101");
-  auto negative = insert(graph_util::create_const(*g, *Dlop::from_binary("????????", true)), -5, "1011011");
+  const auto all_unknown = [&] { return graph_util::create_const(*g, *Dlop::from_binary("????????", true)); };
+  // bits [2,6) <- 1,?,0,1 (LSB-first), so bits 0,1,6,7 and bit 3 stay unknown.
+  auto partial = insert(all_unknown(), 0x3c, "10?1");
+  // Three more windows cover every remaining unknown bit, bit 3 included.
+  auto complete = insert(insert(insert(partial, 0x03, "01"), 0xc0, "10"), 0x08, "1");
+  // The -1 spelling is "replace the whole value": nothing of the base survives.
+  auto negative = insert(all_unknown(), -1, "1011011");
   partial.connect_sink(g->get_output_pin("partial"));
   complete.connect_sink(g->get_output_pin("complete"));
   negative.connect_sink(g->get_output_pin("negative"));
@@ -738,10 +745,10 @@ TEST(CombEquiv, SparseMaskInsertionPreservesAndClearsPositionalUnknowns) {
   ASSERT_TRUE(encoded.ok) << encoded.error;
   const auto& p = encoded.outputs.at("partial");
   const auto& c = encoded.outputs.at("complete");
-  EXPECT_EQ(solver.simplify(p.x_mask), tm.mkBitVector(8, 0x3b));
+  EXPECT_EQ(solver.simplify(p.x_mask), tm.mkBitVector(8, 0xcb));  // bits 0,1,3,6,7
   EXPECT_EQ(solver.simplify(c.x_mask), tm.mkBitVector(8, 0));
   EXPECT_EQ(solver.simplify(c.term), tm.mkBitVector(8, 0xad));
   const auto& n = encoded.outputs.at("negative");
-  EXPECT_EQ(solver.simplify(n.x_mask), tm.mkBitVector(8, 4));
-  EXPECT_EQ(solver.simplify(n.term), tm.mkBitVector(8, 0xb3));
+  EXPECT_EQ(solver.simplify(n.x_mask), tm.mkBitVector(8, 0));
+  EXPECT_EQ(solver.simplify(n.term), tm.mkBitVector(8, 0x5b));
 }

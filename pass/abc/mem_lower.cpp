@@ -123,7 +123,7 @@ struct Builder {
     }
     auto n = mk(Ntype_op::Get_mask);
     gu::setup_sink_by_name(n, "a").connect_driver(p);
-    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, *Dlop::get_mask_value((l + 1) * w - 1, l * w)));
+    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, gu::mask_window_const(l * w, (l + 1) * w)));
     return dw(n, w);
   }
   // Fit an arbitrary driver to an unsigned w-bit value (truncate / zero-extend),
@@ -135,7 +135,7 @@ struct Builder {
     }
     auto n = mk(Ntype_op::Get_mask);
     gu::setup_sink_by_name(n, "a").connect_driver(p);
-    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, *Dlop::get_mask_value(w - 1, 0)));
+    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, gu::mask_window_const(0, w)));
     return dw(n, w);
   }
   // Pack equal-width lanes (LSB first, each `w` bits) into one unsigned

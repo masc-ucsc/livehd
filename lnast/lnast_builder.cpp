@@ -164,7 +164,7 @@ std::optional<int> Lnast_builder::unsigned_bits(std::string_view name) const {
   // (`0ub1?`) is not narrowable by magnitude.
   const auto* v = literal_value(name);
   if (v != nullptr && v->is_integer() && !v->has_unknowns() && !v->is_negative()) {
-    return v->get_bits() > 0 ? v->get_bits() - 1 : 0;  // get_bits() counts the sign slot
+    return v->get_payload_bits();
   }
   return std::nullopt;
 }
@@ -514,12 +514,10 @@ std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::
   add_value_child(idx, bitmask);
 
   // get_mask packs the selected bits LSB-first and zero-extends, so the result
-  // is a non-negative popcount(mask)-wide integer. NOT recorded for a one-bit
-  // mask: that fold returns the signed -1/0 boolean (see Dlop::get_mask_op),
-  // which has no unsigned window.
+  // is a non-negative popcount(mask)-wide integer -- a one-bit mask included.
   if (const auto* m = literal_value(bitmask); m != nullptr && m->is_integer() && !m->has_unknowns() && !m->is_negative()) {
     const int w = m->popcount();
-    if (w >= 2) {
+    if (w >= 1) {
       note_unsigned_bits(res_var, w);
     }
   }

@@ -53,7 +53,6 @@ private:
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map_;   // child node -> parent clone
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   pin_cache_;  // child driver -> parent driver
-  absl::flat_hash_set<hhds::Pin_class>                    resolving_;  // feed-through cycle guard
   absl::flat_hash_map<std::string, uint32_t>              in_name2pid_;
   absl::flat_hash_map<uint32_t, std::string>              out_pid2name_;
   bool                                                    failed_ = false;
@@ -217,34 +216,68 @@ hhds::Pin_class Sub_inliner::driver_feeding_inst_port(uint32_t pid) {
 // out to whatever the parent wired into the instance port; anything else is the
 // clone's own driver.
 hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
-  if (auto it = pin_cache_.find(d); it != pin_cache_.end()) {
-    return it->second;
-  }
-  if (!resolving_.insert(d).second) {
-    livehd::diag::err(from_pass_, "inline-cycle", "unsupported")
-        .msg("inline: combinational feed-through cycle through instance '{}' at '{}{}'",
-             default_instance_name(inst_),
-             prefix_,
-             wire_name(d))
-        .fatal();
-    failed_ = true;
-    return {};
-  }
-
-  hhds::Pin_class res;
-  auto            dn = d.get_master_node();
-  if (is_graph_input_pin(d)) {
-    if (auto pit = in_name2pid_.find(std::string{pin_name_of(d)}); pit != in_name2pid_.end()) {
-      res = driver_feeding_inst_port(pit->second);
+  // Inlining a neighboring pass-through can turn a pin-level acyclic path
+  // into a self-edge on this instance. Follow those IO aliases before deleting
+  // the instance; retaining one of its own output pins would disconnect the
+  // reader when del_node() removes that pin. This walk is per pin, so an
+  // apparent cycle between independent lanes is resolved without recursion.
+  std::vector<hhds::Pin_class>         path;
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  hhds::Pin_class                      cur = d;
+  hhds::Pin_class                      res;
+  while (!cur.is_invalid()) {
+    if (auto it = pin_cache_.find(cur); it != pin_cache_.end()) {
+      res = it->second;
+      break;
     }
-  } else if (auto it = node_map_.find(dn); it != node_map_.end()) {
-    res = it->second.create_driver_pin(d.get_port_id());
-    carry_driver_attrs(d, res);
+    if (!seen.insert(cur).second) {
+      livehd::diag::err(from_pass_, "inline-cycle", "unsupported")
+          .msg("inline: combinational feed-through cycle through instance '{}' at '{}{}'",
+               default_instance_name(inst_),
+               prefix_,
+               wire_name(cur))
+          .fatal();
+      failed_ = true;
+      return {};
+    }
+    path.push_back(cur);
+    if (cur.is_const()) {
+      res = create_const(*parent_, const_of(cur));
+      break;
+    }
+    if (!is_graph_input_pin(cur)) {
+      if (auto it = node_map_.find(cur.get_master_node()); it != node_map_.end()) {
+        res = it->second.create_driver_pin(cur.get_port_id());
+        carry_driver_attrs(cur, res);
+      }
+      break;
+    }
+    const auto pit = in_name2pid_.find(std::string{pin_name_of(cur)});
+    if (pit == in_name2pid_.end()) {
+      break;
+    }
+    auto parent_driver = driver_feeding_inst_port(pit->second);
+    if (parent_driver.is_invalid() || parent_driver.is_const() || parent_driver.get_master_node() != inst_) {
+      res = parent_driver;
+      break;
+    }
+    const auto oit = out_pid2name_.find(static_cast<uint32_t>(parent_driver.get_port_id()));
+    if (oit == out_pid2name_.end()) {
+      break;
+    }
+    auto output = child_->get_output_pin(oit->second);
+    cur         = {};
+    if (!output.is_invalid()) {
+      for (const auto& edge : output.inp_edges()) {
+        cur = edge.driver;
+        break;
+      }
+    }
   }
-
-  resolving_.erase(d);
   if (!res.is_invalid()) {
-    pin_cache_[d] = res;
+    for (const auto& pin : path) {
+      pin_cache_[pin] = res;
+    }
   }
   return res;
 }

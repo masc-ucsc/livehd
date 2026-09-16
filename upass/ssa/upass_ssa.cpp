@@ -189,13 +189,13 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
       }
     }
     ti.is_signed = !(min_v && !min_v->is_negative());  // unsigned only when min known ≥ 0
-    // bits from the bound Consts via get_bits() (signed width; drop the sign
+    // bits from the bound Consts via get_signed_bits() (signed width; drop the sign
     // bit when unsigned) — no to_i, handles >64-bit bounds.
     if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
       if (!min_v->is_negative()) {
-        ti.bits = max_v->is_known_zero() ? 0 : static_cast<int32_t>(max_v->get_bits() - 1);
+        ti.bits = static_cast<int32_t>(max_v->get_payload_bits());
       } else {
-        ti.bits = static_cast<int32_t>(std::max<int64_t>(max_v->get_bits(), min_v->get_bits()));
+        ti.bits = static_cast<int32_t>(std::max<int64_t>(max_v->get_signed_bits(), min_v->get_signed_bits()));
       }
       // Keep the EXACT declared bounds for range-precise overload dispatch (the
       // `bits` window above only approximates `int(min,max)`).
@@ -593,8 +593,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     auto alias_int_bounds = [&ti](const Dlop& max_v, const Dlop& min_v) {
       ti.kind      = Io_kind::integer;
       ti.is_signed = min_v.is_negative();
-      ti.bits      = min_v.is_negative() ? static_cast<int32_t>(std::max<int64_t>(max_v.get_bits(), min_v.get_bits()))
-                                         : (max_v.is_known_zero() ? 0 : static_cast<int32_t>(max_v.get_bits() - 1));
+      ti.bits      = min_v.is_negative() ? static_cast<int32_t>(std::max<int64_t>(max_v.get_signed_bits(), min_v.get_signed_bits()))
+                                         : (static_cast<int32_t>(max_v.get_payload_bits()));
       if (max_v.is_just_i64() && min_v.is_just_i64()) {
         ti.has_range = true;
         ti.range_min = min_v.to_just_i64();

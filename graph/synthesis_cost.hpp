@@ -39,7 +39,7 @@ template <typename Allows>
     if (wanted <= 0) {
       return false;
     }
-    for (int bit = 0; bit < static_cast<int>(mask.get_bits()) && wanted > 0; ++bit) {
+    for (int bit = 0; bit < static_cast<int>(mask.get_signed_bits()) && wanted > 0; ++bit) {
       if (mask.bit_test(bit)) {
         high = std::max(high, static_cast<uint64_t>(bit + 1));
         --wanted;
@@ -110,7 +110,7 @@ namespace shift_detail {
       const int wanted = std::max(0, real_width(consumer.create_driver_pin(0)));
       int       found  = 0;
       int       hi     = 0;
-      for (int bit = 0; bit < static_cast<int>(mask.get_bits()) && found < wanted; ++bit) {
+      for (int bit = 0; bit < static_cast<int>(mask.get_signed_bits()) && found < wanted; ++bit) {
         if (mask.bit_test(bit)) {
           hi = bit + 1;
           ++found;

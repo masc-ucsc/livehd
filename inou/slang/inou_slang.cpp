@@ -38,10 +38,14 @@ std::optional<std::string> find_ware_rtl_dir() {
     std::error_code ec;
     return fs::is_regular_file(p / "cgen_memory_1rd_1wr.v", ec);
   };
-  // A runfiles/exec root nests the workspace under `_main` (bzlmod) or `livehd`
-  // (legacy), but a plain source/exec root holds `ware/rtl` directly.
+  // A runfiles/exec root nests the workspace under its REPO directory: `_main`
+  // when livehd is the ROOT module, but `livehd+` (bzlmod canonical name) or
+  // `livehd` when livehd is a DEPENDENCY -- which is how lhdsuite/lhdtrack
+  // consume it, and the layout this used to miss silently. A plain source/exec
+  // root holds `ware/rtl` directly. Same probe list as inou.yosys's bundled
+  // script resolver and pass.abc's memory_rtl_dir, for the same reason.
   auto under = [&](const fs::path& base) -> std::optional<std::string> {
-    for (const char* ws : {"_main", "livehd"}) {
+    for (const char* ws : {"livehd+", "_main", "livehd"}) {
       if (fs::path cand = base / ws / "ware" / "rtl"; is_ware_rtl(cand)) {
         return cand.string();
       }

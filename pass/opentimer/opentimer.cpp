@@ -1174,7 +1174,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           const auto& mask_const = const_of(mask_dpin);
           const auto  a_bits     = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
-          seed_operand(value_dpin, static_cast<int32_t>(mask_const.get_bits()));
+          seed_operand(value_dpin, static_cast<int32_t>(mask_const.get_signed_bits()));
           pin_tracker.add_set_mask(wname, trk_id(a_dpin), a_bits, mask_const, trk_id(value_dpin));
         } else if (op == Ntype_op::Get_mask) {
           auto a_dpin    = hier_driver_of(node, "a");

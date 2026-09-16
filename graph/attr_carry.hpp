@@ -50,11 +50,16 @@ namespace livehd::graph_util {
 
 // Copy ONE attribute, if present. `value_type` construction covers the string
 // case (the store hands back a view, set() wants an owning string) without a
-// per-tag special case.
+// per-tag special case; a PRESENCE-ONLY (hhds::flag) tag has no value to move,
+// so carrying it is just re-setting the bit.
 template <class Tag, class Src, class Dst>
 inline void carry_attr(const Src& from, const Dst& to) {
   if (auto a = from.attr(Tag{}); a.has()) {
-    to.attr(Tag{}).set(typename Tag::value_type{a.get()});
+    if constexpr (hhds::attr_is_flag<Tag>()) {
+      to.attr(Tag{}).set();
+    } else {
+      to.attr(Tag{}).set(typename Tag::value_type{a.get()});
+    }
   }
 }
 

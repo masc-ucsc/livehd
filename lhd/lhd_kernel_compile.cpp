@@ -1267,6 +1267,36 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     for (const auto& ln : var.lnasts) {
       pristine.emplace(std::string(ln->get_top_module_name()), ln->tree_ptr()->clone());
     }
+    // file unit -> the file units that IMPORT it, built BEFORE the first round
+    // while every body is still pristine (a walked body has had its import
+    // statements consumed, so collecting this later would miss edges).
+    std::map<std::string, std::set<std::string>> importers;
+    {
+      std::set<std::string> file_units;
+      for (const auto& [pname, _] : pristine) {
+        file_units.insert(pname);
+      }
+      for (const auto& ln : var.lnasts) {
+        const std::string me{ln->get_top_module_name()};
+        if (file_units.count(me) == 0) {
+          continue;  // a derived (`file.fn`) tree, not a file unit
+        }
+        for (const auto& text : collect_imports(ln)) {
+          // An import names a unit (`"pkg"`) or one of its entries
+          // (`"leaf.f"`): the file unit is the longest known prefix.
+          std::string target;
+          if (file_units.count(text) != 0) {
+            target = text;
+          } else if (const auto dot = text.rfind('.');
+                     dot != std::string::npos && file_units.count(text.substr(0, dot)) != 0) {
+            target = text.substr(0, dot);
+          }
+          if (!target.empty() && target != me) {
+            importers[target].insert(me);
+          }
+        }
+      }
+    }
     std::map<std::string, std::set<std::string>> prev_blocked;
     while (true) {
       run_step("pass.upass", var, up, opts, res);
@@ -1321,9 +1351,40 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
         throw classify_engine_failure("import resolution made no progress");
       }
       prev_blocked = std::move(blocked);
-      // Whole-file retry: restore each blocked file's pristine body and drop
-      // its round-derived trees so re-extraction doesn't duplicate units.
+      // The retry set is the blocked files PLUS everything that transitively
+      // imports one. A unit that INLINED a `comb` from a blocked file walked
+      // to completion, but the body it spliced in carries that file's own
+      // unresolved names: a spliced body's `pkg.K` is renamed `inlN_pkg.K` and
+      // resolved against the CALLER's frame, so if `pkg` had not published yet
+      // when the splice happened, the caller ends up holding a reference no
+      // later round revisits -- it is frozen as "final" just below. The symptom
+      // is a tolg `field/index read of 'inlN_<pkg>' could not be resolved`,
+      // reached "via" a call site in a unit that itself looks perfectly
+      // resolved (cva6: every `comb` importing `riscv`, which is deferred
+      // because riscv.prp itself imports cva6_config_pkg).
+      // `prev_blocked` remains the PROGRESS key, so termination is unchanged.
+      std::set<std::string>    retry;
+      std::vector<std::string> work;
       for (const auto& [file, _] : prev_blocked) {
+        retry.insert(file);
+        work.push_back(file);
+      }
+      while (!work.empty()) {
+        const auto cur = std::move(work.back());
+        work.pop_back();
+        auto it = importers.find(cur);
+        if (it == importers.end()) {
+          continue;
+        }
+        for (const auto& importer : it->second) {
+          if (retry.insert(importer).second) {
+            work.push_back(importer);
+          }
+        }
+      }
+      // Whole-file retry: restore each retried file's pristine body and drop
+      // its round-derived trees so re-extraction doesn't duplicate units.
+      for (const auto& file : retry) {
         auto pit = pristine.find(file);
         if (pit == pristine.end()) {
           continue;
@@ -1351,7 +1412,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       // blocked files were just restored to their pristine bodies, so they are
       // NOT frozen and re-elaborate from scratch next round.
       for (const auto& ln : var.lnasts) {
-        if (!prev_blocked.contains(std::string(ln->get_top_module_name()))) {
+        if (!retry.contains(std::string(ln->get_top_module_name()))) {
           ln->set_upass_converged(true);
         }
       }
@@ -1413,15 +1474,39 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       // unambiguous candidate. Keying on names.size()==1 instead dropped the top
       // from the emit -- silently, exit 0 -- for the ordinary shape of a generic
       // `pub mod` beside a private helper, or beside any import.
+      std::vector<std::string> candidates;
       for (const auto& ln : var.lnasts) {
         if (!ln->is_template() || !fully_defaulted(ln) || !is_pub_entity(ln->get_top_module_name())) {
           continue;
         }
-        if (!selected.empty()) {
-          selected.clear();  // ambiguous -- decline rather than guess
-          break;
+        candidates.emplace_back(ln->get_top_module_name());
+      }
+      if (candidates.size() == 1) {
+        selected = candidates.front();
+      } else if (candidates.size() > 1) {
+        // Several qualify: a design's own generic IMPORTS qualify exactly as
+        // hard as the design (`pub mod add_node<SW=10>` pulled in by a `pub mod
+        // matched_filter<SIZE=..>`), so declining outright dropped the top of
+        // every such tree -- silently, exit 0, only the non-generic leaves
+        // emitted. The user named the design's FILE on the command line and
+        // never named the file an import reached, so that is the tie-break.
+        // Only a tie that is STILL ambiguous after it declines.
+        absl::flat_hash_set<std::string> named;
+        for (const auto& f : opts.files) {
+          named.insert(std::filesystem::path(f).stem().string());
         }
-        selected = ln->get_top_module_name();
+        for (const auto& cand : candidates) {
+          const auto dot  = cand.rfind('.');
+          const auto file = dot == std::string::npos ? cand : cand.substr(0, dot);
+          if (named.count(file) == 0) {
+            continue;
+          }
+          if (!selected.empty()) {
+            selected.clear();  // ambiguous -- decline rather than guess
+            break;
+          }
+          selected = cand;
+        }
       }
     }
     for (const auto& ln : var.lnasts) {

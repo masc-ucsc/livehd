@@ -1,0 +1,12 @@
+/*
+:name: wire_field_const_forward
+:type: equiv
+:verilog_top: wire_field_const_forward
+:pyrope_top: wire_field_const_forward
+*/
+
+// The Verilog closes a bit-acyclic struct feedback path. Its ready field is
+// driven by one even though the read appears before that constant driver.
+pub comb wire_field_const_forward(valid:u1, bits:u5) -> (ready:u1) {
+  ready = 1
+}

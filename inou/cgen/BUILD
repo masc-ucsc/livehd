@@ -154,3 +154,15 @@ filegroup(
     srcs = ["cgen_verilog.cpp", "cgen_verilog.hpp", "inou_cgen.cpp"],
     visibility = ["//visibility:public"],
 )
+
+cc_test(
+    name = "cgen_verilog_test",
+    srcs = ["cgen_verilog_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":inou_cgen",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)

@@ -17,10 +17,7 @@ namespace upass {
 // Dlop::get_mask_value(bits-1) calls; route them all through here so the rule
 // lives in one place.
 //
-// The n<=1 edge matters: Dlop::get_mask_value(0) and get_neg_mask_value(0) both
-// return 1 (defensive branches), which makes the naive signed reconstruction of
-// a 1-bit int(-1,0) come out as (max=1, min=1) instead of (max=0, min=-1). These
-// helpers special-case it. `bits == 0` means "unbounded / no derivation" and the
+// `bits == 0` means "unbounded / no derivation" for the SIGNED pair, and the
 // caller should treat the returned 0 as a sentinel, not a real bound.
 
 // The one integer-type width ceiling. Every spelling that can name a width --
@@ -31,33 +28,21 @@ namespace upass {
 inline constexpr int64_t kMaxIntTypeWidth = 1 << 20;
 
 inline Dlop unsigned_max_from_bits(uint32_t bits) {
-  if (bits == 0) {
-    return *Dlop::create_integer(0);
-  }
-  return *Dlop::get_mask_value(bits);  // 2^bits - 1
+  return *Dlop::get_mask_value(static_cast<int>(bits));  // 2^bits - 1 (0 bits -> 0)
 }
 
 inline Dlop unsigned_min_from_bits(uint32_t /*bits*/) { return *Dlop::create_integer(0); }
 
 inline Dlop signed_max_from_bits(uint32_t bits) {
-  if (bits <= 1) {
-    return *Dlop::create_integer(0);  // 1-bit signed max is 0 (range is {-1,0})
-  }
-  return *Dlop::get_mask_value(bits - 1);  // 2^(bits-1) - 1
+  // 2^(bits-1) - 1, so a 1-bit signed maxes at 0 (its range is {-1, 0}).
+  return *Dlop::get_mask_value(bits == 0 ? 0 : static_cast<int>(bits) - 1);
 }
 
 inline Dlop signed_min_from_bits(uint32_t bits) {
   if (bits == 0) {
     return *Dlop::create_integer(0);  // sentinel: unbounded
   }
-  if (bits == 1) {
-    return *Dlop::create_integer(-1);  // 1-bit signed min is -1
-  }
-  if (bits == 2) {
-    return *Dlop::create_integer(-2);  // 2-bit signed min is -2: get_neg_mask_value(1)
-                                       // hits the same wart as get_neg_mask_value(0) and returns +1
-  }
-  return *Dlop::get_neg_mask_value(bits - 1);  // -2^(bits-1)
+  return *Dlop::get_neg_mask_value(static_cast<int>(bits) - 1);  // -2^(bits-1)
 }
 
 // Convenience: pick the right max/min pair by signedness.

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "slang_location.hpp"
 #include "absl/container/flat_hash_set.h"
 
 // clang-format off
@@ -881,9 +882,7 @@ private:
   static Tinfo       flat_or_tinfo(const slang::ast::Type& t);
   void               emit_prim_type_int(const Lnast_nid& parent, int bits, bool is_signed);
   // Pyrope literals for the max/min value of a `bits`-wide integer of the given
-  // sign. Works around Dlop::get_{,neg_}mask_value's narrow-arg wart (both
-  // return 1 for arg <= 1): a 1-bit signed is {0,-1} and a 2-bit signed is
-  // {1,-2}, not the (1,1) the naive get_*_mask_value(bits-1) calls produce.
+  // sign: 2^(bits-1)-1 / -2^(bits-1) signed, 2^bits-1 / 0 unsigned.
   std::string        int_max_str(int bits, bool is_signed) const;
   std::string        int_min_str(int bits, bool is_signed) const;
   // The single conversion boundary: adjust an integer-semantics value from
@@ -949,6 +948,14 @@ private:
 
   // ── provenance + diagnostics (all through the slang_loc seam) ─────────────
   hhds::SourceId mint_loc(slang::SourceRange range);
+  // Files already ingested by mint_loc in THIS read. Lives on the context (one
+  // per compilation) rather than on a locator, because the reader builds one
+  // Lnast -- and so one Source_locator -- per module: without a shared cache
+  // every module re-copies the whole source buffer. The cached shared_ptrs are
+  // what keep the bytes alive, so the Lnasts that outlive this context (they
+  // are handed to the caller by pick_lnast) stay valid; nothing points BACK at
+  // the context, which is why this is a cache and not a Source_locator base.
+  livehd::slang_loc::Ingest_cache src_ingest_;
   hhds::SourceId mint_loc(slang::SourceLocation loc) { return mint_loc(slang::SourceRange(loc, loc)); }
   void           set_pending_loc(slang::SourceRange range);
   void           set_pending_loc(slang::SourceLocation loc) { set_pending_loc(slang::SourceRange(loc, loc)); }

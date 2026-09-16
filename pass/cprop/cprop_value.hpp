@@ -25,7 +25,7 @@ inline int unsigned_width_impl(const hhds::Pin_class& pin, int depth, absl::flat
     if (value.has_unknowns()) {
       // A mixed constant with a known zero sign still has a finite unsigned
       // envelope. Unknown-sign constants must remain unbounded.
-      const int width = value.get_bits() - 1;
+      const int width = value.get_payload_bits();
       return width >= 0 && value.sra_op(Dlop::create_integer(width))->is_known_zero() ? width : -1;
     }
     return value.get_last_bit_set() + 1;

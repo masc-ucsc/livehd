@@ -48,7 +48,7 @@ bool cut(const Pin& p) {
   return op == Ntype_op::Flop || op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch;
 }
 int width(const Pin& p) {
-  return p.is_const() ? std::max(1, static_cast<int>(gu::const_of(p).get_bits())) : std::max(1, gu::bits_of(p));
+  return p.is_const() ? std::max(1, static_cast<int>(gu::const_of(p).get_signed_bits())) : std::max(1, gu::bits_of(p));
 }
 
 struct Arms {

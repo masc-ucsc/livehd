@@ -58,7 +58,7 @@ uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& _lm) : upa
 // ── Lnast_range ↔ bundle-Entry conversion ────────────────────────────────────
 
 std::optional<int64_t> uPass_bitwidth::const_to_i64(const Dlop& v) {
-  if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
+  if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_signed_bits() > 62) {
     return std::nullopt;
   }
   return v.to_just_i64();

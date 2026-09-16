@@ -37,7 +37,7 @@ Ntype::_init::_init() {
   // Ntype_op::Invalid (== 0).
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto& e : sink_name2pid) {
-      e[op] = livehd::Port_invalid;
+      e[op] = hhds::Port_invalid;
     }
 
     for (auto& e : sink_pid2name) {
@@ -68,7 +68,7 @@ Ntype::_init::_init() {
       // same op may share a leading char (Flop posclk/pipe_min/pipe_max all
       // start with 'p'); the later pins resolve through get_sink_pid's slow
       // path (the cell type's name2pid map) instead of this table.
-      if (sink_name2pid[pin_name[0]][op] == livehd::Port_invalid) {
+      if (sink_name2pid[pin_name[0]][op] == hhds::Port_invalid) {
         sink_name2pid[pin_name[0]][op] = pid;
       }
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
@@ -93,22 +93,22 @@ Ntype::_init::_init() {
     // (see get_sink_name_slow) but their leading char is still 'a'/'b', so the
     // pid stays 0/1 here and the get_sink_pid fast path is unaffected.
     pid = sink_name2pid['a'][op];
-    assert(pid == livehd::Port_invalid || pid == 0);
+    assert(pid == hhds::Port_invalid || pid == 0);
 
     pid = sink_name2pid['b'][op];
-    assert(pid == livehd::Port_invalid || pid == 1);
+    assert(pid == hhds::Port_invalid || pid == 1);
 
     pid = sink_name2pid['c'][op];
-    assert(pid == livehd::Port_invalid || pid == 2);
+    assert(pid == hhds::Port_invalid || pid == 2);
 
     pid = sink_name2pid['d'][op];
-    assert(pid == livehd::Port_invalid || pid == 3);
+    assert(pid == hhds::Port_invalid || pid == 3);
 
     pid = sink_name2pid['e'][op];
-    assert(pid == livehd::Port_invalid || pid == 4);
+    assert(pid == hhds::Port_invalid || pid == 4);
 
     pid = sink_name2pid['f'][op];
-    assert(pid == livehd::Port_invalid || pid == 5);
+    assert(pid == hhds::Port_invalid || pid == 5);
   }
 
   // cell_name_sv is sized Last_invalid + 1, so its TAIL slot (and slot 0) still

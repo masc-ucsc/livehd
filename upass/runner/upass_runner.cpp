@@ -1380,9 +1380,9 @@ static uint32_t array_elem_declared_bits(const Bundle& b) {
     return 0;
   }
   if (elem_min.is_negative()) {
-    return static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()));
+    return static_cast<uint32_t>(std::max<int64_t>(elem_max.get_signed_bits(), elem_min.get_signed_bits()));
   }
-  return elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1);
+  return static_cast<uint32_t>(elem_max.get_payload_bits());
 }
 
 // The total width of a DECLARED positional array spliced as ONE concat lane:
@@ -1898,7 +1898,7 @@ std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_na
 // Resolved HERE, at emission, for the same reason the concat widths above are:
 // everything downstream (tolg, the Pyrope writer, sim, LEC) reads the LITERAL,
 // and a sign-unknown literal carries no width to read — Dlop can only bound one
-// conservatively (get_bits() -> 65 for ANY sign-unknown value). Left alone, every
+// conservatively (get_signed_bits() -> 65 for ANY sign-unknown value). Left alone, every
 // net driven by an x-poison came out 65 bits wide, and a destination wider than
 // that read a known 0 above bit 64 instead of `?`.
 //
@@ -1933,12 +1933,12 @@ std::string uPass_runner::resolve_x_fill() {
     //      fills 3 bits and not 8;
     //   2. `bits` alone, which is ALL AN IO PORT CARRIES once its width passes
     //      61. upass.ssa records `has_range` only when BOTH bounds are
-    //      i64-representable (`Dlop::is_just_i64()` == `get_bits() <= 62`), and
+    //      i64-representable (`Dlop::is_just_i64()` == `get_signed_bits() <= 62`), and
     //      a u62's max needs 63 — so every wider port reaches here with a
     //      width and no range.
     //
     // Without source 2 a wide port's poison stayed the 1-bit `0sb?`, tolg sized
-    // it from `Dlop::get_bits()` (65 for ANY sign-unknown value), and the
+    // it from `Dlop::get_signed_bits()` (65 for ANY sign-unknown value), and the
     // destination read a KNOWN 1 above bit 64 — the silent 0/1 this fill exists
     // to prevent, just at a different width. Reproduced with a 128-bit undriven
     // comb output round-tripped through `--emit-dir pyrope:`: `129'sb0?…?`
@@ -1952,7 +1952,7 @@ std::string uPass_runner::resolve_x_fill() {
       envelope = *Dlop::get_mask_value(static_cast<int>(f->bits));
     }
     if (last_kid && envelope && !envelope->is_invalid()) {
-      const int w = envelope->get_bits() - 1;  // uN's max is 2^N-1; get_bits() counts the sign slot
+      const int w = envelope->get_payload_bits();  // uN's max is 2^N-1
       if (w > 0) {
         try {
           const Dlop& v = Dlop::from_pyrope_cached(txt);
@@ -2639,7 +2639,7 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
     return "bool";
   }
   const auto to_i64 = [](const Dlop& v) -> std::optional<int64_t> {
-    if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
+    if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_signed_bits() > 62) {
       return std::nullopt;
     }
     return v.to_just_i64();
@@ -2653,7 +2653,7 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
     return std::max(sb(lo), sb(hi));
   };
 
-  // Declared WIDTH from the (max, min) type Consts. get_bits() is the signed
+  // Declared WIDTH from the (max, min) type Consts. get_signed_bits() is the signed
   // width; an unsigned envelope (min >= 0) drops the sign bit. Unlike to_i64
   // this handles >62-bit types (u64/u128) whose bounds don't fit int64, so the
   // width still renders instead of collapsing to `int`.
@@ -2665,7 +2665,7 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
       return std::nullopt;
     }
     dsgn          = !dmin.is_invalid() && dmin.is_integer() && dmin.is_negative();
-    const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_bits(); };
+    const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_signed_bits(); };
     const int  b  = dsgn ? std::max(bw(dmax), bw(dmin)) : (dmax.is_known_zero() ? 0 : bw(dmax) - 1);
     return b > 0 ? std::optional<int>(b) : std::nullopt;
   }();
@@ -2803,7 +2803,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
 
   // Dlop const -> int64 (mirrors uPass_bitwidth::const_to_i64).
   const auto to_i64 = [](const Dlop& v) -> std::optional<int64_t> {
-    if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
+    if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_signed_bits() > 62) {
       return std::nullopt;
     }
     return v.to_just_i64();
@@ -2833,14 +2833,14 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   std::optional<int64_t> dhi;
   Io_kind                io_kind    = Io_kind::none;  // declared bool/string on an IO leaf
   // Derive the declared width + i64 envelope from a type's (max, min) Consts.
-  // get_bits() handles >62-bit types (u64/u128) whose bounds don't fit int64,
+  // get_signed_bits() handles >62-bit types (u64/u128) whose bounds don't fit int64,
   // so dbits is set even when to_i64 (dlo/dhi) cannot represent the bound.
   const auto             apply_decl = [&](const Dlop& dmax, const Dlop& dmin) {
     if ((dmax.is_invalid() || !dmax.is_integer()) && (dmin.is_invalid() || !dmin.is_integer())) {
       return;
     }
     dsigned       = !dmin.is_invalid() && dmin.is_integer() && dmin.is_negative();
-    const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_bits(); };
+    const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_signed_bits(); };
     const int  b  = dsigned ? std::max(bw(dmax), bw(dmin)) : (dmax.is_known_zero() ? 0 : bw(dmax) - 1);
     if (b > 0) {
       dbits = b;
@@ -3701,7 +3701,7 @@ void uPass_runner::process_bit_selection() {
     const std::optional<Dlop> v
         = value.is_const() ? std::optional<Dlop>(*Dlop::from_pyrope(value.get_name())) : try_fold_ref(value.get_name());
     if (v && v->is_integer()) {
-      bits = v->get_bits();  // scalar selections do not impose a packing layout
+      bits = v->get_signed_bits();  // scalar selections do not impose a packing layout
     }
   }
   std::optional<int64_t> selected;
@@ -4415,9 +4415,9 @@ bool uPass_runner::try_lower_typecast() {
   // so `signed(x#[0..=31])` / `signed(a + b)` work, not just declared variables.
   if (!operand_is_bool && reinterpret_W == 0 && vmax && vmin) {
     if (!vmin->is_negative()) {
-      reinterpret_W = vmax->is_known_zero() ? 0u : static_cast<uint32_t>(vmax->get_bits() - 1);
+      reinterpret_W = static_cast<uint32_t>(vmax->get_payload_bits());
     } else {
-      reinterpret_W = static_cast<uint32_t>(std::max<int64_t>(vmax->get_bits(), vmin->get_bits()));
+      reinterpret_W = static_cast<uint32_t>(std::max<int64_t>(vmax->get_signed_bits(), vmin->get_signed_bits()));
     }
   }
 
@@ -6696,10 +6696,10 @@ std::string uPass_runner::generic_cast_token(const Generic_bind& gb) {
   int        bits      = 0;
   if (gb.max && gb.max->is_integer()) {
     if (!is_signed) {
-      bits = gb.max->is_known_zero() ? 0 : static_cast<int>(gb.max->get_bits() - 1);
+      bits = static_cast<int>(gb.max->get_payload_bits());
     } else {
-      const int mb = static_cast<int>(gb.max->get_bits());
-      const int nb = (gb.min && gb.min->is_integer()) ? static_cast<int>(gb.min->get_bits()) : mb;
+      const int mb = static_cast<int>(gb.max->get_signed_bits());
+      const int nb = (gb.min && gb.min->is_integer()) ? static_cast<int>(gb.min->get_signed_bits()) : mb;
       bits         = std::max(mb, nb);
     }
   }
@@ -9296,10 +9296,10 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     int        bits      = 0;
     if (max && max->is_integer()) {
       if (!is_signed) {
-        bits = max->is_known_zero() ? 0 : static_cast<int>(max->get_bits() - 1);
+        bits = static_cast<int>(max->get_payload_bits());
       } else {
-        const int mb = static_cast<int>(max->get_bits());
-        const int nb = (min && min->is_integer()) ? static_cast<int>(min->get_bits()) : mb;
+        const int mb = static_cast<int>(max->get_signed_bits());
+        const int nb = (min && min->is_integer()) ? static_cast<int>(min->get_signed_bits()) : mb;
         bits         = std::max(mb, nb);
       }
     }
@@ -9930,7 +9930,7 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
       return false;  // kind mismatch (bool vs int vs string)
     }
     if (pe.kind == Io_kind::integer && param_val[i].is_const() && (pe.has_range || (pe.bits > 0 && pe.bits < 62))) {
-      if (auto v = Dlop::from_pyrope(param_val[i].get_name()); v && v->is_integer() && !v->has_unknowns() && v->get_bits() <= 62) {
+      if (auto v = Dlop::from_pyrope(param_val[i].get_name()); v && v->is_integer() && !v->has_unknowns() && v->get_signed_bits() <= 62) {
         const int64_t val = v->to_just_i64();
         // Prefer the EXACT declared `int(min,max)` range (so adjacent windows
         // like int(0,99) vs int(100,199) discriminate 100 correctly — a
@@ -11969,6 +11969,30 @@ bool uPass_runner::try_detuple_tuple_add() {
       return false;  // the literal itself still lowers normally (DCE'd later)
     }
   }
+  // A declaration's dotted type_specs already describe its shape. Match
+  // those labels directly, without consulting same-named local variables.
+  // This also covers a mix of scalar and nested fields in one declaration.
+  const auto& declared    = detuple_pending_decl_->fields;
+  const auto& recorded    = detuple_tuple_values_.at(tmp);
+  auto        names_field = [](const Lnast_node& label, const auto& field) {
+    return label.is_ref() && (field.name == label.get_name() || field.name.starts_with(std::string(label.get_name()) + "."));
+  };
+  if (!declared.empty() && !recorded.named && recorded.positional.size() == static_cast<std::size_t>(child_count)
+      && std::all_of(recorded.positional.begin(),
+                     recorded.positional.end(),
+                     [&](const auto& label) {
+                       return std::any_of(declared.begin(), declared.end(), [&](const auto& field) {
+                         return names_field(label, field);
+                       });
+                     })
+      && std::all_of(declared.begin(), declared.end(), [&](const auto& field) {
+           return std::any_of(recorded.positional.begin(), recorded.positional.end(), [&](const auto& label) {
+             return names_field(label, field);
+           });
+         })) {
+    detuple_pending_decl_->shape_tmp = tmp;
+    return true;
+  }
   if (!all_typed_refs || shape.empty()) {
     // 2f-nested_type — a NESTED tuple type's shape seed carries BARE refs for
     // the nested fields (`tuple_add %ctl_0, ref 'ex', ref 'wb'`), which have no
@@ -13535,9 +13559,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
           && lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
         const auto vt = lm->current_text();
         if (vt.find('?') != std::string_view::npos) {
-          if (auto v = Dlop::from_pyrope(vt); v && v->has_unknowns() && v->get_bits() > 1) {
+          if (auto v = Dlop::from_pyrope(vt); v && v->has_unknowns() && v->get_signed_bits() > 1) {
             const bool sgn  = vt.size() > 1 && vt[1] == 's';
-            const auto bits = static_cast<uint32_t>(v->get_bits() - 1);
+            const auto bits = static_cast<uint32_t>(sgn ? v->get_signed_bits() : v->get_payload_bits());
             if (bits > 0) {
               decl_max = upass::max_from_bits(bits, sgn);
               decl_min = upass::min_from_bits(bits, sgn);

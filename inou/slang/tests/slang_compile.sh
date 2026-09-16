@@ -108,7 +108,7 @@ run_one() { # <tier> <file>
         local lec_status=$?
         # UNKNOWN also covers unsupported encodings and other refusals. Only
         # accept an explicit timeout on the final verdict, never every exit 7.
-        if [ "$lec_status" -eq 7 ] && grep -Eq "^lec: .* UNKNOWN .*\(hit formal\.timeout=|^lec: .* UNKNOWN .*exceeded [0-9]+s hard wall backstop" "$wd"/check.log; then
+        if [ "$lec_status" -eq 7 ] && grep -Eq "^lec: .* UNKNOWN .*(\(hit formal\.timeout=|exceeded the [0-9]+s hard wall backstop)" "$wd"/check.log; then
           echo "PASS(${base}) tier=${tier}: LEC TIMEOUT (20-second solver budget; equivalence unproven)"
           tail -5 "$wd"/check.log
           return 0

@@ -2299,7 +2299,7 @@ private:
       return bool_val("(" + l + ").eq_op(" + r + ").is_known_true()");
     }
     if (op == "!=") {
-      return bool_val("!(" + l + ").eq_op(" + r + ").is_known_true()");  // Slop has no ne_op
+      return bool_val("(" + l + ").ne_op(" + r + ").is_known_true()");
     }
     if (op == "<") {
       return bool_val("(" + l + ").lt_op(" + r + ").is_known_true()");

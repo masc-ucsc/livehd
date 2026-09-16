@@ -7314,9 +7314,8 @@ void Prp2lnast::prelower_type_bounds(TSNode type_cast_node) {
     // sugar\" translated from `max`/`min`"), so emit that translation:
     //   unsigned: max = (1 << E) - 1,        min = 0
     //   signed:   max = (1 << (E-1)) - 1,    min = 0 - (1 << (E-1))
-    // The uniform formula reproduces the literal path's s1={-1,0} / s2={-2..1}
-    // results exactly; that path only spells them out to dodge Dlop's
-    // get_mask_value(0) wart, which this arithmetic never hits.
+    // The uniform formula reproduces the literal path's s1={-1,0} /
+    // s2={-2..1} results exactly.
     const Lnast_node one   = Lnast_node::create_const("1");
     Lnast_node       e     = expr_to_node(rv);
     Lnast_node       width = is_signed ? emit_bound_binop(Lnast_ntype::create_minus(), e, one) : e;
@@ -7418,10 +7417,9 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
   }
   auto bits_to_bounds = [&](int n, std::string& maxt, std::string& mint) {
     if (signed_base) {
-      // Narrow-width warts: get_mask_value(0) and get_neg_mask_value(0/1) return
-      // 1, so s1 would mis-range to [1,1]. s1 is {-1,0}, s2 is {-2..1}.
-      maxt = (n <= 1) ? "0" : std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
-      mint = (n == 1) ? "-1" : (n == 2) ? "-2" : std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
+      // s1 is {-1,0}, s2 is {-2..1}: 2^(n-1)-1 down to -2^(n-1).
+      maxt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
+      mint = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
     } else {
       maxt = std::string(Dlop::get_mask_value(n)->to_pyrope());
       mint = "0";
@@ -7724,7 +7722,9 @@ void Prp2lnast::emit_tuple_type_field_specs(std::string_view path, TSNode tuple_
       continue;
     }
     const std::string fname{canonical_escaped_ident(trim(get_text(fid)))};
-    if (fname.empty() || fname.find('.') != std::string::npos) {
+    // The parser supplies one identifier here. A dot can only be inside an
+    // escaped field name; retain its backticks in the qualified path.
+    if (fname.empty()) {
       continue;
     }
     const std::string fpath = std::string(path) + "." + fname;
@@ -7787,7 +7787,7 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
           if (const auto tn = target.get_name(); !tn.empty()) {
             emit_tuple_type_field_specs(tn, inner);
           }
-          auto bundle_ref = tuple_to_node(inner, false);
+          auto bundle_ref = tuple_to_node(inner, false, /*field_types_on_target=*/true);
           auto aidx       = builder.add_child(Lnast_ntype::create_store());
           lnast->add_child(aidx, target);
           lnast->add_child(aidx, bundle_ref);
@@ -7937,10 +7937,9 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
       const int  n         = *w;
       const bool is_signed = (t == "sint_type");
       if (is_signed) {
-        // s1 is {-1,0}, s2 is {-2..1}: dodge the get_mask_value(0)/
-        // get_neg_mask_value(0,1) wart that returns 1 (would give s1 = [1,1]).
-        max_txt = (n <= 1) ? "0" : std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
-        min_txt = (n == 1) ? "-1" : (n == 2) ? "-2" : std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
+        // s1 is {-1,0}, s2 is {-2..1}: 2^(n-1)-1 down to -2^(n-1).
+        max_txt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
+        min_txt = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
       } else {
         max_txt = std::string(Dlop::get_mask_value(n)->to_pyrope());
         min_txt = "0";
@@ -10400,7 +10399,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   return ref;
 }
 
-Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
+Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_types_on_target) {
   // Collected once: the `var_or_let_or_reg` case needs an i+1 lookahead and
   // generated tuple literals can be huge (per-index child fetch is a linear scan).
   std::vector<TSNode> kids;
@@ -10712,7 +10711,14 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         }
       }
       Item it;
-      it.value = expr_to_node(c);
+      if (t == "typed_field" && field_types_on_target) {
+        // emit_type_spec already stamped target.field. This shape seed only
+        // carries labels: typing the bare field here would re-type an
+        // unrelated local with the same name (NewCSR's mtopi instance).
+        it.value = identifier_to_node(child_by_field(c, "identifier"), true);
+      } else {
+        it.value = expr_to_node(c);
+      }
       items.push_back(std::move(it));
     }
   }

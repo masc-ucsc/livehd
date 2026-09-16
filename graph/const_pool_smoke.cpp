@@ -23,10 +23,19 @@ TEST(ConstPin, CanonicalizesAtMint) {
   auto  gio = lib.create_io("canon");
   auto  g   = gio->create_graph();
 
-  // Boolean literals lower to unsigned 1 / 0, including mux selectors.
-  EXPECT_EQ(gu::create_const(*g, *Dlop::create_bool(true)), gu::create_const(*g, integer(1)));
-  EXPECT_EQ(gu::create_const(*g, *Dlop::create_bool(false)), gu::create_const(*g, integer(0)));
-  EXPECT_TRUE(gu::const_of(gu::create_const(*g, *Dlop::create_bool(true))).is_integer());
+  // A Boolean is minted VERBATIM: hlop already stores it as the hardware u1
+  // (`true` = 1, `false` = 0, non-negative, one payload bit), so no consumer
+  // needs a re-spelling. It keeps its Boolean tag, which the pool key mixes,
+  // so `true` and `1` are two pins with the same bit pattern.
+  const auto t = gu::create_const(*g, *Dlop::create_bool(true));
+  EXPECT_EQ(t, gu::create_const(*g, *Dlop::create_bool(true)));
+  EXPECT_NE(t, gu::create_const(*g, integer(1)));
+  EXPECT_TRUE(gu::const_of(t).is_bool());
+  EXPECT_TRUE(gu::const_of(t).is_known_true());
+  EXPECT_FALSE(gu::const_of(t).is_negative());
+  EXPECT_EQ(gu::const_of(t).get_payload_bits(), 1);
+  EXPECT_EQ(gu::const_of(t).to_just_i64(), 1);
+  EXPECT_TRUE(gu::const_of(gu::create_const(*g, *Dlop::create_bool(false))).is_known_false());
 
   // A wide-operand fold result and a literal are ONE constant.
   auto wide_one = Dlop::from_pyrope("0x1_0000_0000_0000_0001")->and_op(integer(1));

@@ -72,7 +72,7 @@ struct Build {
     b.connect_sink(n.create_sink_pin(2));
     return output(n, width);
   }
-  static int pin_width(Pin p) { return p.is_const() ? std::max(1, gu::const_of(p).get_bits()) : std::max(1, gu::real_width(p)); }
+  static int pin_width(Pin p) { return p.is_const() ? std::max(1, gu::const_of(p).get_signed_bits()) : std::max(1, gu::real_width(p)); }
   Pin        zero_extend(Pin p, int target) {
     const int source = pin_width(p);
     if (source >= target) {
@@ -119,7 +119,7 @@ int literal(Pin p, int fallback) {
   const auto value = c.to_just_i64();
   return value >= std::numeric_limits<int>::min() && value <= std::numeric_limits<int>::max() ? static_cast<int>(value) : fallback;
 }
-int  width(Pin p) { return p.is_const() ? std::max(1, gu::const_of(p).get_bits()) : std::max(1, gu::bits_of(p)); }
+int  width(Pin p) { return p.is_const() ? std::max(1, gu::const_of(p).get_signed_bits()) : std::max(1, gu::bits_of(p)); }
 bool same(Pin a, Pin b) { return a == b || (a.is_const() && b.is_const() && gu::const_of(a).is_known_eq(gu::const_of(b))); }
 
 struct Memory_queries {
@@ -416,7 +416,7 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
         words.reserve(depth / 2);
         for (int entry = depth / 2 - 1; entry >= 0; --entry) {
           int original = ((entry >> bit) << (bit + 1)) | (static_cast<int>(*fixed) << bit) | (entry & ((1 << bit) - 1));
-          words.push_back(*old.get_mask_op(Dlop::get_mask_value((original + 1) * word - 1, original * word)));
+          words.push_back(*old.get_mask_op_opt(original * word, (original + 1) * word));
         }
         std::vector<Dlop::Concat_lane> init_lanes;
         for (const auto& value : words) {

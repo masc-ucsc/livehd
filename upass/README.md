@@ -258,8 +258,9 @@ value's size envelope and nominal identity come from the declared type (or a
 literal's implied type), never from the value itself.
 
 - **Size envelope (`bits`/`max`/`min`)** comes from the declared type:
-  `:uN`/`:sN` set width and range; `:bool` is the 1-bit signed envelope
-  (`min=-1, max=0, bits=1`); `:string` has no numeric envelope (reads `nil`).
+  `:uN`/`:sN` set width and range; `:bool` is the hardware u1 envelope
+  (`min=0, max=1, bits=1`, never signed); `:string` has no numeric envelope
+  (reads `nil`).
   When only `max`/`min` (or `range=lo..=hi`) is pinned, `bits` derives on
   demand. Unannotated → all three read `nil`; a bare `true`/`false` literal
   is auto-typed `:bool`.

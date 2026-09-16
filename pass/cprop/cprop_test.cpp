@@ -823,3 +823,35 @@ TEST(CpropMuxSharing, WidthHintsDoNotGateSharingButColorsDo) {
   }
 }
 }  // namespace
+
+// A read of bit zero cannot be resolved through a cycle whose writes affect
+// only bit one. Truncating the walk at 64 links used to rotate this read around
+// a longer ring forever in the packed-read fixed-point loop.
+TEST(CpropMasks, CyclicPackedReadDoesNotRotateAtWalkBudget) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_long_cycle");
+  auto  io     = lib.create_io("long_cycle");
+  io->add_output("q", 0);
+  io->set_bits("q", 1);
+  auto                          graph = io->create_graph();
+  std::vector<hhds::Node_class> writers;
+  for (int i = 0; i < 65; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Set_mask, 2);
+    gu::set_ubits(node.create_driver_pin(0), 2);
+    gu::setup_sink_by_name(node, "mask").connect_driver(gu::create_const(*graph, *Dlop::create_integer(2)));
+    gu::setup_sink_by_name(node, "value").connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
+    writers.push_back(node);
+  }
+  for (size_t i = 0; i < writers.size(); ++i) {
+    gu::setup_sink_by_name(writers[i], "a").connect_driver(writers[(i + 1) % writers.size()].get_driver_pin(0));
+  }
+  auto       read   = gu::create_typed_node(*graph, Ntype_op::Get_mask, 1);
+  const auto source = writers.front().get_driver_pin(0);
+  gu::setup_sink_by_name(read, "a").connect_driver(source);
+  gu::setup_sink_by_name(read, "mask").connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
+  read.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  Cprop cp;
+  cp.do_trans(graph);
+  EXPECT_FALSE(read.is_invalid());
+  EXPECT_EQ(gu::get_driver_of_sink_name(read, "a"), source);
+}

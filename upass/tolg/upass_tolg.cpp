@@ -106,9 +106,8 @@ struct Val {
     // The literal PAYLOAD width, not Dlop's signed carrier: a non-negative
     // constant (an unsigned unknown such as `0ub?` included) carries one
     // leading zero beyond its payload, and that headroom must not widen a
-    // Mux/Hotmux arm or an enclosing Concat lane. Shared with pass/cprop's
-    // lossless-carrier rule and cgen_sim's mux-arm check.
-    return livehd::graph_util::literal_payload_bits(v);
+    // Mux/Hotmux arm or an enclosing Concat lane.
+    return std::max<int32_t>(1, v.get_payload_bits());
   }
   return 0;
 }
@@ -470,7 +469,7 @@ public:
           // width (the width cgen emits for the literal) so `out:int = 300` is
           // not squeezed into a single bit.
           if (it->second.is_const()) {
-            dbits = livehd::graph_util::const_of(it->second).get_bits();
+            dbits = livehd::graph_util::const_of(it->second).get_signed_bits();
           } else {
             dbits = mw_lookup(e.name);
           }
@@ -667,7 +666,7 @@ private:
         // rules); say so here -- the constant pool refuses Nil as a value.
         c = Dlop::create_integer(0);
       }
-      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_bits()));
+      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_signed_bits()));
       return {create_const(*g_, *c), mw};
     }
     auto name = lnast_->get_name(nid);
@@ -4731,7 +4730,7 @@ private:
   }
 
   // Declared (mw, is_signed) from a declare's type child. prim_type_int(max,
-  // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_bits()-1
+  // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_signed_bits()-1
   // drops the sign bit when unsigned). prim_type_bool → 1. Unknown → (0,_).
   [[nodiscard]] std::pair<int32_t, bool> declared_width(const Lnast_nid& type_nid) {
     using N      = Lnast_ntype;
@@ -4758,17 +4757,17 @@ private:
       if (auto mn_v = Dlop::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
         min_known = true;
         min_neg   = mn_v->is_negative();
-        min_bits  = static_cast<int32_t>(mn_v->get_bits());
+        min_bits  = static_cast<int32_t>(mn_v->get_signed_bits());
       }
     }
     const bool is_signed = !(min_known && !min_neg);
     if (!is_signed) {
-      auto bits = max_v->is_known_zero() ? int32_t{1} : static_cast<int32_t>(max_v->get_bits() - 1);
+      auto bits = std::max<int32_t>(1, static_cast<int32_t>(max_v->get_payload_bits()));
       return {bits, false};
     }
     // Signed: the WIDER of the two bounds' signed widths (mirrors the ssa io
     // harvest + io_mw — a min like -100 needs more bits than a max of 3).
-    auto bits = static_cast<int32_t>(max_v->get_bits());
+    auto bits = static_cast<int32_t>(max_v->get_signed_bits());
     if (min_known) {
       bits = std::max(bits, min_bits);
     }
@@ -6282,7 +6281,20 @@ private:
   // parses correctly is kept as-is.
   [[nodiscard]] spool_ptr<Dlop> mask_from_operand(const Lnast_nid& mask_op) {
     if (Lnast_ntype::is_const(lnast_->get_type(mask_op))) {
-      return Dlop::from_pyrope(lnast_->get_name(mask_op));
+      auto value = Dlop::from_pyrope(lnast_->get_name(mask_op));
+      // graph/cell.hpp: a Get_mask/Set_mask mask is ONE contiguous window, or
+      // the -1 "whole value" spelling. This is the only producer that passes a
+      // literal through unchecked, so a sparse mask has to be refused HERE --
+      // every consumer downstream reads a window and would otherwise take the
+      // bounding one, selecting bits the source never asked for.
+      if (!value || !livehd::graph_util::is_legal_mask(*value)) {
+        error_at(mask_op,
+                 {"mask-not-contiguous", "unsupported"},
+                 "upass.tolg: get_mask/set_mask mask '{}' is not a contiguous bit range "
+                 "(a sparse mask has no lowering; write one mask per range)",
+                 lnast_->get_name(mask_op));
+      }
+      return value;
     }
     auto it = range_map_.find(std::string{lnast_->get_name(mask_op)});
     if (it != range_map_.end()) {
@@ -6312,8 +6324,7 @@ private:
 
   // Highest set bit + 1 of a (non-negative) mask = the set_mask reach.
   static int32_t mask_high_bit(const Dlop& m) {
-    int gb = m.is_positive() ? m.get_bits() : 0;  // get_bits() counts the sign bit too
-    return gb > 0 ? static_cast<int32_t>(gb - 1) : int32_t{0};
+    return m.is_positive() ? static_cast<int32_t>(m.get_payload_bits()) : int32_t{0};
   }
 
   // The base (`value`) operand of a set_mask. Normally `leaf(val)`, but a
