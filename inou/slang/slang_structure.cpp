@@ -5371,7 +5371,35 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     }
   };
   if (stmt.kind != StatementKind::Timed && assertion_only(stmt)) {
-    emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "assertion-only process ignored (synthesis semantics)");
+    // NOT "ignore the block": walk it and lower every assertion we can. A
+    // dropped `assume`/`restrict` leaves the environment unconstrained, so a
+    // TRUE property comes back with a counterexample that cannot occur; a
+    // dropped `assert property` proves nothing while exiting 0. Whatever cannot
+    // be lowered is refused loudly below.
+    std::function<void(const slang::ast::Statement&)> lower_assertions = [&](const slang::ast::Statement& s) {
+      switch (s.kind) {
+        case StatementKind::Empty: return;
+        case StatementKind::ImmediateAssertion:
+          lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>());
+          return;
+        case StatementKind::ConcurrentAssertion:
+          if (!lower_concurrent_assertion(s.as<slang::ast::ConcurrentAssertionStatement>())) {
+            emit_unsupported(s.sourceRange,
+                             "unsupported-property",
+                             "a temporal SVA property (|->, |=>, ##N, [*n], sequences) is not supported by "
+                             "--reader slang yet");
+          }
+          return;
+        case StatementKind::Block: lower_assertions(s.as<slang::ast::BlockStatement>().body); return;
+        case StatementKind::List:
+          for (const auto* c : s.as<slang::ast::StatementList>().list) {
+            lower_assertions(*c);
+          }
+          return;
+        default: return;
+      }
+    };
+    lower_assertions(stmt);
     return;
   }
   if (stmt.kind != StatementKind::Timed) {

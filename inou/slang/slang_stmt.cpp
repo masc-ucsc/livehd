@@ -203,7 +203,16 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
     }
     case StatementKind::ImmediateAssertion: lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>()); return;
     case StatementKind::ConcurrentAssertion:
-      emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "concurrent assertion ignored (synthesis semantics)");
+      // Same contract as the module-level form (slang_structure.cpp): lower the
+      // per-cycle boolean case, refuse the temporal one LOUDLY. Never drop it —
+      // a dropped assume/restrict invents a counterexample, a dropped assert
+      // proves nothing at exit 0.
+      if (!lower_concurrent_assertion(stmt.as<slang::ast::ConcurrentAssertionStatement>())) {
+        emit_unsupported(stmt.sourceRange,
+                         "unsupported-property",
+                         "a temporal SVA property (|->, |=>, ##N, [*n], sequences) is not supported by "
+                         "--reader slang yet");
+      }
       return;
     case StatementKind::Return: {
       // Inside an inlined function body, `return expr` assigns the result var.
@@ -337,6 +346,84 @@ void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAsserti
     builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
   }
   clear_pending_loc();
+}
+
+// A CONCURRENT assertion — `assert/assume/restrict/cover property (...)`, either
+// at module level or inside a process. slang models the module-level form as an
+// implicit `always` block whose body is this statement.
+//
+// These used to be dropped with a warning and nothing else, and for `assume` /
+// `restrict` that is not merely incomplete, it is ACTIVELY MISLEADING: the
+// hypothesis vanishes, the environment stays unconstrained, and a property that
+// is true under the restriction gets a COUNTEREXAMPLE that cannot happen. A
+// user then debugs a trace the design can never produce. `assert property` had
+// the mirror-image problem the immediate form used to have — the run proves
+// nothing and exits 0.
+//
+// What is lowered here is the per-cycle BOOLEAN case: a property that unwraps,
+// through its clocking event and an optional `disable iff`, to a plain
+// expression with no sequence repetition. That is exactly an immediate
+// assert/assume evaluated every clock, so it reuses that path. `disable iff (d)`
+// becomes an implication — the claim is only made when d is low.
+//
+// Anything with real temporal structure (`|->`, `|=>`, `##N`, `[*n]`,
+// sequences) returns false so the caller REFUSES it. The engine does have the
+// machinery for those (past/rose/eventually/always over a bounded window, see
+// lhd_kernel_formal.cpp), but it is not wired to SVA property operators yet,
+// and a silent drop is the one outcome that must not happen.
+bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAssertionStatement& stmt) {
+  using slang::ast::AssertionExprKind;
+  using slang::ast::AssertionKind;
+
+  if (stmt.assertionKind == AssertionKind::CoverProperty || stmt.assertionKind == AssertionKind::CoverSequence) {
+    emit_warning(stmt.sourceRange, "cover-ignored", "unsupported", "concurrent cover is a count, not an obligation — ignored");
+    return true;
+  }
+
+  // Unwrap the clocking event and any `disable iff`, collecting the disable
+  // conditions on the way down.
+  const slang::ast::AssertionExpr*              spec = &stmt.propertySpec;
+  std::vector<const slang::ast::Expression*>    disables;
+  for (bool peeled = true; peeled;) {
+    peeled = false;
+    if (spec->kind == AssertionExprKind::Clocking) {
+      spec   = &spec->as<slang::ast::ClockingAssertionExpr>().expr;
+      peeled = true;
+    } else if (spec->kind == AssertionExprKind::DisableIff) {
+      const auto& d = spec->as<slang::ast::DisableIffAssertionExpr>();
+      disables.push_back(&d.condition);
+      spec   = &d.expr;
+      peeled = true;
+    }
+  }
+  if (spec->kind != AssertionExprKind::Simple) {
+    return false;  // sequence / implication / delay — caller refuses
+  }
+  const auto& simple = spec->as<slang::ast::SimpleAssertionExpr>();
+  if (simple.repetition.has_value()) {
+    return false;  // `[*n]` is temporal
+  }
+
+  set_pending_loc(stmt.sourceRange);
+  auto cond = booleanize(lower_rvalue(simple.expr));
+  // `disable iff (d)` : the obligation is `!d implies cond`, spelled as the
+  // disjunction so it reuses the ordinary boolean path.
+  for (const auto* d : disables) {
+    auto dis    = booleanize(lower_rvalue(*d));
+    // Both results are BOOLs and must be registered as such: pyrope keeps bool
+    // and int apart, and an unmarked temp would be re-booleanized as an integer.
+    auto not_d = mark_bool(builder_.create_log_not_stmts(dis));
+    cond       = mark_bool(builder_.create_log_or_stmts(not_d, cond));
+  }
+  auto idx = builder_.add_child(Lnast_ntype::create_cassert());
+  builder_.add_value_child_pub(idx, cond);
+  if (stmt.assertionKind == AssertionKind::Assume || stmt.assertionKind == AssertionKind::Restrict) {
+    // `restrict` is an assume that only constrains formal (simulation ignores
+    // it). Both are hypotheses here, so both carry the assume sentinel.
+    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
+  }
+  clear_pending_loc();
+  return true;
 }
 
 // Every `&&&` condition folds to a known constant with no x/z: true when they all

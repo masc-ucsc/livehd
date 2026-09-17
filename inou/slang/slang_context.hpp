@@ -645,6 +645,10 @@ private:
   // as the reader used to, makes a design whose properties are all immediate
   // asserts verify as "no obligations found" — proving nothing at exit 0.
   void lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt);
+  // A CONCURRENT `assert/assume/restrict/cover property(...)`. Returns false
+  // when the property carries real temporal structure this reader cannot prove;
+  // the caller then refuses LOUDLY rather than dropping it.
+  bool lower_concurrent_assertion(const slang::ast::ConcurrentAssertionStatement& stmt);
   void lower_case(const slang::ast::CaseStatement& stmt);
   bool case_is_exhaustive(const slang::ast::CaseStatement& stmt);
   // `(* full_case *)`: the arms are DECLARED exhaustive, so an uncovered
