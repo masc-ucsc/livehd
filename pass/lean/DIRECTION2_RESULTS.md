@@ -394,3 +394,116 @@ lake build Sim<Top> Bench<Top>
 `lake build Bench<Top>` links against Mathlib's native objects (the verified
 compiler needs them) and takes about an hour the first time; `lake build
 Sim<Top>` does not, and takes about ninety seconds.
+
+---
+
+## 9. Multi-clock plan, Phase A: memories under the phase divider
+
+The 37 CORE-ET modules with no certificate were classified from the census
+(`generated/core-et/coreet_census.tsv`), and 22 of them were refused by
+`pass.single_edge`.  Seventeen of those had nothing to do with multiple clocks:
+
+> `memory ... would commit on every sub-step under a phase divider`
+> (`pass_single_edge.cpp`, formerly a hard refusal; the hint read *"slot enables
+> are not wired into the Memory cell yet"*)
+
+They are single-clock register-file and array blocks that contain a latch or a
+negedge flop and so need the P=2 phase divider -- and the pass slotted every flop
+(`enable &= (phase == slot)`) but never a `Memory` cell, so it failed closed.
+Phase A wires the same gate into the Memory cell.  `DesignCert` is untouched: the
+normalised design is single-edge, exactly as before.
+
+### What the lowering does (`pass/single_edge/pass_single_edge.cpp`)
+
+* **Classification (`build_plan`, step 4).**  A clocked memory's committing
+  ports are read per port: every write port, plus a sync-read (`type == 1`)
+  port whose enable captures its read-data register.  An async read is
+  combinational and is neither checked nor gated.  Each committing port's
+  `clock_pin` resolves through the same walk a flop's does -- `resolve_icg`
+  first, so a port clocked through an ICG cone (`clk & en`) takes the CLOCK's
+  commit class and carries its enables; else `control_root`.  All committing
+  ports must agree on one (net, edge), and that key must be the reference
+  clock.  A memory contributes its slot to P.
+* **Rewrite.**  For each committing port, `enable := (phase == slot) & enable
+  & <ICG enables>`; a negedge `posclk` is dropped (the slot now carries the
+  edge); explicit clocks are rebound to the reference root, as for flops.
+* **Rule 4 extended.**  The L1 hazard -- a latch and a same-edge committer
+  whose input cone reads the latch's Q -- is checked over a memory's
+  addr/data/enable cones too, not only over flop `din`.
+* **The enable-latch bypass** is now one helper shared by flops and memories,
+  so the parity is decided in one place.
+
+### New named refusals (fail-closed, self-explaining)
+
+| code | when | example |
+|---|---|---|
+| `memory-latch-array` | a committing port's clock is (or resolves to) a constant: yosys emits a level-sensitive latch-array write as a `$mem_v2` port with `WR_CLK_ENABLE = 0` | `vpu_rf` (`gen_latch.u_rf.rf_q`) |
+| `memory-type-unsupported` | `type` is not 0/1/2: the yosys reader writes the per-read-port `RD_CLK_ENABLE` **bitmask** into the cell's one global `type`, so mixed clocked/unclocked reads arrive as e.g. `24 = 0b11000` | `minion_frontend_thread_buffer` (5 read ports, two registered) |
+| `memory-mixed-edge` | ports disagree on (net, edge), or the reader's `Memory_posclk_mixed` sentinel; the message names every port's root | -- |
+| `off-reference-clock` (memory) | the memory's committing edge is on a net other than the reference clock; the message names both | -- |
+
+The `type` refusal matters beyond diagnostics: treating `24` as "not sync"
+would have left two registered read-data registers unslotted -- committing on
+every sub-step -- which is exactly the wrong lowering this pass exists never to
+emit.  `pass.lean` refuses the same value downstream; refusing it upstream is
+what makes the pass correct on its own.
+
+### Validation
+
+* `lhd/tests/single_edge_memory_slot_test.sh` -- a posedge flop, a negedge flop
+  (forces P=2) and a clocked memory written from the flop, read
+  asynchronously.  The pass fires (`P=2 slots ... 1 memory(ies) slotted`), the
+  normalised emission has no `negedge`, and **iverilog** agrees with the real
+  negedge/memory source over 39 periods with the memory read included; the P=1
+  negative control fails as it must.  Edge normalisation is not
+  cycle-preserving, so this independent oracle -- not `lhd lec` -- is the
+  binding check, as for the four-classes test.
+* The four pre-existing `single_edge_*` tests still pass.
+* **The 17 modules, through the real emit pipeline** (`run_coreet_module_lean.sh`
+  in `verified_compiler` mode) -- `SWEEP_direction2_phaseA.tsv`:
+
+| outcome | modules |
+|---|---|
+| **certificate emitted, `checkDesign` ACCEPTED, 4 cycles simulated** | 13: `vpu_tensor{a,b,c,tmp}_rf`, `vpu_lane_tima` (7 gated clocks, 2 memories), `minion_tlb`, `minion_dcache_{128x64,128x72}_1r1w_lram`, `minion_dcache_{buffer,data,metadata,tlb}_array` (up to 8 memories), `minion_dcache_replay_queue` (129 flops) |
+| `minion_dcache_top` | normalises -- P=2, 12 latches retyped, **302 gated clocks folded, 21 memories slotted**, 985 elements -- but the `pass.lean` emission of the resulting ~100k-node graph exceeded the pipeline's 90-minute budget (11 GB resident) and was killed. The first time this design has reached the emitter at all: the census recorded it as a `single_edge` refusal. An emitter-scaling question, not a lowering one; relaunched with an 8-hour budget, outcome not yet known |
+| refused: latch array (new named refusal) | `vpu_rf` |
+| refused: mixed read-port clocking encoded as `type=24` | `minion_frontend_thread_buffer` -- normalises (37 gated clocks folded, 2 memories slotted) but the certificate cannot represent it |
+| blocked in core-et RTL, not LiveHD | `minion_frontend`: slang rejects `vpu_defs_pkg.sv:875` (`TXFMA_EXP_FRAC_OFFSET` used before its declaration at `:892`); `livehd-new`'s Sep-1 binary fails identically, so it is the RTL, which has changed since the census recorded this module as a `single_edge` refusal |
+
+* **Differential against B1+B2** on the newly unblocked, memory-bearing
+  `minion_dcache_data_array` (517 nodes, 26 flops, **8 memories**): `diff OK`
+  over 20 cycles, direct 13 ms/cycle vs compiled 13 ms/cycle.
+  On `vpu_lane_tima` (818 nodes, 13 flops, 2 memories, **7 clock gates folded into
+  enables** by the new memory path): `diff OK` over 20 cycles, direct
+  6.3 ms/cycle vs compiled 6.1 ms/cycle -- the only D2/B1+B2
+  agreement point that exercises an ICG-clocked memory.
+
+### What this does and does not establish
+
+The iverilog fixture validates the LOWERING on the shape it exercises.  On the
+real modules the evidence is that the normalised graph is accepted and executed
+by two independent implementations of the certificate semantics -- consistency,
+not an RTL-level oracle: no cycle-accurate checker can see an edge
+normalisation, and the LEC gate in the pipeline compares RTL to the
+*normalised* graph only at P=1.  That limit is the same one the pass has always
+had for flops.
+
+### A census-label bug found on the way
+
+`scripts/run_vc_sweep.sh` stamped every `single_edge` refusal as
+`NO_EMIT(compile)`: its classifier tested the generic `"status":"fail"` JSON
+marker before the `single_edge` marker, and every failing `lhd` invocation
+prints that marker.  The 2026-08 sweep therefore reported 24 compile failures
+where the census shows 8 (`yosys-failed`) plus 22 `single_edge` refusals.  The
+specific markers are now tested first.
+
+### Reproducing
+
+```bash
+bazel build -c dbg //lhd:lhd
+bash lhd/tests/single_edge_memory_slot_test.sh            # or: bazel test //lhd/tests:single_edge_memory_slot_test
+COREET_TOP=vpu_tensora_rf LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LEC_GATE=false \
+  STOP_AFTER=lean OUT=/tmp/pa/vpu_tensora_rf scripts/run_coreet_module_lean.sh
+python3 pass/lean/scripts/direct_sweep.py --out SWEEP.tsv --max-rec-depth 20000000 /tmp/pa
+```
+

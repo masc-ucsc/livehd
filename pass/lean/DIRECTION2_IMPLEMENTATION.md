@@ -490,6 +490,13 @@ What is deliberately NOT done, and why:
   representation change plus an extensionality proof.
 * **Single-edge normalisation is not proved**, and cannot be until the exporter
   emits clock provenance into the certificate.
+* **Phase A of the multi-clock plan has landed** (`DIRECTION2_RESULTS.md` §9):
+  `pass.single_edge` now slot-gates `Memory` cells under the phase divider, so
+  13 of the 17 CORE-ET register-file/array blocks it used to refuse emit
+  certificates that Direction 2 accepts and executes; the other four are
+  classified by name — two new fail-closed refusals (latch-array write, mixed
+  read-port clocking), one core-et RTL error, one emitter-budget timeout on a
+  100k-node result.  `DesignCert` is unchanged by it.
 * **Runtime certificate loading is not implemented**, and the sweep found where
   that costs: the two largest CVA6 certificates (14 MB files) exhaust Lean's
   emitted `maxRecDepth` of 1,000,000 while ELABORATING the `sources := #[…]`

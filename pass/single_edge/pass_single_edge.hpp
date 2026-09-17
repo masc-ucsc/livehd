@@ -53,6 +53,11 @@ struct Result {
   int  latches_retyped = 0;
   int  flops_slotted   = 0;
   int  icg_folded      = 0;  // gated clocks rewritten into a flop enable
+  // Clocked `Memory` cells whose committing ports were slot-gated (P > 1 only).
+  // A memory's write port commits on its clock edge exactly as a flop does, so
+  // under a divider it gets the same `enable &= (phase == slot)`; the pass used
+  // to refuse every memory at P > 1 instead ("would commit on every sub-step").
+  int  memories_slotted = 0;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is

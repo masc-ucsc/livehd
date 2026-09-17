@@ -72,12 +72,21 @@ emit_one() {
       "$(grep -c 'resetActiveLow' "$f")" "$(grep -c 'nextImg' "$f")"
   else
     # Name the stage, not just the exit code.
+    #
+    # ORDER MATTERS. Every failing `lhd` invocation prints a JSON result line
+    # with `"status":"fail"`, including `lhd pass single_edge` and the pass.lean
+    # emit, so that marker only says "something failed". Tested first, it
+    # stamped all 22 single_edge refusals (and every pass.lean refusal) as
+    # NO_EMIT(compile) in the 2026-08 CORE-ET sweep -- the census had to be
+    # consulted to learn that only 8 were yosys failures. The specific stage
+    # markers come first; the generic one is the fallback it always was.
     local stage=unknown
     if   [[ "$rc" -eq 124 ]]; then stage=timeout
-    elif grep -q 'no \.sv\|missing RTL\|filelist' "$log" 2>/dev/null; then stage=filelist
-    elif grep -q 'compile exit=[1-9]\|"status":"fail"' "$log" 2>/dev/null;  then stage=compile
-    elif grep -q 'single_edge' "$log" 2>/dev/null;                          then stage=single_edge
-    elif grep -q 'pass.lean' "$log" 2>/dev/null;                            then stage=pass_lean
+    elif grep -q 'no \.sv\|missing RTL\|filelist' "$log" 2>/dev/null;        then stage=filelist
+    elif grep -q 'compile exit=[1-9]' "$log" 2>/dev/null;                     then stage=compile
+    elif grep -q 'single_edge exit=[1-9]\|pass.single_edge refused' "$log" 2>/dev/null; then stage=single_edge
+    elif grep -q 'lean emit exit=[1-9]\|\[ERROR\] pass.lean' "$log" 2>/dev/null;   then stage=pass_lean
+    elif grep -q '"status":"fail"' "$log" 2>/dev/null;                        then stage=compile
     fi
     printf '%s\tNO_EMIT(%s)\t\t\t\t\n' "$m" "$stage"
   fi

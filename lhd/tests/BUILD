@@ -802,6 +802,21 @@ sh_test(
     tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+# A clocked MEMORY under the P=2 phase divider: its write port must commit in
+# its slot only, not on every sub-step. Validated against iverilog like the
+# four-classes test, because edge normalization is not cycle-preserving and no
+# cycle-accurate checker can see it.
+sh_test(
+    name = "single_edge_memory_slot_test",
+    size = "large",
+    srcs = ["single_edge_memory_slot_test.sh"],
+    data = [
+        "//lhd",
+        "//ware:cgen_memory_rtl",  # the emitted memory `include`s cgen_memory_*.v
+    ],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 # LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
 # latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
 # DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and

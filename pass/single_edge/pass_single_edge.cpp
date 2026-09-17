@@ -127,8 +127,91 @@ void refuse(bool quiet, std::string_view code, const std::string& msg, std::stri
 
 // ---------------------------------------------------------------------------
 
+// The ENABLE-LATCH BYPASS, resolved during ANALYSIS because the rewrite loop
+// retypes latches into flops as it goes -- so by the time it reached a gated
+// element the enable latch might already be a Flop and the bypass would
+// silently not fire, leaving the enable a full cycle late. (Measured exactly
+// that way: the emitted netlist came out `if (enl)`, the latch's held Q,
+// instead of the value it was passing through.)
+//
+// A real ICG latches its enable on the opposite phase purely to suppress
+// glitches: the latch closes exactly when the element samples, so the element
+// sees what the latch was passing THROUGH. Reading its Q instead is the classic
+// L1 error.
+//
+// `latch_transparent_arm` only recognizes tolg's HOLD-MUX shape (`gate ? d : q`
+// -> `d`). A latch whose `din` is the raw D -- the yosys D/EN shape, and also
+// what Pyrope emits for a plain `if !clk { enl = en }` where `en` is a module
+// input -- has no mux, so the arm comes back invalid and the bypass would
+// silently not fire (measured as `if (enl)` in the emitted netlist, 19/29
+// cycles mismatching the source under iverilog). latch_contract.cpp's own
+// ICG-def matcher already falls back this way; do the same here.
+//
+// ONE helper for flops and memories, on purpose: a parity or a bypass decided in
+// two places is how the two drift.
+void bypass_enable_latches(std::vector<hhds::Pin_class>& ens) {
+  for (auto& en : ens) {
+    if (en.is_invalid() || gu::is_const_pin(en) || gu::is_graph_input_pin(en)) {
+      continue;
+    }
+    auto dn = en.get_master_node();
+    if (gu::type_op_of(dn) != Ntype_op::Latch) {
+      continue;
+    }
+    auto arm = lc::latch_transparent_arm(dn);
+    if (arm.is_invalid()) {
+      arm = gu::get_driver_of_sink_name(dn, "din");  // raw D/EN shape
+    }
+    if (!arm.is_invalid()) {
+      en = arm;
+    }
+  }
+}
+
+// A clocked `Memory` cell under a phase divider. Its WRITE ports -- and, for a
+// sync-read memory, the read-data registers its read enables capture -- commit
+// on an edge and so own a slot exactly like a flop. A combinational array
+// (`type == 2`) has no edge and is recorded only so the rewrite skips it
+// knowingly.
+struct Mem_element {
+  hhds::Node_class node;
+  lc::Commit_class cc;        // the one (net, edge) its clocked ports commit on
+  int              slot = 0;
+  int64_t          type = 0;  // graph/cell.cpp pid 7: 0 async-read, 1 sync-read, 2 array
+  // A port clocked through an ICG cone (`<clock> & <enables>`): its commit class
+  // is the CLOCK's, and the enables become part of that port's `enable` in the
+  // rewrite -- the same fold a gated flop gets (see apply of `Element::icg`).
+  std::vector<std::pair<hhds::Port_id, std::vector<hhds::Pin_class>>> icg_enables;
+};
+
+// The Memory cell's per-port pins live at raw pid `port * Memory_port_stride +
+// base`, the cell-global ones at `base` alone (graph/cell.hpp). These read one
+// by RAW pid; `get_driver_of_sink_name` cannot, because a per-port name is
+// spelled "<pid><base>" and the helper asserts a single driver besides.
+hhds::Pin_class mem_sink_driver(const hhds::Node_class& n, hhds::Port_id raw_pid) {
+  for (const auto& e : n.inp_edges()) {
+    if (e.sink.get_port_id() == raw_pid) {
+      return e.driver;
+    }
+  }
+  return {};
+}
+
+std::optional<int64_t> mem_sink_const(const hhds::Node_class& n, hhds::Port_id raw_pid) {
+  auto d = mem_sink_driver(n, raw_pid);
+  if (d.is_invalid() || !gu::is_const_pin(d)) {
+    return std::nullopt;
+  }
+  auto v = gu::hydrate_const(d);
+  if (!v.is_just_i64()) {
+    return std::nullopt;
+  }
+  return v.to_just_i64();
+}
+
 struct Plan {
   std::vector<Element>            elems;
+  std::vector<Mem_element>        mems;
   absl::flat_hash_map<std::string, int> slot_of_key;
   int                             slots = 1;
   bool                            ok    = false;
@@ -146,9 +229,11 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
   for (auto n : g->fast_class()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
-      // A memory rides the reference clock. Leaving it untouched is correct at
-      // P = 1 and WRONG at P > 1 (it would commit every sub-step), so it is
-      // allowed here and rejected below once P is known.
+      // A clocked memory commits on an edge exactly like a flop, but it is not a
+      // `plan.elems` entry: it does not vote for the reference clock (a design's
+      // time base is set by its flops), and its commit class is read from the
+      // cell once the reference is known -- step 4 below. Under a divider its
+      // committing ports are slot-gated in the rewrite (`Plan::mems`).
       continue;
     }
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
@@ -190,43 +275,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
       // commit class, the data half becomes the flop enable.
       e.icg = lc::resolve_icg(sink_driver(n, e.is_latch ? "enable" : "clock_pin"), clocks);
       if (e.icg) {
-        // Resolve the ENABLE-LATCH BYPASS here, during ANALYSIS, because the
-        // rewrite loop retypes latches into flops as it goes -- so by the time
-        // it reached this flop the enable latch might already be a Flop and the
-        // bypass would silently not fire, leaving the enable a full cycle late.
-        // (Measured exactly that way: the emitted netlist came out `if (enl)`,
-        // the latch's held Q, instead of the value it was passing through.)
-        //
-        // A real ICG latches its enable on the opposite phase purely to
-        // suppress glitches: the latch closes exactly when the flop samples, so
-        // the flop sees what the latch was passing THROUGH. Reading its Q
-        // instead is the classic L1 error.
-        for (auto& en : e.icg->enables) {
-          if (en.is_invalid() || gu::is_const_pin(en) || gu::is_graph_input_pin(en)) {
-            continue;
-          }
-          auto dn = en.get_master_node();
-          if (gu::type_op_of(dn) != Ntype_op::Latch) {
-            continue;
-          }
-          // `latch_transparent_arm` only recognizes tolg's HOLD-MUX shape
-          // (`gate ? d : q` -> `d`). A latch whose `din` is the raw D — the
-          // yosys D/EN shape, and also what Pyrope emits for a plain
-          // `if !clk { enl = en }` where `en` is a module input — has no mux,
-          // so the arm comes back invalid and the bypass silently did not fire,
-          // leaving the enable a full cycle late (the exact L1 error the block
-          // above warns about; measured as `if (enl)` in the emitted netlist,
-          // 19/29 cycles mismatching the source under iverilog).
-          // latch_contract.cpp's own ICG-def matcher already falls back this
-          // way; do the same here.
-          auto arm = lc::latch_transparent_arm(dn);
-          if (arm.is_invalid()) {
-            arm = gu::get_driver_of_sink_name(dn, "din");  // raw D/EN shape
-          }
-          if (!arm.is_invalid()) {
-            en = arm;
-          }
-        }
+        bypass_enable_latches(e.icg->enables);
       }
     }
     plan.elems.push_back(e);
@@ -327,9 +376,191 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     // a false REFUTED.
   }
 
+  // 4. Clocked memories. Not a vote for the reference clock and not a
+  //    `plan.elems` entry, but every clocked port owns a slot the way a flop
+  //    does: a WRITE port commits its data on its clock edge, and a sync-read
+  //    (`type == 1`) port commits its read-data register. A combinational
+  //    array (`type == 2`) has no edge and is recorded only to be skipped.
+  //
+  //    The cell carries ONE global `posclk`, and the readers wire one clock
+  //    per port that all name the same net (yosys: `WR_CLK[i]` bit extracts of
+  //    one port). `Memory_posclk_mixed` marks the shape whose ports do NOT
+  //    share an edge; that is a multi-clock memory, not a slot lowering, and is
+  //    refused. A memory with no clock driver at all rides the reference clock
+  //    -- there is nothing else it could be riding.
+  {
+    const auto stride     = Ntype::Memory_port_stride;
+    const auto pid_clk    = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
+    const auto pid_posclk = Ntype::get_sink_pid(Ntype_op::Memory, "posclk");
+    const auto pid_type   = Ntype::get_sink_pid(Ntype_op::Memory, "type");
+    for (auto n : g->fast_class()) {
+      if (gu::type_op_of(n) != Ntype_op::Memory) {
+        continue;
+      }
+      Mem_element me;
+      me.node = n;
+      me.type = mem_sink_const(n, pid_type).value_or(0);
+      if (me.type == 2) {
+        plan.mems.push_back(me);
+        continue;
+      }
+      // `type` is defined as 0 async / 1 sync / 2 array (graph/cell.cpp pid 7).
+      // The yosys reader writes yosys's per-read-port `RD_CLK_ENABLE` BITMASK
+      // into it, so a memory whose read ports MIX clocked and unclocked reads
+      // arrives as, e.g., 24 (= 0b11000: read ports 3 and 4 registered, 0-2
+      // combinational). Measured on core-et's minion_frontend_thread_buffer.
+      // pass.lean refuses that value too; refusing it HERE matters because
+      // treating 24 as "not 1" would leave the two clocked read-data registers
+      // unslotted -- committing on every sub-step -- which is precisely the
+      // wrong lowering this pass exists never to emit.
+      if (me.type != 0 && me.type != 1) {
+        plan.code = "memory-type-unsupported";
+        plan.why  = std::format("memory `{}` has type={} (not async 0 / sync 1 / array 2): its read ports mix "
+                                "clocked and unclocked reads, which the Memory cell's one global `type` cannot "
+                                "represent",
+                                label_of(n), me.type);
+        return plan;
+      }
+      const auto posclk = mem_sink_const(n, pid_posclk).value_or(1);
+      if (posclk == Ntype::Memory_posclk_mixed) {
+        plan.code = "memory-mixed-edge";
+        plan.why  = "memory `" + label_of(n) + "` commits on more than one clock edge across its ports";
+        return plan;
+      }
+      const bool pos = posclk != 0;
+      // One commit class per COMMITTING port, then they must all agree.
+      // Resolved first and checked second so a refusal can NAME every port's
+      // root: a "different clock nets" message that does not say which nets is
+      // not a diagnostic, it is a dead end.
+      //
+      // Only ports that commit have an edge to agree on. An async read
+      // (`type != 1`, `rdport` set) is combinational: yosys emits its
+      // `RD_CLK` as a constant 0 (measured on core-et's `prim_rf_1r1w_preview`:
+      // `always_ff @(posedge rf_clk_i)` write, `assign rd_data_o = rf_q[..]`
+      // read), and the reader excludes it from the polarity vote for the same
+      // reason. Treating that constant as a second clock net refused every one
+      // of the 17 register-file blocks this lowering exists for.
+      const auto pid_rd = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
+      std::vector<std::pair<hhds::Port_id, lc::Commit_class>> per_port;
+      for (const auto& e : n.inp_edges()) {
+        if (e.sink.get_port_id() % stride != pid_clk || e.driver.is_invalid()) {
+          continue;
+        }
+        const auto port    = static_cast<hhds::Port_id>(e.sink.get_port_id() / stride);
+        const bool is_read = mem_sink_const(n, port * stride + pid_rd).value_or(0) != 0;
+        if (is_read && me.type != 1) {
+          continue;  // async read: no commit, no edge
+        }
+        // A committing port whose clock is a CONSTANT is not clocked at all: it
+        // is a level-sensitive write, i.e. a LATCH ARRAY (yosys emits core-et's
+        // `gen_latch.u_rf.rf_q` register file as a `$mem_v2` write port with
+        // `WR_CLK_ENABLE = 0` and the clock tied off). A latch commits when its
+        // enable CLOSES, which is a latch-phase analysis of the enable cone this
+        // lowering does not do for memories yet -- and slotting it as if it were
+        // edge-triggered would be exactly the double-negation class of silent
+        // full-cycle error this pass exists to refuse.
+        if (gu::is_const_pin(e.driver)) {
+          plan.code = "memory-latch-array";
+          plan.why  = std::format("memory `{}` port {} has a constant clock: a level-sensitive (latch-array) write, "
+                                  "which has no edge to slot",
+                                  label_of(n), port);
+          return plan;
+        }
+        lc::Commit_class cc;
+        cc.role = lc::Net_role::Clock;
+        // A GATED clock (`<clock> & <enables>`) commits on its CLOCK operand's
+        // edge, gated by the enables -- exactly a gated flop. Its commit class
+        // is the clock's, and the enables fold into the port's `enable` in the
+        // rewrite. Without this the And node itself becomes the "net" and a
+        // memory in a gated domain looks like a second clock (measured:
+        // minion_frontend_thread_buffer's `buffer_pc`, whose 37 sibling flops
+        // on `clock_gated` fold fine while the memory refused as
+        // off-reference).
+        if (auto icg = lc::resolve_icg(e.driver, clocks)) {
+          bypass_enable_latches(icg->enables);
+          cc.net    = icg->clock;
+          cc.rising = pos != icg->clock_inverted;
+          me.icg_enables.emplace_back(port, std::move(icg->enables));
+        } else {
+          // The same walk a flop's `clock_pin` gets: the root net, with an
+          // inversion in the cone flipping the edge the `posclk` pin names.
+          const auto cr = lc::control_root(e.driver);
+          if (cr.net.is_invalid()) {
+            plan.code = "unresolved-commit-class";
+            plan.why  = "memory `" + label_of(n) + "` has a clock cone that does not resolve to a root net";
+            return plan;
+          }
+          if (gu::is_const_pin(cr.net)) {
+            // Same latch-array shape, one width mask deeper (`Get_mask(1'b0)`).
+            plan.code = "memory-latch-array";
+            plan.why  = std::format("memory `{}` port {} has a clock that resolves to a constant: a level-sensitive "
+                                    "(latch-array) write, which has no edge to slot",
+                                    label_of(n), port);
+            return plan;
+          }
+          cc.net    = cr.net;
+          cc.rising = pos != cr.inverted;
+        }
+        per_port.emplace_back(port, cc);
+      }
+      const auto root_desc = [](const lc::Commit_class& cc) -> std::string {
+        if (cc.implicit_clock) {
+          return "implicit";
+        }
+        if (cc.net.is_invalid()) {
+          return "unresolved";
+        }
+        if (gu::is_graph_input_pin(cc.net)) {
+          return std::string(gu::pin_name_of(cc.net));
+        }
+        if (gu::is_const_pin(cc.net)) {
+          return "const";
+        }
+        // An internal root: the node, its op id, and the pin's name if it has one.
+        const auto pn = std::string(gu::pin_name_of(cc.net));
+        return gu::debug_name(cc.net.get_master_node())
+               + std::format("[op={}]", static_cast<int>(gu::type_op_of(cc.net.get_master_node())))
+               + (pn.empty() ? "" : "/" + pn);
+      };
+      std::optional<lc::Commit_class> mcc;
+      for (const auto& [port, cc] : per_port) {
+        if (mcc && mcc->key() != cc.key()) {
+          std::string desc;
+          for (const auto& [pp, pc] : per_port) {
+            desc += std::format(" port{}:{}{}", pp, root_desc(pc), pc.rising ? "+" : "-");
+          }
+          plan.code = "memory-mixed-edge";
+          plan.why  = "memory `" + label_of(n) + "` has ports on different clock nets or edges:" + desc;
+          return plan;
+        }
+        mcc = cc;
+      }
+      if (!mcc) {
+        lc::Commit_class cc;
+        cc.implicit_clock = true;
+        cc.role           = lc::Net_role::Clock;
+        cc.rising         = pos;
+        mcc               = cc;
+      } else if (mcc->net_key() != ref_net) {
+        plan.code = "off-reference-clock";
+        plan.why  = std::format("memory `{}` commits on `{}` ({}), not the reference clock `{}`", label_of(n),
+                                root_desc(*mcc), mcc->rising ? "rise" : "fall", ref_net);
+        return plan;
+      }
+      me.cc   = *mcc;
+      me.slot = mcc->rising ? 0 : 1;
+      plan.mems.push_back(me);
+    }
+  }
+
   int max_slot = 0;
   for (const auto& e : plan.elems) {
     max_slot = std::max(max_slot, e.slot);
+  }
+  for (const auto& me : plan.mems) {
+    if (me.type != 2) {
+      max_slot = std::max(max_slot, me.slot);
+    }
   }
   plan.slots = max_slot + 1;
   plan.ok    = true;
@@ -385,6 +616,54 @@ bool check_rule4(const Plan& plan, bool quiet) {
           .hint("the latch is still transparent at that edge, so the real hardware samples its D while the "
                 "commit-at-closing-edge model samples its held Q — a persistent full-cycle error. Move the two onto "
                 "opposite phases (a master/slave pair), or replace the latch with a buffer if it is meant to be one")
+          .emit();
+      break;
+    }
+    // The same L1 hazard through a MEMORY: a write (or sync-read) port that
+    // commits on the latch's closing edge and whose addr/data/enable cone reads
+    // the latch's Q samples its D in hardware and its held Q in the model.
+    // Same key test, same reach walk, over the port operand pins instead of
+    // `din`.
+    if (!ok) {
+      continue;
+    }
+    const auto stride  = Ntype::Memory_port_stride;
+    const auto pid_rd  = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
+    const auto pid_en  = Ntype::get_sink_pid(Ntype_op::Memory, "enable");
+    const auto pid_ad  = Ntype::get_sink_pid(Ntype_op::Memory, "addr");
+    const auto pid_din = Ntype::get_sink_pid(Ntype_op::Memory, "din");
+    for (const auto& me : plan.mems) {
+      if (me.type == 2 || me.cc.key() != l.cc.key()) {
+        continue;
+      }
+      absl::flat_hash_set<hhds::Class_index> hit;
+      for (const auto& e : me.node.inp_edges()) {
+        const auto raw = e.sink.get_port_id();
+        const auto off = raw % stride;
+        if (off != pid_en && off != pid_ad && off != pid_din) {
+          continue;
+        }
+        const auto p       = static_cast<hhds::Port_id>(raw / stride);
+        const bool is_read = mem_sink_const(me.node, p * stride + pid_rd).value_or(0) != 0;
+        if (is_read && me.type != 1) {
+          continue;  // an async read commits nothing
+        }
+        comb_state_reach(e.driver, hit);
+      }
+      if (!hit.contains(l.node.get_class_index())) {
+        continue;
+      }
+      ok = false;
+      if (quiet) {
+        return false;
+      }
+      livehd::diag::err(kPass, "coincident-commit-edge", "unsupported")
+          .msg("latch `{}` and memory `{}` commit at the SAME edge, and the memory's port reads the latch "
+               "combinationally",
+               label_of(l.node), label_of(me.node))
+          .hint("the latch is still transparent at that edge, so the real hardware writes its D while the "
+                "commit-at-closing-edge model writes its held Q — a persistent full-cycle error. Move the two onto "
+                "opposite phases, or replace the latch with a buffer if it is meant to be one")
           .emit();
       break;
     }
@@ -583,13 +862,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       refuse(quiet, "fflop-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
       return r;
     }
-    if (op == Ntype_op::Memory && plan.slots > 1) {
-      r.error  = true;
-      r.reason = "memory `" + label_of(n) + "` would commit on every sub-step under a phase divider";
-      refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-             "slot enables are not wired into the Memory cell yet");
-      return r;
-    }
+    // A Memory is no longer refused at P > 1: build_plan classified it (or
+    // declined the design) and the rewrite slot-gates its committing ports.
     if (op != Ntype_op::Sub) {
       continue;
     }
@@ -597,8 +871,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (!sub) {
       continue;  // blackbox / property cell: no state of ours to re-time
     }
-    // ...and only under a DIVIDER, exactly like the Memory case above. What
-    // this refuses is re-timing a child we cannot reach: at P>1 the parent's
+    // ...and only under a DIVIDER, for the same reason a memory's ports need
+    // slotting there. What this refuses is re-timing a child we cannot reach:
+    // at P>1 the parent's
     // state moves onto slots driven by a phase counter that is not threaded
     // through the child's ports, so the child would keep counting in the old
     // time base. At P=1 there IS no phase counter and no slot -- a latch
@@ -995,6 +1270,98 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     }
   }
 
+  // ---- clocked memories: slot-gate every port that COMMITS -----------------
+  // A memory's write port commits on its clock edge exactly as a flop does, so
+  // under a divider it must commit only in its slot -- left alone it would write
+  // on every sub-step, which is the shape this pass used to refuse outright.
+  // The gate is the one a flop gets, `enable &= (phase == slot)`, applied to:
+  //   * every WRITE port's `enable`;
+  //   * a SYNC-read (`type == 1`) port's `enable`, because that enable is what
+  //     captures the read-data REGISTER (`if ren then table[addr] else old` in
+  //     the certificate), and a register is state that commits;
+  //   * NOT an async (`type == 0`) read port: its read is combinational and
+  //     always visible, and gating it would read as zero in the other slot.
+  // A `type == 2` array is combinational through and through and is skipped.
+  // The byte-enable lanes (`wensize`) are data, not the commit, and are not
+  // touched.
+  if (plan.slots > 1) {
+    const auto stride     = Ntype::Memory_port_stride;
+    const auto pid_en     = Ntype::get_sink_pid(Ntype_op::Memory, "enable");
+    const auto pid_rd     = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
+    const auto pid_clk    = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
+    const auto pid_posclk = Ntype::get_sink_pid(Ntype_op::Memory, "posclk");
+    for (const auto& me : plan.mems) {
+      if (me.type == 2) {
+        continue;
+      }
+      // Every raw pid on the cell names the port it belongs to.
+      std::vector<hhds::Port_id> ports;
+      for (const auto& e : me.node.inp_edges()) {
+        ports.push_back(static_cast<hhds::Port_id>(e.sink.get_port_id() / stride));
+      }
+      std::sort(ports.begin(), ports.end());
+      ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
+
+      const auto pred = slot_pred[me.slot];
+      for (const auto p : ports) {
+        // `rdport` absent reads as a write port, exactly as pass.lean's walk
+        // defaults it (Memory_port_info::rdport = false).
+        const bool is_read = mem_sink_const(me.node, p * stride + pid_rd).value_or(0) != 0;
+        if (is_read && me.type != 1) {
+          continue;  // async read: combinational, nothing commits
+        }
+        const auto en_pid  = static_cast<hhds::Port_id>(p * stride + pid_en);
+        const auto en_name = std::string(Ntype::get_sink_name(Ntype_op::Memory, en_pid));
+        // enable := slot predicate & old enable & every ICG enable on this port
+        std::vector<hhds::Pin_class> terms{pred};
+        if (auto old = mem_sink_driver(me.node, en_pid); !old.is_invalid()) {
+          terms.push_back(old);
+        }
+        for (const auto& [ip, ens] : me.icg_enables) {
+          if (ip == p) {
+            terms.insert(terms.end(), ens.begin(), ens.end());
+          }
+        }
+        hhds::Pin_class acc;
+        for (const auto& t : terms) {
+          if (acc.is_invalid()) {
+            acc = t;
+            continue;
+          }
+          auto andn = gu::create_typed_node(*g, Ntype_op::And);
+          acc.connect_sink(andn.create_sink_pin(0));
+          t.connect_sink(andn.create_sink_pin(0));
+          acc = andn.create_driver_pin(0);
+          gu::set_bits(acc, 1);
+          gu::set_unsign(acc);
+        }
+        drop_sink(me.node, en_name);
+        acc.connect_sink(gu::setup_sink_by_name(me.node, en_name));
+      }
+      // Every commit is now expressed by its slot on the reference clock. A
+      // negedge `posclk` left in place would be re-read as a second inversion
+      // (the same double negation the latch path guards against), so drop it --
+      // the pin's absence is posedge -- and rebind any explicit clock to the
+      // resolved root, as the flop loop does.
+      if (mem_sink_const(me.node, pid_posclk).value_or(1) == 0) {
+        drop_sink(me.node, std::string(Ntype::get_sink_name(Ntype_op::Memory, pid_posclk)));
+      }
+      if (!plan.ref_clk_pin.is_invalid()) {
+        for (const auto p : ports) {
+          const auto clk_pid = static_cast<hhds::Port_id>(p * stride + pid_clk);
+          auto       cur     = mem_sink_driver(me.node, clk_pid);
+          if (cur.is_invalid() || cur.get_class_index() == plan.ref_clk_pin.get_class_index()) {
+            continue;  // implicit clock, or already the root
+          }
+          const auto nm = std::string(Ntype::get_sink_name(Ntype_op::Memory, clk_pid));
+          drop_sink(me.node, nm);
+          plan.ref_clk_pin.connect_sink(gu::setup_sink_by_name(me.node, nm));
+        }
+      }
+      ++r.memories_slotted;
+    }
+  }
+
   // ---- period-boundary guard on the design's obligations -----------------
   // Keeps ALL period knowledge inside this pass instead of smearing P through
   // Lec_options, both fork-race codecs and the verify cache key. Without it a
@@ -1076,8 +1443,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   r.slots     = plan.slots;
   r.ref_clock = plan.ref_net;
   r.reason  = std::format("P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable, {} element(s) "
-                          "slotted ({})",
-                          r.slots, r.latches_retyped, r.icg_folded, r.flops_slotted,
+                          "slotted, {} memory(ies) slotted ({})",
+                          r.slots, r.latches_retyped, r.icg_folded, r.flops_slotted, r.memories_slotted,
                           need.why.empty() ? "def-driven" : need.why);
   livehd::diag::info(kPass, "single-edge-applied", "progress")
       .msg("edge normalization on `{}`: {}", g->get_name(), r.reason)
