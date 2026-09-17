@@ -48,18 +48,20 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
     auto       n  = p.get_master_node();
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Or) {
-      for (const auto& e : n.inp_edges()) {
-        work.emplace_back(off, e.driver);
+      for (auto e_sink : n.inp_sorted_pins()) {
+        auto e_drv = e_sink.get_driver_pin();
+        work.emplace_back(off, e_drv);
       }
       continue;
     }
     if (op == Ntype_op::SHL) {
       hhds::Pin_class val, amt;
-      for (const auto& e : n.inp_edges()) {
-        if (e.sink.get_port_id() == 0) {
-          val = e.driver;
+      for (auto e_sink : n.inp_sorted_pins()) {
+        auto e_drv = e_sink.get_driver_pin();
+        if (e_sink.get_port_id() == 0) {
+          val = e_drv;
         } else {
-          amt = e.driver;
+          amt = e_drv;
         }
       }
       if (val.is_invalid() || amt.is_invalid() || !amt.is_const()) {
@@ -98,11 +100,12 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
       // masked range; the chain terminates at the undriven `0sb?` base (or
       // any other base, which becomes the leaf under everything else).
       hhds::Pin_class base, msk, val;
-      for (const auto& e : n.inp_edges()) {
-        switch (e.sink.get_port_id()) {
-          case 0: base = e.driver; break;
-          case 2: msk = e.driver; break;
-          case 4: val = e.driver; break;
+      for (auto e_sink : n.inp_sorted_pins()) {
+        auto e_drv = e_sink.get_driver_pin();
+        switch (e_sink.get_port_id()) {
+          case 0: base = e_drv; break;
+          case 2: msk = e_drv; break;
+          case 4: val = e_drv; break;
           default: break;
         }
       }
@@ -206,11 +209,12 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           }
           if (op == Ntype_op::Get_mask) {
             hhds::Pin_class val, msk;
-            for (const auto& e : n.inp_edges()) {
-              if (e.sink.get_port_id() == 0) {
-                val = e.driver;
+            for (auto e_sink : n.inp_sorted_pins()) {
+              auto e_drv = e_sink.get_driver_pin();
+              if (e_sink.get_port_id() == 0) {
+                val = e_drv;
               } else {
-                msk = e.driver;
+                msk = e_drv;
               }
             }
             if (msk.is_invalid()) {
@@ -245,11 +249,12 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           return false;
         }
         hhds::Pin_class val, amt;
-        for (const auto& e : n.inp_edges()) {
-          if (e.sink.get_port_id() == 0) {
-            val = e.driver;
+        for (auto e_sink : n.inp_sorted_pins()) {
+          auto e_drv = e_sink.get_driver_pin();
+          if (e_sink.get_port_id() == 0) {
+            val = e_drv;
           } else {
-            amt = e.driver;
+            amt = e_drv;
           }
         }
         val = peel_ident(val);
@@ -272,11 +277,12 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       uint32_t   pid = 0, k = 0;
       if (op == Ntype_op::Get_mask) {
         hhds::Pin_class val, msk;
-        for (const auto& e : n.inp_edges()) {
-          if (e.sink.get_port_id() == 0) {
-            val = e.driver;
+        for (auto e_sink : n.inp_sorted_pins()) {
+          auto e_drv = e_sink.get_driver_pin();
+          if (e_sink.get_port_id() == 0) {
+            val = e_drv;
           } else {
-            msk = e.driver;
+            msk = e_drv;
           }
         }
         val = peel_ident(val);
@@ -306,12 +312,13 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       if (op == Ntype_op::And) {
         hhds::Pin_class other, msk;
         int             cnt = 0;
-        for (const auto& e : n.inp_edges()) {
+        for (auto e_sink : n.inp_sorted_pins()) {
+          auto e_drv = e_sink.get_driver_pin();
           ++cnt;
-          if (e.driver.is_const()) {
-            msk = e.driver;
+          if (e_drv.is_const()) {
+            msk = e_drv;
           } else {
-            other = e.driver;
+            other = e_drv;
           }
         }
         if (cnt != 2 || msk.is_invalid() || other.is_invalid()) {
@@ -366,11 +373,12 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           // the bit range instead of the whole port. Any other shape falls
           // through to plain traversal.
           hhds::Pin_class val, msk;
-          for (const auto& e : m.inp_edges()) {
-            if (e.sink.get_port_id() == 0) {
-              val = e.driver;
+          for (auto e_sink : m.inp_sorted_pins()) {
+            auto e_drv = e_sink.get_driver_pin();
+            if (e_sink.get_port_id() == 0) {
+              val = e_drv;
             } else {
-              msk = e.driver;
+              msk = e_drv;
             }
           }
           if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
@@ -381,8 +389,11 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             }
           }
           if (expanded.insert(m).second) {
-            for (const auto& e : m.inp_edges()) {
-              stk.push_back(e.driver);
+            // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+            for (auto e_sink : m.inp_sorted_pins()) {
+              for (auto e_drv : e_sink.get_driver_pins()) {
+                stk.push_back(e_drv);
+              }
             }
           }
           continue;
@@ -391,8 +402,11 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           auto cg = m.get_subnode_graph();
           if (!cg) {
             if (expanded.insert(m).second) {
-              for (const auto& e : m.inp_edges()) {
-                stk.push_back(e.driver);  // body-less blackbox: depend on everything connected
+              // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+              for (auto e_sink : m.inp_sorted_pins()) {
+                for (auto e_drv : e_sink.get_driver_pins()) {
+                  stk.push_back(e_drv);  // body-less blackbox: depend on everything connected
+                }
               }
             }
             continue;
@@ -400,9 +414,12 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           const auto& cr = of(cg);  // memoized; hierarchy is a DAG
           if (auto it = cr.out2ins.find(static_cast<uint32_t>(d.get_port_id())); it != cr.out2ins.end()) {
             for (const uint32_t ipid : it->second) {
-              for (const auto& e : m.inp_edges()) {
-                if (static_cast<uint32_t>(e.sink.get_port_id()) == ipid) {
-                  stk.push_back(e.driver);
+              // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+              for (auto e_sink : m.inp_sorted_pins()) {
+                for (auto e_drv : e_sink.get_driver_pins()) {
+                  if (static_cast<uint32_t>(e_sink.get_port_id()) == ipid) {
+                    stk.push_back(e_drv);
+                  }
                 }
               }
             }
@@ -425,41 +442,44 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           bool                         has_clock   = false;
           bool                         fwd_nonzero = false;
           int                          mtype       = 2;
-          for (const auto& e : m.inp_edges()) {
-            const int  raw = static_cast<int>(e.sink.get_port_id());
-            const auto pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
-            const auto idx = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
-            if (pn == "fwd" || pn == "undef") {
-              if (e.driver.is_const()) {
-                const auto& c = gu::const_of(e.driver);
-                if (!(c.is_just_i64() && c.to_just_i64() == 0)) {
+          // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+          for (auto e_sink : m.inp_sorted_pins()) {
+            for (auto e_drv : e_sink.get_driver_pins()) {
+              const int  raw = static_cast<int>(e_sink.get_port_id());
+              const auto pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
+              const auto idx = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
+              if (pn == "fwd" || pn == "undef") {
+                if (e_drv.is_const()) {
+                  const auto& c = gu::const_of(e_drv);
+                  if (!(c.is_just_i64() && c.to_just_i64() == 0)) {
+                    fwd_nonzero = true;
+                  }
+                } else {
                   fwd_nonzero = true;
                 }
+              } else if (pn == "type") {
+                if (e_drv.is_const()) {
+                  mtype = static_cast<int>(gu::const_of(e_drv).to_just_i64());
+                }
+              } else if (pn == "update") {
+                update = e_drv;
+              } else if (pn == "update_enable" || pn == "reset" || pn == "initial" || pn == "bits" || pn == "size"
+                         || pn == "wensize") {
+              } else if (pn.ends_with("clock_pin")) {
+                has_clock = true;
               } else {
-                fwd_nonzero = true;
-              }
-            } else if (pn == "type") {
-              if (e.driver.is_const()) {
-                mtype = static_cast<int>(gu::const_of(e.driver).to_just_i64());
-              }
-            } else if (pn == "update") {
-              update = e.driver;
-            } else if (pn == "update_enable" || pn == "reset" || pn == "initial" || pn == "bits" || pn == "size"
-                       || pn == "wensize") {
-            } else if (pn.ends_with("clock_pin")) {
-              has_clock = true;
-            } else {
-              if (pv.size() <= idx) {
-                pv.resize(idx + 1);
-              }
-              if (pn.ends_with("addr")) {
-                pv[idx].addr = e.driver;
-              } else if (pn.ends_with("enable")) {
-                pv[idx].en = e.driver;
-              } else if (pn.ends_with("din")) {
-                pv[idx].din = e.driver;
-              } else if (pn.ends_with("rdport")) {
-                pv[idx].rd = e.driver.is_const() && !e.driver.is_known_false();
+                if (pv.size() <= idx) {
+                  pv.resize(idx + 1);
+                }
+                if (pn.ends_with("addr")) {
+                  pv[idx].addr = e_drv;
+                } else if (pn.ends_with("enable")) {
+                  pv[idx].en = e_drv;
+                } else if (pn.ends_with("din")) {
+                  pv[idx].din = e_drv;
+                } else if (pn.ends_with("rdport")) {
+                  pv[idx].rd = e_drv.is_const() && !e_drv.is_known_false();
+                }
               }
             }
           }
@@ -515,15 +535,21 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             }
           }
           if (!handled && expanded.insert(m).second) {
-            for (const auto& e : m.inp_edges()) {
-              stk.push_back(e.driver);
+            // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+            for (auto e_sink : m.inp_sorted_pins()) {
+              for (auto e_drv : e_sink.get_driver_pins()) {
+                stk.push_back(e_drv);
+              }
             }
           }
           continue;
         }
         if (expanded.insert(m).second) {
-          for (const auto& e : m.inp_edges()) {
-            stk.push_back(e.driver);
+          // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+          for (auto e_sink : m.inp_sorted_pins()) {
+            for (auto e_drv : e_sink.get_driver_pins()) {
+              stk.push_back(e_drv);
+            }
           }
         }
       }
@@ -536,9 +562,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       hhds::Pin_class drv;
-      for (const auto& e : opin.get_master_node().inp_edges()) {
-        if (e.sink.get_port_id() == opin.get_port_id()) {
-          drv = e.driver;
+      for (auto e_sink : opin.get_master_node().inp_sorted_pins()) {
+        auto e_drv = e_sink.get_driver_pin();
+        if (e_sink.get_port_id() == opin.get_port_id()) {
+          drv = e_drv;
           break;
         }
       }
@@ -578,9 +605,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             ps.shifted = true;  // the leaf is the callee's whole bundle pin
             for (const auto& ca : cs.ins) {
               hhds::Pin_class idrv;
-              for (const auto& e : sn.inp_edges()) {
-                if (static_cast<uint32_t>(e.sink.get_port_id()) == ca.pid) {
-                  idrv = e.driver;
+              for (auto e_sink : sn.inp_sorted_pins()) {
+                auto e_drv = e_sink.get_driver_pin();
+                if (static_cast<uint32_t>(e_sink.get_port_id()) == ca.pid) {
+                  idrv = e_drv;
                   break;
                 }
               }

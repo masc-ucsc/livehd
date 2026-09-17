@@ -38,19 +38,19 @@ struct Design {
     gu::set_ubits(a, 4);
     gu::set_ubits(idx, 4);
     auto x = gu::create_typed_node(*body, Ntype_op::Xor);
-    a.connect_sink(x.create_sink_pin(0));
-    idx.connect_sink(x.create_sink_pin(0));
+    a.connect_sink(gu::setup_sink_pid(x, 0));
+    idx.connect_sink(gu::setup_sink_pid(x, 0));
     auto xp = x.create_driver_pin(0);
     gu::set_ubits(xp, 4);
     auto sum = gu::create_typed_node(*body, Ntype_op::Sum);
-    a.connect_sink(sum.create_sink_pin(0));
-    xp.connect_sink(sum.create_sink_pin(0));
+    a.connect_sink(gu::setup_sink_pid(sum, 0));
+    xp.connect_sink(gu::setup_sink_pid(sum, 0));
     auto y = sum.create_driver_pin(0);
     gu::set_ubits(y, 4);
     y.connect_sink(body->get_output_pin("y"));
     auto mask = gu::create_typed_node(*body, Ntype_op::And);
-    a.connect_sink(mask.create_sink_pin(0));
-    idx.connect_sink(mask.create_sink_pin(0));
+    a.connect_sink(gu::setup_sink_pid(mask, 0));
+    idx.connect_sink(gu::setup_sink_pid(mask, 0));
     auto z = mask.create_driver_pin(0);
     gu::set_ubits(z, 4);
     z.connect_sink(body->get_output_pin("z"));
@@ -61,11 +61,11 @@ struct Design {
       auto data = body->get_input_pin("data");
       gu::set_ubits(data, 4);
       auto independent_xor = gu::create_typed_node(*body, Ntype_op::Xor);
-      data.connect_sink(independent_xor.create_sink_pin(0));
-      idx.connect_sink(independent_xor.create_sink_pin(0));
+      data.connect_sink(gu::setup_sink_pid(independent_xor, 0));
+      idx.connect_sink(gu::setup_sink_pid(independent_xor, 0));
       auto value = independent_xor.create_driver_pin(0);
       gu::set_ubits(value, 4);
-      value.connect_sink(sum.create_sink_pin(0));
+      value.connect_sink(gu::setup_sink_pid(sum, 0));
     }
 
     auto tio = lib.create_io("top");
@@ -90,20 +90,20 @@ struct Design {
       auto n = gu::create_typed_node(*top, Ntype_op::Sub);
       n.set_subnode(bio, loop);
       n.set_name(i ? "carried" : "independent");
-      input.connect_sink(n.create_sink_pin(1));
+      input.connect_sink(gu::setup_sink_pid(n, 1));
       for (int j = 0; j < 2; ++j) {
         auto out = n.create_driver_pin(j + 3);
         gu::set_ubits(out, 4);
         out.connect_sink(top->get_output_pin("o" + std::to_string(i * 2 + j)));
       }
       if (i) {
-        n.create_driver_pin(3).connect_sink(n.create_sink_pin(1));
+        n.create_driver_pin(3).connect_sink(gu::setup_sink_pid(n, 1));
         carried = n;
       } else {
         independent = n;
       }
       if (parallel_data) {
-        input.connect_sink(n.create_sink_pin(5));
+        input.connect_sink(gu::setup_sink_pid(n, 5));
       }
     }
   }
@@ -149,7 +149,7 @@ TEST(LoopCleanup, ActivationRecurrenceCountsAsCarry) {
         loop.next_active_output = 6;
       }
       n.set_subnode(io, loop);
-      gu::create_const(*d.top, *Dlop::create_integer(1)).connect_sink(n.create_sink_pin(5));
+      gu::create_const(*d.top, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(n, 5));
     }
     abc::Loop_preparation prep;
     ASSERT_TRUE(abc::prepare_loop_bodies(d.graphs(), true, prep));

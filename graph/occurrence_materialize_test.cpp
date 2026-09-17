@@ -66,9 +66,11 @@ std::vector<hhds::Node_class> subs_of(hhds::Graph* g) {
 
 // The driver feeding `pid` of `n`, or an invalid pin.
 hhds::Pin_class driver_of(const hhds::Node_class& n, hhds::Port_id pid) {
-  for (const auto& e : n.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.driver;
+  for (auto e_sink : n.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      if (e_sink.get_port_id() == pid) {
+        return e_drv;
+      }
     }
   }
   return {};

@@ -153,11 +153,8 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
     return result;
   }
 
-  auto adapter = gu::create_typed_node(*flat_, Ntype_op::Get_mask);
-  source.connect_sink(gu::setup_sink_by_name(adapter, "a"));
-  gu::create_const(*flat_, *Dlop::get_mask_value(static_cast<int>(shape.bits)))
-      .connect_sink(gu::setup_sink_by_name(adapter, "mask"));
-  auto result = adapter.create_driver_pin(0);
+  auto adapter = gu::create_get_mask(*flat_, source, 0, static_cast<int>(shape.bits));
+  auto result  = adapter.create_driver_pin(0);
   gu::set_ubits(result, static_cast<int32_t>(shape.bits));
   return result;
 }
@@ -356,10 +353,13 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
       if (pit != ctx->in_name2pid.end()) {
         if (!ctx->inst_drivers_built) {
           ctx->inst_drivers_built = true;
-          // try_emplace, so a multi-driver sink port keeps the FIRST edge in
-          // iteration order — what the per-port scan-and-break took.
-          for (const auto& e : ctx->inst.inp_edges()) {
-            ctx->inst_drivers.try_emplace(static_cast<uint32_t>(e.sink.get_port_id()), e.driver);
+          // One sink pin, one driver (graph/cell.hpp), and inp_sorted_pins()
+          // yields each sink pin exactly once, so try_emplace can no longer
+          // collide on a port -- it stays only because a Sub's port ids are
+          // sparse and this map is keyed by port, not by position.
+          for (const auto& in_pin : ctx->inst.inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
+            ctx->inst_drivers.try_emplace(static_cast<uint32_t>(in_pin.get_port_id()), in_drv);
           }
         }
         if (auto eit = ctx->inst_drivers.find(pit->second); eit != ctx->inst_drivers.end()) {
@@ -405,19 +405,22 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
   if (opin.is_invalid()) {
     return {};
   }
-  for (const auto& e : opin.inp_edges()) {
-    hhds::Pin_class source;
-    if (e.driver.is_const()) {
-      source = gu::create_const(*flat_, gu::const_of(e.driver));
-    } else {
-      source = resolve_driver(cctx, e.driver);
-    }
-    if (auto sit = cctx->out_name2shape.find(std::string{oname}); sit != cctx->out_name2shape.end()) {
-      source = apply_port_shape(source, sit->second);
-    }
-    return source;
+  // The child's output pin is a SINK with exactly one driver (graph/cell.hpp),
+  // which is why the old loop returned unconditionally on its first iteration.
+  auto drv = opin.get_driver_pin();
+  if (drv.is_invalid()) {
+    return {};  // declared but undriven
   }
-  return {};  // declared but undriven
+  hhds::Pin_class source;
+  if (drv.is_const()) {
+    source = gu::create_const(*flat_, gu::const_of(drv));
+  } else {
+    source = resolve_driver(cctx, drv);
+  }
+  if (auto sit = cctx->out_name2shape.find(std::string{oname}); sit != cctx->out_name2shape.end()) {
+    source = apply_port_shape(source, sit->second);
+  }
+  return source;
 }
 
 void Flattener::wire_edges(Ictx* ctx) {
@@ -430,14 +433,24 @@ void Flattener::wire_edges(Ictx* ctx) {
       continue;  // design Subs, consts, builtins: not cloned
     }
     auto neo = it->second;
-    for (const auto& e : n.inp_edges()) {
-      auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (e.driver.is_const()) {
-        gu::create_const(*flat_, gu::const_of(e.driver)).connect_sink(sp);
-      } else {
-        auto dp = resolve_driver(ctx, e.driver);
-        if (!dp.is_invalid()) {
-          dp.connect_sink(sp);
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      auto sp = neo.create_sink_pin(in_pin.get_port_id());
+      // PLURAL, not get_driver_pin(): this CLONES every in-edge of `n`, and a
+      // PRESERVED compact-loop Sub reaches here (it is entered into node_map
+      // above, unlike an inlined one). Its carry-in sink is the one sanctioned
+      // two-driver pin -- the seed, plus a self edge from the same instance's
+      // carry-out meaning "the previous ordinal" (pass/legalize/legalize.cpp:307).
+      // Keeping only one driver silently drops the seed or the recurrence, and
+      // the flattened design then computes a different value for every carried
+      // output.
+      for (const auto& in_drv : in_pin.get_driver_pins()) {
+        if (in_drv.is_const()) {
+          gu::create_const(*flat_, gu::const_of(in_drv)).connect_sink(sp);
+        } else {
+          auto dp = resolve_driver(ctx, in_drv);
+          if (!dp.is_invalid()) {
+            dp.connect_sink(sp);
+          }
         }
       }
     }
@@ -454,15 +467,18 @@ void Flattener::wire_top_outputs(Ictx* top_ctx) {
     if (opin.is_invalid()) {
       continue;
     }
-    for (const auto& e : opin.inp_edges()) {
-      auto sink = flat_->get_output_pin(decl.name);
-      if (e.driver.is_const()) {
-        gu::create_const(*flat_, gu::const_of(e.driver)).connect_sink(sink);
-      } else {
-        auto dp = resolve_driver(top_ctx, e.driver);
-        if (!dp.is_invalid()) {
-          dp.connect_sink(sink);
-        }
+    // One driver per sink pin, so a top output port is one driver, not a set.
+    auto drv = opin.get_driver_pin();
+    if (drv.is_invalid()) {
+      continue;  // declared but undriven
+    }
+    auto sink = flat_->get_output_pin(decl.name);
+    if (drv.is_const()) {
+      gu::create_const(*flat_, gu::const_of(drv)).connect_sink(sink);
+    } else {
+      auto dp = resolve_driver(top_ctx, drv);
+      if (!dp.is_invalid()) {
+        dp.connect_sink(sink);
       }
     }
   }
@@ -480,9 +496,11 @@ void Flattener::complete_bbox_outputs(Ictx* ctx) {
     if (!sio) {
       continue;
     }
+    // "which output ports already exist and are wired": the driver PINS, not
+    // the fan-out edges (which re-derive the same set once per consumer).
     absl::flat_hash_set<uint32_t> made;
-    for (const auto& e : neo.out_edges()) {
-      made.insert(static_cast<uint32_t>(e.driver.get_port_id()));
+    for (const auto& out_pin : neo.out_sorted_pins()) {
+      made.insert(static_cast<uint32_t>(out_pin.get_port_id()));
     }
     for (const auto& d : sio->get_output_pin_decls()) {
       if (made.contains(static_cast<uint32_t>(d.port_id))) {

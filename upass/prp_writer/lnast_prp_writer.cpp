@@ -831,6 +831,10 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_bit_or       :
     case N::Lnast_ntype_bit_xor      :
     case N::Lnast_ntype_bit_not      :
+    case N::Lnast_ntype_red_or       :
+    case N::Lnast_ntype_red_and      :
+    case N::Lnast_ntype_red_xor      :
+    case N::Lnast_ntype_popcount     :
     case N::Lnast_ntype_tuple_get:
     // concat has no infix/postfix spelling, but it is still a plain value def
     // (`dst = concat(a, b, c)`), so it rides the same wrapper — only its RHS
@@ -6695,6 +6699,18 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       std::string s   = src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/true);
       std::string p   = pos.is_invalid() ? std::string("0") : std::string(strip_prefix(lnast->get_name(pos)));
       return std::format("{}#sext[0..={}]", s, p);  // postfix — binds tight, never wrapped
+    }
+    case N::Lnast_ntype_red_or  :
+    case N::Lnast_ntype_red_and :
+    case N::Lnast_ntype_red_xor :
+    case N::Lnast_ntype_popcount: {
+      auto       src    = lnast->get_sibling_next(c0);
+      auto       value  = src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/true);
+      const char symbol = t == N::Lnast_ntype_red_or    ? '|'
+                          : t == N::Lnast_ntype_red_and ? '&'
+                          : t == N::Lnast_ntype_red_xor ? '^'
+                                                        : '+';
+      return std::format("{}#{}[..]", value, symbol);
     }
     case N::Lnast_ntype_get_mask : return render_get_mask_rhs(c0, operand_ctx);
     case N::Lnast_ntype_concat   : return render_concat_rhs(c0, operand_ctx);

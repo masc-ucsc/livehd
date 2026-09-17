@@ -153,7 +153,7 @@ bool model_cell(hhds::GraphLibrary& outlib, Mio_Gate_t* g) {
     }
     auto n = gu::create_typed_node(*body, op);
     for (const auto& d : ins) {
-      d.connect_sink(n.create_sink_pin(0));
+      d.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
     }
     return one_bit(n.create_driver_pin(0));
   };

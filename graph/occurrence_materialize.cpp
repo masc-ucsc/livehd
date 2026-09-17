@@ -29,11 +29,16 @@ struct Boundary {
 
 Boundary snapshot_boundary(const hhds::Node_class& inst) {
   Boundary b;
-  for (const auto& e : inst.inp_edges()) {
-    if (e.driver.get_master_node() == inst) {
-      continue;  // native carry self-edge, not an external initial driver
+  // PLURAL reader: `inst` is a loop instance, and its carry-in sink carries the
+  // external seed AND the native self edge. The `== inst` test below is what
+  // separates them, so both drivers have to be offered to it.
+  for (auto e_sink : inst.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      if (e_drv.get_master_node() == inst) {
+        continue;  // native carry self-edge, not an external initial driver
+      }
+      b.in_driver[static_cast<uint32_t>(e_sink.get_port_id())] = e_drv;
     }
-    b.in_driver[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
   }
   for (const auto& e : inst.out_edges()) {
     if (e.sink.get_master_node() == inst) {
@@ -309,17 +314,27 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
                                   static_cast<uint64_t>(*desc.next_active_output)));
         }
         auto andn = create_typed_node(*g, Ntype_op::And);
-        auto as   = andn.create_sink_pin(static_cast<hhds::Port_id>(0));  // multi-driver "as"
+        // ONE DRIVER PER SINK PIN. And is a BANKED op, so EACH operand gets its
+        // own "as" pid -- setup_sink_pid appends a fresh slot on every call, and
+        // the two consecutive pids still fold to bank 0 (graph/cell.hpp). This
+        // used to mint ONE pin and hang both drivers off it ("multi-driver as"),
+        // the shape pass/legalize's verify_single_driver_sinks forbids: every
+        // pin-centric reader (inp_sorted_pins + get_driver_pin) then silently
+        // keeps ONE of the two operands, turning `active[r-1] && next_active[r-1]`
+        // into a bare copy of whichever driver came first.
+        //
         // The previous occurrence's activation is whatever drives its sink.
         if (!prev_act.is_invalid()) {
-          for (const auto& e : prev.inp_edges()) {
-            if (e.sink.get_port_id() == *desc.activation_input) {
-              e.driver.connect_sink(as);
+          // SNAPSHOT: the body connects an edge in the same graph, which a lazy
+          // pin view over live storage does not survive.
+          for (auto e_sink : prev.inp_pins_snapshot()) {
+            if (e_sink.get_port_id() == *desc.activation_input) {
+              e_sink.get_driver_pin().connect_sink(livehd::graph_util::setup_sink_pid(andn, static_cast<hhds::Port_id>(0)));
               break;
             }
           }
         }
-        prev_next.connect_sink(as);
+        prev_next.connect_sink(livehd::graph_util::setup_sink_pid(andn, static_cast<hhds::Port_id>(0)));
         auto ao = andn.create_driver_pin(static_cast<hhds::Port_id>(0));
         set_bits(ao, 1);
         set_unsign(ao);
@@ -359,9 +374,9 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
             return fail(std::format("carry destination pid {} has no previous input value", static_cast<uint64_t>(c.input_port())));
           }
           auto mux = create_typed_node(*g, Ntype_op::Mux, static_cast<int32_t>(decl->bits));
-          active_values[r - 1].connect_sink(mux.create_sink_pin(0));
-          prior_values.back().connect_sink(mux.create_sink_pin(1));
-          previous_output.connect_sink(mux.create_sink_pin(2));
+          active_values[r - 1].connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+          prior_values.back().connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+          previous_output.connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
           carry_value = mux.create_driver_pin(0);
           if (decl->unsign) {
             set_unsign(carry_value);

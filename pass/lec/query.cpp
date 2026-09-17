@@ -1649,9 +1649,10 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   // graph-input drivers with their own candidate bit. This single topological
   // sweep is O(N): each node's cone is memoized in `cone` by nid and a driver's
   // source node is looked up there, never re-walked. (Historically this shape was
-  // also FORCED because inp_edges() on a get_master_node()-derived node returned
-  // an empty range; hhds fixed that — see graph_test test_get_master_node_edges —
-  // so a backward walk would now be correct, just less efficient than this pass.)
+  // also FORCED because the in-edge reader on a get_master_node()-derived node
+  // returned an empty range; hhds fixed that — see graph_test
+  // test_get_master_node_edges — so a backward walk would now be correct, just
+  // less efficient than this pass.)
   const bool                                  dbg = std::getenv("LEC_SPLIT_LOG") != nullptr;
   absl::flat_hash_map<std::string, long long> score;
   std::vector<std::string>                    cand;  // candidate index (bitmask, cap 64)
@@ -1701,8 +1702,23 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     ++dbg_nodes;
     uint64_t m = 0;
-    for (auto e : node.inp_edges()) {
-      m |= cone_of(cone, e.driver);
+    // Both branches walk inp_sorted_pins() -- SORTED because hhds keeps port 0
+    // as the node itself, so the raw inp_pins() list would drop a banked cell's
+    // first operand and lose port order. They differ in the driver reader: the
+    // singular one is enough for an ordinary cell (one driver per sink pin),
+    // while a COMPACT LOOP Sub needs the PLURAL get_driver_pins() because its
+    // carry-in sink legitimately carries TWO drivers (the seed and its own
+    // carry-out, meaning "the previous ordinal" -- pass/legalize.cpp's one
+    // sanctioned exception), and get_driver_pin() would keep only one, silently
+    // shrinking this cone.
+    // ONE canonical form for every node. The plural reader costs nothing and
+    // needs no invariant, whereas a `node.is_loop_subnode()` special case has to
+    // be RIGHT about which nodes can carry two drivers -- and the singular arm
+    // silently shrinks this cone whenever it is not.
+    for (auto e_sink : node.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        m |= cone_of(cone, e_drv);
+      }
     }
     cone[static_cast<uint64_t>(node.get_debug_nid())] = m;
     // The control driver's source node precedes `node` in topo order, so its cone
@@ -2500,11 +2516,19 @@ int pipeline_flush_latency(hhds::Graph* g) {
   };
   auto make_frame = [](const hhds::Occurrence_node& node) {
     Frame frame{node, std::string(node.get_hier_name()), {}};
-    for (const auto& e : node.inp_edges()) {
-      if (graph_util::is_graph_input_pin(e.driver) || e.driver.is_const()) {
-        continue;
+    // Occurrence_node::inp_sorted_pins() is the hier-resolving pin walk, and
+    // both halves are load-bearing: SORTED yields the node-as-pin (port 0)
+    // first and then ascending port order (raw inp_pins() omits port 0, where a
+    // banked cell's first operand lives), and the PLURAL get_driver_pins()
+    // keeps BOTH drivers of a compact-loop carry-in. One dep per DRIVER is the
+    // faithful count -- a two-driver sink used to contribute two in-edges here.
+    for (auto sink : node.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
+          continue;  // skips this DRIVER, which is what skipping its edge did
+        }
+        frame.deps.push_back(drv.get_master_node());
       }
-      frame.deps.push_back(e.driver.get_master_node());
     }
     return frame;
   };
@@ -3663,13 +3687,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             in_pw[d.name] = w;
           }
         }
-        for (const auto& e : bi.node.inp_edges()) {
-          auto        pid  = e.sink.get_port_id();
+        // Occurrence_node: hier-resolving pin walk (see make_frame). SORTED so
+        // port 0 -- a banked cell's first operand -- keeps its slot, and PLURAL
+        // get_driver_pins() so a two-driver carry-in still widens the port by
+        // the widest of BOTH drivers, exactly as the per-edge max did. The port
+        // name depends only on the sink, so it is resolved once per pin.
+        for (auto sink : bi.node.inp_sorted_pins()) {
+          auto        pid  = sink.get_port_id();
           auto        nit  = in_name.find(pid);
           std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
-          int         w    = gu::real_width(e.driver);
-          if (auto it = in_pw.find(port); it == in_pw.end() || w > it->second) {
-            in_pw[port] = w;
+          for (auto drv : sink.get_driver_pins()) {
+            int w = gu::real_width(drv);
+            if (auto it = in_pw.find(port); it == in_pw.end() || w > it->second) {
+              in_pw[port] = w;
+            }
           }
         }
       }
@@ -9200,8 +9231,15 @@ bool has_direct_boundary_feedback(const hhds::Node_class& sub) {
   }
   absl::flat_hash_set<hhds::Node_class> seen;
   std::vector<hhds::Pin_class>          pending;
-  for (const auto& e : sub.inp_edges()) {
-    pending.push_back(e.driver);
+  // Pin walk, PLURAL driver read. Not-a-loop-subnode does NOT imply one driver
+  // per sink: any banked combinational cell reached here can carry several, and
+  // a dropped driver silently hides a feedback path this predicate exists to
+  // find. The walk also no longer decodes the Sub's whole output fanout just to
+  // throw it away.
+  for (const auto& sink : sub.inp_sorted_pins()) {
+    for (const auto& drv : sink.get_driver_pins()) {
+      pending.push_back(drv);
+    }
   }
   while (!pending.empty()) {
     auto driver = pending.back();
@@ -9218,8 +9256,12 @@ bool has_direct_boundary_feedback(const hhds::Node_class& sub) {
         || !seen.insert(node).second) {
       continue;
     }
-    for (const auto& e : node.inp_edges()) {
-      pending.push_back(e.driver);
+    // Ordinary combinational logic reaches here (every Sub was `continue`d
+    // above) -- which does NOT bound the driver count per sink, so read plural.
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        pending.push_back(drv);
+      }
     }
   }
   return false;
@@ -9530,9 +9572,18 @@ bool summarize_certified_loop(const hhds::Node_class& old) {
   };
   std::vector<Input_edge>  inputs;
   std::vector<Output_edge> outputs;
-  for (const auto& edge : old.inp_edges()) {
-    if (edge.driver.get_master_node() != old) {
-      inputs.push_back(Input_edge{edge.sink.get_port_id(), edge.driver});
+  // `old` is a COMPACT LOOP node, so its carry-in sink is the one pin in the
+  // design that legitimately carries TWO drivers -- the seed, and a self edge
+  // from its own carry-out meaning "the previous ordinal" (pass/legalize.cpp's
+  // sanctioned exception). The `!= old` filter below is exactly what separates
+  // them, so this walk must use the PLURAL reader: get_driver_pin() would hand
+  // back one of the two with no way to say which, and on the wrong pick the
+  // summary Sub loses its carry-in SEED.
+  for (auto edge_sink : old.inp_sorted_pins()) {
+    for (auto edge_drv : edge_sink.get_driver_pins()) {
+      if (edge_drv.get_master_node() != old) {
+        inputs.push_back(Input_edge{edge_sink.get_port_id(), edge_drv});
+      }
     }
   }
   for (const auto& edge : old.out_edges()) {

@@ -68,8 +68,8 @@ void Color_acyclic::gather_roots(hhds::Graph* g) {
       if (opin.is_invalid()) {
         continue;
       }
-      for (const auto& e : opin.inp_edges()) {
-        auto dn = e.driver.get_master_node();
+      if (const auto drv = opin.get_driver_pin(); !drv.is_invalid()) {
+        auto dn = drv.get_master_node();  // an output pin is a sink: one driver
         if (is_partitionable(dn)) {
           add_root(dn);
         }
@@ -82,16 +82,22 @@ void Color_acyclic::gather_roots(hhds::Graph* g) {
       continue;
     }
     bool            root   = false;
-    // Classify fan-out as 0 / 1 / >1 with an early-break cap (never size() the
-    // lazy out_edges view); capture the lone sink for the exactly-one case.
+    // Classify fan-out as 0 / 1 / >1 with an early-break cap (never size() a
+    // lazy view); capture the lone sink for the exactly-one case. A driver's
+    // fanout stays a SET, so the sinks come from each driver pin.
     size_t          fanout = 0;
     hhds::Pin_class one_sink;
-    for (const auto& e : n.out_edges()) {
-      ++fanout;
-      if (fanout == 1) {
-        one_sink = e.sink;
-      } else {
-        break;  // fan-out >= 2
+    for (const auto& dpin : n.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        ++fanout;
+        if (fanout == 1) {
+          one_sink = e.sink;
+        } else {
+          break;  // fan-out >= 2
+        }
+      }
+      if (fanout >= 2) {
+        break;
       }
     }
     if (fanout != 1) {  // 0 or >1 out edges
@@ -122,17 +128,21 @@ void Color_acyclic::grow_partitions(hhds::Graph* g) {
       if (!is_partitionable(curr)) {
         continue;
       }
-      for (const auto& ie : curr.inp_edges()) {
-        auto pot_pred = ie.driver.get_master_node();
-        if (!is_partitionable(pot_pred)) {
-          continue;  // skip const / IO
-        }
-        bool is_not_root    = !roots.contains(pot_pred);
-        bool is_not_labeled = !node2id.contains(pot_pred);
-        if (is_not_root && is_not_labeled) {
-          node2id[pot_pred] = curr_id;
-          id2nodes[curr_id].insert(pot_pred);
-          node_preds.push_back(pot_pred);
+      for (auto sink : curr.inp_sorted_pins()) {  // read-only pin walk
+        // PLURAL: a compact loop's carry-in sink legitimately holds two
+        // drivers (pass/legalize/legalize.cpp:301).
+        for (const auto& drv : sink.get_driver_pins()) {
+          auto pot_pred = drv.get_master_node();
+          if (!is_partitionable(pot_pred)) {
+            continue;  // skip const / IO
+          }
+          bool is_not_root    = !roots.contains(pot_pred);
+          bool is_not_labeled = !node2id.contains(pot_pred);
+          if (is_not_root && is_not_labeled) {
+            node2id[pot_pred] = curr_id;
+            id2nodes[curr_id].insert(pot_pred);
+            node_preds.push_back(pot_pred);
+          }
         }
       }
     }
@@ -153,34 +163,38 @@ void Color_acyclic::gather_inou(hhds::Graph* g) {
       if (!is_partitionable(n)) {
         continue;
       }
-      for (const auto& e : n.out_edges()) {
-        auto snode = e.sink.get_master_node();
-        if (!is_partitionable(snode)) {
-          continue;  // const / IO sink
-        }
-        auto out_it = node2id.find(snode);
-        if (out_it == node2id.end()) {
-          continue;
-        }
-        auto outgoing_id = out_it->second;
-        if (curr_id != outgoing_id) {
-          common_out.insert(snode);
-          common_outparts.insert(outgoing_id);
+      for (const auto& dpin : n.out_sorted_pins()) {
+        for (const auto& e : dpin.out_edges()) {
+          auto snode = e.sink.get_master_node();
+          if (!is_partitionable(snode)) {
+            continue;  // const / IO sink
+          }
+          auto out_it = node2id.find(snode);
+          if (out_it == node2id.end()) {
+            continue;
+          }
+          auto outgoing_id = out_it->second;
+          if (curr_id != outgoing_id) {
+            common_out.insert(snode);
+            common_outparts.insert(outgoing_id);
+          }
         }
       }
-      for (const auto& e : n.inp_edges()) {
-        auto dnode = e.driver.get_master_node();
-        if (!is_partitionable(dnode)) {
-          continue;
-        }
-        auto inc_it = node2id.find(dnode);
-        if (inc_it == node2id.end()) {
-          continue;
-        }
-        auto incoming_id = inc_it->second;
-        if (curr_id != incoming_id) {
-          common_inc.insert(dnode);
-          common_incparts.insert(incoming_id);
+      for (auto sink : n.inp_sorted_pins()) {             // read-only pin walk
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          auto dnode = drv.get_master_node();
+          if (!is_partitionable(dnode)) {
+            continue;
+          }
+          auto inc_it = node2id.find(dnode);
+          if (inc_it == node2id.end()) {
+            continue;
+          }
+          auto incoming_id = inc_it->second;
+          if (curr_id != incoming_id) {
+            common_inc.insert(dnode);
+            common_incparts.insert(incoming_id);
+          }
         }
       }
     }

@@ -93,6 +93,19 @@ void Pass_prp_writer::work(Eprp_var& var) {
   // component so `<file>.prp` carries the imports plus every `pub mod` of that
   // file, exactly like the source it came from. A slang-origin unit has no dot
   // and is its own file — the historical 1:1 layout, unchanged.
+  // Names a CONCRETE (non-template) unit already owns. A fully-defaulted
+  // template whose name is in here has been realized under its own name by an
+  // IDENTITY specialization (maybe_specialize_template_call) — emitting both
+  // would write two same-named defs into one file, which no longer re-parses.
+  // The specialization is the one to keep: it carries the same `<N=default>`
+  // signature with the generics already folded.
+  absl::flat_hash_set<std::string> concrete_unit_names;
+  for (const auto& ln : var.lnasts) {
+    if (!ln->is_template()) {
+      concrete_unit_names.insert(std::string(ln->get_top_module_name()));
+    }
+  }
+
   std::map<std::string, std::vector<std::shared_ptr<Lnast>>> by_file;
   for (const auto& ln : var.lnasts) {
     // A deferred TEMPLATE (`mod f(b)` with an untyped param, `...args`, an
@@ -102,6 +115,9 @@ void Pass_prp_writer::work(Eprp_var& var) {
     // Its concrete twins ARE emitted and every call site names one of them, so
     // dropping the template loses nothing the artifact can use.
     if (ln->is_template()) {
+      if (concrete_unit_names.contains(std::string(ln->get_top_module_name()))) {
+        continue;  // its identity specialization is emitted under this same name
+      }
       // ... EXCEPT a template every one of whose generics carries a DECLARATION
       // DEFAULT. That one is elaboration-COMPLETE as written: the writer renders
       // it with its own `<NAME=default, …>` header and the result re-parses to the

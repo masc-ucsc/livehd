@@ -91,8 +91,12 @@ bool cone_reaches_any(const hhds::Pin_class& start, const absl::flat_hash_set<hh
     if (!visited.insert(n).second || is_state_boundary(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    // Arbitrary node: a compact loop's carry-in sink legitimately holds the
+    // seed AND the previous-ordinal self edge, so take the plural reader.
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        work.push_back(e_drv);
+      }
     }
   }
   return false;
@@ -112,8 +116,12 @@ void collect_cone(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Node_c
     if (n.is_invalid() || is_builtin_node(n) || !out.insert(n).second || is_state_boundary(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    // Arbitrary node: a compact loop's carry-in sink legitimately holds the
+    // seed AND the previous-ordinal self edge, so take the plural reader.
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        work.push_back(e_drv);
+      }
     }
   }
 }
@@ -210,9 +218,10 @@ Loop_split classify_loop(const hhds::Node_class& loop_sub) {
     auto carry_in = declared_input_pin(*body, cc.in_port);
 
     hhds::Pin_class carry_out;
-    for (const auto& e : out_node.inp_edges()) {
-      if (e.sink.get_port_id() == cc.out_port) {
-        carry_out = e.driver;
+    for (auto e_sink : out_node.inp_sorted_pins()) {
+      auto e_drv = e_sink.get_driver_pin();
+      if (e_sink.get_port_id() == cc.out_port) {
+        carry_out = e_drv;
         break;
       }
     }
@@ -252,12 +261,15 @@ Loop_split classify_loop(const hhds::Node_class& loop_sub) {
       int  carry_operands = 0;
       int  free_operands  = 0;
       bool foreign        = false;
-      for (const auto& e : head_n.inp_edges()) {
-        if (e.sink.get_port_id() != 0) {
-          foreign = true;  // an operand on a non-fold sink (Sum/Mult `bs`)
-        } else if (skip_identities(e.driver) == carry_in) {
+      for (auto e_sink : head_n.inp_sorted_pins()) {
+        auto e_drv = e_sink.get_driver_pin();
+        // Bank, not raw pid: the fold bank is EVEN-pid `as`, and every operand
+        // now owns a pid of its own (graph/cell.hpp).
+        if (Ntype::sink_bank(op, e_sink.get_port_id()) != 0) {
+          foreign = true;  // an operand on a non-fold sink (Sum's `bs`)
+        } else if (skip_identities(e_drv) == carry_in) {
           ++carry_operands;
-        } else if (!depends_on_a_carry(e.driver)) {
+        } else if (!depends_on_a_carry(e_drv)) {
           ++free_operands;
         } else {
           foreign = true;  // an operand that USES a carry without being it

@@ -43,8 +43,8 @@ TEST(SubInline, FeedThroughChainRetainsItsExternalDriver) {
   inst.create_driver_pin(static_cast<hhds::Port_id>(2 * count - 1)).connect_sink(parent->get_output_pin("result"));
   ASSERT_TRUE(gu::inline_sub_instance(parent.get(), inst, "test"));
   int drivers = 0;
-  for (const auto& edge : parent->get_output_pin("result").inp_edges()) {
-    EXPECT_EQ(edge.driver, data);
+  for (auto edge_drv : parent->get_output_pin("result").get_driver_pins()) {
+    EXPECT_EQ(edge_drv, data);
     ++drivers;
   }
   EXPECT_EQ(drivers, 1);

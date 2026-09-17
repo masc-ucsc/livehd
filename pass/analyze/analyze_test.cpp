@@ -42,8 +42,8 @@ TEST(Analyze, CleanCombCone) {
   auto g = gio->create_graph();
 
   auto sum = create_typed_node(*g, Ntype_op::Sum);
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(sum.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(sum, 1));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
 
   Report rep;
@@ -65,9 +65,9 @@ TEST(Analyze, GenuineCombLoopIsOther) {
   auto g = gio->create_graph();
 
   auto sum = create_typed_node(*g, Ntype_op::Sum);
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   auto sum_o = sum.create_driver_pin(0);
-  sum_o.connect_sink(sum.create_sink_pin(1));  // the ring
+  sum_o.connect_sink(livehd::graph_util::setup_sink_pid(sum, 1));  // the ring
   sum_o.connect_sink(g->get_output_pin("y"));
 
   Report rep;
@@ -161,7 +161,7 @@ TEST(Analyze, ClockFromSubIsReported) {
 
   auto inst = create_typed_node(*g, Ntype_op::Sub);
   inst.set_subnode(cgio);
-  g->get_input_pin("clk").connect_sink(inst.create_sink_pin(1));
+  g->get_input_pin("clk").connect_sink(livehd::graph_util::setup_sink_pid(inst, 1));
 
   auto ff = create_typed_node(*g, Ntype_op::Flop);
   inst.create_driver_pin(2).connect_sink(
@@ -217,13 +217,13 @@ TEST(Analyze, GateIntoChildClockPortIsReported) {
 
   // ...and the GATE, feeding the child's clock port.
   auto gate = create_typed_node(*g, Ntype_op::And);
-  g->get_input_pin("clk").connect_sink(gate.create_sink_pin(0));
-  g->get_input_pin("en").connect_sink(gate.create_sink_pin(0));
+  g->get_input_pin("clk").connect_sink(livehd::graph_util::setup_sink_pid(gate, 0));
+  g->get_input_pin("en").connect_sink(livehd::graph_util::setup_sink_pid(gate, 0));
 
   auto inst = create_typed_node(*g, Ntype_op::Sub);
   inst.set_subnode(cgio);
-  gate.create_driver_pin(0).connect_sink(inst.create_sink_pin(1));
-  g->get_input_pin("d").connect_sink(inst.create_sink_pin(2));
+  gate.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(inst, 1));
+  g->get_input_pin("d").connect_sink(livehd::graph_util::setup_sink_pid(inst, 2));
   inst.create_driver_pin(3).connect_sink(g->get_output_pin("q"));
 
   Report rep;

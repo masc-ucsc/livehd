@@ -208,11 +208,14 @@ for u in params params_p1; do
 done
 echo "PASS: a fully-defaulted generic unit survives a pyrope -> pyrope re-emit"
 
-# KNOWN GAP (see inou/slang/README.md): recompiling the emitted Pyrope renames a
-# parameterized STATEFUL module to its mangled specialization, so cross-frontend
-# def pairing degrades on the verilog -> pyrope -> lg leg. (A parameterized COMB
-# child is inlined instead, so it never shows this.) Pinned so the day the
-# identity-specialization naming lands, this flips and says so out loud.
+# Cross-frontend def pairing on the verilog -> pyrope -> lg leg. This USED to be a
+# known gap: recompiling the emitted Pyrope renamed a parameterized STATEFUL module
+# to its mangled specialization (`rtsub__u1_u8_N_3_h…`), so the two legs could not be
+# paired by name. The identity-specialization naming fixed it -- a specialization
+# whose generics all take their DECLARED DEFAULTS keeps the template's own name -- so
+# the assertion below is now the real one rather than a pinned limitation.
+# `rtsub` (N=3, the default) keeps its name; `rtsub_p1` (N=5) is a distinct
+# specialization and gets its own emitted def. Neither may carry a `__` mangle.
 cat >"$W/rt.v" <<'EOF'
 module rtsub #(parameter int N = 3)(input clk, input [7:0] a, output reg [8:0] y);
   always @(posedge clk) y <= a + N;
@@ -230,10 +233,14 @@ $LHD compile "$W/rt.v" --top rttop --emit-dir pyrope:"$W/rt-p" --workdir "$W/rt-
   || fail "stateful parameterized pyrope emission failed"
 $LHD compile "$W/rt-p"/*.prp --top rttop.rttop --emit-dir lg:"$W/rt-lgp" --workdir "$W/rt-wr" -q \
   || fail "recompiling the generated stateful Pyrope failed"
-if $LHD tool tree lg:"$W/rt-lgp" 2>/dev/null | grep -q 'rtsub__'; then
-  echo "KNOWN GAP: recompiled parameterized stateful modules keep their mangled specialization names"
-else
-  fail "mangled specialization names are GONE -- the identity-specialization fix landed; replace this block with the real assertion (semdiff --top rttop --ref lg:rt-lgv --impl lg:rt-lgp reports '3 def pair(s), 0 ref-only' and 'registers ref 2/2 paired') and drop the matching limitation from inou/slang/README.md"
-fi
+! $LHD tool tree lg:"$W/rt-lgp" 2>/dev/null | grep -q 'rtsub__' \
+  || fail "recompiled parameterized stateful module kept a mangled specialization name: $($LHD tool tree lg:"$W/rt-lgp" 2>/dev/null)"
+for d in rtsub rtsub_p1; do
+  $LHD tool tree lg:"$W/rt-lgv" 2>/dev/null | grep -q "^$d " \
+    || fail "verilog -> lg leg lost the plain def name '$d'"
+  $LHD tool tree lg:"$W/rt-lgp" 2>/dev/null | grep -q "^$d\.$d " \
+    || fail "pyrope -> lg leg lost the plain def name '$d': $($LHD tool tree lg:"$W/rt-lgp" 2>/dev/null)"
+done
+echo "PASS: a parameterized STATEFUL module keeps its plain name across verilog -> pyrope -> lg (both specializations pair)"
 
 echo "ALL PASS"

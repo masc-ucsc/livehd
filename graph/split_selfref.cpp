@@ -108,9 +108,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   }
 
   auto drv_at = [](const hhds::Node_class& n, uint32_t pid) -> hhds::Pin_class {
-    for (auto e : n.inp_edges()) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
-        return e.driver;
+    for (auto sink : n.inp_sorted_pins()) {
+      if (static_cast<uint32_t>(sink.get_port_id()) == pid) {
+        return sink.get_driver_pin();
       }
     }
     return {};
@@ -178,11 +178,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // clears everything above the mask's top set bit) -- covers the `x & 1`
       // valid-bit clamps the slang->prp regeneration emits.
       std::pair<int, int> best = kBail;
-      for (auto e : m.inp_edges()) {
-        if (!e.driver.is_const()) {
+      for (auto sink : m.inp_sorted_pins()) {
+        auto drv = sink.get_driver_pin();
+        if (!drv.is_const()) {
           continue;
         }
-        const auto& c = gu::const_of(e.driver);
+        const auto& c = gu::const_of(drv);
         if (c.has_unknowns() || c.is_negative()) {
           continue;
         }
@@ -206,12 +207,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       const auto          control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(m) : 0;
       std::pair<int, int> u{0, 0};
       bool                any = false;
-      for (auto e : m.inp_edges()) {
-        if ((op == Ntype_op::Mux && e.sink.get_port_id() == 0)
-            || (op == Ntype_op::Hotmux && gu::is_hotmux_control(e.sink.get_port_id(), control_end))) {
+      for (auto sink : m.inp_sorted_pins()) {
+        if ((op == Ntype_op::Mux && sink.get_port_id() == 0)
+            || (op == Ntype_op::Hotmux && gu::is_hotmux_control(sink.get_port_id(), control_end))) {
           continue;  // selector
         }
-        auto f = self(self, e.driver, depth + 1);
+        auto f = self(self, sink.get_driver_pin(), depth + 1);
         if (f.first < 0) {
           return kBail;
         }
@@ -362,11 +363,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     }
     const int w          = hi - lo;
     auto      slice_node = [&](const hhds::Pin_class& val) -> hhds::Pin_class {
-      auto n = gu::create_typed_node(*g, Ntype_op::Get_mask);
+      auto n = gu::create_get_mask(*g, val, lo, hi);
       ++created;
       ++total_created;
-      val.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
-      mask_const(lo, hi).connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(2)));
       auto dp = n.create_driver_pin(0);
       gu::set_ubits(dp, w);
       return dp;
@@ -404,12 +403,23 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     if (op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor || op == Ntype_op::Sum) {
       std::vector<hhds::Pin_class> operands;
       bool                         has_sub = false;
-      for (auto e : m.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+      for (auto sink : m.inp_sorted_pins()) {  // read-only walk
+        // BANK, not the raw sink pid. All four of these ops are BANKED
+        // (graph/cell.hpp's ONE DRIVER PER SINK PIN block), so each operand of
+        // the ADD bank owns its own pid -- 0, 2, 4, ... for a Sum, and 0, 1,
+        // 2, ... for the single-bank Or/And/Xor. Testing `pid != 0` therefore
+        // declared the SECOND operand of every pack a "subtrahend", set
+        // has_sub and left `usable` false, so split_selfref silently refused
+        // every commutative pack and the false word-level cycle it exists to
+        // cut survived to the back end (selfref_wire regenerated with a
+        // self-referential `or_64`, and lec REFUSED to encode it).
+        // Ntype::sink_bank folds the per-operand pids back to the role, so
+        // bank 1 means the Sum's `bs` side and nothing else.
+        if (Ntype::sink_bank(op, sink.get_port_id()) != 0) {
           has_sub = true;  // Sum subtrahend (or unexpected port) -> not a pack
           break;
         }
-        operands.push_back(e.driver);
+        operands.push_back(sink.get_driver_pin());
       }
       bool usable = !has_sub && !operands.empty();
       // A Sum is only a pack when NO carry can occur: every operand bounded
@@ -476,7 +486,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             ++created;
             ++total_created;
             for (auto& low : lows) {
-              low.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+              low.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
             }
             auto dp = n.create_driver_pin(0);
             gu::set_ubits(dp, hi);
@@ -536,7 +546,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
           auto n = gu::create_typed_node(*g, op == Ntype_op::Sum ? Ntype_op::Or : op);
           ++created;
           for (auto& pp : parts) {
-            pp.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+            pp.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           }
           auto dp = n.create_driver_pin(0);
           gu::set_ubits(dp, w);
@@ -559,9 +569,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             if (!low.is_invalid()) {
               auto n = gu::create_typed_node(*g, Ntype_op::SHL);
               ++created;
-              low.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+              low.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
               livehd::graph_util::create_const(*g, *Dlop::create_integer(k - lo))
-                  .connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(1)));
+                  .connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(1)));
               auto dp = n.create_driver_pin(0);
               gu::set_ubits(dp, w);
               res = dp;
@@ -607,27 +617,48 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       if (!rsel.is_invalid()) {
         std::vector<std::pair<hhds::Port_id, hhds::Pin_class>> arms;
         bool                                                   ok = true;
-        for (auto e : m.inp_edges()) {
-          if (static_cast<uint32_t>(e.sink.get_port_id()) == 0) {
-            continue;  // selector
+        // SNAPSHOT: `self` RECURSES and creates nodes/edges in `g` -- the very
+        // graph `m` lives in -- so a lazy view over live pin storage would be
+        // invalidated mid-walk. inp_edges() materialized, and this must too.
+        for (auto sink : m.inp_pins_snapshot()) {
+          if (static_cast<uint32_t>(sink.get_port_id()) == 0) {
+            continue;  // selector (Mux is NOT banked: pid 0 is the role)
           }
-          auto r = self(self, e.driver, lo, hi, depth + 1);
+          auto r = self(self, sink.get_driver_pin(), lo, hi, depth + 1);
           if (r.is_invalid()) {
             ok = false;
             break;
           }
-          arms.emplace_back(e.sink.get_port_id(), r);
+          arms.emplace_back(sink.get_port_id(), r);
         }
         if (ok && !arms.empty()) {
           auto n = gu::create_typed_node(*g, Ntype_op::Mux);
           ++created;
-          rsel.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          rsel.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           for (auto& [pid, ap] : arms) {
             ap.connect_sink(n.create_sink_pin(pid));
           }
           auto dp = n.create_driver_pin(0);
           gu::set_ubits(dp, w);
           res = dp;
+        }
+      }
+    } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+      const int count = gu::reduction_count(m);
+      const int width = op == Ntype_op::Rxor ? 1 : std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(count))));
+      if (count == 0 || lo >= width) {
+        res = gu::create_const(*g, *Dlop::create_integer(0));
+      } else {
+        // Every result bit depends only on the explicit selected window.
+        auto source = self(self, drv_at(m, 0), 0, count, depth + 1);
+        if (!source.is_invalid()) {
+          auto reduced = gu::create_typed_node(*g, op);
+          ++created;
+          source.connect_sink(livehd::graph_util::setup_sink_pid(reduced, 0));
+          drv_at(m, 1).connect_sink(livehd::graph_util::setup_sink_pid(reduced, 1));
+          auto output = reduced.create_driver_pin(0);
+          gu::set_ubits(output, width);
+          res = lo == 0 && hi >= width ? output : slice_node(output);
         }
       }
     } else if (op == Ntype_op::EQ || op == Ntype_op::Ror) {
@@ -643,12 +674,18 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       } else {
         std::vector<hhds::Pin_class> operands;
         bool                         ok = true;
-        for (auto e : m.inp_edges()) {
-          if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+        // SNAPSHOT: `self` recurses and creates nodes in `g` below.
+        for (auto sink : m.inp_pins_snapshot()) {
+          // BANK, not the raw sink pid -- the same defect this file already
+          // carries a note about at the Or/And/Xor/Sum pack above. EQ and Ror
+          // are SINGLE-bank commutative ops, so operand k now owns pid k; the
+          // old `pid != 0` test was unsatisfiable past the first operand and
+          // silently killed every EQ/Ror rebuild.
+          if (Ntype::sink_bank(op, sink.get_port_id()) != 0) {
             ok = false;
             break;
           }
-          auto d = e.driver;
+          auto d = sink.get_driver_pin();
           if (!d.is_const() && in_cycle.contains(d.get_master_node())) {
             const int db      = gu::bits_of(d);
             int       whole_w = 0;
@@ -687,7 +724,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
           auto n = gu::create_typed_node(*g, op);
           ++created;
           for (auto& d : operands) {
-            d.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+            d.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           }
           auto dp = n.create_driver_pin(0);
           gu::set_ubits(dp, 1);  // unsigned boolean
@@ -700,14 +737,14 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       if (!r.is_invalid()) {
         auto n1 = gu::create_typed_node(*g, Ntype_op::Not);
         ++created;
-        r.connect_sink(n1.create_sink_pin(static_cast<hhds::Port_id>(0)));
+        r.connect_sink(livehd::graph_util::setup_sink_pid(n1, static_cast<hhds::Port_id>(0)));
         auto np = n1.create_driver_pin(0);
         gu::set_sbits(np, w + 1);
         auto n2 = gu::create_typed_node(*g, Ntype_op::And);
         ++created;
-        np.connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
+        np.connect_sink(livehd::graph_util::setup_sink_pid(n2, static_cast<hhds::Port_id>(0)));
         livehd::graph_util::create_const(*g, gu::mask_window_const(0, w))
-            .connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
+            .connect_sink(livehd::graph_util::setup_sink_pid(n2, static_cast<hhds::Port_id>(0)));
         auto dp = n2.create_driver_pin(0);
         gu::set_ubits(dp, w);
         res = dp;
@@ -822,9 +859,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         if (a > lo) {
           auto n = gu::create_typed_node(*g, Ntype_op::SHL);
           ++created;
-          r.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          r.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           livehd::graph_util::create_const(*g, *Dlop::create_integer(a - lo))
-              .connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(1)));
+              .connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(1)));
           auto dp = n.create_driver_pin(0);
           gu::set_ubits(dp, w);
           r = dp;
@@ -841,7 +878,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         auto n = gu::create_typed_node(*g, Ntype_op::Or);
         ++created;
         for (auto& pp : parts) {
-          pp.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          pp.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
         }
         auto dp = n.create_driver_pin(0);
         gu::set_ubits(dp, w);
@@ -905,16 +942,17 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       hhds::Pin_class cpin, other;
       int             nins = 0;
       bool            bad  = false;
-      for (auto e : R.inp_edges()) {
+      for (auto sink : R.inp_sorted_pins()) {  // read-only walk
+        auto drv = sink.get_driver_pin();
         ++nins;
-        if (e.driver.is_const()) {
+        if (drv.is_const()) {
           if (cpin.is_invalid()) {
-            cpin = e.driver;
+            cpin = drv;
           } else {
             bad = true;
           }
         } else if (other.is_invalid()) {
-          other = e.driver;
+          other = drv;
         } else {
           bad = true;
         }
@@ -968,28 +1006,28 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   }
 
   for (auto& [R, res, nm] : gm_rewires) {
-    auto edges = R.inp_edges();  // snapshot before mutating
-    for (auto e : edges) {
-      auto pid = static_cast<uint32_t>(e.sink.get_port_id());
+    // SNAPSHOT before mutating: the body deletes the edge it stands on.
+    for (auto sink : R.inp_pins_snapshot()) {
+      auto pid = static_cast<uint32_t>(sink.get_port_id());
       if (pid == 0 || pid == 2) {
-        e.del_edge();
+        sink.del_sink(sink.get_driver_pin());  // drop this sink pin's one driver
       }
     }
     // resolve() returned the packed-down [0,w) slice, so the reader becomes a
     // low-w identity read: same value, same single-bit clamp semantics.
-    res.connect_sink(R.create_sink_pin(static_cast<hhds::Port_id>(0)));
-    nm.connect_sink(R.create_sink_pin(static_cast<hhds::Port_id>(2)));
+    res.connect_sink(livehd::graph_util::setup_sink_pid(R, static_cast<hhds::Port_id>(0)));
+    nm.connect_sink(livehd::graph_util::setup_sink_pid(R, static_cast<hhds::Port_id>(2)));
   }
   for (auto& [A, oldd, res] : and_rewires) {
-    auto edges = A.inp_edges();  // snapshot before mutating
-    for (auto e : edges) {
-      if (e.driver == oldd) {
-        e.del_edge();
+    // SNAPSHOT before mutating: the body deletes the edge it stands on.
+    for (auto sink : A.inp_pins_snapshot()) {
+      if (auto drv = sink.get_driver_pin(); drv == oldd) {
+        sink.del_sink(drv);
       }
     }
     // And(res, 2^j-1) == res: the const mask stays, other SRA consumers keep
     // their (possibly still cyclic) reads and fail loudly if unresolvable.
-    res.connect_sink(A.create_sink_pin(static_cast<hhds::Port_id>(0)));
+    res.connect_sink(livehd::graph_util::setup_sink_pid(A, static_cast<hhds::Port_id>(0)));
   }
   const int nrew   = static_cast<int>(gm_rewires.size() + and_rewires.size());
   // Report the survivors to the caller (the iterating wrapper decides whether to
@@ -1151,8 +1189,8 @@ static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& ins
 
   absl::flat_hash_set<hhds::Pin_class> seen;
   std::vector<hhds::Pin_class>         work;
-  for (const auto& e : opin.inp_edges()) {
-    work.push_back(e.driver);
+  if (auto seed = opin.get_driver_pin(); !seed.is_invalid()) {
+    work.push_back(seed);  // a graph output pin is a sink: at most one driver
   }
   while (!work.empty()) {
     auto d = work.back();
@@ -1176,15 +1214,15 @@ static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& ins
     }
     if (op == Ntype_op::Sub) {
       const auto inner = sub_output_deps(dn, static_cast<uint32_t>(d.get_port_id()), cache);
-      for (const auto& e : dn.inp_edges()) {
-        if (inner.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
-          work.push_back(e.driver);
+      for (auto sink : dn.inp_sorted_pins()) {
+        if (inner.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+          work.push_back(sink.get_driver_pin());
         }
       }
       continue;
     }
-    for (const auto& e : dn.inp_edges()) {
-      work.push_back(e.driver);
+    for (auto sink : dn.inp_sorted_pins()) {
+      work.push_back(sink.get_driver_pin());
     }
   }
   cache[key] = res;
@@ -1222,15 +1260,15 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
       // empty set (loop sub, black box, state-fed output) leaves the instance a
       // boundary, which is how every Sub used to be treated.
       const auto deps = sub_output_deps(n, static_cast<uint32_t>(d.get_port_id()), dep_cache);
-      for (const auto& e : n.inp_edges()) {
-        if (deps.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
-          work.push_back(e.driver);
+      for (auto sink : n.inp_sorted_pins()) {
+        if (deps.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+          work.push_back(sink.get_driver_pin());
         }
       }
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    for (auto sink : n.inp_sorted_pins()) {
+      work.push_back(sink.get_driver_pin());
     }
   }
   return false;
@@ -1295,17 +1333,18 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
     }
   }
   for (auto& n : nodes) {
-    for (auto e : n.inp_edges()) {
-      auto d = e.driver;
-      if (d.is_invalid() || d.is_const()) {
-        continue;
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      for (auto d : sink.get_driver_pins()) {
+        if (d.is_invalid() || d.is_const()) {
+          continue;
+        }
+        auto m = d.get_master_node();
+        if (!indeg.contains(m)) {
+          continue;  // the `contains` guard also drops boundary masters fast_class never lists
+        }
+        ++indeg[n];
+        succ[m].push_back(n);
       }
-      auto m = d.get_master_node();
-      if (!indeg.contains(m)) {
-        continue;  // the `contains` guard also drops boundary masters fast_class never lists
-      }
-      ++indeg[n];
-      succ[m].push_back(n);
     }
   }
   std::vector<hhds::Node_class> q;
@@ -1374,14 +1413,16 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
   std::vector<int>              indeg(total, 0);
   std::vector<std::vector<int>> succ(total);
   for (int i = 0; i < total; ++i) {
-    for (const auto& e : nodes[i].inp_edges()) {
-      if (e.driver.is_invalid() || e.driver.is_const()) {
-        continue;
-      }
-      auto d = e.driver.get_master_node();
-      if (auto it = idx.find(d); it != idx.end() && it->second != i) {
-        ++indeg[i];
-        succ[it->second].push_back(i);
+    for (auto sink : nodes[i].inp_sorted_pins()) {  // read-only walk
+      for (auto drv : sink.get_driver_pins()) {
+        if (drv.is_invalid() || drv.is_const()) {
+          continue;
+        }
+        auto d = drv.get_master_node();
+        if (auto it = idx.find(d); it != idx.end() && it->second != i) {
+          ++indeg[i];
+          succ[it->second].push_back(i);
+        }
       }
     }
   }
@@ -1470,12 +1511,7 @@ static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>
     if (sink.is_invalid()) {
       return {};
     }
-    for (auto e : sink.get_master_node().inp_edges()) {
-      if (e.sink.get_port_id() == sink.get_port_id()) {
-        return e.driver;
-      }
-    }
-    return {};
+    return sink.get_driver_pin();  // exactly one driver per sink pin
   };
 
   // A Sub S is on a false loop iff a backward COMB walk from one of its input
@@ -1494,8 +1530,8 @@ static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>
   auto on_false_loop = [&](const hhds::Node_class& s) {
     absl::flat_hash_set<hhds::Node_class> seen;
     std::vector<hhds::Pin_class>          stk;
-    for (auto e : s.inp_edges()) {
-      stk.push_back(e.driver);
+    for (auto sink : s.inp_sorted_pins()) {  // read-only walk
+      stk.push_back(sink.get_driver_pin());
     }
     while (!stk.empty()) {
       auto d = stk.back();
@@ -1514,8 +1550,8 @@ static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>
       if (!seen.insert(m).second) {
         continue;
       }
-      for (auto e : m.inp_edges()) {
-        stk.push_back(e.driver);
+      for (auto sink : m.inp_sorted_pins()) {
+        stk.push_back(sink.get_driver_pin());
       }
     }
     return false;
@@ -1570,8 +1606,8 @@ static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>
       }
       // The Sub's driver for each input port (by port id) -- feeds a callee input.
       absl::flat_hash_map<uint32_t, hhds::Pin_class> sub_in_drv;
-      for (auto e : sub.inp_edges()) {
-        sub_in_drv[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
+      for (auto sink : sub.inp_sorted_pins()) {  // read-only walk
+        sub_in_drv[static_cast<uint32_t>(sink.get_port_id())] = sink.get_driver_pin();
       }
 
       // (a) copy every callee comb node into g (consts/IO ports handled on demand).
@@ -1631,22 +1667,31 @@ static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>
         if (it == nmap.end()) {
           continue;
         }
-        for (auto e : cn.inp_edges()) {
-          auto gdrv = map_driver(e.driver);
+        // SNAPSHOT: the walk is over the CALLEE body but map_driver() creates
+        // nodes and pins in `g`. Keeping the snapshot the old inp_edges() gave
+        // us makes the loop immune to whichever body the epoch counter belongs
+        // to; the cost is one small vector per callee node.
+        for (auto sink : cn.inp_pins_snapshot()) {
+          auto gdrv = map_driver(sink.get_driver_pin());
           if (gdrv.is_invalid()) {
             continue;
           }
-          gdrv.connect_sink(it->second.create_sink_pin(e.sink.get_port_id()));
+          gdrv.connect_sink(it->second.create_sink_pin(sink.get_port_id()));
         }
       }
 
       // (c) resolve each callee OUTPUT port to its g-driver and the Sub-output's
       // consumer sinks (computed BEFORE deleting the Sub, which still owns them).
-      // Walk out_edges instead of probing get_driver_pin per decl: a declared
-      // output with no consumer has no materialized pin and hhds asserts.
+      // Walk the DRIVEN output pins instead of probing get_driver_pin per
+      // decl: a declared output with no consumer has no materialized pin and
+      // hhds asserts. The per-pin fanout stays edge-shaped because it is a SET;
+      // out_sorted_pins() just skips the instance's sink pins on the way.
       absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> out_sinks;
-      for (const auto& oe : sub.out_edges()) {
-        out_sinks[static_cast<uint32_t>(oe.driver.get_port_id())].push_back(oe.sink);
+      for (auto drv : sub.out_sorted_pins()) {
+        auto& sinks = out_sinks[static_cast<uint32_t>(drv.get_port_id())];
+        for (const auto& oe : drv.out_edges()) {
+          sinks.push_back(oe.sink);
+        }
       }
       std::vector<std::pair<hhds::Pin_class, std::vector<hhds::Pin_class>>> reconnect;
       for (const auto& od : sio->get_output_pin_decls()) {
@@ -1885,11 +1930,12 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
     if (n.is_invalid() || !ancestors.insert(n).second) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      if (e.driver.is_invalid() || e.driver.is_const() || livehd::graph_util::is_graph_input_pin(e.driver)) {
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      auto drv = sink.get_driver_pin();
+      if (drv.is_invalid() || drv.is_const() || livehd::graph_util::is_graph_input_pin(drv)) {
         continue;
       }
-      auto pred = e.driver.get_master_node();
+      auto pred = drv.get_master_node();
       if (!pred.is_invalid() && is_comb(pred)) {
         work.push_back(pred);
       }
@@ -1914,10 +1960,16 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
     if (n.is_invalid() || !ancestors.contains(n) || !scoped_cycle.insert(n).second) {
       continue;
     }
-    for (const auto& e : n.out_edges()) {
-      auto succ = e.sink.get_master_node();
-      if (!succ.is_invalid() && ancestors.contains(succ)) {
-        work.push_back(succ);
+    // A driver's fanout is a SET, so the inner walk stays edge-shaped -- but
+    // out_sorted_pins() gets there through the node's pin list, so the node's
+    // SINK pins are skipped by a direction-bit test instead of having their
+    // in-edges decoded and thrown away.
+    for (auto drv : n.out_sorted_pins()) {
+      for (const auto& e : drv.out_edges()) {
+        auto succ = e.sink.get_master_node();
+        if (!succ.is_invalid() && ancestors.contains(succ)) {
+          work.push_back(succ);
+        }
       }
     }
   }

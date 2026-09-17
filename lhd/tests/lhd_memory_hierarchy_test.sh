@@ -42,11 +42,11 @@ assert len(ids['true'])==2,ids
 names=[bytes.fromhex(s).decode() for s in ids['true']]
 assert any('left' in s for s in names) and any('right' in s for s in names),names
 assert 'cgen_memory_1rd_1wr #' in texts['false']
-assert '_lowered_' not in texts['false']
+assert '_blasted' not in texts['false']
 # `default` is memory=auto: each bank is 4 x 8 = 32 bits over 2 ports, well
 # within memory_max_bits, so it folds exactly like memory=true.
 for m in ('default','true'):
-    assert re.search(r'module cgen_memory_.*_lowered_',texts[m]),m
+    assert re.search(r'module cgen_memory_.*_blasted',texts[m]),m
     assert not re.search(r'`include.*cgen_memory',texts[m]),m
     assert 'DFFx1 ' in texts[m] or 'always @(posedge' in texts[m],m
 for m in texts:

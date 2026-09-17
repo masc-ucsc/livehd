@@ -86,12 +86,19 @@ class Mux_sharing {
     if (control.is_const() || gu::type_op_of(node) != Ntype_op::EQ) {
       return {};
     }
-    const auto edges = node.inp_edges();
-    if (edges.size() != 2 || edges[0].sink.get_port_id() != 0 || edges[1].sink.get_port_id() != 0) {
+    const auto edges = node.inp_pins_snapshot();
+    // EQ is a SINGLE-BANK commutative cell, so its two operands each own a
+    // sink pid -- 0 and 1 -- rather than sharing pin 0 (graph/cell.hpp's ONE
+    // DRIVER PER SINK PIN block). Requiring BOTH on pid 0 made this decode
+    // unsatisfiable, silently disabling the whole mux-chain decode rather than
+    // miscompiling. Check the BANK, which is 0 for every EQ operand and is
+    // what "these are the two compared values" actually means.
+    if (edges.size() != 2 || Ntype::sink_bank(Ntype_op::EQ, edges[0].get_port_id()) != 0
+        || Ntype::sink_bank(Ntype_op::EQ, edges[1].get_port_id()) != 0) {
       return {};
     }
-    auto a = edges[0].driver;
-    auto b = edges[1].driver;
+    auto a = edges[0].get_driver_pin();
+    auto b = edges[1].get_driver_pin();
     if (a.is_const()) {
       std::swap(a, b);
     }
@@ -144,7 +151,7 @@ class Mux_sharing {
     }
     auto n = gu::create_typed_node(graph, Ntype_op::Ror, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
-    n.create_sink_pin(0).connect_driver(p);
+    livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
     return n.create_driver_pin(0);
   }
 
@@ -157,8 +164,8 @@ class Mux_sharing {
     }
     auto n = gu::create_typed_node(graph, Ntype_op::EQ, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
-    n.create_sink_pin(0).connect_driver(p);
-    n.create_sink_pin(0).connect_driver(zero);
+    livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
+    livehd::graph_util::setup_sink_pid(n, 0).connect_driver(zero);
     return n.create_driver_pin(0);
   }
 
@@ -174,8 +181,8 @@ class Mux_sharing {
     }
     auto n = gu::create_typed_node(graph, Ntype_op::And, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
-    n.create_sink_pin(0).connect_driver(a);
-    n.create_sink_pin(0).connect_driver(b);
+    livehd::graph_util::setup_sink_pid(n, 0).connect_driver(a);
+    livehd::graph_util::setup_sink_pid(n, 0).connect_driver(b);
     return n.create_driver_pin(0);
   }
 
@@ -189,7 +196,7 @@ class Mux_sharing {
     auto n = gu::create_typed_node(graph, Ntype_op::Or, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
     for (auto p : pins) {
-      n.create_sink_pin(0).connect_driver(p);
+      livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
     }
     return n.create_driver_pin(0);
   }
@@ -203,17 +210,23 @@ class Mux_sharing {
       }
       // Dense pid indexing avoids sorting high-fanin Hotmuxes. Reject malformed
       // or gapped cells without reinterpreting their port numbers.
-      const auto       edges = node.inp_edges();
-      std::vector<Pin> pins(edges.size());
+      // Read-only scan over the node's own sink-pin list (already ascending by
+      // port id); no Edge_class is materialized for a 320-arm Hotmux.
+      size_t n_in = 0;
+      for ([[maybe_unused]] auto isnk : node.inp_sorted_pins()) {
+        ++n_in;
+      }
+      std::vector<Pin> pins(n_in);
       bool             valid = true;
-      for (const auto& e : edges) {
-        const auto pid = e.sink.get_port_id();
-        if (pid >= pins.size() || !pins[pid].is_invalid() || e.driver.is_invalid()
-            || (e.driver.is_const() && gu::const_of(e.driver).has_unknowns())) {
+      for (auto isnk : node.inp_sorted_pins()) {
+        const auto pid  = isnk.get_port_id();
+        auto       idrv = isnk.get_driver_pin();
+        if (pid >= pins.size() || !pins[pid].is_invalid() || idrv.is_invalid()
+            || (idrv.is_const() && gu::const_of(idrv).has_unknowns())) {
           valid = false;
           break;
         }
-        pins[pid] = e.driver;
+        pins[pid] = idrv;
       }
       if (!valid || pins.size() < 2) {
         continue;
@@ -376,27 +389,28 @@ class Mux_sharing {
         update = conjunction(boolean(en), update);
       }
       auto sink = gu::setup_sink_by_name(flop, "enable");
-      for (auto e : sink.inp_edges()) {
-        e.del_edge();
-      }
+      sink.del_sink();  // one driver per sink pin: the whole old enable
       sink.connect_driver(update);
     }
     // Retain the root and its output metadata/name: other regions may use it
     // as an opaque terminal. Replacing that pin would invalidate their snapshot.
-    for (auto e : root.node.inp_edges()) {
-      e.del_edge();
+    // SNAPSHOT: del_sink() is structural, so a lazy pin view would be
+    // invalidated by the first disconnect. Only EDGES go, never a pin or the
+    // node, so the later elements stay valid.
+    for (const auto& spin : root.node.inp_pins_snapshot()) {
+      spin.del_sink();
     }
     gu::clear_proven(root.node);
     if (data.size() == 1) {
       gu::set_type_op(root.node, Ntype_op::Or);
-      root.node.create_sink_pin(0).connect_driver(data.front());
+      livehd::graph_util::setup_sink_pid(root.node, 0).connect_driver(data.front());
     } else {
       gu::set_type_op(root.node, Ntype_op::Hotmux);
       for (size_t i = 0; i + 1 < data.size(); ++i) {
-        root.node.create_sink_pin(2 * i).connect_driver(controls[i]);
-        root.node.create_sink_pin(2 * i + 1).connect_driver(data[i]);
+        livehd::graph_util::setup_sink_pid(root.node, 2 * i).connect_driver(controls[i]);
+        livehd::graph_util::setup_sink_pid(root.node, 2 * i + 1).connect_driver(data[i]);
       }
-      root.node.create_sink_pin(2 * (data.size() - 1)).connect_driver(data.back());
+      livehd::graph_util::setup_sink_pid(root.node, 2 * (data.size() - 1)).connect_driver(data.back());
       // Binary mux paths partition the input space; absorbed Hotmuxes already
       // had an exclusivity proof. Grouping these disjoint predicates preserves it.
       gu::set_proven(root.node, gu::kFormalOnehot);

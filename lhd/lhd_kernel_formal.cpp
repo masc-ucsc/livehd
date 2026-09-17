@@ -74,8 +74,8 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
     // inline_sub_instance diagnoses a direct IO feed-through as an unsupported
     // boundary cycle. Since this path is optional, decline it silently before
     // calling the mutator and leave the ordinary solver fallback pristine.
-    for (const auto& edge : body->get_output_node().inp_edges()) {
-      if (livehd::graph_util::is_graph_input_pin(edge.driver)) {
+    for (auto sink : body->get_output_node().inp_sorted_pins()) {  // read-only
+      if (livehd::graph_util::is_graph_input_pin(sink.get_driver_pin())) {
         return false;
       }
     }
@@ -802,11 +802,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         return root_of(livehd::latch_contract::sink_driver_hier(n, "clk_ref"), pname, depth + 1);
       }
       if (op == Ntype_op::And || op == Ntype_op::Or) {  // an inline gate, likewise
-        for (const auto& e : n.inp_edges()) {
-          if (e.driver.is_const()) {
+        for (auto sink : n.inp_sorted_pins()) {
+          const auto drv = sink.get_driver_pin();
+          if (drv.is_const()) {
             continue;
           }
-          if (std::string r = root_of(e.driver, pname, depth + 1); !r.empty()) {
+          if (std::string r = root_of(drv, pname, depth + 1); !r.empty()) {
             return r;
           }
         }
@@ -849,19 +850,23 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             continue;
           }
           absl::flat_hash_map<std::string, std::vector<std::string>> by_net;
-          for (const auto& e : node.inp_edges()) {
+          for (auto sink : node.inp_sorted_pins()) {
             std::string port;
             for (const auto& d : sio->get_input_pin_decls()) {
-              if (sio->get_input_port_id(d.name) == e.sink.get_port_id()) {
+              if (sio->get_input_port_id(d.name) == sink.get_port_id()) {
                 port = d.name;
                 break;
               }
             }
-            const auto cr = livehd::latch_contract::control_root(e.driver);
-            if (port.empty() || cr.net.is_invalid()) {
-              continue;
+            // PLURAL: a compact loop's carry-in sink holds two drivers
+            // (pass/legalize/legalize.cpp:301).
+            for (const auto& drv : sink.get_driver_pins()) {
+              const auto cr = livehd::latch_contract::control_root(drv);
+              if (port.empty() || cr.net.is_invalid()) {
+                continue;
+              }
+              by_net[std::to_string(static_cast<uint64_t>(cr.net.get_class_index().value))].push_back(port);
             }
-            by_net[std::to_string(static_cast<uint64_t>(cr.net.get_class_index().value))].push_back(port);
           }
           if (!seen_site) {
             for (auto& [net, ports] : by_net) {
@@ -1011,10 +1016,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (by_name.find(cn) == by_name.end()) {
           continue;
         }
-        for (const auto& e : node.inp_edges()) {
+        for (auto sink : node.inp_sorted_pins()) {
           std::string port;
           for (const auto& d : sio->get_input_pin_decls()) {
-            if (sio->get_input_port_id(d.name) == e.sink.get_port_id()) {
+            if (sio->get_input_port_id(d.name) == sink.get_port_id()) {
               port = d.name;
               break;
             }
@@ -1022,7 +1027,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           if (port.empty()) {
             continue;
           }
-          const std::string r = root_of(e.driver, pname, 0);
+          const std::string r = root_of(sink.get_driver_pins().front(), pname, 0);
           if (r.empty()) {
             continue;  // not a clock (or not resolvable): leave it unmapped
           }
@@ -3844,8 +3849,12 @@ static void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Gr
       }
       cells.push_back(node);
     }
-    for (const auto& edge : node.inp_edges()) {
-      pending.push_back(edge.driver);
+    for (auto sink : node.inp_sorted_pins()) {
+      // PLURAL: a compact loop's carry-in sink holds two drivers
+      // (pass/legalize/legalize.cpp:301).
+      for (const auto& drv : sink.get_driver_pins()) {
+        pending.push_back(drv);
+      }
     }
   }
   for (const auto& cell : cells) {
@@ -4004,11 +4013,45 @@ static size_t inline_instances_missing_from_other_side(const absl::flat_hash_map
       hosts.push_back(sp.get());
     }
   }
+  // RUNAWAY GUARD ONLY -- it is not the termination argument. Termination comes
+  // from the `spliced == 0` break below: a pass either inlines something or
+  // stops. This exists solely so a hierarchy that somehow regenerates instances
+  // fails loudly instead of spinning, so it must be UNREACHABLE for any real
+  // design. It is NOT a bound on the instance count: a def instantiated N times
+  // contributes N copies of its whole subtree, so the transitive total is a
+  // PRODUCT down the hierarchy, not a sum. A first attempt used
+  // (Sub count x 2) and fired at 292 splices on a legitimate `loop_roll_carry`
+  // run that needed exactly that many -- turning a PROVEN into a hard error.
+  size_t side_nodes = 0;
+  for (const auto& sp : side_graphs) {
+    if (!sp) {
+      continue;
+    }
+    for ([[maybe_unused]] auto n : sp->body().nodes()) {
+      ++side_nodes;
+    }
+  }
+  const size_t splice_budget = 10000 + side_nodes * 100;
+
   size_t done = 0;
   for (auto* host : hosts) {
-    // Splicing a child can expose the grandchildren it instantiated, so sweep
-    // until nothing absorbed is left. Bounded: each round must make progress.
-    for (int round = 0; round < 64; ++round) {
+    // ONE SPLICE PER COLLECTION, then re-collect.
+    //
+    // `inline_sub_instance` MUTATES `host`, and every other handle in the
+    // collected vector points into that same host. Splicing the whole batch
+    // reused handles that the first splice had already invalidated, which
+    // silently corrupted the model: with >=2 absorbed instances LEC reported a
+    // counterexample that DOES NOT REPRODUCE IN SIMULATION. Swapping two
+    // instantiation lines in the reference flipped REFUTED<->PROVEN with the
+    // implementation byte-identical, while 20,052 random vectors showed zero
+    // mismatch between source Verilog, ref netlist and impl netlist.
+    // Collecting first is necessary (never mutate while walking) but NOT
+    // sufficient -- the handles have to be re-derived after each mutation.
+    //
+    // Progress-bounded rather than a fixed round cap: the loop only continues
+    // while a splice actually happened, so it cannot spin, and the old magic 64
+    // silently truncated any host with more absorbed instances than that.
+    while (true) {
       std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
       for (auto n : host->body().nodes()) {
         if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
@@ -4043,8 +4086,25 @@ static size_t inline_instances_missing_from_other_side(const absl::flat_hash_map
       if (insts.empty()) {
         break;
       }
+      if (done >= splice_budget) {
+        livehd::diag::err("pass.lec", "inline-runaway", "internal")
+            .msg("inlining absorbed defs into '{}' exceeded {} splices; refusing to continue",
+                 std::string{host->get_name()},
+                 splice_budget)
+            .emit();
+        break;
+      }
       size_t spliced = 0;
+      // Try candidates in order and STOP AT THE FIRST SUCCESS: that splice
+      // invalidates every remaining handle, so the rest of `insts` is discarded
+      // and re-derived on the next pass. A candidate that returns false did not
+      // mutate anything (a real blackbox), so it is safe to try the next one --
+      // otherwise one un-inlinable instance would mask every later one, which is
+      // what the batch loop got right and a naive one-shot fix would lose.
       for (const auto& inst : insts) {
+        if (spliced != 0) {
+          break;
+        }
         // pass.color names an absorbed region `<host>__c<N>` and inserts an
         // UNNAMED Sub at the host boundary.  Its fallback instance name
         // (`sub_<nid>`) is not source hierarchy and is unstable across the two

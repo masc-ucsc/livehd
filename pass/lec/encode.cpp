@@ -118,21 +118,33 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     // `$signed(0) | $signed(v)`. Exactly ONE non-constant operand distinguishes
     // these identities from a real clock gate (`clk & enable`) or derived clock
     // logic. Constants must preserve bit 0: 1 for And, 0 for Or.
+    //
+    // OPERAND WALK (the shape used throughout this file, and both halves are
+    // load-bearing): inp_sorted_pins() yields the NODE-AS-PIN (port 0) first and
+    // then ascending port order, which is exactly what the retired inp_edges()
+    // walked -- the raw inp_pins() list OMITS port 0, where a banked cell's first
+    // operand lives, and is unordered, so it would silently drop an operand here.
+    // get_driver_pins() is PLURAL because a sink can resolve to more than one
+    // driver (a compact loop's carry-in: external seed plus its own carry-out),
+    // and the singular reader would drop the seed. One driver == one of the old
+    // edges, so a per-edge count stays a per-driver count.
     if (op == Ntype_op::And || op == Ntype_op::Or) {
       Pin  data;
       int  data_ins = 0;
       bool identity = true;
-      for (const auto& e : p.get_master_node().inp_edges()) {
-        if (e.driver.is_const()) {
-          if (op == Ntype_op::And) {
-            identity &= !gu::const_of(e.driver).and_op(*Dlop::create_integer(1))->is_known_false();
-          } else {
-            identity &= gu::const_of(e.driver).is_known_zero();
+      for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
+        for (const auto& driver : sink.get_driver_pins()) {
+          if (driver.is_const()) {
+            if (op == Ntype_op::And) {
+              identity &= !gu::const_of(driver).and_op(*Dlop::create_integer(1))->is_known_false();
+            } else {
+              identity &= gu::const_of(driver).is_known_zero();
+            }
+            continue;
           }
-          continue;
+          ++data_ins;
+          data = driver;
         }
-        ++data_ins;
-        data = e.driver;
       }
       if (data_ins != 1 || !identity || data.is_invalid()) {
         break;
@@ -151,11 +163,13 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     // walk lands on it and gives up, order-dependently.
     Pin           a;
     hhds::Port_id a_pid = hhds::Port_invalid;
-    for (const auto& e : p.get_master_node().inp_edges()) {
-      const auto spid = e.sink.get_port_id();
-      if (a.is_invalid() || spid < a_pid) {
-        a     = e.driver;
-        a_pid = spid;
+    for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
+      const auto spid = sink.get_port_id();
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (a.is_invalid() || spid < a_pid) {
+          a     = driver;
+          a_pid = spid;
+        }
       }
     }
     if (a.is_invalid()) {
@@ -216,18 +230,21 @@ static Clock_cell_use<Pin> clock_cell_on(Pin p) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Clock_cell) {
       r.cell = p;
-      for (const auto& e : n.inp_edges()) {
-        switch (static_cast<int>(e.sink.get_port_id())) {
-          case 2: r.clk_ref = e.driver; break;
-          case 3:
-            if (e.driver.is_const()) {
-              const auto& dc = gu::const_of(e.driver);
-              r.div          = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
-            }
-            break;
-          case 4 : r.en = e.driver; break;
-          case 6 : r.invert = e.driver.is_const() && !e.driver.is_known_false(); break;
-          default: break;
+      for (const auto& sink : n.inp_sorted_pins()) {
+        const auto spid = static_cast<int>(sink.get_port_id());
+        for (const auto& driver : sink.get_driver_pins()) {
+          switch (spid) {
+            case 2: r.clk_ref = driver; break;
+            case 3:
+              if (driver.is_const()) {
+                const auto& dc = gu::const_of(driver);
+                r.div          = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
+              }
+              break;
+            case 4 : r.en = driver; break;
+            case 6 : r.invert = driver.is_const() && !driver.is_known_false(); break;
+            default: break;
+          }
         }
       }
       return r;
@@ -278,9 +295,11 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
     // decls), so count the non-constant inputs and refuse anything with a
     // second one. Constants are tie-offs, not enables.
     int data_ins = 0;
-    for (const auto& e : n.inp_edges()) {
-      if (!e.driver.is_const()) {
-        ++data_ins;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (!driver.is_const()) {
+          ++data_ins;
+        }
       }
     }
     return data_ins <= 1;
@@ -301,15 +320,17 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
   if (op == Ntype_op::And) {
     Pin data;
     int data_ins = 0;
-    for (const auto& e : n.inp_edges()) {
-      if (e.driver.is_const()) {
-        if (gu::const_of(e.driver).is_known_false()) {
-          return false;  // `clk & 0` is a constant, not a clock
+    for (const auto& sink : n.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (driver.is_const()) {
+          if (gu::const_of(driver).is_known_false()) {
+            return false;  // `clk & 0` is a constant, not a clock
+          }
+          continue;
         }
-        continue;
+        ++data_ins;
+        data = driver;
       }
-      ++data_ins;
-      data = e.driver;
     }
     if (data_ins != 1) {
       return false;
@@ -319,9 +340,11 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
   if (op != Ntype_op::Set_mask) {
     return false;
   }
-  for (const auto& e : n.inp_edges()) {
-    if (!memory_clock_shape_ok(e.driver, depth + 1)) {
-      return false;
+  for (const auto& sink : n.inp_sorted_pins()) {
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (!memory_clock_shape_ok(driver, depth + 1)) {
+        return false;
+      }
     }
   }
   return true;
@@ -728,23 +751,36 @@ static int mem_addr_width(int size) {
 // from its config pins. Mirrors inou/cgen's port decode (pid -> port*12+field).
 Mem_sig read_mem_sig(const hhds::Node_class& node) {
   Mem_sig sig;
-  for (auto e : node.inp_edges()) {
-    auto raw_pid  = static_cast<int>(e.sink.get_port_id());
+  // Pin walk, not an edge walk. `node` is always LOCAL -- query.cpp hands it a
+  // body node, and the Occurrence_node overload in encode.hpp forwards
+  // base_node(), which the hierarchy view takes straight from
+  // graph->body().nodes() (hhds/graph.cpp:344), i.e. Flat context. So
+  // inp_sorted_pins() sees exactly what inp_edges() saw here -- node-as-pin
+  // (port 0) first, then ascending port order -- without decoding the memory's
+  // dout fanout only to discard it. get_driver_pins() is the PLURAL reader on
+  // purpose: the singular one returns drivers.front() with an assert that
+  // compiles out under NDEBUG, so a sink that ever carried two drivers would
+  // silently lose one and the rdport tally below would under-count. One driver
+  // is one of the old edges, which keeps n_rd/n_wr the per-edge counts they were.
+  for (const auto& sink : node.inp_sorted_pins()) {
+    auto raw_pid  = static_cast<int>(sink.get_port_id());
     auto pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
-    if (pin_name == "bits") {
-      if (e.driver.is_const()) {
-        sig.bits = static_cast<int>(gu::const_of(e.driver).to_just_i64());
-      }
-    } else if (pin_name == "size") {
-      if (e.driver.is_const()) {
-        sig.size = static_cast<int>(gu::const_of(e.driver).to_just_i64());
-      }
-    } else if (std::string_view(pin_name).find("rdport") != std::string_view::npos) {
-      if (e.driver.is_const()) {
-        if (gu::const_of(e.driver).is_known_false()) {
-          ++sig.n_wr;
-        } else {
-          ++sig.n_rd;
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (pin_name == "bits") {
+        if (driver.is_const()) {
+          sig.bits = static_cast<int>(gu::const_of(driver).to_just_i64());
+        }
+      } else if (pin_name == "size") {
+        if (driver.is_const()) {
+          sig.size = static_cast<int>(gu::const_of(driver).to_just_i64());
+        }
+      } else if (std::string_view(pin_name).find("rdport") != std::string_view::npos) {
+        if (driver.is_const()) {
+          if (gu::const_of(driver).is_known_false()) {
+            ++sig.n_wr;
+          } else {
+            ++sig.n_rd;
+          }
         }
       }
     }
@@ -803,8 +839,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
   // driver-pin -> Val (SSA value table). Keyed by a HIER-stable string
   // "gid:hier_pos:pid" so that, under occurrences().nodes(hhds::Node_order::forward), a producer deep in an
-  // instance and a consumer reading it across the boundary (inp_edges resolves
-  // the real leaf driver, carrying its instance hier_pos) agree on one key.
+  // instance and a consumer reading it across the boundary (the sink's
+  // get_driver_pins() resolves the real leaf driver, carrying its instance
+  // hier_pos) agree on one key.
   absl::flat_hash_map<std::string, Val> pin2val;
   auto                                  pinkey = [](const auto& p) -> std::string {
     using Pin = std::remove_cvref_t<decltype(p)>;
@@ -923,7 +960,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   };
 
   // Resolve a driver pin to its Val (constant literal or a computed SSA value).
-  // Under occurrences().nodes(hhds::Node_order::forward), inp_edges() resolves a sink across instance boundaries
+  // Under occurrences().nodes(hhds::Node_order::forward), get_driver_pins() on an
+  // occurrence sink resolves it across instance boundaries
   // to the real LEAF driver: a constant, a top primary input (a pin on the root
   // INPUT_NODE — resolved by port name from the seeded, cross-design-shared
   // inputs), or an ordinary producer node (looked up by its hier pinkey).
@@ -1337,111 +1375,115 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // written on `posedge clk`, and a gated-clock write PROVEN equal to an
     // ungated one. (pass.single_edge does not cover this either: its trigger
     // scans Flop/Fflop/Latch, so a negedge MEMORY does not even fire it.)
-    for (auto e : node.inp_edges()) {
-      const auto  raw = static_cast<int>(e.sink.get_port_id());
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto  raw = static_cast<int>(sink.get_port_id());
       std::string pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
-      if (pn == "posclk") {
-        if (e.driver.is_known_false()) {
-          return fail_unsupported("memory '" + gu::debug_name(node)
-                                  + "' is written on the FALLING clock edge, which this encoder does not model "
-                                    "(it treats every memory write as landing once per step)");
-        }
-        // PER-PORT clock edges (Ntype::Memory_posclk_mixed): the source memory's
-        // ports do not all commit on the same edge, so the reader could not
-        // represent it and said so. A latch may mix phases -- that is what the
-        // formal phase schedule is for -- a memory may not; the encoder has ONE
-        // commit point per memory. This is a FORMAL refusal, not a read error:
-        // the language allows the shape, so it parses
-        // and regenerates, and the user opts back in per memory.
-        static const std::vector<std::string> no_ignored;
-        if (auto error = mixed_memory_edge_error(node, ignore_memory_ ? *ignore_memory_ : no_ignored); !error.empty()) {
-          return fail_unsupported(error);
-        }
-      } else if (pn == "clock_pin") {
-        // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
-        // a BUFFER CELL (`.clk(g118_BUFx1_2)`), which is a `Sub` and resolves to
-        // no input either -- but it is the same clock, and refusing it would
-        // reject every mapped design. So: refuse when any lane of the clock is
-        // ordinary combinational LOGIC in this graph (an And gate, an inverter,
-        // a mux, a divider's Q), and allow an opaque instance. A tech-mapped
-        // ICG cell is therefore still not caught here; that needs cell-model
-        // awareness and is the pre-existing behaviour for mapped netlists.
-        // memory_clock_shape_ok, not the bare Sub test: the abc read-back does
-        // not wire the buffer cell to clock_pin directly -- it wraps it in a
-        // Set_mask concat -- so the immediate driver is a Set_mask and the Sub
-        // exemption alone refuses every mapped memory.
-        // 2f-latch M9 -- a recognized Clock_cell IS modellable, and this is the
-        // half the M8 fold structurally cannot reach: that fold rewrites flop
-        // clocks into enables and never touches a Memory's clock_pin. Gate the
-        // writes on the cell's enable instead of refusing.
-        //
-        // The enable's VALUE cannot be built here: this scan is phase 1, before
-        // the combinational fixpoint, so no Val exists for the cone yet. Record
-        // the driver PIN and resolve it in phase 2, where every write folds.
-        if (auto cc = clock_cell_on(e.driver); !cc.cell.is_invalid()) {
-          if (cc.div != 1) {
-            return fail_unsupported("memory '" + gu::debug_name(node) + "' is clocked by a Clock_cell with div="
-                                    + std::to_string(cc.div) + ", which is not implemented (v1 is div=1 only)");
-          }
-          if (cc.invert) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (pn == "posclk") {
+          if (driver.is_known_false()) {
             return fail_unsupported("memory '" + gu::debug_name(node)
-                                    + "' is clocked by an INVERTED Clock_cell; this encoder models every memory "
-                                      "write as landing once per step and cannot express the opposite edge");
+                                    + "' is written on the FALLING clock edge, which this encoder does not model "
+                                      "(it treats every memory write as landing once per step)");
           }
-          if (resolve_clk_input(cc.clk_ref).is_invalid()) {
+          // PER-PORT clock edges (Ntype::Memory_posclk_mixed): the source memory's
+          // ports do not all commit on the same edge, so the reader could not
+          // represent it and said so. A latch may mix phases -- that is what the
+          // formal phase schedule is for -- a memory may not; the encoder has ONE
+          // commit point per memory. This is a FORMAL refusal, not a read error:
+          // the language allows the shape, so it parses
+          // and regenerates, and the user opts back in per memory.
+          static const std::vector<std::string> no_ignored;
+          if (auto error = mixed_memory_edge_error(node, ignore_memory_ ? *ignore_memory_ : no_ignored); !error.empty()) {
+            return fail_unsupported(error);
+          }
+        } else if (pn == "clock_pin") {
+          // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
+          // a BUFFER CELL (`.clk(g118_BUFx1_2)`), which is a `Sub` and resolves to
+          // no input either -- but it is the same clock, and refusing it would
+          // reject every mapped design. So: refuse when any lane of the clock is
+          // ordinary combinational LOGIC in this graph (an And gate, an inverter,
+          // a mux, a divider's Q), and allow an opaque instance. A tech-mapped
+          // ICG cell is therefore still not caught here; that needs cell-model
+          // awareness and is the pre-existing behaviour for mapped netlists.
+          // memory_clock_shape_ok, not the bare Sub test: the abc read-back does
+          // not wire the buffer cell to clock_pin directly -- it wraps it in a
+          // Set_mask concat -- so the immediate driver is a Set_mask and the Sub
+          // exemption alone refuses every mapped memory.
+          // 2f-latch M9 -- a recognized Clock_cell IS modellable, and this is the
+          // half the M8 fold structurally cannot reach: that fold rewrites flop
+          // clocks into enables and never touches a Memory's clock_pin. Gate the
+          // writes on the cell's enable instead of refusing.
+          //
+          // The enable's VALUE cannot be built here: this scan is phase 1, before
+          // the combinational fixpoint, so no Val exists for the cone yet. Record
+          // the driver PIN and resolve it in phase 2, where every write folds.
+          if (auto cc = clock_cell_on(driver); !cc.cell.is_invalid()) {
+            if (cc.div != 1) {
+              return fail_unsupported("memory '" + gu::debug_name(node) + "' is clocked by a Clock_cell with div="
+                                      + std::to_string(cc.div) + ", which is not implemented (v1 is div=1 only)");
+            }
+            if (cc.invert) {
+              return fail_unsupported("memory '" + gu::debug_name(node)
+                                      + "' is clocked by an INVERTED Clock_cell; this encoder models every memory "
+                                        "write as landing once per step and cannot express the opposite edge");
+            }
+            if (resolve_clk_input(cc.clk_ref).is_invalid()) {
+              return fail_unsupported("memory '" + gu::debug_name(node)
+                                      + "' is clocked by a Clock_cell whose clk_ref is itself derived");
+            }
+            mc.commit_en = cc.en;  // invalid => an identity cell: commits every step
+            continue;
+          }
+          if (!memory_clock_shape_ok(driver)) {
             return fail_unsupported("memory '" + gu::debug_name(node)
-                                    + "' is clocked by a Clock_cell whose clk_ref is itself derived");
+                                    + "' has a derived clock the encoder cannot model (it treats every memory write as "
+                                      "landing once per step, with the clock derivation as dead code)");
           }
-          mc.commit_en = cc.en;  // invalid => an identity cell: commits every step
-          continue;
-        }
-        if (!memory_clock_shape_ok(e.driver)) {
-          return fail_unsupported("memory '" + gu::debug_name(node)
-                                  + "' has a derived clock the encoder cannot model (it treats every memory write as "
-                                    "landing once per step, with the clock derivation as dead code)");
         }
       }
     }
     int mtype = -1;
-    for (auto e : node.inp_edges()) {
-      auto        raw_pid = static_cast<int>(e.sink.get_port_id());
+    for (const auto& sink : node.inp_sorted_pins()) {
+      auto        raw_pid = static_cast<int>(sink.get_port_id());
       std::string pn      = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
       size_t      pid     = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
-      if (pn == "wensize") {
-        mc.wensize = static_cast<int>(gu::const_of(e.driver).to_just_i64());
-      } else if (pn == "fwd") {
-        mc.fwd = Dlop::clone(gu::const_of(e.driver));
-      } else if (pn == "undef") {
-        mc.undef = Dlop::clone(gu::const_of(e.driver));
-      } else if (pn == "update") {
-        mc.update   = e.driver;
-        mc.is_whole = true;
-      } else if (pn == "update_enable") {  // MUST precede ends_with("enable") below
-        mc.update_enable = e.driver;
-      } else if (pn == "reset") {
-        mc.reset = e.driver;
-      } else if (pn == "initial") {
-        mc.init = e.driver;  // whole-array runtime reset-value bus
-      } else if (pn == "type") {
-        if (e.driver.is_const()) {
-          mtype = static_cast<int>(gu::const_of(e.driver).to_just_i64());
-        }
-      } else if (pn == "bits" || pn == "size" || pn == "posclk" || ends_with(pn, "clock_pin")) {
-        // config / clock: abstracted out of the relational encoding
-      } else {
-        if (mc.ports.size() <= pid) {
-          mc.ports.resize(pid + 1);
-        }
-        if (ends_with(pn, "addr")) {
-          mc.ports[pid].addr = e.driver;
-        } else if (ends_with(pn, "din")) {
-          mc.ports[pid].din = e.driver;
-        } else if (ends_with(pn, "enable")) {
-          mc.ports[pid].en = e.driver;
-        } else if (ends_with(pn, "rdport")) {
-          // A comptime pin: a non-constant driver is not "read port" -- probe
-          // it (const_of on a wire is a hard abort).
-          mc.ports[pid].rd = e.driver.is_const() && !gu::const_of(e.driver).is_known_false();
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (pn == "wensize") {
+          mc.wensize = static_cast<int>(gu::const_of(driver).to_just_i64());
+        } else if (pn == "fwd") {
+          mc.fwd = Dlop::clone(gu::const_of(driver));
+        } else if (pn == "undef") {
+          mc.undef = Dlop::clone(gu::const_of(driver));
+        } else if (pn == "update") {
+          mc.update   = driver;
+          mc.is_whole = true;
+        } else if (pn == "update_enable") {  // MUST precede ends_with("enable") below
+          mc.update_enable = driver;
+        } else if (pn == "reset") {
+          mc.reset = driver;
+        } else if (pn == "initial") {
+          mc.init = driver;  // whole-array runtime reset-value bus
+        } else if (pn == "type") {
+          if (driver.is_const()) {
+            mtype = static_cast<int>(gu::const_of(driver).to_just_i64());
+          }
+        } else if (pn == "bits" || pn == "size" || pn == "posclk" || ends_with(pn, "clock_pin")) {
+          // config / clock: abstracted out of the relational encoding
+        } else {
+          if (mc.ports.size() <= pid) {
+            mc.ports.resize(pid + 1);
+          }
+          if (ends_with(pn, "addr")) {
+            mc.ports[pid].addr = driver;
+          } else if (ends_with(pn, "din")) {
+            mc.ports[pid].din = driver;
+          } else if (ends_with(pn, "enable")) {
+            mc.ports[pid].en = driver;
+          } else if (ends_with(pn, "rdport")) {
+            // A comptime pin: a non-constant driver is not "read port" -- probe
+            // it (const_of on a wire is a hard abort).
+            mc.ports[pid].rd = driver.is_const() && !gu::const_of(driver).is_known_false();
+          }
         }
       }
     }
@@ -1455,7 +1497,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // stayed a free symbol -> reads diverged across designs -> false refute.
     mc.mtype   = mtype;
     mc.is_comb = (mtype == 2);
-    for (const auto& e2 : node.out_edges()) {  // read_all is a DRIVER pin (not in inp_edges)
+    for (const auto& e2 : node.out_edges()) {  // read_all is a DRIVER pin (not in inp_sorted_pins)
       if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
         mc.ra_pin = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
         break;
@@ -1614,7 +1656,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
   // ---- Combinational nodes. occurrences().nodes(hhds::Node_order::forward) virtual-flattens the design: it
   // descends into every sub-instance body (so a StageReg/ALU instance's internal
-  // nodes are visited here) and inp_edges() resolves drivers across instance
+  // nodes are visited here) and get_driver_pins() on an occurrence sink resolves
+  // drivers across instance
   // boundaries. Flop/Memory state is cut (seeded above), so the combinational
   // graph is ACYCLIC — but occurrences().nodes(hhds::Node_order::forward) can still emit a node before a driver
   // that lives in a loop_break sub-instance emitted earlier (e.g. a register
@@ -1629,9 +1672,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // ids intentionally match Flop pin ids (graph/cell.cpp).
   auto hier_sink_driver = [](const hhds::Occurrence_node& n, std::string_view sink_name) -> hhds::Occurrence_pin {
     auto pid = Ntype::get_sink_pid(Ntype_op::Flop, sink_name);
-    for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() == pid) {
-        return e.driver;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      if (sink.get_port_id() != pid) {
+        continue;
+      }
+      for (const auto& driver : sink.get_driver_pins()) {
+        return driver;  // the first driver of that sink is the edge the old walk returned
       }
     }
     return {};
@@ -1683,8 +1729,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return false;
       }
       bool dep = false;
-      for (const auto& e : n.inp_edges()) {
-        dep |= self(self, e.driver);
+      for (const auto& sink : n.inp_sorted_pins()) {
+        for (const auto& driver : sink.get_driver_pins()) {
+          dep |= self(self, driver);
+        }
       }
       clock_dep_visiting.erase(k);
       clock_dep_memo[k] = dep;
@@ -1699,8 +1747,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (!clock_control_timing.insert(k).second) {
         return;
       }
-      for (const auto& e : n.inp_edges()) {
-        self(self, e.driver);
+      for (const auto& sink : n.inp_sorted_pins()) {
+        for (const auto& driver : sink.get_driver_pins()) {
+          self(self, driver);
+        }
       }
     };
     for (auto n : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
@@ -1745,9 +1795,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // Use stored connectivity for this early dead-node elimination. The
       // occurrence view resolves edges to hierarchy leaves; a parent producer
       // feeding a callee input can therefore have no occurrence-level out edge
-      // even though the callee consumer resolves that producer through
-      // inp_edges(). Encoding an extra unreachable node is harmless; skipping a
-      // live producer is not.
+      // even though the callee consumer resolves that producer through its own
+      // sink's get_driver_pins(). Encoding an extra unreachable node is harmless;
+      // skipping a live producer is not.
       if (!node.base_node().has_out_edges()) {
         continue;
       }
@@ -1763,11 +1813,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           continue;
         }
         hhds::Occurrence_pin dd;
-        for (const auto& e : node.inp_edges()) {
-          if (e.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Latch, "din")) {
-            dd = e.driver;
+        for (const auto& sink : node.inp_sorted_pins()) {
+          if (sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "din")) {
+            continue;
+          }
+          for (const auto& driver : sink.get_driver_pins()) {
+            dd = driver;  // first driver of the din sink == the first edge the old walk saw
             break;
           }
+          break;  // that `break` left the WHOLE walk
         }
         if (dd.is_invalid()) {
           return fail("always-transparent latch '" + gu::debug_name(node) + "' has no din");
@@ -1818,8 +1872,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             = collapse_defs_ != nullptr && sub_io != nullptr && collapse_defs_->count(std::string(sub_io->get_name())) > 0;
 
         // A design sub-instance whose body lives in the graph library is DESCENDED
-        // into by forward_hier (its internal nodes are visited and inp_edges()
-        // threads its boundary), so encode nothing here. Only a sub NOT in the
+        // into by forward_hier (its internal nodes are visited and the occurrence
+        // sink's get_driver_pins() threads its boundary), so encode nothing here. Only a sub NOT in the
         // library (an ABC cell-model from sub_lib_, or a true blackbox) — or one
         // FORCE-COLLAPSED, which forward_hier left undescended — is handled inline.
         if (node.get_subnode_graph() != nullptr && !force_collapse) {
@@ -1863,18 +1917,23 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // Bind the instance inputs by NAME and encode the def inline.
           Io_name_map<Val> bound;
           bool             sub_deferred = false;
-          for (const auto& e : node.inp_edges()) {
-            auto nit = in_name.find(e.sink.get_port_id());
-            if (nit == in_name.end()) {
-              return fail("Sub instance '" + gu::debug_name(node) + "' input pin has no IO name");
+          for (const auto& sink : node.inp_sorted_pins()) {
+            for (const auto& driver : sink.get_driver_pins()) {
+              auto nit = in_name.find(sink.get_port_id());
+              if (nit == in_name.end()) {
+                return fail("Sub instance '" + gu::debug_name(node) + "' input pin has no IO name");
+              }
+              bool sok = true;
+              Val  v   = driver_val(driver, sok);
+              if (!sok) {
+                sub_deferred = true;  // input not yet encoded — retry next fixpoint pass
+                break;
+              }
+              bound[nit->second] = v;
             }
-            bool sok = true;
-            Val  v   = driver_val(e.driver, sok);
-            if (!sok) {
-              sub_deferred = true;  // input not yet encoded — retry next fixpoint pass
-              break;
+            if (sub_deferred) {
+              break;  // the old edge walk's `break` left the WHOLE walk
             }
-            bound[nit->second] = v;
           }
           if (sub_deferred) {
             continue;
@@ -2052,38 +2111,43 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // until they ALL resolve, then emit the bbin compare points + next-state.
         Io_name_map<Val> bb_in_by_port;
         bool             all_in = true;
-        for (const auto& e : node.inp_edges()) {
-          bool sok = true;
-          Val  v   = driver_val(e.driver, sok);
-          if (!sok && sub_def != nullptr) {
-            // Resolve the callee's clock interface only on the exceptional
-            // timing-only path. Most boxes have ordinary encoded inputs; doing
-            // a recursive interface scan for every one of them made large
-            // hierarchy encodes needlessly quadratic. The shared cache keeps
-            // the remaining probes one-per-definition.
-            const auto& clock_input_pids = livehd::latch_contract::clock_input_ports(sub_def, clock_port_cache);
-            if (clock_input_pids.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
-              // A collapsed child's CLOCK is a sequence-boundary obligation,
-              // not an ordinary read of the clock as data. See
-              // clock_box_input above.
-              v = clock_box_input(e.driver, sok, 0);
+        for (const auto& sink : node.inp_sorted_pins()) {
+          const auto pid = sink.get_port_id();
+          for (const auto& driver : sink.get_driver_pins()) {
+            bool sok = true;
+            Val  v   = driver_val(driver, sok);
+            if (!sok && sub_def != nullptr) {
+              // Resolve the callee's clock interface only on the exceptional
+              // timing-only path. Most boxes have ordinary encoded inputs; doing
+              // a recursive interface scan for every one of them made large
+              // hierarchy encodes needlessly quadratic. The shared cache keeps
+              // the remaining probes one-per-definition.
+              const auto& clock_input_pids = livehd::latch_contract::clock_input_ports(sub_def, clock_port_cache);
+              if (clock_input_pids.contains(static_cast<uint32_t>(pid))) {
+                // A collapsed child's CLOCK is a sequence-boundary obligation,
+                // not an ordinary read of the clock as data. See
+                // clock_box_input above.
+                v = clock_box_input(driver, sok, 0);
+              }
             }
+            if (!sok) {
+              all_in = false;
+              break;
+            }
+            auto        nit  = in_name.find(pid);
+            std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
+            // Compare only the bits the blackbox port actually receives (a wider driver
+            // is truncated by the connection — see the SRAM addr note).
+            if (auto pit = in_pw.find(pid); pit != in_pw.end() && pit->second > 0 && pit->second < v.width) {
+              Val tv{fit(v, pit->second), pit->second, v.is_signed};
+              tv.x_mask = fit_x_mask_to(tm_, v, pit->second);  // keep the X plane through the truncation
+              v         = tv;
+            }
+            bb_in_by_port[port] = v;
           }
-          if (!sok) {
-            all_in = false;
-            break;
+          if (!all_in) {
+            break;  // the old edge walk's `break` left the WHOLE walk
           }
-          auto        pid  = e.sink.get_port_id();
-          auto        nit  = in_name.find(pid);
-          std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
-          // Compare only the bits the blackbox port actually receives (a wider driver
-          // is truncated by the connection — see the SRAM addr note).
-          if (auto pit = in_pw.find(pid); pit != in_pw.end() && pit->second > 0 && pit->second < v.width) {
-            Val tv{fit(v, pit->second), pit->second, v.is_signed};
-            tv.x_mask = fit_x_mask_to(tm_, v, pit->second);  // keep the X plane through the truncation
-            v         = tv;
-          }
-          bb_in_by_port[port] = v;
         }
         if (!all_in) {
           continue;  // inputs not ready; outputs already emitted, so nothing is blocked
@@ -2235,9 +2299,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (op == Ntype_op::Clock_cell && phased && !single_step()) {
         auto cell_sink = [&](std::string_view name) -> hhds::Occurrence_pin {
           const auto pid = Ntype::get_sink_pid(Ntype_op::Clock_cell, name);
-          for (const auto& e : node.inp_edges()) {
-            if (e.sink.get_port_id() == pid) {
-              return e.driver;
+          for (const auto& sink : node.inp_sorted_pins()) {
+            if (sink.get_port_id() != pid) {
+              continue;
+            }
+            for (const auto& driver : sink.get_driver_pins()) {
+              return driver;  // first driver of that sink == the first matching edge
             }
           }
           return {};
@@ -2329,19 +2396,40 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       bool out_signed = !gu::is_unsign(dpin);
 
-      // Bucket input edges by sink port id, resolving every driver to a Val.
+      // Bucket the operands by sink port BANK, resolving every driver to a Val.
+      //
+      // Bank, not raw pid: under ONE DRIVER PER SINK PIN (graph/cell.hpp) a
+      // commutative cell spends one pid PER OPERAND, and Ntype::sink_bank folds
+      // those consecutive pids back to the operand ROLE -- 0/1 for a Sum's
+      // add/subtract sides and an LT/GT's a/b, 0 for the single-bank reductions.
+      // For every non-banked op it is the identity, so `pid(k)` below keeps
+      // naming the same operand it always did.
+      //
+      // ORDER IS LOAD-BEARING here (`all` is consumed positionally by Concat and
+      // by the Mux/Hotmux arms), which is why this is inp_sorted_pins() and not
+      // the raw inp_pins(): sorted yields the node-as-pin (port 0) FIRST and then
+      // ascending port order -- the exact sequence the retired inp_edges() walked
+      // -- whereas the raw list drops port 0 (a banked cell's first operand) and
+      // is unordered. get_driver_pins() is plural so a sink with two drivers
+      // still contributes two operands, one per old edge.
       absl::flat_hash_map<hhds::Port_id, std::vector<Val>> by_pid;
-      std::vector<Val>                                     all;  // in edge order
+      std::vector<Val>                                     all;  // in sink-pin (old edge) order
       bool                                                 ok       = true;
       bool                                                 deferred = false;
-      for (const auto& e : node.inp_edges()) {
-        Val v = driver_val(e.driver, ok);
-        if (!ok) {
-          deferred = true;  // operand not yet encoded — retry in a later fixpoint pass
-          break;
+      for (const auto& sink : node.inp_sorted_pins()) {
+        const auto bank = Ntype::sink_bank(op, sink.get_port_id());
+        for (const auto& driver : sink.get_driver_pins()) {
+          Val v = driver_val(driver, ok);
+          if (!ok) {
+            deferred = true;  // operand not yet encoded — retry in a later fixpoint pass
+            break;
+          }
+          by_pid[bank].push_back(v);
+          all.push_back(v);
         }
-        by_pid[e.sink.get_port_id()].push_back(v);
-        all.push_back(v);
+        if (deferred) {
+          break;  // the old edge walk's `break` left the WHOLE walk
+        }
       }
       if (deferred) {
         continue;
@@ -2356,7 +2444,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // Filled by the Concat arm and re-read by the X-plane block after the
       // switch. The lane table is the ONLY source of a lane's window width (see
       // the Concat arm), and decoding it a second time down there would pay the
-      // whole inp_edges walk again on every packed bus.
+      // whole operand walk again on every packed bus.
       std::vector<gu::Concat_lane> concat_tbl;
 
       Term result;
@@ -2438,21 +2526,28 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // matches Verilog's semantics for `+`/`-` exactly, the same way the Or
           // arm above matches `|` and the SRA arm below matches `>>>`.
           {
-            bool every = !all.empty();
-            for (const auto& e : node.inp_edges()) {
-              if (e.driver.is_const()) {
-                if (gu::const_of(e.driver).is_negative()) {
-                  continue;  // negative literal: signed in the emitted text
+            bool every       = !all.empty();
+            bool every_known = true;  // the old edge walk `break`ed out of the WHOLE walk here
+            for (const auto& sink : node.inp_sorted_pins()) {
+              for (const auto& driver : sink.get_driver_pins()) {
+                if (driver.is_const()) {
+                  if (gu::const_of(driver).is_negative()) {
+                    continue;  // negative literal: signed in the emitted text
+                  }
+                  continue;  // non-negative constant: sign-transparent
                 }
-                continue;  // non-negative constant: sign-transparent
+                bool ok2 = true;
+                Val  v   = driver_val(driver, ok2);
+                if (!ok2) {
+                  every       = false;
+                  every_known = false;
+                  break;
+                }
+                every &= v.is_signed;
               }
-              bool ok2 = true;
-              Val  v   = driver_val(e.driver, ok2);
-              if (!ok2) {
-                every = false;
+              if (!every_known) {
                 break;
               }
-              every &= v.is_signed;
             }
             // A sized result carries bitwidth's inferred sign. Signed inputs
             // can produce a non-negative result (e.g. signed(bool) + 2);
@@ -2526,6 +2621,22 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             return fail("Not has no operand");
           }
           result = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(all[0], W)});
+          break;
+        }
+        case Ntype_op::Rxor    :
+        case Ntype_op::Popcount: {
+          const int count = livehd::graph_util::reduction_count(node);
+          result          = bv_const(tm_, W, 0);
+          if (count > 0) {
+            const auto input = fit(pid(0)[0], count);
+            for (int bit = 0; bit < count; ++bit) {
+              const auto lane
+                  = tm_.mkTerm(tm_.mkOp(Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(bit), static_cast<uint32_t>(bit)}),
+                               {input});
+              const auto term = fit(Val{lane, 1, false}, W);
+              result          = tm_.mkTerm(op == Ntype_op::Rxor ? Kind::BITVECTOR_XOR : Kind::BITVECTOR_ADD, {result, term});
+            }
+          }
           break;
         }
         case Ntype_op::Ror: {
@@ -2681,11 +2792,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           const Val&           a = pid(0)[0];
           // pos must be a constant we can read.
           hhds::Occurrence_pin pos_pin;
-          for (const auto& e : node.inp_edges()) {
-            if (e.sink.get_port_id() == 1) {
-              pos_pin = e.driver;
+          for (const auto& sink : node.inp_sorted_pins()) {
+            if (sink.get_port_id() != 1) {
+              continue;
+            }
+            for (const auto& driver : sink.get_driver_pins()) {
+              pos_pin = driver;  // first driver of that sink == the first matching edge
               break;
             }
+            break;  // that `break` left the WHOLE walk
           }
           if (pos_pin.is_invalid() || !pos_pin.is_const()) {
             return fail_unsupported("Sext with non-constant position not supported (M1)");
@@ -2719,11 +2834,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
           const Val&           a = pid(0)[0];
           hhds::Occurrence_pin mask_pin;
-          for (const auto& e : node.inp_edges()) {
-            if (e.sink.get_port_id() == Ntype::get_sink_pid(op, "mask")) {
-              mask_pin = e.driver;
+          for (const auto& sink : node.inp_sorted_pins()) {
+            if (sink.get_port_id() != Ntype::get_sink_pid(op, "mask")) {
+              continue;
+            }
+            for (const auto& driver : sink.get_driver_pins()) {
+              mask_pin = driver;  // first driver of that sink == the first matching edge
               break;
             }
+            break;  // that `break` left the WHOLE walk
           }
           if (mask_pin.is_invalid() || !mask_pin.is_const()) {
             return fail_unsupported("Get_mask with non-constant mask not supported (M1)");
@@ -2755,11 +2874,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         case Ntype_op::Set_mask: {
           hhds::Occurrence_pin mask_pin;
-          for (const auto& e : node.inp_edges()) {
-            if (e.sink.get_port_id() == Ntype::get_sink_pid(op, "mask")) {
-              mask_pin = e.driver;
+          for (const auto& sink : node.inp_sorted_pins()) {
+            if (sink.get_port_id() != Ntype::get_sink_pid(op, "mask")) {
+              continue;
+            }
+            for (const auto& driver : sink.get_driver_pins()) {
+              mask_pin = driver;  // first driver of that sink == the first matching edge
               break;
             }
+            break;  // that `break` left the WHOLE walk
           }
           if (mask_pin.is_invalid() || !mask_pin.is_const()) {
             return fail_unsupported("Set_mask with non-constant mask not supported (M1)");
@@ -3206,70 +3329,81 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           break;
         }
         chain.push_back(diagnostic_node_name(g, cur));
-        bool hopped = false;
-        for (const auto& e : cur.inp_edges()) {
-          const auto& drv = e.driver;
-          if (drv.is_const()) {
-            continue;
-          }
-          if (gu::is_graph_input_pin(drv)) {
-            std::string in_name{drv.get_pin_name()};
-            if (!out.inputs.contains(in_name)) {
-              diag      = "input pin '" + in_name + "' of '" + gu::debug_name(cur) + "' is not among the declared inputs";
-              diagnosed = true;
+        bool hopped    = false;
+        // `stop_walk` is NOT `diagnosed`: the graph-input arm below sets
+        // `diagnosed` and then keeps walking, so only the two arms that used to
+        // `break` out of the flat edge list may leave BOTH of these loops.
+        bool stop_walk = false;
+        for (const auto& sink : cur.inp_sorted_pins()) {
+          for (const auto& drv : sink.get_driver_pins()) {
+            if (drv.is_const()) {
+              continue;
             }
-            continue;
-          }
-          // Seeded state outputs are resolved even though state cells never
-          // enter `done`. Following their D inputs invents a combinational
-          // cycle through an ordinary register feedback path.
-          bool drv_ok = true;
-          (void)driver_val(drv, drv_ok);
-          if (drv_ok) {
-            continue;
-          }
-          auto mn = drv.get_master_node();
-          if (!done.contains(nodekey(mn))) {
-            cur    = mn;
-            hopped = true;
-            break;  // follow the first undone operand
-          }
-          // A producer can be structurally "done" without carrying a DATA
-          // value: Clock_cell and the identity wrappers on its output are
-          // deliberately timing-only.  If such a pin reaches an ordinary
-          // data operator, driver_val() is still unresolved even though the
-          // producer node is in `done`.  Calling that "all operands resolved"
-          // hides the exact edge which crossed from the clock domain into the
-          // data cone (and made Minion's intpipe_csr_file look like an
-          // inexplicable deferred Mux/Or). Diagnose the missing pin directly.
-          if (!drv_ok) {
-            diag  = "data input of '" + gu::debug_name(cur) + "' is driven by timing-only or unencoded pin '" + gu::debug_name(mn)
-                    + "' (op " + std::string(Ntype::get_name(gu::type_op_of(mn))) + ", key " + missing_driver_key + ")";
-            diag += "; consumer inputs{";
-            bool first = true;
-            for (const auto& ie : cur.inp_edges()) {
-              if (!first) {
-                diag += ", ";
+            if (gu::is_graph_input_pin(drv)) {
+              std::string in_name{drv.get_pin_name()};
+              if (!out.inputs.contains(in_name)) {
+                diag      = "input pin '" + in_name + "' of '" + gu::debug_name(cur) + "' is not among the declared inputs";
+                diagnosed = true;
               }
-              first  = false;
-              diag  += "p" + std::to_string(static_cast<int>(ie.sink.get_port_id())) + "="
-                       + gu::debug_name(ie.driver.get_master_node()) + ":"
-                       + std::string(Ntype::get_name(gu::type_op_of(ie.driver.get_master_node())));
+              continue;
             }
-            diag  += "}; consumer outputs{";
-            first  = true;
-            for (const auto& oe : cur.out_edges()) {
-              if (!first) {
-                diag += ", ";
+            // Seeded state outputs are resolved even though state cells never
+            // enter `done`. Following their D inputs invents a combinational
+            // cycle through an ordinary register feedback path.
+            bool drv_ok = true;
+            (void)driver_val(drv, drv_ok);
+            if (drv_ok) {
+              continue;
+            }
+            auto mn = drv.get_master_node();
+            if (!done.contains(nodekey(mn))) {
+              cur       = mn;
+              hopped    = true;
+              stop_walk = true;
+              break;  // follow the first undone operand
+            }
+            // A producer can be structurally "done" without carrying a DATA
+            // value: Clock_cell and the identity wrappers on its output are
+            // deliberately timing-only.  If such a pin reaches an ordinary
+            // data operator, driver_val() is still unresolved even though the
+            // producer node is in `done`.  Calling that "all operands resolved"
+            // hides the exact edge which crossed from the clock domain into the
+            // data cone (and made Minion's intpipe_csr_file look like an
+            // inexplicable deferred Mux/Or). Diagnose the missing pin directly.
+            if (!drv_ok) {
+              diag  = "data input of '" + gu::debug_name(cur) + "' is driven by timing-only or unencoded pin '" + gu::debug_name(mn)
+                      + "' (op " + std::string(Ntype::get_name(gu::type_op_of(mn))) + ", key " + missing_driver_key + ")";
+              diag += "; consumer inputs{";
+              bool first = true;
+              for (const auto& isink : cur.inp_sorted_pins()) {
+                for (const auto& idrv : isink.get_driver_pins()) {
+                  if (!first) {
+                    diag += ", ";
+                  }
+                  first = false;
+                  diag += "p" + std::to_string(static_cast<int>(isink.get_port_id())) + "=" + gu::debug_name(idrv.get_master_node())
+                          + ":" + std::string(Ntype::get_name(gu::type_op_of(idrv.get_master_node())));
+                }
               }
-              first  = false;
-              diag  += gu::debug_name(oe.sink.get_master_node()) + ":"
-                       + std::string(Ntype::get_name(gu::type_op_of(oe.sink.get_master_node()))) + ".p"
-                       + std::to_string(static_cast<int>(oe.sink.get_port_id()));
+              diag  += "}; consumer outputs{";
+              first  = true;
+              for (const auto& oe : cur.out_edges()) {
+                if (!first) {
+                  diag += ", ";
+                }
+                first  = false;
+                diag  += gu::debug_name(oe.sink.get_master_node()) + ":"
+                         + std::string(Ntype::get_name(gu::type_op_of(oe.sink.get_master_node()))) + ".p"
+                         + std::to_string(static_cast<int>(oe.sink.get_port_id()));
+              }
+              diag      += "}";
+              diagnosed  = true;
+              stop_walk  = true;
+              break;
             }
-            diag      += "}";
-            diagnosed  = true;
-            break;
+          }
+          if (stop_walk) {
+            break;  // both of the old `break`s left the WHOLE edge walk
           }
         }
         if (diagnosed) {
@@ -3313,15 +3447,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (sio == nullptr || sio->get_name() != gu::fproperty_module_name) {
         continue;
       }
-      // Resolve the cond driver across instance boundaries via the HIER
-      // inp_edges (get_driver_of_sink_name stops at a sub's GraphIO pin).
+      // Resolve the cond driver across instance boundaries via the HIER sink
+      // pins (get_driver_of_sink_name stops at a sub's GraphIO pin).
       const auto           cond_pid = sio->get_input_port_id("cond");
       hhds::Occurrence_pin cond_drv;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == cond_pid) {
-          cond_drv = e.driver;
+      for (const auto& sink : node.inp_sorted_pins()) {
+        if (sink.get_port_id() != cond_pid) {
+          continue;
+        }
+        for (const auto& driver : sink.get_driver_pins()) {
+          cond_drv = driver;  // first driver of that sink == the first matching edge
           break;
         }
+        break;  // that `break` left the WHOLE walk
       }
       const int occ = prop_occ++;  // count even a skipped prop: keys stay walk-stable
       if (cond_drv.is_invalid()) {
@@ -3411,11 +3549,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       const auto           guard_pid = sio->get_input_port_id("guard");
       hhds::Occurrence_pin guard_drv;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == guard_pid) {
-          guard_drv = e.driver;
+      for (const auto& sink : node.inp_sorted_pins()) {
+        if (sink.get_port_id() != guard_pid) {
+          continue;
+        }
+        for (const auto& driver : sink.get_driver_pins()) {
+          guard_drv = driver;  // first driver of that sink == the first matching edge
           break;
         }
+        break;  // that `break` left the WHOLE walk
       }
       if (guard_drv.is_invalid()) {
         continue;  // unguarded property: nothing to report
@@ -3454,15 +3596,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         out.outputs["\x05tap:" + hname + "." + port] = Val{fit(v, w), w, decl_sgn};
       };
       // INPUT ports: the parent-side driver, resolved across the instance
-      // boundary via the HIER inp_edges (the fproperty cond pattern).
+      // boundary via the HIER sink pins (the fproperty cond pattern).
       for (const auto& d : sio->get_input_pin_decls()) {
         const auto           pid = sio->get_input_port_id(d.name);
         hhds::Occurrence_pin drv;
-        for (const auto& e : node.inp_edges()) {
-          if (e.sink.get_port_id() == pid) {
-            drv = e.driver;
+        for (const auto& sink : node.inp_sorted_pins()) {
+          if (sink.get_port_id() != pid) {
+            continue;
+          }
+          for (const auto& driver : sink.get_driver_pins()) {
+            drv = driver;  // first driver of that sink == the first matching edge
             break;
           }
+          break;  // that `break` left the WHOLE walk
         }
         if (drv.is_invalid()) {
           continue;
@@ -3475,8 +3621,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       // OUTPUT ports: in a HIER walk the instance pin itself carries no value —
       // edges hop THROUGH boundaries to real leaves. Recover the internal
-      // driver from any consumer: the consumer's inp_edge whose sink is this
-      // same pin resolves its driver DOWN into the callee, to the real
+      // driver from any consumer: the consumer's own sink pin, the one that IS
+      // this pin, resolves its driver DOWN into the callee, to the real
       // (memoized) leaf. An output nobody reads has no tap.
       auto same_pin = [](const hhds::Occurrence_pin& a, const hhds::Occurrence_pin& b) { return a == b; };
       for (const auto& d : sio->get_output_pin_decls()) {
@@ -3492,11 +3638,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               continue;
             }
             auto consumer = e.sink.get_master_node();
-            for (const auto& ce : consumer.inp_edges()) {
-              if (same_pin(ce.sink, e.sink)) {
-                v = driver_val(ce.driver, ok);
+            for (const auto& csink : consumer.inp_sorted_pins()) {
+              if (!same_pin(csink, e.sink)) {
+                continue;
+              }
+              for (const auto& driver : csink.get_driver_pins()) {
+                v = driver_val(driver, ok);  // first driver of that sink == the first matching edge
                 break;
               }
+              break;  // that `break` left the WHOLE walk
             }
             if (ok) {
               break;
@@ -3554,14 +3704,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // Distinct clock INPUT nets across this design's flops.
   absl::flat_hash_set<std::string> clk_inputs;
   for (const auto& fn : flops) {
-    for (const auto& e : fn.inp_edges()) {
-      if (e.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
+    for (const auto& sink : fn.inp_sorted_pins()) {
+      if (sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
         continue;
       }
-      if (auto ci = resolve_clk_input(e.driver); !ci.is_invalid()) {
-        clk_inputs.insert(std::string(gu::pin_name_of(ci)));
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (auto ci = resolve_clk_input(driver); !ci.is_invalid()) {
+          clk_inputs.insert(std::string(gu::pin_name_of(ci)));
+        }
+        break;  // first driver of the clock_pin sink == the first edge the old walk saw
       }
-      break;
+      break;  // that `break` left the WHOLE walk
     }
   }
   const bool multi_clock = clk_inputs.size() >= 2;
@@ -3613,14 +3766,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       bool                 has_q_arm = false;
       hhds::Occurrence_pin other;
-      for (const auto& e : mux.inp_edges()) {
-        if (e.sink.get_port_id() == 0) {
+      for (const auto& sink : mux.inp_sorted_pins()) {
+        if (sink.get_port_id() == 0) {
           continue;  // the selector is the gate, not an arm
         }
-        if (!e.driver.is_invalid() && e.driver.get_class_index() == q.get_class_index()) {
-          has_q_arm = true;
-        } else if (other.is_invalid()) {
-          other = e.driver;
+        for (const auto& driver : sink.get_driver_pins()) {
+          if (!driver.is_invalid() && driver.get_class_index() == q.get_class_index()) {
+            has_q_arm = true;
+          } else if (other.is_invalid()) {
+            other = driver;
+          }
         }
       }
       if (has_q_arm) {
@@ -3800,13 +3955,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // "en held at this step" -- the same term the inline M8 fold produces,
         // now reachable when the gate was INSTANTIATED rather than spelled out.
         hhds::Occurrence_pin ref_d, en_d, div_d, inv_d;
-        for (const auto& e : cn.inp_edges()) {
-          switch (static_cast<int>(e.sink.get_port_id())) {
-            case 2 : ref_d = e.driver; break;  // clk_ref
-            case 3 : div_d = e.driver; break;  // div
-            case 4 : en_d = e.driver; break;   // en
-            case 6 : inv_d = e.driver; break;  // invert
-            default: break;
+        for (const auto& sink : cn.inp_sorted_pins()) {
+          const auto spid = static_cast<int>(sink.get_port_id());
+          for (const auto& driver : sink.get_driver_pins()) {
+            switch (spid) {
+              case 2 : ref_d = driver; break;  // clk_ref
+              case 3 : div_d = driver; break;  // div
+              case 4 : en_d = driver; break;   // en
+              case 6 : inv_d = driver; break;  // invert
+              default: break;
+            }
           }
         }
         int divv = 1;
@@ -3890,30 +4048,38 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // AMBIGUITY IS A REFUSAL, not a coin flip: if two operands both look
         // like clocks this is not an ICG (it is an AND of two clocks), and
         // picking the first would silently drop the other.
+        // One driver == one of the old in-edges, so this stays a per-operand count.
         int n_clockish = 0;
-        for (const auto& e : cn.inp_edges()) {
-          n_clockish += is_clock_operand(e.driver) ? 1 : 0;
+        for (const auto& sink : cn.inp_sorted_pins()) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            n_clockish += is_clock_operand(driver) ? 1 : 0;
+          }
         }
         bool                 saw_clock = n_clockish != 1;  // !=1 -> never fold below
         hhds::Occurrence_pin gate_ref;                     // the gate's reference clock input
         std::vector<Term>    guards;
         bool                 gok = n_clockish == 1;
-        for (const auto& e : cn.inp_edges()) {
-          if (gok && !saw_clock && is_clock_operand(e.driver)) {
-            saw_clock = true;
-            gate_ref  = resolve_clk_input(e.driver);
-            continue;
+        for (const auto& sink : cn.inp_sorted_pins()) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            if (gok && !saw_clock && is_clock_operand(driver)) {
+              saw_clock = true;
+              gate_ref  = resolve_clk_input(driver);
+              continue;
+            }
+            if (!gok) {
+              break;
+            }
+            bool ok2 = true;
+            Val  gv  = driver_val(driver, ok2);
+            if (!ok2 || gv.term.isNull()) {
+              gok = false;
+              break;
+            }
+            guards.push_back(tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)}));
           }
           if (!gok) {
-            break;
+            break;  // both of the old `break`s left the WHOLE walk, and both have gok==false
           }
-          bool ok2 = true;
-          Val  gv  = driver_val(e.driver, ok2);
-          if (!ok2 || gv.term.isNull()) {
-            gok = false;
-            break;
-          }
-          guards.push_back(tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)}));
         }
         if (gok && saw_clock && !guards.empty()) {
           commits = guards.size() == 1 ? guards[0] : tm_.mkTerm(Kind::AND, guards);
@@ -4569,9 +4735,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // pass.abc wrapper shape: `out <- u_top__c0.f_o` with no comb node between)
   // has no pin2val entry for the boundary pin itself — the encoded producer
   // lives inside the child body and is keyed by ITS hier frame. A hier-context
-  // handle's inp_edges() resolves each edge to the real leaf driver (and stops
-  // at an opaque collapsed boundary, whose box outputs ARE keyed on the
-  // boundary pin — the occurrence view's owned policy covers this walk too).
+  // handle's get_driver_pins() resolves the output sink to the real leaf drivers
+  // (and stops at an opaque collapsed boundary, whose box outputs ARE keyed on
+  // the boundary pin — the occurrence view's owned policy covers this walk too).
+  // PLURAL and then front(): same list the retired inp_edges() built, same order.
   auto output_view = g->occurrences(opaque);
   for (const auto& d : gio->get_output_pin_decls()) {
     auto spin = g->get_output_pin(d.name);
@@ -4579,12 +4746,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       continue;
     }
     auto occurrence_spin = output_view.lift(spin);
-    auto output_edges    = occurrence_spin.inp_edges();
-    if (output_edges.empty()) {
+    auto output_drivers  = occurrence_spin.get_driver_pins();
+    if (output_drivers.empty()) {
       return fail("output '" + d.name + "' is undriven");
     }
     bool ok = true;
-    Val  v  = driver_val(output_edges.front().driver, ok);
+    Val  v  = driver_val(output_drivers.front(), ok);
     if (!ok) {
       return fail("output '" + d.name + "' driver not encodable (missing " + missing_driver_key + ", values "
                   + std::to_string(pin2val.size()) + (pin2val.empty() ? ")" : ", first " + pin2val.begin()->first + ")"));

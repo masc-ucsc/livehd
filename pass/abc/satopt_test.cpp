@@ -79,9 +79,7 @@ TEST(Satopt, InRegionFactsAreNotCandidates) {
 }
 TEST(Satopt, IndependentFreeInputsDoNotBecomeConstants) {
   Fixture f("satopt_free");
-  for (const auto& e : f.mux.create_sink_pin(0).inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(f.mux.create_sink_pin(0));
   f.x.connect_sink(f.mux.create_sink_pin(0));
   // A nonzero 8-bit selector must see bit 7, not just bit 0.
   auto result = livehd::abc::satopt(f.g.get(), {}, true);
@@ -98,9 +96,7 @@ TEST(Satopt, ComplementedArmsAreProven) {
   auto value = inv.create_driver_pin(0);
   gu::set_ubits(value, 8);
   gu::set_color(inv, 1);
-  for (const auto& e : f.mux.create_sink_pin(2).inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(f.mux.create_sink_pin(2));
   value.connect_sink(f.mux.create_sink_pin(2));
   auto result = livehd::abc::satopt(f.g.get());
   for (int bit = 0; bit < 8; ++bit) {
@@ -110,9 +106,7 @@ TEST(Satopt, ComplementedArmsAreProven) {
 
 TEST(Satopt, SharedHotmuxBlasterUsesEveryControlBit) {
   Fixture f("satopt_hotmux_control");
-  for (const auto& e : f.mux.inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(f.mux);
   gu::set_type_op(f.mux, Ntype_op::Hotmux);
   f.x.connect_sink(f.mux.create_sink_pin(0));
   gu::create_const(*f.g, *Dlop::create_integer(255)).connect_sink(f.mux.create_sink_pin(1));

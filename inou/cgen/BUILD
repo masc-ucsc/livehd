@@ -156,6 +156,18 @@ filegroup(
 )
 
 cc_test(
+    name = "cgen_sim_test",
+    srcs = ["cgen_sim_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":inou_cgen",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
     name = "cgen_verilog_test",
     srcs = ["cgen_verilog_test.cpp"],
     copts = COPTS,

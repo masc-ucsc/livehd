@@ -19,6 +19,7 @@
 #include "cprop_value.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "mask_eval.hpp"
 #include "node_util.hpp"
 #include "pass_cprop.hpp"
 #include "perf_tracing.hpp"
@@ -36,28 +37,28 @@ using livehd::graph_util::type_op_of;
 
 namespace {
 
-// The ports are already ascending (hhds contract); only the several drivers of
-// one sink pin need a deterministic order.
-void sort_inp(livehd::graph_util::Edge_vec& edges) {
-  livehd::graph_util::sort_drivers_within_pin(edges, [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
-    const auto an = a.driver.get_master_node().get_debug_nid();
-    const auto bn = b.driver.get_master_node().get_debug_nid();
-    if (an != bn) {
-      return an < bn;
-    }
-    return a.driver.get_port_id() < b.driver.get_port_id();
-  });
-}
+// This node's operands, in ascending sink-port order, as a SNAPSHOT.
+//
+// SNAPSHOT, not a lazy view: every caller rewrites the graph while holding the
+// result (connect_driver, del_sink, set_type_op, del_node), and a lazy pin view
+// is a view over the storage those calls mutate. inp_edges() materialized for
+// exactly this reason; inp_pins_snapshot() is the pin-shaped equivalent.
+//
+// The SORT this used to do is GONE, and its absence is the point rather than an
+// omission. It existed only to impose a deterministic order on the SEVERAL
+// DRIVERS OF ONE SINK PIN -- the one thing hhds does not order. Under ONE
+// DRIVER PER SINK PIN (graph/cell.hpp) a commutative cell spends one sink pid
+// per operand, so every run it sorted has length one and there is nothing left
+// to order. What remains is the ascending sink-port contract, which the pin
+// chain already keeps, so the whole pass is now order-free by construction.
+//
+// cprop never sees the one sanctioned multi-driver sink either: a compact
+// loop's carry-in belongs to a Sub, and scalar_node returns before reaching
+// here for anything is_computed_comb_op rejects.
+Cprop::Inp_pins ordered_inp_edges(const hhds::Node_class& node) { return node.inp_pins_snapshot(); }
 
-livehd::graph_util::Edge_vec ordered_inp_edges(const hhds::Node_class& node) {
-  auto e = node.inp_edges();
-  sort_inp(e);
-  return e;
-}
-
-bool is_two_arm_mux(const livehd::graph_util::Edge_vec& edges) {
-  return edges.size() == 3 && edges[0].sink.get_port_id() == 0 && edges[1].sink.get_port_id() == 1
-         && edges[2].sink.get_port_id() == 2;
+bool is_two_arm_mux(const Cprop::Inp_pins& edges) {
+  return edges.size() == 3 && edges[0].get_port_id() == 0 && edges[1].get_port_id() == 1 && edges[2].get_port_id() == 2;
 }
 
 // Materialize HHDS's forward order once. HHDS owns the topological traversal;
@@ -74,6 +75,37 @@ std::vector<hhds::Node_class> stable_nodes(hhds::Graph* g) {
 
 using livehd::graph_util::const_of;
 using livehd::graph_util::setup_sink_by_name;
+
+// Disconnect EVERY operand of `node`, leaving the node in place for its callers
+// to re-wire under a new opcode.
+//
+// SNAPSHOT: del_sink() is a structural mutation, so a lazy pin view taken here
+// would be invalidated by the first disconnect. The snapshot is a plain vector
+// of handles and only EDGES are removed (never a pin or the node), so every
+// later element stays valid -- which is why this is one loop and not the
+// collect-then-delete pair it replaces. One driver per sink pin, so dropping a
+// sink's driver IS dropping the one in-edge the old code deleted.
+void clear_all_sinks(const hhds::Node_class& node) {
+  for (const auto& spin : node.inp_pins_snapshot()) {
+    spin.del_sink();
+  }
+}
+
+// Every consumer SINK of `node`, materialized: the node's DRIVER PINS, then
+// each pin's own fan-out. Same sinks, same order as the old node-level
+// out_edges() walk, but safe to rewire through -- a driver's fan-out is a lazy
+// view over live edge storage, and every caller below reconnects or deletes
+// while walking it. A driver's fan-out is genuinely a SET (clock and reset
+// reach 100K+ sinks), so there is no single-sink reader to use instead.
+std::vector<hhds::Pin_class> consumer_sinks(const hhds::Node_class& node) {
+  std::vector<hhds::Pin_class> sinks;
+  for (const auto& out_pin : node.out_sorted_pins()) {
+    for (const auto& e : out_pin.out_edges()) {
+      sinks.push_back(e.sink);
+    }
+  }
+  return sinks;
+}
 
 // Only explicit operations and literal values can prove a mask redundant.
 bool fits_unsigned_window(const hhds::Pin_class& pin, int width) {
@@ -164,17 +196,18 @@ struct Bool_condition {
     }
   } else if (type_op_of(n) == Ntype_op::EQ) {
     // The lowering spells truth tests as `(x == 0) == 0`; peel each equality
-    // against known zero and carry its inversion bit. EQ's `as` port is
-    // multi-driver, so inspect edges rather than drv_at().
+    // against known zero and carry its inversion bit. EQ's operands occupy
+    // CONSECUTIVE sink pins of one bank, so walk the pins rather than drv_at().
     hhds::Pin_class value;
     int             zeros  = 0;
     int             values = 0;
-    for (const auto& e : n.inp_edges()) {
-      auto truth = const_truth(e.driver);
+    for (auto isnk : n.inp_sorted_pins()) {
+      auto idrv  = isnk.get_driver_pin();
+      auto truth = const_truth(idrv);
       if (truth.has_value() && !*truth) {
         ++zeros;
       } else {
-        value = e.driver;
+        value = idrv;
         ++values;
       }
     }
@@ -255,8 +288,12 @@ struct Hold_mux_match {
         }
       }
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    // Arbitrary node: a compact loop's carry-in sink legitimately holds the
+    // seed AND the previous-ordinal self edge, so take the plural reader.
+    for (auto isnk : n.inp_sorted_pins()) {
+      for (auto idrv : isnk.get_driver_pins()) {
+        work.push_back(idrv);
+      }
     }
   }
   return std::nullopt;
@@ -279,8 +316,12 @@ struct Hold_mux_match {
     if (livehd::graph_util::is_type_register(n) || type_op_of(n) == Ntype_op::Sub) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    // Arbitrary node: a compact loop's carry-in sink legitimately holds the
+    // seed AND the previous-ordinal self edge, so take the plural reader.
+    for (auto isnk : n.inp_sorted_pins()) {
+      for (auto idrv : isnk.get_driver_pins()) {
+        work.push_back(idrv);
+      }
     }
   }
   return false;
@@ -318,8 +359,12 @@ struct Hold_mux_match {
         }
       }
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    // Arbitrary node: a compact loop's carry-in sink legitimately holds the
+    // seed AND the previous-ordinal self edge, so take the plural reader.
+    for (auto isnk : n.inp_sorted_pins()) {
+      for (auto idrv : isnk.get_driver_pins()) {
+        work.push_back(idrv);
+      }
     }
   }
   return false;
@@ -544,19 +589,20 @@ using livehd::cprop_value::is_bool01;
   hhds::Pin_class value;
   int             matches = 0;
   int             total   = 0;
-  for (const auto& e : n.inp_edges()) {
+  for (auto isnk : n.inp_sorted_pins()) {
+    auto idrv = isnk.get_driver_pin();
     ++total;
     if (total > 2) {
       return {};
     }
-    if (e.driver.is_const()) {
-      const auto& c = const_of(e.driver);
+    if (idrv.is_const()) {
+      const auto& c = const_of(idrv);
       if (c.is_just_i64() && !c.has_unknowns() && c.to_just_i64() == against) {
         ++matches;
         continue;
       }
     }
-    value = e.driver;
+    value = idrv;
   }
   if (total != 2 || matches != 1 || value.is_invalid()) {
     return {};
@@ -632,11 +678,12 @@ void sweep_dead_node(const hhds::Node_class& n) {
         || type_op_of(cur) == Ntype_op::Hotmux || cur.has_out_edges()) {
       continue;
     }
-    for (const auto& e : cur.inp_edges()) {
-      if (is_graph_input_pin(e.driver) || is_graph_output_pin(e.driver)) {
+    for (const auto& in_pin : cur.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (is_graph_input_pin(in_drv) || is_graph_output_pin(in_drv)) {
         continue;
       }
-      auto m = e.driver.get_master_node();
+      auto m = in_drv.get_master_node();
       if (!livehd::graph_util::is_builtin_node(m) && queued.insert(m.get_class_index()).second) {
         work.push_back(m);
       }
@@ -702,10 +749,7 @@ void cleanup_dead_nodes(hhds::Graph* g) {
 // LSB-first (as tile_pack_lanes leaves it) and the cell is MSB-first, hence the
 // reverse indexing.
 void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_lane>& tiled) {
-  auto edges = node.inp_edges();  // snapshot: del_edge invalidates the lazy view
-  for (auto e : edges) {
-    e.del_edge();
-  }
+  clear_all_sinks(node);
   livehd::graph_util::set_type_op(node, Ntype_op::Concat);
 
   int32_t total = 0;
@@ -719,14 +763,14 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
         value = create_const(g, *const_of(value).and_op(*mask));
       } else {
         auto get = create_typed_node(g, Ntype_op::Get_mask);
-        setup_sink_by_name(get, "a").connect_driver(value);
-        setup_sink_by_name(get, "mask").connect_driver(create_const(g, *mask));
+        livehd::graph_util::connect_mask_operands(get, value, create_const(g, *mask));
         value = get.create_driver_pin(0);
         livehd::graph_util::set_ubits(value, w);
       }
     }
-    node.create_sink_pin(static_cast<hhds::Port_id>(2 * i)).connect_driver(value);
-    node.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1)).connect_driver(create_const(g, *Dlop::create_integer(w)));
+    livehd::graph_util::setup_sink_pid(node, static_cast<hhds::Port_id>(2 * i)).connect_driver(value);
+    livehd::graph_util::setup_sink_pid(node, static_cast<hhds::Port_id>(2 * i + 1))
+        .connect_driver(create_const(g, *Dlop::create_integer(w)));
     total += w;
   }
 
@@ -875,12 +919,11 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
     for (const auto& [lo, hi] : gaps) {
       const auto mask = Dlop::get_mask_value(hi - 1, lo);
       if (base_pin.is_const()) {
-        auto value = const_of(base_pin).get_mask_op(*mask);
+        auto value = const_of(base_pin).get_mask_op_opt(lo, hi);
         lanes.push_back(Pack_lane{create_const(g, *value), lo, hi});
       } else {
         auto get = livehd::graph_util::create_typed_node(g, Ntype_op::Get_mask);
-        livehd::graph_util::setup_sink_by_name(get, "a").connect_driver(base_pin);
-        livehd::graph_util::setup_sink_by_name(get, "mask").connect_driver(create_const(g, *mask));
+        livehd::graph_util::connect_mask_operands(get, base_pin, create_const(g, *mask));
         auto value = get.create_driver_pin(0);
         livehd::graph_util::set_ubits(value, hi - lo);
         lanes.push_back(Pack_lane{value, lo, hi});
@@ -921,14 +964,14 @@ bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
   std::vector<Pack_lane>        lanes;
   std::vector<hhds::Node_class> shifts;
   int                           fan_in = 0;
-  for (const auto& e : node.inp_edges()) {
+  for (auto isnk : node.inp_sorted_pins()) {
     if (++fan_in > kConcatPackFanInLimit) {
       return false;
     }
-    if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
-      return false;  // Or is n-ary on ONE sink; anything else is not this shape
+    if (Ntype::sink_bank(Ntype_op::Or, isnk.get_port_id()) != 0) {
+      return false;  // Or has ONE operand bank; anything else is not this shape
     }
-    auto value = e.driver;
+    auto value = isnk.get_driver_pin();
     int  shift = 0;
     auto m     = value.get_master_node();
     if (!m.is_invalid() && type_op_of(m) == Ntype_op::SHL) {
@@ -1011,7 +1054,7 @@ bool canonicalize_concat_pack(hhds::Graph* g, hhds::Node_class& node) {
 
 }  // namespace
 
-void Cprop::collapse_forward_same_op(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+void Cprop::collapse_forward_same_op(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   auto op = type_op_of(node);
 
   // out_edges() is a lazy view; rewriting an edge (connect_driver/del_edge)
@@ -1027,42 +1070,43 @@ void Cprop::collapse_forward_same_op(hhds::Node_class& node, livehd::graph_util:
       if (type_op_of(out.sink.get_master_node()) != op) {
         continue;
       }
-      if (out.driver.get_port_id() != out.sink.get_port_id()) {
+      // The consumer must read us through the SAME operand role. `op` here is a
+      // single-bank commutative cell (Mult/Or/And/Xor), so that role is bank 0
+      // and this node's output pid is 0 -- compare against the BANK, not the raw
+      // sink pid, because each operand now owns a consecutive pid of its own
+      // (graph/cell.hpp's ONE DRIVER PER SINK PIN block).
+      if (out.driver.get_port_id() != Ntype::sink_bank(op, out.sink.get_port_id())) {
         continue;
       }
-      // Parallel-edge refusal (same hazard collapse_forward_always_pin0 and
-      // collapse_forward_for_pin guard against): splicing an operand into a
-      // consumer that ALREADY reads it needs a second parallel edge, which
-      // hhds overflow-mode sink storage (a set) silently DEDUPS -- Mult would
-      // square the shared operand away (Mult(Mult(a,b),a) = a*a*b collapsing
-      // to a*b). And/Or are idempotent so the dedup is value-neutral there,
-      // and Xor is handled by the explicit parity cancel below.
-      if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor) {
-        bool shares_operand = false;
-        for (auto& inp : inp_edges_ordered) {
-          if (is_driver_connected_to_sink(inp.driver, out.sink)) {
-            shares_operand = true;
-            break;
-          }
-        }
-        if (shares_operand) {
-          continue;  // leave this consumer's edge in place
-        }
-      }
+      auto       consumer = out.sink.get_master_node();
+      const auto bank     = Ntype::sink_bank(op, out.sink.get_port_id());
+
+      // NO parallel-edge refusal any more. It existed because every operand of a
+      // commutative cell used to land on ONE sink pin, where hhds edge storage
+      // (a set keyed by (driver, sink)) silently DEDUPED a repeat: splicing `a`
+      // into a consumer that already read `a` turned Mult(Mult(a,b),a) = a*a*b
+      // into a*b. Operands now occupy distinct pins, so the multiset is
+      // representable and the splice is exact for every op here.
 
       for (auto& inp : inp_edges_ordered) {
         if (op == Ntype_op::Xor) {
-          if (is_driver_connected_to_sink(inp.driver, out.sink)) {
-            out.sink.del_sink(inp.driver);
-          } else {
-            out.sink.connect_driver(inp.driver);
+          // Parity cancel: `a ^ a` is 0, so a repeat REMOVES the slot holding it
+          // rather than adding one. Scan the whole bank -- the duplicate may sit
+          // on any of its slots, not just the one our edge arrived on.
+          hhds::Pin_class dup;
+          for (const auto& slot : livehd::graph_util::bank_sinks(consumer, "as")) {
+            if (is_driver_connected_to_sink(inp.get_driver_pin(), slot)) {
+              dup = slot;
+              break;
+            }
           }
-        } else if (op == Ntype_op::Or || op == Ntype_op::And) {
-          out.sink.connect_driver(inp.driver);
-        } else {
-          I(op != Ntype_op::Sum);
-          out.sink.connect_driver(inp.driver);
+          if (!dup.is_invalid()) {
+            dup.del_sink(inp.get_driver_pin());
+            continue;
+          }
         }
+        I(op != Ntype_op::Sum);  // Sum has two banks; collapse_forward_sum owns it
+        livehd::graph_util::append_sink_operand(consumer, op, bank).connect_driver(inp.get_driver_pin());
       }
 
       out.del_edge();
@@ -1075,7 +1119,7 @@ void Cprop::collapse_forward_same_op(hhds::Node_class& node, livehd::graph_util:
   }
 }
 
-void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+void Cprop::collapse_forward_sum(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   if (inp_edges_ordered.size() > 32) {
     return;
   }
@@ -1113,21 +1157,25 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
       // is the same runtime-offset width shape one level down, and forwarding it
       // as two cancelling edges would grow the consumer's fan-in by two for a
       // contribution of zero -- and nothing downstream folds that pair back out.
-      // Compare landings, not `inp.sink`: an illegal Sum pid >= 2 binarizes into
+      // Compare landings, not `inp_sink`: an illegal Sum pid >= 2 binarizes into
       // `bs` above, and only the landing form then refuses conservatively.
+      // BANK parity decides the sign, not the raw pid: each Sum operand owns a
+      // consecutive pid, EVEN = added, ODD = subtracted (graph/cell.hpp's ONE
+      // DRIVER PER SINK PIN block). `pid == 0 ? add : sub` would have read
+      // every `as` slot above pid 0 as a subtrahend.
       const auto        as_sink  = find_sink_pin(next_sum_node, "as");
       const auto        bs_sink  = find_sink_pin(next_sum_node, "bs");
-      const int         out_port = out.sink.get_port_id() == 0 ? 0 : 1;
+      const int         out_port = static_cast<int>(Ntype::sink_bank(Ntype_op::Sum, out.sink.get_port_id()));
       bool              refuse   = false;
       std::vector<bool> cancel(inp_edges_ordered.size(), false);
       std::vector<bool> drop(inp_edges_ordered.size(), false);  // node-internal +D/-D pair: splice neither
       std::vector<int>  landing(inp_edges_ordered.size(), 0);
       for (size_t i = 0; i < inp_edges_ordered.size(); ++i) {
-        landing[i] = (inp_edges_ordered[i].sink.get_port_id() == 0 ? 0 : 1) ^ out_port;
+        landing[i] = static_cast<int>(Ntype::sink_bank(Ntype_op::Sum, inp_edges_ordered[i].get_port_id())) ^ out_port;
       }
       for (size_t i = 0; i < inp_edges_ordered.size() && !refuse; ++i) {
         for (size_t j = 0; j < i; ++j) {
-          if (inp_edges_ordered[j].driver != inp_edges_ordered[i].driver) {
+          if (inp_edges_ordered[j].get_driver_pin() != inp_edges_ordered[i].get_driver_pin()) {
             continue;
           }
           if (landing[j] == landing[i]) {
@@ -1144,12 +1192,12 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
         if (drop[i]) {
           continue;
         }
-        const auto& inp           = inp_edges_ordered[i];
+        const auto  inp_sink      = inp_edges_ordered[i];
         const auto& same_sink     = landing[i] == 0 ? as_sink : bs_sink;
         const auto& opposite_sink = landing[i] == 0 ? bs_sink : as_sink;
-        if (is_driver_connected_to_sink(inp.driver, same_sink)) {
+        if (is_driver_connected_to_sink(inp_sink.get_driver_pin(), same_sink)) {
           refuse = true;
-        } else if (is_driver_connected_to_sink(inp.driver, opposite_sink)) {
+        } else if (is_driver_connected_to_sink(inp_sink.get_driver_pin(), opposite_sink)) {
           cancel[i] = true;
         }
       }
@@ -1158,15 +1206,15 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
       }
 
       for (size_t i = 0; i < inp_edges_ordered.size(); ++i) {
-        const auto& inp = inp_edges_ordered[i];
+        const auto inp_sink = inp_edges_ordered[i];
         if (drop[i]) {
           continue;
         }
         if (cancel[i]) {
-          (landing[i] == 0 ? bs_sink : as_sink).del_sink(inp.driver);
+          (landing[i] == 0 ? bs_sink : as_sink).del_sink(inp_sink.get_driver_pin());
           continue;
         }
-        setup_sink_by_name(next_sum_node, landing[i] == 0 ? "as" : "bs").connect_driver(inp.driver);
+        setup_sink_by_name(next_sum_node, landing[i] == 0 ? "as" : "bs").connect_driver(inp_sink.get_driver_pin());
       }
       out.del_edge();
       if (!next_sum_node.has_inp_edges()) {
@@ -1183,7 +1231,7 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
   }
 }
 
-void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   auto op = type_op_of(node);
 
   // Parallel-edge pre-scan: forwarding an operand into a consumer that
@@ -1192,13 +1240,13 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
   // drop one operand (Sum halves, Mult squares away). And/Or consumers are
   // idempotent so the dedup is value-neutral, and Xor-into-Xor is handled by
   // the explicit parity cancel below. Anything else: leave the node alone.
-  for (const auto& out : node.out_edges()) {
-    const auto consumer_op = type_op_of(out.sink.get_master_node());
+  for (const auto& consumer : consumer_sinks(node)) {
+    const auto consumer_op = type_op_of(consumer.get_master_node());
     if (consumer_op == Ntype_op::And || consumer_op == Ntype_op::Or || (op == Ntype_op::Xor && consumer_op == Ntype_op::Xor)) {
       continue;
     }
     for (auto& inp : inp_edges_ordered) {
-      if (is_driver_connected_to_sink(inp.driver, out.sink)) {
+      if (is_driver_connected_to_sink(inp.get_driver_pin(), consumer)) {
         return;
       }
     }
@@ -1206,22 +1254,30 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
 
   // Splice this node's inputs onto every consumer sink, then bwd_del_node
   // deletes the node in one shot (del_node bulk-drops its edges — no per-edge
-  // del_edge lookup). Iterating the live out_edges while connecting is safe:
-  // connect_driver/del_sink only touch the input/consumer pins, never node's
-  // out-edge storage, and no node/pin is created to realloc the tables.
-  for (const auto& out : node.out_edges()) {
+  // del_edge lookup).
+  //
+  // The consumer list is SNAPSHOTTED. It used to be a live out_edges() walk,
+  // under a comment arguing that connect_driver/del_sink touch only the input
+  // and consumer pins and so cannot disturb node's own out-edge storage. That
+  // is a claim about hhds internals made from the outside, and it is not the
+  // contract: a lazy fan-out view is invalidated by ANY add_edge/del_edge on
+  // the body (debug builds assert on exactly this). The snapshot costs one
+  // small vector and makes the loop correct by construction instead of by
+  // argument -- and the set it walks is identical, since the new edges run from
+  // node's INPUTS to the consumers, never from node itself.
+  for (const auto& consumer : consumer_sinks(node)) {
     for (auto& inp : inp_edges_ordered) {
-      if (op == Ntype_op::Xor && type_op_of(out.sink.get_master_node()) == Ntype_op::Xor) {
+      if (op == Ntype_op::Xor && type_op_of(consumer.get_master_node()) == Ntype_op::Xor) {
         // Parity cancel is only correct INTO another Xor: a shared operand
         // pair drops out of that consumer's reduction. For every other
         // consumer the pre-scan above guarantees a plain reconnect suffices.
-        if (is_driver_connected_to_sink(inp.driver, out.sink)) {
-          out.sink.del_sink(inp.driver);
+        if (is_driver_connected_to_sink(inp.get_driver_pin(), consumer)) {
+          consumer.del_sink(inp.get_driver_pin());
         } else {
-          out.sink.connect_driver(inp.driver);
+          consumer.connect_driver(inp.get_driver_pin());
         }
       } else {
-        out.sink.connect_driver(inp.driver);
+        consumer.connect_driver(inp.get_driver_pin());
       }
     }
   }
@@ -1255,7 +1311,19 @@ namespace {
 }  // namespace
 
 bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
-  for (const auto& out : node.out_edges()) {
+  // SNAPSHOT ONCE. out_edges() is a lazy VIEW over live edge storage, and the
+  // second loop below MUTATES (connect_sink -> add_edge). The old code walked
+  // the live view while connecting, on the reasoning that "connect_sink only
+  // grows new_dpin/sink storage, so the live walk stays valid" -- which does
+  // not hold: an add_edge that spills an entry into overflow push_backs onto
+  // Graph::overflow_sets(), and THAT vector reallocating dangles the raw
+  // OverflowSet pointer and the borrowed set iterators the in-flight
+  // OutEdgeIterator is walking. hhds's debug mutation guard aborts on it.
+  // Snapshotting also stops this function walking the fanout twice.
+  const auto                   out_view = node.out_edges();
+  livehd::graph_util::Edge_vec outs(out_view.begin(), out_view.end());
+
+  for (const auto& out : outs) {
     // Parallel-edge refusal: if new_dpin ALREADY drives this consumer sink,
     // the reconnect needs a second parallel edge -- and hhds overflow-mode
     // sink storage is a set that silently DEDUPS it, so the consumer would
@@ -1273,9 +1341,8 @@ bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
   }
 
   // Redirect every consumer to new_dpin, then bwd_del_node deletes the node in
-  // one shot (del_node bulk-drops its edges — no per-edge find). connect_sink
-  // only grows new_dpin/sink storage, so the live walk stays valid.
-  for (const auto& out : node.out_edges()) {
+  // one shot (del_node bulk-drops its edges — no per-edge find).
+  for (const auto& out : outs) {
     new_dpin.connect_sink(out.sink);
   }
 
@@ -1283,12 +1350,12 @@ bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
   return true;
 }
 
-bool Cprop::try_constant_prop(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+bool Cprop::try_constant_prop(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   int n_inputs_constant = 0;
   int n_inputs          = 0;
   for (auto& e : inp_edges_ordered) {
     n_inputs++;
-    if (!e.driver.is_const()) {
+    if (!e.get_driver_pin().is_const()) {
       continue;
     }
     n_inputs_constant++;
@@ -1305,16 +1372,16 @@ bool Cprop::try_constant_prop(hhds::Node_class& node, livehd::graph_util::Edge_v
   return false;
 }
 
-void Cprop::try_collapse_forward(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+void Cprop::try_collapse_forward(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   auto op = type_op_of(node);
 
   if (inp_edges_ordered.size() == 1) {
-    auto       prev_op      = type_op_of(inp_edges_ordered[0].driver.get_master_node());
+    auto       prev_op      = type_op_of(inp_edges_ordered[0].get_driver_pin().get_master_node());
     // A single-input Sum whose lone driver is on the SUBTRACT (b) pin is a
     // negation (0 - x = -x). collapse_forward_always_pin0 forwards the driver
     // UNCHANGED, which would drop the sign (turning -x into +x). Leave the Sum
     // node so cgen renders it as -(x).
-    const bool sum_subtract = op == Ntype_op::Sum && sink_pin_name(inp_edges_ordered[0].sink) == "bs";
+    const bool sum_subtract = op == Ntype_op::Sum && sink_pin_name(inp_edges_ordered[0]) == "bs";
     if ((op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
          || op == Ntype_op::Xor)
         && !sum_subtract) {
@@ -1345,9 +1412,9 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, livehd::graph_util::Edg
       return;
     }
     if (op == Ntype_op::Mux) {
-      auto& a_pin = inp_edges_ordered[1].driver;
+      auto a_pin = inp_edges_ordered[1].get_driver_pin();
       for (auto i = 2u; i < inp_edges_ordered.size(); ++i) {
-        if (!same_driver_value(a_pin, inp_edges_ordered[i].driver)) {
+        if (!same_driver_value(a_pin, inp_edges_ordered[i].get_driver_pin())) {
           return;
         }
       }
@@ -1378,10 +1445,10 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, livehd::graph_util::Edg
   }
 }
 
-void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+void Cprop::replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   auto op = type_op_of(node);
   if (op == Ntype_op::Mux) {
-    auto& s_pin = inp_edges_ordered[0].driver;
+    auto s_pin = inp_edges_ordered[0].get_driver_pin();
     if (!s_pin.is_const()) {
       return;
     }
@@ -1399,11 +1466,11 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
 
     hhds::Pin_class a_pin;
     for (auto& e : inp_edges_ordered) {
-      if (e.sink.get_port_id() == 0) {
+      if (e.get_port_id() == 0) {
         continue;
       }
-      if (e.sink.get_port_id() == static_cast<hhds::Port_id>(sel + 1)) {
-        a_pin = e.driver;
+      if (e.get_port_id() == static_cast<hhds::Port_id>(sel + 1)) {
+        a_pin = e.get_driver_pin();
         break;
       }
     }
@@ -1437,9 +1504,9 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
   } else if (op == Ntype_op::EQ) {
     // FIXME: 1- eq(X,0) = not(ror(x))
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
-    hhds::Edge_class first_const_edge;
-    int              nconstants = 0;
-    int              npending   = 0;
+    hhds::Pin_class first_const_edge;
+    int             nconstants = 0;
+    int             npending   = 0;
 
     // Seed the accumulator with the op's identity (0 for Sum/Or, -1 for And).
     // A default Dlop is Invalid, which used to act as the additive identity but
@@ -1450,13 +1517,13 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     // A non-numeric constant operand (a String) turns every fold below into
     // nil, which is not a value: bail BEFORE any constant edge is deleted.
     for (const auto& i : inp_edges_ordered) {
-      if (i.driver.is_const() && !const_of(i.driver).is_numeric()) {
+      if (i.get_driver_pin().is_const() && !const_of(i.get_driver_pin()).is_numeric()) {
         return;
       }
     }
-    livehd::graph_util::Edge_vec edge_it2;
+    Cprop::Inp_pins edge_it2;
     for (auto& i : inp_edges_ordered) {
-      if (!i.driver.is_const()) {
+      if (!i.get_driver_pin().is_const()) {
         if (npending == 0) {
           edge_it2.push_back(i);
         }
@@ -1464,15 +1531,15 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
         continue;
       }
 
-      const auto& c = const_of(i.driver);
+      const auto& c = const_of(i.get_driver_pin());
 
       ++nconstants;
 
       if (op == Ntype_op::Sum) {
-        if (sink_pin_name(i.sink) == "as") {
+        if (sink_pin_name(i) == "as") {
           result = result.add_op(c);
         } else {
-          I(sink_pin_name(i.sink) == "bs");
+          I(sink_pin_name(i) == "bs");
           result = result.sub_op(c);
         }
       } else if (op == Ntype_op::Or) {
@@ -1487,7 +1554,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
       if (nconstants == 1) {
         first_const_edge = i;
       } else {
-        i.del_edge();
+        i.del_sink();
       }
     }
 
@@ -1505,7 +1572,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
       // Or's annihilator: x | -1 is the all-ones -1 for EVERY x.
       replace_node(node, result);
     } else if (nconstants > 1) {
-      first_const_edge.del_edge();
+      first_const_edge.del_sink();
       if (!result.is_known_zero()) {
         if (op == Ntype_op::Sum && !result.is_positive()) {
           // `result` is the SIGNED fold (add_op for `as`, sub_op for `bs`), so a
@@ -1523,7 +1590,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
           // Or/And/Xor have no subtract sink, so their fold always joins `as`.
           setup_sink_by_name(node, "as").connect_driver(create_const(*current_graph, result));
         }
-      } else if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "bs")) {
+      } else if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0]) == "bs")) {
         // Same guard as the nconstants==0 case below: a lone pending operand on a
         // Sum's subtract (b) pin is `0 - x` = -x, so forwarding x unchanged would
         // drop the sign. Leave the Sum node (it now holds only the b driver).
@@ -1539,21 +1606,21 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
       // as +1 and masks everything away. (Sum's lone `+0` used to fall through
       // every branch here — the nconstants>1 fold path needs two constants —
       // so `add(add(0,a),b)` survived all the way into the generated sim C++.)
-      first_const_edge.del_edge();
-      if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "bs")) {
+      first_const_edge.del_sink();
+      if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0]) == "bs")) {
         collapse_forward_always_pin0(node, edge_it2);
       }
     } else if (npending == 0 && nconstants == 1) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
     } else if (npending == 1 && nconstants == 0) {
-      if (!(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "bs")) {
+      if (!(op == Ntype_op::Sum && sink_pin_name(edge_it2[0]) == "bs")) {
         collapse_forward_always_pin0(node, edge_it2);
       }
     }
   } else if (op == Ntype_op::Mult) {
-    hhds::Edge_class first_const_edge;
-    int              nconstants = 0;
-    int              npending   = 0;
+    hhds::Pin_class first_const_edge;
+    int             nconstants = 0;
+    int             npending   = 0;
 
     Dlop result;
     result = Dlop::create_integer(1);  // multiplicative identity
@@ -1561,26 +1628,26 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     // A non-numeric constant operand (a String) turns every fold below into
     // nil, which is not a value: bail BEFORE any constant edge is deleted.
     for (const auto& i : inp_edges_ordered) {
-      if (i.driver.is_const() && !const_of(i.driver).is_numeric()) {
+      if (i.get_driver_pin().is_const() && !const_of(i.get_driver_pin()).is_numeric()) {
         return;
       }
     }
-    livehd::graph_util::Edge_vec edge_it2;
+    Cprop::Inp_pins edge_it2;
     for (auto& i : inp_edges_ordered) {
-      if (!i.driver.is_const()) {
+      if (!i.get_driver_pin().is_const()) {
         if (npending == 0) {
           edge_it2.push_back(i);
         }
         npending++;
         continue;
       }
-      const auto& c = const_of(i.driver);
+      const auto& c = const_of(i.get_driver_pin());
       ++nconstants;
       result = result.mult_op(c);
       if (nconstants == 1) {
         first_const_edge = i;
       } else {
-        i.del_edge();
+        i.del_sink();
       }
     }
     I(nconstants >= 1 && npending >= 1);  // try_constant_prop routes all-const to replace_all
@@ -1589,44 +1656,51 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
       replace_node(node, result);  // x * 0 == 0: annihilator (width-adjusts per consumer)
     } else if (result.is_just_i64() && result.to_just_i64() == 1) {
       // Multiplicative identity: drop the constant.
-      first_const_edge.del_edge();
+      first_const_edge.del_sink();
       if (npending == 1) {
         collapse_forward_always_pin0(node, edge_it2);
       }
     } else if (npending == 1 && result.is_just_i64() && result.to_just_i64() > 1
                && (result.to_just_i64() & (result.to_just_i64() - 1)) == 0) {
       // Strength reduction: Mult(x, 2^k) -> SHL(x, k). Exact for any sign of x
-      // at unlimited precision. Mult's multi-driver `as` shares pid 0 with
-      // SHL's `a`, so the live operand stays put and only the amount is wired.
+      // at unlimited precision.
+      //
+      // The surviving operand must be MOVED to pid 0. Mult's operand bank
+      // spends one pid PER operand (graph/cell.hpp), so `x` may sit on pid 1,
+      // 2, ... -- and pid 1 is exactly SHL's shift-AMOUNT sink. Leaving it
+      // there and wiring the amount produced `x << x`. Rebuild both sinks from
+      // scratch instead of assuming any pid survives the retype.
       const int64_t v = result.to_just_i64();
       int           k = 0;
       while ((v >> k) != 1) {
         ++k;
       }
-      first_const_edge.del_edge();
+      auto x_pin = edge_it2[0].get_driver_pin();  // the single non-constant operand
+      clear_all_sinks(node);
       livehd::graph_util::set_type_op(node, Ntype_op::SHL);
+      setup_sink_by_name(node, "a").connect_driver(x_pin);
       setup_sink_by_name(node, "b").connect_driver(create_const(*current_graph, *Dlop::create_integer(k)));
     } else if (nconstants > 1) {
       // Reattach the folded product as the one surviving constant.
-      first_const_edge.del_edge();
+      first_const_edge.del_sink();
       setup_sink_by_name(node, "as").connect_driver(create_const(*current_graph, result));
     }
   } else if (op == Ntype_op::SRA) {
-    auto& amt_pin = inp_edges_ordered[1].driver;
+    auto amt_pin = inp_edges_ordered[1].get_driver_pin();
     if (amt_pin.is_known_false()) {
-      collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
+      collapse_forward_for_pin(node, inp_edges_ordered[0].get_driver_pin());
     }
   } else if (op == Ntype_op::SHL) {
     if (inp_edges_ordered.size() == 2) {
-      auto& amt_pin = inp_edges_ordered[1].driver;
+      auto amt_pin = inp_edges_ordered[1].get_driver_pin();
       if (amt_pin.is_known_false()) {
-        collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
+        collapse_forward_for_pin(node, inp_edges_ordered[0].get_driver_pin());
       }
     }
   }
 }
 
-void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   auto op = type_op_of(node);
   if (op == Ntype_op::SHL) {
     // SHL b is single-driver (the one-hot multi-shift form was removed).
@@ -1647,11 +1721,15 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(0);
     for (auto& i : inp_edges_ordered) {
-      const auto& c = const_of(i.driver);
+      const auto& c = const_of(i.get_driver_pin());
       result        = result.ror_op(c);
     }
 
     replace_node(node, result);
+  } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+    const auto input    = livehd::graph_util::get_driver_of_sink_name(node, "a");
+    const auto selected = const_of(input).get_mask_op_opt(0, livehd::graph_util::reduction_count(node));
+    replace_node(node, op == Ntype_op::Rxor ? selected->rxor_op() : selected->popcount_op());
   } else if (op == Ntype_op::Set_mask) {
     auto a_pin     = livehd::graph_util::get_driver_of_sink_name(node, "a");
     auto mask_pin  = livehd::graph_util::get_driver_of_sink_name(node, "mask");
@@ -1665,7 +1743,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (!mask_pin.is_invalid() && !value_pin.is_invalid()) {
       const auto& mask  = const_of(mask_pin);
       const auto& value = const_of(value_pin);
-      replace_node(node, val.set_mask_op(mask, value));
+      replace_node(node, livehd::eval_set_mask(val, mask, value));
     } else {
       replace_node(node, val);
     }
@@ -1673,8 +1751,9 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(0);  // additive identity (Invalid no longer folds as 0)
     for (auto& i : inp_edges_ordered) {
-      const auto& c = const_of(i.driver);
-      if (i.sink.get_port_id() == 0) {
+      const auto& c = const_of(i.get_driver_pin());
+      // EVEN pid = added, ODD = subtracted; one pid per operand (cell.hpp).
+      if (Ntype::sink_bank(Ntype_op::Sum, i.get_port_id()) == 0) {
         result = result.add_op(c);
       } else {
         result = result.sub_op(c);
@@ -1686,7 +1765,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(0);  // or identity (Invalid no longer folds as 0)
     for (auto& e : inp_edges_ordered) {
-      const auto& c = const_of(e.driver);
+      const auto& c = const_of(e.get_driver_pin());
       result        = result.or_op(c);
     }
 
@@ -1696,7 +1775,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(-1);
     for (auto& i : inp_edges_ordered) {
-      const auto& c = const_of(i.driver);
+      const auto& c = const_of(i.get_driver_pin());
       result        = result.and_op(c);
     }
 
@@ -1720,11 +1799,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     // Leave the cell alone instead — the same three-valued discipline the
     // LT/GT fold below already follows. A DEFINITE mismatch still folds: it
     // decides the all-equal regardless of unknown bits elsewhere.
-    const auto& first   = const_of(inp_edges_ordered[0].driver);
+    const auto& first   = const_of(inp_edges_ordered[0].get_driver_pin());
     bool        eq      = true;
     bool        any_unk = false;
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
-      const auto& c = const_of(inp_edges_ordered[i].driver);
+      const auto& c = const_of(inp_edges_ordered[i].get_driver_pin());
       auto        r = first.eq_op(c);
       if (r->is_known_false()) {
         eq = false;
@@ -1741,7 +1820,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
-    const auto& sel_const = const_of(inp_edges_ordered[0].driver);
+    const auto& sel_const = const_of(inp_edges_ordered[0].get_driver_pin());
     const bool  binary    = is_two_arm_mux(inp_edges_ordered);
     if (!sel_const.is_numeric() || sel_const.has_unknowns() || (!binary && !sel_const.is_just_i64())) {
       return;  // unknown-bit selector (0sb? poison cond): keep the mux as-is
@@ -1751,11 +1830,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 
     Dlop result;
     for (auto& e : inp_edges_ordered) {
-      if (e.sink.get_port_id() == 0) {
+      if (e.get_port_id() == 0) {
         continue;
       }
-      if (e.sink.get_port_id() == static_cast<hhds::Port_id>(sel + 1)) {
-        result = const_of(e.driver);
+      if (e.get_port_id() == static_cast<hhds::Port_id>(sel + 1)) {
+        result = const_of(e.get_driver_pin());
         break;
       }
     }
@@ -1774,23 +1853,23 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop result;
     result = Dlop::create_integer(1);
     for (auto& i : inp_edges_ordered) {
-      const auto& c = const_of(i.driver);
+      const auto& c = const_of(i.get_driver_pin());
       result        = result.mult_op(c);
     }
 
     replace_node(node, result);
   } else if (op == Ntype_op::Div) {
     I(inp_edges_ordered.size() == 2);
-    Dlop a = const_of(inp_edges_ordered[0].driver);
-    Dlop b = const_of(inp_edges_ordered[1].driver);
+    Dlop a = const_of(inp_edges_ordered[0].get_driver_pin());
+    Dlop b = const_of(inp_edges_ordered[1].get_driver_pin());
 
     auto result = a.div_op(b);
 
     replace_node(node, result);
   } else if (op == Ntype_op::Rem) {
     I(inp_edges_ordered.size() == 2);
-    Dlop a = const_of(inp_edges_ordered[0].driver);
-    Dlop b = const_of(inp_edges_ordered[1].driver);
+    Dlop a = const_of(inp_edges_ordered[0].get_driver_pin());
+    Dlop b = const_of(inp_edges_ordered[1].get_driver_pin());
 
     auto result = a.rem_op(b);  // truncated remainder; invalid on rem-by-zero
 
@@ -1799,12 +1878,19 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     if (inp_edges_ordered.size() != 1) {
       return;
     }
-    replace_node(node, const_of(inp_edges_ordered[0].driver).not_op());
+    replace_node(node, const_of(inp_edges_ordered[0].get_driver_pin()).not_op());
   } else if (op == Ntype_op::Xor) {
     Dlop result;
     result = Dlop::create_integer(0);
     for (auto& e : inp_edges_ordered) {
-      result = result.xor_op(const_of(e.driver));
+      result = result.xor_op(const_of(e.get_driver_pin()));
+    }
+    if (std::getenv("LHD_DBG_XOR")) {
+      std::fprintf(stderr, "DBG xor nid=%llu n=%zu ->", (unsigned long long)node.get_debug_nid(), inp_edges_ordered.size());
+      for (auto& e : inp_edges_ordered) {
+        std::fprintf(stderr, " [pid=%u v=%s]", (unsigned)e.get_port_id(), const_of(e.get_driver_pin()).to_pyrope().c_str());
+      }
+      std::fprintf(stderr, " = %s\n", result.to_pyrope().c_str());
     }
     replace_logic_node(node, result);
   } else if (op == Ntype_op::SRA) {
@@ -1820,20 +1906,32 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     }
     replace_node(node, const_of(a_pin).sra_op(amt));
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
-    // as/bs are multi-driver reduce ports; fold only the plain 2-operand form.
-    hhds::Pin_class a_pin, b_pin;
+    // Each side of a compare is an operand BANK that may hold several slots
+    // (one per operand), and a bank REDUCES BY SUM -- "Sum and both comparison
+    // sides sum their operands independently", the rule the old
+    // connect_folded_const folded duplicate constants under. Every operand here
+    // is a constant (replace_all_inputs_const's precondition), so reduce each
+    // bank and compare the two sums.
+    //
+    // Folding this shape is not an optimization, it is the only agreed reading
+    // of it: the downstream consumers do NOT agree on a multi-operand compare
+    // bank (pass/abc's blaster takes the last operand of each side, cgen emits
+    // the pairwise cross-product), so an all-constant one must never reach
+    // them. A bank with a NON-constant operand cannot get here at all.
+    Dlop a_sum, b_sum;
+    a_sum      = Dlop::create_integer(0);
+    b_sum      = Dlop::create_integer(0);
+    bool has_a = false, has_b = false;
     for (auto& e : inp_edges_ordered) {
-      auto& slot = e.sink.get_port_id() == 0 ? a_pin : b_pin;
-      if (!slot.is_invalid()) {
-        return;  // multi-driver reduce compare: leave it alone
-      }
-      slot = e.driver;
+      const bool is_b        = Ntype::sink_bank(type_op_of(node), e.get_port_id()) != 0;
+      (is_b ? b_sum : a_sum) = (is_b ? b_sum : a_sum).add_op(const_of(e.get_driver_pin()));
+      (is_b ? has_b : has_a) = true;
     }
-    if (a_pin.is_invalid() || b_pin.is_invalid()) {
+    if (!has_a || !has_b || a_sum.is_invalid() || b_sum.is_invalid() || a_sum.is_nil() || b_sum.is_nil()) {
       return;
     }
-    Dlop a   = const_of(a_pin);
-    Dlop b   = const_of(b_pin);
+    Dlop a   = a_sum;
+    Dlop b   = b_sum;
     auto cmp = op == Ntype_op::LT ? a.lt_op(b) : a.gt_op(b);
     if (cmp->has_unknowns()) {
       return;  // three-valued compare on ?-bits: keep the node
@@ -1856,7 +1954,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
       }
       return;
     }
-    replace_node(node, *a.get_mask_op(mask));
+    replace_node(node, livehd::eval_get_mask(a, mask));
   } else if (op == Ntype_op::Concat) {
     // Every lane VALUE is constant, so the whole assembly is one non-negative
     // sum(w_i)-bit constant.
@@ -1916,12 +2014,8 @@ void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
     // Invalid/Nil are not values (division by zero, illegal shifts, etc.).
     return;
   }
-  auto                                    dpin = create_const(*current_graph, result);
-  absl::InlinedVector<hhds::Pin_class, 4> consumers;
-  for (const auto& out : node.out_edges()) {
-    consumers.push_back(out.sink);
-  }
-  for (const auto& sink : consumers) {
+  auto dpin = create_const(*current_graph, result);
+  for (const auto& sink : consumer_sinks(node)) {
     livehd::graph_util::connect_folded_const(*current_graph, dpin, sink);
   }
   node.del_node();
@@ -1931,24 +2025,20 @@ void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
   if (result.is_invalid() || result.is_nil()) {
     return;
   }
-  auto                                    dpin = create_const(*current_graph, result);
-  absl::InlinedVector<hhds::Pin_class, 4> consumers;
-  for (const auto& out : node.out_edges()) {
-    consumers.push_back(out.sink);
-  }
-  for (const auto& sink : consumers) {
+  auto dpin = create_const(*current_graph, result);
+  for (const auto& sink : consumer_sinks(node)) {
     livehd::graph_util::connect_folded_const(*current_graph, dpin, sink);
   }
   node.del_node();
 }
 
-bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   if (inp_edges_ordered.size() != 3) {
     return false;
   }
 
-  if (inp_edges_ordered[1].driver == inp_edges_ordered[2].driver) {
-    return collapse_forward_for_pin(node, inp_edges_ordered[1].driver);
+  if (inp_edges_ordered[1].get_driver_pin() == inp_edges_ordered[2].get_driver_pin()) {
+    return collapse_forward_for_pin(node, inp_edges_ordered[1].get_driver_pin());
   }
 
   // If both arms update the same packed lane of the same base, select only
@@ -1956,9 +2046,9 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   // factoring below and is what removes the final word-wide Mux in a nested
   // `if (reset) bit=R; else if (enable) bit=D;` update.
   auto factor_set_mask_pair = [&]() {
-    const auto sel = inp_edges_ordered[0].driver;
-    auto       sm0 = inp_edges_ordered[1].driver.get_master_node();
-    auto       sm1 = inp_edges_ordered[2].driver.get_master_node();
+    const auto sel = inp_edges_ordered[0].get_driver_pin();
+    auto       sm0 = inp_edges_ordered[1].get_driver_pin().get_master_node();
+    auto       sm1 = inp_edges_ordered[2].get_driver_pin().get_master_node();
     if (sel.is_invalid() || sm0.is_invalid() || sm1.is_invalid() || type_op_of(sm0) != Ntype_op::Set_mask
         || type_op_of(sm1) != Ntype_op::Set_mask) {
       return false;
@@ -1976,18 +2066,14 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
       return false;
     }
     auto lane_mux = livehd::graph_util::create_typed_node(*current_graph, Ntype_op::Mux);
-    lane_mux.create_sink_pin(0).connect_driver(sel);
-    lane_mux.create_sink_pin(1).connect_driver(value0);
-    lane_mux.create_sink_pin(2).connect_driver(value1);
+    livehd::graph_util::setup_sink_pid(lane_mux, 0).connect_driver(sel);
+    livehd::graph_util::setup_sink_pid(lane_mux, 1).connect_driver(value0);
+    livehd::graph_util::setup_sink_pid(lane_mux, 2).connect_driver(value1);
     auto lane = lane_mux.create_driver_pin(0);
 
-    for (auto edge : node.inp_edges()) {
-      edge.del_edge();
-    }
+    clear_all_sinks(node);
     livehd::graph_util::set_type_op(node, Ntype_op::Set_mask);
-    livehd::graph_util::setup_sink_by_name(node, "a").connect_driver(base0);
-    livehd::graph_util::setup_sink_by_name(node, "mask").connect_driver(mask0);
-    livehd::graph_util::setup_sink_by_name(node, "value").connect_driver(lane);
+    livehd::graph_util::connect_mask_operands(node, base0, mask0, lane);
     if (!sm0.has_out_edges()) {
       bwd_del_node(sm0);
     }
@@ -2012,9 +2098,9 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   // Set_mask and Get_mask are constant-mask wiring in pass.abc; after this
   // rewrite only the selected lane crosses Boolean mapping.
   auto factor_set_mask_arm = [&](size_t updated_idx, size_t base_idx) {
-    const auto sel     = inp_edges_ordered[0].driver;
-    const auto updated = inp_edges_ordered[updated_idx].driver;
-    const auto base    = inp_edges_ordered[base_idx].driver;
+    const auto sel     = inp_edges_ordered[0].get_driver_pin();
+    const auto updated = inp_edges_ordered[updated_idx].get_driver_pin();
+    const auto base    = inp_edges_ordered[base_idx].get_driver_pin();
     if (sel.is_invalid() || updated.is_invalid() || base.is_invalid()) {
       return false;
     }
@@ -2031,29 +2117,24 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
       return false;
     }
     auto get = livehd::graph_util::create_typed_node(*current_graph, Ntype_op::Get_mask);
-    livehd::graph_util::setup_sink_by_name(get, "a").connect_driver(base);
-    livehd::graph_util::setup_sink_by_name(get, "mask").connect_driver(mask);
+    livehd::graph_util::connect_mask_operands(get, base, mask);
     auto old_lane = get.create_driver_pin(0);
     livehd::graph_util::set_ubits(old_lane, width);
 
     auto lane_mux = livehd::graph_util::create_typed_node(*current_graph, Ntype_op::Mux);
-    lane_mux.create_sink_pin(0).connect_driver(sel);
+    livehd::graph_util::setup_sink_pid(lane_mux, 0).connect_driver(sel);
     if (updated_idx == 2) {
-      lane_mux.create_sink_pin(1).connect_driver(old_lane);
-      lane_mux.create_sink_pin(2).connect_driver(value);
+      livehd::graph_util::setup_sink_pid(lane_mux, 1).connect_driver(old_lane);
+      livehd::graph_util::setup_sink_pid(lane_mux, 2).connect_driver(value);
     } else {
-      lane_mux.create_sink_pin(1).connect_driver(value);
-      lane_mux.create_sink_pin(2).connect_driver(old_lane);
+      livehd::graph_util::setup_sink_pid(lane_mux, 1).connect_driver(value);
+      livehd::graph_util::setup_sink_pid(lane_mux, 2).connect_driver(old_lane);
     }
     auto lane = lane_mux.create_driver_pin(0);
 
-    for (auto edge : node.inp_edges()) {
-      edge.del_edge();
-    }
+    clear_all_sinks(node);
     livehd::graph_util::set_type_op(node, Ntype_op::Set_mask);
-    livehd::graph_util::setup_sink_by_name(node, "a").connect_driver(base);
-    livehd::graph_util::setup_sink_by_name(node, "mask").connect_driver(mask);
-    livehd::graph_util::setup_sink_by_name(node, "value").connect_driver(lane);
+    livehd::graph_util::connect_mask_operands(node, base, mask, lane);
     if (!sm.has_out_edges()) {
       bwd_del_node(sm);
     }
@@ -2073,11 +2154,11 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
     // the 2-arm layout (sel=0, arm0=1, arm1=2). A partially connected wider
     // Hotmux-shaped Mux (say pids 0,1,3) also has three edges, and renumbering
     // its arms would silently select a different one.
-    if (inp_edges_ordered[0].sink.get_port_id() != 0 || inp_edges_ordered[1].sink.get_port_id() != 1
-        || inp_edges_ordered[2].sink.get_port_id() != 2) {
+    if (inp_edges_ordered[0].get_port_id() != 0 || inp_edges_ordered[1].get_port_id() != 1
+        || inp_edges_ordered[2].get_port_id() != 2) {
       break;
     }
-    const auto& sel = inp_edges_ordered[0].driver;
+    const auto sel = inp_edges_ordered[0].get_driver_pin();
     if (sel.is_invalid() || sel.is_const()) {
       break;
     }
@@ -2089,14 +2170,14 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
     if (x.is_invalid() || !is_bool01(x)) {
       break;
     }
-    auto arm0 = inp_edges_ordered[1].driver;
-    auto arm1 = inp_edges_ordered[2].driver;
+    auto arm0 = inp_edges_ordered[1].get_driver_pin();
+    auto arm1 = inp_edges_ordered[2].get_driver_pin();
     for (auto& e : inp_edges_ordered) {
-      e.del_edge();
+      e.del_sink();
     }
-    node.create_sink_pin(0).connect_driver(x);
-    node.create_sink_pin(1).connect_driver(arm1);
-    node.create_sink_pin(2).connect_driver(arm0);
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(x);
+    livehd::graph_util::setup_sink_pid(node, 1).connect_driver(arm1);
+    livehd::graph_util::setup_sink_pid(node, 2).connect_driver(arm0);
     // The fused sweep visits in forward order, so the EQ was already swept: nothing
     // downstream of here deletes it, and a dead cell survives into cgen/sim as
     // a dead def. Collect it now (bwd_del_node also drops its dead fan-in).
@@ -2110,13 +2191,13 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   }
 
   // Constant 0/1 arms are a boolean materialization of the selector itself.
-  if (inp_edges_ordered[1].driver.is_const() && inp_edges_ordered[2].driver.is_const()) {
-    const auto& c0 = const_of(inp_edges_ordered[1].driver);
-    const auto& c1 = const_of(inp_edges_ordered[2].driver);
+  if (inp_edges_ordered[1].get_driver_pin().is_const() && inp_edges_ordered[2].get_driver_pin().is_const()) {
+    const auto& c0 = const_of(inp_edges_ordered[1].get_driver_pin());
+    const auto& c1 = const_of(inp_edges_ordered[2].get_driver_pin());
     if (!c0.has_unknowns() && !c1.has_unknowns()) {
       const bool  zero0 = c0.is_known_zero();
       const bool  one1  = c1.is_just_i64() && c1.to_just_i64() == 1;
-      const auto& sel   = inp_edges_ordered[0].driver;
+      const auto& sel   = inp_edges_ordered[0].get_driver_pin();
       // Mux(s, 0, 1) == s -- only when s is already a 0/1 VALUE (the cell
       // treats any nonzero s as true, so a wide s must keep the mux).
       // The inverted-arm sibling Mux(s,1,0) -> EQ(s,0) was measured at only
@@ -2130,12 +2211,12 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   }
 
   bool false_path_zero = false;
-  if (inp_edges_ordered[1].driver.is_const()) {
-    const auto& v   = const_of(inp_edges_ordered[1].driver);
+  if (inp_edges_ordered[1].get_driver_pin().is_const()) {
+    const auto& v   = const_of(inp_edges_ordered[1].get_driver_pin());
     false_path_zero = v.is_known_zero() || v.is_string();
   }
 
-  bool true_path_sel = inp_edges_ordered[0].driver == inp_edges_ordered[2].driver;
+  bool true_path_sel = inp_edges_ordered[0].get_driver_pin() == inp_edges_ordered[2].get_driver_pin();
 
   // Mux selectors are 0/1 (port = sel+1), so mux(s,0,s) == s. The old
   // -1-as-true folds (mux(s,0,-1)->s, mux(s,s,-1)->s, mux(s,-1,s)->-1,
@@ -2144,14 +2225,14 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   // yosys-consolidated 8-bit write-enable mux(reset,0,-1) must yield 0xff,
   // not 1 (caught by lgcheck BMC on mem_reset). Keep only the sound rule.
   if (false_path_zero && true_path_sel) {
-    return collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
+    return collapse_forward_for_pin(node, inp_edges_ordered[0].get_driver_pin());
   }
 
   return false;
 }
 
-void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
-  const auto& pos_dpin = inp_edges_ordered[1].driver;
+void Cprop::scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
+  const auto pos_dpin = inp_edges_ordered[1].get_driver_pin();
   if (!pos_dpin.is_const()) {
     return;
   }
@@ -2165,7 +2246,7 @@ void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& in
     self_pos = v.to_just_i64();
   }
 
-  const auto& wire_dpin = inp_edges_ordered[0].driver;
+  const auto wire_dpin = inp_edges_ordered[0].get_driver_pin();
 
   // Sext(X,1) maps boolean 1 to -1. It preserves truthiness only, so bypass
   // it on a selector with a proven boolean input, never on a Mux data arm.
@@ -2206,12 +2287,12 @@ void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& in
   auto b = std::min(self_pos, parent_pos);
   if (b != self_pos) {
     auto new_const_dpin = create_const(*current_graph, *Dlop::create_integer(b));
-    inp_edges_ordered[1].del_edge();
+    inp_edges_ordered[1].del_sink();
     setup_sink_by_name(node, "b").connect_driver(new_const_dpin);
   }
 
   auto parent_wire_dpin = livehd::graph_util::get_driver_of_sink_name(wire_master, "a");
-  inp_edges_ordered[0].del_edge();
+  inp_edges_ordered[0].del_sink();
   setup_sink_by_name(node, "a").connect_driver(parent_wire_dpin);
 }
 
@@ -2219,7 +2300,7 @@ void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& in
 // EQ(EQ(x,0),0); on an already-0/1 value both nodes of the double chain are
 // the identity. Forward order guarantees the inner EQ was visited first, so a
 // triple chain EQ(EQ(EQ(z,0),0),0) reduces in two visits to EQ(z,0).
-bool Cprop::scalar_eq(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+bool Cprop::scalar_eq(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   if (inp_edges_ordered.size() != 2) {
     return false;
   }
@@ -2255,7 +2336,7 @@ bool Cprop::scalar_eq(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_
 //   SRA(SHL(x,a),b) -> SHL(x,a-b) | x | SRA(x,b-a)   (by sign of a-b)
 //   SHL(SRA(x,a),a) -> And(x, -2^a)    (clears the low a bits in place)
 // Returns true when the node was rewired (caller re-reads its input edges).
-bool Cprop::scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+bool Cprop::scalar_shift(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   const auto op = type_op_of(node);
   I(op == Ntype_op::SHL || op == Ntype_op::SRA);
   if (inp_edges_ordered.size() != 2) {
@@ -2296,9 +2377,7 @@ bool Cprop::scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& i
   };
 
   auto retarget = [&](Ntype_op new_op, int amount) {
-    for (auto e : node.inp_edges()) {  // snapshot; two edges at most
-      e.del_edge();
-    }
+    clear_all_sinks(node);
     if (new_op != op) {
       livehd::graph_util::set_type_op(node, new_op);  // SHL/SRA share the a=0,b=1 sink layout
     }
@@ -2333,9 +2412,7 @@ bool Cprop::scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& i
     return true;
   }
   if (outer == inner) {
-    for (auto e : node.inp_edges()) {
-      e.del_edge();
-    }
+    clear_all_sinks(node);
     livehd::graph_util::set_type_op(node, Ntype_op::And);
     // ~(2^a - 1) == -(2^a): the infinite mask with the low a bits clear.
     auto neg_mask = Dlop::get_mask_value(inner)->not_op();
@@ -2352,7 +2429,7 @@ bool Cprop::scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& i
 // AND-ed with a value as the mux-free select idiom `{N{bit}} & y`). All N
 // copies carry the same truth, so the whole tree is Mux(x, 0, sum(2^ki)) --
 // which cgen emits as a lazy ternary instead of N-1 word-wide Or/SHL calls.
-bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
+bool Cprop::try_broadcast_or(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   if (inp_edges_ordered.size() < 2 || inp_edges_ordered.size() > 128) {
     return false;
   }
@@ -2362,7 +2439,7 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
   // leaf may sit anywhere in the operand list, or not exist at all).
   absl::InlinedVector<hhds::Pin_class, 2> candidates;
   {
-    const auto& first = inp_edges_ordered[0].driver;
+    const auto first = inp_edges_ordered[0].get_driver_pin();
     if (first.is_invalid() || first.is_const()) {
       return false;
     }
@@ -2383,11 +2460,11 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
     auto C  = Dlop::create_integer(0);
     bool ok = true;
     for (auto& e : inp_edges_ordered) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+      if (static_cast<uint32_t>(e.get_port_id()) != 0) {
         ok = false;
         break;
       }
-      const auto& d = e.driver;
+      const auto& d = e.get_driver_pin();
       int         k = -1;
       if (same_pin(d, x)) {
         k = 0;
@@ -2426,9 +2503,9 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_ve
     }
 
     auto mux = create_typed_node(*current_graph, Ntype_op::Mux);
-    mux.create_sink_pin(0).connect_driver(x);
-    mux.create_sink_pin(1).connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
-    mux.create_sink_pin(2).connect_driver(create_const(*current_graph, *C));
+    livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(x);
+    livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
+    livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(create_const(*current_graph, *C));
     auto md = mux.create_driver_pin(0);
     if (collapse_forward_for_pin(node, md)) {
       return true;
@@ -2478,10 +2555,7 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
         // an intermediate packed-word version. Besides being locally exact,
         // this makes the writer chain private and lets the pack canonicalizer
         // replace a fully assembled word with one Concat.
-        auto get = livehd::graph_util::create_typed_node(*current_graph, Ntype_op::Get_mask);
-        livehd::graph_util::setup_sink_by_name(get, "a").connect_driver(a_pin);
-        livehd::graph_util::setup_sink_by_name(get, "mask")
-            .connect_driver(create_const(*current_graph, *Dlop::get_mask_value(static_cast<int>(pos), static_cast<int>(pos))));
+        auto get = livehd::graph_util::create_get_mask(*current_graph, a_pin, static_cast<int>(pos), static_cast<int>(pos) + 1);
         auto out = get.create_driver_pin(0);
         livehd::graph_util::set_ubits(out, 1);
         return out;
@@ -2561,21 +2635,22 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       int             n_over  = 0;
       int             fan_in  = 0;
       bool            bad_pid = false;
-      for (const auto& e : m.inp_edges()) {
+      for (auto isnk : m.inp_sorted_pins()) {
         if (++fan_in > kPackedSliceFanInLimit) {
           bad_pid = true;  // conservative bailout: do not fold a very wide Or
           break;
         }
-        if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+        if (Ntype::sink_bank(Ntype_op::Or, isnk.get_port_id()) != 0) {
           bad_pid = true;
           break;
         }
-        auto f = footprint(e.driver, 0);
+        auto idrv = isnk.get_driver_pin();
+        auto f    = footprint(idrv, 0);
         // An unbounded (kFpBail) operand counts as an OVERLAPPER: soundness rests
         // ONLY on the others being provably disjoint from [lo,hi).
         if (f.first < 0 || !(hi <= f.first || lo >= f.second)) {
           ++n_over;
-          overlapper = e.driver;
+          overlapper = idrv;
         }
       }
       if (bad_pid || n_over > 1) {
@@ -2778,15 +2853,14 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
   // Every rule preserves (hi-lo), so the mask popcount is invariant and the
   // pin's existing literal width stays correct: do NOT re-stamp bits/sign.
   auto old_master = a_now.get_master_node();
-  auto edges      = node.inp_edges();  // snapshot before mutating
-  for (auto e : edges) {
-    auto pid = static_cast<uint32_t>(e.sink.get_port_id());
+  // SNAPSHOT before mutating: del_sink() is structural.
+  for (const auto& spin : node.inp_pins_snapshot()) {
+    auto pid = static_cast<uint32_t>(spin.get_port_id());
     if (pid == 0 || pid == 2) {
-      e.del_edge();
+      spin.del_sink();
     }
   }
-  setup_sink_by_name(node, "a").connect_driver(cur);
-  setup_sink_by_name(node, "mask").connect_driver(create_const(*current_graph, livehd::graph_util::mask_window_const(lo, hi)));
+  livehd::graph_util::connect_mask_operands(node, cur, create_const(*current_graph, livehd::graph_util::mask_window_const(lo, hi)));
 
   // The bypassed pack/wire-buffer chain is usually dead now; bwd_del_node also
   // sweeps the inputs that become dead behind it.
@@ -2831,15 +2905,18 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     auto outer_sum = a_pin.get_master_node();
     if (!outer_sum.is_invalid() && type_op_of(outer_sum) == Ntype_op::Sum) {
       bool progress = true;
-      while (progress && outer_sum.inp_edges().size() <= 128) {
+      while (progress && outer_sum.inp_pins_snapshot().size() <= 128) {
         progress         = false;
         auto outer_edges = ordered_inp_edges(outer_sum);
         for (auto& edge : outer_edges) {
-          if (edge.sink.get_port_id() != 0 || edge.driver.is_const() || is_graph_input_pin(edge.driver)) {
+          // Added operands only ("as" bank = EVEN pid); a subtrahend does not
+          // distribute through the low-bit mask this rewrite is folding.
+          const auto edge_drv = edge.get_driver_pin();
+          if (Ntype::sink_bank(Ntype_op::Sum, edge.get_port_id()) != 0 || edge_drv.is_const() || is_graph_input_pin(edge_drv)) {
             continue;
           }
-          auto inner_mask = edge.driver.get_master_node();
-          if (inner_mask.is_invalid() || type_op_of(inner_mask) != Ntype_op::Get_mask || !has_single_consumer(edge.driver)) {
+          auto inner_mask = edge_drv.get_master_node();
+          if (inner_mask.is_invalid() || type_op_of(inner_mask) != Ntype_op::Get_mask || !has_single_consumer(edge_drv)) {
             continue;
           }
           auto inner_mask_pin = drv_at(inner_mask, 2);
@@ -2855,13 +2932,15 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
           }
           auto inner_edges = ordered_inp_edges(inner_sum);
           if (inner_edges.empty() || outer_edges.size() - 1 + inner_edges.size() > 128
-              || std::any_of(inner_edges.begin(), inner_edges.end(), [](const auto& e) { return e.sink.get_port_id() != 0; })) {
+              || std::any_of(inner_edges.begin(), inner_edges.end(), [](const auto& e) {
+                   return Ntype::sink_bank(Ntype_op::Sum, e.get_port_id()) != 0;
+                 })) {
             continue;
           }
           auto as_sink   = find_sink_pin(outer_sum, "as");
           bool duplicate = false;
           for (const auto& ie : inner_edges) {
-            if (is_driver_connected_to_sink(ie.driver, as_sink)) {
+            if (is_driver_connected_to_sink(ie.get_driver_pin(), as_sink)) {
               duplicate = true;
               break;
             }
@@ -2869,9 +2948,9 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
           if (duplicate) {
             continue;
           }
-          edge.del_edge();
+          edge.del_sink();  // one driver per sink pin
           for (const auto& ie : inner_edges) {
-            setup_sink_by_name(outer_sum, "as").connect_driver(ie.driver);
+            setup_sink_by_name(outer_sum, "as").connect_driver(ie.get_driver_pin());
           }
           if (!inner_mask.has_out_edges()) {
             bwd_del_node(inner_mask);
@@ -3028,13 +3107,13 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   if (node.is_invalid() || type_op_of(node) != Ntype_op::And || !node.has_out_edges()) {
     return;
   }
-  auto edges = node.inp_edges();  // snapshot
+  auto edges = node.inp_pins_snapshot();  // SNAPSHOT: this node is rewired below
   if (edges.size() != 2) {
     return;
   }
   int const_idx = -1;
   for (int i = 0; i < 2; ++i) {
-    if (edges[i].driver.is_const()) {
+    if (edges[i].get_driver_pin().is_const()) {
       if (const_idx >= 0) {
         const_idx = -2;  // two constants: constant-fold territory, not ours
         break;
@@ -3045,22 +3124,21 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   if (const_idx < 0) {
     return;
   }
-  auto      mask_pin = edges[const_idx].driver;
+  auto      mask_pin = edges[const_idx].get_driver_pin();
   const int n        = low_mask_width(const_of(mask_pin));
   if (n <= 0) {
     return;
   }
-  auto x_pin = edges[const_idx ^ 1].driver;
+  auto x_pin = edges[const_idx ^ 1].get_driver_pin();
   // With literal width hints the And and Get_mask spellings agree for every
   // operand producer; there is no producer-specific sign-slot exception.
   if (x_pin.is_invalid() || x_pin.is_const()) {
     return;
   }
-  edges[0].del_edge();
-  edges[1].del_edge();
+  edges[0].del_sink();  // one driver per sink pin
+  edges[1].del_sink();
   livehd::graph_util::set_type_op(node, Ntype_op::Get_mask);
-  setup_sink_by_name(node, "a").connect_driver(x_pin);
-  setup_sink_by_name(node, "mask").connect_driver(mask_pin);
+  livehd::graph_util::connect_mask_operands(node, x_pin, mask_pin);
 }
 
 // Hash-cons identical combinational nodes: two nodes with the same op reading
@@ -3071,10 +3149,30 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
 // one Slop call per surviving node, so each merge is a direct sim-op win --
 // and one node fewer for every other backend.
 //
-// Key = (op, sorted (pid, driver-pin index) list). Sorting makes the key
-// order-insensitive, which is exact for multi-driver ports (And/Or/Xor/EQ/
-// Mult `as`, Sum/LT/GT `as`/`bs` -- all commutative per port) and harmless
-// for positional single-driver ports, where the pid half disambiguates.
+// Key = (op, sorted (sink BANK, driver-pin index) list) -- the CANONICAL FORM
+// of the node's operand multiset, and an exact map key rather than a digest.
+//
+// BANK, not raw sink pid. A commutative cell spends one sink pid PER OPERAND
+// (graph/cell.hpp's ONE DRIVER PER SINK PIN block), so `Sum(a@0, b@2)` and
+// `Sum(b@0, a@2)` are the SAME node and must produce the SAME key; keying on
+// the raw pid would make every operand reordering a CSE miss. Ntype::sink_bank
+// folds the per-operand pids back to the role (0/1 for Sum/LT/GT, 0 for the
+// single-bank reductions) and is the identity for a positional cell, where the
+// bank half is the pid and disambiguates exactly as before.
+//
+// SORTING IS A CANONICAL FORM HERE, unlike a sort over sink port ids: the pair
+// sorts on the DRIVER's class index, which discriminates every operand even
+// when their roles do not. Within a bank the operands are commutative by the
+// cell's own identity op, so ordering them by driver is value-preserving.
+//
+// The map does the rest: absl hashes the canonical key (a FILTER) and then
+// compares two colliding keys ELEMENT BY ELEMENT before treating them as the
+// same node. A hash collision can therefore never merge two different cells --
+// which matters, because a false CSE merge is a silent miscompile. Duplicated
+// operands survive canonicalization (the list is sorted, never deduped), so
+// `Sum(a, a)` = 2a keeps a different key from `Sum(a)`, and `Xor(a, a)` = 0
+// from `Xor(a)`. And/Or ARE idempotent, but their duplicates are removed by an
+// explicit sweep after the merges below, not by the key.
 //
 // Guards, each load-bearing:
 //  * pure combinational ops only (is_computed_comb_op), minus LUT: its function
@@ -3118,28 +3216,25 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     Key key;
     key.first   = static_cast<uint16_t>(op);
     bool usable = true;
-    for (const auto& e : node.inp_edges()) {
-      if (e.driver.is_invalid()) {
+    for (auto isnk : node.inp_sorted_pins()) {
+      auto idrv = isnk.get_driver_pin();
+      if (idrv.is_invalid()) {
         usable = false;
         break;
       }
-      key.second.emplace_back(static_cast<uint32_t>(e.sink.get_port_id()), static_cast<uint64_t>(e.driver.get_class_index().value));
+      key.second.emplace_back(static_cast<uint32_t>(Ntype::sink_bank(op, isnk.get_port_id())),
+                              static_cast<uint64_t>(idrv.get_class_index().value));
     }
     if (!usable || key.second.empty()) {
       continue;
     }
-    // The key must stay EXACT (it is a map key, not a digest -- a collision
-    // would merge two different cells), so this canonicalizes rather than
-    // hashes. inp_edges() is already sink-port ascending, so only the several
-    // DRIVERS OF ONE SINK PIN need ordering.
-    for (auto it = key.second.begin(); it != key.second.end();) {
-      auto run_end = it;
-      while (run_end != key.second.end() && run_end->first == it->first) {
-        ++run_end;
-      }
-      std::sort(it, run_end);
-      it = run_end;
-    }
+    // Canonicalize: sort the WHOLE list. inp_edges() is sink-pid ascending,
+    // which for a banked cell INTERLEAVES the two banks (`as` on even pids,
+    // `bs` on odd), so the old per-run sort -- which assumed all operands of a
+    // bank were contiguous -- no longer groups them. Sorting the full
+    // (bank, driver) list groups by bank and orders within it in one step, and
+    // it is stable across operand orderings, which is the whole point.
+    std::sort(key.second.begin(), key.second.end());
 
     auto [it, inserted] = seen.try_emplace(key, node);
     if (inserted) {
@@ -3193,18 +3288,25 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     if (node.is_invalid()) {
       continue;
     }
-    absl::flat_hash_set<hhds::Class_index>   first_seen;
-    absl::InlinedVector<hhds::Edge_class, 4> extras;
-    for (const auto& e : node.inp_edges()) {
-      if (e.driver.is_invalid() || static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+    absl::flat_hash_set<hhds::Class_index>  first_seen;
+    absl::InlinedVector<hhds::Pin_class, 4> extras;
+    for (auto isnk : node.inp_sorted_pins()) {
+      // The one operand BANK of an And/Or (every operand, whatever pid it
+      // landed on). Under ONE DRIVER PER SINK PIN a repeated operand is a
+      // second PIN rather than a deduped parallel edge, so this sweep is what
+      // removes it -- and And/Or are idempotent, so removing it is exact.
+      auto idrv = isnk.get_driver_pin();
+      if (idrv.is_invalid() || Ntype::sink_bank(type_op_of(node), isnk.get_port_id()) != 0) {
         continue;
       }
-      if (!first_seen.insert(e.driver.get_class_index()).second) {
-        extras.push_back(e);
+      if (!first_seen.insert(idrv.get_class_index()).second) {
+        extras.push_back(isnk);
       }
     }
-    for (auto& e : extras) {
-      e.del_edge();
+    // Deletion happens AFTER the walk: inp_sorted_pins() is a view over live
+    // pin storage and del_sink() invalidates it.
+    for (auto& isnk : extras) {
+      isnk.del_sink(isnk.get_driver_pin());
     }
     if (!extras.empty()) {
       auto edges = ordered_inp_edges(node);
@@ -3362,7 +3464,15 @@ void Cprop::canonicalize_latch_hold(const hhds::Node_class& latch) {
   }
   auto reset = livehd::graph_util::get_driver_of_sink_name(latch, "reset_pin");
   if (always_open && reset.is_invalid() && !q.is_invalid() && !din.is_invalid() && !cone_reaches_q(din, q)) {
-    for (const auto& out : q.out_edges()) {
+    // SNAPSHOT: out_edges() is a lazy VIEW over live edge storage (hhds
+    // graph.hpp) and connect_sink() calls add_edge, which can rehome an entry
+    // into the overflow set -- and growing overflow_sets() reallocates the
+    // vector the in-flight iterator is borrowing from. Walking and connecting
+    // in one loop read freed storage; hhds's debug mutation guard now aborts
+    // on it.
+    const auto                   q_view = q.out_edges();
+    livehd::graph_util::Edge_vec q_outs(q_view.begin(), q_view.end());
+    for (const auto& out : q_outs) {
       din.connect_sink(out.sink);
     }
     latch.del_node();
@@ -3393,7 +3503,10 @@ void Cprop::canonicalize_latch_hold(const hhds::Node_class& latch) {
     if (!hit.has_value()) {
       break;
     }
-    for (const auto& out : hit->mux.out_edges()) {
+    // Same snapshot-before-mutate rule as above.
+    const auto                   mux_view = hit->mux.out_edges();
+    livehd::graph_util::Edge_vec mux_outs(mux_view.begin(), mux_view.end());
+    for (const auto& out : mux_outs) {
       hit->data.connect_sink(out.sink);
     }
     hit->mux.del_node();
@@ -3430,6 +3543,22 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // only additional graph traversal; one forward round is sufficient because
   // every key sees already-folded producer pins.
   auto order    = stable_nodes(current_graph);
+  if (std::getenv("LHD_DBG_XOR")) {
+    for (const auto& n : order) {
+      if (n.is_invalid() || type_op_of(n) != Ntype_op::Xor) {
+        continue;
+      }
+      std::fprintf(stderr, "DBG[%s] pre-xor nid=%llu:", name.c_str(), (unsigned long long)n.get_debug_nid());
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        std::fprintf(stderr,
+                     " [pid=%u drv=%s]",
+                     (unsigned)in_pin.get_port_id(),
+                     in_drv.is_const() ? const_of(in_drv).to_pyrope().c_str() : "?");
+      }
+      std::fprintf(stderr, "\n");
+    }
+  }
   // Latch hold removal is NOT foldable into the sweep below. It matches a
   // `din = enable ? data : Q` shape, and hhds forward order only guarantees
   // that a loop_break node precedes ITS OWN dependents: Pass 1 emits sources
@@ -3533,11 +3662,12 @@ void Cprop::bwd_del_node(hhds::Node_class& node) {
   absl::flat_hash_set<hhds::Class_index> potential_set;
   std::deque<hhds::Node_class>           potential;
 
-  for (const auto& e : node.inp_edges()) {
-    if (is_graph_input_pin(e.driver) || is_graph_output_pin(e.driver)) {
+  for (const auto& in_pin : node.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    if (is_graph_input_pin(in_drv) || is_graph_output_pin(in_drv)) {
       continue;
     }
-    auto master = e.driver.get_master_node();
+    auto master = in_drv.get_master_node();
     // CONST_NODE (and other singletons) cannot be deleted: const pins are
     // leaves of the form CONST_NODE.pid_N, so dropping the consumer just
     // leaves the pin unreferenced — harmless and dedup-friendly.
@@ -3562,11 +3692,12 @@ void Cprop::bwd_del_node(hhds::Node_class& node) {
     }
 
     if (!Ntype::is_loop_last(type_op_of(n)) && type_op_of(n) != Ntype_op::Hotmux && !n.has_out_edges()) {
-      for (auto e : n.inp_edges()) {
-        if (is_graph_input_pin(e.driver) || is_graph_output_pin(e.driver)) {
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        if (is_graph_input_pin(in_drv) || is_graph_output_pin(in_drv)) {
           continue;
         }
-        auto d_master = e.driver.get_master_node();
+        auto d_master = in_drv.get_master_node();
         if (livehd::graph_util::is_builtin_node(d_master)) {
           continue;
         }

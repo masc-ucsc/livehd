@@ -426,6 +426,13 @@ void Pass_upass::work(Eprp_var& var) {
   {
     absl::flat_hash_map<std::string, int> name_count;  // case-sensitive: Module_Fo and MODULE_FO are distinct
     for (const auto& ln : var.lnasts) {
+      // A TEMPLATE does not count as a provider of its name: an IDENTITY
+      // specialization minted by the runner (every generic at its declared
+      // default) is named after the template and lives alongside it, and that
+      // pair is one unit, not an ambiguous import.
+      if (ln->is_template()) {
+        continue;
+      }
       ++name_count[std::string(ln->get_top_module_name())];
     }
     absl::flat_hash_set<std::string> ambiguous;
@@ -557,9 +564,15 @@ void Pass_upass::work(Eprp_var& var) {
   // specializations below (was an O(lnasts) linear scan per spawn — O(M^2) on a
   // specialization-heavy design). Seeded from the current queue (entry points +
   // the pre-walk lambda split); kept in sync on every var.add inside the loop.
+  // A TEMPLATE's name is deliberately NOT seeded: a runner-minted IDENTITY
+  // specialization (every generic at its declaration default, no port type
+  // injected) is named after the template itself, so seeding it would make the
+  // dedup below DROP the only tree that can actually lower — the template mints
+  // no GraphIO (upass_tolg::register_io) and the call would then bind nothing.
+  // The top-specialization below re-inserts its own name for the same reason.
   absl::flat_hash_set<std::string> seen_module_names;
   for (const auto& ln : var.lnasts) {
-    if (ln) {
+    if (ln && !ln->is_template()) {
       seen_module_names.insert(std::string(ln->get_top_module_name()));
     }
   }
@@ -576,6 +589,10 @@ void Pass_upass::work(Eprp_var& var) {
       specializer.set_function_registry(function_registry);
       ln              = specializer.specialize_top_defaults();
       var.lnasts[idx] = ln;
+      // The specialized top REPLACES the template in-place under the same name;
+      // record it so a call site that also identity-specializes this module does
+      // not append a second, duplicate unit with that name.
+      seen_module_names.insert(std::string(ln->get_top_module_name()));
       if (up.run_ssa) {
         uPass_ssa::run(ln, &var.lnasts, up.stream_ssa);
       }

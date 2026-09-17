@@ -20,6 +20,7 @@
 #include "cell.hpp"
 #include "hash_util.hpp"
 #include "hhds/hash_mix.hpp"
+#include "hhds/node_hash.hpp"
 #include "node_util.hpp"
 
 namespace livehd::semdiff {
@@ -33,6 +34,63 @@ using hash_util::mix64;
 
 constexpr uint64_t hcombine(uint64_t hash, uint64_t value) { return hash_util::combine64(hash, value); }
 constexpr uint64_t hstr(std::string_view text) { return fnv1a64(text); }
+
+// --- Pin-centric in-walk -----------------------------------------------------
+//
+// ONE DRIVER PER SINK PIN (graph/cell.hpp), so the SINK PIN *is* the operand and
+// `inp_sorted_pins()` replaces the node-level in-edge walk: it steps the node's
+// own pin list -- already sorted by ascending port_id -- and skips a driver-only
+// pin by a BIT TEST, where the edge walk decoded every OUT-edge of every pin and
+// threw it away.
+//
+// No walk in this file reads inp_edges() any more -- class or hierarchical.
+// Two readers are load-bearing in its place, and neither has a substitute:
+//
+//   * the SORTED one. inp_sorted_pins() yields the NODE-AS-PIN (port 0) first
+//     and then ascending port order, which is exactly what the edge walk saw.
+//     The raw inp_pins() is NOT the same list: hhds stores port 0 as the node
+//     itself, so it omits the pin a banked cell's FIRST operand sits on, and it
+//     is unordered besides. Using it would silently fold two different
+//     functions alike.
+//   * the PLURAL one. A COMPACT LOOP Sub's carry-in sink deliberately carries
+//     TWO drivers: the seed, and a self edge from its own carry-out meaning
+//     "the previous ordinal" (pass/legalize.cpp:299 documents it as the single
+//     sanctioned exception to one-driver-per-sink-pin). get_driver_pin() keeps
+//     only ONE of them -- and its assert compiles out under NDEBUG -- which
+//     here would drop half a loop's carry out of a signature and let two
+//     different compact loops fold alike: a false "identical", which is the
+//     failure mode semdiff exists not to have.
+//
+// So arbitrary-node walks route through this helper, which takes the plural
+// reader on exactly the shape that needs it; a walk whose node type is already
+// pinned down (a Get_mask, a Sum, the body's output node) calls
+// inp_sorted_pins() directly.
+//
+// `fn(sink, driver)` returns false to stop the walk early; the helper returns
+// false iff it stopped that way. semdiff never mutates a graph (it reports, it
+// never merges), so the LAZY iterator is always the right one here and no site
+// in this file needs inp_pins_snapshot().
+template <typename Fn>
+bool for_each_inp_operand(const hhds::Node_class& node, Fn&& fn) {
+  if (node.is_loop_subnode()) {
+    // The sanctioned two-driver sink: take the PLURAL reader so the seed and
+    // the previous-ordinal self edge both reach `fn`.
+    for (auto sink : node.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        if (!fn(sink, drv)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (!fn(sink, sink.get_driver_pin())) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // State cells are cut points (their data input is not followed): structure does
 // not flow through them unless matching_names seeds them by hierarchical name.
@@ -120,8 +178,12 @@ std::string cut_point_key(hhds::Graph* g, const hhds::Node_class& node) {
 // Width of a node's first sized driver pin (0 = unknown). Folded into the key so
 // differing literal widths never falsely match.
 int32_t node_out_bits(const hhds::Node_class& node) {
-  for (const auto& e : node.out_edges()) {
-    if (auto b = gu::bits_of(e.driver); b != 0) {
+  // Driver pins, not out-edges: this only ever reads `e.driver`, and out_edges()
+  // repeats a driver once per sink (a clock pin repeats it 100K+ times).
+  // out_sorted_pins() yields each CONNECTED driver pin exactly once, in
+  // ascending port order -- same first-sized-pin answer, no fanout scan.
+  for (const auto& drv : node.out_sorted_pins()) {
+    if (auto b = gu::bits_of(drv); b != 0) {
       return b;
     }
   }
@@ -196,7 +258,7 @@ uint64_t loop_descriptor_key(const hhds::Node_class& node) {
 
   // The carries are a MULTISET of (input port, output port) pairs; order is
   // the group's storage order, not a contract.
-  hhds::Commutative_combiner carries;
+  hhds::Field_combiner carries;
   for (const auto& c : node.subnode_group().carries()) {
     carries.add(hcombine(port_key(c.input_port(), true), port_key(c.output_port(), false)));
   }
@@ -222,18 +284,20 @@ uint64_t node_kind_key(const hhds::Node_class& node) {
 // WITHIN each sink-port class but never across ports — so Sum's added (port A)
 // and subtracted (port B) operands stay distinct while `a+b == b+a`.
 //
-// hhds::Commutative_combiner is what makes the ports need no sort either: each
-// term carries its OWN sink pid, so a term cannot migrate across ports and the
-// order the map hands the ports back in stops mattering.
+// hhds::group_fold is THE shared spelling of this composition (hhds/node_hash.hpp)
+// -- the same rule canonical_node_hash applies to a node's own operands. It folds
+// each bank with a Field_combiner and then combines the bank digests POSITIONALLY
+// in ascending role order, which is stronger than the flat "mix the role into
+// each term" fold it replaced: no term can migrate across roles even under a
+// collision in the role mixing.
+//
+// BANK, not raw pid: a commutative cell now spends one pid per OPERAND
+// (graph/cell.hpp's ONE DRIVER PER SINK PIN block), so keying on the raw pid
+// would make `a+b` and `b+a` two DIFFERENT signatures and every structural
+// match across an operand reordering would fail. Ntype::sink_bank folds those
+// consecutive pids back to the role and is the identity everywhere else.
 uint64_t fold_operands(uint64_t base, absl::flat_hash_map<int, std::vector<uint64_t>>& by_port) {
-  hhds::Commutative_combiner c;
-  for (const auto& [p, vs] : by_port) {
-    const auto port_term = static_cast<uint64_t>(static_cast<uint32_t>(p)) | (1ULL << 40U);
-    for (uint64_t v : vs) {
-      c.add(hhds::hash_combine64(v, port_term));
-    }
-  }
-  return hcombine(base, c.value());
+  return hhds::group_fold(base, by_port);
 }
 
 // ---- tier-2 state pairing (full-match, the simplified SynAlign scheme) ------
@@ -378,11 +442,12 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
     // Backward: data-pin fan-in.
     absl::flat_hash_set<hhds::Class_index> seen;
     std::vector<hhds::Pin_class>           work;
-    for (const auto& e : c.node.inp_edges()) {
-      if (data_sink_port(op, e.sink.get_port_id())) {
-        work.push_back(e.driver);
+    for_each_inp_operand(c.node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
+      if (data_sink_port(op, sink.get_port_id())) {
+        work.push_back(driver);
       }
-    }
+      return true;
+    });
     while (!work.empty()) {
       auto drv = work.back();
       work.pop_back();
@@ -403,9 +468,10 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
         continue;
       }
       if (seen.insert(m.get_class_index()).second) {
-        for (const auto& e : m.inp_edges()) {
-          work.push_back(e.driver);
-        }
+        for_each_inp_operand(m, [&](const hhds::Pin_class&, const hhds::Pin_class& driver) {
+          work.push_back(driver);
+          return true;
+        });
       }
     }
 
@@ -1118,17 +1184,19 @@ std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& n
   const auto      m_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "mask");
   hhds::Pin_class a;
   hhds::Pin_class mask;
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == a_pid) {
+  // `node` is a Get_mask (checked above), so it is never a compact-loop Sub and
+  // the pin walk is exact: one driver per sink pin.
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() == a_pid) {
       if (!a.is_invalid()) {
         return std::nullopt;
       }
-      a = e.driver;
-    } else if (e.sink.get_port_id() == m_pid) {
+      a = sink.get_driver_pin();
+    } else if (sink.get_port_id() == m_pid) {
       if (!mask.is_invalid()) {
         return std::nullopt;
       }
-      mask = e.driver;
+      mask = sink.get_driver_pin();
     }
   }
   const int bits     = gu::bits_of(a);
@@ -1220,12 +1288,19 @@ bool resolve_driver(const Side& s, const hhds::Pin_class& drv, uint64_t& out) {
 // had no forward signature, so the obligation is UNDECIDABLE (never "discharged").
 bool cut_signature(const Side& s, const hhds::Node_class& node, uint64_t& out) {
   absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
-  for (const auto& e : node.inp_edges()) {
-    uint64_t dsig = 0;
-    if (!resolve_driver(s, e.driver, dsig)) {
-      return false;
-    }
-    by_port[e.sink.get_port_id()].push_back(dsig);
+  // A cut point can be a Sub, so this is an arbitrary-node walk: route it
+  // through for_each_inp_operand (a compact loop's carry-in keeps both drivers).
+  const bool complete
+      = for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
+          uint64_t dsig = 0;
+          if (!resolve_driver(s, driver, dsig)) {
+            return false;
+          }
+          by_port[Ntype::sink_bank(gu::type_op_of(node), sink.get_port_id())].push_back(dsig);
+          return true;
+        });
+  if (!complete) {
+    return false;
   }
   out = fold_operands(node_kind_key(node), by_port);
   return true;
@@ -1276,16 +1351,15 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       continue;  // unseeded state cell => forward frontier
     }
 
-    bool                                            ready = true;
     absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
-    for (const auto& e : node.inp_edges()) {
+    const bool ready = for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
       uint64_t dsig = 0;
-      if (!resolve_driver(s, e.driver, dsig)) {
-        ready = false;
-        break;
+      if (!resolve_driver(s, driver, dsig)) {
+        return false;
       }
-      by_port[e.sink.get_port_id()].push_back(dsig);
-    }
+      by_port[Ntype::sink_bank(gu::type_op_of(node), sink.get_port_id())].push_back(dsig);
+      return true;
+    });
     if (!ready) {
       continue;  // past a frontier => no forward signature
     }
@@ -1321,16 +1395,15 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       if (is_state(op)) {
         continue;  // const already signed; unseeded state is a real frontier
       }
-      bool                                            ready = true;
       absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
-      for (const auto& e : node.inp_edges()) {
+      const bool ready = for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
         uint64_t dsig = 0;
-        if (!resolve_driver(s, e.driver, dsig)) {
-          ready = false;
-          break;
+        if (!resolve_driver(s, driver, dsig)) {
+          return false;
         }
-        by_port[e.sink.get_port_id()].push_back(dsig);
-      }
+        by_port[Ntype::sink_bank(gu::type_op_of(node), sink.get_port_id())].push_back(dsig);
+        return true;
+      });
       if (!ready) {
         continue;
       }
@@ -1376,9 +1449,11 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
           ready = false;
           break;
         }
-        usig = hcombine(it2->second, static_cast<uint64_t>(static_cast<uint32_t>(snk.get_port_id())));
+        usig = hcombine(it2->second,
+                        static_cast<uint64_t>(static_cast<uint32_t>(
+                            Ntype::sink_bank(gu::type_op_of(snk.get_master_node()), snk.get_port_id()))));
       }
-      by_port[snk.get_port_id()].push_back(usig);
+      by_port[Ntype::sink_bank(gu::type_op_of(snk.get_master_node()), snk.get_port_id())].push_back(usig);
     }
     if (!ready || !any) {
       continue;  // a dead node or one past a frontier has no backward signature
@@ -1418,11 +1493,11 @@ std::optional<Classkey> class_of(const Side& side, hhds::Class_index ci, const a
 // Stamp `id` on the node and each of its distinct driver (output) pins.
 void stamp(const hhds::Node_class& node, uint32_t id) {
   gu::set_match(node, id);
-  absl::flat_hash_set<int> seen;
-  for (const auto& e : node.out_edges()) {
-    if (seen.insert(e.driver.get_port_id()).second) {
-      gu::set_match(e.driver, id);
-    }
+  // out_sorted_pins() yields each CONNECTED driver pin exactly once, which is
+  // literally what this wanted: out_edges() repeated a driver once per sink and
+  // the seen-set existed only to undo that.
+  for (const auto& drv : node.out_sorted_pins()) {
+    gu::set_match(drv, id);
   }
 }
 
@@ -1547,11 +1622,13 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
       // (discarded) backward signature, so the node set alone cannot see it.
       auto onode = s.g->get_output_node();
       if (!onode.is_invalid()) {
-        for (const auto& e : onode.inp_edges()) {
-          auto     key  = s.matching_io_names ? "o:" + std::string(gu::pin_name_of(e.sink))
-                                              : "p:" + std::to_string(static_cast<uint32_t>(e.sink.get_port_id()));
+        // The body's OUTPUT node -- never a compact-loop Sub -- so the pin walk
+        // is exact: one output port, one sink pin, one driver.
+        for (const auto& sink : onode.inp_sorted_pins()) {
+          auto     key  = s.matching_io_names ? "o:" + std::string(gu::pin_name_of(sink))
+                                              : "p:" + std::to_string(static_cast<uint32_t>(sink.get_port_id()));
           uint64_t dsig = 0;
-          if (resolve_driver(s, e.driver, dsig)) {
+          if (resolve_driver(s, sink.get_driver_pin(), dsig)) {
             k.emplace(key, dsig);
           } else {
             u.insert(key);
@@ -1884,14 +1961,18 @@ uint64_t driver_desc(const hhds::Pin_class& drv, bool a_side, const Bimap& ab, c
   return h;
 }
 
-// One input edge's descriptor: the sink port (by NAME on a Sub, else port_id)
+// One input operand's descriptor: the sink port (by NAME on a Sub, else port_id)
 // combined with the driver descriptor. `ok` is cleared when the driver is
-// unresolved (verify: mismatch).
-uint64_t edge_desc(const hhds::Edge_class& e, bool sink_is_sub, bool a_side, const Bimap& ab, const Bimap& ba, bool& ok) {
+// unresolved (verify: mismatch). Takes the two pins rather than an Edge_class:
+// every caller now walks sorted sink pins and the drivers of each, so the
+// (sink, driver) pair IS the operand, one-driver sink and two-driver compact
+// loop carry-in alike.
+uint64_t operand_desc(const hhds::Pin_class& sink, const hhds::Pin_class& driver, bool sink_is_sub, bool a_side,
+                      const Bimap& ab, const Bimap& ba, bool& ok) {
   uint64_t sink_port
-      = sink_is_sub ? hstr(e.sink.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(e.sink.get_port_id()));
+      = sink_is_sub ? hstr(sink.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(sink.get_port_id()));
   bool     resolved;
-  uint64_t d = driver_desc(e.driver, a_side, ab, ba, resolved);
+  uint64_t d = driver_desc(driver, a_side, ab, ba, resolved);
   ok         = resolved;
   return hcombine(sink_port, d);
 }
@@ -1902,11 +1983,12 @@ std::vector<uint64_t> input_descs(const hhds::Node_class& node, bool a_side, con
   ok                             = true;
   bool                  sink_sub = gu::type_op_of(node) == Ntype_op::Sub;
   std::vector<uint64_t> v;
-  for (const auto& e : node.inp_edges()) {
+  for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
     bool eok;
-    v.push_back(edge_desc(e, sink_sub, a_side, ab, ba, eok));
+    v.push_back(operand_desc(sink, driver, sink_sub, a_side, ab, ba, eok));
     ok = ok && eok;
-  }
+    return true;
+  });
   std::sort(v.begin(), v.end());
   return v;
 }
@@ -1915,32 +1997,96 @@ std::vector<uint64_t> input_descs(const hhds::Node_class& node, bool a_side, con
 
 namespace {
 
-// Two independent chains keep the virtual-expression comparison on the same
-// collision footing as Canonical_digest. This is still only the discovery
-// representation: folded_loop_identical's shape/accounting gates are what make
-// the accepted mixed-loop class deliberately small and inspectable.
-struct Fold_key {
-  uint64_t h0                                 = 0;
-  uint64_t h1                                 = 0;
-  auto     operator<=>(const Fold_key&) const = default;
+// HASH-CONSED, not digested. `Term_id` equality IS structural equality.
+//
+// This comparison is the DECIDING gate: `folded_loop_identical` compares two
+// vectors of these, and a match flows straight to a definitive cached Proven
+// (lhd/lhd_kernel_formal.cpp) with no solver and no structural re-confirmation.
+// A pure digest therefore made a collision a FALSE PROVEN. It used to carry two
+// 64-bit lanes to make that unlikely; "unlikely" is not the bar for a proof.
+//
+// So the term is INTERNED instead. Both sides share one `Term_pool`, and:
+//
+//   64-bit hhds hash  ->  bucket  ->  Term::operator==  ->  reuse that id
+//
+// The hash only chooses a bucket. `Term::operator==` is the confirmation and it
+// is NOT a hash: it compares the kind, the cell op, the width, the port id, the
+// constant's SERIALIZED BYTES, the input pin's NAME, and the child-id vector
+// elementwise. By induction -- base cases are real bytes -- equal ids mean
+// structurally identical normalized terms. A 64-bit collision costs one failed
+// tuple comparison and a fresh id; it can never produce a wrong answer. That is
+// exactly the owner's rule: "an alias triggers a traversal to analyze/verify".
+//
+// `operator==` is O(arity + |text|), not a subtree walk, because `kids` are
+// already-canonical ids. The confirmation runs inside the walk that already
+// happens -- there is no second pass.
+//
+// WHY NOT `&&` THE EXISTING EXACT PROVER: `mixed_loop_structural_identity`
+// (lhd_kernel_formal.cpp) copies the whole library into private scratch,
+// materializes occurrences, inlines per lifted instance and runs Cprop -- O(count
+// x body) memory and mutation, which is precisely the cost this fold exists to
+// avoid. It is an `||` sibling at the call site, not a confirmation. (Whether
+// normalization would ALSO prove the flat cases is untested.)
+//
+// WHAT THIS DOES NOT COVER, unchanged by the collapse:
+//   * Interning proves the two virtual expressions are the SAME TERM under this
+//     fold's normalization rules. It does NOT prove those rules are
+//     value-preserving (that an all-bits Get_mask may cross a Sum at modulus
+//     2^W, that a zero seed may vanish). Those are argued in prose below. 128
+//     bits never covered it either.
+//   * The verdict is committed to the formal vcache under a key made of two
+//     Canonical_digests, and replayed with no analysis at all for that def. That
+//     key is still an unconfirmed digest; this change does not make the call
+//     chain digest-free.
+enum class Term_kind : uint8_t { Const, Input, Node, SumMod, Fit };
+
+using Term_id = uint32_t;
+
+struct Term {
+  Term_kind                              kind  = Term_kind::Const;
+  uint32_t                               op    = 0;  // Ntype_op, for Node
+  int32_t                                width = 0;  // compare modulus / native width
+  int32_t                                port  = 0;  // driver port_id (Node); unsign flag (Input)
+  std::string                            text;       // Dlop::serialize() bytes, or the input pin NAME
+  std::vector<std::pair<int32_t, Term_id>> kids;     // (sink_bank role, child id), canonicalized
+
+  bool operator==(const Term&) const = default;  // <== THE CONFIRMATION
+
+  template <typename H>
+  friend H AbslHashValue(H h, const Term& t) {  // <== the 64-bit FILTER, hhds facility
+    uint64_t acc = hhds::hash_mu2(static_cast<uint64_t>(t.kind), static_cast<uint64_t>(t.op));
+    acc          = hhds::hash_mu2(acc, static_cast<uint64_t>(static_cast<uint32_t>(t.width)));
+    acc          = hhds::hash_mu2(acc, static_cast<uint64_t>(static_cast<uint32_t>(t.port)));
+    acc          = hhds::hash_mu2(acc, hash_util::fnv1a64(t.text));
+    // Kids are already canonicalized (bank-bucketed, ids sorted within a bank,
+    // banks in ascending role order), so a positional fold is exact here.
+    for (const auto& [role, id] : t.kids) {
+      acc = hhds::hash_mu2(acc, hhds::hash_mu2(static_cast<uint64_t>(static_cast<uint32_t>(role)), id));
+    }
+    return H::combine(std::move(h), acc);
+  }
 };
 
-Fold_key fold_atom(std::string_view tag, std::string_view payload = {}) {
-  const uint64_t t = hstr(tag);
-  const uint64_t p = hstr(payload);
-  return {hcombine(t, p), hcombine(hcombine(0xd6e8feb86659fd93ULL, t), p)};
-}
+// One pool per folded_loop_identical call, SHARED by both Virtual_exprs: ids
+// from different pools are incomparable, which would make every comparison
+// false -- a false MISS, the safe direction, and the loop_roll_flat fixtures
+// catch it immediately.
+class Term_pool {
+public:
+  [[nodiscard]] Term_id intern(Term&& t) {
+    if (auto it = intern_.find(t); it != intern_.end()) {
+      return it->second;  // bucket hit CONFIRMED by Term::operator==
+    }
+    const auto id = static_cast<Term_id>(terms_.size());
+    terms_.push_back(t);
+    intern_.emplace(std::move(t), id);
+    return id;
+  }
 
-Fold_key fold_join(Fold_key base, uint64_t value) {
-  base.h0 = hcombine(base.h0, value);
-  base.h1 = hcombine(base.h1, mix64(value ^ 0xa0761d6478bd642fULL));
-  return base;
-}
-
-Fold_key fold_join(Fold_key base, Fold_key value) {
-  base = fold_join(base, value.h0);
-  return fold_join(base, value.h1);
-}
+private:
+  absl::flat_hash_map<Term, Term_id> intern_;
+  std::vector<Term>                  terms_;
+};
 
 int occurrence_width(const hhds::Occurrence_pin& pin) {
   if (pin.is_invalid()) {
@@ -1958,14 +2104,25 @@ int occurrence_width(const hhds::Occurrence_pin& pin) {
 std::optional<hhds::Occurrence_pin> occurrence_value_input(const hhds::Occurrence_node& node, std::string_view name) {
   const auto           pid = Ntype::get_sink_pid(gu::type_op_of(node), name);
   hhds::Occurrence_pin found;
-  for (const auto& edge : node.inp_edges()) {
-    if (edge.sink.get_port_id() != pid) {
+  // Occurrence_node::inp_sorted_pins() is the hier-resolving pin walk: the
+  // node-as-pin (port 0, where a banked cell's FIRST operand lives) first, then
+  // ascending port order -- the raw inp_pins() would drop port 0 and lose the
+  // order. Every edge of a sink pin shares that pin's port_id, so the pid filter
+  // belongs on the SINK and skips exactly the edges the edge walk skipped. The
+  // PLURAL get_driver_pins() is what makes "more than one driver" still
+  // observable here (a compact loop's carry-in sink legitimately has two): the
+  // singular reader would hand back drivers.front() and turn an ambiguous input
+  // into a confident wrong answer.
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() != pid) {
       continue;
     }
-    if (!found.is_invalid()) {
-      return std::nullopt;
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (!found.is_invalid()) {
+        return std::nullopt;
+      }
+      found = driver;
     }
-    found = edge.driver;
   }
   return found.is_invalid() ? std::nullopt : std::optional<hhds::Occurrence_pin>{found};
 }
@@ -2007,25 +2164,36 @@ struct Memo_key {
 // cprop's single n-ary reduction without materializing either representation.
 class Virtual_expr {
 public:
-  explicit Virtual_expr(hhds::Graph* graph) : graph_(graph), view_(graph->occurrences()) {}
+  // The pool is SHARED by the two sides being compared. Ids from different pools
+  // are incomparable, so a split pool would make every comparison false -- a
+  // false MISS, which is the safe direction and which the loop_roll_flat
+  // fixtures catch immediately.
+  Virtual_expr(hhds::Graph* graph, Term_pool& pool) : graph_(graph), view_(graph->occurrences()) { pool_ = &pool; }
 
-  std::optional<std::vector<std::pair<std::string, Fold_key>>> outputs() {
+  std::optional<std::vector<std::pair<std::string, Term_id>>> outputs() {
     if (graph_ == nullptr || graph_->get_io() == nullptr) {
       return std::nullopt;
     }
-    std::vector<std::pair<std::string, Fold_key>> result;
+    std::vector<std::pair<std::string, Term_id>> result;
     auto                                          out = view_.lift(graph_->get_output_node());
-    for (const auto& edge : out.inp_edges()) {
-      const std::string name{edge.sink.get_pin_name()};
-      const int         width = static_cast<int>(graph_->get_io()->get_bits(name));
-      if (width <= 0) {
-        return std::nullopt;
+    // Occurrence_node (view_.lift): the hier-resolving SORTED pin walk, then the
+    // PLURAL driver reader per sink -- one iteration per in-edge, in the same
+    // order, which is all the edge walk ever was. The name/width lookup stays
+    // INSIDE the driver loop on purpose: an output sink pin with no driver
+    // contributed no edge, so it must not be width-checked now either.
+    for (const auto& sink : out.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        const std::string name{sink.get_pin_name()};
+        const int         width = static_cast<int>(graph_->get_io()->get_bits(name));
+        if (width <= 0) {
+          return std::nullopt;
+        }
+        auto key = at_width(driver, width);
+        if (!key) {
+          return std::nullopt;
+        }
+        result.emplace_back(name, *key);
       }
-      auto key = at_width(edge.driver, width);
-      if (!key) {
-        return std::nullopt;
-      }
-      result.emplace_back(name, *key);
     }
     std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
     return result;
@@ -2094,7 +2262,7 @@ private:
     return std::nullopt;
   }
 
-  std::optional<Fold_key> at_width(const hhds::Occurrence_pin& pin, int width) {
+  std::optional<Term_id> at_width(const hhds::Occurrence_pin& pin, int width) {
     if (pin.is_invalid() || width <= 0) {
       failed_ = true;
       return std::nullopt;
@@ -2108,19 +2276,20 @@ private:
       return std::nullopt;
     }
 
-    std::optional<Fold_key> result;
+    std::optional<Term_id> result;
     if (pin.is_const()) {
-      result = fold_atom("const", gu::const_of(pin).serialize());
+      result = pool_->intern(Term{.kind = Term_kind::Const, .text = gu::const_of(pin).serialize()});
     } else if (gu::is_graph_input_pin(pin)) {
       if (auto index = loop_index_value(pin)) {
-        result = fold_atom("const", Dlop::create_integer(*index)->serialize());
+        result = pool_->intern(Term{.kind = Term_kind::Const, .text = Dlop::create_integer(*index)->serialize()});
       } else if (auto initial = loop_initial_driver(pin)) {
         result = at_width(*initial, width);
       } else {
-        auto key = fold_atom("input", pin.get_pin_name());
-        key      = fold_join(key, static_cast<uint64_t>(width));
-        key      = fold_join(key, gu::is_unsign(pin) ? 1 : 2);
-        result   = key;
+        // The pin NAME is compared as bytes, not hashed into an identity.
+        result = pool_->intern(Term{.kind  = Term_kind::Input,
+                                    .width = width,
+                                    .port  = gu::is_unsign(pin) ? 1 : 2,
+                                    .text  = std::string{pin.get_pin_name()}});
       }
     } else {
       const auto node = pin.get_master_node();
@@ -2143,21 +2312,27 @@ private:
       }
 
       if (!result && gu::type_op_of(node) == Ntype_op::Sum && native_width >= width) {
-        std::vector<Fold_key> terms;
+        std::vector<Term_id> terms;
         if (collect_sum(pin, width, terms)) {
+          // Sorting IDS is an exact canonical multiset representative. The old
+          // sort was by HASH, so two colliding-but-different terms sorted
+          // adjacently and folded alike; distinct terms now have distinct ids.
           std::sort(terms.begin(), terms.end());
-          Fold_key key = fold_join(fold_atom("sum-mod"), static_cast<uint64_t>(width));
+          Term t{.kind = Term_kind::SumMod, .width = width};
+          t.kids.reserve(terms.size());
           for (const auto& term : terms) {
-            key = fold_join(key, term);
+            t.kids.emplace_back(0, term);
           }
-          result = key;
+          result = pool_->intern(std::move(t));
         }
       }
 
       if (!result) {
         auto key = native(pin);
         if (key) {
-          result = occurrence_width(pin) == width ? *key : fold_join(fold_join(fold_atom("fit"), width), *key);
+          result = occurrence_width(pin) == width
+                       ? *key
+                       : pool_->intern(Term{.kind = Term_kind::Fit, .width = width, .kids = {{0, *key}}});
         }
       }
     }
@@ -2169,7 +2344,7 @@ private:
     return result;
   }
 
-  bool collect_sum(const hhds::Occurrence_pin& pin, int width, std::vector<Fold_key>& terms) {
+  bool collect_sum(const hhds::Occurrence_pin& pin, int width, std::vector<Term_id>& terms) {
     if (pin.is_invalid()) {
       return false;
     }
@@ -2193,19 +2368,36 @@ private:
         // neither representation has discarded a carry. Signed or unknown
         // operands keep their native fit so extension semantics remain exact.
         bool exact_unsigned_sum = gu::is_unsign(pin);
-        for (const auto& edge : node.inp_edges()) {
-          if (edge.sink.get_port_id() != 0) {
-            exact_unsigned_sum = false;
-            break;
-          }
-          if (edge.driver.is_const()) {
-            const auto& value = gu::const_of(edge.driver);
-            if (value.has_unknowns() || value.is_negative()) {
+        // Occurrence_node: the hier-resolving SORTED pin walk (port 0 FIRST --
+        // a Sum's first addend lives there, and raw inp_pins() would drop it),
+        // then the PLURAL driver reader so a two-driver sink contributes BOTH
+        // operands to the unsignedness question instead of only drivers.front().
+        // `stop` is load-bearing: the edge walk's `break` left the WHOLE walk,
+        // and an inner `break` would only leave one sink's drivers.
+        bool stop = false;
+        for (const auto& sink : node.inp_sorted_pins()) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            // Added operands only. Bank parity, not the raw pid: every Sum
+            // operand owns a pid, EVEN adds and ODD subtracts (graph/cell.hpp).
+            if (Ntype::sink_bank(Ntype_op::Sum, sink.get_port_id()) != 0) {
               exact_unsigned_sum = false;
+              stop               = true;
               break;
             }
-          } else if (!gu::is_unsign(edge.driver)) {
-            exact_unsigned_sum = false;
+            if (driver.is_const()) {
+              const auto& value = gu::const_of(driver);
+              if (value.has_unknowns() || value.is_negative()) {
+                exact_unsigned_sum = false;
+                stop               = true;
+                break;
+              }
+            } else if (!gu::is_unsign(driver)) {
+              exact_unsigned_sum = false;
+              stop               = true;
+              break;
+            }
+          }
+          if (stop) {
             break;
           }
         }
@@ -2218,13 +2410,21 @@ private:
           return true;
         }
         bool any = false;
-        for (const auto& edge : node.inp_edges()) {
-          // Sum port 0 is addition. Any subtract/other operand makes this a
-          // non-associative shape and the fold declines.
-          if (edge.sink.get_port_id() != 0 || !collect_sum(edge.driver, width, terms)) {
-            return false;
+        // Occurrence_node: the hier-resolving SORTED pin walk plus the PLURAL
+        // driver reader. `any` still ticks once per DRIVER, which is the
+        // faithful per-edge count -- a two-driver sink contributes two operands
+        // and both must reach collect_sum. `return` is unaffected by nesting,
+        // and the bank test stays INSIDE the driver loop so an undriven sink
+        // keeps contributing nothing, exactly as it did to the edge walk.
+        for (const auto& sink : node.inp_sorted_pins()) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            // The `as` BANK (even pid) is addition. Any subtract operand makes
+            // this a non-associative shape and the fold declines.
+            if (Ntype::sink_bank(Ntype_op::Sum, sink.get_port_id()) != 0 || !collect_sum(driver, width, terms)) {
+              return false;
+            }
+            any = true;
           }
-          any = true;
         }
         return any;
       }
@@ -2246,7 +2446,7 @@ private:
     return true;
   }
 
-  std::optional<Fold_key> native(const hhds::Occurrence_pin& pin) {
+  std::optional<Term_id> native(const hhds::Occurrence_pin& pin) {
     if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
       return at_width(pin, std::max(1, occurrence_width(pin)));
     }
@@ -2256,36 +2456,54 @@ private:
       failed_ = true;
       return std::nullopt;
     }
-    Fold_key key = fold_join(fold_atom("node"), static_cast<uint64_t>(op));
-    key          = fold_join(key, static_cast<uint64_t>(std::max(0, occurrence_width(pin))));
-    key          = fold_join(key, static_cast<uint64_t>(static_cast<uint32_t>(pin.get_port_id())));
+    Term t{.kind  = Term_kind::Node,
+           .op    = static_cast<uint32_t>(op),
+           .width = std::max(0, occurrence_width(pin)),
+           .port  = static_cast<int32_t>(static_cast<uint32_t>(pin.get_port_id()))};
 
-    absl::flat_hash_map<int, std::vector<Fold_key>> by_port;
-    for (const auto& edge : node.inp_edges()) {
-      const int child_width = std::max(1, occurrence_width(edge.driver));
-      auto      child       = at_width(edge.driver, child_width);
-      if (!child) {
-        return std::nullopt;
+    absl::flat_hash_map<int, std::vector<Term_id>> by_port;
+    // Occurrence_node: the hier-resolving SORTED pin walk -- node-as-pin (port
+    // 0) first, then ascending port order, so a banked cell's first operand is
+    // still folded in; the raw inp_pins() would silently drop it and fold two
+    // different functions alike. The PLURAL driver reader matters just as much:
+    // a compact loop's carry-in sink carries its seed AND the previous-ordinal
+    // self edge, and pushing only drivers.front() would drop half a loop's carry
+    // out of the signature -- a false "identical", which is the failure mode
+    // semdiff exists not to have.
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        const int child_width = std::max(1, occurrence_width(driver));
+        auto      child       = at_width(driver, child_width);
+        if (!child) {
+          return std::nullopt;
+        }
+        by_port[Ntype::sink_bank(op, sink.get_port_id())].push_back(*child);
       }
-      by_port[edge.sink.get_port_id()].push_back(*child);
     }
-    // Same rule as fold_operands above: commutative WITHIN a sink port, never
-    // across ports. Each term carries its own pid, so neither the ports nor the
-    // operands sharing one need a sort.
-    hhds::Commutative_combiner128 operands;
-    for (const auto& [port, values] : by_port) {
-      const auto port_term = hhds::hash_mix128(static_cast<uint64_t>(static_cast<uint32_t>(port)) | (1ULL << 40U));
-      for (const auto& value : values) {
-        operands.add(hhds::hash_combine128({value.h0, value.h1}, port_term));
+    // Commutative WITHIN a sink BANK, never across banks -- structurally, not by
+    // a mixer. Sort each bank's ids (commutativity inside the bank) and emit the
+    // banks in ascending role order (ordering across banks). That is an EXACT
+    // representation of the multiset of (bank, child) pairs the 128-bit
+    // commutative combiner stood for, so acceptance is unchanged.
+    std::vector<int> roles;
+    roles.reserve(by_port.size());
+    for (auto& [port, values] : by_port) {
+      std::sort(values.begin(), values.end());
+      roles.push_back(port);
+    }
+    std::sort(roles.begin(), roles.end());
+    for (const auto role : roles) {
+      for (const auto id : by_port[role]) {
+        t.kids.emplace_back(static_cast<int32_t>(role), id);
       }
     }
-    const auto folded = operands.value();
-    return fold_join(key, Fold_key{folded.a, folded.b});
+    return pool_->intern(std::move(t));
   }
 
   hhds::Graph*                                graph_ = nullptr;
   hhds::Occurrences_view                      view_;
-  absl::flat_hash_map<Memo_key, Fold_key>     memo_;
+  absl::flat_hash_map<Memo_key, Term_id>      memo_;
+  Term_pool*                                 pool_ = nullptr;
   absl::flat_hash_set<Memo_key>               active_;
   absl::flat_hash_set<hhds::Occurrence_index> visited_;
   bool                                        failed_ = false;
@@ -2321,13 +2539,19 @@ int graph_input_uses(const hhds::Pin_class& root, const hhds::Pin_class& wanted,
   if (!active.insert(node.get_class_index()).second) {
     return -1;
   }
-  int uses = 0;
-  for (const auto& edge : node.inp_edges()) {
-    const int n = graph_input_uses(edge.driver, wanted, active);
+  int  uses     = 0;
+  bool recursed = true;
+  for_each_inp_operand(node, [&](const hhds::Pin_class&, const hhds::Pin_class& driver) {
+    const int n = graph_input_uses(driver, wanted, active);
     if (n < 0) {
-      return -1;
+      recursed = false;
+      return false;
     }
     uses += n;
+    return true;
+  });
+  if (!recursed) {
+    return -1;
   }
   active.erase(node.get_class_index());
   return uses;
@@ -2410,10 +2634,12 @@ bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool sta
   // carry use; the carry operand must contain exactly one carry and no index.
   hhds::Pin_class carry_driver;
   size_t          output_edges = 0;
-  for (const auto& edge : body->get_output_node().inp_edges()) {
+  // The loop BODY's output node: one port, one sink pin, one driver -- never a
+  // compact-loop Sub, so the pin walk counts exactly what the edge walk did.
+  for (const auto& sink : body->get_output_node().inp_sorted_pins()) {
     ++output_edges;
-    if (edge.sink.get_pin_name() == carry_odecl->name) {
-      carry_driver = edge.driver;
+    if (sink.get_pin_name() == carry_odecl->name) {
+      carry_driver = sink.get_driver_pin();
     }
   }
   if (output_edges != 1 || carry_driver.is_invalid() || carry_driver.is_const() || gu::is_graph_input_pin(carry_driver)
@@ -2422,14 +2648,17 @@ bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool sta
   }
   int carry_operands = 0;
   int lane_operands  = 0;
-  for (const auto& edge : carry_driver.get_master_node().inp_edges()) {
-    if (edge.sink.get_port_id() != 0) {
-      return false;
+  // `carry_driver`'s master is a Sum (checked just above), never a compact-loop
+  // Sub: every operand owns a sink pid, so the pin walk IS the operand walk.
+  for (const auto& sink : carry_driver.get_master_node().inp_sorted_pins()) {
+    if (Ntype::sink_bank(Ntype_op::Sum, sink.get_port_id()) != 0) {
+      return false;  // a subtracted operand: not the carry shape this matches
     }
+    const auto                             operand = sink.get_driver_pin();
     absl::flat_hash_set<hhds::Class_index> active_index;
     absl::flat_hash_set<hhds::Class_index> active_carry;
-    const int                              index_uses = graph_input_uses(edge.driver, index_pin, active_index);
-    const int                              carry_uses = graph_input_uses(edge.driver, carry_pin, active_carry);
+    const int                              index_uses = graph_input_uses(operand, index_pin, active_index);
+    const int                              carry_uses = graph_input_uses(operand, carry_pin, active_carry);
     if (index_uses < 0 || carry_uses < 0) {
       return false;
     }
@@ -2445,8 +2674,9 @@ bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled, bool sta
     return false;
   }
 
-  Virtual_expr compact_expr(compact);
-  Virtual_expr unrolled_expr(unrolled);
+  Term_pool    term_pool;  // ONE pool: see the Virtual_expr ctor
+  Virtual_expr compact_expr(compact, term_pool);
+  Virtual_expr unrolled_expr(unrolled, term_pool);
   const auto   compact_outputs  = compact_expr.outputs();
   const auto   unrolled_outputs = unrolled_expr.outputs();
   const bool   compact_live     = compact_outputs && compact_expr.every_live_node_consumed();
@@ -2577,26 +2807,30 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   };
 
   // The distinct output driver pins of a node, keyed for cross-side matching
-  // (Sub: by name; else by port_id).
+  // (Sub: by name; else by port_id). out_sorted_pins() yields exactly that -- each
+  // connected DRIVER pin once -- where out_edges() repeated one per sink and the
+  // bseen/aseen sets existed only to undo the repetition. They stay because the
+  // Sub key is a NAME, and two pins are still allowed to share one; for the
+  // port_id key they are now provably redundant (distinct pins, distinct pids).
   auto enqueue_node_outputs = [&](const hhds::Node_class& na, const hhds::Node_class& nb) {
     bool                                           sub = gu::type_op_of(na) == Ntype_op::Sub;
     absl::flat_hash_map<uint64_t, hhds::Pin_class> bmap;
     absl::flat_hash_set<uint64_t>                  bseen;
-    for (const auto& e : nb.out_edges()) {
-      uint64_t k = sub ? hstr(e.driver.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
+    for (const auto& drv : nb.out_sorted_pins()) {
+      uint64_t k = sub ? hstr(drv.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(drv.get_port_id()));
       if (bseen.insert(k).second) {
-        bmap.emplace(k, e.driver);
+        bmap.emplace(k, drv);
       }
     }
     absl::flat_hash_set<uint64_t> aseen;
-    for (const auto& e : na.out_edges()) {
-      uint64_t k = sub ? hstr(e.driver.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
+    for (const auto& drv : na.out_sorted_pins()) {
+      uint64_t k = sub ? hstr(drv.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(drv.get_port_id()));
       if (!aseen.insert(k).second) {
         continue;
       }
       auto it = bmap.find(k);
       if (it != bmap.end()) {
-        enqueue(e.driver, it->second);
+        enqueue(drv, it->second);
       }
     }
   };
@@ -2608,18 +2842,21 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     auto                                              input_key = [&](const hhds::Pin_class& pin) {
       return opts.matching_io_names ? std::string{pin.get_pin_name()} : std::to_string(static_cast<uint32_t>(pin.get_port_id()));
     };
-    for (const auto& e : b->get_input_node().out_edges()) {
-      bin.try_emplace(input_key(e.driver), e.driver);
+    // Driver pins of the INPUT node -- one per graph input port. Same reason as
+    // enqueue_node_outputs: only `e.driver` was ever read, and out_edges()
+    // repeated it once per consumer (a clock input, once per flop in the body).
+    for (const auto& drv : b->get_input_node().out_sorted_pins()) {
+      bin.try_emplace(input_key(drv), drv);
     }
     absl::flat_hash_set<std::string> adone;
-    for (const auto& e : a->get_input_node().out_edges()) {
-      auto key = input_key(e.driver);
+    for (const auto& drv : a->get_input_node().out_sorted_pins()) {
+      auto key = input_key(drv);
       if (!adone.insert(key).second) {
         continue;
       }
       auto it = bin.find(key);
       if (it != bin.end()) {
-        enqueue(e.driver, it->second);
+        enqueue(drv, it->second);
       }
     }
   }
@@ -2634,11 +2871,12 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   auto canon = [&](const hhds::Node_class& node, bool a_side) -> uint64_t {
     uint64_t                                        h = node_kind_key(node);
     absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
-    for (const auto& e : node.inp_edges()) {
+    for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
       bool     resolved;
-      uint64_t d = driver_desc(e.driver, a_side, ab, ba, resolved);
-      by_port[e.sink.get_port_id()].push_back(resolved ? d : hstr("\x01?"));
-    }
+      uint64_t d = driver_desc(driver, a_side, ab, ba, resolved);
+      by_port[Ntype::sink_bank(gu::type_op_of(node), sink.get_port_id())].push_back(resolved ? d : hstr("\x01?"));
+      return true;
+    });
     return fold_operands(h, by_port);
   };
 

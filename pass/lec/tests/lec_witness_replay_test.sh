@@ -157,12 +157,12 @@ ck "replay reproduces the counterexample (query + witness JSON agree)" \
 # ---- the verdict text names the same divergence -------------------------------
 ck "verdict names the divergence" 'echo "$OUT" | grep -q "o(ref=1 impl=2)"'
 
-# ---- the same chain over the shape that actually broke: STRUCT ports + a
-# construct pass.prp_writer cannot emit --------------------------------------
+# ---- the same chain over the shape that actually broke: STRUCT ports +
+# popcount ------------------------------------------------------------------
 # A struct port is not writable from a test, so the wrapper flattens it to one
 # scalar per leaf; and an importable Pyrope pair must not be round-tripped
-# through the writer, or `popcount` (`#+[..]`) takes the whole reproduction with
-# it. Here the counterexample INPUTS are solver-chosen, so nothing is pinned to a
+# through the writer. Popcount is now supported by the writer; the directory
+# checks below still enforce direct imports. The INPUTS are solver-chosen, so nothing is pinned to a
 # golden: the assertion is the definition of a counterexample — the two agree at
 # every cycle before the one the witness names, and part on it with exactly the
 # values it names.

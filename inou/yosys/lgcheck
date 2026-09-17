@@ -550,6 +550,16 @@ if ! [[ "$LGCHECK_HEURISTIC_TIMEOUT" =~ ^[0-9]+$ ]]; then
   echo "lgcheck: LGCHECK_HEURISTIC_TIMEOUT must be a non-negative integer (got '$LGCHECK_HEURISTIC_TIMEOUT')"
   exit 5
 fi
+LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-5}"
+# Failed correspondence guesses do not refute the public outputs. Reserve a
+# bounded share for the final counterexample search, including solver startup,
+# so a short shared budget cannot expire before that search even starts.
+bmc_reserve=0
+if [[ "$LGCHECK_BMC_STEPS" =~ ^[0-9]+$ ]] && [ "$LGCHECK_BMC_STEPS" -gt 0 ] \
+    && [ "$LGCHECK_EQUIV_TIMEOUT" -gt 1 ]; then
+  bmc_reserve=$(((LGCHECK_EQUIV_TIMEOUT + 3) / 4))
+  [ "$bmc_reserve" -le 30 ] || bmc_reserve=30
+fi
 equiv_start=$SECONDS
 # coreutils `timeout` is NOT guaranteed to exist: macOS ships none, and bazel's
 # test PATH (/bin:/usr/bin:/usr/local/bin) does not carry the homebrew prefix
@@ -566,8 +576,12 @@ for _t in timeout gtimeout; do
 done
 run_equiv_yosys() {
   local heuristic=0
+  local bmc=0
   if [ "$1" = --heuristic ]; then
     heuristic=1
+    shift
+  elif [ "$1" = --bmc ]; then
+    bmc=1
     shift
   fi
   if [ "$LGCHECK_EQUIV_TIMEOUT" -eq 0 ]; then
@@ -576,6 +590,9 @@ run_equiv_yosys() {
   fi
   local elapsed=$((SECONDS - equiv_start))
   local remaining=$((LGCHECK_EQUIV_TIMEOUT - elapsed))
+  if [ "$bmc" -eq 0 ]; then
+    remaining=$((remaining - bmc_reserve))
+  fi
   if [ "$remaining" -le 0 ]; then
     return 124
   fi
@@ -905,7 +922,6 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-5}"
 if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ]; then
   echo "INFO: running bounded miter check (LGCHECK_BMC_STEPS=${LGCHECK_BMC_STEPS})"
 
@@ -943,7 +959,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
   # two equivalent machines intact before the shared initialization policy is
   # applied by SAT.
-  run_equiv_yosys -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+  run_equiv_yosys --bmc -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
                $(gate_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate

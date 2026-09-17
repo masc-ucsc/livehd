@@ -40,8 +40,10 @@ void Color_cgen::label(hhds::Graph* g) {
       if (n.is_loop_break()) {
         continue;  // flop/mem boundary -- do not cross into its din-cone
       }
-      for (const auto& ie : n.inp_edges()) {
-        wl.push_back(ie.driver.get_master_node());
+      for (auto sink : n.inp_sorted_pins()) {             // read-only pin walk
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          wl.push_back(drv.get_master_node());
+        }
       }
     }
   };
@@ -57,8 +59,8 @@ void Color_cgen::label(hhds::Graph* g) {
         continue;
       }
       int idx = next_sink++;
-      for (const auto& e : opin.inp_edges()) {
-        mark(e.driver.get_master_node(), idx);
+      if (const auto drv = opin.get_driver_pin(); !drv.is_invalid()) {
+        mark(drv.get_master_node(), idx);  // an output pin is a sink: one driver
       }
     }
   }
@@ -70,8 +72,10 @@ void Color_cgen::label(hhds::Graph* g) {
     if (!n.is_loop_break()) {
       continue;
     }
-    for (const auto& ie : n.inp_edges()) {
-      mark(ie.driver.get_master_node(), STATE);
+    for (auto sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+        mark(drv.get_master_node(), STATE);
+      }
     }
   }
 

@@ -1890,6 +1890,29 @@ std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_na
   return widths;
 }
 
+// The BASE variable a private SSA version name belongs to, or "" when `name` is
+// not a version. Both spellings are recognized: `x___ssa_<N>` as upass.ssa mints
+// it, and `x__w<N>` as upass.ssa DEMOTES it when a body is re-SSA'd (see the
+// "Demote stale SSA versions" block in upass/ssa/upass_ssa.cpp, and
+// lnast_prp_writer's identical `base + "__w" + version` spelling on emit).
+static std::string_view ssa_version_base(std::string_view name) {
+  for (const std::string_view sep : {std::string_view{"___ssa_"}, std::string_view{"__w"}}) {
+    const auto pos = name.rfind(sep);
+    if (pos == std::string_view::npos || pos == 0) {
+      continue;
+    }
+    const auto digits = pos + sep.size();
+    if (digits >= name.size()) {
+      continue;
+    }
+    if (name.find_first_not_of("0123456789", digits) != std::string_view::npos) {
+      continue;
+    }
+    return name.substr(0, pos);
+  }
+  return {};
+}
+
 // `x:u48 = 0sb?` — an UNKNOWN sign extension is the WIDTH-TAKING wildcard: the
 // `?` replicates into the destination's DECLARED width and stops there, so the
 // store is exactly `x = 0ub` + 48 `?` (and `v:u8 = 0sb?1` is `0ub??????_?1`).
@@ -1922,9 +1945,28 @@ std::string uPass_runner::resolve_x_fill() {
     // An SSA version holds a value OF the declared variable, so it answers to
     // the base name's envelope (the poison store lands on `x___ssa_1`).
     auto       f        = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), dst);
+    // An SSA version answers to the base name's envelope, and it reaches here
+    // under EITHER of the two spellings a version can carry:
+    //
+    //   `x___ssa_N` — minted by the SSA run that produced this body;
+    //   `x__wN`     — the SAME version after upass_ssa's "demote stale SSA
+    //                 versions" step (upass/ssa/upass_ssa.cpp, `___ssa_<N>` ->
+    //                 `__w<N>`), which fires whenever a body is sent through
+    //                 SSA a SECOND time.
+    //
+    // The second pass is not exotic: lhd_kernel_compile.cpp re-runs pass.upass
+    // with `default_top` set so a GENERIC top can be specialized
+    // (specialize_top_defaults), and that round re-SSAs the clone. Matching only
+    // `___ssa_` therefore lost the envelope for every x-poison in a unit with
+    // generic parameters — the store stayed the UNBOUNDED sign-unknown `0sb?`,
+    // tolg sized it from Dlop::get_signed_bits() (65), and every bit above the
+    // declared width reached the netlist free. A whole-value read of such a net
+    // (`|vec` -> `vec != 0`) is then unconstrained: minion's
+    // `minion_dcache_tensor_load{,_p1}` emitted `65'sb1?…?` for nine 4-bit
+    // generate-loop vectors and LEC refuted on `l2_req_valid`/`bus_err_o`.
     if (!f || !f->range_max) {
-      if (const auto pos = dst.find("___ssa_"); pos != std::string::npos) {
-        f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), std::string_view{dst}.substr(0, pos));
+      if (const auto base = ssa_version_base(dst); !base.empty()) {
+        f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), base);
       }
     }
     // The declared envelope, as a MASK. Two sources, in precedence order:
@@ -5600,7 +5642,12 @@ bool uPass_runner::try_inline_func_call() {
   // callee and unification conflicts (fatal).
   const auto gbinds = resolve_generic_binds(callee, io, param_val, param_set, nbind, explicit_generics, callee_name, call_span);
 
-  if (callee->is_template()) {
+  // `in_identity_respecialize_`: this IS the call an identity specialization
+  // just emitted, coming back through emit_named_instance_call's re-walk. The
+  // clone it names carries the template's own name, so re-entering here would
+  // specialize it again, forever. Decline instead and take the ordinary
+  // mod/pipe Sub-instance path below — which is what the clone now is.
+  if (callee->is_template() && !in_identity_respecialize_) {
     const auto k         = callee->get_lambda_kind();
     const bool is_method = !io.inputs.empty() && io.inputs[0].name == "self";
     if ((k == "mod" || k == "pipe" || k == "fluid") && !is_method) {
@@ -8949,7 +8996,9 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       }
       const std::string def = (i < gdefaults.size()) ? gdefaults[i] : std::string{};
       if (!def.empty()) {
-        binds[gens[i]] = bind_of_explicit_arg(def, std::format("the default for generic `{}`", gens[i]));
+        auto gb         = bind_of_explicit_arg(def, std::format("the default for generic `{}`", gens[i]));
+        gb.from_default = true;  // identity-specialization test (see maybe_specialize_template_call)
+        binds[gens[i]]  = std::move(gb);
       }
     }
   };
@@ -9532,22 +9581,53 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       break;
     }
   }
-  std::string mangled = std::string(callee->get_top_module_name()) + "__";
-  for (std::size_t i = 0; i < suffix.size(); ++i) {
-    if (i) {
-      mangled += "_";
+  // IDENTITY specialization — the clone IS the template. Three conditions, all
+  // computed above: no port type is injected (every declared port was already
+  // concrete, so `inject`/`out_inject` are all `inject=false`), there is no
+  // var-arg expansion, and every declared generic took its DECLARATION DEFAULT
+  // (`from_default`, set in resolve_generic_binds::apply_defaults) rather than
+  // an explicit `<…>` bind or an inferred one. The clone then differs from the
+  // template only by having the generics substituted at their defaults and the
+  // template flag cleared — exactly the tree specialize_top_defaults builds for
+  // a template TOP, which already keeps the template's own name. So name it
+  // after the template too: the mangled name buys nothing here and costs the
+  // module name that every downstream by-name consumer needs (lec pairing,
+  // netlist review, the emitted Verilog module name).
+  //
+  // A call that binds anything else keeps the mangled name, so the two can
+  // never merge: the base name has no `__` suffix and every mangled one does.
+  // The template itself mints no GraphIO (upass_tolg::register_io skips it),
+  // and the runner's own callee registry keeps the FIRST body under a name
+  // (uPass_function_registry::ensure), so the template — not this clone — stays
+  // the resolution target for any LATER call site that binds non-defaults.
+  const bool identity_spec
+      = !has_vararg && vports.empty()
+        && std::none_of(inject.begin(), inject.end(), [](const Spec_port& p) { return p.inject; })
+        && std::none_of(out_inject.begin(), out_inject.end(), [](const Spec_port& p) { return p.inject; })
+        && std::all_of(gens.begin(), gens.end(), [&](const std::string& g) {
+             const auto it = gbinds.find(g);
+             return it != gbinds.end() && it->second.from_default;
+           });
+
+  std::string mangled = std::string(callee->get_top_module_name());
+  if (!identity_spec) {
+    mangled += "__";
+    for (std::size_t i = 0; i < suffix.size(); ++i) {
+      if (i) {
+        mangled += "_";
+      }
+      mangled += suffix[i];
     }
-    mangled += suffix[i];
-  }
-  if (ambiguous) {
-    namespace hu = livehd::hash_util;
-    uint64_t h   = hu::kFnv1a64_offset;
-    for (const auto& s : suffix) {
-      h ^= 0x01;  // component separator (never in an identifier/width token)
-      h *= hu::kFnv1a64_prime;
-      h  = hu::fnv1a64(s, h);
+    if (ambiguous) {
+      namespace hu = livehd::hash_util;
+      uint64_t h   = hu::kFnv1a64_offset;
+      for (const auto& s : suffix) {
+        h ^= 0x01;  // component separator (never in an identifier/width token)
+        h *= hu::kFnv1a64_prime;
+        h  = hu::fnv1a64(s, h);
+      }
+      mangled += std::format("_h{:08x}", static_cast<uint32_t>(h & 0xffffffffu));
     }
-    mangled += std::format("_h{:08x}", static_cast<uint32_t>(h & 0xffffffffu));
   }
 
   if (!specialized_emitted_.contains(mangled)) {
@@ -9620,7 +9700,14 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       symbol_table_.pending_keys_by_root[dst_name].push_back(key);
     }
   }
-  emit_named_instance_call(dst_name, mangled, /*inst_name=*/"", actuals);
+  {
+    // See in_identity_respecialize_: only the identity clone reuses the
+    // template's name, so only its re-walk needs the guard.
+    const bool           saved = in_identity_respecialize_;
+    in_identity_respecialize_  = identity_spec;
+    emit_named_instance_call(dst_name, mangled, /*inst_name=*/"", actuals);
+    in_identity_respecialize_  = saved;
+  }
   return true;
 }
 

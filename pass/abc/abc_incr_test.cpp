@@ -74,14 +74,14 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   set_bits(ic, bits);
 
   auto x = create_typed_node(*g, op);
-  ia.connect_sink(x.create_sink_pin(0));
-  ib.connect_sink(x.create_sink_pin(0));
+  ia.connect_sink(livehd::graph_util::setup_sink_pid(x, 0));
+  ib.connect_sink(livehd::graph_util::setup_sink_pid(x, 0));
   auto xd = x.create_driver_pin(0);
   set_bits(xd, bits);
 
   auto an = create_typed_node(*g, Ntype_op::And);
-  xd.connect_sink(an.create_sink_pin(0));
-  ic.connect_sink(an.create_sink_pin(0));
+  xd.connect_sink(livehd::graph_util::setup_sink_pid(an, 0));
+  ic.connect_sink(livehd::graph_util::setup_sink_pid(an, 0));
   auto ad = an.create_driver_pin(0);
   set_bits(ad, bits);
 
@@ -110,8 +110,8 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   auto m   = mgio->create_graph();
   f.mapped = m;
   auto mk  = create_typed_node(*m, Ntype_op::And);  // one marker gate
-  m->get_input_pin(a_name).connect_sink(mk.create_sink_pin(0));
-  m->get_input_pin(b_name).connect_sink(mk.create_sink_pin(0));
+  m->get_input_pin(a_name).connect_sink(livehd::graph_util::setup_sink_pid(mk, 0));
+  m->get_input_pin(b_name).connect_sink(livehd::graph_util::setup_sink_pid(mk, 0));
   auto md = mk.create_driver_pin(0);
   set_bits(md, bits);
   md.connect_sink(m->get_output_pin(y_name));

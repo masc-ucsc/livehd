@@ -274,6 +274,22 @@ Cgen_llvm::Value Cgen_llvm::reduce_or(Value value, uint32_t result_width, bool r
   return impl_->remember(cast_integer(impl_->builder, nonzero, result_width, true), result_width, result_unsign);
 }
 
+Cgen_llvm::Value Cgen_llvm::count_bits(Value value, uint32_t count, uint32_t result_width, bool parity) {
+  if (count == 0) {
+    return constant(result_width, 0, true);
+  }
+  auto* operand = impl_->get(value);
+  if (operand == nullptr || result_width == 0) {
+    return {};
+  }
+  operand                 = cast_integer(impl_->builder, operand, count, value.unsign);
+  llvm::Value* population = impl_->builder.CreateUnaryIntrinsic(llvm::Intrinsic::ctpop, operand);
+  if (parity) {
+    population = impl_->builder.CreateAnd(population, llvm::ConstantInt::get(population->getType(), 1));
+  }
+  return impl_->remember(cast_integer(impl_->builder, population, result_width, true), result_width, true);
+}
+
 Cgen_llvm::Value Cgen_llvm::bitfield_insert(Value base, Value inserted, uint32_t lo, uint32_t hi, uint32_t result_width,
                                             bool result_unsign) {
   auto* original = impl_->get(base);

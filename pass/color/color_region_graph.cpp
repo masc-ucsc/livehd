@@ -39,11 +39,13 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weig
       continue;
     }
     uf.find(n);  // present even when isolated
-    for (const auto& e : n.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      auto sit   = node2id.find(snode);
-      if (sit != node2id.end() && sit->second == it->second) {
-        uf.merge(n, snode);
+    for (const auto& dpin : n.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        auto snode = e.sink.get_master_node();
+        auto sit   = node2id.find(snode);
+        if (sit != node2id.end() && sit->second == it->second) {
+          uf.merge(n, snode);
+        }
       }
     }
   }
@@ -79,20 +81,22 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weig
       continue;
     }
     const int r = it->second;
-    for (const auto& e : n.out_edges()) {
-      auto sit = node2region_.find(e.sink.get_master_node());
-      if (sit == node2region_.end() || sit->second == r) {
-        continue;
+    for (const auto& dpin : n.out_sorted_pins()) {  // fanout is a SET
+      for (const auto& e : dpin.out_edges()) {
+        auto sit = node2region_.find(e.sink.get_master_node());
+        if (sit == node2region_.end() || sit->second == r) {
+          continue;
+        }
+        uint64_t bits = static_cast<uint64_t>(std::max(bits_of(dpin), 1));
+        // Name-weight tilt: an anonymous crossing (would mint `<op>_<nid>`) binds
+        // name_weight x tighter, so the window prefers to swallow it; a nameable
+        // crossing keeps its plain weight and is likelier to survive as a boundary.
+        if (name_weight > 1 && !crossing_is_nameable(dpin)) {
+          bits *= static_cast<uint64_t>(name_weight);
+        }
+        adj_[r][sit->second] += bits;
+        adj_[sit->second][r] += bits;
       }
-      uint64_t bits = static_cast<uint64_t>(std::max(bits_of(e.driver), 1));
-      // Name-weight tilt: an anonymous crossing (would mint `<op>_<nid>`) binds
-      // name_weight x tighter, so the window prefers to swallow it; a nameable
-      // crossing keeps its plain weight and is likelier to survive as a boundary.
-      if (name_weight > 1 && !crossing_is_nameable(e.driver)) {
-        bits *= static_cast<uint64_t>(name_weight);
-      }
-      adj_[r][sit->second] += bits;
-      adj_[sit->second][r] += bits;
     }
   }
 }

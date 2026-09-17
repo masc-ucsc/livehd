@@ -980,14 +980,15 @@ namespace {
             next.push_back(sn);
           }
         } else {
-          for (const auto& e : cur.inp_edges()) {
+          for (const auto& in_pin : cur.inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
             if (++edges > kMaxEdges) {
               break;
             }
-            if (auto nm = gu::pin_name_of(e.driver); !nm.empty()) {  // also resolves a module INPUT port
+            if (auto nm = gu::pin_name_of(in_drv); !nm.empty()) {  // also resolves a module INPUT port
               return std::string{nm};
             }
-            auto dn = e.driver.get_master_node();
+            auto dn = in_drv.get_master_node();
             if (dn.is_invalid() || !seen.insert(dn).second) {
               continue;
             }
@@ -1243,9 +1244,15 @@ void rewrite_trivial_rems(hhds::Graph* g) {
     auto andn = gu::create_typed_node(*g, Ntype_op::And, gu::bits_of(n.get_driver_pin(0)));
     gu::setup_sink_by_name(andn, "as").connect_driver(a);
     gu::setup_sink_by_name(andn, "as").connect_driver(gu::create_const(*g, *Dlop::create_integer(ba - 1)));
-    auto newd = andn.create_driver_pin(0);
+    auto                         newd = andn.create_driver_pin(0);
+    // SNAPSHOT the fan-out: connect_driver() below adds an edge, which
+    // invalidates the lazy out_edges() view this used to rewire from.
+    std::vector<hhds::Pin_class> readers;
     for (const auto& e : n.get_driver_pin(0).out_edges()) {
-      e.sink.connect_driver(newd);
+      readers.push_back(e.sink);
+    }
+    for (const auto& reader : readers) {
+      reader.connect_driver(newd);
     }
     n.del_node();
   }
@@ -1323,8 +1330,14 @@ void bypass_setmask_bit_reads(hhds::Graph* g) {
       gu::set_bits(replacement, 1);
       gu::set_unsign(replacement);
     }
+    // SNAPSHOT the fan-out: connect_driver() below adds an edge, which
+    // invalidates the lazy out_edges() view this used to rewire from.
+    std::vector<hhds::Pin_class> readers;
     for (const auto& edge : rewrite.node.out_edges()) {
-      edge.sink.connect_driver(replacement);
+      readers.push_back(edge.sink);
+    }
+    for (const auto& reader : readers) {
+      reader.connect_driver(replacement);
     }
     rewrite.node.del_node();
   }
@@ -2556,8 +2569,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   absl::flat_hash_set<hhds::Node_class> native_comb_logic;
   auto                                  node_output_width = [](const hhds::Node_class& n) {
     int width = 0;
-    for (const auto& e : n.out_edges()) {
-      width = std::max(width, gu::bits_of(e.driver));
+    for (const auto& out_pin : n.out_sorted_pins()) {  // widest driver pin; consumers do not matter
+      width = std::max(width, gu::bits_of(out_pin));
     }
     return width != 0 ? width : gu::bits_of(n.create_driver_pin(0));
   };
@@ -2614,19 +2627,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     bool                          packing         = true;
     int                           unshifted_lanes = 0;
     std::string                   reject;
-    for (const auto& e : n.inp_edges()) {
-      if (e.driver.is_const()) {
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (in_drv.is_const()) {
         // A constant lane is already synthesized: zero is padding and one
         // fixes the corresponding output bit. It needs no Liberty cell and
         // does not participate in variable-lane overlap.
         continue;
       }
-      const auto shl = e.driver.get_master_node();
+      const auto shl = in_drv.get_master_node();
       if (gu::type_op_of(shl) != Ntype_op::SHL) {
         // Packed assemblies commonly leave the low lane unshifted (Rob's low
         // 20 bits arrive from an extracted Sub) and shift every higher lane.
         // One such lane is safe: interval overlap below proves it is disjoint.
-        const int width = gu::bits_of(e.driver);
+        const int width = gu::bits_of(in_drv);
         if (++unshifted_lanes > 1 || width <= 0) {
           packing = false;
           reject  = "multiple or widthless unshifted inputs";
@@ -2721,11 +2735,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
   for (size_t head = 0; head < exported_wiring.size(); ++head) {
-    for (const auto& e : exported_wiring[head].inp_edges()) {
-      if (e.driver.is_invalid() || e.driver.is_const()) {
+    for (const auto& in_pin : exported_wiring[head].inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (in_drv.is_invalid() || in_drv.is_const()) {
         continue;
       }
-      const auto parent = e.driver.get_master_node();
+      const auto parent = in_drv.get_master_node();
       const auto op     = gu::type_op_of(parent);
       if (!region.contains(parent) || node_output_width(parent) < kNativeWiringBits
           || (op != Ntype_op::Concat && op != Ntype_op::Set_mask)) {
@@ -2769,8 +2784,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     queue.reserve(comb.size());
     for (const auto& n : comb) {
       size_t degree = 0;
-      for (const auto& e : n.inp_edges()) {
-        const auto producer = e.driver.get_master_node();
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto in_drv   = in_pin.get_driver_pin();
+        const auto producer = in_drv.get_master_node();
         if (!producer.is_invalid() && comb_set.contains(producer)) {
           ++degree;
           consumers[producer].push_back(n);
@@ -2948,8 +2964,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // ObjId assignment and the read-back `g<id>_<cell>` gate names — is
     // deterministic; a flat_hash_map iterates in run-to-run-varying order.
     absl::btree_map<int, hhds::Pin_class> out_pins;
-    for (const auto& e : n.out_edges()) {
-      out_pins.emplace(static_cast<int>(e.driver.get_port_id()), e.driver);
+    for (const auto& out_pin : n.out_sorted_pins()) {  // the node's driver pins, once each
+      out_pins.emplace(static_cast<int>(out_pin.get_port_id()), out_pin);
     }
     for (auto& [pid, op_pin] : out_pins) {
       int w = gu::bits_of(op_pin);
@@ -2984,41 +3000,43 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // instances); routing a direct wire through ABC otherwise materializes one
     // output buffer per bit. It also subsumes the clock/reset/enable treatment
     // for native flop/latch boundaries.
-    for (const auto& e : n.inp_edges()) {
-      // The compact carry edge means previous ordinal, not same-instance
-      // Boolean feedback. Keep it out of ABC and restore it with the descriptor.
-      if (n.is_loop_subnode() && e.driver.get_master_node() == n) {
-        continue;
-      }
-
-      int pid = static_cast<int>(e.sink.get_port_id());
-      if (e.driver.is_const()) {
-        bb.const_ins.emplace_back(pid, e.driver);
-      } else {
-        const auto lane_fit      = concat_lane_width.find(pid);
-        const bool needs_fit     = lane_fit != concat_lane_width.end() && gu::bits_of(e.driver) > lane_fit->second;
-        const bool native_driver = region_in_name.contains(e.driver) || native_wiring.contains(e.driver.get_master_node());
-        if (native_driver) {
-          if (needs_fit) {
-            // A Concat lane is an explicit width boundary. The source normally
-            // has a Get_mask in front of an over-wide packed-array carrier, but
-            // that zero-delay wrapper can disappear while native boundaries
-            // are cut and reconstructed. Recreate it natively below rather
-            // than mapping W identity buffers through ABC.
-            bb.fit_native_ins.emplace_back(pid, e.driver, lane_fit->second, !gu::is_unsign(e.driver));
-          } else {
-            bb.native_ins.emplace_back(pid, e.driver);
-          }
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      for (auto in_drv : in_pin.get_driver_pins()) {
+        // The compact carry edge means previous ordinal, not same-instance
+        // Boolean feedback. Keep it out of ABC and restore it with the descriptor.
+        if (n.is_loop_subnode() && in_drv.get_master_node() == n) {
           continue;
         }
-        int w = gu::bits_of(e.driver);
-        if (w == 0) {
-          w = 1;
+
+        int pid = static_cast<int>(in_pin.get_port_id());
+        if (in_drv.is_const()) {
+          bb.const_ins.emplace_back(pid, in_drv);
+        } else {
+          const auto lane_fit      = concat_lane_width.find(pid);
+          const bool needs_fit     = lane_fit != concat_lane_width.end() && gu::bits_of(in_drv) > lane_fit->second;
+          const bool native_driver = region_in_name.contains(in_drv) || native_wiring.contains(in_drv.get_master_node());
+          if (native_driver) {
+            if (needs_fit) {
+              // A Concat lane is an explicit width boundary. The source normally
+              // has a Get_mask in front of an over-wide packed-array carrier, but
+              // that zero-delay wrapper can disappear while native boundaries
+              // are cut and reconstructed. Recreate it natively below rather
+              // than mapping W identity buffers through ABC.
+              bb.fit_native_ins.emplace_back(pid, in_drv, lane_fit->second, !gu::is_unsign(in_drv));
+            } else {
+              bb.native_ins.emplace_back(pid, in_drv);
+            }
+            continue;
+          }
+          int w = gu::bits_of(in_drv);
+          if (w == 0) {
+            w = 1;
+          }
+          if (lane_fit != concat_lane_width.end()) {
+            w = std::min(w, lane_fit->second);
+          }
+          bb.ins.push_back({pid, in_drv, w, !gu::is_unsign(in_drv)});
         }
-        if (lane_fit != concat_lane_width.end()) {
-          w = std::min(w, lane_fit->second);
-        }
-        bb.ins.push_back({pid, e.driver, w, !gu::is_unsign(e.driver)});
       }
     }
     bboxes.push_back(std::move(bb));
@@ -3075,8 +3093,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     queue.reserve(pending.size());
     for (const auto& n : pending) {
       size_t count = 0;
-      for (const auto& e : n.inp_edges()) {
-        const auto& d = e.driver;
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto  in_drv = in_pin.get_driver_pin();
+        const auto& d      = in_drv;
         if (d.is_invalid() || d.is_const() || ready.contains(d) || region_input_index.contains(d)) {
           continue;
         }
@@ -3100,8 +3119,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         blast_order.push_back(n);
       }
       absl::flat_hash_set<hhds::Pin_class> produced;
-      for (const auto& e : n.out_edges()) {
-        produced.insert(e.driver);
+      for (const auto& out_pin : n.out_sorted_pins()) {  // what this node PRODUCES: its driver pins
+        produced.insert(out_pin);
       }
       if (produced.empty()) {
         produced.insert(n.create_driver_pin(0));
@@ -3134,8 +3153,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                    stuck.size());
         size_t shown = 0;
         for (const auto& n : stuck) {
-          for (const auto& e : n.inp_edges()) {
-            const auto& d = e.driver;
+          for (const auto& in_pin : n.inp_sorted_pins()) {
+            const auto  in_drv = in_pin.get_driver_pin();
+            const auto& d      = in_drv;
             if (d.is_invalid() || d.is_const() || ready.contains(d) || region_input_index.contains(d)) {
               continue;
             }
@@ -3201,8 +3221,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (op == Ntype_op::Sum) {
       // All Sum outputs are realizations of the same integer expression.
       // Build one adder at the largest requested width and share its prefixes.
-      for (const auto& e : n.out_edges()) {
-        out_bits = std::max(out_bits, gu::bits_of(e.driver));
+      for (const auto& op_pin : n.out_sorted_pins()) {  // widest driver pin; consumers do not matter
+        out_bits = std::max(out_bits, gu::bits_of(op_pin));
       }
     }
     if (op == Ntype_op::SHL || op == Ntype_op::Not) {
@@ -3223,8 +3243,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     blast_comb(n, out_bits, slots, ops, abc_bit, opts_, rb, region, refuse, refuse_shift_amount, node_facts);
     if (op == Ntype_op::Sum) {
       absl::flat_hash_set<hhds::Pin_class> outputs;
-      for (const auto& e : n.out_edges()) {
-        outputs.insert(e.driver);
+      for (const auto& op_pin : n.out_sorted_pins()) {  // the node's driver pins, once each
+        outputs.insert(op_pin);
       }
       for (const auto& output : outputs) {
         if (output == out_pin) {
@@ -3854,10 +3874,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // A shift with a one-bit hint is still an unlimited-precision shift.
     // Its high bits reappear when a saved mapped graph is compiled again,
     // violating any Concat lane it feeds. Select the bit explicitly.
-    auto select = gu::create_typed_node(*body, Ntype_op::Get_mask);
-    bus.connect_sink(gu::setup_sink_by_name(select, "a"));
-    gu::create_const(*body, *Dlop::get_mask_value(b, b)).connect_sink(gu::setup_sink_by_name(select, "mask"));
-    auto out = select.create_driver_pin(0);
+    auto select = gu::create_get_mask(*body, bus, b, b + 1);
+    auto out    = select.create_driver_pin(0);
     gu::set_ubits(out, 1);
     return out;
   };
@@ -3976,7 +3994,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto& split = shared_input_splitter(w);
       inst        = gu::create_typed_node(*body, Ntype_op::Sub);
       inst.set_subnode(split.io);
-      ipin.connect_sink(inst.create_sink_pin(1));
+      ipin.connect_sink(livehd::graph_util::setup_sink_pid(inst, 1));
       // Only the DEMANDED bits, and in the descending order `demand` is already
       // sorted into, so each pin is a head insert. The INSTANCE may be partial
       // even though the def is not: every consumer of a Sub resolves its ports
@@ -4196,9 +4214,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (source.is_invalid()) {
         continue;
       }
-      auto fit = gu::create_typed_node(*body, Ntype_op::Get_mask);
-      source.connect_sink(gu::setup_sink_by_name(fit, "a"));
-      gu::create_const(*body, *Dlop::get_mask_value(bits)).connect_sink(gu::setup_sink_by_name(fit, "mask"));
+      auto fit    = gu::create_get_mask(*body, source, 0, bits);
       auto fitted = fit.create_driver_pin(0);
       gu::set_bits(fitted, bits);
       sign ? gu::set_sign(fitted) : gu::set_unsign(fitted);
@@ -4888,7 +4904,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // the growing list for every pin and makes a W-bit Concat O(W^2).
       for (size_t b = 0; b < dbit.size(); ++b) {
         auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
-        concat_width_one.connect_sink(concat.create_sink_pin(data_pid + 1));
+        concat_width_one.connect_sink(livehd::graph_util::setup_sink_pid(concat, data_pid + 1));
         dbit[b].connect_sink(concat.create_sink_pin(data_pid));
       }
       out = concat.create_driver_pin(0);

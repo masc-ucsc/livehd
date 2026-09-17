@@ -41,6 +41,7 @@
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
+#include "reduce_lower.hpp"
 #include "str_tools.hpp"
 
 static Pass_plugin pass_plugin_isabelle("pass_isabelle", Pass_isabelle::setup);
@@ -69,19 +70,25 @@ bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_inp
 
 bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
-livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
-  // Ports are ascending by hhds contract; only several drivers sharing one sink
-  // pin need an order, and that one is for deterministic emission.
-  auto edges = node.inp_edges();
-  livehd::graph_util::sort_drivers_within_pin(edges, [](const Edge& a, const Edge& b) {
-    return a.driver.get_class_index().value < b.driver.get_class_index().value;
-  });
-  return edges;
-}
+// The node's DRIVEN sink pins, ascending by port id, one driver each.
+//
+// This used to materialize the in-edges and then sort_drivers_within_pin() them
+// for deterministic emission. ONE DRIVER PER SINK PIN retires that tie-break
+// entirely: a commutative cell now spends one sink pid per operand, so the
+// hhds ascending-port contract IS the total order. A SNAPSHOT (not the lazy
+// inp_sorted_pins view) because the old return value was a vector.
+//
+// ONE DRIVER PER SINK PIN holds for everything this pass can certify. The one
+// sanctioned exception -- a compact loop's carry-in sink, which holds the seed
+// AND a self edge (pass/legalize/legalize.cpp:301) -- lives on an Ntype_op::Sub,
+// and Sub is rejected as unsupported below, so it never reaches an operand
+// walk here.
+absl::InlinedVector<hhds::Pin_class, 8> inp_sinks_ordered(const Node& node) { return node.inp_pins_snapshot(); }
 
-std::string sink_pin_name(const Edge& edge) {
-  const auto sink_node = pin_node(edge.sink);
-  return std::string(Ntype::get_sink_name(node_op(sink_node), edge.sink.get_port_id()));
+// Named by its SINK PIN: one driver per sink pin, so the edge adds nothing.
+std::string sink_pin_name(const Node_pin& sink) {
+  const auto sink_node = pin_node(sink);
+  return std::string(Ntype::get_sink_name(node_op(sink_node), sink.get_port_id()));
 }
 
 uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(livehd::graph_util::bits_of(pin)); }
@@ -534,8 +541,8 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
   mi.node = node;
   mi.nid  = node_id(node);
 
-  for (const auto& e : inp_edges_ordered(node)) {
-    const auto       raw_pid    = static_cast<size_t>(e.sink.get_port_id());
+  for (const auto& e : inp_sinks_ordered(node)) {
+    const auto       raw_pid    = static_cast<size_t>(e.get_port_id());
     // Memory sink pids are laid out in blocks of Ntype::Memory_port_stride
     // (graph/cell.hpp). This used to hardcode 11, which both truncated the
     // cell-global pins (`init`/`update`/`reset`/`undef` all live at pid >= 11)
@@ -550,33 +557,33 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
     mi.ports[port_id].port_id = port_id;
 
     if (pname == "bits") {
-      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
       if (v <= 0) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive bits.");
       }
       mi.bits = static_cast<uint32_t>(v);
     } else if (pname == "size") {
-      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
       if (v <= 0) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive size.");
       }
       mi.size = static_cast<uint64_t>(v);
     } else if (pname == "wensize") {
-      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
       if (v < 0) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has negative wensize.");
       }
       mi.wensize = static_cast<uint32_t>(v);
     } else if (pname == "type") {
-      mi.type = const_pin_int(ctx, e.driver, node, pname);
+      mi.type = const_pin_int(ctx, e.get_driver_pin(), node, pname);
     } else if (pname == "fwd") {
       // The per-(read,write) matrix (graph/cell.cpp) can exceed the 62-bit
       // is_just_i64 window on a many-port memory, and const_pin_int would
       // FATAL on it. This value is only echoed in the debug summary here, so
       // degrade to 0 rather than aborting the pass with a misleading message.
       mi.fwd = 0;
-      if (pin_is_const(e.driver)) {
-        auto fv = pin_const_value(e.driver);
+      if (pin_is_const(e.get_driver_pin())) {
+        auto fv = pin_const_value(e.get_driver_pin());
         if (fv.is_just_i64()) {
           mi.fwd = fv.to_just_i64();
         }
@@ -592,22 +599,22 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
       // wider than the 62-bit i64 window still registers as set, and a
       // non-const driver on this comptime pin refuses instead of guessing.
       mi.undef = true;
-      if (pin_is_const(e.driver)) {
-        mi.undef = !pin_const_value(e.driver).is_known_false();
+      if (pin_is_const(e.get_driver_pin())) {
+        mi.undef = !pin_const_value(e.get_driver_pin()).is_known_false();
       }
     } else if (pname == "posclk") {
-      mi.posclk = const_pin_int(ctx, e.driver, node, pname);
+      mi.posclk = const_pin_int(ctx, e.get_driver_pin(), node, pname);
     } else if (pname == "rdport") {
-      const bool rd            = const_pin_int(ctx, e.driver, node, pname) != 0;
+      const bool rd            = const_pin_int(ctx, e.get_driver_pin(), node, pname) != 0;
       mi.ports[port_id].rdport = rd;
     } else if (pname == "addr") {
-      mi.ports[port_id].addr = e.driver;
+      mi.ports[port_id].addr = e.get_driver_pin();
     } else if (pname == "din") {
-      mi.ports[port_id].din = e.driver;
+      mi.ports[port_id].din = e.get_driver_pin();
     } else if (pname == "enable") {
-      mi.ports[port_id].enable = e.driver;
+      mi.ports[port_id].enable = e.get_driver_pin();
     } else if (pname == "clock_pin") {
-      mi.ports[port_id].clock = e.driver;
+      mi.ports[port_id].clock = e.get_driver_pin();
     }
   }
 
@@ -996,11 +1003,12 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
     switch (node_op(node)) {
       case Ntype_op::Sum: {
         std::vector<uint32_t> a_terms, b_terms;
-        for (const auto& e : inp_edges_ordered(node)) {
-          if (e.sink.get_port_id() == 0) {
-            a_terms.push_back(cert_dep_id(ctx, build, e.driver, w));
-          } else if (e.sink.get_port_id() == 1) {
-            b_terms.push_back(cert_dep_id(ctx, build, e.driver, w));
+        for (const auto& e : inp_sinks_ordered(node)) {
+          // Bank parity: EVEN sink pid adds, ODD subtracts (graph/cell.hpp).
+          if (Ntype::sink_bank(Ntype_op::Sum, e.get_port_id()) == 0) {
+            a_terms.push_back(cert_dep_id(ctx, build, e.get_driver_pin(), w));
+          } else {
+            b_terms.push_back(cert_dep_id(ctx, build, e.get_driver_pin(), w));
           }
         }
         deps = a_terms;
@@ -1011,21 +1019,21 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
 
       case Ntype_op::Mult:
         op_expr = "Op_Mult";
-        for (const auto& e : inp_edges_ordered(node)) {
-          deps.push_back(cert_dep_id(ctx, build, e.driver, w));
+        for (const auto& e : inp_sinks_ordered(node)) {
+          deps.push_back(cert_dep_id(ctx, build, e.get_driver_pin(), w));
         }
         break;
 
       case Ntype_op::Div: {
         Node_pin a, b;
         bool     have_a = false, have_b = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "b" || e.sink.get_port_id() == 1) {
-            b      = e.driver;
+          } else if (pname == "b" || e.get_port_id() == 1) {
+            b      = e.get_driver_pin();
             have_b = true;
           }
         }
@@ -1066,12 +1074,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         uint32_t   dep_w  = w;
         if (node_op(node) == Ntype_op::EQ) {
           dep_w = 1;
-          for (const auto& e : inp_edges_ordered(node)) {
-            dep_w = std::max(dep_w, pin_width(ctx, e.driver, node));
+          for (const auto& e : inp_sinks_ordered(node)) {
+            dep_w = std::max(dep_w, pin_width(ctx, e.get_driver_pin(), node));
           }
         }
-        for (const auto& e : inp_edges_ordered(node)) {
-          deps.push_back(cert_dep_id(ctx, build, e.driver, is_ror ? pin_width(ctx, e.driver, node) : dep_w));
+        for (const auto& e : inp_sinks_ordered(node)) {
+          const auto drv = e.get_driver_pin();
+          deps.push_back(cert_dep_id(ctx, build, drv, is_ror ? pin_width(ctx, drv, node) : dep_w));
         }
         break;
       }
@@ -1079,8 +1088,8 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       case Ntype_op::Not: {
         Node_pin a;
         bool     have = false;
-        for (const auto& e : inp_edges_ordered(node)) {
-          a    = e.driver;
+        for (const auto& e : inp_sinks_ordered(node)) {
+          a    = e.get_driver_pin();
           have = true;
           break;
         }
@@ -1101,8 +1110,8 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
           op_expr = is_signed ? "Op_SGT" : "Op_UGT";
         }
         std::vector<Node_pin> drivers;
-        for (const auto& e : inp_edges_ordered(node)) {
-          drivers.push_back(e.driver);
+        for (const auto& e : inp_sinks_ordered(node)) {
+          drivers.push_back(e.get_driver_pin());
         }
         if (drivers.size() != 2) {
           fatal(ctx, "LT/GT node n_" + std::to_string(node_id(node)) + " is not binary.");
@@ -1116,13 +1125,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         Node_pin              a;
         std::vector<Node_pin> bs;
         bool                  have_a = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-            bs.push_back(e.driver);
+          } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+            bs.push_back(e.get_driver_pin());
           }
         }
         if (!have_a || bs.empty()) {
@@ -1147,14 +1156,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         Node_pin              a, b;
         bool                  have_a = false, have_b = false;
         std::vector<Node_pin> ordered;
-        for (const auto& e : inp_edges_ordered(node)) {
-          ordered.push_back(e.driver);
+        for (const auto& e : inp_sinks_ordered(node)) {
+          ordered.push_back(e.get_driver_pin());
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-            b      = e.driver;
+          } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+            b      = e.get_driver_pin();
             have_b = true;
           }
         }
@@ -1187,14 +1196,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         bool                    have_sel = false;
         std::map<int, Node_pin> options;
         uint32_t                sel_w = 0;
-        for (const auto& e : inp_edges_ordered(node)) {
-          int pid = e.sink.get_port_id();
+        for (const auto& e : inp_sinks_ordered(node)) {
+          int pid = e.get_port_id();
           if (pid == 0) {
-            sel      = e.driver;
+            sel      = e.get_driver_pin();
             have_sel = true;
-            sel_w    = pin_width(ctx, e.driver, node);
+            sel_w    = pin_width(ctx, e.get_driver_pin(), node);
           } else {
-            options[pid] = e.driver;
+            options[pid] = e.get_driver_pin();
           }
         }
         if (!have_sel || options.size() < 2) {
@@ -1215,13 +1224,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       case Ntype_op::Sext: {
         Node_pin a, b;
         bool     have_a = false, have_b = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "b" || e.sink.get_port_id() == 1) {
-            b      = e.driver;
+          } else if (pname == "b" || e.get_port_id() == 1) {
+            b      = e.get_driver_pin();
             have_b = true;
           }
         }
@@ -1245,14 +1254,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         Node_pin              a, mask;
         bool                  have_a = false, have_m = false;
         std::vector<Node_pin> ordered;
-        for (const auto& e : inp_edges_ordered(node)) {
-          ordered.push_back(e.driver);
+        for (const auto& e : inp_sinks_ordered(node)) {
+          ordered.push_back(e.get_driver_pin());
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-            mask   = e.driver;
+          } else if (pname == "mask" || e.get_port_id() == 1) {
+            mask   = e.get_driver_pin();
             have_m = true;
           }
         }
@@ -1277,16 +1286,16 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       case Ntype_op::Set_mask: {
         Node_pin a, mask, value;
         bool     have_a = false, have_m = false, have_v = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-            mask   = e.driver;
+          } else if (pname == "mask" || e.get_port_id() == 1) {
+            mask   = e.get_driver_pin();
             have_m = true;
-          } else if (pname == "value" || e.sink.get_port_id() == 2) {
-            value  = e.driver;
+          } else if (pname == "value" || e.get_port_id() == 2) {
+            value  = e.get_driver_pin();
             have_v = true;
           }
         }
@@ -1894,20 +1903,21 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
   // Gather sink edges grouped by pin.
   // For multi-driver pin groups (Sum's A/B, EQ's variadic A, And's variadic A,
-  // SHL's variadic B), use `inp_edges_ordered()` to get stable ordering.
+  // SHL's variadic B), use `inp_sinks_ordered()` to get stable ordering.
 
   switch (op) {
     case Ntype_op::IO: throw Emit_error("internal: emit_node_expr called on IO node");
 
     case Ntype_op::Sum: {
-      // pid 0 = A (additive, n-ary), pid 1 = B (subtractive, n-ary)
+      // EVEN pid = the A (additive) bank, ODD = the B (subtractive) one; one
+      // pid per operand (graph/cell.hpp's ONE DRIVER PER SINK PIN block).
       std::vector<std::string> a_terms, b_terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        auto pid  = e.sink.get_port_id();
-        auto expr = ucast_pin_at(ctx, e.driver, w);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        auto pid  = Ntype::sink_bank(Ntype_op::Sum, e.get_port_id());
+        auto expr = ucast_pin_at(ctx, e.get_driver_pin(), w);
         if (pid == 0) {
           a_terms.push_back(expr);
-        } else if (pid == 1) {
+        } else {
           b_terms.push_back(expr);
         }
       }
@@ -1925,8 +1935,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Mult: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         fatal(ctx, "Mult node n_" + std::to_string(node_id(node)) + " is empty.");
@@ -1938,13 +1948,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       // v1: emit sem_udiv unconditionally.
       Node_pin a, b;
       bool     have_a = false, have_b = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "b" || e.sink.get_port_id() == 1) {
-          b      = e.driver;
+        } else if (pname == "b" || e.get_port_id() == 1) {
+          b      = e.get_driver_pin();
           have_b = true;
         }
       }
@@ -1960,8 +1970,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::And: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         fatal(ctx, "And node n_" + std::to_string(node_id(node)) + " is empty.");
@@ -1971,8 +1981,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Or: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         return lit_zero(w);
@@ -1982,8 +1992,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Xor: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         return lit_zero(w);
@@ -1994,9 +2004,10 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Ror: {
       // Output is 1 word. Mixed input widths handled by `(expr) \<noteq> 0` per operand.
       std::vector<std::string> bools;
-      for (const auto& e : inp_edges_ordered(node)) {
-        auto ew = pin_width(ctx, e.driver, node);
-        bools.push_back("(" + driver_expr_at(ctx, e.driver, ew) + ") \\<noteq> 0");
+      for (const auto& e : inp_sinks_ordered(node)) {
+        const auto drv = e.get_driver_pin();
+        auto       ew  = pin_width(ctx, drv, node);
+        bools.push_back("(" + driver_expr_at(ctx, drv, ew) + ") \\<noteq> 0");
       }
       if (bools.empty()) {
         return lit_zero(1);
@@ -2012,8 +2023,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Not: {
       Node_pin a;
       bool     have = false;
-      for (const auto& e : inp_edges_ordered(node)) {
-        a    = e.driver;
+      for (const auto& e : inp_sinks_ordered(node)) {
+        a    = e.get_driver_pin();
         have = true;
         break;
       }
@@ -2027,8 +2038,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::GT: {
       // Result type is 1 word; operands compare at cmp_w = max width of inputs.
       std::vector<std::pair<int, Node_pin>> ordered;
-      for (const auto& e : inp_edges_ordered(node)) {
-        ordered.emplace_back(e.sink.get_port_id(), e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        ordered.emplace_back(e.get_port_id(), e.get_driver_pin());
       }
       // pid 0 = A (n-ary, signed-flag uses pid 1 in lgraph; for v1 we treat
       //              standard LT/GT as 2-input unsigned).
@@ -2056,8 +2067,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::EQ: {
       std::vector<Node_pin> drivers;
-      for (const auto& e : inp_edges_ordered(node)) {
-        drivers.push_back(e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        drivers.push_back(e.get_driver_pin());
       }
       if (drivers.empty()) {
         fatal(ctx, "EQ node n_" + std::to_string(node_id(node)) + " is empty.");
@@ -2082,13 +2093,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       Node_pin              a;
       std::vector<Node_pin> bs;
       bool                  have_a = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-          bs.push_back(e.driver);
+        } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+          bs.push_back(e.get_driver_pin());
         }
       }
       if (!have_a || bs.empty()) {
@@ -2121,15 +2132,15 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       bool                     have_a = false, have_b = false;
       std::vector<Node_pin>    ordered;
       std::vector<std::string> pins;
-      for (const auto& e : inp_edges_ordered(node)) {
-        ordered.push_back(e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        ordered.push_back(e.get_driver_pin());
         auto pname = sink_pin_name(e);
-        pins.push_back(pname + "#" + std::to_string(e.sink.get_port_id()));
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        pins.push_back(pname + "#" + std::to_string(e.get_port_id()));
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-          b      = e.driver;
+        } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+          b      = e.get_driver_pin();
           have_b = true;
         }
       }
@@ -2175,14 +2186,14 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       // Collect drivers indexed by pid (1, 2, 3, ...)
       std::map<int, Node_pin> options;
       uint32_t                sel_w = 0;
-      for (const auto& e : inp_edges_ordered(node)) {
-        int pid = e.sink.get_port_id();
+      for (const auto& e : inp_sinks_ordered(node)) {
+        int pid = e.get_port_id();
         if (pid == 0) {
-          sel      = e.driver;
+          sel      = e.get_driver_pin();
           have_sel = true;
-          sel_w    = pin_width(ctx, e.driver, node);
+          sel_w    = pin_width(ctx, e.get_driver_pin(), node);
         } else {
-          options[pid] = e.driver;
+          options[pid] = e.get_driver_pin();
         }
       }
       if (!have_sel || options.size() < 2) {
@@ -2211,13 +2222,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Sext: {
       Node_pin a, b;
       bool     have_a = false, have_b = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "b" || e.sink.get_port_id() == 1) {
-          b      = e.driver;
+        } else if (pname == "b" || e.get_port_id() == 1) {
+          b      = e.get_driver_pin();
           have_b = true;
         }
       }
@@ -2247,15 +2258,15 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       bool                     have_a = false, have_m = false;
       std::vector<Node_pin>    ordered;
       std::vector<std::string> pins;
-      for (const auto& e : inp_edges_ordered(node)) {
-        ordered.push_back(e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        ordered.push_back(e.get_driver_pin());
         auto pname = sink_pin_name(e);
-        pins.push_back(pname + "#" + std::to_string(e.sink.get_port_id()));
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        pins.push_back(pname + "#" + std::to_string(e.get_port_id()));
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-          mask   = e.driver;
+        } else if (pname == "mask" || e.get_port_id() == 1) {
+          mask   = e.get_driver_pin();
           have_m = true;
         }
       }
@@ -2287,16 +2298,16 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Set_mask: {
       Node_pin a, mask, value;
       bool     have_a = false, have_m = false, have_v = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-          mask   = e.driver;
+        } else if (pname == "mask" || e.get_port_id() == 1) {
+          mask   = e.get_driver_pin();
           have_m = true;
-        } else if (pname == "value" || e.sink.get_port_id() == 2) {
-          value  = e.driver;
+        } else if (pname == "value" || e.get_port_id() == 2) {
+          value  = e.get_driver_pin();
           have_v = true;
         }
       }
@@ -2429,9 +2440,10 @@ std::vector<Node> reachable_topo_order(Ctx& /*ctx*/, const std::vector<Node_pin>
       }
       visited = true;
       // Push children (driver pins of input edges).
-      for (const auto& e : inp_edges_ordered(cur)) {
-        auto child = pin_node(e.driver);
-        if (pin_is_input(e.driver) || pin_is_const(e.driver)) {
+      for (const auto& e : inp_sinks_ordered(cur)) {
+        const auto drv   = e.get_driver_pin();
+        auto       child = pin_node(drv);
+        if (pin_is_input(drv) || pin_is_const(drv)) {
           continue;
         }
         if (flop_nids.count(node_id(child)) > 0) {
@@ -2447,17 +2459,18 @@ std::vector<Node> reachable_topo_order(Ctx& /*ctx*/, const std::vector<Node_pin>
   return order;
 }
 
-template <typename Edge>
-uint32_t consumer_expected_width(const Edge& e) {
-  auto sink = e.sink;
-  auto sw   = raw_pin_width(sink);
+// Takes the SINK PIN rather than an edge: under one-driver-per-sink-pin the
+// consumer is fully described by the pin it lands on.
+template <typename SinkPin>
+uint32_t consumer_expected_width(const SinkPin& sink) {
+  auto sw = raw_pin_width(sink);
   if (sw > 0) {
     return static_cast<uint32_t>(sw);
   }
 
   auto sn = pin_node(sink);
   if (node_is_flop(sn)) {
-    auto pname = sink_pin_name(e);
+    auto pname = sink_pin_name(sink);
     if (pname == "din") {
       return static_cast<uint32_t>(raw_node_width(sn));
     }
@@ -2478,16 +2491,21 @@ void normalize_zero_width_get_masks(const Ctx& ctx, const std::vector<Node>& top
 
     uint32_t    expected = 0;
     std::string consumers;
-    for (const auto& e : node.out_edges()) {
-      const auto ew  = consumer_expected_width(e);
-      consumers     += " n_" + std::to_string(node_id(pin_node(e.sink))) + ":" + std::to_string(ew);
-      if (ew == 0) {
-        continue;
-      }
-      if (expected == 0) {
-        expected = ew;
-      } else if (expected != ew) {
-        fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " has conflicting consumer widths:" + consumers);
+    // Pin-centric: out_sorted_pins() yields this node's CONNECTED driver pins;
+    // a driver's fanout stays a SET, so the consumers come from the pin's own
+    // out_edges(). Read-only walk.
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& oe : dpin.out_edges()) {
+        const auto ew  = consumer_expected_width(oe.sink);
+        consumers     += " n_" + std::to_string(node_id(pin_node(oe.sink))) + ":" + std::to_string(ew);
+        if (ew == 0) {
+          continue;
+        }
+        if (expected == 0) {
+          expected = ew;
+        } else if (expected != ew) {
+          fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " has conflicting consumer widths:" + consumers);
+        }
       }
     }
 
@@ -2516,7 +2534,9 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     livehd::diag::warn("pass.isabelle", "no-input", "io").msg("received a null Graph instance").emit();
     return;
   }
-  auto* g = graph.get();
+  hhds::GraphLibrary reduction_scratch;
+  auto               lowered = livehd::graph_util::lower_counted_reductions_copy(graph, reduction_scratch);
+  auto*              g       = lowered.get();
 
   Ctx ctx;
   ctx.g                = g;
@@ -2567,10 +2587,12 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     if (node_is_flop(node)) {
       flop_nodes.emplace_back(node);
       flop_nids.insert(node_id(node));
-      // Use first user-visible out-edge driver name, else fall back to nid.
+      // First user-visible DRIVER PIN name, else fall back to nid. This only
+      // ever looked at the driver side, so the pin walk yields each candidate
+      // once instead of once per fanout edge.
       std::string flop_raw;
-      for (const auto& e : node.out_edges()) {
-        auto wn = livehd::graph_util::wire_name(e.driver);
+      for (const auto& dpin : node.out_sorted_pins()) {
+        auto wn = livehd::graph_util::wire_name(dpin);
         if (!wn.empty() && wn[0] != '_') {
           flop_raw = std::string(wn);
           break;
@@ -2621,9 +2643,9 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   std::map<std::string, Node_pin> out_drivers;
   for (const auto& decl : gio->get_output_pin_decls()) {
     auto out_sink = g->get_output_pin(decl.name);
-    auto edges    = out_sink.inp_edges();
-    if (!edges.empty()) {
-      out_drivers[std::string(decl.name)] = edges.front().driver;
+    auto drv      = out_sink.get_driver_pin();  // one driver per sink pin
+    if (!drv.is_invalid()) {
+      out_drivers[std::string(decl.name)] = drv;
     }
   }
   for (auto& kv : out_drivers) {
@@ -2633,16 +2655,16 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // (b) drivers of every flop's D/reset/enable input
   std::map<uint32_t, Node_pin> flop_din, flop_reset, flop_enable;
   for (auto& fn : flop_nodes) {
-    for (const auto& e : inp_edges_ordered(fn)) {
+    for (const auto& e : inp_sinks_ordered(fn)) {
       auto pname = sink_pin_name(e);
       if (pname == "din") {
-        flop_din[node_id(fn)] = e.driver;
+        flop_din[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "reset_pin") {
-        flop_reset[node_id(fn)] = e.driver;
+        flop_reset[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "enable") {
-        flop_enable[node_id(fn)] = e.driver;
+        flop_enable[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "negreset") {
-        flop_reset[node_id(fn)] = e.driver;
+        flop_reset[node_id(fn)] = e.get_driver_pin();
       }
     }
   }

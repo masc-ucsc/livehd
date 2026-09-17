@@ -139,17 +139,20 @@ void on_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_
     }
   }
   for (auto& n : comb_nodes) {
-    for (auto e : n.inp_edges()) {
-      auto d = e.driver;
-      if (d.is_invalid() || d.is_const()) {
-        continue;
+    for (auto sink : n.inp_sorted_pins()) {  // read-only pin walk
+      // PLURAL: a compact loop's carry-in sink is the one sanctioned
+      // multi-driver pin (pass/legalize/legalize.cpp:301).
+      for (auto d : sink.get_driver_pins()) {
+        if (d.is_invalid() || d.is_const()) {
+          continue;
+        }
+        auto m = d.get_master_node();
+        if (!is_comb(m, strict) || !indeg.contains(m)) {
+          continue;  // state / Sub / IO / a boundary master fast_class never lists
+        }
+        ++indeg[n];
+        succ[m].push_back(n);
       }
-      auto m = d.get_master_node();
-      if (!is_comb(m, strict) || !indeg.contains(m)) {
-        continue;  // state / Sub / IO / a boundary master fast_class never lists
-      }
-      ++indeg[n];
-      succ[m].push_back(n);
     }
   }
   std::vector<hhds::Node_class> q;
@@ -195,14 +198,19 @@ void on_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_
     }
     bool feeds = false;
     bool fed   = false;
-    for (auto e : n.inp_edges()) {
-      if (!e.driver.is_invalid() && in_cycle.contains(e.driver.get_master_node())) {
-        fed = true;
+    for (auto sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+        if (!drv.is_invalid() && in_cycle.contains(drv.get_master_node())) {
+          fed = true;
+        }
       }
     }
-    for (auto e : n.out_edges()) {
-      if (!e.sink.is_invalid() && in_cycle.contains(e.sink.get_master_node())) {
-        feeds = true;
+    // A driver's fanout stays a SET, so the sinks come from each driver pin.
+    for (auto dpin : n.out_sorted_pins()) {
+      for (auto e : dpin.out_edges()) {
+        if (!e.sink.is_invalid() && in_cycle.contains(e.sink.get_master_node())) {
+          feeds = true;
+        }
       }
     }
     if (feeds && fed) {
@@ -288,13 +296,14 @@ int gate_chain_depth(const hhds::Pin_class& p, int budget = 16) {
       // clock. A width-mask And (`x & 1`) is an identity and does not count.
       hhds::Pin_class next;
       int             n_real = 0;
-      for (const auto& e : n.inp_edges()) {
-        if (e.driver.is_const()) {
+      for (auto sink : n.inp_sorted_pins()) {
+        const auto drv = sink.get_driver_pin();
+        if (drv.is_const()) {
           continue;
         }
         ++n_real;
         if (next.is_invalid()) {
-          next = e.driver;
+          next = drv;
         }
       }
       if (n_real <= 1) {
@@ -304,11 +313,12 @@ int gate_chain_depth(const hhds::Pin_class& p, int budget = 16) {
       ++d;
       // Follow whichever operand leads further toward a clock; the deepest wins.
       int best = 0;
-      for (const auto& e : n.inp_edges()) {
-        if (e.driver.is_const()) {
+      for (auto sink : n.inp_sorted_pins()) {
+        const auto drv = sink.get_driver_pin();
+        if (drv.is_const()) {
           continue;
         }
-        best = std::max(best, gate_chain_depth(e.driver, budget - 1));
+        best = std::max(best, gate_chain_depth(drv, budget - 1));
       }
       return d + best;
     }
@@ -350,10 +360,10 @@ bool port_is_child_clock(hhds::Graph* def, hhds::Port_id pid) {
     }
     auto cd = (sop == Ntype_op::Memory) ? hhds::Pin_class{} : gu::get_driver_of_sink_name(sn, "clock_pin");
     if (sop == Ntype_op::Memory) {
-      for (const auto& e : sn.inp_edges()) {
-        const auto pn = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(e.sink.get_port_id()));
+      for (auto sink : sn.inp_sorted_pins()) {
+        const auto pn = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(sink.get_port_id()));
         if (pn.size() >= 9 && pn.substr(pn.size() - 9) == "clock_pin") {
-          cd = e.driver;
+          cd = sink.get_driver_pin();
           break;
         }
       }
@@ -373,10 +383,10 @@ bool port_is_child_clock(hhds::Graph* def, hhds::Port_id pid) {
 // (`port<N>_clock_pin`), everything else on the Flop-shaped `clock_pin`.
 hhds::Pin_class clock_driver_of(const hhds::Node_class& n) {
   if (gu::type_op_of(n) == Ntype_op::Memory) {
-    for (const auto& e : n.inp_edges()) {
-      const auto pn = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(e.sink.get_port_id()));
+    for (auto sink : n.inp_sorted_pins()) {
+      const auto pn = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(sink.get_port_id()));
       if (pn.size() >= 9 && pn.substr(pn.size() - 9) == "clock_pin") {
-        return e.driver;
+        return sink.get_driver_pin();
       }
     }
     return {};
@@ -510,23 +520,25 @@ void check_colors(hhds::Graph* g, std::string_view def_name, bool node_graph_cyc
     if (c == livehd::color::NO_COLOR) {
       continue;
     }
-    for (auto e : n.inp_edges()) {
-      if (e.driver.is_invalid() || e.driver.is_const()) {
-        continue;
-      }
-      auto m = e.driver.get_master_node();
-      if (!livehd::color::is_partitionable(m)) {
-        continue;
-      }
-      // A state element BREAKS the dependency: its q is last period's value, so
-      // an edge out of one is not an ordering constraint. Counting it would
-      // report every sequential loop as a cyclic partition DAG.
-      if (gu::is_type_register(m) || gu::type_op_of(m) == Ntype_op::Memory) {
-        continue;
-      }
-      const int pc = gu::node_color_of(m);
-      if (pc != livehd::color::NO_COLOR && pc != c) {
-        succ[pc].insert(c);
+    for (auto sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+        if (drv.is_invalid() || drv.is_const()) {
+          continue;
+        }
+        auto m = drv.get_master_node();
+        if (!livehd::color::is_partitionable(m)) {
+          continue;
+        }
+        // A state element BREAKS the dependency: its q is last period's value, so
+        // an edge out of one is not an ordering constraint. Counting it would
+        // report every sequential loop as a cyclic partition DAG.
+        if (gu::is_type_register(m) || gu::type_op_of(m) == Ntype_op::Memory) {
+          continue;
+        }
+        const int pc = gu::node_color_of(m);
+        if (pc != livehd::color::NO_COLOR && pc != c) {
+          succ[pc].insert(c);
+        }
       }
     }
   }
@@ -635,17 +647,18 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
         continue;
       }
       auto def = n.get_subnode_graph();
-      for (const auto& e : n.inp_edges()) {
-        if (e.driver.is_invalid() || e.driver.is_const() || gu::is_graph_input_pin(e.driver)) {
+      for (auto sink : n.inp_sorted_pins()) {
+        const auto drv = sink.get_driver_pin();
+        if (drv.is_invalid() || drv.is_const() || gu::is_graph_input_pin(drv)) {
           continue;
         }
         // The gate can reach the child either as an INLINE cone in this body or
         // as the output of an instantiated gate CELL. Both are the same defect.
         int n_guards = 0;
-        if (auto cone = livehd::latch_contract::clock_op_of(e.driver, clocks); cone && !cone->enables.empty()) {
+        if (auto cone = livehd::latch_contract::clock_op_of(drv, clocks); cone && !cone->enables.empty()) {
           n_guards = static_cast<int>(cone->enables.size());
-        } else if (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub) {
-          auto gdef = e.driver.get_master_node().get_subnode_graph();
+        } else if (gu::type_op_of(drv.get_master_node()) == Ntype_op::Sub) {
+          auto gdef = drv.get_master_node().get_subnode_graph();
           if (!gdef || !livehd::latch_contract::match_icg_def(gdef.get())) {
             continue;
           }
@@ -656,7 +669,7 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
         // ...and it must land on a port the CHILD actually clocks on. Without
         // this the check would fire on a gate output used as ordinary data,
         // which is legal and common (a clock-gate enable fanning out to logic).
-        if (!def || !port_is_child_clock(def.get(), e.sink.get_port_id())) {
+        if (!def || !port_is_child_clock(def.get(), sink.get_port_id())) {
           continue;
         }
         Clock_finding f;
@@ -665,8 +678,8 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
         f.op          = "Sub";
         f.kind        = Clock_kind::gates_child_port;
         f.n_guards    = n_guards;
-        f.chain_depth = std::max(1, gate_chain_depth(e.driver));
-        f.root        = std::string{gu::debug_name(e.driver.get_master_node())};
+        f.chain_depth = std::max(1, gate_chain_depth(drv));
+        f.root        = std::string{gu::debug_name(drv.get_master_node())};
         rep.clocks.push_back(std::move(f));
       }
     }

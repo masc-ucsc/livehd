@@ -66,8 +66,8 @@ TEST(SatoptMemory, ExclusiveWritesMerge) {
   for (const auto n : f.g->body().nodes()) {
     if (gu::type_op_of(n) == Ntype_op::Memory) {
       int wr = 0;
-      for (const auto& e : n.inp_edges()) {
-        if (e.sink.get_port_id() % 16 == 3) {
+      for (auto isnk : n.inp_sorted_pins()) {
+        if (isnk.get_port_id() % 16 == 3) {
           ++wr;
         }
       }
@@ -87,9 +87,7 @@ TEST(SatoptMemory, PossibleCollisionKeepsPriority) {
 TEST(SatoptMemory, DistinctAddressesClearOnlyUnreachableCollision) {
   Fixture f("satopt_mem_fwd", false);
   for (int block : {0, 1, 2}) {
-    for (const auto& e : f.mem.create_sink_pin(block * 16).inp_edges()) {
-      e.del_edge();
-    }
+    gu::drop_drivers(f.mem.create_sink_pin(block * 16));
     f.wire(block, 0, f.c(block == 2 ? 3 : block));
   }
   f.wire(0, 5, f.c(3));
@@ -128,9 +126,7 @@ TEST(SatoptMemory, ExclusiveWriteRewriteIsEquivalent) {
 static void exclusive_reads(bool sync) {
   Fixture f(sync ? "satopt_mem_sync_read_lec" : "satopt_mem_read_lec", false);
   if (sync) {
-    for (const auto& e : f.mem.create_sink_pin(7).inp_edges()) {
-      e.del_edge();
-    }
+    gu::drop_drivers(f.mem.create_sink_pin(7));
     f.wire(0, 7, f.c(1));
   }
   f.g->get_io()->add_input("r2", 20);
@@ -142,9 +138,7 @@ static void exclusive_reads(bool sync) {
   sel.connect_sink(inv.create_sink_pin(0));
   auto other = inv.create_driver_pin(0);
   gu::set_ubits(other, 1);
-  for (const auto& e : f.mem.create_sink_pin(2 * 16 + 4).inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(f.mem.create_sink_pin(2 * 16 + 4));
   f.wire(2, 4, sel);
   f.wire(3, 0, f.input("r2", 8));
   f.wire(3, 4, other);
@@ -170,9 +164,7 @@ TEST(SatoptMemory, MutuallyExclusiveSyncReadsAreEquivalent) { exclusive_reads(tr
 
 TEST(SatoptMemory, DisabledReadForwardingRemainsObservable) {
   Fixture f("satopt_mem_disabled_forward", false);
-  for (const auto& e : f.mem.create_sink_pin(2 * 16 + 4).inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(f.mem.create_sink_pin(2 * 16 + 4));
   f.wire(2, 4, f.c(0));
   f.wire(0, 5, f.c(3));
   auto result = livehd::abc::optimize_memories({f.g});
@@ -193,9 +185,7 @@ TEST(SatoptMemory, AddressProofUsesUnsignedTruncation) {
 
 TEST(SatoptMemory, NarrowWriteDataIsZeroExtended) {
   Fixture f("satopt_mem_narrow_lec");
-  for (const auto& e : f.mem.create_sink_pin(3).inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(f.mem.create_sink_pin(3));
   f.wire(0, 3, f.c(3));
   hhds::GraphLibrary copy;
   ASSERT_TRUE(copy.copy_from(f.lib, f.g->get_name()));

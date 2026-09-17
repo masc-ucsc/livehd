@@ -1,0 +1,13 @@
+/*
+:name: reduce_wide
+:type: equiv
+:verilog_top: reduce_wide.foo
+:pyrope_top: foo
+*/
+
+pub comb foo(a:u129, b:s65) -> (parity:u1, population:u8, signed_parity:u1, signed_population:u7) {
+  parity = a#^[..]
+  population = a#+[..]
+  signed_parity = b#^[..]
+  signed_population = b#+[..]
+}

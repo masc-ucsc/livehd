@@ -260,8 +260,7 @@ void merge_entry_lanes(hhds::Graph& g, int64_t mem_bits) {
       const auto& l  = lanes[i];
       const int   w  = l.hi - l.lo;
       auto        gm = gu::create_typed_node(g, Ntype_op::Get_mask);
-      gu::setup_sink_by_name(gm, "a").connect_driver(q);
-      gu::setup_sink_by_name(gm, "mask").connect_driver(gu::create_const(g, gu::mask_window_const(l.lo, l.hi)));
+      livehd::graph_util::connect_mask_operands(gm, q, gu::create_const(g, gu::mask_window_const(l.lo, l.hi)));
       q_slice[i] = gm.create_driver_pin(0);
       gu::set_bits(q_slice[i], w);
       gu::set_unsign(q_slice[i]);
@@ -312,20 +311,24 @@ void merge_entry_lanes(hhds::Graph& g, int64_t mem_bits) {
 
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& mem, bool lower, const fs::path& scratch,
                                      const fs::path& rtl_dir) {
-  auto                       edges = mem.inp_edges();  // sink-port ascending by contract
   std::map<int, bool>        read;
   std::map<int, std::string> port_names;
   hhds::Pin_class            clock;
   bool                       single_clock = true;
-  for (const auto& e : edges) {
-    const int pid = e.sink.get_port_id(), off = pid % Ntype::Memory_port_stride;
+  // The vector this used to be stored into was never mutated through and the
+  // walk below touches nothing in `parent`, so iterate the pins in place. Sink
+  // pids stay ascending (the pin chain is sorted), which is what the Memory
+  // port-stride arithmetic reads.
+  for (const auto& in_pin : mem.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    const int  pid = in_pin.get_port_id(), off = pid % Ntype::Memory_port_stride;
     if (off == 10) {
-      read[pid / Ntype::Memory_port_stride] = !gu::const_of(e.driver).is_known_zero();
+      read[pid / Ntype::Memory_port_stride] = !gu::const_of(in_drv).is_known_zero();
     }
     if (off == 2) {
       if (clock.is_invalid()) {
-        clock = e.driver;
-      } else if (clock != e.driver) {
+        clock = in_drv;
+      } else if (clock != in_drv) {
         single_clock = false;
       }
     }
@@ -336,11 +339,21 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   }
   auto*      lib         = parent.get_io()->get_library();
   const auto source_name = gu::default_instance_name(mem);
-  const auto base        = std::format("cgen_memory_{}rd_{}wr_{}_{}",
+  // Name the BLASTED form as the macro-instance form plus a `_blasted` suffix, so
+  // the two are relatable by stripping that suffix instead of differing in the
+  // middle of the name (it used to be `..._lowered_<hash>` vs `..._instance_<hash>`,
+  // which share no usable prefix/suffix relation). Two things get easier:
+  //   - LEC/semdiff can pair a bit-blasted implementation with the native memory it
+  //     stands for, instead of seeing two unrelated defs;
+  //   - a diff/incremental run can tell "same memory, different realization" from
+  //     "different memory" by name alone.
+  // The hash keys the parent/instance identity and stays where it was, so
+  // uniqueness semantics are unchanged.
+  const auto base        = std::format("cgen_memory_{}rd_{}wr_{}{}",
                                        nr,
                                        nw,
-                                       lower ? "lowered" : "instance",
-                                       std::format("{:016x}", name_hash(std::string(parent.get_name()) + "/" + source_name)));
+                                       std::format("{:016x}", name_hash(std::string(parent.get_name()) + "/" + source_name)),
+                                       lower ? "_blasted" : "");
   auto       name        = base;
   for (unsigned i = 1; lib->find_io(name); ++i) {
     name = base + "_" + std::to_string(i);
@@ -363,22 +376,25 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   std::string                            reset_input_name;
   std::optional<Dlop>                    init_const;
   int64_t                                mem_bits = 0;
-  for (const auto& e : edges) {
-    const int  pid = e.sink.get_port_id(), off = pid % Ntype::Memory_port_stride;
+  // Lazy over `mem`'s own pins: every mutation in this loop lands in the CHILD
+  // graph (`body`, `inner`, `io`), never in the parent body being walked.
+  for (const auto& in_pin : mem.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    const int  pid = in_pin.get_port_id(), off = pid % Ntype::Memory_port_stride;
     // Configuration is specialized into the child. init may instead be a
     // runtime reset-value bus, so only a constant init is a parameter.
     const bool config = off == 1 || off == 5 || off == 6 || off == 7 || off == 8 || off == 9 || off == 10 || off == 15
-                        || (off == 11 && e.driver.is_const());
-    if (off == 1 && e.driver.is_const()) {
-      mem_bits = gu::const_of(e.driver).to_just_i64();
+                        || (off == 11 && in_drv.is_const());
+    if (off == 1 && in_drv.is_const()) {
+      mem_bits = gu::const_of(in_drv).to_just_i64();
     }
-    if (off == 11 && e.driver.is_const()) {
-      init_const = gu::const_of(e.driver);
+    if (off == 11 && in_drv.is_const()) {
+      init_const = gu::const_of(in_drv);
     }
     hhds::Pin_class driver;
     std::string     pname;
     if (config) {
-      driver = gu::create_const(*body, gu::const_of(e.driver));
+      driver = gu::create_const(*body, gu::const_of(in_drv));
     } else {
       const auto field = off == 0 ? "addr" : off == 2 ? "clock" : off == 3 ? "din" : off == 4 ? "enable" : "";
       if (off == 2 && single_clock) {
@@ -391,15 +407,15 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       }
       if (!input_pins.contains(pname)) {
         io->add_input(pname, next_pid++);
-        io->set_bits(pname, std::max(gu::bits_of(e.driver), 1));
-        io->set_unsign(pname, gu::is_unsign(e.driver));
+        io->set_bits(pname, std::max(gu::bits_of(in_drv), 1));
+        io->set_unsign(pname, gu::is_unsign(in_drv));
         auto pin = body->get_input_pin(pname);
-        shape(e.driver, pin);
+        shape(in_drv, pin);
         input_pins[pname] = pin;
-        inputs.push_back({pname, e.driver});
+        inputs.push_back({pname, in_drv});
       }
       // Specialize constant-address ports without deleting their interface.
-      driver = e.driver.is_const() ? gu::create_const(*body, gu::const_of(e.driver)) : input_pins.at(pname);
+      driver = in_drv.is_const() ? gu::create_const(*body, gu::const_of(in_drv)) : input_pins.at(pname);
     }
     if (lower && off == 14 && !config) {
       // The whole-array `reset` (every `reg m:[N]T = <const>` with a reset)
@@ -417,11 +433,13 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       reset_input_name = pname;
       continue;
     }
-    driver.connect_sink(inner.create_sink_pin(e.sink.get_port_id()));
+    driver.connect_sink(inner.create_sink_pin(in_pin.get_port_id()));
   }
+  // The memory's dout DRIVER PINS. The out-edge walk re-emplaced the same
+  // pin once per consumer; out_sorted_pins() yields each exactly once.
   std::map<hhds::Port_id, hhds::Pin_class> douts;
-  for (const auto& e : mem.out_edges()) {
-    douts.emplace(e.driver.get_port_id(), e.driver);
+  for (const auto& out_pin : mem.out_sorted_pins()) {
+    douts.emplace(out_pin.get_port_id(), out_pin);
   }
   for (const auto& [pid, pin] : douts) {
     auto pname = pid == Ntype::Memory_readall_pid ? std::string("read_all") : std::format("rd_dout_{}", int(pid) - nw);
@@ -543,18 +561,21 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         if (index_txt.empty() || !std::ranges::all_of(index_txt, [](char c) { return c >= '0' && c <= '9'; })) {
           continue;
         }
-        const int64_t                 index = std::stoll(std::string(index_txt));
+        const int64_t index = std::stoll(std::string(index_txt));
         // memory_map seeded the power-on value from INIT on the `initial`
         // sink; the same pin is the reset value on a reset flop, so redrive it
         // with the entry's lane (they agree by construction).
-        std::vector<hhds::Edge_class> old_initial;
-        for (const auto& e : node.inp_edges()) {
-          if (!e.sink.is_invalid() && e.sink.get_port_id() == initial_pid) {
-            old_initial.push_back(e);
+        // SNAPSHOT, not the lazy view: the body DELETES the driver it finds,
+        // and del_sink() is a structural mutation that would invalidate a live
+        // pin iterator. The snapshot is a plain vector of handles, and only the
+        // EDGE is removed (never the pin or the node), so the remaining
+        // elements stay valid -- which is why the old collect-then-delete
+        // second pass is no longer needed. One driver per sink pin, so dropping
+        // the pin's driver IS dropping the edge this used to delete.
+        for (const auto& in_pin : node.inp_pins_snapshot()) {
+          if (!in_pin.is_invalid() && in_pin.get_port_id() == initial_pid) {
+            in_pin.del_sink();
           }
-        }
-        for (auto& e : old_initial) {
-          e.del_edge();
         }
         Dlop lane = *Dlop::create_integer(0);
         if (init_const && mem_bits > 0) {
@@ -628,18 +649,19 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       // Every read/write port block carries exactly one address pin (offset 0
       // of its Memory_port_stride block), so counting those edges counts ports.
       uint64_t ports        = 0;
-      for (const auto& e : mem.inp_edges()) {
-        auto off = e.sink.get_port_id() % Ntype::Memory_port_stride;
+      for (const auto& in_pin : mem.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        auto       off    = in_pin.get_port_id() % Ntype::Memory_port_stride;
         if (off == 0) {
           ++ports;
         }
-        if (off == 1 && e.driver.is_const()) {
-          bits = gu::const_of(e.driver).to_just_i64();
+        if (off == 1 && in_drv.is_const()) {
+          bits = gu::const_of(in_drv).to_just_i64();
         }
-        if (off == 9 && e.driver.is_const()) {
-          size = gu::const_of(e.driver).to_just_i64();
+        if (off == 9 && in_drv.is_const()) {
+          size = gu::const_of(in_drv).to_just_i64();
         }
-        if (off == 7 && e.driver.is_const() && gu::const_of(e.driver).to_just_i64() == 2) {
+        if (off == 7 && in_drv.is_const() && gu::const_of(in_drv).to_just_i64() == 2) {
           inline_array = true;
         }
         if (off == 12) {
@@ -653,8 +675,8 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
           inline_array = true;
         }
       }
-      for (const auto& e : mem.out_edges()) {
-        if (e.driver.get_port_id() == Ntype::Memory_readall_pid) {
+      for (const auto& out_pin : mem.out_sorted_pins()) {  // a port test: pins, not consumers
+        if (out_pin.get_port_id() == Ntype::Memory_readall_pid) {
           inline_array = true;
         }
       }
@@ -663,6 +685,23 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       const bool many_ports = ports > kAutoFoldPortsAbove;
       bool       map        = mode == Memory_fold::Always;
       if (mode == Memory_fold::Auto) {
+        // `many_ports` deliberately OVERRIDES memory_max_bits. It is a
+        // MACRO-REALIZABILITY fact, not a budget: ware/rtl ships cgen_memory_*
+        // only up to 4rd_2wr, so there is no macro for an over-3-port array and
+        // keeping it native emits an instantiation of a module that does not
+        // exist. Measured 2026-09-16: dropping this override made dino's
+        // netlist reference `cgen_memory_4rd_32wr_nofwd`, which is not in
+        // ware/rtl -- an unsynthesizable netlist.
+        //
+        // The cost is real and is NOT fixed here: folding dino's 32x64 36-port
+        // regfile bit-blasts it into ~15409 nodes, and because
+        // //bench:dino_synth_lec_synth compares the pre-synthesis design (native
+        // Memory) against the mapped netlist (bit-blasted), LEC sees ~2048
+        // unmatched state cuts and goes UNKNOWN in 3042s where memory=false
+        // PROVES in 145s. That asymmetry belongs to pass/lec -- it should pair a
+        // native memory with the `_blasted` realization that stands for it --
+        // not to this predicate. Do not "fix" the LEC symptom by making the
+        // netlist unimplementable.
         map = !oversized || many_ports;
         if (map && oversized) {
           // Folded on port count alone. Say so: the storage is above the

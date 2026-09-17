@@ -208,3 +208,16 @@ diff --git ot/liberty/celllib.hpp ot/liberty/celllib.hpp
      InternalPower _extract_internal_power(token_iterator&, const token_iterator);
      Timing        _extract_timing        (token_iterator&, const token_iterator);
  
+
+diff --git ot/utility/logger.hpp ot/utility/logger.hpp
+--- ot/utility/logger.hpp
++++ ot/utility/logger.hpp
+@@ -21 +21 @@
+-  DEBUG   = 0,
++  DEBUG_LEVEL = 0,
+@@ -185 +185 @@
+-  if constexpr(severity == LogType::DEBUG) {
++  if constexpr(severity == LogType::DEBUG_LEVEL) {
+@@ -255 +255 @@
+-  _write<LogType::DEBUG>(fpath, line, std::forward<ArgsT>(args)...);
++  _write<LogType::DEBUG_LEVEL>(fpath, line, std::forward<ArgsT>(args)...);

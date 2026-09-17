@@ -21,6 +21,7 @@
 #include "absl/container/node_hash_map.h"
 #include "hhds/attrs/name.hpp"
 #include "json_util.hpp"
+#include "mask_eval.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
 
@@ -70,8 +71,9 @@ Arms arms_of(const Node& n) {
     }
   } else {
     std::map<int, Pin> inputs;
-    for (const auto& e : n.inp_edges()) {
-      inputs[e.sink.get_port_id()] = e.driver;
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv            = in_pin.get_driver_pin();
+      inputs[in_pin.get_port_id()] = in_drv;
     }
     // Two-arm Mux uses a nonzero condition; larger indexed muxes are left to ABC.
     if (inputs.size() == 3 && inputs.contains(0) && inputs.contains(1) && inputs.contains(2)) {
@@ -130,8 +132,12 @@ public:
       const auto                                n  = p.get_master_node();
       const auto                                op = gu::type_op_of(n);
       std::map<int, std::vector<const Values*>> ins;
-      for (const auto& e : n.inp_edges()) {
-        ins[e.sink.get_port_id()].push_back(&get(e.driver));
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        // Bucket by operand BANK: a commutative cell spends one sink pid per
+        // operand (graph/cell.hpp's ONE DRIVER PER SINK PIN block), and every
+        // reader below (`arg(0)`, `arg(1)`, the Sum sign test) names the ROLE.
+        ins[Ntype::sink_bank(op, in_pin.get_port_id())].push_back(&get(in_drv));
       }
       for (int seed = 0; seed < 8; ++seed) {
         const auto arg = [&](int pid) -> const Dlop& {
@@ -167,12 +173,15 @@ public:
             lanes.push_back({&get(l.value)[seed], l.width});
           }
           v = *Dlop::concat_op(lanes);
+        } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+          const auto selected = arg(0).get_mask_op_opt(0, gu::reduction_count(n));
+          v                   = *(op == Ntype_op::Rxor ? selected->rxor_op() : selected->popcount_op());
         } else if (op == Ntype_op::Not) {
           v = *arg(0).not_op();
         } else if (op == Ntype_op::Get_mask) {
-          v = *arg(0).get_mask_op(arg(1));
+          v = livehd::eval_get_mask(arg(0), arg(2));
         } else if (op == Ntype_op::Set_mask) {
-          v = *arg(0).set_mask_op(arg(1), arg(2));
+          v = livehd::eval_set_mask(arg(0), arg(2), arg(4));
         } else if (op == Ntype_op::Sext) {
           v = *arg(0).sext_op(arg(1));
         } else if (op == Ntype_op::SHL) {
@@ -484,8 +493,9 @@ bool crosses(const Node& n, const Arms& arms) {
     if (seen.size() > 50000) {
       return false;
     }
-    for (const auto& e : producer.inp_edges()) {
-      pending.push_back(e.driver);
+    for (const auto& in_pin : producer.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      pending.push_back(in_drv);
     }
   }
   return false;
@@ -515,12 +525,16 @@ std::string source_key(hhds::Graph* graph, bool colors) {
                          value.size(),
                          value);
     };
-    for (const auto& e : n.inp_edges()) {
-      edges.push_back(std::format("{}={}", e.sink.get_port_id(), pin(e.driver)));
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      for (auto in_drv : in_pin.get_driver_pins()) {
+        edges.push_back(std::format("{}={}", in_pin.get_port_id(), pin(in_drv)));
+      }
     }
     for (const auto& e : n.out_edges()) {
       edges.push_back("o=" + pin(e.driver));
     }
+    // Exact proof-cache identity: the caller compares the full source key.
+    // A commutative digest without this representation cannot authorize reuse.
     std::sort(edges.begin(), edges.end());
     for (const auto& edge : edges) {
       row += std::format("|{}:{}", edge.size(), edge);
@@ -807,9 +821,12 @@ std::optional<std::vector<std::string>> satopt_region_facts(const Satopt_result&
         throw Unsupported{};
       }
       std::vector<std::string> inputs;
-      for (const auto& e : n.inp_edges()) {
-        inputs.push_back(std::format("{}={}", e.sink.get_port_id(), expression(e.driver)));
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        inputs.push_back(std::format("{}={}", in_pin.get_port_id(), expression(in_drv)));
       }
+      // These subjects identify proven facts, so retain exact expression
+      // equality rather than accepting a hash collision as a matching subject.
       std::sort(inputs.begin(), inputs.end());
       for (const auto& input : inputs) {
         if (key.size() + input.size() > 1048576) {

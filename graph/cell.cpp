@@ -157,6 +157,8 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       }
       return "invalid";
       break;
+    case Ntype_op::Rxor    :
+    case Ntype_op::Popcount:
     case Ntype_op::Sext:
     case Ntype_op::Div :
     case Ntype_op::Rem :

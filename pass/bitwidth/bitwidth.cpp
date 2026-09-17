@@ -18,6 +18,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "mask_eval.hpp"
 #include "node_util.hpp"
 #include "pass_bitwidth.hpp"
 #include "perf_tracing.hpp"
@@ -32,7 +33,6 @@ using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::find_sink_pin;
 using livehd::graph_util::get_driver_of_sink_name;
-using livehd::graph_util::inp_drivers_of;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::is_sink_connected;
@@ -75,6 +75,8 @@ constexpr bool infer_internal_range(Ntype_op op) {
     case Ntype_op::And     :
     case Ntype_op::Or      :
     case Ntype_op::Xor     :
+    case Ntype_op::Rxor    :
+    case Ntype_op::Popcount:
     case Ntype_op::Ror     :
     case Ntype_op::Not     :
     case Ntype_op::Get_mask:
@@ -95,14 +97,41 @@ constexpr bool infer_internal_range(Ntype_op op) {
   }
 }
 
-// Delete every edge incident to a sink pin (drivers feeding it).
+// Drop the driver feeding a sink pin. One driver per sink pin (graph/cell.hpp),
+// so this is a single disconnect, not the edge sweep it used to be.
 void clear_sink(const hhds::Pin_class& spin) {
   if (spin.is_invalid()) {
     return;
   }
-  for (auto e : spin.inp_edges()) {
-    e.del_edge();
+  spin.del_sink();
+}
+
+// Every consumer SINK of `node`, materialized.
+//
+// Two reasons this exists rather than being inlined at each call site:
+//
+//  1. SAFETY. The callers below reconnect the fan-out and then delete the node,
+//     i.e. they mutate the very edge storage they are walking. A node's driver
+//     fan-out is a LAZY view over that storage, so reading it while rewiring it
+//     is a use-after-free waiting to happen -- the loops used to do exactly
+//     that, under a comment claiming the live walk was deliberate. Taking the
+//     snapshot first is what makes "live-reconnect" honest.
+//
+//  2. It is the pin-centric spelling: the node's DRIVER PINS, then each pin's
+//     own fan-out. That yields the sinks in the same order the old node-level
+//     out_edges() walk did (driver pins ascending, each pin's edges in storage
+//     order), because both walk the same two loops.
+//
+// A driver's fan-out is genuinely a SET -- clock and reset reach 100K+ sinks --
+// so there is no single-sink reader to use here, and materializing is the point.
+std::vector<hhds::Pin_class> consumer_sinks(const hhds::Node_class& node) {
+  std::vector<hhds::Pin_class> sinks;
+  for (const auto& out_pin : node.out_sorted_pins()) {
+    for (const auto& e : out_pin.out_edges()) {
+      sinks.push_back(e.sink);
+    }
   }
+  return sinks;
 }
 
 }  // namespace
@@ -172,7 +201,7 @@ void Bitwidth::set_bw_1bit(hhds::Pin_class dpin) {
   set_bits_sign(dpin, it->second);
 }
 
-void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
+void Bitwidth::set_bits_sign(const hhds::Pin_class& dpin, const Bitwidth_range& bw) {
   if (dpin.is_invalid()) {
     return;
   }
@@ -292,11 +321,7 @@ void Bitwidth::adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw) {
       bwmap.erase(dpin.get_class_index());
       // Combining duplicate constant operands can grow the constant pool;
       // preserve sink handles before reconnecting and deleting the old cell.
-      absl::InlinedVector<hhds::Pin_class, 4> consumers;
-      for (const auto& e : master.out_edges()) {
-        consumers.push_back(e.sink);
-      }
-      for (const auto& sink : consumers) {
+      for (const auto& sink : consumer_sinks(master)) {
         livehd::graph_util::connect_folded_const(*current_graph, cdpin, sink);
       }
       master.del_node();
@@ -371,12 +396,12 @@ void Bitwidth::process_flop(hhds::Node_class& node) {
   adjust_bw(dpin, bw);
 }
 
-void Bitwidth::process_ror(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_ror(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size());
   set_bw_1bit(node.create_driver_pin(0));
 }
 
-void Bitwidth::process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_not(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size());
 
   // ~x == -x-1 is monotonically DECREASING, so the operand's max maps to the
@@ -395,9 +420,9 @@ void Bitwidth::process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   Dlop min_val;
   bool seeded = false;
   for (auto e : inp_edges) {
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
@@ -420,12 +445,12 @@ void Bitwidth::process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
 }
 
-void Bitwidth::process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_mux(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size());
   Bitwidth_range bw;
 
   for (auto e : inp_edges) {
-    if (e.sink.get_port_id() == 0) {
+    if (e.get_port_id() == 0) {
       // The selector is an INDEX over the data arms, so its envelope is
       // [0 .. n_data-1] -- non-negative, exactly like process_hotmux's.
       //
@@ -440,12 +465,12 @@ void Bitwidth::process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec&
       // compare silently became a signed one.
       const auto     n_data = inp_edges.size() - 1;
       Bitwidth_range bw2(0, n_data ? static_cast<int64_t>(n_data) - 1 : 0);
-      adjust_bw(e.driver, bw2);
+      adjust_bw(e.get_driver_pin(), bw2);
       continue;
     }
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
@@ -455,7 +480,7 @@ void Bitwidth::process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec&
 }
 
 // Hotmux controls have independent one-bit widths; union only value arms.
-void Bitwidth::process_hotmux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_hotmux(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size());
   Bitwidth_range bw;
 
@@ -463,12 +488,12 @@ void Bitwidth::process_hotmux(hhds::Node_class& node, livehd::graph_util::Edge_v
   // `edges/2*2`: a re-derivation classifies pins differently on a gapped cell.
   const auto control_end = livehd::graph_util::hotmux_control_end(node);
   for (auto e : inp_edges) {
-    if (livehd::graph_util::is_hotmux_control(e.sink.get_port_id(), control_end)) {
+    if (livehd::graph_util::is_hotmux_control(e.get_port_id(), control_end)) {
       continue;
     }
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
@@ -477,7 +502,7 @@ void Bitwidth::process_hotmux(hhds::Node_class& node, livehd::graph_util::Edge_v
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_shl(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size() == 2);
 
   auto a_dpin = get_driver_of_sink_name(node, "a");
@@ -532,7 +557,7 @@ void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_sra(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size() == 2);
 
   auto a_dpin = get_driver_of_sink_name(node, "a");
@@ -616,7 +641,7 @@ void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   }
 }
 
-void Bitwidth::process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_sum(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size());
 
   // Seed the accumulators EXPLICITLY at zero. A default-constructed Dlop is
@@ -635,14 +660,15 @@ void Bitwidth::process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   Dlop min_val = *Dlop::create_integer(0);
 
   for (auto e : inp_edges) {
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
-    auto pid = e.sink.get_port_id();
-    // Sum: sink "as" (pid 0) adds, sink "bs" (pid 1) subtracts.
+    // Sum: EVEN sink pid adds ("as" bank), ODD subtracts ("bs") -- one pid per
+    // operand, see graph/cell.hpp's ONE DRIVER PER SINK PIN block.
+    auto pid = Ntype::sink_bank(Ntype_op::Sum, e.get_port_id());
     if (pid == 0) {
       max_val = max_val.add_op(it->second.get_max());
       min_val = min_val.add_op(it->second.get_min());
@@ -665,24 +691,28 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   std::vector<hhds::Pin_class> din_drivers;
   std::vector<hhds::Pin_class> addr_drivers;
 
-  auto inp = node.inp_edges();
-  for (auto& e : inp) {
-    auto raw_pid = static_cast<int>(e.sink.get_port_id());
-    auto n       = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % Ntype::Memory_port_stride);
+  // Lazy: this walk only reads the Memory's operands, records drivers in local
+  // vectors and stamps bitwidth ATTRIBUTES, and an attribute write is not a
+  // structural mutation (it does not bump the body epoch), so nothing here can
+  // invalidate the view.
+  for (const auto& in_pin : node.inp_sorted_pins()) {
+    const auto in_drv  = in_pin.get_driver_pin();
+    auto       raw_pid = static_cast<int>(in_pin.get_port_id());
+    auto       n       = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % Ntype::Memory_port_stride);
     if (str_tools::ends_with(n, "clock")) {
-      auto it = bwmap.find(e.driver.get_class_index());
+      auto it = bwmap.find(in_drv.get_class_index());
       if (it == bwmap.end()) {
-        set_bw_1bit(e.driver);
+        set_bw_1bit(in_drv);
         discovered_some_backward_nodes_try_again = true;
       }
     } else if (n == "bits" || n == "size") {
-      if (!e.driver.is_const()) {
+      if (!in_drv.is_const()) {
         livehd::diag::err("pass.bitwidth", "mem-malformed", "internal")
             .msg("Memory node:{} has {} connected to a non-constant pin", debug_name(node), n)
             .fatal();
         return;
       }
-      const auto& val = const_of(e.driver);
+      const auto& val = const_of(in_drv);
       if (!val.is_just_i64()) {
         livehd::diag::err("pass.bitwidth", "mem-malformed", "internal")
             .msg("Memory node:{} has {} connected to a non-integer value", debug_name(node), n)
@@ -699,7 +729,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
       auto n_din  = str_tools::ends_with(n, "din");
       auto n_addr = str_tools::ends_with(n, "addr");
       if (n_din || n_addr) {
-        auto    it    = bwmap.find(e.driver.get_class_index());
+        auto    it    = bwmap.find(in_drv.get_class_index());
         int32_t dbits = 0;
         if (it != bwmap.end()) {
           dbits = it->second.get_sbits();
@@ -721,10 +751,10 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         }
         if (n_din) {
           mem_din_bits = std::max(dbits, mem_din_bits);
-          din_drivers.emplace_back(e.driver);
+          din_drivers.emplace_back(in_drv);
         } else {
           mem_addr_bits = std::max(dbits, mem_addr_bits);
-          addr_drivers.emplace_back(e.driver);
+          addr_drivers.emplace_back(in_drv);
         }
       }
     }
@@ -832,9 +862,11 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   // vote lets a negative-capable expression re-sign a `[N]uW` array, which
   // adjust_bw then stamps onto every dout. Consult din only when there is no
   // sized output at all (a write-only memory with no observable read).
-  for (const auto& e : node.out_edges()) {  // read-only vote; adjust_bw runs below
-    if (e.driver.get_port_id() != Ntype::Memory_readall_pid) {
-      vote_sign(e.driver);
+  // One vote per dout PIN. vote_sign is idempotent, so the old per-CONSUMER
+  // walk voted the same pin once per reader for the same answer.
+  for (const auto& out_pin : node.out_sorted_pins()) {
+    if (out_pin.get_port_id() != Ntype::Memory_readall_pid) {
+      vote_sign(out_pin);
     }
   }
   if (!saw_sized_value) {
@@ -866,12 +898,16 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
 
   // Out-connected pins: walk out_edges, collect unique driver pins.
   absl::flat_hash_set<hhds::Class_index> seen;
-  for (const auto& e : node.out_edges()) {  // read-only: adjust_bw sets a bitwidth attr
-    if (!seen.insert(e.driver.get_class_index()).second) {
+  // read-only: adjust_bw sets a bitwidth attr. out_sorted_pins() yields each
+  // dout pin exactly once, which is what the `seen` set was reconstructing from
+  // the per-consumer edge walk; it is kept only for the `dout_pins` bookkeeping
+  // further down.
+  for (const auto& out_pin : node.out_sorted_pins()) {
+    if (!seen.insert(out_pin.get_class_index()).second) {
       continue;
     }
-    if (e.driver.get_port_id() != Ntype::Memory_readall_pid) {
-      adjust_bw(e.driver, bw_din);
+    if (out_pin.get_port_id() != Ntype::Memory_readall_pid) {
+      adjust_bw(out_pin, bw_din);
       continue;
     }
     // The packed read-all port is mem_bits * mem_size wide -- but ONLY once the
@@ -881,12 +917,12 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     if (mem_size > 0) {
       Bitwidth_range packed_bw;
       packed_bw.set_ubits_range(static_cast<int32_t>(mem_bits * mem_size));
-      adjust_bw(e.driver, packed_bw);
+      adjust_bw(out_pin, packed_bw);
     }
   }
 }
 
-void Bitwidth::process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_mult(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size());
 
   Dlop max_val;
@@ -894,7 +930,7 @@ void Bitwidth::process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec
   Dlop min_val;
   min_val = Dlop::create_integer(1);
   for (auto e : inp_edges) {
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it != bwmap.end()) {
       // All four interval corners matter when either operand crosses zero.
       const Dlop products[] = {*min_val.mult_op(it->second.get_min()),
@@ -912,7 +948,7 @@ void Bitwidth::process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec
         }
       }
     } else {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
@@ -1102,6 +1138,12 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     mask_val = it2->second.get_max().or_op(it2->second.get_min());
   }
 
+  // Analyses may inspect hand-built or incomplete graphs. Do not infer a
+  // range or an identity for a selection outside the construction contract.
+  if (!mask_dpin.is_const() || !livehd::graph_util::is_legal_mask(mask_val)) {
+    return;
+  }
+
   Dlop a_max = it->second.get_max();
   Dlop a_min = it->second.get_min();
 
@@ -1116,7 +1158,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
 
   // get_mask is the zext (force) bit-select: the packed result is never
   // negative, a lone selected set bit included (only `#sext` may be negative).
-  auto gm = [](const Dlop& v, const Dlop& m) -> Dlop { return *v.get_mask_op(m); };
+  auto gm = [](const Dlop& v, const Dlop& m) -> Dlop { return livehd::eval_get_mask(v, m); };
 
   Dlop res_max;
   if (a_max.same_repr(a_min)) {
@@ -1176,8 +1218,8 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     // node's edges in one bulk op (no per-edge del_edge lookup). Iterating the
     // live out_edges while connecting is safe: connect_sink only grows
     // zero_dpin/sink storage, never node's out-edge set.
-    for (const auto& e : node.out_edges()) {
-      zero_dpin.connect_sink(e.sink);
+    for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+      zero_dpin.connect_sink(sink);
     }
     node.del_node();
     return;
@@ -1231,11 +1273,11 @@ void Bitwidth::process_concat(hhds::Node_class& node) {
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_sext(hhds::Node_class& node, Inp_pins& inp_edges) {
   // inp_edges may not be in pid order — sort by sink port_id so [0]==a, [1]==b.
   I(inp_edges.size() >= 2);
-  auto wire_dpin = inp_edges[0].driver;
-  auto pos_dpin  = inp_edges[1].driver;
+  auto wire_dpin = inp_edges[0].get_driver_pin();
+  auto pos_dpin  = inp_edges[1].get_driver_pin();
 
   bool no_wire = !bwmap.contains(wire_dpin.get_class_index());
 
@@ -1271,8 +1313,8 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
       sign_max = b;
       // live-reconnect each consumer to the Sext source; del_node bulk-drops
       // node's edges (no per-edge find). connect only grows the source/sink.
-      for (const auto& e : node.out_edges()) {
-        e.sink.connect_driver(inp_edges[0].driver);
+      for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+        sink.connect_driver(inp_edges[0].get_driver_pin());
       }
       node.del_node();
     }
@@ -1288,8 +1330,8 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
     if (wire_it->second.get_sbits() <= sign_max) {
       // live-reconnect each consumer to wire_dpin; del_node bulk-drops node's
       // edges (no per-edge find).
-      for (const auto& e : node.out_edges()) {
-        e.sink.connect_driver(wire_dpin);
+      for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+        sink.connect_driver(wire_dpin);
       }
       node.del_node();
     } else {
@@ -1297,7 +1339,8 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
       if (wire_op == Ntype_op::Sext) {
         grandpa_dpin = get_driver_of_sink_name(wire_node, "a");
       } else {
-        auto mask_e = wire_node.inp_edges();
+        // SNAPSHOT: `inp_edges[0].del_sink()` below rewires this node's cone.
+        auto mask_e = wire_node.inp_pins_snapshot();
         if (mask_e.size() != 2) {
           return;
         }
@@ -1305,8 +1348,8 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
         // wide (guaranteed by the range test above): the And cannot change
         // any bit the Sext reads, so sign-extend x directly. Constants are
         // CONST_NODE PINS, so probe the driver pins, not their master node.
-        const auto& m0 = mask_e[0].driver;
-        const auto& m1 = mask_e[1].driver;
+        const auto m0 = mask_e[0].get_driver_pin();
+        const auto m1 = mask_e[1].get_driver_pin();
         if (m0.is_const() && const_of(m0).is_mask()) {
           grandpa_dpin = m1;
         } else if (m1.is_const() && const_of(m1).is_mask()) {
@@ -1315,7 +1358,7 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
           return;
         }
       }
-      inp_edges[0].del_edge();
+      inp_edges[0].del_sink();  // one driver per sink pin: dropping it IS the old del_edge
       setup_sink_by_name(node, "a").connect_driver(grandpa_dpin);
     }
   }
@@ -1323,31 +1366,32 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
 
 void Bitwidth::process_comparator(hhds::Node_class& node) { set_bw_1bit(node.create_driver_pin(0)); }
 
-void Bitwidth::process_assignment_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_assignment_or(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size() == 1);
 
-  auto it = bwmap.find(inp_edges[0].driver.get_class_index());
+  auto it = bwmap.find(inp_edges[0].get_driver_pin().get_class_index());
   if (it == bwmap.end()) {
-    debug_unconstrained_msg(node, inp_edges[0].driver);
+    debug_unconstrained_msg(node, inp_edges[0].get_driver_pin());
     not_finished = true;
     return;
   }
-  // live-reconnect each consumer to the single input; del_node bulk-drops node's
-  // edges (no per-edge find).
-  for (const auto& out : node.out_edges()) {
-    inp_edges[0].driver.connect_sink(out.sink);
+  // Reconnect each consumer to the single input, then let del_node bulk-drop
+  // node's edges (no per-edge find). The consumer list is SNAPSHOTTED: the
+  // reconnect mutates the same storage a live fan-out walk would be reading.
+  for (const auto& sink : consumer_sinks(node)) {
+    inp_edges[0].get_driver_pin().connect_sink(sink);
   }
   node.del_node();
 }
 
-void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size() > 1);
   int32_t max_bits     = 0;
   bool    any_negative = false;
   for (auto e : inp_edges) {
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
@@ -1364,8 +1408,8 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
     // node's edges in one bulk op (no per-edge del_edge lookup). Iterating the
     // live out_edges while connecting is safe: connect_sink only grows
     // zero_dpin/sink storage, never node's out-edge set.
-    for (const auto& e : node.out_edges()) {
-      zero_dpin.connect_sink(e.sink);
+    for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+      zero_dpin.connect_sink(sink);
     }
     node.del_node();
     return;
@@ -1386,7 +1430,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_bit_xor(hhds::Node_class& node, Inp_pins& inp_edges) {
   // Constant folding can combine equal operands into a single constant row.
   // Unary XOR is the identity and its range is valid in the loop below.
   I(!inp_edges.empty());
@@ -1400,9 +1444,9 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_
   bool    any_negative = false;
 
   for (auto e : inp_edges) {
-    auto it = bwmap.find(e.driver.get_class_index());
+    auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
-      debug_unconstrained_msg(node, e.driver);
+      debug_unconstrained_msg(node, e.get_driver_pin());
       not_finished = true;
       return;
     }
@@ -1425,7 +1469,7 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
+void Bitwidth::process_bit_and(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(!inp_edges.empty());
 
   int32_t pos_min_sbits = Bits_unknown;
@@ -1433,7 +1477,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
 
   for (auto i = 0u; i < inp_edges.size(); ++i) {
     const auto& e  = inp_edges[i];
-    auto        it = bwmap.find(e.driver.get_class_index());
+    auto        it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
       unk_max_sbits = Bits_unknown;
       continue;
@@ -1443,8 +1487,8 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
       auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
       // live-reconnect each consumer to const-0; del_node bulk-drops node's
       // edges (no per-edge find).
-      for (const auto& e2 : node.out_edges()) {
-        zero_dpin.connect_sink(e2.sink);
+      for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+        zero_dpin.connect_sink(sink);
       }
       node.del_node();
       return;
@@ -1483,13 +1527,13 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
   }
 
   for (auto e : inp_edges) {
-    auto bw_bits = bits_of(e.driver);
+    auto bw_bits = bits_of(e.get_driver_pin());
     if (bw_bits) {
       continue;
     }
-    auto drv_node = e.driver.get_master_node();
-    if (is_graph_input_pin(e.driver) || Ntype::is_loop_last(type_op_of(drv_node))) {
-      set_bits_sign(e.driver, bw);
+    auto drv_node = e.get_driver_pin().get_master_node();
+    if (is_graph_input_pin(e.get_driver_pin()) || Ntype::is_loop_last(type_op_of(drv_node))) {
+      set_bits_sign(e.get_driver_pin(), bw);
     }
   }
 }
@@ -1532,9 +1576,11 @@ void Bitwidth::process_attr_set_dp_assign(hhds::Node_class& node_dp) {
   const Bitwidth_range                   lhs_bw = it->second;
   // Walk out_connected_pins (unique drivers from out_edges).
   absl::flat_hash_set<hhds::Class_index> seen_out;
-  for (const auto& e : node_dp.out_edges()) {  // read-only: records driver bitwidth in a side map
-    if (seen_out.insert(e.driver.get_class_index()).second) {
-      bwmap.insert_or_assign(e.driver.get_class_index(), lhs_bw);
+  // read-only: records the driver bitwidth in a side map, once per DRIVER PIN
+  // (which is what seen_out re-derived from the per-consumer edge walk).
+  for (const auto& out_pin : node_dp.out_sorted_pins()) {
+    if (seen_out.insert(out_pin.get_class_index()).second) {
+      bwmap.insert_or_assign(out_pin.get_class_index(), lhs_bw);
     }
   }
 
@@ -1593,8 +1639,8 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
       }
       // live-reconnect each consumer to parent_dpin; del_node bulk-drops
       // node_attr's edges (no per-edge find).
-      for (const auto& e : node_attr.out_edges()) {
-        parent_dpin.connect_sink(e.sink);
+      for (const auto& sink : consumer_sinks(node_attr)) {  // snapshot: the loop rewires what it walks
+        parent_dpin.connect_sink(sink);
       }
       node_attr.del_node();
     } else {
@@ -1694,10 +1740,7 @@ void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits) {
       }
 
       if (ntposs.is_invalid()) {
-        ntposs          = create_typed_node(*current_graph, Ntype_op::Get_mask);
-        auto mask_cnode = create_const(*current_graph, *mask);
-        setup_sink_by_name(ntposs, "mask").connect_driver(mask_cnode);
-        setup_sink_by_name(ntposs, "a").connect_driver(name_dpin);
+        ntposs = livehd::graph_util::create_get_mask(*current_graph, name_dpin, create_const(*current_graph, *mask));
       }
 
       ntposs.create_driver_pin(0).connect_sink(e.sink);
@@ -1735,7 +1778,7 @@ void Bitwidth::process_attr_set(hhds::Node_class& node_attr) {
   }
 }
 
-void Bitwidth::debug_unconstrained_msg(hhds::Node_class& node, hhds::Pin_class& dpin) {
+void Bitwidth::debug_unconstrained_msg(hhds::Node_class& node, const hhds::Pin_class& dpin) {
   (void)node;
   (void)dpin;
 }
@@ -1814,8 +1857,8 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       if (node.is_invalid()) {
         continue;
       }
-      auto inp_edges = node.inp_edges();
-      auto op = type_op_of(node);
+      auto inp_edges = node.inp_pins_snapshot();  // SNAPSHOT: every process_* below rewires while walking
+      auto op        = type_op_of(node);
 
       if (inp_edges.empty() && op != Ntype_op::Sub && op != Ntype_op::LUT) {
         node.del_node();
@@ -1830,16 +1873,19 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       // not_finished, and a cell as ordinary as `x + 1` was uninferable no
       // matter how well bounded `x` was.
       for (const auto& e : inp_edges) {
-        if (e.driver.is_invalid() || !e.driver.is_const()) {
-          continue;
-        }
-        const auto ci = e.driver.get_class_index();
-        if (bwmap.contains(ci)) {
-          continue;
-        }
-        const auto& val = const_of(e.driver);
-        if (val.is_numeric()) {
-          bwmap.insert_or_assign(ci, Bitwidth_range(val));
+        // Compact-loop carry inputs also have a previous-ordinal driver.
+        for (auto driver : e.get_driver_pins()) {
+          if (!driver.is_const()) {
+            continue;
+          }
+          const auto ci = driver.get_class_index();
+          if (bwmap.contains(ci)) {
+            continue;
+          }
+          const auto& val = const_of(driver);
+          if (val.is_numeric()) {
+            bwmap.insert_or_assign(ci, Bitwidth_range(val));
+          }
         }
       }
 
@@ -1877,6 +1923,9 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         }
       } else if (op == Ntype_op::Xor) {
         process_bit_xor(node, inp_edges);
+      } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+        const int maximum = op == Ntype_op::Rxor ? 1 : livehd::graph_util::reduction_count(node);
+        adjust_bw(node.create_driver_pin(0), Bitwidth_range(*Dlop::create_integer(0), *Dlop::create_integer(maximum)));
       } else if (op == Ntype_op::Ror) {
         process_ror(node, inp_edges);
       } else if (op == Ntype_op::And) {
@@ -1997,55 +2046,59 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
           .at(span)
           .msg("{}", bad)
           .note(std::format("in definition '{}', node {}", g->get_name(), livehd::graph_util::debug_name(node)))
-          .note(std::format("lane table (MSB-first): {}", [&] {
-            std::string t;
-            for (size_t li = 0; li < lanes.size(); ++li) {
-              const auto& l = lanes[li];
-              t += std::format("{}[{}] drv={} bits={} window={}",
-                               t.empty() ? "" : ", ",
-                               li,
-                               livehd::graph_util::wire_name(l.value),
-                               livehd::graph_util::lane_value_bits(l.value),
-                               l.width);
-            }
-            return t;
-          }()))
+          .note(std::format("lane table (MSB-first): {}",
+                            [&] {
+                              std::string t;
+                              for (size_t li = 0; li < lanes.size(); ++li) {
+                                const auto& l  = lanes[li];
+                                t             += std::format("{}[{}] drv={} bits={} window={}",
+                                                             t.empty() ? "" : ", ",
+                                                             li,
+                                                             livehd::graph_util::wire_name(l.value),
+                                                             livehd::graph_util::lane_value_bits(l.value),
+                                                             l.width);
+                              }
+                              return t;
+                            }()))
           // The offending lane driver's OWN operands and their inferred ranges.
           // A too-wide lane driver is always inherited from an operand, so the
           // lane table alone stops one link short of the cause.
-          .note(std::format("offending driver's operands: {}", [&] {
-            std::string t;
-            for (const auto& l : lanes) {
-              if (livehd::graph_util::concat_lane_fits(l)) {
-                continue;
-              }
-              auto drv = l.value.get_master_node();
-              if (drv.is_invalid()) {
-                return std::string{"<invalid master>"};
-              }
-              t += std::format("{} <= ", livehd::graph_util::debug_name(drv));
-              for (const auto& ie : drv.inp_edges()) {
-                const auto  it  = bwmap.find(ie.driver.get_class_index());
-                std::string rng = "unmapped";
-                if (it != bwmap.end()) {
-                  rng = std::format("[{}..{}] ubits={} sbits={} pos={}",
-                                    it->second.get_min().to_pyrope(),
-                                    it->second.get_max().to_pyrope(),
-                                    it->second.get_ubits(),
-                                    it->second.get_sbits(),
-                                    it->second.is_always_positive());
-                }
-                t += std::format("{{pid={} drv={} bits={} unsign={} {}}} ",
-                                 static_cast<int>(ie.sink.get_port_id()),
-                                 livehd::graph_util::wire_name(ie.driver),
-                                 livehd::graph_util::bits_of(ie.driver),
-                                 livehd::graph_util::is_unsign(ie.driver),
-                                 rng);
-              }
-              break;
-            }
-            return t;
-          }()))
+          .note(std::format("offending driver's operands: {}",
+                            [&] {
+                              std::string t;
+                              for (const auto& l : lanes) {
+                                if (livehd::graph_util::concat_lane_fits(l)) {
+                                  continue;
+                                }
+                                auto drv = l.value.get_master_node();
+                                if (drv.is_invalid()) {
+                                  return std::string{"<invalid master>"};
+                                }
+                                t += std::format("{} <= ", livehd::graph_util::debug_name(drv));
+                                for (const auto& in_pin : drv.inp_sorted_pins()) {
+                                  const auto  in_drv = in_pin.get_driver_pin();
+                                  const auto  it     = bwmap.find(in_drv.get_class_index());
+                                  std::string rng    = "unmapped";
+                                  if (it != bwmap.end()) {
+                                    rng = std::format(
+                                        "[{}..{}] ubits={} sbits={} pos={}",
+                                        it->second.get_min().to_pyrope(),
+                                        it->second.get_max().to_pyrope(),
+                                        it->second.is_always_positive() ? std::to_string(it->second.get_ubits()) : "n/a",
+                                        it->second.get_sbits(),
+                                        it->second.is_always_positive());
+                                  }
+                                  t += std::format("{{pid={} drv={} bits={} unsign={} {}}} ",
+                                                   static_cast<int>(in_pin.get_port_id()),
+                                                   livehd::graph_util::wire_name(in_drv),
+                                                   livehd::graph_util::bits_of(in_drv),
+                                                   livehd::graph_util::is_unsign(in_drv),
+                                                   rng);
+                                }
+                                break;
+                              }
+                              return t;
+                            }()))
           .fatal();
     }
   }
@@ -2068,13 +2121,14 @@ void Bitwidth::remove_mask_identities(hhds::Graph* g) {
       source = get_driver_of_sink_name(node, "a");
       mask   = get_driver_of_sink_name(node, "mask");
     } else {
-      const auto inputs = node.inp_edges();
+      // SNAPSHOT: the And is rewired and deleted further down this loop body.
+      const auto inputs = node.inp_pins_snapshot();
       if (inputs.size() != 2) {
         continue;
       }
-      const auto pos = inputs[0].driver.is_const() ? 0 : 1;
-      mask           = inputs[pos].driver;
-      source         = inputs[1 - pos].driver;
+      const auto pos = inputs[0].get_driver_pin().is_const() ? 0 : 1;
+      mask           = inputs[pos].get_driver_pin();
+      source         = inputs[1 - pos].get_driver_pin();
     }
     if (source.is_invalid() || !mask.is_const()) {
       continue;
@@ -2094,9 +2148,31 @@ void Bitwidth::remove_mask_identities(hhds::Graph* g) {
                                  : bits_of(source);
     bool       safe        = source_bits > 0;
     for (const auto& edge : node.out_edges()) {
-      for (auto driver : edge.sink.get_driver_pins()) {
-        if (driver == source) {
-          safe = false;  // HHDS would deduplicate a repeated operand.
+      // REPEATED OPERAND refusal, restated for one-driver-per-sink-pin.
+      //
+      // It used to ask whether `source` was among the DRIVERS OF THIS SINK PIN,
+      // because a repeated operand of a commutative cell was spelled as a second
+      // driver on one pin -- and rewiring the mask away would have made two
+      // identical (driver, sink) pairs, which hhds silently dedups, dropping an
+      // operand (Sum(a,a) = 2a collapsing to a).
+      //
+      // That spelling is gone: a sink pin has exactly one driver, so
+      // get_driver_pins() on this pin can only ever return the mask itself and
+      // the test was dead. The same repeat is now a SECOND PIN OF THE SAME BANK
+      // on the same consumer, so that is what is checked. Deliberately kept
+      // rather than deleted: the refusal is conservative (at worst a missed
+      // mask removal), and dropping it would change which cells this pass
+      // rewrites, which is not what a data-structure migration is for.
+      if (const auto consumer_node = edge.sink.get_master_node(); !consumer_node.is_invalid()) {
+        const auto consumer_op   = type_op_of(consumer_node);
+        const auto consumer_bank = Ntype::sink_bank(consumer_op, edge.sink.get_port_id());
+        for (const auto& other : consumer_node.inp_sorted_pins()) {
+          if (other == edge.sink || Ntype::sink_bank(consumer_op, other.get_port_id()) != consumer_bank) {
+            continue;
+          }
+          if (other.get_driver_pin() == source) {
+            safe = false;
+          }
         }
       }
       int  declared    = 0;
@@ -2132,8 +2208,8 @@ void Bitwidth::remove_mask_identities(hhds::Graph* g) {
     if (!safe) {
       continue;
     }
-    for (const auto& edge : node.out_edges()) {
-      source.connect_sink(edge.sink);
+    for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+      source.connect_sink(sink);
     }
     bwmap.erase(node.get_driver_pin(0).get_class_index());
     node.del_node();
@@ -2252,17 +2328,26 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       all_one_dpin.connect_sink(setup_sink_by_name(mask_node, "as"));
       // live-reconnect each consumer to the masked value; del_node bulk-drops
       // node's edges (no per-edge find).
-      for (const auto& e : node.out_edges()) {
-        mask_dpin.connect_sink(e.sink);
+      for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+        mask_dpin.connect_sink(sink);
       }
       node.del_node();
       return;
     } else {
       // live-reconnect rhs to each port-0 consumer; del_node bulk-drops all of
       // node's edges, including any non-port-0 (no per-edge find).
-      for (const auto& e : node.out_edges()) {
-        if (e.driver.get_port_id() == 0) {
-          e.sink.connect_driver(dpin_rhs);
+      // Snapshot: the loop rewires what it walks. Only port 0's consumers move;
+      // del_node below drops whatever else the node still drives.
+      for (const auto& out_pin : node.out_pins_snapshot()) {
+        if (out_pin.get_port_id() != 0) {
+          continue;
+        }
+        std::vector<hhds::Pin_class> sinks;
+        for (const auto& e : out_pin.out_edges()) {
+          sinks.push_back(e.sink);
+        }
+        for (const auto& sink : sinks) {
+          sink.connect_driver(dpin_rhs);
         }
       }
       node.del_node();
@@ -2274,16 +2359,15 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
     auto data_dpin = get_driver_of_sink_name(node, "parent");
     // live-reconnect each consumer to the parent driver; the shared del_node
     // below bulk-drops node's edges (no per-edge find).
-    for (const auto& e : node.out_edges()) {
-      I(e.driver.get_port_id() == 0);
-      e.sink.connect_driver(data_dpin);
+    for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+      sink.connect_driver(data_dpin);
     }
   } else {
     auto data_dpin = create_const(*current_graph, *Dlop::create_integer(0));
     // live-reconnect each consumer to const-0; the shared del_node bulk-drops
     // node's edges (no per-edge find).
-    for (const auto& e : node.out_edges()) {
-      e.sink.connect_driver(data_dpin);
+    for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+      sink.connect_driver(data_dpin);
     }
   }
   node.del_node();

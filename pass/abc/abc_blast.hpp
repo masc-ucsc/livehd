@@ -161,9 +161,10 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
             other = inputs.fallback;
           }
         } else {
-          for (const auto& e : n.inp_edges()) {
-            if (static_cast<int>(e.sink.get_port_id()) == f.other + 1) {
-              other = e.driver;
+          for (const auto& in_pin : n.inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
+            if (static_cast<int>(in_pin.get_port_id()) == f.other + 1) {
+              other = in_drv;
               break;
             }
           }
@@ -184,19 +185,58 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
   };
   if (op == Ntype_op::Not) {
     hhds::Pin_class a;
-    for (const auto& e : n.inp_edges()) {
-      a = e.driver;
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      a                 = in_drv;
     }
     for (int b = 0; b < out_bits; ++b) {
       slots[b] = abc_not(abc_bit(a, b));
     }
+  } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+    const auto                    input = gu::get_driver_of_sink_name(n, "a");
+    const int                     count = gu::reduction_count(n);
+    std::vector<std::vector<Bit>> level;
+    for (int bit = 0; bit < count; ++bit) {
+      level.push_back({abc_eff_bit(input, bit)});
+    }
+    while (level.size() > 1) {
+      std::vector<std::vector<Bit>> next;
+      for (size_t i = 0; i < level.size(); i += 2) {
+        if (i + 1 == level.size()) {
+          next.push_back(std::move(level[i]));
+          continue;
+        }
+        const auto& a = level[i];
+        const auto& b = level[i + 1];
+        if (op == Ntype_op::Rxor) {
+          next.push_back({abc_bin(a[0], b[0], '^')});
+          continue;
+        }
+        const int        width = std::min(out_bits, static_cast<int>(std::max(a.size(), b.size())) + 1);
+        std::vector<Bit> sum;
+        auto             carry = abc_const_bit(false);
+        for (int bit = 0; bit < width; ++bit) {
+          const auto x  = bit < static_cast<int>(a.size()) ? a[bit] : abc_const_bit(false);
+          const auto y  = bit < static_cast<int>(b.size()) ? b[bit] : abc_const_bit(false);
+          const auto xy = abc_bin(x, y, '^');
+          sum.push_back(abc_bin(xy, carry, '^'));
+          carry = abc_bin(abc_bin(x, y, '&'), abc_bin(xy, carry, '&'), '|');
+        }
+        next.push_back(std::move(sum));
+      }
+      level = std::move(next);
+    }
+    for (int bit = 0; bit < out_bits; ++bit) {
+      slots[bit] = !level.empty() && bit < static_cast<int>(level[0].size()) ? level[0][bit] : abc_const_bit(false);
+    }
   } else if (op == Ntype_op::Ror) {
     std::vector<Bit> level;
-    for (const auto& e : n.inp_edges()) {
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
       // eff_width, not real_width: a constant operand has no `bits` attr and
       // would contribute only its bit 0 (`|{x, 8'h80}` mapped to `|x`).
-      for (int b = 0; b < eff_width(e.driver); ++b) {
-        level.push_back(abc_eff_bit(e.driver, b));
+      for (int b = 0; b < eff_width(in_drv); ++b) {
+        level.push_back(abc_eff_bit(in_drv, b));
       }
     }
     // A balanced tree keeps a wide predicate from acquiring an artificial
@@ -215,8 +255,9 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
   } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
     char                         kind = op == Ntype_op::And ? '&' : (op == Ntype_op::Or ? '|' : '^');
     std::vector<hhds::Pin_class> ins;
-    for (const auto& e : n.inp_edges()) {
-      ins.push_back(e.driver);
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      ins.push_back(in_drv);
     }
     for (int b = 0; b < out_bits; ++b) {
       std::vector<Bit> level;
@@ -288,12 +329,13 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     hhds::Pin_class                       sel;
     absl::btree_map<int, hhds::Pin_class> data;  // pid-1 (value) -> driver; ordered so the OR-tree fed to ABC is deterministic
     int                                   max_v = -1;
-    for (const auto& e : n.inp_edges()) {
-      auto pid = e.sink.get_port_id();
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      auto       pid    = in_pin.get_port_id();
       if (pid == 0) {
-        sel = e.driver;
+        sel = in_drv;
       } else {
-        data[static_cast<int>(pid) - 1] = e.driver;
+        data[static_cast<int>(pid) - 1] = in_drv;
         max_v                           = std::max(max_v, static_cast<int>(pid) - 1);
       }
     }
@@ -390,7 +432,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       // graph/cell.hpp: the mask is ONE window [lo, hi), or -1 == the whole
       // source. Either way the selected positions are CONSECUTIVE, so output
       // bit j reads source bit lo + j -- no per-bit scan and no position list.
-      const auto& mask = gu::const_of(m_drv);
+      const auto& mask   = gu::const_of(m_drv);
       int         a_bits = gu::bits_of(a_drv);
       if (a_bits == 0 && a_drv.is_const()) {
         // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
@@ -416,7 +458,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
                "mask driven here");
       } else {
         const auto [lo, hi] = *window;
-        const int  span     = hi - lo;
+        const int span      = hi - lo;
         for (int b = 0; b < out_bits; ++b) {
           slots[b] = b < span ? abc_bit(a_drv, lo + b) : abc_const_bit(false);
         }
@@ -465,17 +507,17 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     }
   } else if (op == Ntype_op::Sum) {
     std::vector<arith::Sum_operand<Bit>> operands;
-    for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() != 0 && e.sink.get_port_id() != 1) {
-        continue;
-      }
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto              in_drv = in_pin.get_driver_pin();
+      // Every operand has its OWN sink pid; the add/subtract bank is the pid's
+      // PARITY (Ntype::sink_bank, graph/cell.hpp).
       arith::Sum_operand<Bit> operand;
-      operand.is_signed = !gu::is_unsign(e.driver);
-      operand.subtract  = e.sink.get_port_id() == 1;
-      const int width   = e.driver.is_const() ? out_bits : std::min(real_width(e.driver), out_bits);
+      operand.is_signed = !gu::is_unsign(in_drv);
+      operand.subtract  = Ntype::sink_bank(op, in_pin.get_port_id()) == 1;
+      const int width   = in_drv.is_const() ? out_bits : std::min(real_width(in_drv), out_bits);
       operand.bits.reserve(width);
       for (int i = 0; i < width; ++i) {
-        operand.bits.push_back(abc_bit(e.driver, i));
+        operand.bits.push_back(abc_bit(in_drv, i));
       }
       operands.push_back(std::move(operand));
     }
@@ -489,11 +531,14 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // at max(width)+1 (one guard bit so a-b can't overflow the signed range).
     hhds::Pin_class a_d;
     hhds::Pin_class b_d;
-    for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() == 0) {
-        a_d = e.driver;
-      } else if (e.sink.get_port_id() == 1) {
-        b_d = e.driver;
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      // Bank, not raw pid: an LT/GT operand lives on its own pin (even pid = the
+      // `a` side, odd = the `b` side -- Ntype::sink_bank).
+      if (Ntype::sink_bank(op, in_pin.get_port_id()) == 0) {
+        a_d = in_drv;
+      } else {
+        b_d = in_drv;
       }
     }
     bool             uns = gu::is_unsign(a_d) && gu::is_unsign(b_d);
@@ -516,8 +561,9 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // 1-bit result; n-ary all-equal (operands on pid 0). Compare at
     // max(width)+1 so sign-extension differences are caught.
     std::vector<hhds::Pin_class> ds;
-    for (const auto& e : n.inp_edges()) {
-      ds.push_back(e.driver);
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      ds.push_back(in_drv);
     }
     if (ds.size() <= 1) {
       slots[0] = abc_const_bit(true);
@@ -555,11 +601,12 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // matching the LEC's fit-to-W.
     hhds::Pin_class a_d;
     hhds::Pin_class b_d;
-    for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() == 0) {
-        a_d = e.driver;
-      } else if (e.sink.get_port_id() == 1) {
-        b_d = e.driver;
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (in_pin.get_port_id() == 0) {
+        a_d = in_drv;
+      } else if (in_pin.get_port_id() == 1) {
+        b_d = in_drv;
       }
     }
     std::vector<Bit> av(out_bits);
@@ -618,14 +665,15 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // re-wiring; a RUNTIME amount a combinational barrel shifter (build_shr).
     hhds::Pin_class a_d;
     hhds::Pin_class b_d;
-    for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() == 0) {
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (in_pin.get_port_id() == 0) {
         if (a_d.is_invalid()) {
-          a_d = e.driver;
+          a_d = in_drv;
         }
-      } else if (e.sink.get_port_id() == 1) {
+      } else if (in_pin.get_port_id() == 1) {
         if (b_d.is_invalid()) {
-          b_d = e.driver;  // first amount driver, matching the LEC's pid(1)[0]
+          b_d = in_drv;  // first amount driver, matching the LEC's pid(1)[0]
         }
       }
     }
@@ -731,13 +779,14 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       if (sliced_demand && region.contains(amount_node) && gu::type_op_of(amount_node) == Ntype_op::Sum) {
         hhds::Pin_class term;
         bool            valid = true;
-        for (const auto& e : amount_node.inp_edges()) {
-          const int sign = e.sink.get_port_id() == 1 ? -1 : 1;
-          int64_t   value;
-          if (positive_const(e.driver, value)) {
+        for (const auto& in_pin : amount_node.inp_sorted_pins()) {
+          const auto in_drv = in_pin.get_driver_pin();
+          const int  sign   = Ntype::sink_bank(Ntype_op::Sum, in_pin.get_port_id()) == 1 ? -1 : 1;
+          int64_t    value;
+          if (positive_const(in_drv, value)) {
             bias += sign * value;
           } else if (term.is_invalid() && sign > 0) {
-            term = e.driver;
+            term = in_drv;
           } else {
             valid = false;
           }
@@ -745,16 +794,17 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node())
             && gu::type_op_of(term.get_master_node()) == Ntype_op::Mult) {
           scale = 1;
-          for (const auto& e : term.get_master_node().inp_edges()) {
-            int64_t value;
-            if (positive_const(e.driver, value)) {
+          for (const auto& in_pin : term.get_master_node().inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
+            int64_t    value;
+            if (positive_const(in_drv, value)) {
               if (value == 0 || scale > INT64_MAX / value) {
                 valid = false;
                 break;
               }
               scale *= value;
             } else if (index.is_invalid()) {
-              index = e.driver;
+              index = in_drv;
             } else {
               valid = false;
               break;
@@ -861,8 +911,9 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // single-cycle array multiplier (build_mul) reuses the selected adder for
     // partial-product accumulation. An empty product is 1 (LEC convention).
     std::vector<hhds::Pin_class> ds;
-    for (const auto& e : n.inp_edges()) {
-      ds.push_back(e.driver);
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      ds.push_back(in_drv);
     }
     int  out_w  = real_width(out_pin);  // result magnitude width (LEC W); product is mod 2^out_w
     int  bs     = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_w);

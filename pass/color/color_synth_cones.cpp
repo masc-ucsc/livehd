@@ -30,7 +30,7 @@
 // task's Risks section.
 //
 // THE ONE PERFORMANCE INVARIANT. hhds `inp_edges()` is eager and scans a node's
-// WHOLE edge slot list including its out-edges (graph.cpp inp_edges_local, the
+// WHOLE edge slot list including its out-edges (the old graph.cpp inp_edges_local, the
 // `vid & 2` filter). Calling it from inside the per-cone loop on a 100k-fanout
 // reset/enable driver is the quadratic re-scan that cost `pass.opentimer`
 // minutes per def. So the fan-in (and the fan-out derived from it) is
@@ -781,9 +781,11 @@ void collect_roots(Cones& cn) {
   // Graph outputs, ascending port id. They overlap and merge exactly like
   // register cones; without them, output-only glue would reach the totality
   // fallback as a pile of one-node colors.
-  std::vector<std::pair<uint32_t, uint32_t>> outs;  // (port id, driver idx)
-  for (const auto& e : cn.g->get_output_node().inp_edges()) {
-    outs.emplace_back(static_cast<uint32_t>(e.sink.get_port_id()), idx_of(e.driver.get_master_node()));
+  std::vector<std::pair<uint32_t, uint32_t>> outs;               // (port id, driver idx)
+  for (auto sink : cn.g->get_output_node().inp_sorted_pins()) {  // read-only
+    for (const auto& drv : sink.get_driver_pins()) {
+      outs.emplace_back(static_cast<uint32_t>(sink.get_port_id()), idx_of(drv.get_master_node()));
+    }
   }
   std::sort(outs.begin(), outs.end());
   for (const auto& [pid, drv] : outs) {
@@ -1228,16 +1230,23 @@ void Color_synth::label_cones(hhds::Graph* g) {
     }
     cn.flag[i] = f;
 
-    // The ONE inp_edges() call per node (see the file header).
+    // The ONE fan-in walk per node (see the file header). It is now a PIN
+    // walk: a driver-only pin is skipped by a bit test before its edge storage
+    // is touched, which is what the file header's invariant was asking for.
     cn.fin_start[i] = static_cast<uint32_t>(cn.fin_drv.size());
-    for (const auto& e : node.inp_edges()) {
-      cn.fin_drv.emplace_back(idx_of(e.driver.get_master_node()));
-      cn.fin_dpid.emplace_back(e.driver.get_class_index().value);
-      cn.fin_primary.emplace_back(graph_util::is_graph_input_pin(e.driver));
-      if (cn.ctrl_cones) {
-        cn.fin_const.emplace_back(e.driver.is_const());
+    for (auto sink : node.inp_sorted_pins()) {
+      // PLURAL: a compact loop's carry-in sink holds two drivers (seed +
+      // previous ordinal, pass/legalize/legalize.cpp:301). Keeping only one
+      // would drop a fan-in entry from this CSR and mis-colour the cone.
+      for (const auto& drv : sink.get_driver_pins()) {
+        cn.fin_drv.emplace_back(idx_of(drv.get_master_node()));
+        cn.fin_dpid.emplace_back(drv.get_class_index().value);
+        cn.fin_primary.emplace_back(graph_util::is_graph_input_pin(drv));
+        if (cn.ctrl_cones) {
+          cn.fin_const.emplace_back(drv.is_const());
+        }
+        cn.fin_pid.emplace_back(static_cast<uint32_t>(sink.get_port_id()));
       }
-      cn.fin_pid.emplace_back(static_cast<uint32_t>(e.sink.get_port_id()));
     }
     cn.fin_cnt[i] = static_cast<uint32_t>(cn.fin_drv.size()) - cn.fin_start[i];
   }

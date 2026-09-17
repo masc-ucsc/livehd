@@ -1119,9 +1119,9 @@ grep -q "contradictory assume set in the design" "$OUT" \
 #     failed the replay compile and silently produced NO VCD while the verify
 #     verdict still read REFUTED. The embedded check has to follow the design
 #     one level down, EXCEPT for a port the wrapper re-exposes.
-#     The design also uses `#+[..]` (popcount), which pass.prp_writer cannot
-#     emit: an importable design must not be round-tripped through the writer,
-#     or a construct the WRITER lacks costs the whole reproduction.
+#     The design also uses `#+[..]` (popcount). The writer supports it now,
+#     but replay must still import the original design directly: the absence
+#     of formalfail_prp below checks that route independently of writer support.
 cat >"$W/stp.prp" <<'EOF'
 pub mod stp(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
   reg cnt:u8:[reset_pin=ref reset] = 0
@@ -1137,7 +1137,8 @@ formal stp.bound {
   assert(acc.o != 3, "o hit 3")
 }
 EOF
-"$LHD" compile "$W/stp.prp" --emit-dir "pyrope:$W/stp_out" --workdir "$W/stp_w" >/dev/null 2>&1   && fail "the popcount premise is stale: pass.prp_writer now emits this design, so the round-trip leg is untested"
+"$LHD" compile "$W/stp.prp" --emit-dir "pyrope:$W/stp_out" --workdir "$W/stp_w" >"$W/stp_writer.out" 2>&1 \
+  || fail "the writer must emit the struct-ported popcount design: $(cat "$W/stp_writer.out")"
 WD3="$W/wd_struct"
 OUT="$W/struct.out"
 "$LHD" formal verify "$W/stp.prp" --top stp  --workdir "$WD3" >"$OUT" 2>&1

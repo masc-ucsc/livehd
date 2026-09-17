@@ -88,7 +88,7 @@ TEST(LatchContract, DataGatedLatchIsRoleData) {
 
   auto orn = gu::create_typed_node(*g, Ntype_op::Or);
   g->get_input_pin("a").connect_sink(orn.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(orn.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(orn.create_sink_pin(1));
   auto en = orn.create_driver_pin(0);
   gu::set_bits(en, 1);
   gu::set_unsign(en);

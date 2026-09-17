@@ -277,7 +277,16 @@ run pass color synth --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --workdir "$C/
 grep -q '"code":"comb-loop-native"' "$C/diag.jsonl" \
   || fail "pass abc did not report the native combinational SCC boundary"
 run compile lg:"$C/net" --top abc_comb_loop.abc_comb_loop --emit-dir verilog:"$C/netv" --workdir "$C/w4"
-grep -q ' = (a & ' "$C/netv/"*.v || fail "mapped output dropped the native feedback expression"
+# The surviving native cone is `feedback & a`. Match it in EITHER operand
+# order: `&` is commutative and the emitter prints the operands in sink-pid
+# order, so which one comes first is not a property of the mapping. It used to
+# be stable only because every operand of a commutative cell shared ONE sink
+# pin and came back in edge-storage order; now each operand owns its own pid
+# (graph/cell.hpp's ONE DRIVER PER SINK PIN block) and the pair prints as
+# `(or_20 & a)` rather than `(a & or_20)`. Asserting one spelling made a pure
+# operand-order change look like a dropped expression.
+grep -Eq ' = \((a & [A-Za-z_][A-Za-z_0-9]*|[A-Za-z_][A-Za-z_0-9]* & a)\)' "$C/netv/"*.v \
+  || fail "mapped output dropped the native feedback expression"
 "$LHD" pass opentimer --top abc_comb_loop.abc_comb_loop lg:"$C/net" "$LIB" --workdir "$C/w5" \
     --diag-fmt jsonl --result-json "$C/rt.json" 2>"$C/ot.jsonl" \
   || fail "opentimer rejected the explicit native SCC boundary -> $(cat "$C/rt.json" 2>/dev/null)"

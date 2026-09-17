@@ -334,11 +334,16 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
   auto edge_line = [&](const auto& e) {
     os << std::format("    {} -> {}  ({}b)\n", end_name(e.driver), end_name(e.sink), gu::bits_of(e.driver));
   };
-  auto const_edge_line = [&](const auto& inp) {
-    os << std::format("    const {} -> {}  ({}b)\n",
-                      gu::const_of(inp.driver).to_pyrope(),
-                      end_name(inp.sink),
-                      gu::bits_of(inp.driver));
+  // Takes the SINK PIN. PLURAL driver read so the dump stays one line per
+  // EDGE: a compact loop's carry-in sink holds two drivers
+  // (pass/legalize/legalize.cpp:301).
+  auto const_edge_line = [&](const auto& sink) {
+    for (const auto& drv : sink.get_driver_pins()) {
+      if (!drv.is_const()) {
+        continue;
+      }
+      os << std::format("    const {} -> {}  ({}b)\n", gu::const_of(drv).to_pyrope(), end_name(sink), gu::bits_of(drv));
+    }
   };
 
   os << std::format("module {}\n", g->get_name());
@@ -357,11 +362,7 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
       for (const auto& out : pin.out_edges()) {  // outputs reread as drivers
         edge_line(out);
       }
-      for (const auto& inp : pin.inp_edges()) {
-        if (inp.driver.is_const()) {
-          const_edge_line(inp);
-        }
-      }
+      const_edge_line(pin);  // a graph output pin is a sink; the lambda filters
     }
   }
   for (auto node : g->body().nodes()) {
@@ -369,13 +370,13 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
       continue;
     }
     os << std::format("  {}\n", gu::debug_name(node));
-    for (const auto& out : node.out_edges()) {
-      edge_line(out);
-    }
-    for (const auto& inp : node.inp_edges()) {
-      if (inp.driver.is_const()) {
-        const_edge_line(inp);
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& out : dpin.out_edges()) {
+        edge_line(out);
       }
+    }
+    for (auto inp : node.inp_sorted_pins()) {
+      const_edge_line(inp);  // the lambda filters to const drivers
     }
   }
 }

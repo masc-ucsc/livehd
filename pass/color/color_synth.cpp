@@ -45,8 +45,9 @@ void Color_synth::force_id(const hhds::Node_class& node, int id) {
 // unknown width simply is not a boundary, which makes the region larger, never
 // wrong.
 int Color_synth::driver_bits(const hhds::Node_class& n) {
-  for (const auto& e : n.out_edges()) {
-    if (auto b = bits_of(e.driver); b != 0) {
+  // Driver-pin walk: this only ever read the driver side.
+  for (const auto& dpin : n.out_sorted_pins()) {
+    if (auto b = bits_of(dpin); b != 0) {
       return b;
     }
   }
@@ -61,8 +62,8 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
   // Comparisons lower to subtraction later in ABC, so their operand width
   // (not their one-bit result) decides the arithmetic boundary here.
   if (op == Ntype_op::LT || op == Ntype_op::GT) {
-    for (const auto& e : node.inp_edges()) {
-      if (bits_of(e.driver) > 8) {
+    for (auto sink : node.inp_sorted_pins()) {  // read-only pin walk
+      if (bits_of(sink.get_driver_pin()) > 8) {
         return true;
       }
     }
@@ -163,12 +164,14 @@ void Color_synth::mark_ids(hhds::Graph* g) {
     const int id = it == flat_node2id.end() ? get_free_id() : it->second;
     set_id(node, id);  // the node records its OWN id, not just its sinks'
 
-    for (const auto& e : node.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      if (!is_partitionable(snode) || is_cut(snode) || is_seeded(snode)) {
-        continue;  // a cut owns its region; it never inherits this one
+    for (const auto& dpin : node.out_sorted_pins()) {  // fanout is a SET
+      for (const auto& e : dpin.out_edges()) {
+        auto snode = e.sink.get_master_node();
+        if (!is_partitionable(snode) || is_cut(snode) || is_seeded(snode)) {
+          continue;  // a cut owns its region; it never inherits this one
+        }
+        set_id(snode, id);
       }
-      set_id(snode, id);
     }
   }
 
@@ -209,12 +212,14 @@ void Color_synth::preserve_arith_cuts() {
     flat_node2id[n]  = cut_id;
     // Keep constant output slicing with its producer so ABC can see the
     // demanded width when lowering a wide barrel shifter.
-    for (const auto& e : n.out_edges()) {
-      auto sink = e.sink.get_master_node();
-      if (type_op_of(sink) == Ntype_op::Get_mask && !is_seeded(sink)) {
-        auto mask = graph_util::get_driver_of_sink_name(sink, "mask");
-        if (mask.is_const()) {
-          flat_node2id[sink] = cut_id;
+    for (const auto& dpin : n.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        auto sink = e.sink.get_master_node();
+        if (type_op_of(sink) == Ntype_op::Get_mask && !is_seeded(sink)) {
+          auto mask = graph_util::get_driver_of_sink_name(sink, "mask");
+          if (mask.is_const()) {
+            flat_node2id[sink] = cut_id;
+          }
         }
       }
     }

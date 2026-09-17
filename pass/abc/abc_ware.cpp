@@ -219,15 +219,16 @@ void Mapper::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
           continue;
         }
         auto out = shell->get_output_pin(od.name);
-        if (!out.inp_edges().empty()) {
+        if (out.has_driver()) {
           continue;
         }
-        for (auto e : old_body->get_output_pin(od.name).inp_edges()) {
-          if (e.driver.is_const()) {
-            auto c = gu::create_const(*shell, gu::const_of(e.driver));
+        // Both are graph output pins, i.e. SINKS: one driver each, not a set.
+        if (const auto drv = old_body->get_output_pin(od.name).get_driver_pin(); !drv.is_invalid()) {
+          if (drv.is_const()) {
+            auto c = gu::create_const(*shell, gu::const_of(drv));
             c.connect_sink(out);
-          } else if (gu::is_graph_input_pin(e.driver)) {
-            shell->get_input_pin(gu::pin_name_of(e.driver)).connect_sink(out);
+          } else if (gu::is_graph_input_pin(drv)) {
+            shell->get_input_pin(gu::pin_name_of(drv)).connect_sink(out);
           }
         }
       }

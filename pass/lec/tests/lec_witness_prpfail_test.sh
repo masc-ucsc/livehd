@@ -245,17 +245,15 @@ SS="$WORK/ss"
 $LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WS/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SS" >/dev/null 2>&1
 ck "struct: testbench sim-valid"   '[ -f "$SS/sim/drv.cpp" ]'
 
-# ---- a construct pass.prp_writer cannot EMIT must not cost the testbench. The
-# import form references the original .prp verbatim, so it needs the two HEADERS
-# and nothing else; re-emitting a Pyrope side through the writer was pure cost
-# that could fail for a reason the LEC verdict does not care about (here
-# `popcount`, `#+[..]`), and took the whole counterexample down with it. ----
+# ---- import the original popcount design directly. The writer now supports
+# popcount, but replay must still avoid re-emitting either Pyrope side. The
+# absence of lecfail_*_prp below checks that independently of writer support. ----
 sed 's|if io.valid {|const pc:u4 = io.bits.x#+[..]\n  if io.valid {|; s|cnt + io.bits.x|cnt + pc|' \
     "$WORK/simpl.prp" > "$WORK/pcimpl.prp"
 sed 's|if io.valid {|const pc:u4 = io.bits.x#+[..]\n  if io.valid {|; s|cnt + io.bits.x|cnt + pc|' \
     "$WORK/sref.prp"  > "$WORK/pcref.prp"
-ck "popcount: writer really refuses it" \
-   '! $LHD compile "$WORK/pcimpl.prp" --emit-dir "pyrope:$WORK/pcw_out" --workdir "$WORK/pcw" >/dev/null 2>&1'
+ck "popcount: writer emits it" \
+   '$LHD compile "$WORK/pcimpl.prp" --emit-dir "pyrope:$WORK/pcw_out" --workdir "$WORK/pcw" >/dev/null 2>&1'
 WC="$WORK/wc"
 $LHD lec --impl "$WORK/pcimpl.prp" --ref "$WORK/pcref.prp" --workdir "$WC" --set formal.simfail_run=false >/dev/null 2>&1
 ck "popcount: prp still generated" '[ -f "$WC/simfail_dut.prp" ]'

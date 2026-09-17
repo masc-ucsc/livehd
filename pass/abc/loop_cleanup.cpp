@@ -38,8 +38,11 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
             || gu::type_op_of(node) == Ntype_op::Memory || !reached.insert(node).second) {
           continue;
         }
-        for (const auto& output : node.out_edges()) {
-          work.push_back(output.driver);
+        // The frontier is this node's DRIVER PINS. Walking its out-edges
+        // pushed the same pin once per consumer, so a fan-out of N cost N edge
+        // decodes and N duplicate worklist entries for one pin.
+        for (const auto& out_pin : node.out_sorted_pins()) {
+          work.push_back(out_pin);
         }
       }
     }
@@ -71,10 +74,10 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
   std::vector<hhds::Pin_class>                 inputs, outputs;
   absl::flat_hash_map<hhds::Pin_class, size_t> input_ids, output_ids;
   for (auto node : nodes) {
-    for (const auto& edge : node.inp_edges()) {
-      if (!edge.driver.is_const() && !selected.contains(edge.driver.get_master_node())
-          && input_ids.emplace(edge.driver, inputs.size()).second) {
-        inputs.push_back(edge.driver);
+    for (const auto& in_pin : node.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (!in_drv.is_const() && !selected.contains(in_drv.get_master_node()) && input_ids.emplace(in_drv, inputs.size()).second) {
+        inputs.push_back(in_drv);
       }
     }
     for (const auto& edge : node.out_edges()) {
@@ -130,10 +133,15 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
     return copy;
   };
   for (auto node : nodes) {
-    for (const auto& edge : node.inp_edges()) {
-      auto sink = copies.at(node).create_sink_pin(edge.sink.get_port_id());
-      gu::carry_pin_attrs(edge.sink, sink);
-      driver(edge.driver).connect_sink(sink);
+    // LAZY, not a snapshot, although the body creates pins and edges: every
+    // one of those lands in `shared` (the new graph `copies`/`pins` live in),
+    // never in `body`, which is the graph being walked. The two bodies have
+    // separate mutation epochs, so the iterator is not invalidated here.
+    for (const auto& in_pin : node.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      auto       sink   = copies.at(node).create_sink_pin(in_pin.get_port_id());
+      gu::carry_pin_attrs(in_pin, sink);
+      driver(in_drv).connect_sink(sink);
     }
   }
   auto instance = gu::create_typed_node(*body, Ntype_op::Sub);
@@ -214,8 +222,9 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
           if (!child || (!livehd::color::is_pattern_def_name(child->get_name()) && !parallel_defs.contains(child->get_gid()))) {
             continue;
           }
-          for (const auto& edge : node.inp_edges()) {
-            if (edge.driver.is_const()) {
+          for (const auto& in_pin : node.inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
+            if (in_drv.is_const()) {
               constant_patterns.push_back(node);
               break;
             }

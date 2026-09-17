@@ -1025,6 +1025,7 @@ sh_test(
     # so the test does not oversubscribe concurrent solver tests.
     tags = ["cpu:12"],
     data = [
+        "//inou/prp:tests/sim/reduce_wide.prp",
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg.prp",
@@ -1853,6 +1854,13 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+sh_test(
+    name = "lhd_abc_reductions_test",
+    size = "large",
+    srcs = ["lhd_abc_reductions_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # SAT learned-clause reduction and exhaustive mapped quadratic simulation.
 sh_test(
     name = "lhd_abc_fraig_test",
@@ -1972,4 +1980,16 @@ sh_test(
         "//inou/prp:abc_tests",
         "//inou/prp:tests/sim/loop_roll_carry.prp",
     ],
+)
+
+# Regression: upass.constprop's scatter_positional_array wrote an array-shaped
+# destination straight into the symbol-table bundle, skipping
+# record_uncertain_modification -- so a conditional whole-array store kept its
+# constant after the arm closed and poisoned the next whole read (minion's
+# vpu_tensorfma RMW base folded to 0, LEC-REFUTED). Just //lhd.
+sh_test(
+    name = "upass_uncertain_array_scatter_test",
+    size = "medium",
+    srcs = ["upass_uncertain_array_scatter_test.sh"],
+    data = ["//lhd"],
 )

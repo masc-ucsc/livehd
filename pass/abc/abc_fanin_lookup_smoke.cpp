@@ -43,12 +43,19 @@ TEST(AbcFaninLookup, WideSparseInterfaceAndNodeChanges) {
     EXPECT_TRUE(lookup(empty, 0).is_invalid());
   }
 
-  // Folded operators may have several drivers on a sink port. Preserve the
-  // importer policy of choosing the first edge, rather than overwriting it.
+  // A folded commutative operator. This used to pile both operands onto sink
+  // port 0 and assert that the lookup kept the FIRST of the two drivers (the
+  // importer's policy) and that port 1 was empty.
+  //
+  // Neither is the shape any more: Or is a single-BANK cell, so each operand
+  // owns a CONSECUTIVE pid (graph/cell.hpp's ONE DRIVER PER SINK PIN), and the
+  // "which of several drivers wins" question has no subject left. What the
+  // lookup must now do is report each operand on its own port, which is what is
+  // asserted -- a stronger property than the first-edge tie-break it replaces.
   auto folded = livehd::graph_util::create_typed_node(*graph, Ntype_op::Or);
-  a.connect_sink(folded.create_sink_pin(0));
-  b.connect_sink(folded.create_sink_pin(0));
-  const auto first = folded.inp_edges().front().driver;
-  EXPECT_EQ(lookup(folded, 0), first);
-  EXPECT_TRUE(lookup(folded, 1).is_invalid());
+  a.connect_sink(livehd::graph_util::setup_sink_pid(folded, 0));
+  b.connect_sink(livehd::graph_util::setup_sink_pid(folded, 0));
+  EXPECT_EQ(lookup(folded, 0), a);
+  EXPECT_EQ(lookup(folded, 1), b);
+  EXPECT_TRUE(lookup(folded, 2).is_invalid());
 }

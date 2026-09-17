@@ -3,6 +3,7 @@
 #include "legalize.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -179,19 +180,18 @@ void copy_body(hhds::Graph* src, hhds::Graph* dst, hhds::GraphLibrary* rebind, c
   // ---- pass 2: wire every edge, and carry the per-pin attributes.
   //
   // Driven from the SINK side so each edge is visited exactly once (a driver's
-  // fanout can be large and out_edges() is a lazy view; inp_edges() is small,
-  // eager, and available per NODE). A driver's attributes are stamped once, not
-  // once per fanout edge.
+  // fanout can be large; a node's sink-pin list is short and already sorted).
+  // A driver's attributes are stamped once, not once per fanout edge.
   absl::flat_hash_set<hhds::Pin_class> stamped;
-  const auto                           wire_edge = [&](const hhds::Edge_class& e) {
-    auto neo_sink = map_pin(e.sink, /*want_driver=*/false);
-    auto neo_drv  = map_pin(e.driver, /*want_driver=*/true);
+  const auto wire_edge = [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
+    auto neo_sink = map_pin(sink, /*want_driver=*/false);
+    auto neo_drv  = map_pin(driver, /*want_driver=*/true);
     if (neo_sink.is_invalid() || neo_drv.is_invalid()) {
       return;
     }
-    gu::carry_pin_attrs(e.sink, neo_sink);
-    if (stamped.insert(e.driver).second) {
-      gu::carry_pin_attrs(e.driver, neo_drv);
+    gu::carry_pin_attrs(sink, neo_sink);
+    if (stamped.insert(driver).second) {
+      gu::carry_pin_attrs(driver, neo_drv);
     }
     neo_drv.connect_sink(neo_sink);
   };
@@ -199,10 +199,16 @@ void copy_body(hhds::Graph* src, hhds::Graph* dst, hhds::GraphLibrary* rebind, c
     if (!accepted(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      wire_edge(e);
+    // SNAPSHOT: wire_edge creates pins and edges in `dst`, but map_pin can also
+    // mint a constant in `dst`; the walked body is `src`, so this could be lazy
+    // -- it is a snapshot only because the PLURAL reader is needed for a compact
+    // loop's two-driver carry-in and the cost is one small vector per node.
+    for (auto sink : n.inp_pins_snapshot()) {
+      for (auto drv : sink.get_driver_pins()) {
+        wire_edge(sink, drv);
+      }
     }
-    // A single-output cell with NO fanout never appears on any sink's inp_edges,
+    // A single-output cell with NO fanout never appears on any sink pin,
     // so its driver width/sign would be lost. Port 0 is the sole driver of every
     // single-output op. Multi-driver ops (Sub/Memory/IO) keep their decl-based widths.
     if (!Ntype::has_multiple_driver_pins(gu::type_op_of(n))) {
@@ -215,11 +221,13 @@ void copy_body(hhds::Graph* src, hhds::Graph* dst, hhds::GraphLibrary* rebind, c
   // The output singleton is walked too: its sinks are compare points, not
   // decoration, and a rebuild that dropped them would emit a module whose ports
   // are undriven.
-  for (const auto& e : src->get_output_node().inp_edges()) {
-    if (keep_out != nullptr && !keep_out->contains(e.sink.get_port_id())) {
+  for (auto sink : src->get_output_node().inp_pins_snapshot()) {
+    if (keep_out != nullptr && !keep_out->contains(sink.get_port_id())) {
       continue;
     }
-    wire_edge(e);
+    for (auto drv : sink.get_driver_pins()) {
+      wire_edge(sink, drv);
+    }
   }
   // Declared INPUT pins carry width/sign whether or not anything reads them; an
   // unused input has no edge to carry them from.
@@ -270,6 +278,105 @@ bool verify_frozen(hhds::Graph* g, std::string_view who) {
 
 size_t frozen_count() { return frozen_ledger().size(); }
 
+int verify_single_driver_sinks(hhds::Graph* g, std::string_view who) {
+  if (!is_live(g)) {
+    return 0;
+  }
+  int bad = 0;
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    if (node.is_invalid()) {
+      continue;
+    }
+    // Group by sink pid. `inp_sorted_pins()` yields the NODE-AS-PIN (port 0)
+    // FIRST and then the pin list in ascending port order, so this does see the
+    // pin that commutative cells crowd onto -- port 0 is exactly where a banked
+    // op's first `as` operand lives. (The predecessor of this check counted
+    // in-edges instead, because the old `inp_pins()` could not report port 0 at
+    // all; `inp_edges()` is gone and that workaround went with it.)
+    //
+    // An UNDRIVEN sink pin contributes no edge and is invisible here, which is
+    // right: it is unobservable (no consumer can read it) and is how a mutation
+    // that deleted an edge legitimately leaves the table.
+    //
+    // PLURAL reader, and that is the whole point: `get_driver_pin()` (singular)
+    // returns `drivers.front()` and is the very accessor whose one-driver
+    // assumption this pass exists to police. Calling it here made the check
+    // VACUOUS in opt -- one entry per connected sink pin, so `drivers.size()`
+    // could never exceed 1 and `bad` was always 0 -- while in a debug build its
+    // assert fired on the compact-loop carry BEFORE the sanctioned-exception
+    // arm below could whitelist it. hhds delegates this invariant to us
+    // explicitly ("that is the invariant a verify pass owns in opt",
+    // hhds/graph.hpp on get_driver_pin), so the verifier must use the primitive
+    // that can actually see two.
+    absl::flat_hash_map<hhds::Port_id, std::vector<hhds::Pin_class>> by_pid;
+    for (auto e_sink : node.inp_sorted_pins()) {
+      auto& slot = by_pid[e_sink.get_port_id()];
+      for (const auto& e_drv : e_sink.get_driver_pins()) {
+        slot.push_back(e_drv);
+      }
+    }
+    // THE ONE SANCTIONED EXCEPTION: a COMPACT LOOP's carry-in port.
+    //
+    // A compact loop is one Sub instance standing for every ordinal of the
+    // loop, and its carry-in sink deliberately carries TWO drivers: the SEED
+    // (ordinal 0's value, from outside the loop) and a SELF edge from the same
+    // instance's carry-OUT, which means "the previous ordinal", not
+    // same-instance combinational feedback. pass.legalize builds that self edge
+    // itself (split_loops), pass.abc's blaster recognises it by exactly this
+    // shape (`n.is_loop_subnode() && e.driver.get_master_node() == n`) and
+    // restores it from the descriptor, and every loop consumer reads it the
+    // same way.
+    //
+    // It is NOT the multi-driver-per-pin shape this check exists to remove: the
+    // two drivers are not operands of a commutative fold, they are two
+    // ORDINALS of one port, and giving them separate pids would say something
+    // different. Re-encoding the compact-loop carry is its own change; until
+    // then it is disclosed here rather than silently tolerated.
+    const bool loop_sub = node.is_loop_subnode();
+    for (const auto& [pid, drivers] : by_pid) {
+      if (drivers.size() <= 1) {
+        continue;
+      }
+      if (loop_sub && drivers.size() == 2
+          && std::any_of(drivers.begin(), drivers.end(), [&](const auto& d) { return d.get_master_node() == node; })) {
+        continue;  // seed + previous-ordinal self edge
+      }
+      ++bad;
+      std::string names;
+      for (const auto& d : drivers) {
+        if (!names.empty()) {
+          names += ", ";
+        }
+        names += gu::debug_name(d.get_master_node());
+      }
+      const auto op = gu::type_op_of(node);
+      livehd::diag::err(kPass, "sink-multi-driver", "internal")
+          .msg("'{}': sink pin {} ('{}') of {} in '{}' has {} drivers ({})",
+               who,
+               static_cast<uint32_t>(pid),
+               Ntype::get_sink_name(op, pid),
+               gu::debug_name(node),
+               std::string{g->get_name()},
+               drivers.size(),
+               names)
+          .hint(
+              "a sink pin takes EXACTLY one driver. A commutative cell spends one sink pid PER OPERAND -- append with "
+              "graph_util::setup_sink_by_name / append_sink_operand instead of connecting twice to the same pin "
+              "(graph/cell.hpp, ONE DRIVER PER SINK PIN)")
+          .emit();
+    }
+  }
+  return bad;
+}
+
+int verify_design_single_driver_sinks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view who) {
+  int bad = 0;
+  for (const auto& g : graphs) {
+    bad += verify_single_driver_sinks(g.get(), who);
+  }
+  return bad;
+}
+
 std::shared_ptr<hhds::GraphIO> clone_io_decls(hhds::Graph* src, hhds::GraphLibrary& dst_lib) {
   if (src == nullptr || src->get_io() == nullptr) {
     return nullptr;
@@ -319,9 +426,10 @@ struct Half {
 void cone_of_output(hhds::Graph* body, hhds::Port_id out_port, Half& half) {
   const auto                   in_node = body->get_input_node();
   std::vector<hhds::Pin_class> work;
-  for (const auto& e : body->get_output_node().inp_edges()) {
-    if (e.sink.get_port_id() == out_port) {
-      work.push_back(e.driver);
+  for (auto e_sink : body->get_output_node().inp_sorted_pins()) {
+    auto e_drv = e_sink.get_driver_pin();
+    if (e_sink.get_port_id() == out_port) {
+      work.push_back(e_drv);
     }
   }
   while (!work.empty()) {
@@ -341,8 +449,9 @@ void cone_of_output(hhds::Graph* body, hhds::Port_id out_port, Half& half) {
     if (gu::is_builtin_node(n) || !half.nodes.insert(n).second) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    for (auto e_sink : n.inp_sorted_pins()) {
+      auto e_drv = e_sink.get_driver_pin();
+      work.push_back(e_drv);
     }
   }
 }
@@ -528,17 +637,19 @@ int split_loops(hhds::Graph* host, hhds::GraphLibrary& lib, Split_state* state) 
     // BOTH halves; a carry self-edge is re-created per half below. The other
     // half's seed lands on a port that half never self-wires, which makes it a
     // plain (unused) input there.
-    for (const auto& e : sub.inp_edges()) {
-      if (e.driver.get_master_node() == sub) {
-        continue;  // the old self-edge
+    for (auto e_sink : sub.inp_pins_snapshot()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (e_drv.get_master_node() == sub) {
+          continue;  // the old self-edge
+        }
+        const auto pid = e_sink.get_port_id();
+        auto       ps  = par_sub.create_sink_pin(pid);
+        auto       is  = ind_sub.create_sink_pin(pid);
+        gu::carry_pin_attrs(e_sink, ps);
+        gu::carry_pin_attrs(e_sink, is);
+        e_drv.connect_sink(ps);
+        e_drv.connect_sink(is);
       }
-      const auto pid = e.sink.get_port_id();
-      auto       ps  = par_sub.create_sink_pin(pid);
-      auto       is  = ind_sub.create_sink_pin(pid);
-      gu::carry_pin_attrs(e.sink, ps);
-      gu::carry_pin_attrs(e.sink, is);
-      e.driver.connect_sink(ps);
-      e.driver.connect_sink(is);
     }
     const auto self_wire = [](const hhds::Node_class& n, const Half& h) {
       for (size_t i = 0; i < h.carry_in.size(); ++i) {
@@ -711,7 +822,14 @@ Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>&
   out.added = state.added;
   out.removed.insert(out.removed.end(), state.removed.begin(), state.removed.end());
 
-  // 4. Freeze AFTER every structural change, so the recorded digest is the
+  // 4. ONE DRIVER PER SINK PIN. Checked on the SETTLED design, in EVERY build
+  //    (an `I()` here would compile out of the only builds that ship). See the
+  //    header for why the transient double-drive inside a rewrite is legal and
+  //    this is not.
+  (void)verify_design_single_driver_sinks(graphs, "pass.legalize");
+  (void)verify_design_single_driver_sinks(out.added, "pass.legalize");
+
+  // 5. Freeze AFTER every structural change, so the recorded digest is the
   //    shape downstream actually sees -- the halves included.
   if (freeze_graphs) {
     for (const auto& g : graphs) {

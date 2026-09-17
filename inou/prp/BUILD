@@ -21,6 +21,7 @@ exports_files([
     "tests/sim/color_kernel_llvm_reg.prp",
     "tests/sim/color_kernel_llvm_reg_const.prp",
     "tests/sim/color_kernel_llvm_wide.prp",
+    "tests/sim/reduce_wide.prp",
     "tests/sim/color_kernel_llvm_mem_whole.prp",
     "tests/sim/mem_sim_gated_clock.prp",
     "tests/sim/loop_roll_conditional_state_call.prp",

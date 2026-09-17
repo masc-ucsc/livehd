@@ -53,8 +53,12 @@ Two_in two_in(const char* dir, const char* name, Ntype_op op, int32_t bits, hhds
   set_bits(g->get_input_pin("a"), bits);
   set_bits(g->get_input_pin("b"), bits);
   auto n = create_typed_node(*g, op);
-  g->get_input_pin("a").connect_sink(n.create_sink_pin(pa));
-  g->get_input_pin("b").connect_sink(n.create_sink_pin(pb));
+  // setup_sink_pid, not create_sink_pin: on a BANKED op (And/Or/Xor/Sum/Mult/
+  // EQ/LT/GT) each operand owns its own pid, so a literal 0 twice would build
+  // the two-drivers-on-one-pin shape the one-driver-per-sink-pin invariant
+  // forbids -- and a pin-centric reader would then see ONE operand, not two.
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(n, pa));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(n, pb));
   auto d = n.create_driver_pin(0);
   set_bits(d, out_bits == 0 ? bits : out_bits);
   d.connect_sink(g->get_output_pin("y"));

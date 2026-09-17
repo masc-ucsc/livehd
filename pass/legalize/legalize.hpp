@@ -83,6 +83,35 @@ namespace livehd::legalize {
 // lives at that address.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ONE DRIVER PER SINK PIN
+//
+// The hhds invariant every consumer now relies on: a sink pin carries EXACTLY
+// one driver, so `get_driver_pin()` is unconditionally valid and a commutative
+// cell's operands are a multiset of PINS rather than a fan-in on one pin
+// (graph/cell.hpp's ONE DRIVER PER SINK PIN block and its bank convention).
+//
+// It is checked HERE rather than with `I(...)`, deliberately: `I()` expands to
+// nothing under -DNDEBUG, which is every `-c opt` build and therefore every
+// build anyone ships or benchmarks. A cross-layer invariant guarded only by an
+// `I()` is guarded in exactly the builds nobody runs.
+//
+// A sink pin may legally be UNDRIVEN or DOUBLY-driven while a mutation is in
+// flight (cprop reconnects a consumer to a folded constant before deleting the
+// node that used to drive it). The check therefore runs on a SETTLED design, as
+// part of legalize_design, never inside a rewrite.
+// ---------------------------------------------------------------------------
+
+// Report every sink pin of `g` that carries more than one driver. Returns the
+// number found (0 == legal) and emits one diagnostic per offender, naming the
+// node, the sink pid and the drivers. `who` names the caller in the diagnostic.
+[[nodiscard]] int verify_single_driver_sinks(hhds::Graph* g, std::string_view who);
+
+// The same over a whole design. Called by legalize_design; exposed so a pass
+// under suspicion can re-run it at its own boundary.
+[[nodiscard]] int verify_design_single_driver_sinks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
+                                                    std::string_view                                 who);
+
 // Record `g`'s structure. Call once, on the rebuild's output.
 void freeze(hhds::Graph* g);
 void freeze(const std::shared_ptr<hhds::Graph>& g);

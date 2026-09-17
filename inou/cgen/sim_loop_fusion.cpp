@@ -127,11 +127,19 @@ std::shared_ptr<hhds::Graph> fuse_group(hhds::Graph* graph, const std::vector<hh
         gu::carry_pin_attrs(old_output, fused_output);
       }
     }
-    for (const auto& edge : original.inp_edges()) {
-      if (edge.driver.get_master_node() == original || original.subnode_loop()->index_input == edge.sink.get_port_id()) {
-        continue;
+    // TWO reasons this is a SNAPSHOT over the PLURAL driver reader: `original`
+    // is a compact-loop Sub, whose carry-in sink is the one pin pass/legalize
+    // sanctions with two drivers (get_driver_pin() would hand back just one of
+    // them, and the `== original` test below is what separates them), and this
+    // body MUTATES the graph as it walks (connect_sink / create_sink_pin),
+    // which a lazy view over live pin storage does not survive.
+    for (auto edge_sink : original.inp_pins_snapshot()) {
+      for (auto edge_drv : edge_sink.get_driver_pins()) {
+        if (edge_drv.get_master_node() == original || original.subnode_loop()->index_input == edge_sink.get_port_id()) {
+          continue;
+        }
+        edge_drv.connect_sink(fused.create_sink_pin(ports[i].inputs.at(edge_sink.get_port_id())));
       }
-      edge.driver.connect_sink(fused.create_sink_pin(ports[i].inputs.at(edge.sink.get_port_id())));
     }
     for (const auto& carry : original.subnode_group().carries()) {
       fused.create_driver_pin(ports[i].outputs.at(carry.output_port()))
@@ -179,14 +187,19 @@ std::vector<std::shared_ptr<hhds::Graph>> fuse_parallel_loops(hhds::Graph* graph
   std::vector<size_t>              indegree(nodes.size());
   std::vector<std::vector<size_t>> successors(nodes.size());
   for (size_t sink = 0; sink < nodes.size(); ++sink) {
-    for (const auto& edge : nodes[sink].inp_edges()) {
-      const auto producer = edge.driver.get_master_node();
-      if (producer == nodes[sink] && nodes[sink].is_loop_subnode()) {
-        continue;  // ordinal carry, not a dependency between loops
-      }
-      if (auto it = ids.find(producer); it != ids.end()) {
-        ++indegree[sink];
-        successors[it->second].push_back(sink);
+    // Edge-shaped on purpose: `nodes[sink]` may be a compact-loop Sub and the
+    // ordinal-carry filter just below is a per-EDGE test on that two-driver
+    // carry-in sink.
+    for (auto edge_sink : nodes[sink].inp_sorted_pins()) {
+      for (auto edge_drv : edge_sink.get_driver_pins()) {
+        const auto producer = edge_drv.get_master_node();
+        if (producer == nodes[sink] && nodes[sink].is_loop_subnode()) {
+          continue;  // ordinal carry, not a dependency between loops
+        }
+        if (auto it = ids.find(producer); it != ids.end()) {
+          ++indegree[sink];
+          successors[it->second].push_back(sink);
+        }
       }
     }
   }

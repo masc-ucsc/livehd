@@ -848,6 +848,8 @@ std::string context_descriptor(const Options& opts) {
     text += std::format("|src:{}", normalized_user_path(f));
   }
   auto sets = opts.sets;
+  // This descriptor is persisted and compared byte-for-byte by load_prior;
+  // preserve exact option equality rather than replacing it with a digest.
   std::sort(sets.begin(), sets.end());
   for (const auto& [key, value] : sets) {
     // Reporting does not change the compiled graph; toggling --stats must keep

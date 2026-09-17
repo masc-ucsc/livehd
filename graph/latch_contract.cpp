@@ -79,14 +79,14 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
       // selector's, inverted when the arms are swapped. Any other mux is data,
       // not a control shape -> stop.
       Pin sel, arm0, arm1;
-      for (const auto& e : n.inp_edges()) {
-        const auto pid = e.sink.get_port_id();
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        const auto pid = in.get_port_id();
         if (pid == 0) {
-          sel = e.driver;
+          sel = in.driver;
         } else if (pid == 1) {
-          arm0 = e.driver;
+          arm0 = in.driver;
         } else if (pid == 2) {
-          arm1 = e.driver;
+          arm1 = in.driver;
         }
       }
       if (sel.is_invalid() || arm0.is_invalid() || arm1.is_invalid()) {
@@ -111,8 +111,8 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
       // `if !clk` (one extra negation) reliably lands on the opposite parity.
       Pin a, b;
       int cnt = 0;
-      for (const auto& e : n.inp_edges()) {
-        (cnt++ == 0 ? a : b) = e.driver;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        (cnt++ == 0 ? a : b) = in.driver;
       }
       if (cnt != 2) {
         break;
@@ -147,18 +147,18 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
       Pin val;
       Pin cst;
       int cnt = 0;
-      for (const auto& e : n.inp_edges()) {
+      for (const auto& in : gu::inp_sink_drivers(n)) {
         ++cnt;
-        if (e.driver.is_const()) {
+        if (in.driver.is_const()) {
           if (!cst.is_invalid()) {
             break;
           }
-          cst = e.driver;
+          cst = in.driver;
         } else {
           if (!val.is_invalid()) {
             break;
           }
-          val = e.driver;
+          val = in.driver;
         }
       }
       if (cnt != 2 || val.is_invalid() || cst.is_invalid()) {
@@ -185,8 +185,8 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
 
     if (op == Ntype_op::Not) {
       Pin a;
-      for (const auto& e : n.inp_edges()) {
-        a = e.driver;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        a = in.driver;
         break;
       }
       if (a.is_invalid()) {
@@ -207,12 +207,12 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
       Pin  val;
       bool masked = false;
       int  cnt    = 0;
-      for (const auto& e : n.inp_edges()) {
+      for (const auto& in : gu::inp_sink_drivers(n)) {
         ++cnt;
-        if (const_is(e.driver, 1) || const_is(e.driver, -1)) {
+        if (const_is(in.driver, 1) || const_is(in.driver, -1)) {
           masked = true;
         } else {
-          val = e.driver;
+          val = in.driver;
         }
       }
       if (cnt != 2 || !masked || val.is_invalid()) {
@@ -320,16 +320,17 @@ void comb_reach(const hhds::Pin_class& start, const hhds::Node_class& hold_owner
       continue;  // opaque instance: not traversed (conservative, may under-report)
     }
     const auto control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(n) : 0;
-    for (const auto& e : n.inp_edges()) {
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      auto drv = sink.get_driver_pin();
       // The hold-mux exemption applies to data arms of either mux encoding.
-      const auto pid = e.sink.get_port_id();
+      const auto pid = sink.get_port_id();
       const bool data_arm
           = (op == Ntype_op::Mux && pid != 0) || (op == Ntype_op::Hotmux && !gu::is_hotmux_control(pid, control_end));
-      if (has_owner && data_arm && !owner_q.is_invalid() && !e.driver.is_invalid()
-          && e.driver.get_class_index() == owner_q.get_class_index()) {
+      if (has_owner && data_arm && !owner_q.is_invalid() && !drv.is_invalid()
+          && drv.get_class_index() == owner_q.get_class_index()) {
         continue;
       }
-      work.push_back(e.driver);
+      work.push_back(drv);
     }
   }
 }
@@ -410,9 +411,9 @@ Occurrence_control_root control_root(hhds::Occurrence_pin p, bool stop_at_clock_
 
 hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name) {
   const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), sink_name);
-  for (const auto& e : n.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.driver;
+  for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+    if (sink.get_port_id() == pid) {
+      return sink.get_driver_pin();
     }
   }
   return {};
@@ -420,9 +421,17 @@ hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sin
 
 hhds::Occurrence_pin sink_driver_hier(const hhds::Occurrence_node& n, std::string_view sink_name) {
   const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), sink_name);
-  for (const auto& e : n.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.driver;
+  // The hier twin of the flat walk above, and the same two levels
+  // Occurrence_node::inp_edges() ran internally: sink pins in SORTED order,
+  // then the drivers of each. SORTED is load-bearing -- the raw inp_pins()
+  // omits the node-as-pin (port 0), which is a real operand slot. PLURAL keeps
+  // it edge-for-edge: a sink may carry more than one driver, and the first of
+  // them is the edge the old walk reached first.
+  for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+    if (sink.get_port_id() == pid) {
+      for (auto driver : sink.get_driver_pins()) {
+        return driver;
+      }
     }
   }
   return {};
@@ -546,14 +555,15 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
       // falls through: it is the through-value itself.
       bool            has_q_arm = false;
       hhds::Pin_class other;
-      for (const auto& e : mux.inp_edges()) {
-        if (e.sink.get_port_id() == 0) {
+      for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
+        if (sink.get_port_id() == 0) {
           continue;  // the selector is the gate, not an arm
         }
-        if (!e.driver.is_invalid() && e.driver.get_class_index() == q.get_class_index()) {
+        auto drv = sink.get_driver_pin();
+        if (!drv.is_invalid() && drv.get_class_index() == q.get_class_index()) {
           has_q_arm = true;
         } else if (other.is_invalid()) {
-          other = e.driver;
+          other = drv;
         }
       }
       if (has_q_arm) {
@@ -581,14 +591,22 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
     if (gu::type_op_of(mux) == Ntype_op::Mux) {
       bool                 has_q_arm = false;
       hhds::Occurrence_pin other;
-      for (const auto& e : mux.inp_edges()) {
-        if (e.sink.get_port_id() == 0) {
-          continue;
+      // Same two-level walk as the flat overload above; see sink_driver_hier.
+      // The port-0 skip stays on the OUTER loop because it is a property of the
+      // SINK -- every edge of a pin shares that pin's port -- so skipping the
+      // pin drops exactly the edges the per-edge `continue` did.
+      for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
+        if (sink.get_port_id() == 0) {
+          continue;  // the selector is the gate, not an arm
         }
-        if (!e.driver.is_invalid() && e.driver == q) {
-          has_q_arm = true;
-        } else if (other.is_invalid()) {
-          other = e.driver;
+        // PLURAL: an arm with more than one driver contributed one edge each,
+        // and `other` must still take the first of them.
+        for (auto driver : sink.get_driver_pins()) {
+          if (!driver.is_invalid() && driver == q) {
+            has_q_arm = true;
+          } else if (other.is_invalid()) {
+            other = driver;
+          }
         }
       }
       if (has_q_arm) {
@@ -657,11 +675,12 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
       if (gu::type_op_of(aggregate) == Ntype_op::Or) {
         hhds::Pin_class only;
         int             live_inputs = 0;
-        for (const auto& edge : aggregate.inp_edges()) {
-          if (edge.driver.is_invalid() || edge.driver.is_const()) {
+        for (auto sink : aggregate.inp_sorted_pins()) {  // read-only walk
+          auto drv = sink.get_driver_pin();
+          if (drv.is_invalid() || drv.is_const()) {
             continue;
           }
-          only = edge.driver;
+          only = drv;
           ++live_inputs;
         }
         if (live_inputs == 1) {
@@ -694,9 +713,9 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
           }
         }
         if (found_pid) {
-          for (const auto& edge : rn.inp_edges()) {
-            if (static_cast<uint32_t>(edge.sink.get_port_id()) == clock_pid) {
-              return root_port(edge.driver, depth + 1);
+          for (auto sink : rn.inp_sorted_pins()) {  // read-only walk
+            if (static_cast<uint32_t>(sink.get_port_id()) == clock_pid) {
+              return root_port(sink.get_driver_pin(), depth + 1);
             }
           }
         }
@@ -755,11 +774,11 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     result.complete         = result.complete && child.complete;
     for (const auto cp : child.ports) {
       bool found = false;
-      for (const auto& e : n.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) != cp) {
+      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+        if (static_cast<uint32_t>(sink.get_port_id()) != cp) {
           continue;
         }
-        add_clock(e.driver);
+        add_clock(sink.get_driver_pin());
         found = true;
         break;
       }
@@ -835,11 +854,11 @@ const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& d
     result.complete         = result.complete && child.complete;
     for (const auto& rp : child.ports) {
       bool found = false;
-      for (const auto& e : n.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) != rp.port_id) {
+      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+        if (static_cast<uint32_t>(sink.get_port_id()) != rp.port_id) {
           continue;
         }
-        add_reset(e.driver, rp.active_low);
+        add_reset(sink.get_driver_pin(), rp.active_low);
         found = true;
         break;
       }
@@ -909,9 +928,9 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass, const st
     if (clk_pids.empty()) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      if (clk_pids.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
-        mark_clock_net(e.driver);
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      if (clk_pids.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+        mark_clock_net(sink.get_driver_pin());
       }
     }
   }
@@ -1028,8 +1047,9 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
   }
   Icg_cone icg;
   int      n_clock = 0;
-  for (const auto& e : n.inp_edges()) {
-    if (e.driver.is_invalid()) {
+  for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+    auto drv = sink.get_driver_pin();
+    if (drv.is_invalid()) {
       return std::nullopt;
     }
     // A CONSTANT operand is a WIDTH MASK, not an enable. `x & 1` is how the
@@ -1037,10 +1057,10 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
     // `And(Not(Get_mask(clk)), 1)`. Reading that constant as an enable made an
     // INVERTED CLOCK look like a gated one, which silently threw the inversion
     // away and un-fixed the negedge-vs-posedge case.
-    if (e.driver.is_const()) {
+    if (drv.is_const()) {
       continue;
     }
-    const auto ph = resolve_phase(e.driver);
+    const auto ph = resolve_phase(drv);
     if (!ph.net.is_invalid() && clocks.is_clock(ph.net)) {
       ++n_clock;
       icg.clock          = ph.net;
@@ -1059,13 +1079,13 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
     // recursion lives HERE, in the shared recognizer, rather than in any one
     // consumer's private matcher.
     if (depth < kMaxGateChain) {
-      if (auto inner = clock_op_depth(e.driver, clocks, depth + 1)) {
+      if (auto inner = clock_op_depth(drv, clocks, depth + 1)) {
         ++n_clock;
         absorb_chain(icg, *inner, outer.inverted);
         continue;
       }
     }
-    icg.enables.push_back(e.driver);
+    icg.enables.push_back(drv);
   }
   // EXACTLY ONE clock operand, and at least one non-constant enable. Zero clock
   // operands means we could not tell which is the clock; more than one means the
@@ -1135,11 +1155,12 @@ hhds::Pin_class peel_width_mask(hhds::Pin_class inner) {
     hhds::Pin_class value;
     int             values = 0;
     bool            mask   = true;
-    for (const auto& e : node.inp_edges()) {
-      if (e.driver.is_const()) {
-        mask = mask && const_is(e.driver, 1);
-      } else if (!e.driver.is_invalid()) {
-        value = e.driver;
+    for (auto sink : node.inp_sorted_pins()) {  // read-only walk
+      auto drv = sink.get_driver_pin();
+      if (drv.is_const()) {
+        mask = mask && const_is(drv, 1);
+      } else if (!drv.is_invalid()) {
+        value = drv;
         ++values;
       }
     }
@@ -1164,9 +1185,9 @@ hhds::Pin_class parent_driver_of(const hhds::Node_class& inst, const std::shared
     if (d.name != nm) {
       continue;
     }
-    for (const auto& e : inst.inp_edges()) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
-        return e.driver;
+    for (auto sink : inst.inp_sorted_pins()) {  // read-only walk
+      if (static_cast<uint32_t>(sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
+        return sink.get_driver_pin();
       }
     }
     break;
@@ -1307,12 +1328,8 @@ std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, c
   if (opin.is_invalid()) {
     return std::nullopt;
   }
-  hhds::Pin_class inner;
-  for (const auto& e : opin.inp_edges()) {
-    inner = e.driver;
-    break;
-  }
-  inner = peel_width_mask(inner);
+  hhds::Pin_class inner = opin.get_driver_pin();  // output pin is a sink: one driver
+  inner                 = peel_width_mask(inner);
   if (inner.is_invalid() || inner.is_const() || gu::is_graph_input_pin(inner)) {
     return std::nullopt;
   }
@@ -1326,17 +1343,18 @@ std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, c
   // output never moves, and reporting it as a live gate on `clk` would hand a
   // consumer a commit class the netlist does not have.
   std::vector<hhds::Pin_class> operands;
-  for (const auto& e : gate_node.inp_edges()) {
-    if (e.driver.is_const()) {
-      if (!const_is(e.driver, 1) && !const_is(e.driver, -1)) {
+  for (auto sink : gate_node.inp_sorted_pins()) {  // read-only walk
+    auto drv = sink.get_driver_pin();
+    if (drv.is_const()) {
+      if (!const_is(drv, 1) && !const_is(drv, -1)) {
         return std::nullopt;
       }
       continue;
     }
-    if (e.driver.is_invalid() || !gu::is_graph_input_pin(e.driver)) {
+    if (drv.is_invalid() || !gu::is_graph_input_pin(drv)) {
       return std::nullopt;
     }
-    operands.push_back(e.driver);
+    operands.push_back(drv);
   }
   if (operands.size() != 2) {
     return std::nullopt;
@@ -1419,12 +1437,8 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     if (opin.is_invalid()) {
       continue;
     }
-    hhds::Pin_class inner;
-    for (const auto& e : opin.inp_edges()) {
-      inner = e.driver;
-      break;
-    }
-    inner = peel_width_mask(inner);  // see the helper: `(value & 1)` is a width mask, not the gate
+    hhds::Pin_class inner = opin.get_driver_pin();  // output pin is a sink: one driver
+    inner                 = peel_width_mask(inner);  // see the helper: `(value & 1)` is a width mask, not the gate
     if (inner.is_invalid() || inner.is_const() || gu::is_graph_input_pin(inner)) {
       continue;
     }
@@ -1456,11 +1470,12 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     // flop, so Design_clocks has no root to offer inside the def.
     hhds::Pin_class clk_port, latched;
     int             n_ports = 0, n_latched = 0;
-    for (const auto& e : gate.inp_edges()) {
-      if (e.driver.is_invalid() || e.driver.is_const()) {
+    for (auto sink : gate.inp_sorted_pins()) {  // read-only walk
+      auto drv = sink.get_driver_pin();
+      if (drv.is_invalid() || drv.is_const()) {
         continue;  // a width mask, not an operand
       }
-      const Phase ph = resolve_phase(e.driver);
+      const Phase ph = resolve_phase(drv);
       if (!ph.net.is_invalid() && gu::is_graph_input_pin(ph.net)) {
         ++n_ports;
         clk_port = ph.net;
@@ -1514,8 +1529,8 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
         return const_is(pin, 1) || const_is(pin, -1);  // an always-true And operand changes nothing
       }
       if (!gu::is_graph_input_pin(pin) && gu::type_op_of(pin.get_master_node()) == Ntype_op::And) {
-        for (const auto& edge : pin.get_master_node().inp_edges()) {
-          if (!scan_enable(edge.driver, depth + 1, saw_clock)) {
+        for (auto sink : pin.get_master_node().inp_sorted_pins()) {  // read-only walk
+          if (!scan_enable(sink.get_driver_pin(), depth + 1, saw_clock)) {
             return false;
           }
         }
@@ -1605,9 +1620,17 @@ public:
     }
     auto res  = neo.create_driver_pin(d.get_port_id());
     cache_[d] = res;  // before recursing: a diamond re-uses the clone, a cycle would recurse forever
-    for (const auto& e : n.inp_edges()) {
-      auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      auto dp = clone(e.driver, depth + 1);
+    // SNAPSHOT: clone() recurses and creates nodes/pins/edges in the PARENT,
+    // and driver_feeding() can clone a constant into it too, so a live pin view
+    // would be invalidated mid-walk. inp_pins_snapshot() is the SORTED walk
+    // (node-as-pin port 0 first, then ascending port order) copied into a small
+    // vector -- the raw inp_pins() would drop port 0, a real operand slot.
+    // Singular get_driver_pin() is sound here: the one sink livehd lets carry
+    // two drivers is a compact loop's carry-in, and that node is a Sub, which
+    // the is_loop_last refusal above has already rejected.
+    for (auto sink : n.inp_pins_snapshot()) {
+      auto sp = neo.create_sink_pin(sink.get_port_id());
+      auto dp = clone(sink.get_driver_pin(), depth + 1);
       if (dp.is_invalid()) {
         failed_ = true;
         return {};
@@ -1620,16 +1643,23 @@ public:
 
 private:
   hhds::Pin_class driver_feeding(uint32_t pid) {
-    for (const auto& e : inst_.inp_edges()) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) != pid) {
+    // Read-only pin walk; the const clone is deliberately OUTSIDE it, because
+    // it creates a node in the parent graph -- the graph being walked.
+    hhds::Pin_class drv;
+    for (auto sink : inst_.inp_sorted_pins()) {
+      if (static_cast<uint32_t>(sink.get_port_id()) != pid) {
         continue;
       }
-      if (e.driver.is_const()) {
-        return gu::create_const(*parent_, gu::const_of(e.driver));
-      }
-      return e.driver;
+      drv = sink.get_driver_pin();
+      break;
     }
-    return {};
+    if (drv.is_invalid()) {
+      return {};
+    }
+    if (drv.is_const()) {
+      return gu::create_const(*parent_, gu::const_of(drv));
+    }
+    return drv;
   }
 
   hhds::Graph*                                          parent_;
@@ -1717,11 +1747,11 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
         clk_pids.insert(static_cast<uint32_t>(d.port_id));
       }
     }
-    for (const auto& e : n.inp_edges()) {
-      if (!clk_pids.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      if (!clk_pids.contains(static_cast<uint32_t>(sink.get_port_id()))) {
         continue;
       }
-      if (auto in = walk_to_graph_input(e.driver); !in.is_invalid()) {
+      if (auto in = walk_to_graph_input(sink.get_driver_pin()); !in.is_invalid()) {
         out.insert(std::string(gu::pin_name_of(in)));  // a clock threaded straight through
       }
     }
@@ -1784,9 +1814,9 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
         clk_pids.insert(static_cast<uint32_t>(d.port_id));
       }
     }
-    for (const auto& e : n.inp_edges()) {
-      if (clk_pids.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
-        note_clock_driver(e.driver);
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      if (clk_pids.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+        note_clock_driver(sink.get_driver_pin());
       }
     }
   }
@@ -1836,9 +1866,9 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
     // The parent net wired to the def's clock port.
     hhds::Pin_class clk_src;
     if (auto pit = in_name2pid.find(std::string{gu::pin_name_of(m.clk_in)}); pit != in_name2pid.end()) {
-      for (const auto& e : inst.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) == pit->second) {
-          clk_src = e.driver;
+      for (auto sink : inst.inp_sorted_pins()) {  // read-only walk
+        if (static_cast<uint32_t>(sink.get_port_id()) == pit->second) {
+          clk_src = sink.get_driver_pin();
           break;
         }
       }
@@ -1862,8 +1892,15 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
 
     // Everything the instance's clock output drove now reads the cell.
     std::vector<hhds::Pin_class> readers;
-    for (const auto& e : inst.out_edges()) {
-      if (static_cast<uint32_t>(e.driver.get_port_id()) == out_pid) {
+    // A DRIVER's fanout is a SET, so this stays edge-shaped -- but only for the
+    // ONE output pin that matters: out_sorted_pins() finds it by a pin-list
+    // step instead of decoding every other output pin's edges and discarding
+    // them.
+    for (auto drv : inst.out_sorted_pins()) {
+      if (static_cast<uint32_t>(drv.get_port_id()) != out_pid) {
+        continue;
+      }
+      for (const auto& e : drv.out_edges()) {
         readers.push_back(e.sink);
       }
     }
@@ -1910,7 +1947,7 @@ namespace {
     if (gu::type_op_of(n) != op) {
       continue;
     }
-    const auto ins = n.inp_edges();
+    const auto ins = gu::inp_sink_drivers(n);
     if (ins.size() != 2) {
       continue;
     }
@@ -1933,8 +1970,8 @@ namespace {
     return found;
   }
   auto eq = gu::create_typed_node(*g, Ntype_op::EQ);
-  a.connect_sink(eq.create_sink_pin(0));
-  zero.connect_sink(eq.create_sink_pin(0));
+  a.connect_sink(livehd::graph_util::setup_sink_pid(eq, 0));
+  zero.connect_sink(livehd::graph_util::setup_sink_pid(eq, 0));
   auto out = eq.create_driver_pin(0);
   gu::set_bits(out, 1);
   return out;
@@ -1958,8 +1995,8 @@ namespace {
     return found;
   }
   auto op = gu::create_typed_node(*g, Ntype_op::Or);
-  a.connect_sink(op.create_sink_pin(0));
-  b.connect_sink(op.create_sink_pin(0));
+  a.connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  b.connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   auto out = op.create_driver_pin(0);
   gu::set_bits(out, 1);
   return out;
@@ -2004,8 +2041,10 @@ namespace {
     if (seen.size() > visit_cap) {
       return false;
     }
-    for (const auto& e : p.get_master_node().inp_edges()) {
-      work.push_back(e.driver);
+    for (auto sink : p.get_master_node().inp_sorted_pins()) {  // read-only walk
+      for (auto driver : sink.get_driver_pins()) {
+        work.push_back(driver);
+      }
     }
   }
   return false;
@@ -2038,8 +2077,15 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
     for (const auto& d : io->get_input_pin_decls()) {
       names.emplace(static_cast<uint32_t>(d.port_id), d.name);
     }
-    for (const auto& e : inst.inp_edges()) {
-      bound.emplace(static_cast<uint32_t>(e.sink.get_port_id()), e.driver);
+    for (auto sink : inst.inp_sorted_pins()) {  // read-only walk
+      // A compact-loop carry has a seed and a previous-ordinal self edge.
+      // Only the external binding supplies the activation/clock interface.
+      for (auto driver : sink.get_driver_pins()) {
+        if (inst.is_loop_subnode() && driver.get_master_node() == inst) {
+          continue;
+        }
+        bound.emplace(static_cast<uint32_t>(sink.get_port_id()), driver);
+      }
     }
 
     hhds::Pin_class guard;
@@ -2196,12 +2242,12 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
       auto out = cell.create_driver_pin(0);
       gu::set_bits(out, 1);
 
-      for (auto e : inst.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) != pid) {
+      // SNAPSHOT: the body drops the edge it is standing on and adds another.
+      for (auto sink : inst.inp_pins_snapshot()) {
+        if (static_cast<uint32_t>(sink.get_port_id()) != pid) {
           continue;
         }
-        auto sink = e.sink;
-        e.del_edge();
+        sink.del_sink(sink.get_driver_pin());  // the port's one driver
         out.connect_sink(sink);
         break;
       }

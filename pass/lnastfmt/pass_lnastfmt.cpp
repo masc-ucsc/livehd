@@ -91,6 +91,20 @@ static bool is_valid_ref_text(std::string_view name) {
   if (name.empty()) {
     return false;
   }
+  // A tuple path may contain escaped segments, e.g. io.`a.b`. Split only
+  // outside backticks so the field's dot remains part of its identity.
+  // Compiler temporaries keep their separate, non-dotted grammar below.
+  if (name.front() != '%') {
+    bool quoted = false;
+    for (size_t pos = 0; pos < name.size(); ++pos) {
+      if (name[pos] == '`') {
+        quoted = !quoted;
+      } else if (name[pos] == '.' && !quoted) {
+        const auto rest = name.substr(pos + 1);
+        return is_valid_ref_text(name.substr(0, pos)) && !rest.empty() && rest.front() != '%' && is_valid_ref_text(rest);
+      }
+    }
+  }
   if (name.front() == '`') {
     // Pyrope backtick-escaped name: must be terminated and must actually
     // need the escape — i.e. the inner text contains at least one char

@@ -48,8 +48,8 @@ void shape(const hhds::Pin_class& from, const hhds::Pin_class& to) {
 std::string family(const hhds::Node_class& node, const Ware_policy& policy) {
   const auto op    = gu::type_op_of(node);
   int        width = 0;
-  for (auto e : node.out_edges()) {
-    width = std::max(width, gu::bits_of(e.driver));
+  for (auto out_pin : node.out_sorted_pins()) {  // widest driver pin; consumers do not matter
+    width = std::max(width, gu::bits_of(out_pin));
   }
   if (policy.arith) {
     if (op == Ntype_op::Sum && width > 8) {
@@ -63,8 +63,8 @@ std::string family(const hhds::Node_class& node, const Ware_policy& policy) {
     }
   }
   if (policy.cmp && (op == Ntype_op::LT || op == Ntype_op::GT)) {
-    for (auto e : node.inp_edges()) {
-      if (gu::bits_of(e.driver) > 8) {
+    for (auto in_pin : node.inp_sorted_pins()) {
+      if (gu::bits_of(in_pin.get_driver_pin()) > 8) {
         return op == Ntype_op::LT ? "lt" : "gt";
       }
     }
@@ -110,18 +110,17 @@ std::string section_info(hhds::Graph& graph, int color, Ware_policy policy) {
 
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& node, const std::string& kind,
                                      Ware_policy policy) {
-  auto edges = node.inp_edges();  // sink-port ascending by contract
-  gu::sort_drivers_within_pin(edges, [](const auto& a, const auto& b) {
-    const auto key = [](const auto& pin) {
-      return std::tuple{gu::bits_of(pin), gu::is_unsign(pin), pin.is_const() ? gu::const_of(pin).to_pyrope() : std::string{}};
-    };
-    return key(a.driver) < key(b.driver);
-  });
+  // Sink-port ascending by contract (the pin chain is kept sorted), which is the
+  // whole of the order now. The sort_drivers_within_pin call that used to follow
+  // is GONE: it imposed a deterministic order on the SEVERAL DRIVERS OF ONE SINK
+  // PIN, and under ONE DRIVER PER SINK PIN (graph/cell.hpp) every run it sorted
+  // has length one. Nothing is left to order.
+  auto                                     edges = node.inp_pins_snapshot();
   std::map<hhds::Port_id, hhds::Pin_class> outputs;
-  for (auto e : node.out_edges()) {
-    outputs.emplace(e.driver.get_port_id(), e.driver);
+  for (auto out_pin : node.out_sorted_pins()) {  // the node's driver pins, once each
+    outputs.emplace(out_pin.get_port_id(), out_pin);
   }
-  const bool     narrowable = kind == "sum" || kind == "shl" || kind == "sra" || kind == "mult";
+  const bool     narrowable   = kind == "sum" || kind == "shl" || kind == "sra" || kind == "mult";
   // `masked_output_width` measures DRIVER PIN 0 ONLY (node_util.hpp out_width),
   // so it may only bound pin 0.  Pin 0 is NOT guaranteed to be the widest
   // realization -- abc_map.cpp:3254 and pass/lec/encode.cpp:2226 both max over
@@ -129,19 +128,19 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   // silently truncated the others.  It also returns 0 for an unsized pin 0
   // (an expected shape, cf. abc_map.cpp:3249), which collapsed EVERY port to
   // 1 bit; hence the `demand > 0` guard, matching abc_map.cpp:3261.
-  const uint64_t demand     = narrowable ? gu::masked_output_width(node) : 0;
-  const auto output_width   = [&](const auto& pin) {
+  const uint64_t demand       = narrowable ? gu::masked_output_width(node) : 0;
+  const auto     output_width = [&](const auto& pin) {
     const int cap = (demand > 0 && pin.get_port_id() == 0) ? static_cast<int>(demand) : INT_MAX;
     return std::max(1, std::min(gu::bits_of(pin), cap));
   };
   // The full descriptor is stored on the module; its hash is only a short name.
   // Include source mapping options so sections with different policies never
   // accidentally share an implementation selected in a different context.
-  std::string descriptor   = kind;
+  std::string descriptor = kind;
   for (auto e : edges) {
-    descriptor += std::format("/i{}:{}:{}", e.sink.get_port_id(), gu::bits_of(e.driver), gu::is_unsign(e.driver));
-    if (e.driver.is_const()) {
-      descriptor += ":" + gu::const_of(e.driver).to_pyrope();
+    descriptor += std::format("/i{}:{}:{}", e.get_port_id(), gu::bits_of(e.get_driver_pin()), gu::is_unsign(e.get_driver_pin()));
+    if (e.get_driver_pin().is_const()) {
+      descriptor += ":" + gu::const_of(e.get_driver_pin()).to_pyrope();
     }
   }
   for (auto [pid, pin] : outputs) {
@@ -181,24 +180,24 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     for (size_t i = 0; i < edges.size(); ++i) {
       const auto&     e = edges[i];
       hhds::Pin_class driver;
-      if (e.driver.is_const()) {
-        driver = gu::create_const(*body, gu::const_of(e.driver));
+      if (e.get_driver_pin().is_const()) {
+        driver = gu::create_const(*body, gu::const_of(e.get_driver_pin()));
       } else {
         auto pname = std::format("i{}", i);
         io->add_input(pname, next++);
-        io->set_bits(pname, std::max(gu::bits_of(e.driver), 1));
-        io->set_unsign(pname, gu::is_unsign(e.driver));
+        io->set_bits(pname, std::max(gu::bits_of(e.get_driver_pin()), 1));
+        io->set_unsign(pname, gu::is_unsign(e.get_driver_pin()));
         driver = body->get_input_pin(pname);
       }
-      if (e.driver.is_const()) {
+      if (e.get_driver_pin().is_const()) {
         // An unsized constant is not a one-bit value. Preserve only explicit
         // source annotations; otherwise its Dlop value determines its width.
-        gu::carry_pin_attrs(e.driver, driver);
+        gu::carry_pin_attrs(e.get_driver_pin(), driver);
       } else {
-        shape(e.driver, driver);
+        shape(e.get_driver_pin(), driver);
       }
-      auto sink = inner.create_sink_pin(e.sink.get_port_id());
-      gu::carry_pin_attrs(e.sink, sink);
+      auto sink = inner.create_sink_pin(e.get_port_id());
+      gu::carry_pin_attrs(e, sink);
       driver.connect_sink(sink);
     }
     for (auto [pid, pin] : outputs) {
@@ -217,16 +216,22 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   gu::carry_node_attrs(node, inst);
   gu::carry_srcid(node, inst);
   for (size_t i = 0; i < edges.size(); ++i) {
-    if (!edges[i].driver.is_const()) {
-      edges[i].driver.connect_sink(inst.create_sink_pin(io->get_input_port_id(std::format("i{}", i))));
+    if (const auto drv = edges[i].get_driver_pin(); !drv.is_const()) {
+      drv.connect_sink(inst.create_sink_pin(io->get_input_port_id(std::format("i{}", i))));
     }
   }
   for (auto [pid, pin] : outputs) {
     auto driver = inst.create_driver_pin(io->get_output_port_id(std::format("o{}", pid)));
     shape(pin, driver);
     gu::set_bits(driver, output_width(pin));
+    // SNAPSHOT the fan-out: connect_sink below mutates the storage this lazy
+    // view walks, and `node` is not deleted until after every port is rewired.
+    std::vector<hhds::Pin_class> readers;
     for (auto e : pin.out_edges()) {
-      driver.connect_sink(e.sink);
+      readers.push_back(e.sink);
+    }
+    for (const auto& reader : readers) {
+      driver.connect_sink(reader);
     }
   }
   node.del_node();

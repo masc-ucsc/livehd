@@ -89,8 +89,9 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     unsupported = true;
     return;
   }
-  for (const auto& e : node.inp_edges()) {
-    cone_walk(e.driver, seen, n, stateful, unsupported);
+  for (const auto& in_pin : node.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    cone_walk(in_drv, seen, n, stateful, unsupported);
   }
 }
 
@@ -219,12 +220,16 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
 
   absl::flat_hash_map<hhds::Port_id, std::vector<Val>> by_pid;
   std::vector<Val>                                     all;
-  for (const auto& e : node.inp_edges()) {
-    auto v = val_of(e.driver);
+  for (const auto& in_pin : node.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    auto       v      = val_of(in_drv);
     if (!v) {
       return std::nullopt;
     }
-    by_pid[e.sink.get_port_id()].push_back(*v);
+    // Bank, not raw pid: one sink pid per OPERAND (graph/cell.hpp's ONE DRIVER
+    // PER SINK PIN); sink_bank folds them back to the operand role and is the
+    // identity for every non-banked op.
+    by_pid[Ntype::sink_bank(op, in_pin.get_port_id())].push_back(*v);
     all.push_back(*v);
   }
   auto pid = [&](hhds::Port_id p) -> std::vector<Val>& {
@@ -305,6 +310,21 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
         return std::nullopt;
       }
       result = tm_.mkTerm(Kind::BITVECTOR_NOT, {lec::fit_to(tm_, all[0], W)});
+      break;
+    }
+    case Ntype_op::Rxor    :
+    case Ntype_op::Popcount: {
+      const int count = livehd::graph_util::reduction_count(node);
+      result          = bv_const(W, 0);
+      if (count > 0) {
+        const auto input = lec::fit_to(tm_, pid(0)[0], count);
+        for (int bit = 0; bit < count; ++bit) {
+          const auto lane
+              = tm_.mkTerm(tm_.mkOp(Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(bit), static_cast<uint32_t>(bit)}), {input});
+          const auto term = lec::fit_to(tm_, Val{lane, 1, false}, W);
+          result          = tm_.mkTerm(op == Ntype_op::Rxor ? Kind::BITVECTOR_XOR : Kind::BITVECTOR_ADD, {result, term});
+        }
+      }
       break;
     }
     case Ntype_op::Ror: {
@@ -412,9 +432,10 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       }
       const Val&      a = pid(0)[0];
       hhds::Pin_class pos_pin;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == 1) {
-          pos_pin = e.driver;
+      for (const auto& in_pin : node.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        if (in_pin.get_port_id() == 1) {
+          pos_pin = in_drv;
           break;
         }
       }

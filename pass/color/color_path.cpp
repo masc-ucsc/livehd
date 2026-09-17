@@ -68,8 +68,9 @@ bool Color_path::should_stop_fwd(const hhds::Node_class& node, int color) const 
     if (is_alias_passthrough_node(node)) {
       return false;
     }
-    for (const auto& oe : node.out_edges()) {
-      if (has_real_wname(oe.driver)) {
+    // Driver-pin walk: the name lives on the driver side.
+    for (const auto& dpin : node.out_sorted_pins()) {
+      if (has_real_wname(dpin)) {
         return true;
       }
     }
@@ -96,22 +97,24 @@ void Color_path::propagate_fwd(const hhds::Node_class& node, int color) {
   while (!todo.empty()) {
     auto cur = todo.back();
     todo.pop_back();
-    for (const auto& e : cur.out_edges()) {
-      auto succ = e.sink.get_master_node();
-      if (!is_partitionable(succ)) {
-        continue;
+    for (const auto& dpin : cur.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        auto succ = e.sink.get_master_node();
+        if (!is_partitionable(succ)) {
+          continue;
+        }
+        if (succ.is_loop_break()) {
+          add_color(node2colors[succ], color);  // back-to-back flop: share color, stop
+          continue;
+        }
+        if (!add_color(node2colors[succ], color)) {
+          continue;  // already propagated here
+        }
+        if (should_stop_fwd(succ, color)) {
+          continue;
+        }
+        todo.emplace_back(succ);
       }
-      if (succ.is_loop_break()) {
-        add_color(node2colors[succ], color);  // back-to-back flop: share color, stop
-        continue;
-      }
-      if (!add_color(node2colors[succ], color)) {
-        continue;  // already propagated here
-      }
-      if (should_stop_fwd(succ, color)) {
-        continue;
-      }
-      todo.emplace_back(succ);
     }
   }
 }
@@ -121,29 +124,31 @@ void Color_path::propagate_bwd(const hhds::Node_class& node, int color) {
   while (!todo.empty()) {
     auto cur = todo.back();
     todo.pop_back();
-    for (const auto& e : cur.inp_edges()) {
-      auto pred = e.driver.get_master_node();
-      if (!is_partitionable(pred)) {
-        continue;
-      }
-      if (pred.is_loop_break()) {
-        add_color(node2colors[pred], color);  // back-to-back flop: share color
-        continue;
-      }
-      if (!add_color(node2colors[pred], color)) {
-        continue;
-      }
-      bool has_wname = false;
-      for (const auto& oe : pred.out_edges()) {
-        if (has_real_wname(oe.driver)) {
-          has_wname = true;
-          break;
+    for (auto sink : cur.inp_sorted_pins()) {           // read-only pin walk
+      for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+        auto pred = drv.get_master_node();
+        if (!is_partitionable(pred)) {
+          continue;
         }
+        if (pred.is_loop_break()) {
+          add_color(node2colors[pred], color);  // back-to-back flop: share color
+          continue;
+        }
+        if (!add_color(node2colors[pred], color)) {
+          continue;
+        }
+        bool has_wname = false;
+        for (const auto& dpin : pred.out_sorted_pins()) {
+          if (has_real_wname(dpin)) {
+            has_wname = true;
+            break;
+          }
+        }
+        if (has_wname && !is_alias_passthrough_node(pred)) {
+          continue;
+        }
+        todo.emplace_back(pred);
       }
-      if (has_wname && !is_alias_passthrough_node(pred)) {
-        continue;
-      }
-      todo.emplace_back(pred);
     }
   }
 }

@@ -90,8 +90,12 @@ void comb_state_reach(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Cl
     if (gu::type_op_of(n) == Ntype_op::Sub) {
       continue;  // opaque instance
     }
-    for (const auto& e : n.inp_edges()) {
-      work.push_back(e.driver);
+    for (auto sink : n.inp_sorted_pins()) {  // read-only pin walk
+      // PLURAL: a compact loop's carry-in sink holds two drivers
+      // (pass/legalize/legalize.cpp:301).
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
     }
   }
 }
@@ -103,14 +107,17 @@ void drop_sink(const hhds::Node_class& n, std::string_view pin) {
   if (pid == hhds::Port_invalid) {
     return;
   }
-  std::vector<hhds::Edge_class> doomed;
-  for (const auto& e : n.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      doomed.push_back(e);
+  // Snapshot the pins, then delete: inp_sorted_pins() is a view over live
+  // storage, so the del_sink() calls must land after the walk (the hhds rule
+  // the edge form obeyed by collecting `doomed` first).
+  absl::InlinedVector<hhds::Pin_class, 4> doomed;
+  for (auto sink : n.inp_sorted_pins()) {
+    if (sink.get_port_id() == pid) {
+      doomed.push_back(sink);
     }
   }
-  for (const auto& e : doomed) {  // never delete while iterating (hhds rule)
-    e.del_edge();
+  for (const auto& sink : doomed) {
+    sink.del_sink();  // one driver per sink pin
   }
 }
 
@@ -505,8 +512,9 @@ bool has_hold_mux(const hhds::Node_class& latch) {
   if (gu::type_op_of(n) != Ntype_op::Mux) {
     return false;
   }
-  for (const auto& e : n.inp_edges()) {
-    if (!e.driver.is_invalid() && e.driver.get_class_index() == q.get_class_index()) {
+  for (auto sink : n.inp_sorted_pins()) {
+    const auto drv = sink.get_driver_pin();
+    if (!drv.is_invalid() && drv.get_class_index() == q.get_class_index()) {
       return true;
     }
   }
@@ -731,13 +739,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // ICG); a def with plain posedge state normalizes nothing and stays allowed.
     if (child_has_state && rewrites_a_clock) {
       auto csio = n.get_subnode_io();
-      for (const auto& e : n.inp_edges()) {
+      for (auto sink : n.inp_sorted_pins()) {
+        const auto       drv = sink.get_driver_pin();
         // Clock ports only, by the SHARED spelling notion (Design_clocks::
         // name_looks_like_clock) rather than a private list, so this and the
         // rest of M8 agree on what a clock port is.
         std::string_view pname;
         for (const auto& d : csio->get_input_pin_decls()) {
-          if (csio->get_input_port_id(d.name) == e.sink.get_port_id()) {
+          if (csio->get_input_port_id(d.name) == sink.get_port_id()) {
             pname = d.name;
             break;
           }
@@ -747,9 +756,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         }
         // A PLAIN clock input (possibly through the width mask the readers add)
         // is untouched by this pass; anything else is in-graph logic.
-        if (gu::is_graph_input_pin(e.driver) || (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Get_mask && [&] {
-              for (const auto& ge : e.driver.get_master_node().inp_edges()) {
-                if (gu::is_graph_input_pin(ge.driver)) {
+        if (gu::is_graph_input_pin(drv) || (gu::type_op_of(drv.get_master_node()) == Ntype_op::Get_mask && [&] {
+              for (auto gsink : drv.get_master_node().inp_sorted_pins()) {
+                if (gu::is_graph_input_pin(gsink.get_driver_pin())) {
                   return true;
                 }
               }
@@ -846,7 +855,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     }
     // P == 2: next = !phase (a 1-bit counter). P > 2 is refused above.
     auto nxt = gu::create_typed_node(*g, Ntype_op::Not);
-    phq.connect_sink(nxt.create_sink_pin(0));
+    phq.connect_sink(livehd::graph_util::setup_sink_pid(nxt, 0));
     auto nxtq = nxt.create_driver_pin(0);
     gu::set_bits(nxtq, 1);
     gu::set_unsign(nxtq);
@@ -854,8 +863,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
 
     for (int k = 0; k < plan.slots; ++k) {
       auto eq = gu::create_typed_node(*g, Ntype_op::EQ);
-      phq.connect_sink(eq.create_sink_pin(0));
-      gu::create_const(*g, *Dlop::create_integer(k)).connect_sink(eq.create_sink_pin(0));
+      phq.connect_sink(livehd::graph_util::setup_sink_pid(eq, 0));
+      gu::create_const(*g, *Dlop::create_integer(k)).connect_sink(livehd::graph_util::setup_sink_pid(eq, 0));
       auto eqq = eq.create_driver_pin(0);
       gu::set_bits(eqq, 1);
       gu::set_unsign(eqq);
@@ -873,7 +882,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       if (latch_is_active_low(e.node)) {
         auto en  = sink_driver(e.node, "enable");
         auto inv = gu::create_typed_node(*g, Ntype_op::Not);
-        en.connect_sink(inv.create_sink_pin(0));
+        en.connect_sink(livehd::graph_util::setup_sink_pid(inv, 0));
         auto iq = inv.create_driver_pin(0);
         gu::set_bits(iq, 1);
         gu::set_unsign(iq);
@@ -901,12 +910,13 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           auto            q   = e.node.get_driver_pin(0);
           auto            mux = sink_driver(e.node, "din").get_master_node();
           hhds::Pin_class transparent;
-          for (const auto& me : mux.inp_edges()) {
-            if (me.sink.get_port_id() == 0) {
+          for (auto msink : mux.inp_sorted_pins()) {
+            if (msink.get_port_id() == 0) {
               continue;  // the selector (the gate itself)
             }
-            if (!me.driver.is_invalid() && me.driver.get_class_index() != q.get_class_index()) {
-              transparent = me.driver;
+            const auto mdrv = msink.get_driver_pin();
+            if (!mdrv.is_invalid() && mdrv.get_class_index() != q.get_class_index()) {
+              transparent = mdrv;
             }
           }
           if (transparent.is_invalid()) {
@@ -957,8 +967,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           continue;
         }
         auto andn = gu::create_typed_node(*g, Ntype_op::And);
-        acc.connect_sink(andn.create_sink_pin(0));
-        en.connect_sink(andn.create_sink_pin(0));
+        acc.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+        en.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
         acc = andn.create_driver_pin(0);
         gu::set_bits(acc, 1);
         gu::set_unsign(acc);
@@ -1005,7 +1015,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // gate is exactly right for it, and it is also the form M7 ruled a
       // lowered latch's reset must keep.
       if (auto rstp = sink_driver(e.node, "reset_pin"); !rstp.is_invalid()) {
-        auto       asyncp = sink_driver(e.node, "async");
+        auto       asyncp   = sink_driver(e.node, "async");
         // A LATCH's reset is inherently ASYNCHRONOUS -- there is no clock edge
         // for it to synchronize to, which is M7's landed ruling and why cgen
         // emits it as the FIRST branch ahead of the transparency test. So a
@@ -1019,7 +1029,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           auto test = rstp;
           if (negp.is_const() && !negp.is_known_false()) {
             auto inv = gu::create_typed_node(*g, Ntype_op::Not);
-            rstp.connect_sink(inv.create_sink_pin(0));
+            rstp.connect_sink(livehd::graph_util::setup_sink_pid(inv, 0));
             test = inv.create_driver_pin(0);
             gu::set_bits(test, 1);
             gu::set_unsign(test);
@@ -1034,9 +1044,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
             // Mux pin ids: 0 = selector, 1 = arm taken when the selector is 0,
             // 2 = arm taken when it is 1. Reset value on the 1 arm.
             auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
-            test.connect_sink(mux.create_sink_pin(0));
-            din.connect_sink(mux.create_sink_pin(1));
-            init.connect_sink(mux.create_sink_pin(2));
+            test.connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+            din.connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+            init.connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
             auto mq = mux.create_driver_pin(0);
             gu::set_bits(mq, qw);
             gu::set_unsign(mq);
@@ -1045,8 +1055,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           }
           if (auto en = sink_driver(e.node, "enable"); !en.is_invalid()) {
             auto orn = gu::create_typed_node(*g, Ntype_op::Or);
-            en.connect_sink(orn.create_sink_pin(0));
-            test.connect_sink(orn.create_sink_pin(0));
+            en.connect_sink(livehd::graph_util::setup_sink_pid(orn, 0));
+            test.connect_sink(livehd::graph_util::setup_sink_pid(orn, 0));
             auto oq = orn.create_driver_pin(0);
             gu::set_bits(oq, 1);
             gu::set_unsign(oq);
@@ -1074,8 +1084,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         pred.connect_sink(gu::setup_sink_by_name(e.node, "enable"));
       } else {
         auto andn = gu::create_typed_node(*g, Ntype_op::And);
-        old.connect_sink(andn.create_sink_pin(0));
-        pred.connect_sink(andn.create_sink_pin(0));
+        old.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+        pred.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
         auto aq = andn.create_driver_pin(0);
         gu::set_bits(aq, 1);
         gu::set_unsign(aq);
@@ -1128,9 +1138,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       }
       const auto      cond_pid = sio->get_input_port_id("cond");
       hhds::Pin_class cond;
-      for (const auto& e : n.inp_edges()) {
-        if (e.sink.get_port_id() == cond_pid) {
-          cond = e.driver;
+      for (auto sink : n.inp_sorted_pins()) {
+        if (sink.get_port_id() == cond_pid) {
+          cond = sink.get_driver_pin();
           break;
         }
       }
@@ -1139,24 +1149,25 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       }
       // boundary implies cond  ==  !boundary | cond
       auto notb = gu::create_typed_node(*g, Ntype_op::Not);
-      boundary.connect_sink(notb.create_sink_pin(0));
+      boundary.connect_sink(livehd::graph_util::setup_sink_pid(notb, 0));
       auto nbq = notb.create_driver_pin(0);
       gu::set_bits(nbq, 1);
       gu::set_unsign(nbq);
       auto orn = gu::create_typed_node(*g, Ntype_op::Or);
-      nbq.connect_sink(orn.create_sink_pin(0));
-      cond.connect_sink(orn.create_sink_pin(0));
+      nbq.connect_sink(livehd::graph_util::setup_sink_pid(orn, 0));
+      cond.connect_sink(livehd::graph_util::setup_sink_pid(orn, 0));
       auto oq = orn.create_driver_pin(0);
       gu::set_bits(oq, 1);
       gu::set_unsign(oq);
-      std::vector<hhds::Edge_class> doomed;
-      for (const auto& e : n.inp_edges()) {
-        if (e.sink.get_port_id() == cond_pid) {
-          doomed.push_back(e);
+      // Snapshot first: the pin walk is a view over live storage.
+      absl::InlinedVector<hhds::Pin_class, 4> doomed;
+      for (auto sink : n.inp_sorted_pins()) {
+        if (sink.get_port_id() == cond_pid) {
+          doomed.push_back(sink);
         }
       }
-      for (const auto& e : doomed) {
-        e.del_edge();
+      for (const auto& sink : doomed) {
+        sink.del_sink();
       }
       oq.connect_sink(n.create_sink_pin("cond"));
     }

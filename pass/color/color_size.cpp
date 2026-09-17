@@ -157,15 +157,17 @@ void agglomerate_to_cap(Region_graph& rg, uint64_t cap, Size_window_stats& st) {
 // Split-large
 // ---------------------------------------------------------------------------
 
-// Fan-out degree, capped at 2. NEVER out_edges().size(): that view is lazy and
-// size() re-walks it (hhds graph.hpp). Only the "exactly one reader" distinction
-// matters here, which is the same cap color_acyclic and pass_submatch use.
+// Fan-out degree, capped at 2. NEVER size() a fanout view: it is lazy and
+// size() re-walks it (hhds graph.hpp). Only the "exactly one reader"
+// distinction matters here, the same cap color_acyclic and pass_submatch use.
 [[nodiscard]] size_t fanout_upto2(const hhds::Node_class& n) {
   size_t k = 0;
-  for (const auto& e : n.out_edges()) {
-    (void)e;
-    if (++k >= 2) {
-      break;
+  for (const auto& dpin : n.out_sorted_pins()) {
+    for (const auto& e : dpin.out_edges()) {
+      (void)e;
+      if (++k >= 2) {
+        return k;
+      }
     }
   }
   return k;
@@ -194,8 +196,10 @@ void agglomerate_to_cap(Region_graph& rg, uint64_t cap, Size_window_stats& st) {
     if (fanout_upto2(n) != 1) {
       return true;  // fans out (reconvergence) or drives nothing (a region output)
     }
-    for (const auto& e : n.out_edges()) {
-      return !member.contains(e.sink.get_master_node());  // its one reader left the region
+    for (const auto& dpin : n.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        return !member.contains(e.sink.get_master_node());  // its one reader left the region
+      }
     }
     return true;
   };
@@ -218,13 +222,15 @@ void agglomerate_to_cap(Region_graph& rg, uint64_t cap, Size_window_stats& st) {
     while (!work.empty()) {
       auto n = work.back();
       work.pop_back();
-      for (const auto& e : n.inp_edges()) {
-        auto d = e.driver.get_master_node();
-        if (!member.contains(d) || cluster.contains(d)) {
-          continue;  // outside the region, already a root, or already claimed
+      for (auto sink : n.inp_sorted_pins()) {             // read-only pin walk
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          auto d = drv.get_master_node();
+          if (!member.contains(d) || cluster.contains(d)) {
+            continue;  // outside the region, already a root, or already claimed
+          }
+          cluster[d] = static_cast<int>(i);
+          work.emplace_back(d);
         }
-        cluster[d] = static_cast<int>(i);
-        work.emplace_back(d);
       }
     }
   }

@@ -20,6 +20,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "iassert.hpp"
+#include "mask_eval.hpp"
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "perf_tracing.hpp"
 #include "split_selfref.hpp"  // //graph — pure-comb hierarchy false-loop repair
@@ -574,15 +575,16 @@ bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
       pending.push_back({get_driver(find_sink_pin(node, "a")), false});
     } else if (type_op_of(node) == Ntype_op::Or) {
       bool has_data = false;
-      for (const auto& edge : node.inp_edges()) {
-        if (edge.driver.is_const()) {
-          const auto& value = const_of(edge.driver);
+      for (const auto& sink : node.inp_sorted_pins()) {
+        const auto drv = sink.get_driver_pin();
+        if (drv.is_const()) {
+          const auto& value = const_of(drv);
           if (value.has_unknowns() || !value.is_known_false()) {
             return false;
           }
         } else {
           has_data = true;
-          pending.push_back({edge.driver, false});
+          pending.push_back({drv, false});
         }
       }
       if (!has_data) {
@@ -654,6 +656,8 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
     switch (type_op_of(node)) {
       case Ntype_op::Get_mask: return unsigned_mask_identity(node);
       case Ntype_op::Sum     :
+      case Ntype_op::Rxor    :
+      case Ntype_op::Popcount:
       case Ntype_op::Ror     :
       case Ntype_op::Div     :
       case Ntype_op::Rem     :
@@ -712,9 +716,10 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
       return {};
     }
     pending.push_back({pin, true});
-    for (const auto& edge : node.inp_edges()) {
-      if (!ready(edge.driver)) {
-        pending.push_back({edge.driver, false});
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      if (!ready(drv)) {
+        pending.push_back({drv, false});
       }
     }
   }
@@ -755,10 +760,11 @@ std::string Cgen_verilog::signed_operand(const hhds::Pin_class& dpin, std::strin
 bool Cgen_verilog::mixes_operand_signs(const hhds::Node_class& node) const {
   bool saw_signed   = false;
   bool saw_unsigned = false;
-  for (const auto& e : node.inp_edges()) {
-    if (operand_reads_signed(e.driver)) {
+  for (const auto& sink : node.inp_sorted_pins()) {
+    const auto drv = sink.get_driver_pin();
+    if (operand_reads_signed(drv)) {
       saw_signed = true;
-    } else if (!e.driver.is_const()) {
+    } else if (!drv.is_const()) {
       saw_unsigned = true;
     }
   }
@@ -1143,11 +1149,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   hhds::Pin_class mem_update_enable_dpin;  // optional bulk-update enable (absent => always-on)
   hhds::Pin_class mem_reset_dpin;          // 1-bit reset condition (registered whole-array)
 
-  for (auto e : node.inp_edges()) {
+  for (const auto& sink : node.inp_sorted_pins()) {
+    const auto drv = sink.get_driver_pin();
     // HHDS does not store LiveHD's per-sink-name convention; derive the
     // name from the port_id via Ntype::get_sink_name. For memory the names
     // wrap with `pid % Memory_port_stride` (see Ntype::get_sink_name).
-    auto   raw_pid  = static_cast<int>(e.sink.get_port_id());
+    auto   raw_pid  = static_cast<int>(sink.get_port_id());
     auto   pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
     size_t port_id  = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
 
@@ -1156,90 +1163,90 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
 
     if (pin_name == "bits") {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant for bits not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant for bits not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      mem_bits = const_of(e.driver).to_just_i64();
+      mem_bits = const_of(drv).to_just_i64();
     } else if (pin_name == "size") {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant for size not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant for size not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      mem_size = const_of(e.driver).to_just_i64();
+      mem_size = const_of(drv).to_just_i64();
     } else if (pin_name == "type") {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant type not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant type not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      mem_type = const_of(e.driver).to_just_i64();
+      mem_type = const_of(drv).to_just_i64();
     } else if (pin_name == "posclk") {
-      if (!e.driver.is_const() || !const_of(e.driver).is_just_i64()
-          || const_of(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
+      if (!drv.is_const() || !const_of(drv).is_just_i64()
+          || const_of(drv).to_just_i64() == Ntype::Memory_posclk_mixed) {
         livehd::diag::err("inou.cgen", "mem-clock-edge", "unsupported")
             .msg("memory {} requires per-port clock edge polarity, which Verilog emission does not support", debug_name(node))
             .fatal();
         return;
       }
-      mem_posclk = !const_of(e.driver).is_known_zero();
+      mem_posclk = !const_of(drv).is_known_zero();
     } else if (pin_name == "wensize") {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant for wensize not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant for wensize not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      mem_wensize = const_of(e.driver).to_just_i64();
+      mem_wensize = const_of(drv).to_just_i64();
     } else if (pin_name == "fwd") {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      mem_fwd_dpin = e.driver;
+      mem_fwd_dpin = drv;
     } else if (pin_name == "undef") {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant for undef not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant for undef not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      mem_undef_dpin = e.driver;
+      mem_undef_dpin = drv;
     } else if (pin_name == "initial") {
       // For a plain memory `initial` is the comptime power-on contents; for a
       // whole-array cell (the `update` pin is driven) it is the RUNTIME reset
       // value bus, so do not force a constant here — the const-consuming paths
       // (wrapper INIT param, type-2 default fill) only run when there is no update.
-      mem_init_dpin = e.driver;
+      mem_init_dpin = drv;
     } else if (pin_name == "update") {
-      mem_update_dpin = e.driver;
+      mem_update_dpin = drv;
     } else if (pin_name == "update_enable") {  // MUST precede the ends_with("enable") per-port branch below
-      mem_update_enable_dpin = e.driver;
+      mem_update_enable_dpin = drv;
     } else if (pin_name == "reset") {
-      mem_reset_dpin = e.driver;
+      mem_reset_dpin = drv;
     } else if (str_tools::ends_with(pin_name, "clock_pin")) {
-      port_vector[port_id].clock = e.driver;
+      port_vector[port_id].clock = drv;
     } else if (str_tools::ends_with(pin_name, "addr")) {
-      port_vector[port_id].addr = e.driver;
+      port_vector[port_id].addr = drv;
     } else if (str_tools::ends_with(pin_name, "enable")) {
-      port_vector[port_id].enable = e.driver;
+      port_vector[port_id].enable = drv;
     } else if (str_tools::ends_with(pin_name, "din")) {
-      port_vector[port_id].din = e.driver;
+      port_vector[port_id].din = drv;
     } else if (str_tools::ends_with(pin_name, "rdport")) {
-      if (!e.driver.is_const()) {
+      if (!drv.is_const()) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant rdport not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .msg("memory {} should have a constant rdport not {}", debug_name(node), debug_name(drv.get_master_node()))
             .fatal();
         return;
       }
-      const auto& v               = const_of(e.driver);
+      const auto& v               = const_of(drv);
       bool        rdport          = !v.is_known_false();
       port_vector[port_id].rdport = rdport;
       if (rdport) {
@@ -1261,8 +1268,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // NDEBUG build silently hands back an invalid pin). Ask the out edges, which
   // is also the exact question -- "is there a net to drive?".
   absl::flat_hash_set<uint32_t> live_dout_pids;
-  for (const auto& e2 : node.out_edges()) {
-    live_dout_pids.insert(static_cast<uint32_t>(e2.driver.get_port_id()));
+  for (const auto& odrv : node.out_sorted_pins()) {
+    live_dout_pids.insert(static_cast<uint32_t>(odrv.get_port_id()));
   }
   // Does anything read the WHOLE array (the reserved read_all driver pid)?
   // Computed here because it selects the emission style below, not just what
@@ -1907,10 +1914,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 
 void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   note_src(fout, node);
-  auto ordered_inp = node.inp_edges();
+  // INDEXED, not just iterated: the case label of arm i is its ordinal, so
+  // this needs random access. The walk itself is read-only (no graph
+  // mutation between here and the last use), but a lazy range has no
+  // operator[], so take the pin snapshot -- one small vector, same
+  // ascending-sink-port order inp_edges() gave.
+  auto ordered_inp = node.inp_pins_snapshot();
   I(ordered_inp.size() > 2);  // at least 0 + 1 + 2
 
-  auto sel_expr    = get_expression(ordered_inp[0].driver);
+  auto sel_expr    = get_expression(ordered_inp[0].get_driver_pin());
   auto dpin_dest   = node.get_driver_pin(0);
   auto dest_var_it = pin2var.find(dpin_dest.get_class_index());
   I(dest_var_it != pin2var.end());
@@ -1920,16 +1932,16 @@ void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, const hhds::No
   if (mux2vec_it == mux2vector.end()) {
     if (ordered_inp.size() == 3) {  // if-else
       fout->append("   if (", sel_expr, ") begin\n");
-      fout->append("     ", dest_var, " = ", get_expression(ordered_inp[2].driver), ";\n");
+      fout->append("     ", dest_var, " = ", get_expression(ordered_inp[2].get_driver_pin()), ";\n");
       fout->append("   end else begin\n");
-      fout->append("     ", dest_var, " = ", get_expression(ordered_inp[1].driver), ";\n");
+      fout->append("     ", dest_var, " = ", get_expression(ordered_inp[1].get_driver_pin()), ";\n");
       fout->append("   end\n");
     } else {
       fout->append("   case (", sel_expr, ")\n");
-      auto sel_bits = bits_of(ordered_inp[0].driver);
+      auto sel_bits = bits_of(ordered_inp[0].get_driver_pin());
       for (auto i = 1u; i < ordered_inp.size(); ++i) {
         fout->append("     ", std::to_string(sel_bits), "'d", std::to_string(i - 1));
-        fout->append(" : ", dest_var, " = ", get_expression(ordered_inp[i].driver), ";\n");
+        fout->append(" : ", dest_var, " = ", get_expression(ordered_inp[i].get_driver_pin()), ";\n");
       }
       size_t num_cases = size_t{1} << sel_bits;
       if (num_cases > ordered_inp.size() - 1) {
@@ -1985,8 +1997,9 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     const int   result_bits       = bits_of(dpin);
     const bool  result_uns        = is_unsign(dpin);
     bool        signed_arithmetic = false;
-    for (const auto& e : node.inp_edges()) {
-      signed_arithmetic |= operand_reads_signed(e.driver);
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      signed_arithmetic |= operand_reads_signed(drv);
     }
     bool saw_context_constant = false;
     auto sum_expr             = [&](const hhds::Pin_class& operand_pin) {
@@ -2009,13 +2022,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       const int   constant_bits = signed_arithmetic ? std::max(result_bits, static_cast<int>(c.get_signed_bits())) : result_bits;
       return absl::StrCat("(", const_to_verilog(c, constant_bits, result_uns && !signed_arithmetic && !c.is_negative()), ")");
     };
-    for (auto e : node.inp_edges()) {
-      const auto raw     = sum_expr(e.driver);
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      const auto raw     = sum_expr(drv);
       // Subtraction can produce a signed value from entirely unsigned inputs
       // (for example -a-1). Preserve that sign when the Sum is inlined into
       // division or comparison, where modular unsigned arithmetic is different.
-      const auto operand = (mixed_signs || !result_uns) ? signed_operand(e.driver, raw) : std::string{};
-      if (e.sink.get_port_id() == 0) {
+      const auto operand = (mixed_signs || !result_uns) ? signed_operand(drv, raw) : std::string{};
+      // Bank parity, not the raw pid: each Sum operand owns a pid, even = added,
+      // odd = subtracted (graph/cell.hpp's ONE DRIVER PER SINK PIN block).
+      if (Ntype::sink_bank(Ntype_op::Sum, sink.get_port_id()) == 0) {
         const auto& term = operand.empty() ? raw : operand;
         add_seq          = add_seq.empty() ? term : absl::StrCat(add_seq, " + ", term);
       } else {
@@ -2038,19 +2054,48 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // the 2-bit value 2 into a wider unsigned output as ...1110.
       final_expr = absl::StrCat("$unsigned(", final_expr, ")");
     }
-  } else if (op == Ntype_op::Ror) {
-    auto inp_edges = node.inp_edges();
-    if (inp_edges.size() == 1) {
-      auto expr  = get_expression(inp_edges[0].driver);
-      final_expr = absl::StrCat("|", expr);
+  } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+    const auto input = livehd::graph_util::get_driver_of_sink_name(node, "a");
+    const int  count = livehd::graph_util::reduction_count(node);
+    if (count == 0) {
+      final_expr = "1'b0";
     } else {
-      auto expr  = get_expression(inp_edges[0].driver);
-      final_expr = absl::StrCat("|{", expr);
-      for (auto i = 1u; i < inp_edges.size(); ++i) {
-        final_expr = absl::StrCat(final_expr, " | ", get_expression(inp_edges[i].driver));
+      // A sized cast extends according to the source expression's sign before
+      // interpreting the selected low bits as unsigned.
+      const auto selected = absl::StrCat("$unsigned(", count, "'(", get_expression(input), "))");
+      if (op == Ntype_op::Rxor) {
+        final_expr = absl::StrCat("(^", selected, ")");
+      } else {
+        // Explicitly size every addend: Verilog's one-bit addition would lose
+        // carries. A balanced expression keeps wide reductions shallow.
+        const int                width = std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(count))));
+        std::vector<std::string> terms;
+        for (int bit = 0; bit < count; ++bit) {
+          terms.push_back(absl::StrCat(width, "'(1'(", selected, " >> ", bit, "))"));
+        }
+        while (terms.size() > 1) {
+          std::vector<std::string> next;
+          for (size_t i = 0; i < terms.size(); i += 2) {
+            next.push_back(i + 1 == terms.size() ? terms[i] : absl::StrCat("(", terms[i], " + ", terms[i + 1], ")"));
+          }
+          terms = std::move(next);
+        }
+        final_expr = absl::StrCat("$unsigned(", terms.front(), ")");
       }
-      final_expr = absl::StrCat(final_expr, "}");
     }
+  } else if (op == Ntype_op::Ror) {
+    // Ror is single-bank commutative: every operand owns its own sink pid, so
+    // one read-only in-pin walk visits them in ascending-pid order (the order
+    // inp_edges() used to promise). One operand reduces bare, several reduce
+    // over a concat.
+    std::string terms;
+    size_t      n_terms = 0;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      auto expr = get_expression(sink.get_driver_pin());
+      terms     = terms.empty() ? std::move(expr) : absl::StrCat(terms, " | ", expr);
+      ++n_terms;
+    }
+    final_expr = (n_terms == 1) ? absl::StrCat("|", terms) : absl::StrCat("|{", terms, "}");
   } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
     const auto a   = get_driver(find_sink_pin(node, "a"));
     const auto b   = get_driver(find_sink_pin(node, "b"));
@@ -2172,7 +2217,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // InvalidSelectExpression / "lhd lec ERROR" category). The select is fully
       // determined at generation time, so apply the mask to the constant directly
       // and emit the resulting literal (the value cprop would have folded to).
-      final_expr = const_to_verilog(*const_of(a_dpin).get_mask_op(mask_v));
+      final_expr = const_to_verilog(livehd::eval_get_mask(const_of(a_dpin), mask_v));
     } else if (mask_v.is_just_i64() && mask_v.to_just_i64() == -1) {
       if (a_bits > 0 && !is_unsign(a_dpin)) {
         // To-positive of a signed driver: a plain copy sign-extends when the
@@ -2344,11 +2389,12 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       }
       return expr;
     };
-    for (const auto& e : node.inp_edges()) {
-      if (Ntype::get_sink_name(op, e.sink.get_port_id()) == "as") {
-        lhs.emplace_back(cmp_expr(e.driver));
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      if (Ntype::get_sink_name(op, sink.get_port_id()) == "as") {
+        lhs.emplace_back(cmp_expr(drv));
       } else {
-        rhs.emplace_back(cmp_expr(e.driver));
+        rhs.emplace_back(cmp_expr(drv));
       }
     }
     std::string cmp = (op == Ntype_op::GT) ? " > " : " < ";
@@ -2616,13 +2662,14 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // the Sum arm). And/Or/Xor are bitwise and width-preserving, so padding
     // their operands would only widen the result.
     const bool mixed_signs = (op == Ntype_op::Mult || op == Ntype_op::EQ) && mixes_operand_signs(node);
-    for (auto e : node.inp_edges()) {
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
       if (mixed_signs) {
-        auto operand = signed_operand(e.driver, get_expression(e.driver));
+        auto operand = signed_operand(drv, get_expression(drv));
         final_expr   = final_expr.empty() ? operand : absl::StrCat(final_expr, " ", txt_op, " ", operand);
         continue;
       }
-      final_expr = add_expression(final_expr, txt_op, e.driver);
+      final_expr = add_expression(final_expr, txt_op, drv);
     }
   }
 
@@ -3111,11 +3158,12 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
     // probing it via get_driver_pin/get_sink_pin asserts inside hhds find_pin.
     absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> in_conn;   // sink port_id -> its driver
     absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> out_conn;  // driver port_id -> consumed driver pin
-    for (const auto& e : node.inp_edges()) {
-      in_conn.emplace(e.sink.get_port_id(), e.driver);
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      in_conn.emplace(sink.get_port_id(), drv);
     }
-    for (const auto& e : node.out_edges()) {
-      out_conn.emplace(e.driver.get_port_id(), e.driver);
+    for (const auto& odrv : node.out_sorted_pins()) {
+      out_conn.emplace(odrv.get_port_id(), odrv);
     }
 
     for (const auto& io : ordered) {
@@ -3792,11 +3840,24 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // Only parent-body drivers need ordinary local declarations. The
           // descriptor's output->input self-edges are virtualized below and
           // must never create one shared class-level output net.
-          for (const auto& e : node.inp_edges()) {
-            if (e.driver.get_master_node() == node) {
-              continue;
+          //
+          // PLURAL reader: a compact loop's carry-IN sink is the one sanctioned
+          // two-driver pin in the tree (the seed, plus a self edge from this
+          // same instance's carry-out meaning "the previous ordinal"; see
+          // pass/legalize's verify_single_driver_sinks). Both drivers must be
+          // offered to the `== node` filter below -- that filter is what
+          // separates the seed from the self edge. The singular
+          // get_driver_pin() hands back only ONE of the two, so when the self
+          // edge came first the SEED's declaration was silently skipped, which
+          // is the exact failure this comment has always warned about; the
+          // migration off inp_edges() to a pin walk is what reintroduced it.
+          for (auto e_sink : node.inp_sorted_pins()) {
+            for (auto e_drv : e_sink.get_driver_pins()) {
+              if (e_drv.get_master_node() == node) {
+                continue;
+              }
+              add_to_pin2var(fout, e_drv, get_scaped_name(pin_wire_name(e_drv)), is_unsign(e_drv));
             }
-            add_to_pin2var(fout, e.driver, get_scaped_name(pin_wire_name(e.driver)), is_unsign(e.driver));
           }
 
           // Materialize one private output net per logical call. Declare all
@@ -3833,6 +3894,10 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
 
           // Downstream class edges represent the loop result. Point that class
           // pin at the last logical occurrence without changing graph storage.
+          //
+          // STAYS ON out_edges(): the filter is per-EDGE (skip the self edge
+          // back into this instance), and one driver pin can carry both a self
+          // sink and an external one. An out-PIN walk cannot express that.
           if (group.size() != 0) {
             for (const auto& e : node.out_edges()) {
               if (e.sink.get_master_node() == node) {
@@ -3860,9 +3925,13 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
               }
               hhds::Pin_class initial;
               hhds::Pin_class output;
-              for (const auto& e : node.inp_edges()) {
-                if (e.driver.get_master_node() != node && e.sink.get_port_id() == *binding.source_input_port()) {
-                  initial = e.driver;
+              // Both walks STAY ON edges: this is the compact-loop carry again
+              // (the in-pin one would drop one of the carry-in's two drivers)
+              // and the out one filters per-edge on the self sink.
+              for (auto e_sink : node.inp_sorted_pins()) {
+                auto e_drv = e_sink.get_driver_pin();
+                if (e_drv.get_master_node() != node && e_sink.get_port_id() == *binding.source_input_port()) {
+                  initial = e_drv;
                   break;
                 }
               }
@@ -3880,9 +3949,10 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           continue;
         }
 
-        for (auto& e : node.inp_edges()) {
-          auto name2 = get_scaped_name(pin_wire_name(e.driver));
-          add_to_pin2var(fout, e.driver, name2, is_unsign(e.driver));
+        for (const auto& sink : node.inp_sorted_pins()) {
+          const auto drv = sink.get_driver_pin();
+          auto name2 = get_scaped_name(pin_wire_name(drv));
+          add_to_pin2var(fout, drv, name2, is_unsign(drv));
         }
         if (op == Ntype_op::Memory) {
           // Instance outputs must land on a dedicated net: the dout pin is
@@ -3891,11 +3961,13 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // cannot legally drive an `output reg` anyway). create_outputs
           // then emits `q0 = <iname>_dout_<pid>;` like any other driver.
           //
-          // Iterate out_edges (not out_pins): out_pins misses driver pid 0
-          // (a zero-write-port ROM's dout) and its handles encode pins
-          // WITHOUT the driver bit, so their class_index never matches
-          // edge.driver / get_driver_pin handles. Re-fetch the canonical
-          // driver handle for keying; pin2var insert dedups repeat pids.
+          // Iterate out_sorted_pins() (not the old out_pins()): out_pins()
+          // missed driver pid 0 (a zero-write-port ROM's dout) and its handles
+          // encoded pins WITHOUT the driver bit, so their class_index never
+          // matched a get_driver_pin handle. out_sorted_pins() emits the
+          // node-as-pin first and yields canonical driver handles. The
+          // re-fetch below is kept so the pin2var key is spelled exactly the
+          // way every other writer spells it; pin2var insert dedups repeats.
           //
           // type==2 (array) douts are procedurally assigned in process_memory's
           // always_comb, so they must be `reg`; type 0/1 douts connect to the
@@ -3906,14 +3978,15 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // other way would emit `always_comb dout = ...` onto a `wire` for a
           // Memory cell that arrives without a `type` pin.
           bool is_array_mem = true;
-          for (auto& e2 : node.inp_edges()) {
-            if (e2.sink.get_port_id() == 7 && e2.driver.is_const()) {  // pid 7 = "type" (comptime x 1)
-              is_array_mem = const_of(e2.driver).to_just_i64() == 2;
+          for (const auto& tsink : node.inp_sorted_pins()) {
+            const auto tdrv = tsink.get_driver_pin();
+            if (tsink.get_port_id() == 7 && tdrv.is_const()) {  // pid 7 = "type" (comptime x 1)
+              is_array_mem = const_of(tdrv).to_just_i64() == 2;
               break;
             }
           }
-          for (const auto& e2 : node.out_edges()) {
-            auto dout = node.get_driver_pin(e2.driver.get_port_id());
+          for (const auto& odrv : node.out_sorted_pins()) {
+            auto dout = node.get_driver_pin(odrv.get_port_id());
             // Claim the slot FIRST (like the Sub branch below): get_unique_decl_name
             // permanently reserves the name it returns, so computing it for a pin
             // already bound would burn a `_cgenN` counter on a name never declared.
@@ -3931,7 +4004,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             // re-declaration. reserve_instance_names only pre-seeds the bare
             // instance name, not these derivatives.
             auto name2 = get_unique_decl_name(
-                get_scaped_name(absl::StrCat(unquote_prp_name(default_instance_name(node)), "_dout_", e2.driver.get_port_id())));
+                get_scaped_name(absl::StrCat(unquote_prp_name(default_instance_name(node)), "_dout_", odrv.get_port_id())));
             pin2var.insert({dout.get_class_index(), name2});
             {
               int bits2 = bits_of(dout);
@@ -3942,18 +4015,19 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
               // drives down to entry 0, and every consumer of the bus (a whole-array
               // `d = q` copy, then the per-entry update) then read garbage. LEC
               // refuted comb_array_const_index_read on exactly this.
-              if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
+              if (static_cast<hhds::Port_id>(odrv.get_port_id()) == Ntype::Memory_readall_pid) {
                 int64_t mb = 0;
                 int64_t ms = 0;
-                for (const auto& e3 : node.inp_edges()) {
-                  if (!e3.driver.is_const()) {
+                for (const auto& msink : node.inp_sorted_pins()) {
+                  const auto mdrv = msink.get_driver_pin();
+                  if (!mdrv.is_const()) {
                     continue;
                   }
-                  auto nm = Ntype::get_sink_name(Ntype_op::Memory, e3.sink.get_port_id());
+                  auto nm = Ntype::get_sink_name(Ntype_op::Memory, msink.get_port_id());
                   if (nm == "bits") {
-                    mb = const_of(e3.driver).to_just_i64();
+                    mb = const_of(mdrv).to_just_i64();
                   } else if (nm == "size") {
-                    ms = const_of(e3.driver).to_just_i64();
+                    ms = const_of(mdrv).to_just_i64();
                   }
                 }
                 if (mb > 0 && ms > 0) {
@@ -3982,17 +4056,19 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           continue;
         }
         absl::flat_hash_set<hhds::Port_id> declared_sub_outputs;
-        for (const auto& output_edge : node.out_edges()) {
-          const auto pid = output_edge.driver.get_port_id();
+        for (const auto& odrv : node.out_sorted_pins()) {
+          const auto pid = odrv.get_port_id();
           if (!declared_sub_outputs.insert(pid).second) {
             continue;
           }
-          // Re-fetch the canonical driver handle (driver bit set) so this keys
-          // pin2var identically to the edge.driver a consumer's inp_edges loop
-          // uses. Iterate out_edges rather than out_pins: HHDS out_pins can omit
-          // a multi-driver node's pid-0 driver, leaving the instance connection
-          // to create an implicit one-bit Verilog wire and silently truncate the
-          // whole Sub output.
+          // out_sorted_pins(), NOT the old out_pins(): it emits the node-as-pin
+          // (driver pid 0) as its first element and hands back CANONICAL driver
+          // handles (driver bit set), so this keys pin2var identically to the
+          // driver a consumer's in-pin walk sees. out_pins() did neither, and a
+          // missed pid-0 driver left the instance connection to create an
+          // implicit one-bit Verilog wire and silently truncate the whole Sub
+          // output. The pid dedup below is now redundant (one pin per pid) but
+          // costs nothing and keeps the loop honest about its own key.
           auto cdpin = node.get_driver_pin(pid);
           // Use a DEDICATED net name (like the Memory dout above), never the wire
           // name: a Sub output that drives a module output directly is otherwise
@@ -4156,7 +4232,19 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       // and precision rules as the single-use path.
       const bool bitwise = op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor;
       // Keep the shared net that breaks recursive expansion on a cycle.
-      const int  limit   = bitwise && node.inp_edges().size() <= 2 && !comb_cycle.contains(node) ? 3 : 2;
+      // Fan-IN degree: with one driver per sink pin, the in-edge count IS the
+      // connected-sink-pin count, so count pins (no edge vector, early exit).
+      const auto fanin_le2 = [&]() {
+        int n = 0;
+        for (const auto& sink : node.inp_sorted_pins()) {
+          (void)sink;
+          if (++n > 2) {
+            return false;
+          }
+        }
+        return true;
+      };
+      const int  limit   = bitwise && fanin_le2() && !comb_cycle.contains(node) ? 3 : 2;
       int        fanout  = 0;
       for (const auto& e : node.out_edges()) {
         (void)e;
@@ -4298,12 +4386,13 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     if (!is_type_register(node) && op != Ntype_op::Memory) {
       continue;
     }
-    for (const auto& e : node.inp_edges()) {
-      const auto pin_name = Ntype::get_sink_name(op, e.sink.get_port_id());
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      const auto pin_name = Ntype::get_sink_name(op, sink.get_port_id());
       if (!str_tools::ends_with(pin_name, "clock_pin") && pin_name != "reset_pin") {
         continue;
       }
-      auto ctl_dpin = e.driver;
+      auto ctl_dpin = drv;
       if (ctl_dpin.is_invalid() || ctl_dpin.is_const() || pin2var.contains(ctl_dpin.get_class_index())) {
         continue;  // tied off, or already a declared net / module input
       }

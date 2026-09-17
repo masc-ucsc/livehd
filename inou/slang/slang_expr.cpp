@@ -701,8 +701,7 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       }
       return mark_bool(builder_.create_eq_stmts(v, "0"));
     }
-    // Reductions: expanded here (operand width is known) instead of relying
-    // on tolg lowering for red_* nodes.
+    // Preserve the operand's declared width for bit reductions.
     case UnaryOperator::BitwiseOr :  // |v
     case UnaryOperator::BitwiseNor: {
       auto v = to_int_value(lower_rvalue(operand));
@@ -714,15 +713,12 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       auto all = mask_text(oi.bits);
       return mark_bool(expr.op == UnaryOperator::BitwiseAnd ? builder_.create_eq_stmts(v, all) : builder_.create_ne_stmts(v, all));
     }
-    case UnaryOperator::BitwiseXor :  // ^v - parity via shift-halving
+    case UnaryOperator::BitwiseXor :
     case UnaryOperator::BitwiseXnor: {
-      auto v = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
-      for (int k = 32; k >= 1; k /= 2) {
-        if (k < oi.bits) {
-          v = builder_.create_bit_xor_stmts(v, builder_.create_sra_stmts(v, std::to_string(k)));
-        }
-      }
-      auto parity = builder_.create_bit_and_stmts(v, "1");
+      // An explicit window fixes the count even if the operand's range later
+      // narrows. It also converts signed inputs to their finite bit pattern.
+      auto v      = builder_.create_get_mask_stmts(to_int_value(lower_rvalue(operand)), mask_text(oi.bits));
+      auto parity = builder_.create_red_xor_stmts(v);
       if (expr.op == UnaryOperator::BitwiseXnor) {
         return mark_bool(builder_.create_eq_stmts(parity, "0"));
       }

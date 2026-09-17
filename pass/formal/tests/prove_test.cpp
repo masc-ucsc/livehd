@@ -13,6 +13,7 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
+#include "reduce_lower.hpp"
 
 using namespace livehd;
 using livehd::formal::Verdict;
@@ -36,9 +37,12 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
 
   auto g      = gio->create_graph();
   auto node   = graph_util::create_typed_node(*g, op);
-  auto sink_a = graph_util::setup_sink_by_name(node, "as");
-  g->get_input_pin("a").connect_sink(sink_a);
-  g->get_input_pin("b").connect_sink(sink_a);
+  // ONE DRIVER PER SINK PIN (graph/cell.hpp): each operand of a banked op gets
+  // its own consecutive pid, so call setup_sink_by_name once PER OPERAND. A
+  // single reused sink pin is the old pile-onto-pin-0 shape, which now loses
+  // every operand after the first.
+  g->get_input_pin("a").connect_sink(graph_util::setup_sink_by_name(node, "as"));
+  g->get_input_pin("b").connect_sink(graph_util::setup_sink_by_name(node, "as"));
   auto dpin = node.create_driver_pin(0);
   graph_util::set_ubits(dpin, out_bits);
   dpin.connect_sink(g->get_output_pin("out"));
@@ -57,9 +61,9 @@ std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::s
 
   auto g      = gio->create_graph();
   auto node   = graph_util::create_typed_node(*g, Ntype_op::EQ);
-  auto sink_a = graph_util::setup_sink_by_name(node, "as");
-  g->get_input_pin("a").connect_sink(sink_a);
-  g->get_input_pin("a").connect_sink(sink_a);  // a == a
+  // a == a: two operands, so two sink pins (see build_binop).
+  g->get_input_pin("a").connect_sink(graph_util::setup_sink_by_name(node, "as"));
+  g->get_input_pin("a").connect_sink(graph_util::setup_sink_by_name(node, "as"));
   auto dpin = node.create_driver_pin(0);
   graph_util::set_ubits(dpin, 1);
   dpin.connect_sink(g->get_output_pin("out"));
@@ -123,8 +127,8 @@ TEST(Prove, HotmuxPairsDefaultAndExclusivity) {
   std::vector<hhds::Pin_class> controls;
   for (int i = 0; i < 2; ++i) {
     auto eq = gu::create_typed_node(*g, Ntype_op::EQ);
-    eq.create_sink_pin(0).connect_driver(g->get_input_pin("x"));
-    eq.create_sink_pin(0).connect_driver(gu::create_const(*g, *Dlop::create_integer(i)));
+    gu::setup_sink_pid(eq, 0).connect_driver(g->get_input_pin("x"));
+    gu::setup_sink_pid(eq, 0).connect_driver(gu::create_const(*g, *Dlop::create_integer(i)));
     auto out = eq.create_driver_pin(0);
     gu::set_ubits(out, 1);
     controls.push_back(out);
@@ -144,4 +148,52 @@ TEST(Prove, HotmuxPairsDefaultAndExclusivity) {
   hot.create_sink_pin(4).connect_driver(nine);
   formal::Prover with_default(g.get());  // A fresh encoder after changing the graph.
   EXPECT_EQ(with_default.equal(out, nine).verdict, Verdict::Proven);
+}
+
+TEST(Prove, CountedReductionsMatchBitTreesAndPreserveSourceOnExport) {
+  namespace gu = livehd::graph_util;
+  for (auto op : {Ntype_op::Rxor, Ntype_op::Popcount}) {
+    for (int count : {0, 1, 3, 8, 65}) {
+      for (bool signed_input : {false, true}) {
+        hhds::GraphLibrary lib;
+        auto               io = lib.create_io("counted");
+        io->add_input("a", 0);
+        io->set_bits("a", 7);
+        io->set_unsign("a", !signed_input);
+        const int width = op == Ntype_op::Rxor ? 1 : std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(count))));
+        io->add_output("out", 1);
+        io->set_bits("out", width);
+        io->set_unsign("out", true);
+        auto graph  = io->create_graph();
+        auto native = gu::create_typed_node(*graph, op);
+        graph->get_input_pin("a").connect_sink(native.create_sink_pin(0));
+        gu::create_const(*graph, *Dlop::create_integer(count)).connect_sink(native.create_sink_pin(1));
+        auto output = native.create_driver_pin(0);
+        gu::set_ubits(output, width);
+        output.connect_sink(graph->get_output_pin("out"));
+        auto expected = gu::create_const(*graph, *Dlop::create_integer(0));
+        for (int bit = 0; bit < count; ++bit) {
+          auto slice = gu::create_get_mask(*graph, graph->get_input_pin("a"), bit, bit + 1);
+          auto lane  = slice.create_driver_pin(0);
+          gu::set_ubits(lane, 1);
+          auto combine = gu::create_typed_node(*graph, op == Ntype_op::Rxor ? Ntype_op::Xor : Ntype_op::Sum);
+          expected.connect_sink(gu::setup_sink_pid(combine, 0));
+          lane.connect_sink(gu::setup_sink_pid(combine, 0));
+          expected = combine.create_driver_pin(0);
+          gu::set_ubits(expected, width);
+        }
+        formal::Prover prover(graph.get());
+        EXPECT_EQ(prover.equal(output, expected).verdict, Verdict::Proven) << count << ":" << signed_input;
+        hhds::GraphLibrary scratch;
+        auto               expanded = gu::lower_counted_reductions_copy(graph, scratch);
+        EXPECT_NE(expanded.get(), graph.get());
+        EXPECT_FALSE(native.is_invalid());
+        EXPECT_EQ(gu::type_op_of(native), op);
+        for (auto node : expanded->body().nodes()) {
+          EXPECT_NE(gu::type_op_of(node), Ntype_op::Rxor);
+          EXPECT_NE(gu::type_op_of(node), Ntype_op::Popcount);
+        }
+      }
+    }
+  }
 }

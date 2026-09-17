@@ -109,8 +109,7 @@ struct Builder {
       return p;
     }
     auto n = mk(Ntype_op::Get_mask);
-    gu::setup_sink_by_name(n, "a").connect_driver(p);
-    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, *bit_mask(b)));
+    gu::connect_mask_operands(n, p, gu::create_const(g, *bit_mask(b)));
     return d1(n);
   }
   // Lane `l` (w bits, LSB-first) of the `total`-bit value p: bits
@@ -122,8 +121,7 @@ struct Builder {
       return p;
     }
     auto n = mk(Ntype_op::Get_mask);
-    gu::setup_sink_by_name(n, "a").connect_driver(p);
-    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, gu::mask_window_const(l * w, (l + 1) * w)));
+    gu::connect_mask_operands(n, p, gu::create_const(g, gu::mask_window_const(l * w, (l + 1) * w)));
     return dw(n, w);
   }
   // Fit an arbitrary driver to an unsigned w-bit value (truncate / zero-extend),
@@ -134,8 +132,7 @@ struct Builder {
       return p;
     }
     auto n = mk(Ntype_op::Get_mask);
-    gu::setup_sink_by_name(n, "a").connect_driver(p);
-    gu::setup_sink_by_name(n, "mask").connect_driver(gu::create_const(g, gu::mask_window_const(0, w)));
+    gu::connect_mask_operands(n, p, gu::create_const(g, gu::mask_window_const(0, w)));
     return dw(n, w);
   }
   // Pack equal-width lanes (LSB first, each `w` bits) into one unsigned
@@ -153,7 +150,7 @@ struct Builder {
     auto wconst = konst_i(w);
     for (int i = n - 1; i >= 0; --i) {
       const auto data_pid = static_cast<hhds::Port_id>(2 * i);
-      wconst.connect_sink(c.create_sink_pin(data_pid + 1));
+      wconst.connect_sink(livehd::graph_util::setup_sink_pid(c, data_pid + 1));
       lanes[static_cast<size_t>(n - 1 - i)].connect_sink(c.create_sink_pin(data_pid));
     }
     return dw(c, n * w);
@@ -198,11 +195,12 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, c
   bool                whole_array   = false;
   bool                undef_refined = false;  // ordering="none" matrix dropped by the bit-blast
   std::map<int, Port> ports;
-  for (auto e : mem.inp_edges()) {
-    int  raw  = static_cast<int>(e.sink.get_port_id());
-    int  off  = raw % kMemStride;
-    int  pidx = raw / kMemStride;
-    auto drv  = e.driver;
+  for (const auto& in_pin : mem.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    int        raw    = static_cast<int>(in_pin.get_port_id());
+    int        off    = raw % kMemStride;
+    int        pidx   = raw / kMemStride;
+    auto       drv    = in_drv;
     switch (off) {
       case kAddr:
         ports[pidx].addr  = drv;
@@ -344,8 +342,9 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, c
   // any node is built so an unmodelable output bails with nothing dangling.
   const int     ra_pid = static_cast<int>(Ntype::Memory_readall_pid);
   std::set<int> out_pids;
-  for (const auto& out : mem.out_edges()) {
-    int pid = static_cast<int>(out.driver.get_port_id());
+  // Which output PORTS exist, not who reads them: one step per pin.
+  for (const auto& out_pin : mem.out_sorted_pins()) {
+    int pid = static_cast<int>(out_pin.get_port_id());
     if (pid != ra_pid && (pid < n_wr || pid >= n_wr + n_rd)) {
       return bail(std::format("unmodeled memory output pid {}", pid));
     }
@@ -541,10 +540,10 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, c
           if (control.is_invalid()) {
             control = B.konst_i(1);
           }
-          control.connect_sink(cover.create_sink_pin(static_cast<hhds::Port_id>(2 * k)));
-          wr_din_lane[active[k]][l].connect_sink(cover.create_sink_pin(static_cast<hhds::Port_id>(2 * k + 1)));
+          control.connect_sink(livehd::graph_util::setup_sink_pid(cover, static_cast<hhds::Port_id>(2 * k)));
+          wr_din_lane[active[k]][l].connect_sink(livehd::graph_util::setup_sink_pid(cover, static_cast<hhds::Port_id>(2 * k + 1)));
         }
-        lane[l].connect_sink(cover.create_sink_pin(static_cast<hhds::Port_id>(2 * active.size())));
+        lane[l].connect_sink(livehd::graph_util::setup_sink_pid(cover, static_cast<hhds::Port_id>(2 * active.size())));
         lane[l] = B.dw(cover, masksize);
       }
     }
@@ -581,8 +580,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, c
       }
       auto hm = B.mk(Ntype_op::Hotmux);
       for (int en = 0; en < size; ++en) {
-        hm.create_sink_pin(static_cast<hhds::Port_id>(2 * en)).connect_driver(onehot[en]);
-        hm.create_sink_pin(static_cast<hhds::Port_id>(2 * en + 1)).connect_driver(data_q[en]);
+        livehd::graph_util::setup_sink_pid(hm, static_cast<hhds::Port_id>(2 * en)).connect_driver(onehot[en]);
+        livehd::graph_util::setup_sink_pid(hm, static_cast<hhds::Port_id>(2 * en + 1)).connect_driver(data_q[en]);
       }
       dmem = B.dw(hm, bits);
     }
@@ -647,8 +646,21 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem, uint64_t max_bits, c
   }
 
   // rewire the memory's read-data consumers onto the new douts, then drop it.
-  for (const auto& out : mem.out_edges()) {
-    read_dout.at(static_cast<int>(out.driver.get_port_id())).connect_sink(out.sink);
+  //
+  // TWO SNAPSHOTS, both required, and the old single lazy `mem.out_edges()`
+  // walk had neither: connect_sink() below is a structural mutation, so it
+  // invalidates any live view of the edge storage it is walking. The outer
+  // snapshot is the memory's dout DRIVER PINS; the inner one is each pin's
+  // fan-out, taken before the first connect touches it.
+  for (const auto& out_pin : mem.out_pins_snapshot()) {
+    auto                         dout = read_dout.at(static_cast<int>(out_pin.get_port_id()));
+    std::vector<hhds::Pin_class> readers;
+    for (const auto& e : out_pin.out_edges()) {
+      readers.push_back(e.sink);
+    }
+    for (const auto& reader : readers) {
+      dout.connect_sink(reader);
+    }
   }
   mem.del_node();
   return true;

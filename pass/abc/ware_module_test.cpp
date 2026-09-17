@@ -36,7 +36,7 @@ TEST(WareModule, NarySumPreservesAllPortsAndSharesEqualRealizations) {
       auto pin = g->get_input_pin(std::to_string(i));
       gu::set_bits(pin, 3 + i * 5);
       i % 2 == 0 ? gu::set_unsign(pin) : gu::set_sign(pin);
-      pin.connect_sink(sum.create_sink_pin(i == 3 ? 1 : 0));
+      pin.connect_sink(gu::setup_sink_pid(sum, i == 3 ? 1 : 0));
     }
     auto a = sum.create_driver_pin(0), b = sum.create_driver_pin(1);
     gu::set_ubits(a, 21);
@@ -56,7 +56,7 @@ TEST(WareModule, NarySumPreservesAllPortsAndSharesEqualRealizations) {
       continue;
     }
     ++sums;
-    EXPECT_EQ(n.inp_edges().size(), 4u);
+    EXPECT_EQ(n.inp_pins_snapshot().size(), 4u);
     EXPECT_EQ(gu::bits_of(n.create_driver_pin(0)), 21);
     EXPECT_EQ(gu::bits_of(n.create_driver_pin(1)), 11);
   }
@@ -104,9 +104,10 @@ TEST(WareModule, NarySumPreservesAllPortsAndSharesEqualRealizations) {
     rb.inputs.push_back({d.name, child->get_input_pin(d.name), static_cast<int>(d.bits), !d.unsign});
   }
   for (const auto& d : child->get_io()->get_output_pin_decls()) {
-    auto edges = child->get_output_pin(d.name).inp_edges();
-    ASSERT_EQ(edges.size(), 1u);
-    rb.outputs.push_back({d.name, edges[0].driver, static_cast<int>(d.bits), !d.unsign});
+    // One driver per sink pin: a graph output is driven by exactly one pin.
+    auto out_drv = child->get_output_pin(d.name).get_driver_pin();
+    ASSERT_FALSE(out_drv.is_invalid());
+    rb.outputs.push_back({d.name, out_drv, static_cast<int>(d.bits), !d.unsign});
   }
   abc::Map_options mapping;
   mapping.library      = "inou/prp/tests/abc/test.lib";
@@ -144,9 +145,7 @@ TEST(WareModule, NarySumPreservesAllPortsAndSharesEqualRealizations) {
   EXPECT_EQ(proof.detail.find("width/sign reconciled"), std::string::npos) << proof.detail;
   // Negative control: the second output must actually be checked.
   auto second = mapped->get_output_pin("o1");
-  for (auto e : second.inp_edges()) {
-    e.del_edge();
-  }
+  gu::drop_drivers(second);
   gu::create_const(*mapped, *Dlop::create_integer(0)).connect_sink(second);
   auto wrong = livehd::lec::prove_equal(child.get(), mapped.get(), proof_options, &sub_lib);
   EXPECT_EQ(wrong.verdict, livehd::lec::Verdict::Refuted) << wrong.detail;

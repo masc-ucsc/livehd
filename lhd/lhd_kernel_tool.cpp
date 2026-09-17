@@ -2,10 +2,10 @@
 // Unified LNAST/LGraph inspection tools: cat, grep, diff, and tree.
 
 #include <algorithm>
-#include <iterator>
 #include <cstdio>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <set>
@@ -292,10 +292,12 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
 // view. An input pin is some other node's output, so it is not lost.
 void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
   namespace gu = livehd::graph_util;
+  // out_sorted_pins() yields each CONNECTED driver pin once, so the walk is
+  // already deduped by pin; `seen` still guards the (pid, name) key the record
+  // is identified by.
   std::set<std::pair<int, std::string>> seen;
-  for (const auto& e : node.out_edges()) {
-    const auto& pin = e.driver;
-    auto        pn  = gu::pin_name_of(pin);
+  for (const auto& pin : node.out_sorted_pins()) {
+    auto pn = gu::pin_name_of(pin);
     if (!seen.insert({pin.get_port_id(), std::string{pn}}).second) {
       continue;
     }
@@ -314,17 +316,19 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
 
 void tool_edge_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
   namespace gu = livehd::graph_util;
-  for (const auto& e : node.out_edges()) {
-    std::string from = tool_endpoint_name(e.driver);
-    std::string to   = tool_endpoint_name(e.sink);
-    int32_t     b    = gu::bits_of(e.driver);
-    Tool_record r;
-    r.type  = 'e';
-    r.ident = std::format("{} -> {}  ({}b)", from, to, b);
-    r.cols.emplace_back("from", from);
-    r.cols.emplace_back("to", to);
-    r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
-    out.push_back(std::move(r));
+  for (const auto& dpin : node.out_sorted_pins()) {
+    for (const auto& e : dpin.out_edges()) {
+      std::string from = tool_endpoint_name(e.driver);
+      std::string to   = tool_endpoint_name(e.sink);
+      int32_t     b    = gu::bits_of(e.driver);
+      Tool_record r;
+      r.type  = 'e';
+      r.ident = std::format("{} -> {}  ({}b)", from, to, b);
+      r.cols.emplace_back("from", from);
+      r.cols.emplace_back("to", to);
+      r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
+      out.push_back(std::move(r));
+    }
   }
 }
 
@@ -480,26 +484,32 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
     if (!take(std::format("  {}", tool_render_pretty(nr, {"color", "src"})))) {
       return;
     }
-    for (const auto& e : node.inp_edges()) {
-      // A sink pin has no width of its own — its width is the DRIVER's (`bits` is a
-      // driver-pin property; see graph/node_util.hpp set_bits). Read the driver.
-      int32_t b = gu::bits_of(e.driver);
-      if (!take(std::format("    .{}  bits={}{}  <- {}",
-                            tool_pin_label(e.sink),
-                            b != 0 ? std::to_string(b) : std::string{"nil"},
-                            gu::is_unsign(e.driver) ? "" : " signed",
-                            tool_endpoint_name(e.driver)))) {
-        return;
+    for (auto sink : node.inp_sorted_pins()) {
+      // PLURAL, so the dump stays one line per EDGE: a compact loop's carry-in
+      // sink holds two drivers (pass/legalize/legalize.cpp:301).
+      for (const auto& drv : sink.get_driver_pins()) {
+        // A sink pin has no width of its own — its width is the DRIVER's (`bits` is a
+        // driver-pin property; see graph/node_util.hpp set_bits). Read the driver.
+        int32_t b = gu::bits_of(drv);
+        if (!take(std::format("    .{}  bits={}{}  <- {}",
+                              tool_pin_label(sink),
+                              b != 0 ? std::to_string(b) : std::string{"nil"},
+                              gu::is_unsign(drv) ? "" : " signed",
+                              tool_endpoint_name(drv)))) {
+          return;
+        }
       }
     }
-    for (const auto& e : node.out_edges()) {
-      int32_t b = gu::bits_of(e.driver);
-      if (!take(std::format("    .{}  bits={}{}  -> {}",
-                            tool_pin_label(e.driver),
-                            b != 0 ? std::to_string(b) : std::string{"nil"},
-                            gu::is_unsign(e.driver) ? "" : " signed",
-                            tool_endpoint_name(e.sink)))) {
-        return;
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        int32_t b = gu::bits_of(e.driver);
+        if (!take(std::format("    .{}  bits={}{}  -> {}",
+                              tool_pin_label(e.driver),
+                              b != 0 ? std::to_string(b) : std::string{"nil"},
+                              gu::is_unsign(e.driver) ? "" : " signed",
+                              tool_endpoint_name(e.sink)))) {
+          return;
+        }
       }
     }
   }
@@ -732,11 +742,11 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
     // The match id says HOW the two sides were paired; without it a report on a
     // design whose two runs number nodes differently is unreadable (and, before
     // the correspondence pairing below, was not even about the same node).
-    return std::format("n{}{} [{}]",
-                       n.get_debug_nid(),
-                       nm.has() ? std::format(" '{}'", nm.get()) : std::string{},
-                       livehd::graph_util::has_match(n) ? std::format("match={}", livehd::graph_util::match_of(n))
-                                                        : std::string{"no-match"});
+    return std::format(
+        "n{}{} [{}]",
+        n.get_debug_nid(),
+        nm.has() ? std::format(" '{}'", nm.get()) : std::string{},
+        livehd::graph_util::has_match(n) ? std::format("match={}", livehd::graph_util::match_of(n)) : std::string{"no-match"});
   };
   std::vector<Tool_record> ar;
   std::vector<Tool_record> br;
@@ -746,10 +756,9 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
     return no(std::format("record count {} vs {}", ar.size(), br.size()));
   }
   const std::vector<std::string> cols{"kind", "name", "color", "partitionable", "bits", "signed"};
-  const auto                     record_key
-      = [&](const Tool_record& r) {
-          return std::format("{}|{}|{}", r.type, tool_ident_without_nids(r.ident), tool_ident_without_nids(tool_render_pretty(r, cols)));
-        };
+  const auto                     record_key = [&](const Tool_record& r) {
+    return std::format("{}|{}|{}", r.type, tool_ident_without_nids(r.ident), tool_ident_without_nids(tool_render_pretty(r, cols)));
+  };
   // Materialize each key once: computing format+render inside the sort
   // comparator costs O(n log n) renders per side for no benefit.
   const auto sorted_keys = [&](const std::vector<Tool_record>& records) {
@@ -776,7 +785,7 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
       std::set_difference(bk.begin(), bk.end(), ak.begin(), ak.end(), std::back_inserter(only_b));
       const auto brief = [](const std::vector<std::string>& v) {
         constexpr size_t kShow = 3;
-        std::string       out;
+        std::string      out;
         for (size_t i = 0; i < v.size() && i < kShow; ++i) {
           out += std::format("{}'{}'", out.empty() ? "" : ", ", v[i]);
         }
@@ -914,8 +923,7 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
     auto bn = bnodes[i];
     if (!same_attr(an, bn, hhds::attrs::name, "name") || !same_attr(an, bn, livehd::attrs::color, "color")
         || !same_attr(an, bn, livehd::attrs::place, "place") || !same_attr(an, bn, livehd::attrs::proven, "proven")
-        || !same_attr(an, bn, livehd::attrs::runtime_check, "runtime_check")
-        || !same_attr(an, bn, livehd::attrs::lut, "lut")
+        || !same_attr(an, bn, livehd::attrs::runtime_check, "runtime_check") || !same_attr(an, bn, livehd::attrs::lut, "lut")
         || !same_range_attr(an, bn, livehd::attrs::time_range, "time_range")
         || !same_range_attr(an, bn, livehd::attrs::pending_time, "pending_time")) {
       return no(std::format("{}: {}", node_id(an), detail));
@@ -926,17 +934,19 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
     // `x + 1` and `x + 2` compared identical.
     const auto const_operands = [](const hhds::Node_class& n) {
       std::vector<std::pair<uint32_t, std::string>> v;
-      for (const auto& edge : n.inp_edges()) {
-        if (edge.driver.is_const()) {
-          v.emplace_back(static_cast<uint32_t>(edge.sink.get_port_id()), edge.driver.const_value()->serialize());
+      for (auto sink : n.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          if (drv.is_const()) {
+            v.emplace_back(static_cast<uint32_t>(sink.get_port_id()), drv.const_value()->serialize());
+          }
         }
       }
       std::sort(v.begin(), v.end());
       return v;
     };
     if (const_operands(an) != const_operands(bn)) {
-      const auto av = const_operands(an);
-      const auto bv = const_operands(bn);
+      const auto av  = const_operands(an);
+      const auto bv  = const_operands(bn);
       // A serialized Dlop can hold unknown bits and padding that render as blanks
       // (or as control bytes), so "[0:    ] vs [0:    ]" is a useless report.
       // Escape anything not printable-ASCII.
@@ -963,11 +973,15 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
     }
     std::vector<hhds::Edge_class> ae;
     std::vector<hhds::Edge_class> be;
-    for (const auto& edge : an.out_edges()) {
-      ae.push_back(edge);
+    for (const auto& dpin : an.out_sorted_pins()) {
+      for (const auto& edge : dpin.out_edges()) {
+        ae.push_back(edge);
+      }
     }
-    for (const auto& edge : bn.out_edges()) {
-      be.push_back(edge);
+    for (const auto& dpin : bn.out_sorted_pins()) {
+      for (const auto& edge : dpin.out_edges()) {
+        be.push_back(edge);
+      }
     }
     const auto edge_less = [](const hhds::Edge_class& lhs, const hhds::Edge_class& rhs) {
       const auto key = [](const hhds::Edge_class& edge) {
@@ -1256,8 +1270,9 @@ bool tool_tree_kind_match(Ntype_op op, const std::vector<std::string>& kinds) {
 // bits" view). 0 = unknown (no sized driver pin, e.g. a dead flop).
 int32_t tool_tree_node_bits(const hhds::Node_class& node) {
   namespace gu = livehd::graph_util;
-  for (const auto& e : node.out_edges()) {
-    if (auto b = gu::bits_of(e.driver); b != 0) {
+  // Driver-pin walk: this only ever read the driver side.
+  for (const auto& dpin : node.out_sorted_pins()) {
+    if (auto b = gu::bits_of(dpin); b != 0) {
       return b;
     }
   }

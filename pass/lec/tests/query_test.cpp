@@ -105,15 +105,15 @@ std::shared_ptr<hhds::Graph> build_overwide_concat(hhds::GraphLibrary& lib, cons
   auto lane = g->get_input_pin("a");
   if (pretruncate) {
     auto mask = graph_util::create_typed_node(*g, Ntype_op::Get_mask, 4);
-    lane.connect_sink(mask.create_sink_pin(0));
-    graph_util::create_const(*g, *Dlop::create_integer(15)).connect_sink(mask.create_sink_pin(2));
+    lane.connect_sink(livehd::graph_util::setup_sink_pid(mask, 0));
+    graph_util::create_const(*g, *Dlop::create_integer(15)).connect_sink(livehd::graph_util::setup_sink_pid(mask, 2));
     lane = mask.create_driver_pin(0);
     graph_util::set_ubits(lane, 4);
   }
 
   auto concat = graph_util::create_typed_node(*g, Ntype_op::Concat, 4);
-  lane.connect_sink(concat.create_sink_pin(0));
-  graph_util::create_const(*g, *Dlop::create_integer(4)).connect_sink(concat.create_sink_pin(1));
+  lane.connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
+  graph_util::create_const(*g, *Dlop::create_integer(4)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
   auto out = concat.create_driver_pin(0);
   graph_util::set_ubits(out, 4);
   out.connect_sink(g->get_output_pin("out"));
@@ -137,16 +137,16 @@ std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t
   auto body = body_io->create_graph();
 
   auto sum = graph_util::create_typed_node(*body, Ntype_op::Sum, 9);
-  body->get_input_pin("carry").connect_sink(sum.create_sink_pin(0));
-  graph_util::create_const(*body, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  body->get_input_pin("carry").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  graph_util::create_const(*body, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
 
   // The lifted body itself preserves the carry while inactive; the occurrence
   // realization additionally inserts the inter-ordinal bypass required by the
   // compact call-binding contract.
   auto mux = graph_util::create_typed_node(*body, Ntype_op::Mux, 9);
-  body->get_input_pin("active").connect_sink(mux.create_sink_pin(0));
-  body->get_input_pin("carry").connect_sink(mux.create_sink_pin(1));
-  sum.create_driver_pin(0).connect_sink(mux.create_sink_pin(2));
+  body->get_input_pin("active").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+  body->get_input_pin("carry").connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+  sum.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
   auto next_carry = mux.create_driver_pin(0);
   graph_util::set_bits(next_carry, 9);
   graph_util::set_unsign(next_carry);
@@ -174,9 +174,9 @@ std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t
                        .activation_input   = 1,
                        .next_active_output = 3,
                    });
-  top->get_input_pin("seed").connect_sink(call.create_sink_pin(0));
-  top->get_input_pin("enable").connect_sink(call.create_sink_pin(1));
-  call.create_driver_pin(2).connect_sink(call.create_sink_pin(0));
+  top->get_input_pin("seed").connect_sink(livehd::graph_util::setup_sink_pid(call, 0));
+  top->get_input_pin("enable").connect_sink(livehd::graph_util::setup_sink_pid(call, 1));
+  call.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_pid(call, 0));
   call.create_driver_pin(2).connect_sink(top->get_output_pin("result"));
   call.subnode_group().validate();
   return top;
@@ -200,9 +200,9 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
   }
   auto body = body_io->create_graph();
   auto sum  = graph_util::create_typed_node(*body, Ntype_op::Sum, 17);
-  body->get_input_pin("index").connect_sink(sum.create_sink_pin(0));
-  body->get_input_pin("x").connect_sink(sum.create_sink_pin(0));
-  body->get_input_pin("carry").connect_sink(sum.create_sink_pin(0));
+  body->get_input_pin("index").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  body->get_input_pin("x").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  body->get_input_pin("carry").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   auto sum_out = sum.create_driver_pin(0);
   graph_util::set_bits(sum_out, 17);
   graph_util::set_unsign(sum_out);
@@ -235,12 +235,12 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
                        .activation_input   = std::nullopt,
                        .next_active_output = std::nullopt,
                    });
-  top->get_input_pin("x").connect_sink(loop.create_sink_pin(1));
-  graph_util::create_const(*top, *Dlop::create_integer(0)).connect_sink(loop.create_sink_pin(2));
+  top->get_input_pin("x").connect_sink(livehd::graph_util::setup_sink_pid(loop, 1));
+  graph_util::create_const(*top, *Dlop::create_integer(0)).connect_sink(livehd::graph_util::setup_sink_pid(loop, 2));
   auto result = loop.create_driver_pin(3);
   graph_util::set_bits(result, 17);
   graph_util::set_unsign(result);
-  result.connect_sink(loop.create_sink_pin(2));
+  result.connect_sink(livehd::graph_util::setup_sink_pid(loop, 2));
   result.connect_sink(top->get_output_pin("result"));
   if (observe_plain_output) {
     auto observed = loop.create_driver_pin(4);
@@ -278,20 +278,20 @@ TEST(CombEquiv, PackedFeedbackSlicesAreRepairedPrivately) {
     auto lane = g->get_input_pin("a");
     if (packed) {
       auto slice = gu::create_typed_node(*g, Ntype_op::Get_mask, 2);
-      word.connect_sink(slice.create_sink_pin(0));
-      gu::create_const(*g, *Dlop::create_integer(real_cycle ? 3 : 12)).connect_sink(slice.create_sink_pin(2));
+      word.connect_sink(livehd::graph_util::setup_sink_pid(slice, 0));
+      gu::create_const(*g, *Dlop::create_integer(real_cycle ? 3 : 12)).connect_sink(livehd::graph_util::setup_sink_pid(slice, 2));
       lane = slice.create_driver_pin(0);
       gu::set_ubits(lane, 2);
     }
     auto flip = gu::create_typed_node(*g, Ntype_op::Xor, 2);
-    lane.connect_sink(flip.create_sink_pin(0));
-    gu::create_const(*g, *Dlop::create_integer(invert)).connect_sink(flip.create_sink_pin(0));
+    lane.connect_sink(livehd::graph_util::setup_sink_pid(flip, 0));
+    gu::create_const(*g, *Dlop::create_integer(invert)).connect_sink(livehd::graph_util::setup_sink_pid(flip, 0));
     auto high = flip.create_driver_pin(0);
     gu::set_ubits(high, 2);
-    g->get_input_pin("a").connect_sink(concat.create_sink_pin(0));
-    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(concat.create_sink_pin(1));
-    high.connect_sink(concat.create_sink_pin(2));
-    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(concat.create_sink_pin(3));
+    g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
+    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
+    high.connect_sink(livehd::graph_util::setup_sink_pid(concat, 2));
+    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 3));
     word.connect_sink(g->get_output_pin("out"));
     return g;
   };
@@ -531,12 +531,12 @@ TEST(CombEquiv, NestedLoopCertificatesSurviveUnresolvedParents) {
       auto node  = graph_util::create_typed_node(*graph, Ntype_op::Sub);
       if (outer_loop) {
         node.set_subnode(child->get_io(), hhds::Subnode_loop{.count = count});
-        node.create_driver_pin(2).connect_sink(node.create_sink_pin(0));
+        node.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
       } else {
         node.set_subnode(child->get_io());
       }
-      graph->get_input_pin("seed").connect_sink(node.create_sink_pin(0));
-      graph->get_input_pin("enable").connect_sink(node.create_sink_pin(1));
+      graph->get_input_pin("seed").connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
+      graph->get_input_pin("enable").connect_sink(livehd::graph_util::setup_sink_pid(node, 1));
       auto result = node.create_driver_pin(2);
       graph_util::set_ubits(result, 9);
       result.connect_sink(graph->get_output_pin("result"));
@@ -664,19 +664,19 @@ TEST(LecState, CpropMuxSharingPreservesTransition) {
         for (int i = 0; i < 6; ++i) {
           auto eq = gu::create_typed_node(*ref, Ntype_op::EQ, 1);
           gu::set_ubits(eq.create_driver_pin(0), 1);
-          eq.create_sink_pin(0).connect_driver(ref->get_input_pin("selector"));
-          eq.create_sink_pin(0).connect_driver(constant(i));
+          livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(ref->get_input_pin("selector"));
+          livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(constant(i));
           hot.create_sink_pin(2 * i).connect_driver(eq.create_driver_pin(0));
           hot.create_sink_pin(2 * i + 1).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
         }
-        hot.create_sink_pin(12).connect_driver(q);
+        livehd::graph_util::setup_sink_pid(hot, 12).connect_driver(q);
         data = hot.create_driver_pin(0);
       } else {
         for (int i = 5; i >= 0; --i) {
           auto mux = make(Ntype_op::Mux);
-          mux.create_sink_pin(0).connect_driver(ref->get_input_pin("c" + std::to_string(i)));
-          mux.create_sink_pin(1).connect_driver(data);
-          mux.create_sink_pin(2).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
+          livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(ref->get_input_pin("c" + std::to_string(i)));
+          livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(data);
+          livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
           data = mux.create_driver_pin(0);
         }
       }

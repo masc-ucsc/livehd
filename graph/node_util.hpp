@@ -12,17 +12,22 @@
 // the "%dot.name" wire-naming scheme, etc.).
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "absl/container/inlined_vector.h"
+
 
 #include "attrs.hpp"
 #include "cell.hpp"
@@ -32,14 +37,117 @@
 
 namespace livehd::graph_util {
 
-// The exact container hhds inp_edges()/out_edges() return — an
-// absl::InlinedVector (heap-free for the common low-degree pin). Aliased via
-// decltype so it tracks hhds's choice (inline size, element type) and can never
-// drift out of sync with the accessor it must bind to.
-using Edge_vec = decltype(std::declval<hhds::Node_class>().inp_edges());
+// A snapshot of a DRIVER's fan-out edges. Matches the element type and inline
+// capacity hhds's out_edges() view yields, so `Edge_vec v(r.begin(), r.end())`
+// never reallocates for the common low-degree driver.
+//
+// There is no in-edge twin any more: the in-edge shape is a pin walk,
+// `for (auto sink : n.inp_sorted_pins()) for (auto drv : sink.get_driver_pins())`
+// (or inp_pins_snapshot() when the walk mutates). Both readers are load-bearing:
+// SORTED because port 0 is the node itself and the raw inp_pins() drops it, and
+// PLURAL because nearly-but-not-quite every sink has one driver -- a compact
+// loop's carry-in has two (pass/legalize's verify_single_driver_sinks sanctions
+// exactly that one), and the singular get_driver_pin() would drop the second.
+using Edge_vec = absl::InlinedVector<hhds::Edge_class, 4>;
 
-// hhds guarantees inp_edges() is SINK-PORT ASCENDING, but says nothing about
-// the order of SEVERAL DRIVERS OF ONE SINK PIN (a Sum's `as` fed by three
+// Disconnect a SINK pin from everything driving it.
+//
+// This is the replacement for the old `for (auto e : sink.inp_edges())
+// e.del_edge();` idiom. It takes a SNAPSHOT first, because del_sink() mutates
+// the very storage a driver view walks. The plural reader is deliberate: a
+// compact loop's carry-in sink is the one pin pass/legalize sanctions with two
+// drivers, and "disconnect this sink" has to mean ALL of them.
+//
+// Spelling note, because hhds's names read backwards at the call site:
+// `Pin_class::del_sink(driver)` is `del_edge(driver, *this)` -- it removes MY
+// driver -- while `del_driver()` removes MY out-edges.
+inline void drop_drivers(const hhds::Pin_class& sink) {
+  auto drivers = sink.get_driver_pins();
+  for (const auto& drv : drivers) {
+    sink.del_sink(drv);
+  }
+}
+
+// Disconnect every sink pin of a node from everything driving it.
+inline void drop_drivers(const hhds::Node_class& node) {
+  for (auto sink : node.inp_pins_snapshot()) {
+    drop_drivers(sink);
+  }
+}
+
+// One operand of a cell: the sink pin it lands on and the driver feeding it.
+template <typename PinT>
+struct Sink_driver {
+  PinT sink;
+  PinT driver;
+
+  [[nodiscard]] hhds::Port_id get_port_id() const { return sink.get_port_id(); }
+};
+
+// The operand list of a node, ascending by sink port id.
+//
+// WHY THIS EXISTS AND NOT A BARE inp_sorted_pins() CALL. The walkers below --
+// and every templated cone walker in graph/ -- are instantiated for BOTH
+// hhds::Node_class (flat) and hhds::Occurrence_node (hierarchical). BOTH handle
+// families answer inp_sorted_pins() now, but they do not yield the same pin
+// TYPE and they do not have the same driver multiplicity, so this overload pair
+// is the one place that difference is spelled out: a shared walker reads
+// `sink.get_port_id()` / `sink.driver` -- one entry per operand EDGE -- and does
+// not care which family it was stamped for.
+//
+// SORTED, never the raw inp_pins(): hhds stores port 0 as the NODE ITSELF, so
+// the raw pin list omits it, and port 0 is exactly where a banked cell's first
+// operand lives (see append_sink_operand). inp_sorted_pins() yields the
+// node-as-pin first, then the list ascending by sink pid -- the order this
+// helper promises.
+//
+// The FLAT overload still gets the whole point of the pin redesign: the
+// operands come off the node's OWN pin list, so a driver pin with a 12k fanout
+// is skipped by a direction-bit test instead of having 12k out-edges decoded
+// and discarded. The small vector it fills is per-CELL (a Mux has 3 operands,
+// an And 2) and is what makes the two handle families share one body.
+//
+// A pin yielded by inp_sorted_pins() is CONNECTED, so the flat overload's
+// `driver` is valid. The HIER overload uses the PLURAL get_driver_pins() per
+// sink instead: one cross-boundary sink can resolve to SEVERAL drivers (a
+// compact loop's carry-in becomes the previous occurrence's output plus, with
+// an activation input, the inactive-carry bypass), and dropping the extra ones
+// would silently shorten the operand list the edge reader used to hand back.
+[[nodiscard]] inline absl::InlinedVector<Sink_driver<hhds::Pin_class>, 4> inp_sink_drivers(const hhds::Node_class& node) {
+  absl::InlinedVector<Sink_driver<hhds::Pin_class>, 4> out;
+  if (node.is_invalid()) {
+    return out;
+  }
+  // PLURAL in BOTH overloads: the contract above is one entry per operand EDGE.
+  // A compact loop's carry-in is the one sink pass/legalize sanctions with two
+  // drivers, and the singular get_driver_pin() returns drivers.front() behind an
+  // assert -DNDEBUG erases -- so the flat list would silently come back SHORT,
+  // and every caller that pairs it POSITIONALLY against the occurrence-side list
+  // would then pair the wrong items.
+  for (auto sink : node.inp_sorted_pins()) {
+    for (auto driver : sink.get_driver_pins()) {
+      out.push_back({sink, driver});
+    }
+  }
+  return out;
+}
+
+[[nodiscard]] inline absl::InlinedVector<Sink_driver<hhds::Occurrence_pin>, 4> inp_sink_drivers(
+    const hhds::Occurrence_node& node) {
+  absl::InlinedVector<Sink_driver<hhds::Occurrence_pin>, 4> out;
+  if (node.is_invalid()) {
+    return out;
+  }
+  for (auto sink : node.inp_sorted_pins()) {
+    for (auto driver : sink.get_driver_pins()) {
+      out.push_back({sink, driver});
+    }
+  }
+  return out;
+}
+
+// hhds guarantees inp_sorted_pins() is SINK-PORT ASCENDING, but says nothing
+// about the order of SEVERAL DRIVERS OF ONE SINK PIN (a Sum's `as` fed by three
 // nodes, an Or's `a`) -- that is edge storage order. A consumer that needs a
 // deterministic emission or hash order there imposes `less` inside each
 // sink-pin RUN and leaves the port order hhds already fixed alone.
@@ -73,25 +181,26 @@ struct Hotmux_inputs {
 
 template <typename Node>
 [[nodiscard]] inline auto hotmux_inputs(const Node& node) {
-  // inp_edges() is sink-port ascending by contract (hhds graph.hpp), so the
-  // pairs come out in pin order with no sort; the assert below pins the
-  // stronger property this cell needs -- that the pids are also CONTIGUOUS
-  // from 0, which is what makes index i the pid. The copy is for the indexing
-  // alone: an Occurrence node's inp_edges() is a range, not a vector.
-  auto                                                range = node.inp_edges();
-  std::vector<std::decay_t<decltype(*range.begin())>> edges;
-  for (const auto& edge : range) {
-    edges.push_back(edge);
+  // The operand list is sink-port ascending by contract (hhds graph.hpp), so
+  // the pairs come out in pin order. inp_sink_drivers serves BOTH the flat and
+  // the hierarchical handle -- see its note -- which is why this stays a
+  // template over `Node`.
+  auto               ins = inp_sink_drivers(node);
+  using Pin              = std::decay_t<decltype(ins[0].driver)>;
+  Hotmux_inputs<Pin> result;
+  Pin                pending;
+  size_t             pid = 0;
+  for (const auto& in : ins) {
+    I(in.get_port_id() == pid);
+    if (pid % 2 == 0) {
+      pending = in.driver;
+    } else {
+      result.arms.emplace_back(pending, in.driver);
+    }
+    ++pid;
   }
-  Hotmux_inputs<std::decay_t<decltype(edges[0].driver)>> result;
-  for (size_t i = 0; i < edges.size(); ++i) {
-    I(edges[i].sink.get_port_id() == i);
-  }
-  for (size_t i = 0; i + 1 < edges.size(); i += 2) {
-    result.arms.emplace_back(edges[i].driver, edges[i + 1].driver);
-  }
-  if (edges.size() % 2) {
-    result.fallback = edges.back().driver;
+  if (pid % 2) {
+    result.fallback = pending;
   }
   return result;
 }
@@ -100,8 +209,8 @@ template <typename Node>
 template <typename Node>
 [[nodiscard]] inline size_t hotmux_control_end(const Node& node) {
   size_t end = 0;
-  for (const auto& edge : node.inp_edges()) {
-    const auto pid = edge.sink.get_port_id();
+  for (const auto& in : inp_sink_drivers(node)) {
+    const auto pid = in.get_port_id();
     if (pid % 2) {
       end = std::max(end, static_cast<size_t>(pid) + 1);
     }
@@ -238,41 +347,25 @@ const Dlop&                      const_of(const hhds::Occurrence_node&) = delete
 [[nodiscard]] inline bool is_type_const(const hhds::Node_class& node) { return node.get_debug_nid() == hhds::Graph::CONST_NODE; }
 [[nodiscard]] inline bool is_type_const(const hhds::Occurrence_node& node) { return is_type_const(node.base_node()); }
 
-// Add one folded constant operand. HHDS edges are unique, but arithmetic
-// operands are a multiset: redirecting a second 1 to an XOR must cancel it,
-// and redirecting a second 2 to a sum must contribute another 2. Combine a
-// collision using the sink's reduction, repeating if the result also exists.
-// This can create constant pins; callers must not hold live graph iterators.
-inline void connect_folded_const(hhds::Graph& graph, hhds::Pin_class value, const hhds::Pin_class& sink) {
-  const auto op = type_op_of(sink.get_master_node());
-  if (!Ntype::is_sink_single_driver(op, sink.get_port_id())
-      && (op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Mult || op == Ntype_op::Xor)) {
-    for (;;) {
-      hhds::Edge_class collision;
-      for (const auto& edge : sink.inp_edges()) {
-        if (edge.driver == value) {
-          collision = edge;
-          break;
-        }
-      }
-      if (collision.driver.is_invalid()) {
-        break;
-      }
-      const auto& operand = const_of(value);
-      Dlop        combined;
-      if (op == Ntype_op::Mult) {
-        combined = operand.mult_op(operand);
-      } else if (op == Ntype_op::Xor) {
-        combined = operand.xor_op(operand);
-      } else {
-        // Sum and both comparison sides sum their operands independently.
-        combined = operand.add_op(operand);
-      }
-      I(!combined.is_invalid() && !combined.is_nil());
-      collision.del_edge();
-      value = create_const(graph, combined);
-    }
-  }
+// Connect a folded constant to one consumer sink.
+//
+// HISTORY / why this is now a one-liner: hhds edges are unique per
+// (driver, sink) PAIR, and a commutative cell used to pile all of its operands
+// onto ONE sink pin -- so redirecting a second copy of the same constant onto a
+// Sum's `as` was silently DEDUPED (`2 + 2` became `2`) and this helper had to
+// fold the collision by hand (`2 + 2` -> the constant 4, repeating). Under ONE
+// DRIVER PER SINK PIN each operand owns its own pid, two equal constants sit on
+// two different pins, and the multiset is representable directly. There is
+// nothing left to fold: a collision on one pin would mean that pin already had
+// two drivers.
+//
+// The signature is kept (graph, value, sink) because callers pass the graph
+// anyway and a future rule may need it again. Connecting while the sink still
+// carries the driver being replaced is the usual transient -- the caller's
+// del_node drops the old edge immediately after -- and is legal DURING a
+// mutation; the one-driver-per-sink-pin check is a legalize pass, not an
+// invariant that holds mid-rewrite.
+inline void connect_folded_const([[maybe_unused]] hhds::Graph& graph, hhds::Pin_class value, const hhds::Pin_class& sink) {
   value.connect_sink(sink);
 }
 
@@ -507,7 +600,8 @@ inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
   }
 
   const auto op = type_op_of(dpin.get_master_node());
-  if (op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::EQ || op == Ntype_op::Ror || op == Ntype_op::Clock_cell) {
+  if (op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::EQ || op == Ntype_op::Ror || op == Ntype_op::Rxor
+      || op == Ntype_op::Clock_cell) {
     I(is_uns && nbits == 1,
       std::format("pin '{}' from {} must carry the structural u1 hint, got {} {}signed bits",
                   wire_name(dpin),
@@ -569,7 +663,7 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
     }
     if (bits_of(dpin) == 0) {
       std::string inputs;
-      for (const auto& edge : node.inp_edges()) {
+      for (const auto& edge : inp_sink_drivers(node)) {
         if (!inputs.empty()) {
           inputs += ", ";
         }
@@ -613,18 +707,35 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
 // output width leaking onto its 2-bit select sink). Classifying each attribute
 // (attrs.hpp) lets the setter catch that:
 //   driver_pin -> the signal source; assert is_driver  (bits, signed, …)
-//   sink       -> assert is_sink
 //   edge/any   -> no driver/sink restriction (shared wire name, IO offsets, …)
 //   node       -> static error: a node attribute must not go through a pin setter.
+// There is no `sink` role: attributes are forbidden on sink pins, and
+// Attr_kind has no enumerator for one, so "stamp this on a sink" is not a
+// classification anybody can write (see attrs.hpp).
 // Call only on a VALID pin (the setters early-return on invalid first).
+//
+// ALWAYS ON, deliberately -- this was an `I()` until 2026-09-17, and `I()` is
+// erased by -DNDEBUG, which `.bazelrc` sets for every `-c opt` build. So the ONE
+// guard against a structural aliasing bug was absent from precisely the builds
+// that ship and that every bench runs. That is the same "silent in opt" shape
+// that let a vacuous single-driver verifier and a dropped carry seed survive in
+// this tree, so it is a hard check now: the cost is one predictable branch on an
+// already-loaded word, and the failure it catches is a wrong VALUE on an
+// unrelated pin, which no later pass can detect.
 template <typename Tag>
 inline void assert_pin_attr_role([[maybe_unused]] const hhds::Pin_class& pin) {
   static_assert(livehd::attrs::attr_kind<Tag> != livehd::attrs::Attr_kind::node,
                 "node attribute set through a pin setter — use the node overload");
   if constexpr (livehd::attrs::attr_kind<Tag> == livehd::attrs::Attr_kind::driver_pin) {
-    I(pin.is_driver(), "this attribute is a DRIVER-pin property; got a sink pin (write it on the driver / read the driver)");
-  } else if constexpr (livehd::attrs::attr_kind<Tag> == livehd::attrs::Attr_kind::sink) {
-    I(pin.is_sink(), "this attribute is a SINK-pin property; got a driver pin");
+    if (!pin.is_driver()) [[unlikely]] {
+      std::fprintf(stderr,
+                   "livehd: FATAL: a DRIVER-pin attribute was written on a SINK pin.\n"
+                   "  The per-pin attribute key folds the driver/sink bit, so a same-port driver and\n"
+                   "  sink SHARE one slot: this write would silently overwrite the driver's value\n"
+                   "  (e.g. a mux's 66-bit output width landing on its 2-bit select sink).\n"
+                   "  Write it on the driver pin, and read it via bits_of(driver_of(sink)).\n");
+      std::abort();
+    }
   }
 }
 
@@ -826,13 +937,69 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (pid == hhds::Port_invalid) {
     return {};
   }
+  if (Ntype::is_banked_sink_op(op)) {
+    // A banked name denotes a BANK of consecutive operand slots, not one pin
+    // (Ntype's ONE DRIVER PER SINK PIN block). Answer with its LOWEST DRIVEN
+    // slot, so "is this bank used at all" and the single-operand case both
+    // read the way they always did. A caller that needs EVERY operand of the
+    // bank must use bank_sinks / inp_drivers_of.
+    const auto bank = Ntype::sink_bank(op, pid);
+    // inp_sorted_pins(), NOT the raw inp_pins(): port 0 is the node ITSELF in
+    // hhds and is absent from the pin linked list, so a raw pin scan misses the
+    // bank's first slot entirely (see append_sink_operand). inp_sorted_pins
+    // yields the node-as-pin first, then the list, ascending by sink pid.
+    for (auto sink : node.inp_sorted_pins()) {
+      if (Ntype::sink_bank(op, sink.get_port_id()) == bank) {
+        return sink;
+      }
+    }
+    return {};
+  }
   auto pin = node.try_get_sink_pin(pid);
-  if (pin.is_invalid() || pin.inp_edges().empty()) {
+  if (pin.is_invalid() || !pin.has_driver()) {
     return {};
   }
   return pin;
 }
 
+// EVERY driven sink pin of a banked cell's operand bank, in ascending pid
+// order. Empty for a non-banked op or an unused bank.
+[[nodiscard]] inline absl::InlinedVector<hhds::Pin_class, 4> bank_sinks(const hhds::Node_class& node, std::string_view name) {
+  absl::InlinedVector<hhds::Pin_class, 4> out;
+  if (node.is_invalid()) {
+    return out;
+  }
+  const auto op = type_op_of(node);
+  if (!Ntype::is_banked_sink_op(op)) {
+    return out;
+  }
+  const auto pid = Ntype::get_sink_pid(op, name);
+  if (pid == hhds::Port_invalid) {
+    return out;
+  }
+  const auto bank = Ntype::sink_bank(op, pid);
+  // inp_sorted_pins(), NOT the raw inp_pins(): port 0 is the node itself and
+  // never appears in the pin linked list (see append_sink_operand);
+  // inp_sorted_pins yields it first, then the list ascending by sink pid.
+  for (auto sink : node.inp_sorted_pins()) {
+    if (Ntype::sink_bank(op, sink.get_port_id()) == bank) {
+      out.push_back(sink);
+    }
+  }
+  return out;
+}
+
+// Hier twin, on the same SORTED pin walk as the flat overload:
+// Occurrence_node::inp_sorted_pins() yields the node-as-pin (port 0, where a
+// banked cell's first operand lives and which the raw inp_pins() omits) first,
+// then the pin list ascending by sink pid.
+//
+// The `get_driver_pins()` probe is what keeps the no-driver-reads-as-a-miss
+// contract documented above: a hier sink pin exists as soon as the LOCAL edge
+// does, but its cross-boundary resolution can come back empty (a loop domain
+// index, a carry self-edge replaced by the virtual chain), and the edge reader
+// this replaced reported that as a miss. It is PLURAL -- the only question
+// asked of it is "empty?", and one resolved sink can carry several drivers.
 [[nodiscard]] inline hhds::Occurrence_pin find_sink_pin(const hhds::Occurrence_node& node, std::string_view name) {
   if (node.is_invalid()) {
     return {};
@@ -846,9 +1013,9 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
       return {};
     }
     const auto sub_pid = sub_io->get_input_port_id(name);
-    for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_port_id() == sub_pid) {
-        return e.sink;
+    for (auto sink : node.inp_sorted_pins()) {
+      if (sink.get_port_id() == sub_pid && !sink.get_driver_pins().empty()) {
+        return sink;
       }
     }
     return {};
@@ -857,9 +1024,9 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (pid == hhds::Port_invalid) {
     return {};
   }
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == pid) {
-      return e.sink;
+  for (auto sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() == pid && !sink.get_driver_pins().empty()) {
+      return sink;
     }
   }
   return {};
@@ -880,24 +1047,40 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
 [[nodiscard]] inline hhds::Pin_class first_value_driver(const hhds::Node_class& node) {
   hhds::Pin_class a;
   uint32_t        best = 0;
-  for (const auto& e : node.inp_edges()) {
-    const auto sp = static_cast<uint32_t>(e.sink.get_port_id());
-    if (a.is_invalid() || sp < best) {
-      a    = e.driver;
-      best = sp;
+  for (auto sink : node.inp_sorted_pins()) {  // read-only walk, ascending pid
+    const auto sp = static_cast<uint32_t>(sink.get_port_id());
+    // Compare INSIDE the driver loop so the first driver of the lowest pid still
+    // wins, which is what the edge walk returned; the hier twin below does the
+    // same, and the two overloads must not disagree on which reader they trust.
+    for (auto drv : sink.get_driver_pins()) {
+      if (a.is_invalid() || sp < best) {
+        a    = drv;
+        best = sp;
+      }
     }
   }
   return a;
 }
 
+// Hier twin, on Occurrence_node's own inp_sorted_pins(). SORTED is what makes
+// the lowest-sink-pid pick correct at all: hhds stores port 0 as the node
+// itself, so the raw inp_pins() omits the LOWEST pid there is, and a Get_mask
+// whose value operand sits there would be answered with its mask constant.
+// The PLURAL get_driver_pins() keeps every resolved driver of a cross-boundary
+// sink in the walk, exactly as the edge reader it replaced did; drivers of ONE
+// pin share `sp`, so `sp < best` is false for the later ones and the first
+// driver of the lowest pin still wins. See inp_sink_drivers for the shim a
+// SHARED (templated) walker uses instead of either overload.
 [[nodiscard]] inline hhds::Occurrence_pin first_value_driver(const hhds::Occurrence_node& node) {
   hhds::Occurrence_pin a;
   uint32_t             best = 0;
-  for (const auto& e : node.inp_edges()) {
-    const auto sp = static_cast<uint32_t>(e.sink.get_port_id());
-    if (a.is_invalid() || sp < best) {
-      a    = e.driver;
-      best = sp;
+  for (auto sink : node.inp_sorted_pins()) {
+    const auto sp = static_cast<uint32_t>(sink.get_port_id());
+    for (auto driver : sink.get_driver_pins()) {
+      if (a.is_invalid() || sp < best) {
+        a    = driver;
+        best = sp;
+      }
     }
   }
   return a;
@@ -908,6 +1091,17 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
 // Ntype::is_sink_single_driver is false -- the 's'-suffixed "as"/"bs" pins)
 // require inp_drivers_of instead.
 [[nodiscard]] inline hhds::Pin_class get_driver_of_sink_name(const hhds::Node_class& node, std::string_view name) {
+  if (Ntype::is_banked_sink_op(type_op_of(node))) {
+    // A banked name is a whole operand bank; taking its first slot would
+    // silently drop the rest. Answer only when the bank holds ONE operand.
+    auto slots = bank_sinks(node, name);
+    if (slots.empty()) {
+      return {};
+    }
+    I(slots.size() == 1, "get_driver_of_sink_name on a multi-operand bank; use inp_drivers_of");
+    auto drivers = slots.front().get_driver_pins();
+    return drivers.empty() ? hhds::Pin_class{} : drivers.front();
+  }
   auto sink = find_sink_pin(node, name);
   if (sink.is_invalid()) {
     return {};
@@ -938,6 +1132,21 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   return drivers.front();
 }
 
+// Reduction semantics use the explicit count operand, never a pin-width hint.
+template <class Node>
+[[nodiscard]] inline int reduction_count(const Node& node) {
+  const auto count = get_driver_of_sink_name(node, "b");
+  if (count.is_invalid() || !count.is_const()) {
+    throw std::invalid_argument("Rxor/Popcount requires a constant bit count");
+  }
+  const auto& value = const_of(count);
+  if (value.has_unknowns() || !value.is_just_i64() || value.to_just_i64() < 0
+      || value.to_just_i64() > std::numeric_limits<int>::max()) {
+    throw std::invalid_argument("Rxor/Popcount requires a non-negative bit count");
+  }
+  return static_cast<int>(value.to_just_i64());
+}
+
 // Cell-type mutation. hhds owns bit 0 of `NodeEntry::type` (its per-node
 // `is_loop_break` cut flag), so the op is stored SHIFTED LEFT by one with that
 // bit seeded from Ntype::is_loop_last; type_op_of() shifts it back. Keep the
@@ -957,9 +1166,85 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   return node;
 }
 
+// APPEND one operand slot to a BANKED cell's operand bank (Ntype's ONE DRIVER
+// PER SINK PIN block). `bank` is the bank's first pid -- 0 for "as", 1 for
+// "bs" -- and the stride between consecutive slots of one bank is the cell's
+// bank count, so the "as" slots of a Sum are 0, 2, 4, ... and its "bs" slots
+// are 1, 3, 5, ...
+//
+// Returns the LOWEST slot of that bank that is still free. "Free" means UNDRIVEN
+// (hhds::Node_class::inp_sorted_pins yields only sink pins that already carry an
+// edge), so the usual build shape
+//
+//   setup_sink_by_name(sum, "as").connect_driver(x);   // -> pid 0
+//   setup_sink_by_name(sum, "as").connect_driver(y);   // -> pid 2
+//
+// appends, while a setup that is never connected is reused by the next append
+// instead of leaving a disconnected pin behind. That matters: a disconnected
+// sink pin is legal only DURING a mutation, and the one-driver-per-sink-pin
+// legalize check rejects one that survives it.
+[[nodiscard]] inline hhds::Pin_class append_sink_operand(const hhds::Node_class& node, Ntype_op op, hhds::Port_id bank) {
+  const auto stride = static_cast<hhds::Port_id>(Ntype::sink_bank_count(op));
+  I(stride != 0, "append_sink_operand on a cell with no operand banks");
+  I(bank < stride, "append_sink_operand: bank pid outside this cell's bank count");
+  // Walk inp_sorted_pins(), not the raw hhds::Node_class::inp_pins().
+  //
+  // hhds stores PORT 0 as the NODE ITSELF (create_sink_pin(0) hands back a
+  // Pin_class over the node's own Nid), so port 0 is not in the node's pin
+  // linked list and get_sink_pins -- the backing of inp_pins() -- can never
+  // report it. Scanning pins therefore never saw the FIRST operand of a bank,
+  // every append answered `bank` again, and every operand of every commutative
+  // cell piled back onto one pin. (Silently: hhds then DEDUPES a repeated
+  // (driver, sink) pair, so `(x == 0) ^ 1` with the EQ folded to 1 became
+  // `Xor(1)` = 1 instead of `1 ^ 1` = 0 -- caught by inou/prp's folded_rotate.)
+  // inp_sorted_pins() walks the node-as-pin entry and the pin list both.
+  //
+  // The lowest FREE slot, so a setup that was never connected is reused by the
+  // next append instead of leaving a disconnected pin behind: an undriven pin
+  // contributes no edge, so it does not move `next`.
+  hhds::Port_id next = bank;
+  for (auto sink : node.inp_sorted_pins()) {
+    const auto pid = sink.get_port_id();
+    if (Ntype::sink_bank(op, pid) != bank) {
+      continue;
+    }
+    if (pid >= next) {
+      next = static_cast<hhds::Port_id>(pid + stride);
+    }
+  }
+  return node.create_sink_pin(next);
+}
+
+// Create-if-missing sink pin by RAW pid, bank-aware.
+//
+// Use this instead of `node.create_sink_pin(pid)` whenever the pid is a
+// LITERAL the caller chose (building a fresh cell), because on a BANKED op
+// (graph/cell.hpp's ONE DRIVER PER SINK PIN block) a literal names a BANK and
+// each operand needs its own slot:
+//
+//   setup_sink_pid(andn, 0).connect_driver(a);   // -> pid 0
+//   setup_sink_pid(andn, 0).connect_driver(b);   // -> pid 1
+//
+// Do NOT use it to COPY a pid from another graph (`create_sink_pin(
+// e.sink.get_port_id())`): a copy must reproduce the source pid exactly, and
+// appending would renumber the operands.
+[[nodiscard]] inline hhds::Pin_class setup_sink_pid(const hhds::Node_class& node, hhds::Port_id pid) {
+  const auto op = type_op_of(node);
+  if (Ntype::is_banked_sink_op(op)) {
+    return append_sink_operand(node, op, Ntype::sink_bank(op, pid));
+  }
+  return node.create_sink_pin(pid);
+}
+
 // Create-if-missing sink pin lookup by LiveHD-style name. For Sub nodes the
 // name path goes through HHDS's create_sink_pin(name) directly; for other ops
 // we translate name→port_id via Ntype and call create_sink_pin(port_id).
+//
+// For a BANKED op ("as"/"bs" on Sum/LT/GT/Mult/And/Or/Xor/Ror/EQ) the name
+// denotes a BANK rather than a single pin, so this APPENDS a fresh operand slot
+// (see append_sink_operand). Every existing `setup_sink_by_name(n, "as")
+// .connect_driver(d)` call site therefore builds the same cell it always did,
+// with each operand now on its own pin.
 [[nodiscard]] inline hhds::Pin_class setup_sink_by_name(const hhds::Node_class& node, std::string_view name) {
   auto op = type_op_of(node);
   if (op == Ntype_op::Sub) {
@@ -968,6 +1253,9 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   auto pid = Ntype::get_sink_pid(op, name);
   if (pid == hhds::Port_invalid) {
     return {};
+  }
+  if (Ntype::is_banked_sink_op(op)) {
+    return append_sink_operand(node, op, Ntype::sink_bank(op, pid));
   }
   return node.create_sink_pin(pid);
 }
@@ -983,7 +1271,9 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
 // mask that selects nothing is not a cell, it is a constant 0 the producer
 // should have folded.
 [[nodiscard]] inline Dlop mask_window_const(int lo, int hi) {
-  I(lo >= 0 && hi > lo, "Get_mask/Set_mask window must be a non-empty [lo, hi) with lo >= 0");
+  if (lo < 0 || hi <= lo) {
+    throw std::invalid_argument("Get_mask/Set_mask window must be a non-empty [lo, hi) with lo >= 0");
+  }
   return *Dlop::get_mask_value(hi - 1, lo);
 }
 
@@ -1053,9 +1343,63 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   set_type_op(node, op);
   if (bits != 0) {
     auto dpin = node.create_driver_pin(0);
-    dpin.attr(livehd::attrs::bits).set(bits);
+    set_bits(dpin, bits);  // guarded setter, not a raw attr write
   }
   return node;
+}
+
+// Validate before creating a node or changing any edges. These checks are not
+// debug assertions: consumers may only interpret a mask as one window or -1.
+inline void require_mask(const hhds::Pin_class& mask) {
+  if (!mask.is_const() || !is_legal_mask(const_of(mask))) {
+    throw std::invalid_argument("Get_mask/Set_mask requires a constant contiguous window or -1");
+  }
+}
+
+inline void connect_mask_operands(const hhds::Node_class& node, const hhds::Pin_class& value, const hhds::Pin_class& mask,
+                                  const hhds::Pin_class& replacement = {}) {
+  require_mask(mask);
+  const auto op = type_op_of(node);
+  if ((op != Ntype_op::Get_mask && op != Ntype_op::Set_mask) || value.is_invalid()
+      || (op == Ntype_op::Set_mask && replacement.is_invalid())) {
+    throw std::invalid_argument("invalid Get_mask/Set_mask operands");
+  }
+  setup_sink_by_name(node, "a").connect_driver(value);
+  setup_sink_by_name(node, "mask").connect_driver(mask);
+  if (op == Ntype_op::Set_mask) {
+    setup_sink_by_name(node, "value").connect_driver(replacement);
+  }
+}
+
+[[nodiscard]] inline hhds::Node_class create_get_mask(hhds::Graph& graph, const hhds::Pin_class& value,
+                                                      const hhds::Pin_class& mask) {
+  require_mask(mask);
+  if (value.is_invalid()) {
+    throw std::invalid_argument("invalid Get_mask operand");
+  }
+  auto node = create_typed_node(graph, Ntype_op::Get_mask);
+  connect_mask_operands(node, value, mask);
+  return node;
+}
+
+[[nodiscard]] inline hhds::Node_class create_get_mask(hhds::Graph& graph, const hhds::Pin_class& value, int lo, int hi) {
+  return create_get_mask(graph, value, create_const(graph, mask_window_const(lo, hi)));
+}
+
+[[nodiscard]] inline hhds::Node_class create_set_mask(hhds::Graph& graph, const hhds::Pin_class& value, const hhds::Pin_class& mask,
+                                                      const hhds::Pin_class& replacement) {
+  require_mask(mask);
+  if (value.is_invalid() || replacement.is_invalid()) {
+    throw std::invalid_argument("invalid Set_mask operands");
+  }
+  auto node = create_typed_node(graph, Ntype_op::Set_mask);
+  connect_mask_operands(node, value, mask, replacement);
+  return node;
+}
+
+[[nodiscard]] inline hhds::Node_class create_set_mask(hhds::Graph& graph, const hhds::Pin_class& value, int lo, int hi,
+                                                      const hhds::Pin_class& replacement) {
+  return create_set_mask(graph, value, create_const(graph, mask_window_const(lo, hi)), replacement);
 }
 
 // Per-pin offset (used by Get_mask / Set_mask / Sext positional ops, and IO-port
@@ -1076,11 +1420,20 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
 // graph's Source_locator; the old set_source/set_loc1 string+line
 // helpers are gone.
 
-// All drivers feeding a named sink port. Used by passes (memory, bit_or)
-// that allow multiple drivers on the same sink port_id.
+// All drivers feeding a named sink. For a BANKED op this is the whole operand
+// BANK, in ascending pid order -- one driver per slot (Ntype's ONE DRIVER PER
+// SINK PIN block). For every other op it is that single pin's fan-in, which is
+// also exactly one driver.
 [[nodiscard]] inline std::vector<hhds::Pin_class> inp_drivers_of(const hhds::Node_class& node, std::string_view name) {
   std::vector<hhds::Pin_class> result;
   if (node.is_invalid()) {
+    return result;
+  }
+  if (Ntype::is_banked_sink_op(type_op_of(node))) {
+    for (const auto& sink : bank_sinks(node, name)) {
+      auto drivers = sink.get_driver_pins();
+      result.insert(result.end(), drivers.begin(), drivers.end());
+    }
     return result;
   }
   // Go straight to the named sink's fan-in (get_driver_pins) instead of scanning
@@ -1107,9 +1460,15 @@ template <typename Fn>
 inline void for_each_memory_clock_driver(const hhds::Node_class& node, Fn&& fn) {
   I(type_op_of(node) == Ntype_op::Memory, "for_each_memory_clock_driver decodes Memory port blocks; got a non-Memory node");
   const auto clock_off = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
-  for (const auto& edge : node.inp_edges()) {
-    if (edge.sink.get_port_id() % Ntype::Memory_port_stride == clock_off) {
-      fn(edge.driver);
+  for (auto sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() % Ntype::Memory_port_stride != clock_off) {
+      continue;
+    }
+    // PLURAL: the contract above is EVERY port's clock driver. Visiting only
+    // drivers.front() is exactly the "silently loses clock domains" failure it
+    // warns about.
+    for (auto drv : sink.get_driver_pins()) {
+      fn(drv);
     }
   }
 }
@@ -1274,19 +1633,23 @@ namespace ge_detail {
 // of a comparator/reduce, whose own output is a single bit.
 [[nodiscard]] inline uint64_t widest_operand(const hhds::Node_class& node) {
   uint64_t w = 0;
-  for (const auto& e : node.inp_edges()) {
-    const auto b = bits_of(e.driver);
-    if (b > 0 && static_cast<uint64_t>(b) > w) {
-      w = static_cast<uint64_t>(b);
+  for (auto sink : node.inp_sorted_pins()) {  // read-only walk
+    for (auto drv : sink.get_driver_pins()) {  // PLURAL: max over drivers == max over the old edges
+      const auto b = bits_of(drv);
+      if (b > 0 && static_cast<uint64_t>(b) > w) {
+        w = static_cast<uint64_t>(b);
+      }
     }
   }
   return w;
 }
 
 // Port width across a blackbox boundary: every distinct driver pin, plus every
-// distinct sink pin that a non-constant drives. Deduping by port id is
-// load-bearing -- out_edges()/inp_edges() yield one entry per EDGE, so a driver
-// with three readers would otherwise be counted three times. Constant-driven
+// distinct sink pin that a non-constant drives. The `seen` dedupe inside `once`
+// was load-bearing when this walked EDGES -- an edge walk yields one entry per
+// EDGE, so a driver with three readers was counted three times. Both halves now
+// walk SORTED PINS, which yield each pin exactly once, so `once` is kept for the
+// accumulate half of its job and its dedupe is a belt. Constant-driven
 // sinks are skipped: on a Memory those are the comptime `bits`/`size`/`rdport`
 // configuration pins rather than ports, and a tied input costs no boundary gate
 // anywhere (ABC folds it).
@@ -1302,15 +1665,22 @@ namespace ge_detail {
       sum += static_cast<uint64_t>(b);
     }
   };
-  for (const auto& e : node.out_edges()) {
-    once(static_cast<uint32_t>(e.driver.get_port_id()), e.driver);
+  // out_sorted_pins yields each DRIVER PIN once, which is the dedupe this
+  // needed out_edges() plus `seen` to do -- `once` stays only because the sink
+  // half below still uses it.
+  for (auto drv : node.out_sorted_pins()) {
+    once(static_cast<uint32_t>(drv.get_port_id()), drv);
   }
   seen.clear();  // driver and sink port ids live in separate spaces
-  for (const auto& e : node.inp_edges()) {
-    if (e.driver.is_const()) {
-      continue;
+  for (auto sink : node.inp_sorted_pins()) {
+    // The const skip is PER DRIVER, as it was per EDGE: a sink whose first
+    // driver is constant and whose second is not still contributes its width.
+    for (auto drv : sink.get_driver_pins()) {
+      if (drv.is_const()) {
+        continue;
+      }
+      once(static_cast<uint32_t>(sink.get_port_id()), drv);  // a sink's width is its driver's
     }
-    once(static_cast<uint32_t>(e.sink.get_port_id()), e.driver);  // a sink's width is its driver's
   }
   return sum;
 }
@@ -1360,13 +1730,20 @@ struct Concat_lane {
   if (node.is_invalid() || type_op_of(node) != Ntype_op::Concat) {
     return lanes;
   }
-  // Gather by pid first: inp_edges order is unspecified, and here the pid IS
-  // the lane index.
+  // Gather by pid first: the lane table is INDEXED by pid, a malformed cell may
+  // leave holes, and `max_pid` is not known until the walk ends. The SORTED
+  // reader is also what makes port 0 appear at all -- lane 0's value driver is
+  // stored as the node itself, and the raw inp_pins() list omits it.
+  //
+  // `emplace` keeps the FIRST driver per pid deliberately: a Concat lane is one
+  // operand, so a second driver on one pid is a malformed cell, not a lane.
   absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> by_pid;
   hhds::Port_id                                       max_pid = 0;
-  for (const auto& ie : node.inp_edges()) {
-    const auto pid = ie.sink.get_port_id();
-    by_pid.emplace(pid, ie.driver);
+  for (auto sink : node.inp_sorted_pins()) {
+    const auto pid = sink.get_port_id();
+    for (auto drv : sink.get_driver_pins()) {
+      by_pid.emplace(pid, drv);
+    }
     max_pid = std::max(max_pid, pid);
   }
   if (by_pid.empty() || (max_pid % 2) == 0) {
@@ -1500,6 +1877,8 @@ struct Concat_lane {
     case Ntype_op::GT:
     case Ntype_op::EQ:
     case Ntype_op::Ror: return atleast1(ge_detail::widest_operand(node));
+    case Ntype_op::Rxor    : return atleast1(reduction_count(node)) * 3;
+    case Ntype_op::Popcount: return atleast1(reduction_count(node)) * 7;
 
     default: return atleast1(ge_detail::out_width(node));
   }

@@ -28,6 +28,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/hash_mix.hpp"
+#include "hhds/node_hash.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "str_tools.hpp"
@@ -161,8 +162,14 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     if (resolved.contains(pin)) {
       continue;
     }
-    for (const auto& e : pin.get_master_node().inp_edges()) {
-      ++add(e.driver)->second;
+    for (const auto& in_pin : pin.get_master_node().inp_sorted_pins()) {
+      // PLURAL, and it must stay in lockstep with the decrement below: a compact
+      // loop's carry-in sink holds TWO drivers, and counting it once left the
+      // second driver with no indegree entry, never enqueued, and therefore
+      // never `resolved` -- which the operand fold below would then throw on.
+      for (const auto& in_drv : in_pin.get_driver_pins()) {
+        ++add(in_drv)->second;
+      }
     }
   }
   std::vector<hhds::Pin_class> ready;
@@ -176,11 +183,13 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     if (resolved.contains(pin)) {
       continue;
     }
-    for (const auto& e : pin.get_master_node().inp_edges()) {
-      auto it = indegree.find(e.driver);
-      I(it != indegree.end() && it->second > 0);
-      if (--it->second == 0) {
-        ready.push_back(e.driver);
+    for (const auto& in_pin : pin.get_master_node().inp_sorted_pins()) {
+      for (const auto& in_drv : in_pin.get_driver_pins()) {  // mirrors the build above
+        auto it = indegree.find(in_drv);
+        I(it != indegree.end() && it->second > 0);
+        if (--it->second == 0) {
+          ready.push_back(in_drv);
+        }
       }
     }
   }
@@ -196,16 +205,25 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     if (resolved.contains(*it)) {
       continue;
     }
-    // Each operand term carries its own SINK PID, so the fold needs no order:
-    // a commutative pin's drivers agree whatever order they arrive in, while an
-    // operand can never migrate to another pin.
-    hhds::Commutative_combiner operands;
-    bool                       tainted = false;
-    for (const auto& e : it->get_master_node().inp_edges()) {
-      operands.add(sig_mix(resolved.at(e.driver), static_cast<uint64_t>(e.sink.get_port_id())));
-      tainted = tainted || (coarse != nullptr && coarse->contains(e.driver));
+    // Each operand term carries its own SINK BANK, so the fold needs no order:
+    // a commutative cell's operands agree whatever order they arrive in, while
+    // an operand can never migrate to another ROLE. BANK, not raw pid -- each
+    // operand owns a pid now (graph/cell.hpp), so the raw pid would make
+    // `a + b` and `b + a` two different region signatures.
+    absl::flat_hash_map<int, std::vector<uint64_t>> by_bank;
+    bool                                            tainted = false;
+    for (const auto& in_pin : it->get_master_node().inp_sorted_pins()) {
+      const auto bank = static_cast<int>(Ntype::sink_bank(gu::type_op_of(in_pin.get_master_node()), in_pin.get_port_id()));
+      // PLURAL reader: a compact loop's carry-in sink legitimately holds TWO
+      // drivers (seed + previous ordinal). `get_driver_pin()` returns only the
+      // first, so it silently dropped one operand out of the signature -- the
+      // shape that shipped as a miscompile in pass/partition/flatten.cpp.
+      for (const auto& in_drv : in_pin.get_driver_pins()) {
+        by_bank[bank].push_back(resolved.at(in_drv));
+        tainted = tainted || (coarse != nullptr && coarse->contains(in_drv));
+      }
     }
-    const uint64_t node = sig_mix(producer_shape(*it), operands.value());
+    const uint64_t node = sig_mix(producer_shape(*it), hhds::group_fold(0, by_bank));
     resolved.emplace(*it, sig_mix(node, static_cast<uint64_t>(it->get_port_id())));
     if (tainted) {
       coarse->insert(*it);
@@ -216,24 +234,24 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
 
 template <typename Fn>
 void each_fwd_child(const hhds::Node_class& consumer, Fn&& fn) {
-  // Most cells have one output. Keep the common case entirely on the stack;
-  // the old per-visit flat_hash_set was visible in allocation profiles on
-  // large partitioned designs.
-  absl::InlinedVector<int, 4> seen;
-  for (const auto& oe : consumer.out_edges()) {
-    const int port = static_cast<int>(oe.driver.get_port_id());
-    if (std::find(seen.begin(), seen.end(), port) == seen.end()) {
-      seen.push_back(port);
-      fn(oe.driver);
-    }
+  // The node's CONNECTED DRIVER PINS, which is exactly what the old out_edges()
+  // walk reconstructed by hand: it visited every fan-out EDGE and kept the first
+  // one per driver port, so a driver reaching 12k sinks cost 12k edge decodes
+  // plus a linear `seen` scan to yield ONE pin. out_sorted_pins() is that set
+  // directly -- already deduplicated (a pin is yielded once) and in the same
+  // ascending driver-port order, since both walks emit the node-as-pin(0) first
+  // and then the port-sorted pin chain. The dedup vector is deleted, not
+  // replaced.
+  for (const auto& out_pin : consumer.out_sorted_pins()) {
+    fn(out_pin);
   }
 }
 
 uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
   // A driver's USES are a multiset: the out-edge walk order is storage order,
   // not a contract, and the combiner already folds the count in.
-  constexpr uint64_t         kSeed = 0x84222325cbf29ce4ULL;
-  hhds::Commutative_combiner uses;
+  constexpr uint64_t   kSeed = 0x84222325cbf29ce4ULL;
+  hhds::Field_combiner uses;
   for (const auto& e : driver.out_edges()) {
     const auto& snk = e.sink;
     uint64_t    u;
@@ -246,18 +264,20 @@ uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
       } else {
         u = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
         u = sig_mix(u, static_cast<uint64_t>(snk.get_port_id()));
-        hhds::Commutative_combiner cin;
-        for (const auto& ie : cm.inp_edges()) {
-          if (ie.driver.is_const()) {
-            cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
-                            static_cast<uint64_t>(ie.sink.get_port_id())));
+        hhds::Field_combiner cin;
+        for (const auto& in_pin : cm.inp_sorted_pins()) {
+          for (const auto& in_drv : in_pin.get_driver_pins()) {  // plural: see the carry-in note above
+            if (in_drv.is_const()) {
+              cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(in_drv).serialize()),
+                              static_cast<uint64_t>(in_pin.get_port_id())));
+            }
           }
         }
         u = sig_mix(u, cin.value());
         // This is deliberately a local, coarse anchor: it is used only for a
         // cyclic tail. Port ids retain useful discrimination without walking
         // back around the cycle.
-        hhds::Commutative_combiner outs;
+        hhds::Field_combiner outs;
         each_fwd_child(cm, [&](const auto& child) { outs.add(static_cast<uint64_t>(child.get_port_id())); });
         u = sig_mix(u, outs.value());
       }
@@ -270,8 +290,8 @@ uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
 uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_map<hhds::Pin_class, uint64_t>& resolved) {
   // A driver's USES are a multiset: the out-edge walk order is storage order,
   // not a contract, and the combiner already folds the count in.
-  constexpr uint64_t         kSeed = 0x84222325cbf29ce4ULL;
-  hhds::Commutative_combiner uses;
+  constexpr uint64_t   kSeed = 0x84222325cbf29ce4ULL;
+  hhds::Field_combiner uses;
   for (const auto& e : driver.out_edges()) {
     const auto& snk = e.sink;
     uint64_t    u;
@@ -284,15 +304,17 @@ uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_m
       } else {
         uint64_t cnode = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
         cnode          = sig_mix(cnode, static_cast<uint64_t>(snk.get_port_id()));
-        hhds::Commutative_combiner cin;
-        for (const auto& ie : cm.inp_edges()) {
-          if (ie.driver.is_const()) {
-            cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(ie.driver).serialize()),
-                            static_cast<uint64_t>(ie.sink.get_port_id())));
+        hhds::Field_combiner cin;
+        for (const auto& in_pin : cm.inp_sorted_pins()) {
+          for (const auto& in_drv : in_pin.get_driver_pins()) {  // plural: see the carry-in note above
+            if (in_drv.is_const()) {
+              cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(in_drv).serialize()),
+                              static_cast<uint64_t>(in_pin.get_port_id())));
+            }
           }
         }
         cnode = sig_mix(cnode, cin.value());
-        hhds::Commutative_combiner outs;
+        hhds::Field_combiner outs;
         each_fwd_child(cm, [&](const auto& child) {
           auto it = resolved.find(child);
           I(it != resolved.end());
@@ -748,34 +770,39 @@ bool Partitioner::collect() {
       local.insert(region_nodes_[r].begin(), region_nodes_[r].end());
     }
     for (auto n : region_nodes_[r]) {
-      for (const auto& e : n.inp_edges()) {
-        auto dn   = e.driver.get_master_node();
-        auto spid = e.sink.get_port_id();
-        if (e.driver.is_const()) {
-          // internal_edges_/const_edges_ recreate connectivity for the classic
-          // (no-hook) rebuild AND the incremental pre-body (build_pre_): both feed
-          // the SAME construction, so a comment-only recompile yields a byte-stable
-          // pre-body. On the plain hook path they are dead (the hook fills the body
-          // itself) -- skip an O(flat-edges) table that peaks before the first
-          // region and is dead weight on the exact OOM (flatten) path.
-          if ((!hook_ && !batch_hook_) || build_pre_) {
-            const_edges_[r].push_back(ConstEdge{e.driver, n, spid});
-          }
-        } else if (gu::is_graph_input_pin(e.driver)) {
-          // pin_name_of resolves the graph input's declared port name directly.
-          ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(e.driver)});
-        } else if (is_partitionable(dn)) {
-          auto rd = region_idx(dn);
-          if (rd == r || local.contains(dn)) {
-            if ((!hook_ && !batch_hook_) || build_pre_) {  // dead on the plain hook path (see const_edges_ above)
-              internal_edges_[r].push_back(IntEdge{e.driver, n, spid});
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        // PLURAL: this rebuilds CONNECTIVITY, so a dropped driver is a lost edge
+        // in the reconstructed region -- the same defect shape that shipped in
+        // pass/partition/flatten.cpp. A compact loop's carry-in has two.
+        for (const auto& in_drv : in_pin.get_driver_pins()) {
+          auto dn   = in_drv.get_master_node();
+          auto spid = in_pin.get_port_id();
+          if (in_drv.is_const()) {
+            // internal_edges_/const_edges_ recreate connectivity for the classic
+            // (no-hook) rebuild AND the incremental pre-body (build_pre_): both feed
+            // the SAME construction, so a comment-only recompile yields a byte-stable
+            // pre-body. On the plain hook path they are dead (the hook fills the body
+            // itself) -- skip an O(flat-edges) table that peaks before the first
+            // region and is dead weight on the exact OOM (flatten) path.
+            if ((!hook_ && !batch_hook_) || build_pre_) {
+              const_edges_[r].push_back(ConstEdge{in_drv, n, spid});
             }
-          } else {
-            ensure_output_port(e.driver);
-            ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/false, std::string{});
+          } else if (gu::is_graph_input_pin(in_drv)) {
+            // pin_name_of resolves the graph input's declared port name directly.
+            ensure_input_port(r, in_drv, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(in_drv)});
+          } else if (is_partitionable(dn)) {
+            auto rd = region_idx(dn);
+            if (rd == r || local.contains(dn)) {
+              if ((!hook_ && !batch_hook_) || build_pre_) {  // dead on the plain hook path (see const_edges_ above)
+                internal_edges_[r].push_back(IntEdge{in_drv, n, spid});
+              }
+            } else {
+              ensure_output_port(in_drv);
+              ensure_input_port(r, in_drv, SinkRef{n, spid}, /*from_primary=*/false, std::string{});
+            }
           }
+          // else: unexpected builtin driver — skip.
         }
-        // else: unexpected builtin driver — skip.
       }
     }
   }
@@ -787,8 +814,14 @@ bool Partitioner::collect() {
       if (opin.is_invalid()) {
         continue;
       }
-      for (const auto& e : opin.inp_edges()) {
-        auto d  = e.driver;
+      // A graph output pin is a SINK, so it has exactly one driver (see
+      // graph/cell.hpp, ONE DRIVER PER SINK PIN). The loop was always a loop
+      // over one edge; spell it as the single read it is. A declared-but-undriven
+      // output still reaches here, so the invalid answer is checked -- that is
+      // the mid-construction case get_driver_pin() returns invalid for, not a
+      // malformed body.
+      auto d = opin.get_driver_pin();
+      if (!d.is_invalid()) {
         auto dn = d.get_master_node();
         if (d.is_const()) {
           top_outputs_.push_back(OutWire{decl.name, OutWire::Const, {}, {}, d});
@@ -1539,9 +1572,12 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
     if (!sio) {
       continue;
     }
+    // "which output ports already exist and are wired": the driver PINS, not
+    // the fan-out edges. The old walk re-derived the same set by decoding every
+    // edge of every output and inserting its port repeatedly.
     absl::flat_hash_set<uint32_t> made;
-    for (const auto& e : neo.out_edges()) {
-      made.insert(static_cast<uint32_t>(e.driver.get_port_id()));
+    for (const auto& out_pin : neo.out_sorted_pins()) {
+      made.insert(static_cast<uint32_t>(out_pin.get_port_id()));
     }
     for (const auto& d : sio->get_output_pin_decls()) {
       if (made.contains(static_cast<uint32_t>(d.port_id))) {

@@ -6125,9 +6125,10 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
       return;
     }
     for (const auto& f : sit->second.fields) {
-      auto mask = Dlop::get_mask_value(static_cast<int>(f.off) + f.bits - 1, static_cast<int>(f.off));
-      auto lane = initial_is_ref ? extract_field(std::string(initial), f.off, f.bits)
-                                 : std::string(packed->get_mask_op(*mask)->to_pyrope());
+      auto lane
+          = initial_is_ref
+                ? extract_field(std::string(initial), f.off, f.bits)
+                : std::string(packed->get_mask_op_opt(static_cast<int>(f.off), static_cast<int>(f.off) + f.bits)->to_pyrope());
       targets.push_back({absl::StrCat(name, ".", f.name), lane, f.bits, f.is_signed});
     }
   } else {
@@ -6234,7 +6235,13 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
   // A memory can be written by several processes. Preserve the process
   // clock at each group of stores; a global array attribute cannot express it.
   for (const auto* sym : emit_ordered(wc.nonblocking)) {
-    if (!reg_syms_.contains(sym) || !sym->getType().getCanonicalType().isUnpackedArray()) {
+    // Mirror of the clock_pin guard below: a FLATTENED unpacked-array port is a
+    // scalar flop in the emitted Pyrope, so it must NOT receive the Memory-only
+    // `__store_clock_pin` / `__store_posclk` markers -- upass.attributes
+    // deliberately does not propagate those to a Flop, so writing them here is
+    // what left the register clockless.
+    if (!reg_syms_.contains(sym) || !sym->getType().getCanonicalType().isUnpackedArray()
+        || flat_port_syms_.contains(sym)) {
       continue;
     }
     auto&                    ln   = *builder_.lnast;
@@ -6316,7 +6323,17 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     // wc.nonblocking is a pointer-keyed flat_hash_set with run-to-run-varying
     // iteration order, and this loop appends IR.
     for (const auto* sym : emit_ordered(wc.nonblocking)) {
-      if (!reg_syms_.contains(sym) || sym->getType().getCanonicalType().isUnpackedArray()) {
+      // Key on the LOWERING, not the Verilog TYPE. An unpacked-array PORT that
+      // declare_unpacked flattened to a scalar `reg …:uN` (it is in
+      // flat_port_syms_) is a FLOP, not a memory, so it needs `clock_pin=`
+      // like any other scalar reg. Testing isUnpackedArray alone skipped it
+      // here AND the complementary test below routed it to the Memory-only
+      // `__store_clock_pin`, so it ended up with NO clock at all: measured on
+      // minion's vpu_trans `id_trans_scoreboard_o:u96`, which reached
+      // pass.opentimer as 96 bit-blasted flops with an unconnected CLK and
+      // failed synthesis after ~4 hours.
+      if (!reg_syms_.contains(sym)
+          || (sym->getType().getCanonicalType().isUnpackedArray() && !flat_port_syms_.contains(sym))) {
         continue;
       }
       auto                     name = reg_net_of(*sym);

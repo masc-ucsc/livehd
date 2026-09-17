@@ -32,10 +32,11 @@ public:
       } else {
         drivers.clear();
       }
-      const auto edges = node.inp_edges();
-      drivers.reserve(edges.size());
-      for (const auto& edge : edges) {
-        drivers.try_emplace(edge.sink.get_port_id(), edge.driver);  // retain the first driver, as before
+      // One driver per sink pin (graph/cell.hpp), so the pin walk IS the operand
+      // list and try_emplace can no longer collide on a port -- it is kept only
+      // because a Sub's port ids are sparse and this map is keyed by port.
+      for (const auto& in_pin : node.inp_sorted_pins()) {
+        drivers.try_emplace(in_pin.get_port_id(), in_pin.get_driver_pin());
       }
     }
     const auto found = drivers.find(pid);

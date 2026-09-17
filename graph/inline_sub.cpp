@@ -200,16 +200,23 @@ void Sub_inliner::create_nodes() {
 // The parent-side driver feeding instance port `pid`, or an invalid pin when the
 // parent left that port unconnected.
 hhds::Pin_class Sub_inliner::driver_feeding_inst_port(uint32_t pid) {
-  for (const auto& e : inst_.inp_edges()) {
-    if (static_cast<uint32_t>(e.sink.get_port_id()) != pid) {
+  // Read-only pin walk. The const clone below is deliberately OUTSIDE the loop:
+  // it creates a node in the parent graph, which is the graph being walked.
+  hhds::Pin_class drv;
+  for (auto sink : inst_.inp_sorted_pins()) {
+    if (static_cast<uint32_t>(sink.get_port_id()) != pid) {
       continue;
     }
-    if (e.driver.is_const()) {
-      return create_const(*parent_, const_of(e.driver));
-    }
-    return e.driver;  // already a parent pin -- single-level inline needs no hop
+    drv = sink.get_driver_pin();  // exactly one driver per sink pin
+    break;
   }
-  return {};
+  if (drv.is_invalid()) {
+    return {};
+  }
+  if (drv.is_const()) {
+    return create_const(*parent_, const_of(drv));
+  }
+  return drv;  // already a parent pin -- single-level inline needs no hop
 }
 
 // Parent driver pin for the child-local driver pin `d`. A child graph input pops
@@ -268,10 +275,7 @@ hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
     auto output = child_->get_output_pin(oit->second);
     cur         = {};
     if (!output.is_invalid()) {
-      for (const auto& edge : output.inp_edges()) {
-        cur = edge.driver;
-        break;
-      }
+      cur = output.get_driver_pin();  // a graph output pin is a sink: one driver
     }
   }
   if (!res.is_invalid()) {
@@ -290,13 +294,14 @@ hhds::Pin_class Sub_inliner::resolve_output_of(std::string_view oname) {
   if (opin.is_invalid()) {
     return {};
   }
-  for (const auto& e : opin.inp_edges()) {
-    if (e.driver.is_const()) {
-      return create_const(*parent_, const_of(e.driver));
-    }
-    return resolve_driver(e.driver);
+  auto drv = opin.get_driver_pin();  // output pin is a sink: at most one driver
+  if (drv.is_invalid()) {
+    return {};  // declared but undriven
   }
-  return {};  // declared but undriven
+  if (drv.is_const()) {
+    return create_const(*parent_, const_of(drv));
+  }
+  return resolve_driver(drv);
 }
 
 void Sub_inliner::wire_edges() {
@@ -309,12 +314,19 @@ void Sub_inliner::wire_edges() {
       continue;  // consts and builtins: not cloned
     }
     auto neo = it->second;
-    for (const auto& e : n.inp_edges()) {
-      auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (e.driver.is_const()) {
-        create_const(*parent_, const_of(e.driver)).connect_sink(sp);
-      } else if (auto dp = resolve_driver(e.driver); !dp.is_invalid()) {
-        dp.connect_sink(sp);
+    // SNAPSHOT: the body below creates pins/nodes and adds edges, and
+    // resolve_driver() can clone a child constant into the parent. The walk is
+    // over the CHILD body, but keeping a snapshot makes it immune to any
+    // mutation either graph sees mid-loop -- the old inp_edges() materialized
+    // for exactly this reason.
+    for (auto sink : n.inp_pins_snapshot()) {
+      auto sp = neo.create_sink_pin(sink.get_port_id());
+      for (auto driver : sink.get_driver_pins()) {
+        if (driver.is_const()) {
+          create_const(*parent_, const_of(driver)).connect_sink(sp);
+        } else if (auto dp = resolve_driver(driver); !dp.is_invalid()) {
+          dp.connect_sink(sp);
+        }
       }
     }
   }
@@ -322,12 +334,20 @@ void Sub_inliner::wire_edges() {
 
 // Everything the instance drove now reads the child-internal driver directly.
 void Sub_inliner::rewire_instance_outputs() {
-  // Snapshot: out_edges() is a LAZY view over live edge storage, and the loop
-  // below both adds edges and (via the caller) deletes the node it is walking.
+  // SNAPSHOT: the loop below both adds edges and (via the caller) deletes the
+  // node it is walking, so the whole fanout is collected first. A driver's
+  // fanout is a SET, so the inner read stays edge-shaped; out_sorted_pins()
+  // only saves decoding the instance's SINK-pin edges on the way there.
   std::vector<std::pair<uint32_t, hhds::Pin_class>> readers;
-  for (const auto& e : inst_.out_edges()) {
-    readers.emplace_back(static_cast<uint32_t>(e.driver.get_port_id()), e.sink);
+  for (auto drv : inst_.out_sorted_pins()) {
+    const auto pid = static_cast<uint32_t>(drv.get_port_id());
+    for (const auto& e : drv.out_edges()) {
+      readers.emplace_back(pid, e.sink);
+    }
   }
+  // Resolve every output before rewiring: a feed-through can read another
+  // instance input, which must still have its original, single driver.
+  std::vector<std::pair<hhds::Pin_class, hhds::Pin_class>> rewires;
   for (const auto& [pid, sink] : readers) {
     if (failed_) {
       return;
@@ -337,10 +357,13 @@ void Sub_inliner::rewire_instance_outputs() {
       continue;  // a driver port with no decl: nothing on the child side to bind
     }
     if (auto src = resolve_output_of(oit->second); !src.is_invalid()) {
-      src.connect_sink(sink);
+      rewires.emplace_back(src, sink);
     }
     // An undriven child output leaves the reader unconnected -- exactly what the
     // instance did.
+  }
+  for (const auto& [src, sink] : rewires) {
+    src.connect_sink(sink);
   }
 }
 

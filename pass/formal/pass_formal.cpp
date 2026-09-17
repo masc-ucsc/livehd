@@ -443,11 +443,22 @@ void Pass_formal::work(Eprp_var& var) {
         }
         const auto cond_pid  = sio->get_input_port_id("cond");
         bool       connected = false;
-        for (const auto& e : pn.inp_edges()) {
-          if (e.sink.get_port_id() == cond_pid) {
-            connected = true;
-            break;
+        // "cond is actually driven" is an EXISTENCE test over the sink's drivers,
+        // and BOTH readers here are load-bearing. inp_sorted_pins() is the walk
+        // the retired inp_edges() presented: node-as-pin (port 0) FIRST, then
+        // ascending port id. The RAW inp_pins() is NOT a substitute — hhds keeps
+        // port 0 as the node itself, so that list omits it outright and is
+        // unordered. And the PLURAL get_driver_pins() is what answers the
+        // question: a `cond` sink pin that exists but contributes no driver must
+        // not count as connected, while any number of drivers counts once.
+        // Stopping at the cond pin matches the edge walk's `break`, since port
+        // ids are unique per node and no later pin can be `cond` either.
+        for (auto sink : pn.inp_sorted_pins()) {
+          if (sink.get_port_id() != cond_pid) {
+            continue;
           }
+          connected = !sink.get_driver_pins().empty();
+          break;
         }
         if (connected) {
           out.push_back(pn);
@@ -659,12 +670,34 @@ void Pass_formal::work(Eprp_var& var) {
         hotmuxes.push_back(node);
       }
     }
+    // MEMO on the control vector. The one-hotness question depends ONLY on the
+    // controls, so two Hotmuxes over the same control set are the same SMT
+    // query. `unique if` lowering makes that the common case rather than a
+    // coincidence: upass.tolg's lower_unique_merge builds one merge Hotmux per
+    // written variable, all sharing the branch's control list, so minion's
+    // intpipe_decode carries 8848 Hotmuxes over ONE identical 320-control list.
+    // Unmemoized that is 8848 byte-identical cvc5 solves at ~72 ms each:
+    // measured 10.16 s of a 14.0 s compile, with 8710 obligations then
+    // ABANDONED when the 10 s budget ran out and demoted to runtime checks.
+    // Memoized it is one solve, and every Hotmux gets a real verdict.
+    //
+    // Keyed on the control pins' Class_index in pid order -- identity, not a
+    // structural hash, so a hit means the SAME pins and needs no confirmation.
+    absl::flat_hash_map<std::vector<uint64_t>, formal::Query_out> onehot_memo;
     for (auto& node : hotmuxes) {
       std::vector<hhds::Pin_class> controls;
+      std::vector<uint64_t>        memo_key;
       for (const auto& [control, value] : gu::hotmux_inputs(node).arms) {
         controls.push_back(control);
+        memo_key.push_back(static_cast<uint64_t>(control.get_class_index().value));
       }
-      auto out = ask([&] { return prover.are_exclusive(controls); });
+      formal::Query_out out;
+      if (auto it = onehot_memo.find(memo_key); it != onehot_memo.end()) {
+        out = it->second;
+      } else {
+        out = ask([&] { return prover.are_exclusive(controls); });
+        onehot_memo.emplace(std::move(memo_key), out);
+      }
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalOnehot);  // one-hotness obligation discharged
       } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
@@ -914,7 +947,7 @@ void Pass_formal::work(Eprp_var& var) {
       if (!warn_vacuous) {
         return;
       }
-      // Resolve the guard driver by WALKING the in-edges, never via
+      // Resolve the guard driver by WALKING the node's sink PINS, never via
       // get_driver_of_sink_name: an UNGUARDED fproperty has no `guard` sink pin
       // at all, and asking for a pin that was never created aborts in a dbg
       // build ("get_pin: requested pin was not created"). Since most properties
@@ -925,11 +958,25 @@ void Pass_formal::work(Eprp_var& var) {
       }
       const auto      guard_pid = sio->get_input_port_id("guard");
       hhds::Pin_class guard;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == guard_pid) {
-          guard = e.driver;
+      // inp_sorted_pins() is the SORTED reader that replaced inp_edges(): it
+      // yields the node-as-pin (port 0) FIRST and then ascending port id, and it
+      // yields only CONNECTED pins. The raw inp_pins() would not do — it drops
+      // port 0 and has no order. The PLURAL get_driver_pins() is the other
+      // load-bearing half: the singular get_driver_pin() quietly returns
+      // drivers.front() with its multi-driver assert compiled out under NDEBUG,
+      // so it hides rather than reports a `guard` sink that somehow gained a
+      // second driver. Taking the first driver is what the edge walk's `break`
+      // took, and leaving the whole walk at the guard pin is what that same
+      // `break` did (port ids are unique per node, so nothing later matches).
+      for (const auto& in_pin : node.inp_sorted_pins()) {
+        if (in_pin.get_port_id() != guard_pid) {
+          continue;
+        }
+        for (const auto& in_drv : in_pin.get_driver_pins()) {
+          guard = in_drv;
           break;
         }
+        break;
       }
       if (guard.is_invalid()) {
         return;  // unguarded property: nothing to ask, nothing to pay
@@ -1052,11 +1099,20 @@ void Pass_formal::work(Eprp_var& var) {
         }
         auto cond_pid  = sio->get_input_port_id("cond");
         bool connected = false;
-        for (const auto& e : pn.inp_edges()) {
-          if (e.sink.get_port_id() == cond_pid) {
-            connected = true;
-            break;
+        // Same "cond is actually driven" existence test as prop_occurrences
+        // above, spelled the SAME way on purpose — the two filters must agree or
+        // the positional correlation slips. Both halves are load-bearing:
+        // inp_sorted_pins() reproduces the retired inp_edges() walk (node-as-pin
+        // port 0 first, then ascending port id) where the raw inp_pins() would
+        // omit port 0 and lose the order, and the PLURAL get_driver_pins() is
+        // what decides the question, since a `cond` sink pin can exist while
+        // contributing no driver.
+        for (auto sink : pn.inp_sorted_pins()) {
+          if (sink.get_port_id() != cond_pid) {
+            continue;
           }
+          connected = !sink.get_driver_pins().empty();
+          break;
         }
         if (connected) {
           occ_nodes.push_back(pn);

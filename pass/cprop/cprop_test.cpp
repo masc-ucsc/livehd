@@ -23,14 +23,17 @@ TEST(CpropConstants, FoldedValueIgnoresResultAndOutputWidthHints) {
     auto g   = io->create_graph();
     auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
     gu::set_ubits(sum.create_driver_pin(0), hint);
-    gu::create_const(*g, *Dlop::create_integer(255)).connect_sink(sum.create_sink_pin(0));
-    gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+    // ONE DRIVER PER SINK PIN: each `as` operand gets its own pid, which is
+    // what setup_sink_pid appends on a banked op (graph/cell.hpp).
+    gu::create_const(*g, *Dlop::create_integer(255)).connect_sink(gu::setup_sink_pid(sum, 0));
+    gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(sum, 0));
     sum.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
     Cprop{}.do_trans(g);
-    auto edges = g->get_output_pin("out").inp_edges();
-    ASSERT_EQ(edges.size(), 1);
-    ASSERT_TRUE(edges[0].driver.is_const());
-    EXPECT_EQ(gu::const_of(edges[0].driver).to_just_i64(), 256);
+    // One driver per sink pin: a graph output is driven by exactly one pin.
+    auto out_drv = g->get_output_pin("out").get_driver_pin();
+    ASSERT_FALSE(out_drv.is_invalid());
+    ASSERT_TRUE(out_drv.is_const());
+    EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 256);
   }
 }
 
@@ -57,15 +60,24 @@ TEST(CpropMasks, BoundaryAnnotationsCannotProveAMaskRedundant) {
     gu::setup_sink_by_name(mask, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(255)));
     mask.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
     Cprop{}.do_trans(g);
-    auto edges = g->get_output_pin("out").inp_edges();
-    ASSERT_EQ(edges.size(), 1);
-    EXPECT_EQ(gu::type_op_of(edges[0].driver.get_master_node()), Ntype_op::Get_mask);
+    // One driver per sink pin: a graph output is driven by exactly one pin.
+    auto out_drv = g->get_output_pin("out").get_driver_pin();
+    ASSERT_FALSE(out_drv.is_invalid());
+    EXPECT_EQ(gu::type_op_of(out_drv.get_master_node()), Ntype_op::Get_mask);
   }
 }
 
-// A folded producer and an existing literal may intern to the same pin.
-// Their arithmetic multiplicity must survive, including a second collision
-// when 2 + 2 becomes an already-connected 4 (or 2 * 2 becomes 4).
+// A folded producer and an existing literal intern to the SAME driver pin (the
+// constant pool hands out one pin per value), so a cell reading both reads that
+// pin twice. Its arithmetic MULTIPLICITY must survive: `2 + 2` is 4, not 2.
+//
+// Under ONE DRIVER PER SINK PIN each operand owns a sink pid of its own
+// (graph/cell.hpp), so the multiset is representable directly and the repeat
+// cannot be deduped away -- which is exactly what this test pins down. It used
+// to build the cell by connecting every operand to ONE `create_sink_pin(pid)`,
+// where hhds edge storage (a set keyed by (driver, sink)) silently collapsed
+// the repeat and cprop had to fold `2 + 2` into a literal 4 by hand to keep the
+// value. The shape below is the legal one; the expected values are unchanged.
 TEST(CpropConstants, FoldedConstantsPreserveOperandMultiplicity) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_multiplicity");
@@ -85,21 +97,24 @@ TEST(CpropConstants, FoldedConstantsPreserveOperandMultiplicity) {
     auto producer = gu::create_typed_node(*g, Ntype_op::SHL);
     constant(1).connect_sink(producer.create_sink_pin(0));
     constant(1).connect_sink(producer.create_sink_pin(1));
-    auto consumer = gu::create_typed_node(*g, op);
-    auto sink     = consumer.create_sink_pin(pid);
-    constant(2).connect_sink(sink);
-    producer.create_driver_pin(0).connect_sink(sink);
+    auto consumer  = gu::create_typed_node(*g, op);
+    // One sink pin per operand: setup_sink_by_name APPENDS a fresh slot to the
+    // named bank each time it is called on a commutative cell.
+    const auto bank = pid == 0 ? "as" : "bs";
+    constant(2).connect_sink(gu::setup_sink_by_name(consumer, bank));
+    producer.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(consumer, bank));
     if (op == Ntype_op::Sum || op == Ntype_op::Mult) {
-      constant(4).connect_sink(sink);
+      constant(4).connect_sink(gu::setup_sink_by_name(consumer, bank));
     } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
-      constant(3).connect_sink(consumer.create_sink_pin(1));
+      constant(3).connect_sink(gu::setup_sink_by_name(consumer, "bs"));
     }
     consumer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
     Cprop{}.do_trans(g);
-    auto edges = g->get_output_pin("out").inp_edges();
-    ASSERT_EQ(edges.size(), 1);
-    ASSERT_TRUE(edges.begin()->driver.is_const()) << index;
-    EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), expected) << index;
+    // One driver per sink pin: a graph output is driven by exactly one pin.
+    auto out_drv = g->get_output_pin("out").get_driver_pin();
+    ASSERT_FALSE(out_drv.is_invalid());
+    ASSERT_TRUE(out_drv.is_const()) << index;
+    EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), expected) << index;
   }
 }
 
@@ -119,23 +134,23 @@ TEST(CpropConstants, ForwardSumCancelsOppositePortOperand) {
     auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
     auto lo       = g->get_input_pin("lo");
     auto inner    = gu::create_typed_node(*g, Ntype_op::Sum);
-    auto inner_as = inner.create_sink_pin(0);
-    lo.connect_sink(inner_as);
-    constant(7).connect_sink(inner_as);
-    auto outer    = gu::create_typed_node(*g, Ntype_op::Sum);
-    auto outer_as = outer.create_sink_pin(0);
-    inner.create_driver_pin(0).connect_sink(outer_as);
-    constant(1).connect_sink(outer_as);
-    lo.connect_sink(cancel ? outer.create_sink_pin(1) : outer_as);
+    // One sink pin per operand on a banked op (graph/cell.hpp).
+    lo.connect_sink(gu::setup_sink_pid(inner, 0));
+    constant(7).connect_sink(gu::setup_sink_pid(inner, 0));
+    auto outer = gu::create_typed_node(*g, Ntype_op::Sum);
+    inner.create_driver_pin(0).connect_sink(gu::setup_sink_pid(outer, 0));
+    constant(1).connect_sink(gu::setup_sink_pid(outer, 0));
+    lo.connect_sink(gu::setup_sink_pid(outer, cancel ? 1 : 0));
     outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
     Cprop{}.do_trans(g);
-    auto edges = g->get_output_pin("out").inp_edges();
-    ASSERT_EQ(edges.size(), 1);
+    // One driver per sink pin: a graph output is driven by exactly one pin.
+    auto out_drv = g->get_output_pin("out").get_driver_pin();
+    ASSERT_FALSE(out_drv.is_invalid());
     if (cancel) {
-      ASSERT_TRUE(edges.begin()->driver.is_const());
-      EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), 8);
+      ASSERT_TRUE(out_drv.is_const());
+      EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 8);
     } else {
-      EXPECT_FALSE(edges.begin()->driver.is_const());
+      EXPECT_FALSE(out_drv.is_const());
       size_t lo_uses = 0;
       for ([[maybe_unused]] const auto& e : lo.out_edges()) {
         ++lo_uses;
@@ -161,21 +176,21 @@ TEST(CpropConstants, ForwardSumMergesNodeInternalDuplicateDriver) {
   auto lo       = g->get_input_pin("lo");
 
   auto inner = gu::create_typed_node(*g, Ntype_op::Sum);  // lo - lo
-  lo.connect_sink(inner.create_sink_pin(0));
-  lo.connect_sink(inner.create_sink_pin(1));
+  lo.connect_sink(gu::setup_sink_pid(inner, 0));
+  lo.connect_sink(gu::setup_sink_pid(inner, 1));
 
-  auto outer    = gu::create_typed_node(*g, Ntype_op::Sum);  // inner + 5
-  auto outer_as = outer.create_sink_pin(0);
-  inner.create_driver_pin(0).connect_sink(outer_as);
-  constant(5).connect_sink(outer_as);
+  auto outer = gu::create_typed_node(*g, Ntype_op::Sum);  // inner + 5
+  inner.create_driver_pin(0).connect_sink(gu::setup_sink_pid(outer, 0));
+  constant(5).connect_sink(gu::setup_sink_pid(outer, 0));
   outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
 
   Cprop{}.do_trans(g);
 
-  auto edges = g->get_output_pin("out").inp_edges();
-  ASSERT_EQ(edges.size(), 1);
-  ASSERT_TRUE(edges.begin()->driver.is_const());
-  EXPECT_EQ(gu::const_of(edges.begin()->driver).to_just_i64(), 5);
+  // One driver per sink pin: a graph output is driven by exactly one pin.
+  auto out_drv = g->get_output_pin("out").get_driver_pin();
+  ASSERT_FALSE(out_drv.is_invalid());
+  ASSERT_TRUE(out_drv.is_const());
+  EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 5);
 }
 
 // The first latch sweep cannot know that `x | -1` is an always-open enable.
@@ -408,10 +423,11 @@ TEST(CpropHotmux, ConstantControlsSelectValuesAndDefault) {
       hot.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
       Cprop cp;
       cp.do_trans(g);
-      auto edges = g->get_output_pin("q").inp_edges();
-      ASSERT_EQ(edges.size(), 1);
-      ASSERT_TRUE(edges[0].driver.is_const());
-      EXPECT_EQ(gu::const_of(edges[0].driver).to_just_i64(), selected >= 0 ? selected + 10 : fallback ? 99 : 0);
+      // One driver per sink pin: a graph output is driven by exactly one pin.
+      auto out_drv = g->get_output_pin("q").get_driver_pin();
+      ASSERT_FALSE(out_drv.is_invalid());
+      ASSERT_TRUE(out_drv.is_const());
+      EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), selected >= 0 ? selected + 10 : fallback ? 99 : 0);
     }
   }
 }
@@ -472,10 +488,11 @@ TEST(CpropHotmux, IdenticalArmsCollapse) {
       // 0, which the arms do not, so the cell must SURVIVE.
       const bool collapses = fallback || shared;
       EXPECT_EQ(hot.is_invalid(), collapses);
-      auto edges = g->get_output_pin("q").inp_edges();
-      ASSERT_EQ(edges.size(), 1);
+      // One driver per sink pin: a graph output is driven by exactly one pin.
+      auto out_drv = g->get_output_pin("q").get_driver_pin();
+      ASSERT_FALSE(out_drv.is_invalid());
       if (collapses) {
-        EXPECT_TRUE(edges[0].driver == value);
+        EXPECT_TRUE(out_drv == value);
       }
     }
   }
@@ -524,20 +541,22 @@ int64_t mux_eval(Test_pin pin, Test_values& values) {
     result           = op == Ntype_op::And ? -1 : 0;
     bool    first    = true;
     int64_t previous = 0;
-    for (const auto& e : node.inp_edges()) {
-      auto value = mux_eval(e.driver, values);
-      if (op == Ntype_op::And) {
-        result &= value;
-      } else if (op == Ntype_op::Or || op == Ntype_op::Ror) {
-        result |= value;
-      } else {
-        if (first) {
-          result = 1;
+    for (auto e_sink : node.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        auto value = mux_eval(e_drv, values);
+        if (op == Ntype_op::And) {
+          result &= value;
+        } else if (op == Ntype_op::Or || op == Ntype_op::Ror) {
+          result |= value;
         } else {
-          result &= previous == value;
+          if (first) {
+            result = 1;
+          } else {
+            result &= previous == value;
+          }
+          previous = value;
+          first    = false;
         }
-        previous = value;
-        first    = false;
       }
     }
     if (op == Ntype_op::Ror) {
@@ -610,8 +629,9 @@ struct Mux_graph {
   }
   Test_pin eq(Test_pin selector, int64_t value) {
     auto n = node(Ntype_op::EQ, 1);
-    n.create_sink_pin(0).connect_driver(selector);
-    n.create_sink_pin(0).connect_driver(constant(value));
+    // EQ is single-bank: its two operands take consecutive pids, not one pin.
+    gu::setup_sink_pid(n, 0).connect_driver(selector);
+    gu::setup_sink_pid(n, 0).connect_driver(constant(value));
     return n.create_driver_pin(0);
   }
   Test_pin output() { return graph->get_output_pin("out").get_driver_pins().front(); }
@@ -799,7 +819,7 @@ TEST(CpropMuxSharing, DeepPriorityChainHasLinearGeneratedSize) {
   size_t nodes = 0, edges = 0;
   for (auto n : f.graph->body().nodes()) {
     ++nodes;
-    edges += n.inp_edges().size();
+    edges += n.inp_pins_snapshot().size();
   }
   EXPECT_EQ(f.count(Ntype_op::Mux), 0);
   EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);

@@ -21,6 +21,13 @@
 
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::match_of;
+// Sink pins are minted through setup_sink_pid, never create_sink_pin(<literal>):
+// on a BANKED op (And/Or/Xor/Sum/Mult/EQ/...) a literal pid piles every operand
+// onto ONE sink pin, which is the shape one-driver-per-sink-pin forbids and
+// pass/legalize flags. setup_sink_pid appends a fresh operand slot for those and
+// is the plain create_sink_pin for everything else, so the fixtures below build
+// the same cells they always did.
+using livehd::graph_util::setup_sink_pid;
 
 namespace {
 
@@ -35,12 +42,12 @@ std::shared_ptr<hhds::Graph> build_and_or(const std::string& dir, const std::str
   auto g = gio->create_graph();
 
   auto a_and = create_typed_node(*g, Ntype_op::And);
-  g->get_input_pin("a").connect_sink(a_and.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(a_and.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(setup_sink_pid(a_and, 0));
+  g->get_input_pin("b").connect_sink(setup_sink_pid(a_and, 0));
 
   auto an_or = create_typed_node(*g, Ntype_op::Or);
-  a_and.create_driver_pin(0).connect_sink(an_or.create_sink_pin(0));
-  g->get_input_pin("c").connect_sink(an_or.create_sink_pin(0));
+  a_and.create_driver_pin(0).connect_sink(setup_sink_pid(an_or, 0));
+  g->get_input_pin("c").connect_sink(setup_sink_pid(an_or, 0));
   an_or.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
   return g;
 }
@@ -54,10 +61,10 @@ std::shared_ptr<hhds::Graph> build_feedback(const std::string& dir, bool swap_op
   auto g = gio->create_graph();
 
   auto mux = create_typed_node(*g, swap_op ? Ntype_op::Or : Ntype_op::Mux);
-  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
-  g->get_input_pin("d").connect_sink(mux.create_sink_pin(2));
+  g->get_input_pin("sel").connect_sink(setup_sink_pid(mux, 0));
+  g->get_input_pin("d").connect_sink(setup_sink_pid(mux, 2));
   auto out = mux.create_driver_pin(0);
-  out.connect_sink(mux.create_sink_pin(1));
+  out.connect_sink(setup_sink_pid(mux, 1));
   out.connect_sink(g->get_output_pin("y"));
   return g;
 }
@@ -73,7 +80,7 @@ std::shared_ptr<hhds::Graph> build_ambiguous_state_cuts(const std::string& dir) 
   for (int port = 0; port < 2; ++port) {
     auto flop = create_typed_node(*g, Ntype_op::Flop);
     flop.set_name("duplicate_state_name");
-    g->get_input_pin("d").connect_sink(flop.create_sink_pin(3));
+    g->get_input_pin("d").connect_sink(setup_sink_pid(flop, 3));
     auto q = flop.create_driver_pin(0);
     livehd::graph_util::set_bits(q, 1);
     livehd::graph_util::set_pin_name(q, "duplicate_state_name");
@@ -115,7 +122,7 @@ std::shared_ptr<hhds::Graph> build_compact_loop(const std::string& dir, uint64_t
                        .activation_input   = std::nullopt,
                        .next_active_output = std::nullopt,
                    });
-  top->get_input_pin("x").connect_sink(loop.create_sink_pin(0));
+  top->get_input_pin("x").connect_sink(setup_sink_pid(loop, 0));
   auto out = loop.create_driver_pin(1);
   livehd::graph_util::set_bits(out, 9);
   livehd::graph_util::set_unsign(out);
@@ -146,7 +153,7 @@ std::shared_ptr<hhds::Graph> build_mask_boundary(const std::string& dir, std::op
     livehd::graph_util::set_bits(value, mask_bits);
   }
   auto inv = create_typed_node(*g, Ntype_op::Not);
-  value.connect_sink(inv.create_sink_pin(0));
+  value.connect_sink(setup_sink_pid(inv, 0));
   auto out = inv.create_driver_pin(0);
   livehd::graph_util::set_bits(out, 8);
   out.connect_sink(g->get_output_pin("y"));
@@ -223,7 +230,7 @@ TEST(Semdiff, ExtraGateUnmatched) {
 
   // impl additionally computes an unused Not(c).
   auto extra = create_typed_node(*b, Ntype_op::Not);
-  b->get_input_pin("c").connect_sink(extra.create_sink_pin(0));
+  b->get_input_pin("c").connect_sink(setup_sink_pid(extra, 0));
 
   auto r = livehd::semdiff::structural_match(a.get(), b.get());
 
@@ -250,7 +257,7 @@ TEST(Semdiff, StructuralIdenticalFastPath) {
 
   // an extra dangling gate breaks the node-set bijection => not identical
   auto extra = create_typed_node(*b, Ntype_op::Not);
-  b->get_input_pin("c").connect_sink(extra.create_sink_pin(0));
+  b->get_input_pin("c").connect_sink(setup_sink_pid(extra, 0));
   EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get()));
 }
 
@@ -266,11 +273,11 @@ TEST(Semdiff, StructuralIdenticalOpSwap) {
   gio->add_output("y", 1);
   auto b    = gio->create_graph();
   auto a_or = create_typed_node(*b, Ntype_op::Or);  // swapped: y = (a | b) & c
-  b->get_input_pin("a").connect_sink(a_or.create_sink_pin(0));
-  b->get_input_pin("b").connect_sink(a_or.create_sink_pin(0));
+  b->get_input_pin("a").connect_sink(setup_sink_pid(a_or, 0));
+  b->get_input_pin("b").connect_sink(setup_sink_pid(a_or, 0));
   auto an_and = create_typed_node(*b, Ntype_op::And);
-  a_or.create_driver_pin(0).connect_sink(an_and.create_sink_pin(0));
-  b->get_input_pin("c").connect_sink(an_and.create_sink_pin(0));
+  a_or.create_driver_pin(0).connect_sink(setup_sink_pid(an_and, 0));
+  b->get_input_pin("c").connect_sink(setup_sink_pid(an_and, 0));
   an_and.create_driver_pin(0).connect_sink(b->get_output_pin("y"));
 
   EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get()));
@@ -409,10 +416,10 @@ TEST(Semdiff, DigestConstructionOrderIndependent) {
 
   auto an_or = create_typed_node(*b, Ntype_op::Or);  // Or allocated FIRST
   auto a_and = create_typed_node(*b, Ntype_op::And);
-  b->get_input_pin("a").connect_sink(a_and.create_sink_pin(0));
-  b->get_input_pin("b").connect_sink(a_and.create_sink_pin(0));
-  a_and.create_driver_pin(0).connect_sink(an_or.create_sink_pin(0));
-  b->get_input_pin("c").connect_sink(an_or.create_sink_pin(0));
+  b->get_input_pin("a").connect_sink(setup_sink_pid(a_and, 0));
+  b->get_input_pin("b").connect_sink(setup_sink_pid(a_and, 0));
+  a_and.create_driver_pin(0).connect_sink(setup_sink_pid(an_or, 0));
+  b->get_input_pin("c").connect_sink(setup_sink_pid(an_or, 0));
   an_or.create_driver_pin(0).connect_sink(b->get_output_pin("y"));
 
   auto da = livehd::semdiff::canonical_digest(a.get());
@@ -438,11 +445,11 @@ TEST(Semdiff, DigestSensitiveToWidthAndIoName) {
   gn->add_output("z", 4);  // renamed output (y -> z)
   auto ng    = gn->create_graph();
   auto n_and = create_typed_node(*ng, Ntype_op::And);
-  ng->get_input_pin("a").connect_sink(n_and.create_sink_pin(0));
-  ng->get_input_pin("b").connect_sink(n_and.create_sink_pin(0));
+  ng->get_input_pin("a").connect_sink(setup_sink_pid(n_and, 0));
+  ng->get_input_pin("b").connect_sink(setup_sink_pid(n_and, 0));
   auto n_or = create_typed_node(*ng, Ntype_op::Or);
-  n_and.create_driver_pin(0).connect_sink(n_or.create_sink_pin(0));
-  ng->get_input_pin("c").connect_sink(n_or.create_sink_pin(0));
+  n_and.create_driver_pin(0).connect_sink(setup_sink_pid(n_or, 0));
+  ng->get_input_pin("c").connect_sink(setup_sink_pid(n_or, 0));
   n_or.create_driver_pin(0).connect_sink(ng->get_output_pin("z"));
 
   auto d0 = livehd::semdiff::canonical_digest(base.get());
@@ -464,7 +471,7 @@ TEST(Semdiff, DigestAnonymousStateCellInvalid) {
     gio->add_output("q", 1);
     auto g    = gio->create_graph();
     auto flop = create_typed_node(*g, Ntype_op::Flop);
-    g->get_input_pin("d").connect_sink(flop.create_sink_pin(0));
+    g->get_input_pin("d").connect_sink(setup_sink_pid(flop, 0));
     auto qpin = flop.create_driver_pin(0);
     if (name_it) {
       livehd::graph_util::set_pin_name(qpin, "r_state");
@@ -493,8 +500,8 @@ TEST(Semdiff, DigestHierarchicalMerkle) {
     cio->add_output("o", 1);
     auto cg = cio->create_graph();
     auto op = create_typed_node(*cg, child_uses_or ? Ntype_op::Or : Ntype_op::And);
-    cg->get_input_pin("x").connect_sink(op.create_sink_pin(0));
-    cg->get_input_pin("y").connect_sink(op.create_sink_pin(0));
+    cg->get_input_pin("x").connect_sink(setup_sink_pid(op, 0));
+    cg->get_input_pin("y").connect_sink(setup_sink_pid(op, 0));
     op.create_driver_pin(0).connect_sink(cg->get_output_pin("o"));
 
     auto pio = lib.create_io("parent");
@@ -504,8 +511,8 @@ TEST(Semdiff, DigestHierarchicalMerkle) {
     auto pg  = pio->create_graph();
     auto sub = create_typed_node(*pg, Ntype_op::Sub);
     sub.set_subnode(cio);
-    pg->get_input_pin("a").connect_sink(sub.create_sink_pin(0));
-    pg->get_input_pin("b").connect_sink(sub.create_sink_pin(1));
+    pg->get_input_pin("a").connect_sink(setup_sink_pid(sub, 0));
+    pg->get_input_pin("b").connect_sink(setup_sink_pid(sub, 1));
     sub.create_driver_pin(0).connect_sink(pg->get_output_pin("z"));
 
     livehd::semdiff::Digest_resolver resolve = [&lib](hhds::Gid gid) -> hhds::Graph* {
@@ -539,8 +546,8 @@ TEST(Semdiff, DigestInterfaceModeIgnoresChildBody) {
     cio->add_output("o", 1);
     auto cg = cio->create_graph();
     auto op = create_typed_node(*cg, child_uses_or ? Ntype_op::Or : Ntype_op::And);
-    cg->get_input_pin("x").connect_sink(op.create_sink_pin(0));
-    cg->get_input_pin("y").connect_sink(op.create_sink_pin(0));
+    cg->get_input_pin("x").connect_sink(setup_sink_pid(op, 0));
+    cg->get_input_pin("y").connect_sink(setup_sink_pid(op, 0));
     op.create_driver_pin(0).connect_sink(cg->get_output_pin("o"));
 
     auto pio = lib.create_io("parent");
@@ -550,8 +557,8 @@ TEST(Semdiff, DigestInterfaceModeIgnoresChildBody) {
     auto pg  = pio->create_graph();
     auto sub = create_typed_node(*pg, Ntype_op::Sub);
     sub.set_subnode(cio);
-    pg->get_input_pin("a").connect_sink(sub.create_sink_pin(0));
-    pg->get_input_pin("b").connect_sink(sub.create_sink_pin(1));
+    pg->get_input_pin("a").connect_sink(setup_sink_pid(sub, 0));
+    pg->get_input_pin("b").connect_sink(setup_sink_pid(sub, 1));
     sub.create_driver_pin(0).connect_sink(pg->get_output_pin("z"));
 
     livehd::semdiff::Digest_resolver resolve = [&lib](hhds::Gid gid) -> hhds::Graph* {
@@ -584,16 +591,16 @@ std::shared_ptr<hhds::Graph> build_pipe2(const std::string& dir, const std::stri
 
   auto f0 = create_typed_node(*g, Ntype_op::Flop);
   f0.set_name(n0);                                            // node name too (tolg stamps both) — the exported State_pair basis
-  g->get_input_pin("d").connect_sink(f0.create_sink_pin(3));  // din
+  g->get_input_pin("d").connect_sink(setup_sink_pid(f0, 3));  // din
   auto q0 = f0.create_driver_pin(0);
   livehd::graph_util::set_pin_name(q0, n0);
 
   auto inv = create_typed_node(*g, Ntype_op::Not);
-  q0.connect_sink(inv.create_sink_pin(0));
+  q0.connect_sink(setup_sink_pid(inv, 0));
 
   auto f1 = create_typed_node(*g, Ntype_op::Flop);
   f1.set_name(n1);
-  inv.create_driver_pin(0).connect_sink(f1.create_sink_pin(3));  // din
+  inv.create_driver_pin(0).connect_sink(setup_sink_pid(f1, 3));  // din
   auto q1 = f1.create_driver_pin(0);
   livehd::graph_util::set_pin_name(q1, n1);
   q1.connect_sink(g->get_output_pin("q"));
@@ -824,10 +831,10 @@ TEST(Semdiff, StatePairingAmbiguousTwinsStayUnpaired) {
     auto an_or = create_typed_node(*g, Ntype_op::Or);
     for (const auto& nm : {n0, n1}) {
       auto f = create_typed_node(*g, Ntype_op::Flop);
-      g->get_input_pin("d").connect_sink(f.create_sink_pin(3));
+      g->get_input_pin("d").connect_sink(setup_sink_pid(f, 3));
       auto q = f.create_driver_pin(0);
       livehd::graph_util::set_pin_name(q, nm);
-      q.connect_sink(an_or.create_sink_pin(0));
+      q.connect_sink(setup_sink_pid(an_or, 0));
     }
     an_or.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
     return g;
@@ -863,10 +870,10 @@ TEST(Semdiff, StatePairingInitMismatchRefuses) {
     gio->add_output("q", 1);
     auto g = gio->create_graph();
     auto f = create_typed_node(*g, Ntype_op::Flop);
-    g->get_input_pin("d").connect_sink(f.create_sink_pin(3));
+    g->get_input_pin("d").connect_sink(setup_sink_pid(f, 3));
     auto cval = Dlop::create_integer(init);
     auto c    = livehd::graph_util::create_const(*g, *cval);
-    c.connect_sink(f.create_sink_pin(1));  // initial
+    c.connect_sink(setup_sink_pid(f, 1));  // initial
     auto q = f.create_driver_pin(0);
     livehd::graph_util::set_pin_name(q, nm);
     q.connect_sink(g->get_output_pin("q"));
@@ -908,7 +915,7 @@ TEST(Semdiff, StatePairingWidthMismatchPairs) {
     gio->add_output("q", bits);
     auto g = gio->create_graph();
     auto f = create_typed_node(*g, Ntype_op::Flop);
-    g->get_input_pin("d").connect_sink(f.create_sink_pin(3));
+    g->get_input_pin("d").connect_sink(setup_sink_pid(f, 3));
     auto q = f.create_driver_pin(0);
     livehd::graph_util::set_bits(q, bits);
     livehd::graph_util::set_pin_name(q, nm);
@@ -940,7 +947,7 @@ TEST(Semdiff, StatePairingMemoryWidthMismatchRefuses) {
     gio->add_output("q", bits);
     auto g = gio->create_graph();
     auto m = create_typed_node(*g, Ntype_op::Memory);
-    g->get_input_pin("d").connect_sink(m.create_sink_pin(4));
+    g->get_input_pin("d").connect_sink(setup_sink_pid(m, 4));
     auto q = m.create_driver_pin(0);
     livehd::graph_util::set_bits(q, bits);
     livehd::graph_util::set_pin_name(q, nm);
@@ -1009,8 +1016,8 @@ TEST(Semdiff, DivergentOpIsGap) {
   gioa->add_output("y", 1);
   auto a    = gioa->create_graph();
   auto a_op = create_typed_node(*a, Ntype_op::And);
-  a->get_input_pin("a").connect_sink(a_op.create_sink_pin(0));
-  a->get_input_pin("b").connect_sink(a_op.create_sink_pin(0));
+  a->get_input_pin("a").connect_sink(setup_sink_pid(a_op, 0));
+  a->get_input_pin("b").connect_sink(setup_sink_pid(a_op, 0));
   a_op.create_driver_pin(0).connect_sink(a->get_output_pin("y"));
 
   auto& lb   = livehd::Hhds_graph_library::instance("lgdb_semdiff_dv_b");
@@ -1020,8 +1027,8 @@ TEST(Semdiff, DivergentOpIsGap) {
   giob->add_output("y", 1);
   auto b    = giob->create_graph();
   auto b_op = create_typed_node(*b, Ntype_op::Or);
-  b->get_input_pin("a").connect_sink(b_op.create_sink_pin(0));
-  b->get_input_pin("b").connect_sink(b_op.create_sink_pin(0));
+  b->get_input_pin("a").connect_sink(setup_sink_pid(b_op, 0));
+  b->get_input_pin("b").connect_sink(setup_sink_pid(b_op, 0));
   b_op.create_driver_pin(0).connect_sink(b->get_output_pin("y"));
 
   auto r = livehd::semdiff::structural_match(a.get(), b.get());

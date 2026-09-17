@@ -70,6 +70,8 @@ struct Clock_chain {
 // the two sides simply thread separate guard cuts, which is sound because a
 // guard is always SAMPLED before it is READ inside one period (its power-on
 // value is dead).
+// The string also identifies guard state inside one design. Keep an exact
+// canonical representation here; a digest alone could alias different guards.
 std::string cone_digest(const hhds::Occurrence_pin& p, int depth = 0) {
   if (p.is_invalid()) {
     return "-";
@@ -87,8 +89,18 @@ std::string cone_digest(const hhds::Occurrence_pin& p, int depth = 0) {
   std::string s{Ntype::get_name(gu::type_op_of(n))};
   s += "(";
   std::vector<std::string> kids;
-  for (const auto& e : n.inp_edges()) {
-    kids.push_back(std::to_string(static_cast<int>(e.sink.get_port_id())) + "=" + cone_digest(e.driver, depth + 1));
+  // Per SINK pin, then per DRIVER of that pin: a sink with two drivers (a compact
+  // loop's carry-in) still contributes one kid EACH, which is what the edge walk
+  // did and what keeps the digest from aliasing a seeded carry with a bare one.
+  // Both readers are load-bearing. inp_SORTED_pins yields the node-as-pin (port
+  // 0) first and then ascending port order; the raw inp_pins() omits port 0
+  // entirely, which would silently drop a banked cell's FIRST operand and make
+  // two different cones digest the same. get_driver_pinS (plural) is what keeps
+  // the second driver of a carry-in; the singular reader returns only front().
+  for (auto sink : n.inp_sorted_pins()) {
+    for (auto driver : sink.get_driver_pins()) {
+      kids.push_back(std::to_string(static_cast<int>(sink.get_port_id())) + "=" + cone_digest(driver, depth + 1));
+    }
   }
   std::sort(kids.begin(), kids.end());  // pin-id keyed, so commutative operands still agree
   for (size_t i = 0; i < kids.size(); ++i) {
@@ -125,9 +137,16 @@ bool reaches_clock(const hhds::Occurrence_pin& p, const lc::Design_clocks& clock
   if (op != Ntype_op::And) {
     return false;
   }
-  for (const auto& e : n.inp_edges()) {
-    if (!e.driver.is_const() && reaches_clock(e.driver, clocks, depth + 1)) {
-      return true;
+  // Every operand of the And, per sink pin and then per driver of that pin. The
+  // SORTED reader is required: the raw inp_pins() drops port 0, and port 0 is
+  // exactly where `clk & en` parks its first operand -- losing it would answer
+  // "does not reach a clock" for a net that plainly does. `return` leaves the
+  // whole function, so nesting the walk does not change what it exits.
+  for (auto sink : n.inp_sorted_pins()) {
+    for (auto driver : sink.get_driver_pins()) {
+      if (!driver.is_const() && reaches_clock(driver, clocks, depth + 1)) {
+        return true;
+      }
     }
   }
   return false;
@@ -189,15 +208,27 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
       hhds::Occurrence_pin              clk_op;
       std::vector<hhds::Occurrence_pin> ens;
       int                               n_clock = 0;
-      for (const auto& e : n.inp_edges()) {
-        if (e.driver.is_const()) {
-          continue;
-        }
-        if (reaches_clock(e.driver, clocks, depth + 1)) {
-          ++n_clock;
-          clk_op = e.driver;
-        } else {
-          ens.push_back(e.driver);
+      // Every DRIVER of every sink pin is one operand: a sink may carry more than
+      // one (only a compact loop's carry-in does), and each of them counts toward
+      // `n_clock` exactly as its edge used to -- so get_driver_pinS, plural; the
+      // singular reader would keep only front() and undercount. Nothing runs
+      // after the inner loop, so `continue` still means "on to the next operand".
+      // inp_SORTED_pins, not the raw inp_pins(), is what makes the operand list
+      // COMPLETE: hhds parks port 0 on the node itself, so the raw list omits it,
+      // and port 0 is where the first operand of `clk & en` sits. Losing it drives
+      // `n_clock` to 0 and the whole cone falls through ungated -- the exact
+      // no-gating outcome the paragraph above says was measured.
+      for (auto sink : n.inp_sorted_pins()) {
+        for (auto driver : sink.get_driver_pins()) {
+          if (driver.is_const()) {
+            continue;
+          }
+          if (reaches_clock(driver, clocks, depth + 1)) {
+            ++n_clock;
+            clk_op = driver;
+          } else {
+            ens.push_back(driver);
+          }
         }
       }
       if (n_clock == 1 && !ens.empty()) {

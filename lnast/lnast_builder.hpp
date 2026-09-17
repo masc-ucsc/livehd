@@ -115,6 +115,7 @@ public:
   std::string create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_or_stmts(const std::vector<std::string>& var);
   std::string create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_red_xor_stmts(std::string_view var_name);
   std::string create_shl_stmts(std::string_view a_var, std::string_view b_var);
   void        create_assign_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_tuple_get(std::string_view fields);

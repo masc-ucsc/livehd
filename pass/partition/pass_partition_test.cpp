@@ -38,8 +38,11 @@ TEST(PartitionNames, DeepReconvergentProducerCones) {
       gu::set_color(node, i / 20 + 1);
       auto result = node.create_driver_pin(0);
       gu::set_ubits(result, 4);
+      // Xor is a SINGLE bank, so its two operands take consecutive pids. Piling
+      // both onto pid 0 left a two-driver sink that any singular get_driver_pin()
+      // reader silently halves.
       node.create_sink_pin(0).connect_driver(prev);
-      node.create_sink_pin(0).connect_driver(older);
+      node.create_sink_pin(1).connect_driver(older);
       older = prev;
       prev  = result;
     }

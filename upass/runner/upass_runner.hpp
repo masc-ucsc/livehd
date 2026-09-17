@@ -826,6 +826,11 @@ protected:
     // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
     // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
     std::string                    func_name  = {};
+    // This bind came from the DECLARATION DEFAULT (`<N=8>`), not from an
+    // explicit `<…>` argument and not from inference. A call that defaults
+    // EVERY declared generic and injects no port type is an IDENTITY
+    // specialization (see maybe_specialize_template_call).
+    bool                           from_default = false;
   };
   // One explicit `<…>` argument at a call site. `value` is the bound entity's
   // text (a type ref / tmp, a constant, or a lambda name); `name` is set for a
@@ -890,6 +895,16 @@ protected:
   // re-cloning the same signature within one tree; cross-tree dedup is by name
   // in pass_upass's queue drain).
   absl::flat_hash_set<std::string> specialized_emitted_;
+  // Set only while emit_named_instance_call RE-WALKS the call it just emitted
+  // for an IDENTITY specialization. That call names the template's own module
+  // name (the clone kept it), so without this the re-walk would resolve the
+  // callee back to the template, specialize again, emit again — unbounded
+  // recursion (a stack overflow, not a diagnostic). For every OTHER
+  // specialization the mangled name is what stops the re-walk: it resolves to
+  // nothing until the queue folds the clone in. The re-walked tree is a single
+  // func_call with named-actual stores, so suppressing the whole subtree is
+  // exactly the one call.
+  bool                             in_identity_respecialize_ = false;
 
   // ── init constructor hook ───────────────────────────────────────────────
   // One named argument of a synthesized constructor call (positional when

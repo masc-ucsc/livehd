@@ -105,13 +105,18 @@ struct Ctrl_pids {
   const auto  ctrl   = ctrl_pids(op);
   const auto  en_pid = ctrl.enable;
   const auto  rp_pid = ctrl.reset;
-  for (const auto& e : node.inp_edges()) {
-    const auto pid = e.sink.get_port_id();
+  for (auto e_sink : node.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+    // Bank, not raw pid: a commutative cell now spends one pid per operand
+    // (graph/cell.hpp), and those extra pids are more TERMS of one fold, not
+    // extra ARMS -- counting them as arms would inflate every wide reduction's
+    // predicted gate count.
+    const auto pid = Ntype::sink_bank(op, e_sink.get_port_id());
     ++sh.terms;
     if (pid != 0) {
       ++sh.arms;
     }
-    if (const auto b = bits_of(e.driver); b > 0 && static_cast<uint64_t>(b) > sh.widest) {
+    if (const auto b = bits_of(e_drv); b > 0 && static_cast<uint64_t>(b) > sh.widest) {
       sh.widest = static_cast<uint64_t>(b);
     }
     if (en_pid != hhds::Port_invalid && pid == en_pid) {
@@ -120,11 +125,12 @@ struct Ctrl_pids {
     if (rp_pid != hhds::Port_invalid && pid == rp_pid) {
       sh.has_reset = true;
     }
+    }
   }
   if (op == Ntype_op::Hotmux) {
     // (control, value) pairs plus an optional trailing default: the value
     // inputs are exactly ceil(terms/2). Derived from `terms` rather than from a
-    // second inp_edges() walk -- ONE scan is this struct's whole reason to exist.
+    // second fan-in walk -- ONE scan is this struct's whole reason to exist.
     sh.arms = (sh.terms + 1) / 2;
   }
   return sh;
@@ -137,14 +143,16 @@ struct Ctrl_pids {
 [[nodiscard]] inline uint64_t mult_score(const hhds::Node_class& node) {
   uint64_t acc   = 0;  // width of the running product
   uint64_t total = 0;
-  for (const auto& e : node.inp_edges()) {
-    const uint64_t w = atleast1(static_cast<uint64_t>(std::max(0, bits_of(e.driver))));
+  for (auto e_sink : node.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+    const uint64_t w = atleast1(static_cast<uint64_t>(std::max(0, bits_of(e_drv))));
     if (acc == 0) {
       acc = w;
       continue;
     }
     total = sat_add(total, sat_mul(9, sat_mul(acc, w)));
     acc   = sat_add(acc, w);
+    }
   }
   return total;
 }
@@ -235,6 +243,8 @@ struct Ctrl_pids {
       const auto sh = fanin_shape(node, op);
       return sat_mul(3, sat_mul(atleast1(ge_detail::out_width(node)), sh.terms == 0 ? 0 : sh.terms - 1));
     }
+    case Ntype_op::Rxor    : return sat_mul(3, atleast1(reduction_count(node)));
+    case Ntype_op::Popcount: return sat_mul(7, atleast1(reduction_count(node)));
     case Ntype_op::Ror: {
       const auto sh = fanin_shape(node, op);
       return atleast1(sh.widest);  // one OR level per operand bit

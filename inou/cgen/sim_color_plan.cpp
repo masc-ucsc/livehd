@@ -29,6 +29,33 @@
 #include "node_util.hpp"
 #include "port_reach.hpp"
 
+// HOW THIS FILE READS ITS INPUTS
+//
+// Every in-edge walk here is a nested pin walk: inp_sorted_pins() over the
+// node, then the PLURAL get_driver_pins() over each sink. hhds::Occurrence_node
+// offers both, and the retired inp_edges() reader was itself defined as exactly
+// this nesting, so the order and the multiset of (sink, driver) pairs the
+// planner sees are unchanged.
+//
+// Two parts of the spelling are load-bearing, not style:
+//   * SORTED, never the raw inp_pins(). hhds stores port 0 as the node itself,
+//     so the raw list OMITS it -- and port 0 is where a banked cell's first
+//     operand lives. The raw list is unordered too, while inp_sorted_pins()
+//     yields the node-as-pin first and then ascending port order, which is what
+//     the retired edge walk saw.
+//   * PLURAL get_driver_pins(), never the singular get_driver_pin(). A compact
+//     loop's carry-in is the one sink livehd sanctions with two drivers (the
+//     parent's seed plus the self edge, see pass/legalize's
+//     verify_single_driver_sinks); the singular reader hands back one of them
+//     and its assert compiles out under -DNDEBUG.
+//
+// Flattening one edge loop into two also moves what `break`/`continue` mean, so
+// each site below keeps the ORIGINAL control flow explicitly: a `continue` that
+// skipped one edge is an inner-loop `continue`, a `break` that left the whole
+// walk still leaves both loops, and a counter that ticked once per edge ticks
+// once per driver.
+//
+// Out-edges have no pin-centric twin yet, so out_edges() walks stay as they are.
 namespace livehd::sim {
 
 namespace {
@@ -51,14 +78,16 @@ constexpr std::pair<int, int> kPacked_footprint_bail{-1, -1};
 
 hhds::Occurrence_pin occurrence_driver_at(const hhds::Occurrence_node& node, hhds::Port_id pid) {
   hhds::Occurrence_pin result;
-  for (const auto& edge : node.inp_edges()) {
-    if (edge.sink.get_port_id() != pid) {
-      continue;
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() != pid) {
+      continue;  // the same per-edge skip: every edge of this sink shares its port
     }
-    if (!result.is_invalid()) {
-      return {};  // only fixed single-driver operands are traceable
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (!result.is_invalid()) {
+        return {};  // only fixed single-driver operands are traceable
+      }
+      result = driver;
     }
-    result = edge.driver;
   }
   return result;
 }
@@ -140,21 +169,23 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
     // Intersect every bound we can prove; ignoring an unbound operand only
     // widens the result and remains conservative.
     std::pair<int, int> bound = kPacked_footprint_bail;
-    for (const auto& edge : node.inp_edges()) {
-      const auto operand = occurrence_packed_footprint(edge.driver, depth + 1, &visits);
-      if (operand.first < 0) {
-        continue;
-      }
-      if (operand.second <= operand.first) {
-        return {0, 0};
-      }
-      if (bound.first < 0) {
-        bound = operand;
-      } else {
-        bound.first  = std::max(bound.first, operand.first);
-        bound.second = std::min(bound.second, operand.second);
-        if (bound.second <= bound.first) {
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        const auto operand = occurrence_packed_footprint(driver, depth + 1, &visits);
+        if (operand.first < 0) {
+          continue;
+        }
+        if (operand.second <= operand.first) {
           return {0, 0};
+        }
+        if (bound.first < 0) {
+          bound = operand;
+        } else {
+          bound.first  = std::max(bound.first, operand.first);
+          bound.second = std::min(bound.second, operand.second);
+          if (bound.second <= bound.first) {
+            return {0, 0};
+          }
         }
       }
     }
@@ -168,17 +199,19 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
     // every operand must be bounded before that union is useful.
     std::pair<int, int> bound{std::numeric_limits<int>::max(), 0};
     bool                any = false;
-    for (const auto& edge : node.inp_edges()) {
-      const auto operand = occurrence_packed_footprint(edge.driver, depth + 1, &visits);
-      if (operand.first < 0) {
-        return kPacked_footprint_bail;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        const auto operand = occurrence_packed_footprint(driver, depth + 1, &visits);
+        if (operand.first < 0) {
+          return kPacked_footprint_bail;
+        }
+        if (operand.second <= operand.first) {
+          continue;
+        }
+        bound.first  = std::min(bound.first, operand.first);
+        bound.second = std::max(bound.second, operand.second);
+        any          = true;
       }
-      if (operand.second <= operand.first) {
-        continue;
-      }
-      bound.first  = std::min(bound.first, operand.first);
-      bound.second = std::max(bound.second, operand.second);
-      any          = true;
     }
     return any ? bound : std::pair<int, int>{0, 0};
   }
@@ -286,11 +319,18 @@ bool is_conditional_boundary(const hhds::Occurrence_node& node) {
     return false;
   }
   hhds::Occurrence_pin guard;
-  for (const auto& edge : node.inp_edges()) {
-    if (edge.sink.get_port_id() == *port) {
-      guard = edge.driver;
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() != *port) {
+      continue;
+    }
+    // __valid is a single-driver control port. The plural reader is still what
+    // asks the graph; taking the first driver is the same stop the edge walk
+    // made, and the outer break is the one that left the WHOLE walk.
+    for (const auto& driver : sink.get_driver_pins()) {
+      guard = driver;
       break;
     }
+    break;
   }
   if (guard.is_invalid() || is_true_constant(guard)) {
     return false;
@@ -308,11 +348,18 @@ bool is_conditional_boundary(const hhds::Instance_site& site) {
     return false;
   }
   hhds::Pin_class guard;
-  for (const auto& edge : site.base_node().inp_edges()) {
-    if (edge.sink.get_port_id() == *port) {
-      guard = edge.driver;
+  for (const auto& sink : site.base_node().inp_sorted_pins()) {
+    if (sink.get_port_id() != *port) {
+      continue;
+    }
+    // Same shape as the Occurrence_node twin above: the PLURAL reader asks the
+    // graph and the first driver is the one the edge walk stopped at. The
+    // singular get_driver_pin() would assert away in a release build instead.
+    for (const auto& driver : sink.get_driver_pins()) {
+      guard = driver;
       break;
     }
+    break;
   }
   if (guard.is_invalid() || (guard.is_known_true())) {
     return false;
@@ -401,6 +448,23 @@ private:
   uint64_t hi_ = kHiLaneBasis;
 };
 
+// Fold records without ordering them. Fields within a record remain positional;
+// records form a multiset, including duplicate edges and their sink-port roles.
+template <typename Hash, typename Range, typename Append>
+void append_multiset(Hash& hash, const Range& records, Append append) {
+  hhds::Commutative_combiner128 terms;
+  for (const auto& record : records) {
+    Hash term;
+    append(term, record);
+    const auto words = term.finish();
+    terms.add(hhds::Sig128{words[0], words[1]});
+  }
+  const auto combined = terms.value();
+  hash.append_u64(records.size());
+  hash.append_u64(combined.a);
+  hash.append_u64(combined.b);
+}
+
 std::string format_hash128(std::string_view prefix, const std::array<uint64_t, 2>& hash) {
   char      text[40];
   const int size = std::snprintf(text,
@@ -417,6 +481,19 @@ std::string format_hash128(std::string_view prefix, const std::array<uint64_t, 2
 // kernel identity is a later, stricter lockstep-verified contract. Hash typed,
 // length-delimited fields directly: building and then discarding a formatted
 // description for every occurrence dominated planner time on large hierarchies.
+// The walk below MUST offer every driver of a sink pin. This is a CACHE
+// KEY, and the one shape hhds still sanctions with two drivers on one sink pin
+// (a compact loop's carry-in: the seed plus the self edge meaning "the previous
+// ordinal", see pass/legalize's verify_single_driver_sinks) loses a term to any
+// reader that takes only one. Two loop subnodes differing only in their seed
+// would then digest identically, and a false cache hit here serves the wrong
+// generated C++.
+//
+// It reads inp_sorted_pins() + the PLURAL get_driver_pins(), which satisfies
+// that: SORTED keeps port 0 (the node-as-pin, where a banked cell's first
+// operand lives) and the port ordering that the raw inp_pins() drops, and the
+// PLURAL reader keeps the second driver that get_driver_pin() would discard.
+// Both are correctness, not style.
 std::string node_shape(const hhds::Node_class& node) {
   Shape_hash_builder hash;
   hash.append_u64(1);
@@ -424,49 +501,49 @@ std::string node_shape(const hhds::Node_class& node) {
 
   using Input_shape = std::tuple<uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, std::string>;
   std::vector<Input_shape> inputs;
-  for (const auto& edge : node.inp_edges()) {
-    uint64_t    source_kind = 2;
-    uint64_t    source_op   = 0;
-    std::string literal;
-    if (edge.driver.is_const()) {
-      source_kind = 0;
-      literal     = gu::const_of(edge.driver).to_string();
-    } else if (gu::is_graph_input_pin(edge.driver)) {
-      source_kind = 1;
-    } else {
-      source_op = static_cast<uint64_t>(gu::type_op_of(edge.driver.get_master_node()));
+  for (auto edge_sink : node.inp_sorted_pins()) {
+    for (auto edge_drv : edge_sink.get_driver_pins()) {
+      uint64_t    source_kind = 2;
+      uint64_t    source_op   = 0;
+      std::string literal;
+      if (edge_drv.is_const()) {
+        source_kind = 0;
+        literal     = gu::const_of(edge_drv).to_string();
+      } else if (gu::is_graph_input_pin(edge_drv)) {
+        source_kind = 1;
+      } else {
+        source_op = static_cast<uint64_t>(gu::type_op_of(edge_drv.get_master_node()));
+      }
+      inputs.emplace_back(edge_sink.get_port_id(),
+                          source_kind,
+                          source_op,
+                          edge_drv.get_port_id(),
+                          static_cast<uint64_t>(gu::bits_of(edge_drv)),
+                          gu::is_unsign(edge_drv),
+                          std::move(literal));
     }
-    inputs.emplace_back(edge.sink.get_port_id(),
-                        source_kind,
-                        source_op,
-                        edge.driver.get_port_id(),
-                        static_cast<uint64_t>(gu::bits_of(edge.driver)),
-                        gu::is_unsign(edge.driver),
-                        std::move(literal));
   }
-  std::ranges::sort(inputs);
-  hash.append_u64(inputs.size());
-  for (const auto& [sink, source_kind, source_op, source_port, bits, unsign, literal] : inputs) {
-    hash.append_u64(sink);
-    hash.append_u64(source_kind);
-    hash.append_u64(source_op);
-    hash.append_u64(source_port);
-    hash.append_u64(bits);
-    hash.append_u64(unsign);
-    hash.append_text(literal);
-  }
+  append_multiset(hash, inputs, [](auto& term, const auto& input) {
+    const auto& [sink, source_kind, source_op, source_port, bits, unsign, literal] = input;
+    term.append_u64(sink);
+    term.append_u64(source_kind);
+    term.append_u64(source_op);
+    term.append_u64(source_port);
+    term.append_u64(bits);
+    term.append_u64(unsign);
+    term.append_text(literal);
+  });
 
   std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> outputs;
   for (const auto& pin : node.out_pins()) {
     outputs.emplace_back(pin.get_port_id(), static_cast<uint64_t>(gu::bits_of(pin)), gu::is_unsign(pin));
   }
-  std::ranges::sort(outputs);
-  hash.append_u64(outputs.size());
-  for (const auto& [port, bits, unsign] : outputs) {
-    hash.append_u64(port);
-    hash.append_u64(bits);
-    hash.append_u64(unsign);
-  }
+  append_multiset(hash, outputs, [](auto& term, const auto& record) {
+    const auto& [port, bits, unsign] = record;
+    term.append_u64(port);
+    term.append_u64(bits);
+    term.append_u64(unsign);
+  });
 
   if (auto loop = node.subnode_loop()) {
     hash.append_u64(1);
@@ -484,12 +561,11 @@ std::string node_shape(const hhds::Node_class& node) {
     for (const auto& carry : node.subnode_group().carries()) {
       carries.emplace_back(carry.input_port(), carry.output_port());
     }
-    std::ranges::sort(carries);
-    hash.append_u64(carries.size());
-    for (const auto& [input, output] : carries) {
-      hash.append_u64(input);
-      hash.append_u64(output);
-    }
+    append_multiset(hash, carries, [](auto& term, const auto& record) {
+      const auto& [input, output] = record;
+      term.append_u64(input);
+      term.append_u64(output);
+    });
   } else {
     hash.append_u64(0);
   }
@@ -502,14 +578,13 @@ std::string node_shape(const hhds::Node_class& node) {
     for (const auto& decl : io->get_output_pin_decls()) {
       ports.emplace_back(1, decl.port_id, static_cast<uint64_t>(decl.bits), decl.loop_break);
     }
-    std::ranges::sort(ports);
-    hash.append_u64(ports.size());
-    for (const auto& [direction, port, bits, loop_break] : ports) {
-      hash.append_u64(direction);
-      hash.append_u64(port);
-      hash.append_u64(bits);
-      hash.append_u64(loop_break);
-    }
+    append_multiset(hash, ports, [](auto& term, const auto& record) {
+      const auto& [direction, port, bits, loop_break] = record;
+      term.append_u64(direction);
+      term.append_u64(port);
+      term.append_u64(bits);
+      term.append_u64(loop_break);
+    });
   } else {
     hash.append_u64(0);
   }
@@ -533,14 +608,21 @@ const std::string& cached_node_shape(const hhds::Node_class& node, Occurrence_sh
 // occurrence/port is a binding and must not poison reuse: two identical cores
 // behind different top inputs or ICG nets share code. Constants, sink roles,
 // widths/signs, loop descriptors, and sub interfaces remain part of the shape.
+// This is the exact collision-check representation, not a hash-only discovery
+// seed. Keep its canonical ordering when changing the commutative seed hash.
+// Same reason as node_shape above: a collision-check representation must not
+// drop the second driver of a compact loop's carry-in sink, so this reads
+// inp_sorted_pins() + the PLURAL get_driver_pins() and never the singular
+// get_driver_pin() or the unordered, port-0-less inp_pins().
 std::string kernel_node_shape(const hhds::Node_class& node) {
   std::string              result = std::format("op:{}", Ntype::get_name(gu::type_op_of(node)));
   std::vector<std::string> inputs;
-  for (const auto& edge : node.inp_edges()) {
-    const std::string source = edge.driver.is_const()
-                                   ? "const:" + gu::const_of(edge.driver).to_string()
-                                   : std::format("value:b{}:u{}", gu::bits_of(edge.driver), gu::is_unsign(edge.driver));
-    inputs.push_back(std::format("{}<-{}", edge.sink.get_port_id(), source));
+  for (auto edge_sink : node.inp_sorted_pins()) {
+    for (auto edge_drv : edge_sink.get_driver_pins()) {
+      const std::string source = edge_drv.is_const() ? "const:" + gu::const_of(edge_drv).to_string()
+                                                     : std::format("value:b{}:u{}", gu::bits_of(edge_drv), gu::is_unsign(edge_drv));
+      inputs.push_back(std::format("{}<-{}", edge_sink.get_port_id(), source));
+    }
   }
   std::ranges::sort(inputs);
   for (const auto& input : inputs) {
@@ -618,24 +700,34 @@ std::string occurrence_shape(const hhds::Occurrence_node& node, const hhds::Grap
   return shape;
 }
 
-bool is_loop_carry(const hhds::Occurrence_node& node, const hhds::Occurrence_edge& edge) {
-  if (!node.is_loop_subnode() || edge.driver.get_master_node() != node || edge.sink.get_master_node() != node) {
+// The pin pair is the primary spelling: in-edge callers hand over the sink they
+// are iterating and one of ITS drivers, never an assembled edge. The
+// edge-taking overload stays for the out_edges() walk, which has no
+// pin-centric twin yet.
+bool is_loop_carry(const hhds::Occurrence_node& node, const hhds::Occurrence_pin& driver, const hhds::Occurrence_pin& sink) {
+  if (!node.is_loop_subnode() || driver.get_master_node() != node || sink.get_master_node() != node) {
     return false;
   }
   for (const auto& carry : node.subnode_group().carries()) {
-    if (carry.output_port() == edge.driver.get_port_id() && carry.input_port() == edge.sink.get_port_id()) {
+    if (carry.output_port() == driver.get_port_id() && carry.input_port() == sink.get_port_id()) {
       return true;
     }
   }
   return false;
 }
 
-bool is_loop_carry_input(const hhds::Occurrence_node& node, const hhds::Occurrence_edge& edge) {
+bool is_loop_carry(const hhds::Occurrence_node& node, const hhds::Occurrence_edge& edge) {
+  return is_loop_carry(node, edge.driver, edge.sink);
+}
+
+// Only the SINK decides this one, so it takes the pin the walk is standing on
+// and never needs a driver at all.
+bool is_loop_carry_input(const hhds::Occurrence_node& node, const hhds::Occurrence_pin& sink) {
   if (!node.is_loop_subnode()) {
     return false;
   }
   return std::ranges::any_of(node.subnode_group().carries(),
-                             [&](const auto& carry) { return carry.input_port() == edge.sink.get_port_id(); });
+                             [&](const auto& carry) { return carry.input_port() == sink.get_port_id(); });
 }
 
 void refine_structural_ids(std::vector<Color_plan::Site>&                             sites,
@@ -698,39 +790,43 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
   std::vector<std::vector<Neighbor>> adjacency(sites.size());
   for (size_t i = 0; i < sites.size(); ++i) {
     auto& neighbors = adjacency[i];
-    neighbors.reserve(sites[i].node.inp_edges().size() + sites[i].node.out_edges().size());
-    for (const auto& edge : sites[i].node.inp_edges()) {
-      if (is_loop_carry(sites[i].node, edge)) {
-        continue;
-      }
-      Neighbor   neighbor;
-      auto&      fields = neighbor.fields;
-      const auto it     = occurrence_index.find(edge.driver.get_master_node().get_occurrence_index());
-      fields[0]         = 0;
-      fields[1]         = edge.sink.get_port_id();
-      if (it != occurrence_index.end()) {
-        neighbor.site = it->second;
-        fields[4]     = edge.driver.get_port_id();
-      } else {
-        const auto pin = edge.driver.base_pin();
-        fields[2]      = 1;
-        fields[4]      = pin.is_invalid() ? 0 : pin.get_port_id();
-        fields[5]      = 3;
-        if (pin.is_const()) {
-          fields[5]        = 0;
-          const auto value = stable_hash128(gu::const_of(pin).to_string());
-          fields[9]        = value[0];
-          fields[10]       = value[1];
-        } else if (!pin.is_invalid() && gu::is_graph_input_pin(pin)) {
-          fields[5] = 1;
-        } else if (!pin.is_invalid()) {
-          fields[5] = 2;
-          fields[6] = static_cast<uint64_t>(gu::type_op_of(pin.get_master_node()));
+    // reserve() is a capacity hint: one sink usually carries one driver, and
+    // the compact-loop carry-in that carries two just costs a regrow.
+    neighbors.reserve(sites[i].node.inp_sorted_pins().size() + sites[i].node.out_edges().size());
+    for (const auto& edge_sink : sites[i].node.inp_sorted_pins()) {
+      for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        if (is_loop_carry(sites[i].node, edge_drv, edge_sink)) {
+          continue;
         }
-        fields[7] = pin.is_invalid() ? 0 : static_cast<uint64_t>(gu::bits_of(pin));
-        fields[8] = !pin.is_invalid() && gu::is_unsign(pin);
+        Neighbor   neighbor;
+        auto&      fields = neighbor.fields;
+        const auto it     = occurrence_index.find(edge_drv.get_master_node().get_occurrence_index());
+        fields[0]         = 0;
+        fields[1]         = edge_sink.get_port_id();
+        if (it != occurrence_index.end()) {
+          neighbor.site = it->second;
+          fields[4]     = edge_drv.get_port_id();
+        } else {
+          const auto pin = edge_drv.base_pin();
+          fields[2]      = 1;
+          fields[4]      = pin.is_invalid() ? 0 : pin.get_port_id();
+          fields[5]      = 3;
+          if (pin.is_const()) {
+            fields[5]        = 0;
+            const auto value = stable_hash128(gu::const_of(pin).to_string());
+            fields[9]        = value[0];
+            fields[10]       = value[1];
+          } else if (!pin.is_invalid() && gu::is_graph_input_pin(pin)) {
+            fields[5] = 1;
+          } else if (!pin.is_invalid()) {
+            fields[5] = 2;
+            fields[6] = static_cast<uint64_t>(gu::type_op_of(pin.get_master_node()));
+          }
+          fields[7] = pin.is_invalid() ? 0 : static_cast<uint64_t>(gu::bits_of(pin));
+          fields[8] = !pin.is_invalid() && gu::is_unsign(pin);
+        }
+        neighbors.push_back(std::move(neighbor));
       }
-      neighbors.push_back(std::move(neighbor));
     }
     for (const auto& edge : sites[i].node.out_edges()) {
       if (is_loop_carry(sites[i].node, edge)) {
@@ -761,16 +857,14 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
           neighbor.fields[3] = classes[neighbor.site];
         }
       }
-      std::ranges::sort(neighbors, [](const Neighbor& a, const Neighbor& b) { return a.fields < b.fields; });
       Refinement_hash_builder hash;
       hash.append_u64(seeds[i][0]);
       hash.append_u64(seeds[i][1]);
-      hash.append_u64(neighbors.size());
-      for (const auto& neighbor : neighbors) {
+      append_multiset(hash, neighbors, [](auto& term, const auto& neighbor) {
         for (const uint64_t field : neighbor.fields) {
-          hash.append_u64(field);
+          term.append_u64(field);
         }
-      }
+      });
       descriptions[i] = hash.finish();
     }
     auto next = classes_of(descriptions);
@@ -860,11 +954,13 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
     // read -> address/data -> Memory -> read cycle (XS Rob's robDeqGroup).
     // Per-port pins live at `port * Memory_port_stride + <base offset>`, and
     // `clock_pin` is base offset 2 (graph/cell.cpp). Test the raw id directly:
-    // get_sink_name allocates a std::string per edge on a hot per-node path.
+    // get_sink_name allocates a std::string per sink on a hot per-node path.
+    // The question is per SINK, so this only needs the driver list to be
+    // non-empty -- an unconnected clock pin contributed no edge either.
     const auto clock_off = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
     bool       has_clock = false;
-    for (const auto& edge : node.inp_edges()) {
-      if (edge.sink.get_port_id() % Ntype::Memory_port_stride == clock_off) {
+    for (const auto& sink : node.inp_sorted_pins()) {
+      if (sink.get_port_id() % Ntype::Memory_port_stride == clock_off && !sink.get_driver_pins().empty()) {
         has_clock = true;
         break;
       }
@@ -1134,15 +1230,15 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         // through that boundary to the executable leaf occurrence; the local
         // Pin_class edge would stop at an ordinary Sub, which is intentionally
         // not a color-plan site.
-        for (const auto& edge : discovery.lift(output).inp_edges()) {
-          if (const auto site = index.find(edge.driver.get_master_node().get_occurrence_index()); site != index.end()) {
+        for (auto edge_drv : discovery.lift(output).get_driver_pins()) {
+          if (const auto site = index.find(edge_drv.get_master_node().get_occurrence_index()); site != index.end()) {
             mark_live(site->second);
             driver_id = plan.sites_[site->second].structural_id;
           }
         }
       } else {
-        for (const auto& edge : output.inp_edges()) {
-          if (const auto site = find_body_driver_site(body.graph, body.path, edge.driver.get_master_node())) {
+        for (auto edge_drv : output.get_driver_pins()) {
+          if (const auto site = find_body_driver_site(body.graph, body.path, edge_drv.get_master_node())) {
             mark_live(*site);
             driver_id = plan.sites_[*site].structural_id;
           }
@@ -1160,35 +1256,40 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const size_t i = pending.front();
     pending.pop();
     if (std::getenv("LHD_SIM_PLAN_DEBUG") != nullptr && plan.sites_[i].kind == Site_kind::loop_control) {
-      for (const auto& edge : plan.sites_[i].node.inp_edges()) {
-        const auto drv = edge.driver.get_master_node();
-        std::print(stderr,
-                   "[plan] loop site {} sink pid {} <- driver pid {} op {} self={} indexed={}\n",
-                   i,
-                   edge.sink.get_port_id(),
-                   edge.driver.get_port_id(),
-                   drv.is_invalid() ? -1 : static_cast<int>(gu::type_op_of(drv)),
-                   !drv.is_invalid() && drv == plan.sites_[i].node,
-                   !drv.is_invalid() && index.contains(drv.get_occurrence_index()));
+      for (const auto& edge_sink : plan.sites_[i].node.inp_sorted_pins()) {
+        for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+          const auto drv = edge_drv.get_master_node();
+          std::print(stderr,
+                     "[plan] loop site {} sink pid {} <- driver pid {} op {} self={} indexed={}\n",
+                     i,
+                     edge_sink.get_port_id(),
+                     edge_drv.get_port_id(),
+                     drv.is_invalid() ? -1 : static_cast<int>(gu::type_op_of(drv)),
+                     !drv.is_invalid() && drv == plan.sites_[i].node,
+                     !drv.is_invalid() && index.contains(drv.get_occurrence_index()));
+        }
       }
     }
-    for (const auto& edge : plan.sites_[i].node.inp_edges()) {
-      const auto driver = edge.driver.get_master_node();
-      if (driver.is_invalid()) {
-        continue;
-      }
-      // A carry input has TWO drivers: the compact node's own carry self-edge
-      // (the eager chain inside the wrapper — not a parent-level dependency)
-      // and the parent's SEED, which ordinal 0 consumes. Only the self-edge is
-      // skipped; skipping every carry edge marked the seed cone dead, and a
-      // runtime seed (a packed array built before the loop) then reached the
-      // wrapper as `0 /*UNRESOLVED-CYCLE*/` (a constant seed hid it).
-      if (plan.sites_[i].kind == Site_kind::loop_control && is_loop_carry_input(plan.sites_[i].node, edge)
-          && driver == plan.sites_[i].node) {
-        continue;
-      }
-      if (const auto it = index.find(driver.get_occurrence_index()); it != index.end()) {
-        mark_live(it->second);
+    // A carry input has TWO drivers -- which is why the walk reads the PLURAL
+    // get_driver_pins() per sink: the compact node's own carry self-edge (the
+    // eager chain inside the wrapper — not a parent-level dependency) and the
+    // parent's SEED, which ordinal 0 consumes. Only the self-edge is skipped;
+    // skipping every carry edge marked the seed cone dead, and a runtime seed
+    // (a packed array built before the loop) then reached the wrapper as
+    // `0 /*UNRESOLVED-CYCLE*/` (a constant seed hid it).
+    for (const auto& edge_sink : plan.sites_[i].node.inp_sorted_pins()) {
+      for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        const auto driver = edge_drv.get_master_node();
+        if (driver.is_invalid()) {
+          continue;
+        }
+        if (plan.sites_[i].kind == Site_kind::loop_control && is_loop_carry_input(plan.sites_[i].node, edge_sink)
+            && driver == plan.sites_[i].node) {
+          continue;
+        }
+        if (const auto it = index.find(driver.get_occurrence_index()); it != index.end()) {
+          mark_live(it->second);
+        }
       }
     }
   }
@@ -1230,40 +1331,52 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       // a runtime value. The matrix itself is a canonical Memory attribute, so
       // discovery can distinguish deterministic old/fwd/program arrays without
       // duplicating the emitter's full ordering classifier.
-      for (const auto& edge : plan.sites_[consumer].node.inp_edges()) {
-        const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(edge.sink.get_port_id()));
-        if (name == "undef" && edge.driver.is_const() && !edge.driver.is_known_false()) {
-          plan.summary_.runtime_random = true;
+      bool undef_found = false;  // the old walk's `break` left BOTH loops
+      for (const auto& edge_sink : plan.sites_[consumer].node.inp_sorted_pins()) {
+        const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(edge_sink.get_port_id()));
+        if (name != "undef") {
+          continue;
+        }
+        for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+          if (edge_drv.is_const() && !edge_drv.is_known_false()) {
+            plan.summary_.runtime_random = true;
+            undef_found                  = true;
+            break;
+          }
+        }
+        if (undef_found) {
           break;
         }
       }
     }
-    for (const auto& edge : plan.sites_[consumer].node.inp_edges()) {
-      // Unknown literal bits are not runtime randomness in simulation. Under
-      // sim.unknown_zero cgen_sim's sim_const_text() concretizes them to zero;
-      // by default sim_const_expr() draws them from hlop's seeded PRNG ONCE,
-      // behind a `static const`, so the literal is still a constant across
-      // periods. Only operations that draw on EVERY period (currently
-      // ordering="none" memory collisions above) require random scheduling.
-      const auto producer_it = index.find(edge.driver.get_master_node().get_occurrence_index());
-      if (producer_it == index.end() || !plan.sites_[producer_it->second].live) {
-        continue;
+    for (const auto& edge_sink : plan.sites_[consumer].node.inp_sorted_pins()) {
+      for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        // Unknown literal bits are not runtime randomness in simulation. Under
+        // sim.unknown_zero cgen_sim's sim_const_text() concretizes them to zero;
+        // by default sim_const_expr() draws them from hlop's seeded PRNG ONCE,
+        // behind a `static const`, so the literal is still a constant across
+        // periods. Only operations that draw on EVERY period (currently
+        // ordering="none" memory collisions above) require random scheduling.
+        const auto producer_it = index.find(edge_drv.get_master_node().get_occurrence_index());
+        if (producer_it == index.end() || !plan.sites_[producer_it->second].live) {
+          continue;
+        }
+        Dependency dep;
+        dep.producer      = producer_it->second;
+        dep.consumer      = consumer;
+        dep.producer_port = edge_drv.get_port_id();
+        dep.consumer_port = edge_sink.get_port_id();
+        if (is_loop_carry(plan.sites_[consumer].node, edge_drv, edge_sink) && dep.producer == consumer) {
+          continue;  // the self-edge: already represented once from Subnode_group::carries()
+        } else if (plan.sites_[dep.producer].kind == Site_kind::state) {
+          dep.kind = Dependency_kind::state_read;
+        } else if (plan.sites_[dep.consumer].kind == Site_kind::state) {
+          dep.kind = Dependency_kind::state_update;
+        } else if (plan.sites_[dep.producer].kind != Site_kind::data || plan.sites_[dep.consumer].kind != Site_kind::data) {
+          dep.kind = Dependency_kind::control;
+        }
+        plan.dependencies_.push_back(dep);
       }
-      Dependency dep;
-      dep.producer      = producer_it->second;
-      dep.consumer      = consumer;
-      dep.producer_port = edge.driver.get_port_id();
-      dep.consumer_port = edge.sink.get_port_id();
-      if (is_loop_carry(plan.sites_[consumer].node, edge) && dep.producer == consumer) {
-        continue;  // the self-edge: already represented once from Subnode_group::carries()
-      } else if (plan.sites_[dep.producer].kind == Site_kind::state) {
-        dep.kind = Dependency_kind::state_read;
-      } else if (plan.sites_[dep.consumer].kind == Site_kind::state) {
-        dep.kind = Dependency_kind::state_update;
-      } else if (plan.sites_[dep.producer].kind != Site_kind::data || plan.sites_[dep.consumer].kind != Site_kind::data) {
-        dep.kind = Dependency_kind::control;
-      }
-      plan.dependencies_.push_back(dep);
     }
   }
 
@@ -1440,14 +1553,22 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   };
   std::vector<Input_use>    input_uses;
   livehd::port_reach::Cache port_reach;
-  const auto                add_value_use = [&](const auto& edge, size_t consumer, uint32_t consumer_input, State_version version) {
-    auto producer_it = index.find(edge.driver.get_master_node().get_occurrence_index());
-    bool top_input   = producer_it == index.end() && gu::is_graph_input_pin(edge.driver);
+  // The value use is named by the SINK pin the caller is walking plus ONE of
+  // that pin's drivers, which is what the in-pin walks below hand over. A
+  // two-driver carry-in therefore calls this once per driver, exactly as the
+  // old per-edge callers did.
+  const auto                add_value_use = [&](const hhds::Occurrence_pin& use_driver,
+                                                const hhds::Occurrence_pin& use_sink,
+                                                size_t                      consumer,
+                                                uint32_t                    consumer_input,
+                                                State_version               version) {
+    auto producer_it = index.find(use_driver.get_master_node().get_occurrence_index());
+    bool top_input   = producer_it == index.end() && gu::is_graph_input_pin(use_driver);
     if (!top_input && (producer_it == index.end() || !plan.sites_[producer_it->second].live)) {
       return;
     }
     size_t        producer_base       = top_input ? Color_plan::invalid_index : producer_it->second;
-    hhds::Port_id producer_port       = edge.driver.get_port_id();
+    hhds::Port_id producer_port       = use_driver.get_port_id();
     uint32_t      producer_shift      = 0;
     uint32_t      producer_width      = 0;
     uint32_t      producer_extract_lo = 0;
@@ -1465,11 +1586,21 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const auto  consumer_op            = gu::type_op_of(consumer_base.node);
     const bool  slice_debug            = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
     uint32_t    output_boundary_width  = 0;
-    bool        output_boundary_unsign = gu::is_unsign(edge.driver);
-    if (consumer_op == Ntype_op::Get_mask && edge.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
-      for (const auto& input : consumer_base.node.inp_edges()) {
-        if (input.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") && input.driver.is_const()) {
-          std::tie(lo, hi) = gu::const_of(input.driver).get_mask_range();
+    bool        output_boundary_unsign = gu::is_unsign(use_driver);
+    if (consumer_op == Ntype_op::Get_mask && use_sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+      bool mask_found = false;  // the old walk's `break` left BOTH loops
+      for (const auto& input_sink : consumer_base.node.inp_sorted_pins()) {
+        if (input_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "mask")) {
+          continue;
+        }
+        for (const auto& input_drv : input_sink.get_driver_pins()) {
+          if (input_drv.is_const()) {
+            std::tie(lo, hi) = gu::const_of(input_drv).get_mask_range();
+            mask_found       = true;
+            break;
+          }
+        }
+        if (mask_found) {
           break;
         }
       }
@@ -1479,7 +1610,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // consumer. The child expression itself can be wider (for example, a
     // packed Set_mask chain), but those internal bits are not visible across
     // the declared module boundary.
-    const auto driver_node  = edge.driver.get_master_node();
+    const auto driver_node  = use_driver.get_master_node();
     const auto driver_steps = driver_node.path().steps();
     if (driver_steps.size() > consumer_base.node.path().steps().size()) {
       const auto driver_graph = driver_node.get_graph();
@@ -1488,10 +1619,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         for (const auto& decl : driver_io->get_output_pin_decls()) {
           const auto output  = driver_graph->get_output_pin(decl.name);
           bool       matches = false;
-          for (const auto& output_edge : output.inp_edges()) {
-            matches |= output_edge.driver.get_master_node().get_class_index()
-                           == edge.driver.base_pin().get_master_node().get_class_index()
-                       && output_edge.driver.get_port_id() == edge.driver.get_port_id();
+          for (auto output_edge_drv : output.get_driver_pins()) {
+            matches
+                |= output_edge_drv.get_master_node().get_class_index() == use_driver.base_pin().get_master_node().get_class_index()
+                   && output_edge_drv.get_port_id() == use_driver.get_port_id();
           }
           if (matches) {
             output_boundary_width  = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(output, *driver_io, decl.name)));
@@ -1508,8 +1639,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     if (!top_input && library != nullptr) {
       bool                 position_in_whole = true;
       uint32_t             surface_shift     = 0;
-      hhds::Occurrence_pin crossing          = edge.driver;
-      if (consumer_op == Ntype_op::Get_mask && edge.sink.get_port_id() == 0) {
+      hhds::Occurrence_pin crossing          = use_driver;
+      if (consumer_op == Ntype_op::Get_mask && use_sink.get_port_id() == 0) {
         // cprop canonicalizes the And(SRA(word,k), low-mask) bit read into
         // Get_mask(SRA(word,k), low-mask): hop the same consumer-side SRA the
         // And spelling below hops, so both spellings bind the exact
@@ -1527,11 +1658,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           if (shift_node.path() == consumer_base.node.path() && gu::type_op_of(shift_node) == Ntype_op::SRA) {
             hhds::Occurrence_pin value;
             hhds::Occurrence_pin amount;
-            for (const auto& input : shift_node.inp_edges()) {
-              if (input.sink.get_port_id() == 0) {
-                value = input.driver;
-              } else {
-                amount = input.driver;
+            for (const auto& input_sink : shift_node.inp_sorted_pins()) {
+              for (const auto& input_drv : input_sink.get_driver_pins()) {
+                if (input_sink.get_port_id() == 0) {
+                  value = input_drv;
+                } else {
+                  amount = input_drv;
+                }
               }
             }
             if (!value.is_invalid() && amount.is_const()) {
@@ -1548,16 +1681,21 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             }
           }
         }
-      } else if (consumer_op == Ntype_op::And && !edge.driver.is_const()) {
+      } else if (consumer_op == Ntype_op::And && !use_driver.is_const()) {
         int mask_width = -1;
-        for (const auto& input : consumer_base.node.inp_edges()) {
-          if (!input.driver.is_const()) {
-            continue;
+        for (const auto& input_sink : consumer_base.node.inp_sorted_pins()) {
+          for (const auto& input_drv : input_sink.get_driver_pins()) {
+            if (!input_drv.is_const()) {
+              continue;
+            }
+            const auto [mask_lo, mask_hi] = gu::const_of(input_drv).get_mask_range();
+            if (mask_lo == 0 && mask_hi > 0) {
+              mask_width = mask_hi;
+              break;
+            }
           }
-          const auto [mask_lo, mask_hi] = gu::const_of(input.driver).get_mask_range();
-          if (mask_lo == 0 && mask_hi > 0) {
-            mask_width = mask_hi;
-            break;
+          if (mask_width > 0) {
+            break;  // the old walk's `break` left BOTH loops
           }
         }
         for (int depth = 0; depth < 8 && !crossing.is_invalid() && !crossing.is_const(); ++depth) {
@@ -1567,11 +1705,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           bool                 transparent = op == Ntype_op::Sext;
           if (op == Ntype_op::Sext || op == Ntype_op::Get_mask) {
             hhds::Occurrence_pin mask;
-            for (const auto& input : wrapper.inp_edges()) {
-              if (input.sink.get_port_id() == 0) {
-                value = input.driver;
-              } else {
-                mask = input.driver;
+            for (const auto& input_sink : wrapper.inp_sorted_pins()) {
+              for (const auto& input_drv : input_sink.get_driver_pins()) {
+                if (input_sink.get_port_id() == 0) {
+                  value = input_drv;
+                } else {
+                  mask = input_drv;
+                }
               }
             }
             transparent |= mask.is_invalid();
@@ -1589,11 +1729,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (mask_width > 0 && shift_node.path() == consumer_base.node.path() && gu::type_op_of(shift_node) == Ntype_op::SRA) {
           hhds::Occurrence_pin value;
           hhds::Occurrence_pin amount;
-          for (const auto& input : shift_node.inp_edges()) {
-            if (input.sink.get_port_id() == 0) {
-              value = input.driver;
-            } else {
-              amount = input.driver;
+          for (const auto& input_sink : shift_node.inp_sorted_pins()) {
+            for (const auto& input_drv : input_sink.get_driver_pins()) {
+              if (input_sink.get_port_id() == 0) {
+                value = input_drv;
+              } else {
+                amount = input_drv;
+              }
             }
           }
           if (!value.is_invalid() && amount.is_const()) {
@@ -1617,11 +1759,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           }
           hhds::Occurrence_pin value;
           hhds::Occurrence_pin mask;
-          for (const auto& input : crossing_node.inp_edges()) {
-            if (input.sink.get_port_id() == 0) {
-              value = input.driver;
-            } else if (input.sink.get_port_id() == 2 && input.driver.is_const()) {
-              mask = input.driver;
+          for (const auto& input_sink : crossing_node.inp_sorted_pins()) {
+            for (const auto& input_drv : input_sink.get_driver_pins()) {
+              if (input_sink.get_port_id() == 0) {
+                value = input_drv;
+              } else if (input_sink.get_port_id() == 2 && input_drv.is_const()) {
+                mask = input_drv;
+              }
             }
           }
           bool transparent = false;
@@ -1676,15 +1820,24 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             size_t               overlaps  = 0;
             size_t               fanin     = 0;
             bool                 malformed = false;
-            for (const auto& input : packed.inp_edges()) {
-              if (++fanin > 4096 || input.sink.get_port_id() != 0) {
-                malformed = true;
-                break;
+            // `fanin` still ticks once per DRIVER, which is what the per-edge
+            // count was: a sink with two drivers contributed two operands.
+            for (const auto& input_sink : packed.inp_sorted_pins()) {
+              for (const auto& input_drv : input_sink.get_driver_pins()) {
+                // Every Or operand is on the one `as` bank; bank-check rather
+                // than pid-check now that each owns its own pid (cell.hpp).
+                if (++fanin > 4096 || Ntype::sink_bank(Ntype_op::Or, input_sink.get_port_id()) != 0) {
+                  malformed = true;
+                  break;
+                }
+                const auto footprint = occurrence_packed_footprint(input_drv);
+                if (footprint.first < 0 || !(hi <= footprint.first || lo >= footprint.second)) {
+                  overlapper = input_drv;
+                  ++overlaps;
+                }
               }
-              const auto footprint = occurrence_packed_footprint(input.driver);
-              if (footprint.first < 0 || !(hi <= footprint.first || lo >= footprint.second)) {
-                overlapper = input.driver;
-                ++overlaps;
+              if (malformed) {
+                break;  // the old walk's `break` left BOTH loops
               }
             }
             if (malformed || overlaps != 1) {
@@ -1717,16 +1870,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             if (!window || hi > window->second - window->first) {
               break;
             }
-            const auto [mask_lo, mask_hi] = *window;
+            const auto [mask_lo, mask_hi]  = *window;
             // Compose nested constant slices before crossing a packed child
             // output. A wide child field may span several Or/SHL lanes even
             // though its parent consumes only one narrow subfield; tracing the
             // outer demand through this select makes that exact subfield the
             // range tested for unique ownership.
-            crossing  = value;
-            lo       += mask_lo;
-            hi       += mask_lo;
-            rebased   = true;
+            crossing                       = value;
+            lo                            += mask_lo;
+            hi                            += mask_lo;
+            rebased                        = true;
             continue;
           }
           if (packed_op == Ntype_op::Concat) {
@@ -1749,17 +1902,21 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
               break;
             }
             // Lane i's value rides sink pid 2i (cell contract). Read the
-            // OCCURRENCE edge rather than lanes[hit].value: the occurrence
+            // OCCURRENCE driver rather than lanes[hit].value: the occurrence
             // driver has already crossed whatever GraphIO boundary sits between
             // the two bodies, which is what makes a lane fed from the caller
             // resolvable at all. One value may drive several lanes, so the pid
             // -- never pin identity -- is the sound key.
             hhds::Occurrence_pin value;
-            for (const auto& input : packed.inp_edges()) {
-              if (input.sink.get_port_id() == static_cast<hhds::Port_id>(2 * hit)) {
-                value = input.driver;
-                break;
+            for (const auto& input_sink : packed.inp_sorted_pins()) {
+              if (input_sink.get_port_id() != static_cast<hhds::Port_id>(2 * hit)) {
+                continue;
               }
+              for (const auto& input_drv : input_sink.get_driver_pins()) {
+                value = input_drv;
+                break;  // the first driver, as the edge walk took
+              }
+              break;
             }
             if (value.is_invalid()) {
               break;
@@ -1783,12 +1940,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           hhds::Occurrence_pin base;
           hhds::Occurrence_pin mask;
           hhds::Occurrence_pin value;
-          for (const auto& input : packed.inp_edges()) {
-            switch (input.sink.get_port_id()) {
-              case 0 : base = input.driver; break;
-              case 2 : mask = input.driver; break;
-              case 4 : value = input.driver; break;
-              default: break;
+          for (const auto& input_sink : packed.inp_sorted_pins()) {
+            for (const auto& input_drv : input_sink.get_driver_pins()) {
+              switch (input_sink.get_port_id()) {
+                case 0 : base = input_drv; break;
+                case 2 : mask = input_drv; break;
+                case 4 : value = input_drv; break;
+                default: break;
+              }
             }
           }
           if (mask.is_invalid() || !mask.is_const()) {
@@ -1900,13 +2059,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           if (!output_port) {
             for (const auto& decl : sio->get_output_pin_decls()) {
               const auto output = child->get_output_pin(decl.name);
-              for (const auto& output_edge : output.inp_edges()) {
+              for (auto output_edge_drv : output.get_driver_pins()) {
                 // HHDS can expose equivalent multi-driver pins through
                 // different handle encodings (notably pid 0). Match the
                 // semantic driver identity, not the raw pin class index.
-                if (output_edge.driver.get_master_node().get_class_index()
-                        == crossing.base_pin().get_master_node().get_class_index()
-                    && output_edge.driver.get_port_id() == crossing.base_pin().get_port_id()) {
+                if (output_edge_drv.get_master_node().get_class_index() == crossing.base_pin().get_master_node().get_class_index()
+                    && output_edge_drv.get_port_id() == crossing.base_pin().get_port_id()) {
                   output_port = decl.port_id;
                   break;
                 }
@@ -2002,26 +2160,29 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           output_boundary_unsign = decl.unsign;
         }
         const auto output = child->get_output_pin(decl.name);
-        for (const auto& output_edge : output.inp_edges()) {
-          if (gu::is_graph_input_pin(output_edge.driver)) {
-            for (const auto& input_edge : sub_occurrence.inp_edges()) {
-              if (input_edge.sink.get_port_id() != output_edge.driver.get_port_id()) {
+        for (auto output_edge_drv : output.get_driver_pins()) {
+          if (gu::is_graph_input_pin(output_edge_drv)) {
+            for (const auto& input_sink : sub_occurrence.inp_sorted_pins()) {
+              if (input_sink.get_port_id() != output_edge_drv.get_port_id()) {
                 continue;
               }
-              const auto bound = index.find(input_edge.driver.get_master_node().get_occurrence_index());
-              top_input        = bound == index.end() && gu::is_graph_input_pin(input_edge.driver);
-              if (top_input || (bound != index.end() && plan.sites_[bound->second].live)) {
-                producer_base = top_input ? Color_plan::invalid_index : bound->second;
-                producer_port = input_edge.driver.get_port_id();
-                resolved      = true;
+              for (const auto& input_drv : input_sink.get_driver_pins()) {
+                const auto bound = index.find(input_drv.get_master_node().get_occurrence_index());
+                top_input        = bound == index.end() && gu::is_graph_input_pin(input_drv);
+                if (top_input || (bound != index.end() && plan.sites_[bound->second].live)) {
+                  producer_base = top_input ? Color_plan::invalid_index : bound->second;
+                  producer_port = input_drv.get_port_id();
+                  resolved      = true;
+                }
+                break;  // only this port's FIRST driver, as the edge walk did
               }
-              break;
+              break;  // ...and then out of the whole walk, likewise
             }
-          } else if (!output_edge.driver.is_const()) {
-            const auto leaf = find_body_site(child.get(), sub_occurrence.path(), output_edge.driver.get_master_node());
+          } else if (!output_edge_drv.is_const()) {
+            const auto leaf = find_body_site(child.get(), sub_occurrence.path(), output_edge_drv.get_master_node());
             if (leaf && plan.sites_[*leaf].live) {
               producer_base = *leaf;
-              producer_port = output_edge.driver.get_port_id();
+              producer_port = output_edge_drv.get_port_id();
               resolved      = true;
             }
           }
@@ -2043,7 +2204,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // also applies to a top input: the public IO remains one packed object, but
     // each fixed internal view is a narrow direct-ABI lane.
     if (producer_literal.empty() && consumer_op == Ntype_op::Get_mask
-        && edge.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a") && lo >= 0 && hi > lo) {
+        && use_sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a") && lo >= 0 && hi > lo) {
       producer_extract_lo = static_cast<uint32_t>(lo);
       producer_extract_hi = static_cast<uint32_t>(hi);
       producer_shift      = 0;
@@ -2059,7 +2220,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                        producer_shift,
                                        producer_extract_lo,
                                        producer_extract_hi,
-                                       edge.sink.get_port_id(),
+                                       use_sink.get_port_id(),
                                        consumer_input,
                                        version,
                                        top_input};
@@ -2067,7 +2228,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       return;
     }
     const uint32_t width
-        = producer_width != 0 ? producer_width : static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(edge.driver)));
+        = producer_width != 0 ? producer_width : static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(use_driver)));
     uint32_t consumer_width = preextracted ? width : (output_boundary_width != 0 ? output_boundary_width : width);
     // Occurrence traversal resolves a definition-local GraphIO input directly
     // to its caller-side producer. Preserve the declared port width at that
@@ -2081,14 +2242,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // widen that lane before the identity Get_mask consumes it.
     if (!preextracted) {
       uint32_t definition_input = 0;
-      for (const auto& base_edge : consumer_base.node.base_node().inp_edges()) {
-        if (definition_input++ != consumer_input) {
-          continue;
+      for (auto base_edge_sink : consumer_base.node.base_node().inp_sorted_pins()) {
+        for (auto base_edge_drv : base_edge_sink.get_driver_pins()) {
+          if (definition_input++ != consumer_input) {
+            continue;
+          }
+          if (gu::is_graph_input_pin(base_edge_drv)) {
+            consumer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(base_edge_drv)));
+          }
+          break;
         }
-        if (gu::is_graph_input_pin(base_edge.driver)) {
-          consumer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(base_edge.driver)));
-        }
-        break;
       }
     }
     plan.value_uses_.push_back(
@@ -2099,11 +2262,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                   producer_shift,
                   producer_extract_lo,
                   producer_extract_hi,
-                  edge.sink.get_port_id(),
+                  use_sink.get_port_id(),
                   consumer_input,
                   width,
                   consumer_width,
-                  preextracted ? true : (output_boundary_width != 0 ? output_boundary_unsign : gu::is_unsign(edge.driver)),
+                  preextracted ? true : (output_boundary_width != 0 ? output_boundary_unsign : gu::is_unsign(use_driver)),
                   top_input,
                   preextracted,
                   producer_literal});
@@ -2127,13 +2290,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const Execution_slot commit_slot   = *rising ? Execution_slot::rise_commit : Execution_slot::fall_commit;
     const size_t         update        = ensure_version(base, input_version, Version_role::state_update, commit_slot, 0);
     state_updates[base]                = update;
+    // consumer_input still counts one per DRIVER, which is what one per edge
+    // was: it indexes the same operand list add_value_use replays.
     uint32_t consumer_input            = 0;
-    for (const auto& edge : plan.sites_[base].node.inp_edges()) {
-      if (is_timing_input(edge.sink)) {
-        ++consumer_input;
-        continue;
+    for (const auto& edge_sink : plan.sites_[base].node.inp_sorted_pins()) {
+      for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        if (is_timing_input(edge_sink)) {
+          ++consumer_input;
+          continue;
+        }
+        add_value_use(edge_drv, edge_sink, update, consumer_input++, input_version);
       }
-      add_value_use(edge, update, consumer_input++, input_version);
     }
   }
 
@@ -2238,26 +2405,28 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     if (consumer_update == std::numeric_limits<size_t>::max()) {
       continue;
     }
-    for (const auto& edge : plan.sites_[consumer].node.inp_edges()) {
-      const auto producer_it = index.find(edge.driver.get_master_node().get_occurrence_index());
-      if (producer_it == index.end()) {
-        continue;
-      }
-      const bool timing_path = is_timing_input(edge.sink);
-      const auto add_latch   = [&](size_t latch) {
-        const size_t latch_update = state_updates[latch];
-        if (latch != consumer && (timing_path || latch_update < consumer_update)
-            && plan.version_sites_[latch_update].slot == plan.version_sites_[consumer_update].slot) {
-          add_version_edge(latch_update, consumer_update, latch_width[latch]);
+    for (const auto& edge_sink : plan.sites_[consumer].node.inp_sorted_pins()) {
+      for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        const auto producer_it = index.find(edge_drv.get_master_node().get_occurrence_index());
+        if (producer_it == index.end()) {
+          continue;
         }
-      };
-      const size_t producer = producer_it->second;
-      if (gu::type_op_of(plan.sites_[producer].node) == Ntype_op::Latch
-          && state_updates[producer] != std::numeric_limits<size_t>::max()) {
-        add_latch(producer);
-      } else if (plan.sites_[producer].kind != Site_kind::state) {
-        for (const size_t latch : same_edge_latches[producer]) {
-          add_latch(latch);
+        const bool timing_path = is_timing_input(edge_sink);
+        const auto add_latch   = [&](size_t latch) {
+          const size_t latch_update = state_updates[latch];
+          if (latch != consumer && (timing_path || latch_update < consumer_update)
+              && plan.version_sites_[latch_update].slot == plan.version_sites_[consumer_update].slot) {
+            add_version_edge(latch_update, consumer_update, latch_width[latch]);
+          }
+        };
+        const size_t producer = producer_it->second;
+        if (gu::type_op_of(plan.sites_[producer].node) == Ntype_op::Latch
+            && state_updates[producer] != std::numeric_limits<size_t>::max()) {
+          add_latch(producer);
+        } else if (plan.sites_[producer].kind != Site_kind::state) {
+          for (const size_t latch : same_edge_latches[producer]) {
+            add_latch(latch);
+          }
         }
       }
     }
@@ -2325,7 +2494,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   const auto resolve_body_input
       = [&](const Body_occurrence& body, hhds::Port_id input_port) -> std::optional<hhds::Occurrence_pin> {
     // A Sub occurrence carries the same call path as the nodes in its child
-    // body. Its occurrence edges have already crossed the child's GraphIO, so
+    // body. Its occurrence drivers have already crossed the child's GraphIO, so
     // they are the authoritative binding even when that input is used only by
     // a pure input-to-output alias and no ordinary child site mentions it.
     for (const auto& site : plan.sites_) {
@@ -2333,9 +2502,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           || site.node.get_subnode_gid() != body.graph->get_gid()) {
         continue;
       }
-      for (const auto& edge : site.node.inp_edges()) {
-        if (edge.sink.get_port_id() == input_port) {
-          return edge.driver;
+      for (const auto& edge_sink : site.node.inp_sorted_pins()) {
+        if (edge_sink.get_port_id() != input_port) {
+          continue;
+        }
+        for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+          return edge_drv;  // a `return` is unaffected by the extra loop
         }
       }
     }
@@ -2480,12 +2652,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         add_output_use(State_version::post_fall);
       };
       if (is_top_body) {
-        for (const auto& edge : discovery.lift(output).inp_edges()) {
-          add_output_driver(edge.driver);
+        for (auto edge_drv : discovery.lift(output).get_driver_pins()) {
+          add_output_driver(edge_drv);
         }
       } else {
-        for (const auto& edge : output.inp_edges()) {
-          add_output_driver(edge.driver);
+        for (auto edge_drv : output.get_driver_pins()) {
+          add_output_driver(edge_drv);
         }
       }
     }
@@ -2523,15 +2695,21 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         continue;
       }
       absl::flat_hash_map<hhds::Class_index, hhds::Occurrence_pin> occurrence_drivers;
-      for (const auto& edge : site.node.inp_edges()) {
-        occurrence_drivers.try_emplace(edge.sink.base_pin().get_class_index(), edge.driver);
-      }
-      for (const auto& base_edge : site.node.base_node().inp_edges()) {
-        if (!gu::is_graph_input_pin(base_edge.driver)) {
-          continue;
+      for (const auto& edge_sink : site.node.inp_sorted_pins()) {
+        for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+          // try_emplace keeps the FIRST driver of a sink, exactly as it did
+          // over the edge list, and the sorted walk keeps that first one first.
+          occurrence_drivers.try_emplace(edge_sink.base_pin().get_class_index(), edge_drv);
         }
-        if (const auto found = occurrence_drivers.find(base_edge.sink.get_class_index()); found != occurrence_drivers.end()) {
-          resolved_inputs.try_emplace(base_edge.driver.get_port_id(), found->second);
+      }
+      for (auto base_edge_sink : site.node.base_node().inp_sorted_pins()) {
+        for (auto base_edge_drv : base_edge_sink.get_driver_pins()) {
+          if (!gu::is_graph_input_pin(base_edge_drv)) {
+            continue;
+          }
+          if (const auto found = occurrence_drivers.find(base_edge_sink.get_class_index()); found != occurrence_drivers.end()) {
+            resolved_inputs.try_emplace(base_edge_drv.get_port_id(), found->second);
+          }
         }
       }
     }
@@ -2599,33 +2777,35 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       bool                    registered = false;
       bool                    whole      = false;
       int                     type       = 2;
-      for (const auto& edge : base_site.node.inp_edges()) {
-        const int    raw  = static_cast<int>(edge.sink.get_port_id());
+      for (const auto& edge_sink : base_site.node.inp_sorted_pins()) {
+        const int    raw  = static_cast<int>(edge_sink.get_port_id());
         const auto   name = Ntype::get_sink_name(Ntype_op::Memory, raw);
         const size_t port = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
-        if (name == "type" && edge.driver.is_const()) {
-          type = static_cast<int>(gu::const_of(edge.driver).to_just_i64());
-        } else if (name == "fwd") {
-          fwd_matrix = edge.driver;
-        } else if (name == "undef") {
-          undef_matrix = edge.driver;
-        } else if (name == "update") {
-          whole = true;
-        } else if (name == "update_enable" || name == "reset" || name == "initial" || name == "bits" || name == "size"
-                   || name == "wensize" || name == "posclk") {
-          // Cell-global pins share the raw 0..15 block with port zero. Keep
-          // them out of the per-port table before suffix matching: notably,
-          // `update_enable` is not read-port zero's `enable`.
-        } else if (name.ends_with("clock_pin")) {
-          registered = true;
-        } else {
-          if (ports.size() <= port) {
-            ports.resize(port + 1);
-          }
-          if (name.ends_with("addr")) {
-            ports[port].present = true;
-          } else if (name.ends_with("rdport") && edge.driver.is_const()) {
-            ports[port].rd = !gu::const_of(edge.driver).is_known_false();
+        for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+          if (name == "type" && edge_drv.is_const()) {
+            type = static_cast<int>(gu::const_of(edge_drv).to_just_i64());
+          } else if (name == "fwd") {
+            fwd_matrix = edge_drv;
+          } else if (name == "undef") {
+            undef_matrix = edge_drv;
+          } else if (name == "update") {
+            whole = true;
+          } else if (name == "update_enable" || name == "reset" || name == "initial" || name == "bits" || name == "size"
+                     || name == "wensize" || name == "posclk") {
+            // Cell-global pins share the raw 0..15 block with port zero. Keep
+            // them out of the per-port table before suffix matching: notably,
+            // `update_enable` is not read-port zero's `enable`.
+          } else if (name.ends_with("clock_pin")) {
+            registered = true;
+          } else {
+            if (ports.size() <= port) {
+              ports.resize(port + 1);
+            }
+            if (name.ends_with("addr")) {
+              ports[port].present = true;
+            } else if (name.ends_with("rdport") && edge_drv.is_const()) {
+              ports[port].rd = !gu::const_of(edge_drv).is_known_false();
+            }
           }
         }
       }
@@ -2668,9 +2848,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       if (target != nullptr && consumer_site.version == State_version::pre_rise && type != 1) {
         prefix = registered ? std::max(row_prefix(fwd_matrix, target->rdidx), row_prefix(undef_matrix, target->rdidx)) : writes;
       }
+      // consumer_input keeps ticking once per DRIVER, the same operand index
+      // the per-edge walk produced.
       uint32_t consumer_input = 0;
-      for (const auto& edge : base_site.node.inp_edges()) {
-        const int    raw  = static_cast<int>(edge.sink.get_port_id());
+      for (const auto& edge_sink : base_site.node.inp_sorted_pins()) {
+        const int    raw  = static_cast<int>(edge_sink.get_port_id());
         const auto   name = Ntype::get_sink_name(Ntype_op::Memory, raw);
         const size_t port = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
         bool         used = false;
@@ -2684,23 +2866,29 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                      || (!shape.rd && shape.wridx >= 0 && shape.wridx < prefix
                                          && (name.ends_with("addr") || port_enable || name.ends_with("din")));
         }
-        if (used) {
-          add_value_use(edge, consumer_version, consumer_input, consumer_site.version);
+        for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+          if (used) {
+            add_value_use(edge_drv, edge_sink, consumer_version, consumer_input, consumer_site.version);
+          }
+          ++consumer_input;
         }
-        ++consumer_input;
       }
       continue;
     }
     uint32_t consumer_input = 0;
-    for (const auto& edge : base_site.node.inp_edges()) {
-      // Only the carry SELF-edge stays inside the native kernel; the parent's
-      // seed of that carry is an ordinary value use (see the liveness walk).
-      if (base_site.kind == Site_kind::loop_control && is_loop_carry_input(base_site.node, edge)
-          && edge.driver.get_master_node() == base_site.node) {
-        ++consumer_input;
-        continue;
+    for (const auto& edge_sink : base_site.node.inp_sorted_pins()) {
+      for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        // Only the carry SELF-edge stays inside the native kernel; the parent's
+        // seed of that carry is an ordinary value use (see the liveness walk).
+        // That seed is the SECOND driver of this one sink, which is why the
+        // walk reads the plural get_driver_pins() and tests each driver.
+        if (base_site.kind == Site_kind::loop_control && is_loop_carry_input(base_site.node, edge_sink)
+            && edge_drv.get_master_node() == base_site.node) {
+          ++consumer_input;
+          continue;
+        }
+        add_value_use(edge_drv, edge_sink, consumer_version, consumer_input++, consumer_site.version);
       }
-      add_value_use(edge, consumer_version, consumer_input++, consumer_site.version);
     }
   }
 
@@ -3496,7 +3684,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   for (const size_t root_index : roots) {
     auto color_members = members[root_index];
     std::ranges::sort(color_members, [&](size_t a, size_t b) {
-      return plan.version_sites_[a].structural_id < plan.version_sites_[b].structural_id;
+      // Member index breaks the tie: automorphic version sites share a
+      // structural_id BY DESIGN, and this order sets version_position, which is
+      // the tiebreak in the canonical rank sort.
+      return std::tie(plan.version_sites_[a].structural_id, a) < std::tie(plan.version_sites_[b].structural_id, b);
     });
     std::string signature = std::string(execution_slot_name(plan.version_sites_[color_members.front()].slot));
     for (const size_t member : color_members) {
@@ -3513,7 +3704,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     pending_colors.push_back(std::move(pending_color));
   }
   std::ranges::sort(pending_colors, [](const Pending_color& a, const Pending_color& b) {
-    return std::tie(a.color.slot, a.color.structural_id) < std::tie(b.color.slot, b.color.structural_id);
+    // Root index breaks the tie: same legitimate-tie argument, and this sort
+    // assigns the dense color indices.
+    return std::tie(a.color.slot, a.color.structural_id, a.root) < std::tie(b.color.slot, b.color.structural_id, b.root);
   });
   std::vector<size_t> root_to_color(nversions, std::numeric_limits<size_t>::max());
   for (auto& pending_color : pending_colors) {
@@ -3843,8 +4036,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     plan.boundary_slots_[slot].literal = input.literal;
   }
-  std::ranges::sort(plan.boundary_slots_,
-                    [](const Boundary_slot& a, const Boundary_slot& b) { return a.structural_id < b.structural_id; });
+  std::ranges::sort(plan.boundary_slots_, [](const Boundary_slot& a, const Boundary_slot& b) {
+    // Exact tiebreak after the digest: two slots may legitimately share a
+    // structural_id, and this order is observable downstream.
+    return std::tie(a.structural_id, a.kind, a.owner_site, a.producer_version, a.producer_port, a.public_port, a.width,
+                    a.unsign)
+           < std::tie(b.structural_id, b.kind, b.owner_site, b.producer_version, b.producer_port, b.public_port, b.width,
+                      b.unsign);
+  });
   for (auto& slot : plan.boundary_slots_) {
     std::ranges::sort(slot.consumers, [](const Boundary_consumer& a, const Boundary_consumer& b) {
       return std::tie(a.color, a.version_site, a.port, a.input, a.width)
@@ -4065,7 +4264,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     std::string serialization = std::string(execution_slot_name(color.slot));
     if (!unique_ranks && color.members.size() > 1) {
-      serialization += "|ambiguous-no-reuse:" + color.structural_id;
+      // UNIQUE BY CONSTRUCTION, not by digest. This string keys
+      // `serialization_to_kernel`, and key equality is what merges two colors
+      // onto ONE emitted C++ body -- so a digest collision here emitted the
+      // wrong kernel. Everything else in `serialization` is exact text; this
+      // substring was the whole 64-bit exposure. The color index cannot collide,
+      // is cheaper, and an ambiguous color never reuses anyway.
+      serialization += "|ambiguous-no-reuse:c" + std::to_string(color_index);
     }
     std::vector<size_t> canonical_order(color.members.size());
     std::iota(canonical_order.begin(), canonical_order.end(), 0);
@@ -4143,13 +4348,23 @@ const std::vector<size_t>& Color_plan::colors_in_execution_order() const {
 }
 
 bool Color_plan::validate_retained_handles() const {
+  // One in-edge per (sink pin, driver) pair: summing the PLURAL driver lists
+  // over the sorted sink pins is the same count the in-edge range reported,
+  // and it still counts both drivers of a compact loop's carry-in.
+  const auto inp_edge_count = [](const auto& node) {
+    uint64_t count = 0;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      count += sink.get_driver_pins().size();
+    }
+    return count;
+  };
   uint64_t edge_count = 0;
   for (const auto& node : outer_nodes_) {
-    edge_count += node.inp_edges().size();
+    edge_count += inp_edge_count(node);
     edge_count += node.out_edges().size();
   }
   for (const auto& site : sites_) {
-    edge_count += site.node.inp_edges().size();
+    edge_count += inp_edge_count(site.node);
     edge_count += site.node.out_edges().size();
   }
   return edge_count >= summary_.carry_edges_cut;

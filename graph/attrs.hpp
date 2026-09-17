@@ -38,7 +38,17 @@ namespace livehd::attrs {
 //   edge        - shared driver<->sink across the net (the wire name); read on
 //                 either end via the shared slot, so no driver/sink restriction
 //   any_pin     - any pin, no driver/sink restriction (IO-port offsets, mixed)
-enum class Attr_kind { node, driver_pin, edge, sink, any_pin };
+// Pin role an attribute may legally be stamped on.
+//
+// There is deliberately NO `sink`: attributes are forbidden on sink pins. The
+// per-pin attr key folds the driver/sink bit (hhds graph.hpp Pin_class::attr
+// masks Pid 0x2), so a same-port driver and sink SHARE one slot and a sink
+// stamp silently aliases the driver's value. `driver_pin` is the signal-source
+// role (bits, signed, delay); `edge` and `any_pin` are the genuinely
+// role-neutral ones (a shared wire name, IO offsets); `node` must not reach a
+// pin setter at all. Adding a `sink` enumerator back would reintroduce the
+// aliasing this classification exists to prevent.
+enum class Attr_kind { node, driver_pin, edge, any_pin };
 
 // Per-pin bitwidth (driver pin), plain int32; storage uses uint32_t
 // for the flat_storage value to avoid signed-int hashmap key issues.

@@ -230,7 +230,7 @@ run pass liberty gensim "$LIB" --emit-dir lg:"$W/ram128_models" --workdir "$W/ra
 run synth lg:"$W/ram128_source" --top ram128_repro --set synth.liberty="$LIB" \
     --emit-dir lg:"$W/ram128_mapped" --emit verilog:"$W/ram128_mapped.v" \
     --workdir "$W/ram128_synth"
-[ "$(grep -c '^module cgen_memory_.*_lowered_' "$W/ram128_mapped.v")" = 1 ] \
+[ "$(grep -c '^module cgen_memory_.*_blasted' "$W/ram128_mapped.v")" = 1 ] \
     || fail "128-bit fixture must synthesize exactly one lowered memory"
 run lec --ref lg:"$W/ram128_source" --impl lg:"$W/ram128_mapped" \
     --lib lg:"$W/ram128_models" --top ram128_repro --set formal.timeout=30 \

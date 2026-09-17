@@ -18,6 +18,7 @@
 #include "decl_facts.hpp"  // lookup() recovers the reinterpret input's declared width
 #include "diag.hpp"
 #include "lnast_ntype.hpp"
+#include "mask_eval.hpp"
 #include "range_bits.hpp"  // classify_typecast + max/min_from_bits for uN()/sN() casts
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
@@ -320,7 +321,7 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
 // get_mask is Pyrope's default-zext bit-select (the "force" operator): with a
 // non-negative mask the extracted bits are packed LSB-first as an UNSIGNED
 // value, so the fold is never negative (only the explicit `#sext` form may be).
-// Dlop::get_mask_op produces exactly that; this wrapper exists only for the
+// The range-based mask evaluator produces that; this wrapper exists only for the
 // X-plane rebuild below.
 static Dlop get_mask_x_plane(const Dlop& value, const Dlop& mask) {
   // Dlop's multiword get_mask path historically lost the extra (unknown) plane
@@ -352,7 +353,7 @@ static Dlop get_mask_x_plane(const Dlop& value, const Dlop& mask) {
     return *Dlop::from_pyrope(std::string{"0ub"} + low_to_high);
   }
 
-  return *value.get_mask_op(mask);
+  return livehd::eval_get_mask(value, mask);
 }
 
 Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end) {
@@ -3674,7 +3675,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "set_mask") {
     if (need_n(3)) {
-      result  = *args[0].set_mask_op(args[1], args[2]);
+      result  = livehd::eval_set_mask(args[0], args[1], args[2]);
       matched = true;
     }
   } else if (op == "lt") {
@@ -5287,6 +5288,20 @@ bool uPass_constprop::scatter_positional_array(std::string_view name, const Dlop
   if (!ebits) {
     return false;
   }
+  // This IS a whole-variable write, but it reaches the bundle directly instead
+  // of through Symbol_table::set -- so nothing else records it, and the
+  // arm-exit invalidation (Symbol_table::leave_scope) never fires for it. Under
+  // an uncertain if-arm that is a MISCOMPILE, not a missed optimization: the
+  // lanes written here keep the arm's constants after the arm closes, and the
+  // next whole read of the array folds to them as if the arm had certainly run.
+  // Minion's `if (tenb_flush) v = '0;` followed by a later `v[i][j] = 1'b0;`
+  // lowered that read-modify-write's BASE operand to the constant 0 -- wiping
+  // every bit the arm had not written (lhdsuite vpu_tensorfma, LEC-REFUTED
+  // against its own Verilog). Only a CONSTANT rhs reaches here (a runtime rhs
+  // has no scalar() and takes the plain st().set path, which records), so this
+  // is exactly the case Symbol_table::set would otherwise have covered.
+  // No-op when no enclosing scope is uncertain.
+  st().note_uncertain_write(name);
   const int  elem_bits = *ebits;
   const Dlop lane_mask = *Dlop::get_mask_value(elem_bits);
   for (size_t pos = 0; pos < b->unnamed_top_count(); ++pos) {
@@ -5481,7 +5496,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   Dlop new_val = operand_value(src[2]);
 
   // Delegate to Dlop: both the input being written into and the value being
-  // written may carry unknown bits — set_mask_op tracks them bit-precisely.
+  // written may carry unknown bits — set_mask_op_opt tracks them bit-precisely.
   // Only the *mask* (which bits to write) must be concrete (see below).
   if (!is_numeric(input_val) || !is_numeric(new_val)) {
     return decline_runtime_redefine();
@@ -5501,9 +5516,9 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     auto width = range_end.sub_op(range_start)->add_op(*one);
     final_mask = *one->shl_op(*width)->sub_op(*one)->shl_op(range_start);
   } else {
-    // The mask selects *which* bits to overwrite; Dlop::set_mask_op requires
-    // it concrete (asserts on an unknown mask, unlike get_mask_op). This is a
-    // Dlop precondition on the bit-selection, not a value pre-filter — the
+    // The mask selects *which* bits to overwrite and must be concrete before
+    // converting it to a contiguous range. This is a precondition on the
+    // bit-selection, not a value pre-filter — the
     // data operands (input_val/new_val) above already pass unknowns through.
     if (!foldable(mask)) {
       return decline_runtime_redefine();
@@ -5511,7 +5526,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     final_mask = mask;
   }
 
-  Dlop result = *input_val.set_mask_op(final_mask, new_val);
+  Dlop result = livehd::eval_set_mask(input_val, final_mask, new_val);
   if (base_type && base_type->kind == upass::decl_facts::Num::signed_int && base_type->bits > 0) {
     result = upass::bitwidth::wrap_to_signed(result, base_type->bits);
   }

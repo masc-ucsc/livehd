@@ -415,8 +415,9 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
     // inference; forwarding that hint used to put a 65-bit value into a
     // one-bit Concat lane in picorv32. Encode the selection intrinsically.
     auto get = create_typed_node(*g, Ntype_op::Get_mask, width);
-    setup_sink_by_name(get, "a").connect_driver(wide_dpin);
-    setup_sink_by_name(get, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_window_const(offset, offset + width)));
+    livehd::graph_util::connect_mask_operands(get,
+                                              wide_dpin,
+                                              create_const(*g, livehd::graph_util::mask_window_const(offset, offset + width)));
     dpin = get.create_driver_pin(0);
     set_ubits(dpin, width);
   }
@@ -454,8 +455,7 @@ static hhds::Pin_class get_edge_pin(hhds::Graph* g, const RTLIL::Wire* wire, boo
     }
 
     auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, bits_of(dpin));
-    setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
-    setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+    livehd::graph_util::connect_mask_operands(tposs_node, dpin, create_const(*g, livehd::graph_util::mask_whole_const()));
 
     return tposs_node.create_driver_pin(0);
   }
@@ -533,6 +533,7 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
   I(!dpin.is_invalid());
 
   auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask);
+  auto selected   = dpin;
 
   if (or_offset) {
     auto shl_node = create_typed_node(*g, Ntype_op::SHL, or_offset + dpin_width(dpin));
@@ -540,14 +541,13 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
     setup_sink_by_name(shl_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(or_offset)));
 
     set_ubits(tposs_node.create_driver_pin(0), or_offset + dpin_width(dpin));
-    setup_sink_by_name(tposs_node, "a").connect_driver(shl_node.create_driver_pin(0));
+    selected = shl_node.create_driver_pin(0);
   } else {
     set_ubits(tposs_node.create_driver_pin(0), dpin_width(dpin));
-    setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
   }
 
-  setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
-  tposs_node.create_driver_pin(0).connect_sink(or_node.create_sink_pin(0));
+  livehd::graph_util::connect_mask_operands(tposs_node, selected, create_const(*g, livehd::graph_util::mask_whole_const()));
+  tposs_node.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(or_node, 0));
 }
 
 static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigSpec& ss, bool is_signed) {
@@ -692,8 +692,7 @@ static hhds::Pin_class get_unsigned_dpin(hhds::Graph* g, const RTLIL::Cell* cell
   if (operand_bits > 0) {
     set_ubits(a_tposs.create_driver_pin(0), operand_bits);
   }
-  setup_sink_by_name(a_tposs, "a").connect_driver(dpin);
-  setup_sink_by_name(a_tposs, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+  livehd::graph_util::connect_mask_operands(a_tposs, dpin, create_const(*g, livehd::graph_util::mask_whole_const()));
 
   return a_tposs.create_driver_pin(0);
 }
@@ -758,8 +757,12 @@ static bool is_yosys_output(const std::string& idstring) {
   return idstring == "\\Y" || idstring == "\\Q" || idstring == "\\RD_DATA";
 }
 
-static void connect_all_inputs(const hhds::Pin_class& spin, const RTLIL::Cell* cell) {
-  I(spin.is_sink());
+// Fold every non-output connection of `cell` into the operand bank `pid` of
+// `node`. Each driver gets its OWN sink pin (setup_sink_pid appends within the
+// bank), because a sink pin takes exactly one driver -- piling them onto one
+// pin also DEDUPED a repeated operand, which for a Xor meant `a ^ a` silently
+// became `a`.
+static void connect_all_inputs(const hhds::Node_class& node, hhds::Port_id pid, const RTLIL::Cell* cell) {
   bool is_signed = false;
   for (auto& conn : cell->connections()) {
     RTLIL::SigSpec ss = conn.second;
@@ -788,6 +791,7 @@ static void connect_all_inputs(const hhds::Pin_class& spin, const RTLIL::Cell* c
       continue;
     }
 
+    auto spin = livehd::graph_util::setup_sink_pid(node, pid);
     spin.connect_driver(create_pick_concat_dpin(spin.get_graph(), ss, is_signed));
   }
 }
@@ -830,7 +834,7 @@ static hhds::Pin_class get_partial_dpin(hhds::Graph* g, const RTLIL::Wire* wire)
       auto out_sink = g->get_output_pin(out_name);
       out_sink.connect_driver(real_dpin);
     } else if (unlikely(type_op_of(master_node(or_dpin)) == Ntype_op::Sub)) {
-      real_or_node.create_sink_pin(0).connect_driver(or_dpin);
+      livehd::graph_util::setup_sink_pid(real_or_node, 0).connect_driver(or_dpin);
     } else if (type_op_of(master_node(or_dpin)) != Ntype_op::Or) {
       std::cerr << "WARNING: wire:" << wire->name.str() << " is mapped to dpin:" << debug_name(master_node(or_dpin)) << "\n";
     }
@@ -884,7 +888,7 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
             I(type_op_of(or_node) == Ntype_op::Or);
             I(!or_node.has_inp_edges());
 
-            or_node.create_sink_pin(0).connect_driver(dpin);
+            livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(dpin);
             I((int)bits_of(or_dpin) == wire->width);
           }
         } else if (chunk.width == ss.size()) {
@@ -1299,7 +1303,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
                 auto or_node = create_typed_node(*g, Ntype_op::Or, lhs_wire->width);
                 auto or_dpin = or_node.create_driver_pin(0);
                 set_driver_name_if_free(or_dpin, best_name);
-                or_node.create_sink_pin(0).connect_driver(prev_pin);
+                livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(prev_pin);
                 wire2pin[lhs_wire] = or_dpin;
                 mark_pin_sign_from_wire(or_dpin, lhs_wire);
               }
@@ -1341,7 +1345,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
                     auto or_node = create_typed_node(*g, Ntype_op::Or, chunk.width);
                     auto or_dpin = or_node.create_driver_pin(0);
                     set_driver_name_if_free(or_dpin, bit_name);
-                    or_node.create_sink_pin(0).connect_driver(chunk_pin);
+                    livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(chunk_pin);
                     wire2pin[chunk.wire] = or_dpin;
                     mark_pin_sign_from_wire(or_dpin, chunk.wire);
                   }
@@ -1358,7 +1362,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
 
           auto alias_dpin = alias_node.create_driver_pin(0);
           set_driver_name_if_free(alias_dpin, lhs_name);
-          alias_node.create_sink_pin(0).connect_driver(dpin);
+          livehd::graph_util::setup_sink_pid(alias_node, 0).connect_driver(dpin);
           dpin = alias_dpin;
         } else if (!lhs_is_internal) {
           bool rhs_adjusted_name = false;
@@ -1382,7 +1386,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
               auto or_node = create_typed_node(*g, Ntype_op::Or, lhs_wire->width);
               auto or_dpin = or_node.create_driver_pin(0);
               set_driver_name_if_free(or_dpin, best_name);
-              or_node.create_sink_pin(0).connect_driver(dpin);
+              livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(dpin);
               dpin = or_dpin;
             }
           }
@@ -1516,9 +1520,9 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
               }
               if (to_in_rchunk < rchunk.width) {
                 auto and_node = create_typed_node(*g, Ntype_op::And, bits_needed);
-                and_node.create_sink_pin(0).connect_driver(dpin);
+                livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(dpin);
                 auto c_pin = create_const(*g, *Dlop::get_mask_value(bits_needed));
-                and_node.create_sink_pin(0).connect_driver(c_pin);
+                livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(c_pin);
                 dpin = and_node.create_driver_pin(0);
               }
             } else {
@@ -1590,8 +1594,8 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
     append_to_or_node(g, or_node, current_dpin, or_offset);
   } else if (bits_of(current_dpin) > nbits) {
     auto and_node = create_typed_node(*g, Ntype_op::And, nbits);
-    create_const(*g, *Dlop::get_mask_value(nbits)).connect_sink(and_node.create_sink_pin(0));
-    and_node.create_sink_pin(0).connect_driver(current_dpin);
+    create_const(*g, *Dlop::get_mask_value(nbits)).connect_sink(livehd::graph_util::setup_sink_pid(and_node, 0));
+    livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(current_dpin);
 
     append_to_or_node(g, or_node, and_node.create_driver_pin(0), or_offset);
   } else if (bits_of(current_dpin) == nbits) {
@@ -1605,8 +1609,8 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
     mask = mask.append(n_x, '?');
     mask = mask.append(n_z, '0');
 
-    create_const(*g, *Dlop::from_pyrope(mask)).connect_sink(local_or_node.create_sink_pin(0));
-    local_or_node.create_sink_pin(0).connect_driver(current_dpin);
+    create_const(*g, *Dlop::from_pyrope(mask)).connect_sink(livehd::graph_util::setup_sink_pid(local_or_node, 0));
+    livehd::graph_util::setup_sink_pid(local_or_node, 0).connect_driver(current_dpin);
 
     append_to_or_node(g, or_node, local_or_node.create_driver_pin(0), or_offset);
   }
@@ -1711,12 +1715,18 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
       auto pre_or_node = create_typed_node(*g, Ntype_op::Or, wire->width);
       set_loc(pre_or_node, wire->get_src_attribute());
 
-      for (auto e : master_or_node.inp_edges()) {
-        pre_or_node.create_sink_pin(0).connect_driver(e.driver);
-        e.del_edge();
+      // SNAPSHOT: the loop rewires the graph (connect_driver on one node,
+      // del_sink on the other) while walking, so a live view would dangle.
+      // get_driver_pinS, PLURAL: del_sink() drops EVERY driver of the pin, so
+      // reading only one would silently lose the rest.
+      for (auto sink : master_or_node.inp_pins_snapshot()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          livehd::graph_util::setup_sink_pid(pre_or_node, 0).connect_driver(drv);
+        }
+        sink.del_sink();
       }
       I(!master_or_node.has_inp_edges());
-      master_or_node.create_sink_pin(0).connect_driver(pre_or_node.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(master_or_node, 0).connect_driver(pre_or_node.create_driver_pin(0));
 
       for (auto shift : shifts) {
         Dlop wr_mask;
@@ -1743,12 +1753,13 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
 
         auto and_node = create_typed_node(*g, Ntype_op::And, wire->width);
 
-        and_node.create_sink_pin(0).connect_driver(pre_or_node.create_driver_pin(0));
-        create_const(*g, rd_mask).connect_sink(and_node.create_sink_pin(0));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(pre_or_node.create_driver_pin(0));
+        create_const(*g, rd_mask).connect_sink(livehd::graph_util::setup_sink_pid(and_node, 0));
 
         auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, wire->width);
-        setup_sink_by_name(tposs_node, "a").connect_driver(and_node.create_driver_pin(0));
-        setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(tposs_node,
+                                                  and_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
 
         I(shift);
         if (shift < 0) {
@@ -1756,13 +1767,13 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
           setup_sink_by_name(sra_node, "a").connect_driver(tposs_node.create_driver_pin(0));
           setup_sink_by_name(sra_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(-shift)));
 
-          master_or_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(master_or_node, 0).connect_driver(sra_node.create_driver_pin(0));
         } else {
           auto shl_node = create_typed_node(*g, Ntype_op::SHL, wire->width);
           setup_sink_by_name(shl_node, "a").connect_driver(tposs_node.create_driver_pin(0));
           setup_sink_by_name(shl_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(shift)));
 
-          master_or_node.create_sink_pin(0).connect_driver(shl_node.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(master_or_node, 0).connect_driver(shl_node.create_driver_pin(0));
         }
       }
 
@@ -1805,8 +1816,10 @@ static void process_partially_assigned(hhds::Graph* g) {
     auto                          buffer_pin = get_partial_dpin(g, wire);
     auto                          buffer     = master_node(buffer_pin);
     std::vector<hhds::Node_class> readers;
-    for (auto e : buffer.out_edges()) {
-      readers.push_back(e.sink.get_master_node());
+    for (auto dpin : buffer.out_sorted_pins()) {  // a driver's fanout is a SET
+      for (auto e : dpin.out_edges()) {
+        readers.push_back(e.sink.get_master_node());
+      }
     }
     if (readers.empty() || !buffer.has_inp_edges()) {
       continue;
@@ -1815,11 +1828,15 @@ static void process_partially_assigned(hhds::Graph* g) {
     set_loc(definition, wire->get_src_attribute());
     auto driver = definition.create_driver_pin(0);
     mark_pin_sign_from_wire(driver, wire);
-    for (auto e : buffer.inp_edges()) {
-      definition.create_sink_pin(0).connect_driver(e.driver);
-      e.del_edge();
+    // SNAPSHOT: this loop rewires while walking (see above). PLURAL driver
+    // read, because del_sink() drops every driver of the pin.
+    for (auto sink : buffer.inp_pins_snapshot()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        livehd::graph_util::setup_sink_pid(definition, 0).connect_driver(drv);
+      }
+      sink.del_sink();
     }
-    buffer.create_sink_pin(0).connect_driver(driver);
+    livehd::graph_util::setup_sink_pid(buffer, 0).connect_driver(driver);
     livehd::graph_util::split_packed_selfref_wire(g, buffer, driver, readers);
   }
 }
@@ -1886,11 +1903,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto b_bits = cell->getParam(ID::B_WIDTH).as_int();
 
       if ((a_bits == y_bits && b_bits == y_bits) || (a_sign && b_sign)) {
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::B));
       } else {
-        exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
-        exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
       }
     } else if (std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0) {
       bool all_1bit = true;
@@ -1900,7 +1917,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
 
       if (all_1bit) {
-        connect_all_inputs(exit_node.create_sink_pin(0), cell);
+        connect_all_inputs(exit_node, 0, cell);
       } else {
         auto             y_bits = cell->getParam(ID::Y_WIDTH).as_int();
         hhds::Node_class and_node;
@@ -1912,19 +1929,20 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           and_node = create_typed_node(*g, Ntype_op::And, 1);
           set_type_op(exit_node, Ntype_op::Get_mask);
           set_bits(exit_node.create_driver_pin(0), y_bits);
-          setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
-          setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+          livehd::graph_util::connect_mask_operands(exit_node,
+                                                    and_node.create_driver_pin(0),
+                                                    create_const(*g, livehd::graph_util::mask_whole_const()));
         }
 
         auto ror_node = create_typed_node(*g, Ntype_op::Ror, 1);
 
         auto not_ror_node = create_typed_node(*g, Ntype_op::Xor, 1);
-        not_ror_node.create_sink_pin(0).connect_driver(ror_node.create_driver_pin(0));
-        not_ror_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(not_ror_node, 0).connect_driver(ror_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(not_ror_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
         set_ubits(not_ror_node.create_driver_pin(0), 1);
         explicit_pin_signs.insert(not_ror_node.create_driver_pin(0).get_class_index());
 
-        and_node.create_sink_pin(0).connect_driver(not_ror_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(not_ror_node.create_driver_pin(0));
 
         auto a_dpin = get_unsigned_dpin(g, cell, ID::A);
         auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
@@ -1936,7 +1954,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           // ~uW ranges from -2^W through -1 and therefore needs W+1 signed
           // carrier bits until the surrounding reduction consumes it.
           auto not_a_node = create_typed_node(*g, Ntype_op::Not, a_bits + 1);
-          not_a_node.create_sink_pin(0).connect_driver(a_dpin);
+          livehd::graph_util::setup_sink_pid(not_a_node, 0).connect_driver(a_dpin);
 
           // RTLIL reduction consumes exactly A_WIDTH bits. The unlimited
           // inversion above has a leading one; allowing Ror to consume that
@@ -1944,16 +1962,16 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           auto finite_not = create_typed_node(*g, Ntype_op::And, a_bits);
           set_ubits(finite_not.create_driver_pin(0), a_bits);
           explicit_pin_signs.insert(finite_not.create_driver_pin(0).get_class_index());
-          finite_not.create_sink_pin(0).connect_driver(not_a_node.create_driver_pin(0));
-          finite_not.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(a_bits)));
-          ror_node.create_sink_pin(0).connect_driver(finite_not.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(finite_not, 0).connect_driver(not_a_node.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(finite_not, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(a_bits)));
+          livehd::graph_util::setup_sink_pid(ror_node, 0).connect_driver(finite_not.create_driver_pin(0));
 
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(a_bits - 1)));
 
-          and_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(sra_node.create_driver_pin(0));
         } else {
-          and_node.create_sink_pin(0).connect_driver(a_dpin);
+          livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(a_dpin);
         }
       }
     } else if (std::strncmp(cell->type.c_str(), "$logic_and", 10) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0) {
@@ -1979,43 +1997,44 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       } else {
         and_node = create_typed_node(*g, op, 1);
         set_type_op(exit_node, Ntype_op::Get_mask);
-        setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
-        setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(exit_node,
+                                                  and_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
       }
 
       if (a_bits == 1) {
-        and_node.create_sink_pin(0).connect_driver(a_dpin);
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(a_dpin);
       } else {
         auto ror_node = create_typed_node(*g, Ntype_op::Ror, 1);
-        ror_node.create_sink_pin(0).connect_driver(a_dpin);
-        and_node.create_sink_pin(0).connect_driver(ror_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(ror_node, 0).connect_driver(a_dpin);
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(ror_node.create_driver_pin(0));
       }
       if (b_bits == 1) {
-        and_node.create_sink_pin(0).connect_driver(b_dpin);
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(b_dpin);
       } else {
         auto ror_node = create_typed_node(*g, Ntype_op::Ror, 1);
-        ror_node.create_sink_pin(0).connect_driver(b_dpin);
-        and_node.create_sink_pin(0).connect_driver(ror_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(ror_node, 0).connect_driver(b_dpin);
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(ror_node.create_driver_pin(0));
       }
     } else if (std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       I(get_input_size(cell) == get_output_size(cell));
       const auto y_bits   = get_output_size(cell);
       const bool a_signed = cell->hasParam(ID::A_SIGNED) && cell->getParam(ID::A_SIGNED).as_bool();
       auto       bit_not  = create_typed_node(*g, Ntype_op::Not, y_bits + (a_signed ? 0 : 1));
-      connect_all_inputs(bit_not.create_sink_pin(0), cell);
+      connect_all_inputs(bit_not, 0, cell);
 
       // LGraph Not is an unlimited signed operation. RTLIL $not is a finite
       // vector operation, so make its legal precision reduction explicit.
       set_type_op(exit_node, Ntype_op::And);
       set_ubits(exit_node.create_driver_pin(0), y_bits);
       explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
-      exit_node.create_sink_pin(0).connect_driver(bit_not.create_driver_pin(0));
-      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(bit_not.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
     } else if (std::strncmp(cell->type.c_str(), "$logic_not", 10) == 0) {
       auto entry_node = create_typed_node(*g, Ntype_op::Ror, 1);
       auto not_node   = create_typed_node(*g, Ntype_op::Xor, 1);
-      not_node.create_sink_pin(0).connect_driver(entry_node.create_driver_pin(0));
-      not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+      livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(entry_node.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       set_ubits(not_node.create_driver_pin(0), 1);
       explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
 
@@ -2023,15 +2042,16 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (y_bits == 1) {
         set_type_op(exit_node, Ntype_op::And);
         set_bits(exit_node.create_driver_pin(0), 1);
-        exit_node.create_sink_pin(0).connect_driver(not_node.create_driver_pin(0));
-        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(not_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       } else {
         set_type_op(exit_node, Ntype_op::Get_mask);
-        setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
-        setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(exit_node,
+                                                  not_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
       }
 
-      connect_all_inputs(entry_node.create_sink_pin(0), cell);
+      connect_all_inputs(entry_node, 0, cell);
     } else if (std::strncmp(cell->type.c_str(), "$or", 3) == 0) {
       set_type_op(exit_node, Ntype_op::Or);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
@@ -2043,30 +2063,31 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto b_bits = cell->getParam(ID::B_WIDTH).as_int();
 
       if ((a_bits == y_bits && b_bits == y_bits) || (a_sign && b_sign)) {
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::B));
       } else {
-        exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
-        exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
       }
     } else if (std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0
                || std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
-      hhds::Pin_class entry_pin;
-      auto            y_bits = cell->getParam(ID::Y_WIDTH).as_int();
+      hhds::Node_class entry_node2;  // the Ror that folds the cell's operands
+      auto             y_bits = cell->getParam(ID::Y_WIDTH).as_int();
       if (y_bits == 1) {
         set_type_op(exit_node, Ntype_op::Ror);
         set_bits(exit_node.create_driver_pin(0), 1);
-        entry_pin = exit_node.create_sink_pin(0);
+        entry_node2 = exit_node;
       } else {
         auto ror_node = create_typed_node(*g, Ntype_op::Ror, 1);
-        entry_pin     = ror_node.create_sink_pin(0);
+        entry_node2   = ror_node;
 
         set_type_op(exit_node, Ntype_op::Get_mask);
         set_bits(exit_node.create_driver_pin(0), y_bits);
-        setup_sink_by_name(exit_node, "a").connect_driver(ror_node.create_driver_pin(0));
-        setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(exit_node,
+                                                  ror_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
       }
-      connect_all_inputs(entry_pin, cell);
+      connect_all_inputs(entry_node2, 0, cell);
     } else if (std::strncmp(cell->type.c_str(), "$xor", 4) == 0) {
       set_type_op(exit_node, Ntype_op::Xor);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
@@ -2081,11 +2102,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         // Per-operand sign-extension (each via its own A_SIGNED/B_SIGNED), same as
         // $and/$or above — connect_all_inputs would collapse to one shared sign and
         // mis-extend the mixed-sign equal-width case.
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::B));
       } else {
-        exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
-        exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
       }
     } else if (std::strncmp(cell->type.c_str(), "$reduce_xor", 11) == 0) {
       auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
@@ -2095,7 +2116,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (a_bits == 1 && y_bits == 1) {
         set_type_op(exit_node, Ntype_op::And);
         set_bits(exit_node.create_driver_pin(0), 1);
-        exit_node.create_sink_pin(0).connect_driver(a_dpin);
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(a_dpin);
       } else {
         hhds::Node_class and_node;
         if (y_bits == 1) {
@@ -2107,23 +2128,24 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
           set_type_op(exit_node, Ntype_op::Get_mask);
           set_bits(exit_node.create_driver_pin(0), y_bits);  // zext the 1-bit reduce to y_bits (match $reduce_and/or)
-          setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
-          setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+          livehd::graph_util::connect_mask_operands(exit_node,
+                                                    and_node.create_driver_pin(0),
+                                                    create_const(*g, livehd::graph_util::mask_whole_const()));
         }
 
         auto xor_node = create_typed_node(*g, Ntype_op::Xor, 1);
-        xor_node.create_sink_pin(0).connect_driver(a_dpin);
+        livehd::graph_util::setup_sink_pid(xor_node, 0).connect_driver(a_dpin);
 
         for (int i = 1; i < a_bits; ++i) {
           auto sra_node = create_typed_node(*g, Ntype_op::SRA, 1);
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(i)));
 
-          xor_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(xor_node, 0).connect_driver(sra_node.create_driver_pin(0));
         }
 
-        and_node.create_sink_pin(0).connect_driver(xor_node.create_driver_pin(0));
-        and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(xor_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       }
     } else if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0) {
       auto s    = get_output_size(cell);
@@ -2133,9 +2155,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       set_type_op(exit_node, Ntype_op::Not);
       set_bits(exit_node.create_driver_pin(0), size);
-      exit_node.create_sink_pin(0).connect_driver(entry_node.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(entry_node.create_driver_pin(0));
 
-      connect_all_inputs(entry_node.create_sink_pin(0), cell);
+      connect_all_inputs(entry_node, 0, cell);
     } else if (std::strncmp(cell->type.c_str(), "$reduce_xnor", 11) == 0) {
       auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
       auto a_dpin = get_dpin(g, cell, ID::A);
@@ -2144,8 +2166,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (a_bits == 1 && y_bits == 1) {
         set_type_op(exit_node, Ntype_op::Xor);
         set_ubits(exit_node.create_driver_pin(0), 1);
-        exit_node.create_sink_pin(0).connect_driver(a_dpin);
-        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(a_dpin);
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       } else {
         hhds::Node_class not_node;
         if (y_bits == 1) {
@@ -2157,29 +2179,30 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
           set_type_op(exit_node, Ntype_op::Get_mask);
           set_bits(exit_node.create_driver_pin(0), y_bits);  // zext the 1-bit reduce to y_bits (match $reduce_and/or)
-          setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
-          setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+          livehd::graph_util::connect_mask_operands(exit_node,
+                                                    not_node.create_driver_pin(0),
+                                                    create_const(*g, livehd::graph_util::mask_whole_const()));
         }
-        not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
         set_ubits(not_node.create_driver_pin(0), 1);
         explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
 
         auto and_node = create_typed_node(*g, Ntype_op::And, 1);
-        and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
 
         auto xor_node = create_typed_node(*g, Ntype_op::Xor, 1);
-        xor_node.create_sink_pin(0).connect_driver(a_dpin);
+        livehd::graph_util::setup_sink_pid(xor_node, 0).connect_driver(a_dpin);
 
         for (int i = 1; i < a_bits; ++i) {
           auto sra_node = create_typed_node(*g, Ntype_op::SRA, 1);
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(i)));
 
-          xor_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
+          livehd::graph_util::setup_sink_pid(xor_node, 0).connect_driver(sra_node.create_driver_pin(0));
         }
 
-        and_node.create_sink_pin(0).connect_driver(xor_node.create_driver_pin(0));
-        not_node.create_sink_pin(0).connect_driver(and_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(xor_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(and_node.create_driver_pin(0));
       }
     } else if (std::strncmp(cell->type.c_str(), "$dff", 4) == 0 || std::strncmp(cell->type.c_str(), "$dffe", 5) == 0
                || std::strncmp(cell->type.c_str(), "$dffsr", 6) == 0 || std::strncmp(cell->type.c_str(), "$adff", 5) == 0
@@ -2266,8 +2289,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         auto enable_dpin = get_dpin(g, cell, ID::EN);
         if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
           auto not_node = create_typed_node(*g, Ntype_op::Xor, 1);
-          not_node.create_sink_pin(0).connect_driver(enable_dpin);
-          not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+          livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(enable_dpin);
+          livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
           set_ubits(not_node.create_driver_pin(0), 1);
           explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
           setup_sink_by_name(exit_node, "enable").connect_driver(not_node.create_driver_pin(0));
@@ -2346,8 +2369,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
             return pin;
           }
           auto inv = create_typed_node(*g, Ntype_op::Xor, 1);
-          inv.create_sink_pin(0).connect_driver(pin);
-          inv.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+          livehd::graph_util::setup_sink_pid(inv, 0).connect_driver(pin);
+          livehd::graph_util::setup_sink_pid(inv, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
           set_ubits(inv.create_driver_pin(0), 1);
           explicit_pin_signs.insert(inv.create_driver_pin(0).get_class_index());
           return inv.create_driver_pin(0);
@@ -2355,8 +2378,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         enable     = active_high(enable, polarity_of(ID::EN_POLARITY));
         auto reset = active_high(gate_dpin(ID::ARST), polarity_of(ID::ARST_POLARITY));
         auto gate  = create_typed_node(*g, Ntype_op::Or, 1);
-        gate.create_sink_pin(0).connect_driver(enable);
-        gate.create_sink_pin(0).connect_driver(reset);
+        livehd::graph_util::setup_sink_pid(gate, 0).connect_driver(enable);
+        livehd::graph_util::setup_sink_pid(gate, 0).connect_driver(reset);
         set_ubits(gate.create_driver_pin(0), 1);
         auto mux = create_typed_node(*g, Ntype_op::Mux, get_output_size(cell));
         setup_sink_by_name(mux, "s").connect_driver(reset);
@@ -2394,8 +2417,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         auto cmp_node = create_typed_node(*g, op, 1);
         set_type_op(exit_node, Ntype_op::Get_mask);
         set_bits(exit_node.create_driver_pin(0), 1);
-        setup_sink_by_name(exit_node, "a").connect_driver(cmp_node.create_driver_pin(0));
-        setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(exit_node,
+                                                  cmp_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
         connect_comparator(cmp_node, cell);
       }
     } else if (std::strncmp(cell->type.c_str(), "$ge", 3) == 0 || std::strncmp(cell->type.c_str(), "$le", 3) == 0
@@ -2414,18 +2438,19 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (y_bits == 1) {
         set_type_op(exit_node, Ntype_op::Xor);
         set_ubits(exit_node.create_driver_pin(0), 1);
-        exit_node.create_sink_pin(0).connect_driver(cmp_node.create_driver_pin(0));
-        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(cmp_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       } else {
         auto not_node = create_typed_node(*g, Ntype_op::Xor, 1);
-        not_node.create_sink_pin(0).connect_driver(cmp_node.create_driver_pin(0));
-        not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(cmp_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
         set_ubits(not_node.create_driver_pin(0), 1);
         explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
 
         set_type_op(exit_node, Ntype_op::Get_mask);
-        setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
-        setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(exit_node,
+                                                  not_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
       }
     } else if (std::strncmp(cell->type.c_str(), "$demux", 6) == 0) {
       // Yosys $demux: place A into one WIDTH-bit lane selected by S, all
@@ -2474,25 +2499,25 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // S is an unsigned y_bits-wide mask. Its unlimited complement needs one
       // signed headroom bit; A and B then mask that bit away again.
       auto not_s = create_typed_node(*g, Ntype_op::Not, y_bits + 1);
-      not_s.create_sink_pin(0).connect_driver(s_dpin);
+      livehd::graph_util::setup_sink_pid(not_s, 0).connect_driver(s_dpin);
 
       auto keep_a = create_typed_node(*g, Ntype_op::And, y_bits);
-      keep_a.create_sink_pin(0).connect_driver(a_dpin);
-      keep_a.create_sink_pin(0).connect_driver(not_s.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(keep_a, 0).connect_driver(a_dpin);
+      livehd::graph_util::setup_sink_pid(keep_a, 0).connect_driver(not_s.create_driver_pin(0));
       set_ubits(keep_a.create_driver_pin(0), y_bits);
       explicit_pin_signs.insert(keep_a.create_driver_pin(0).get_class_index());
 
       auto take_b = create_typed_node(*g, Ntype_op::And, y_bits);
-      take_b.create_sink_pin(0).connect_driver(b_dpin);
-      take_b.create_sink_pin(0).connect_driver(s_dpin);
+      livehd::graph_util::setup_sink_pid(take_b, 0).connect_driver(b_dpin);
+      livehd::graph_util::setup_sink_pid(take_b, 0).connect_driver(s_dpin);
       set_ubits(take_b.create_driver_pin(0), y_bits);
       explicit_pin_signs.insert(take_b.create_driver_pin(0).get_class_index());
 
       set_type_op(exit_node, Ntype_op::Or);
       set_ubits(exit_node.create_driver_pin(0), y_bits);
       explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
-      exit_node.create_sink_pin(0).connect_driver(keep_a.create_driver_pin(0));
-      exit_node.create_sink_pin(0).connect_driver(take_b.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(keep_a.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(take_b.create_driver_pin(0));
     } else if (std::strncmp(cell->type.c_str(), "$mux", 4) == 0) {
       set_type_op(exit_node, Ntype_op::Mux);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
@@ -2518,8 +2543,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_type_op(exit_node, Ntype_op::And);
         set_ubits(exit_node.create_driver_pin(0), y_bits);
         explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
-        exit_node.create_sink_pin(0).connect_driver(sum_node.create_driver_pin(0));
-        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(sum_node.create_driver_pin(0));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
       } else {
         set_type_op(exit_node, Ntype_op::Sum);
         set_bits(exit_node.create_driver_pin(0), y_bits);
@@ -2564,8 +2589,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::And);
       set_bits(exit_node.create_driver_pin(0), y_bits);
       auto mul_node = create_typed_node(*g, Ntype_op::Mult, y_bits);
-      exit_node.create_sink_pin(0).connect_driver(mul_node.create_driver_pin(0));
-      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(mul_node.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 #else
       set_type_op(exit_node, Ntype_op::Mult);
       set_bits(exit_node.create_driver_pin(0), y_bits);
@@ -2580,8 +2605,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::And);
       set_bits(exit_node.create_driver_pin(0), y_bits);
       auto div_node = create_typed_node(*g, Ntype_op::Div, y_bits);
-      exit_node.create_sink_pin(0).connect_driver(div_node.create_driver_pin(0));
-      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(div_node.create_driver_pin(0));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 #else
       set_type_op(exit_node, Ntype_op::Div);
       set_bits(exit_node.create_driver_pin(0), y_bits);
@@ -2614,17 +2639,18 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
         set_type_op(exit_node, Ntype_op::And);
         set_bits(exit_node.create_driver_pin(0), y_bits);
-        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
-        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+        livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
       } else {
         auto and_node = create_typed_node(*g, Ntype_op::And, y_bits);
-        and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
-        and_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+        livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
 
         set_type_op(exit_node, Ntype_op::Get_mask);
         set_ubits(exit_node.create_driver_pin(0), y_bits);
-        setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
-        setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+        livehd::graph_util::connect_mask_operands(exit_node,
+                                                  and_node.create_driver_pin(0),
+                                                  create_const(*g, livehd::graph_util::mask_whole_const()));
       }
     } else if (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && cell->getParam(ID::B_SIGNED).as_bool()) {
       auto a_bits       = cell->getParam(ID::A_WIDTH).as_int();
@@ -2662,8 +2688,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       setup_sink_by_name(mux_node, "p2").connect_driver(y1_dpin);
       auto y2_dpin = mux_node.create_driver_pin(0);
 
-      exit_node.create_sink_pin(0).connect_driver(y2_dpin);
-      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(y2_dpin);
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
     } else if (std::strncmp(cell->type.c_str(), "$shr", 4) == 0
                || (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && !cell->getParam(ID::B_SIGNED).as_bool())
                || (std::strncmp(cell->type.c_str(), "$sshr", 5) == 0 && !cell->getParam(ID::A_SIGNED).as_bool())) {
@@ -2676,13 +2702,14 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
         if ((int)bits_of(dpin_a_signed) < y_bits) {
           auto and_node = create_typed_node(*g, Ntype_op::And, y_bits);
-          and_node.create_sink_pin(0).connect_driver(dpin_a_signed);
-          and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
+          livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(dpin_a_signed);
+          livehd::graph_util::setup_sink_pid(and_node, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 
           auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, y_bits);
           set_unsign(tposs_node.create_driver_pin(0));
-          setup_sink_by_name(tposs_node, "a").connect_driver(and_node.create_driver_pin(0));
-          setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+          livehd::graph_util::connect_mask_operands(tposs_node,
+                                                    and_node.create_driver_pin(0),
+                                                    create_const(*g, livehd::graph_util::mask_whole_const()));
 
           dpin_a = tposs_node.create_driver_pin(0);
         }
@@ -2698,8 +2725,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           if (bits_of(dpin_a_signed)) {
             set_ubits(tposs_node.create_driver_pin(0), bits_of(dpin_a_signed));
           }
-          setup_sink_by_name(tposs_node, "a").connect_driver(dpin_a_signed);
-          setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, livehd::graph_util::mask_whole_const()));
+          livehd::graph_util::connect_mask_operands(tposs_node,
+                                                    dpin_a_signed,
+                                                    create_const(*g, livehd::graph_util::mask_whole_const()));
 
           dpin_a = tposs_node.create_driver_pin(0);
         }
@@ -2859,9 +2887,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * static_cast<int>(Ntype::Memory_port_stride);
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(10 + port_n))
             .connect_driver(create_const(*g, *Dlop::create_integer(0)));
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(3 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(3 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_DATA).extract(i * width, width), false));
 
         auto wr_addr_dpin = create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false);
@@ -2882,20 +2910,20 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           setup_sink_by_name(en_mux, "p2").connect_driver(wr_en_dpin);
           wr_en_dpin = en_mux.create_driver_pin(0);
         }
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n)).connect_driver(wr_en_dpin);
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(0 + port_n)).connect_driver(wr_addr_dpin);
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(2 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n)).connect_driver(wr_en_dpin);
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n)).connect_driver(wr_addr_dpin);
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
       }
       for (int i = 0; i < rdports; i++) {
         auto port_n = (wrports + i) * static_cast<int>(Ntype::Memory_port_stride);
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(10 + port_n))
             .connect_driver(create_const(*g, *Dlop::create_integer(1)));
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(0 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(2 + port_n))
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
       }
     } else if (cell->type.c_str()[0] == '$' && cell->type.c_str()[1] != '_' && strncmp(cell->type.c_str(), "$paramod", 8) != 0) {
@@ -2903,25 +2931,25 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
     } else if (std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {
       set_type_op(exit_node, Ntype_op::And);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$_OR_", 6) == 0) {
       set_type_op(exit_node, Ntype_op::Or);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$_XOR_", 6) == 0) {
       set_type_op(exit_node, Ntype_op::Xor);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$_NOT_", 6) == 0) {
       I(get_output_size(cell) == 1);
       set_type_op(exit_node, Ntype_op::Xor);
       set_ubits(exit_node.create_driver_pin(0), 1);
       explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
-      exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
-      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(get_dpin(g, cell, ID::A));
+      livehd::graph_util::setup_sink_pid(exit_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_P_", 8) == 0) {
       set_type_op(exit_node, Ntype_op::Flop);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
@@ -2995,7 +3023,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           auto edge_key = std::make_pair(dpin.get_class_index(), spin.get_class_index());
           if (added_edges.find(edge_key) != added_edges.end()) {
             auto or_node = create_typed_node(*g, Ntype_op::Or, ss.size());
-            dpin.connect_sink(or_node.create_sink_pin(0));
+            dpin.connect_sink(livehd::graph_util::setup_sink_pid(or_node, 0));
             dpin = or_node.create_driver_pin(0);
           }
           dpin.connect_sink(spin);

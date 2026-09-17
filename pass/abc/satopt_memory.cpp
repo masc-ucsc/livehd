@@ -50,8 +50,8 @@ struct Build {
   }
   Pin binary(Ntype_op op, Pin a, Pin b, int width) {
     auto n = node(op);
-    a.connect_sink(n.create_sink_pin(0));
-    b.connect_sink(n.create_sink_pin(0));
+    a.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    b.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
     return output(n, width);
   }
   Pin boolean(Pin a) {
@@ -59,7 +59,7 @@ struct Build {
       return konst(!gu::const_of(a).is_known_zero());
     }
     auto n = node(Ntype_op::Ror);
-    a.connect_sink(n.create_sink_pin(0));
+    a.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
     return output(n, 1);
   }
   Pin mux(Pin s, Pin a, Pin b, int width) {
@@ -67,22 +67,24 @@ struct Build {
       return a;
     }
     auto n = node(Ntype_op::Mux);
-    s.connect_sink(n.create_sink_pin(0));
-    a.connect_sink(n.create_sink_pin(1));
-    b.connect_sink(n.create_sink_pin(2));
+    s.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    a.connect_sink(livehd::graph_util::setup_sink_pid(n, 1));
+    b.connect_sink(livehd::graph_util::setup_sink_pid(n, 2));
     return output(n, width);
   }
-  static int pin_width(Pin p) { return p.is_const() ? std::max(1, gu::const_of(p).get_signed_bits()) : std::max(1, gu::real_width(p)); }
-  Pin        zero_extend(Pin p, int target) {
+  static int pin_width(Pin p) {
+    return p.is_const() ? std::max(1, gu::const_of(p).get_signed_bits()) : std::max(1, gu::real_width(p));
+  }
+  Pin zero_extend(Pin p, int target) {
     const int source = pin_width(p);
     if (source >= target) {
       return p;
     }
     auto n = node(Ntype_op::Concat);
-    konst(0).connect_sink(n.create_sink_pin(0));
-    konst(target - source).connect_sink(n.create_sink_pin(1));
-    p.connect_sink(n.create_sink_pin(2));
-    konst(source).connect_sink(n.create_sink_pin(3));
+    konst(0).connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    konst(target - source).connect_sink(livehd::graph_util::setup_sink_pid(n, 1));
+    p.connect_sink(livehd::graph_util::setup_sink_pid(n, 2));
+    konst(source).connect_sink(livehd::graph_util::setup_sink_pid(n, 3));
     return output(n, target);
   }
   Pin address_mux(Pin s, Pin a, Pin b) {
@@ -91,19 +93,47 @@ struct Build {
   }
   Pin mask(Pin a, const Dlop& value, int width) {
     auto n = node(Ntype_op::Get_mask);
-    a.connect_sink(n.create_sink_pin(0));
-    gu::create_const(g, value).connect_sink(n.create_sink_pin(1));
+    gu::connect_mask_operands(n, a, gu::create_const(g, value));
     return output(n, width);
   }
   Pin slice(Pin a, int lo, int width) { return mask(a, *Dlop::get_mask_value(lo + width - 1, lo), width); }
+  // Compress an address after deleting an invariant dimension. Selecting all
+  // bits except `bit` is two windows, not a legal sparse Get_mask operand.
+  Pin remove_address_bit(Pin address, int bit) {
+    const int address_width = std::max(pin_width(address), bit + 1);
+    if (address.is_const()) {
+      const auto& value = gu::const_of(address);
+      const auto  low   = value.get_mask_op_opt(0, bit);
+      const auto  high  = value.get_mask_op_opt(bit + 1, address_width);
+      return gu::create_const(g, *low->or_op(*high->shl_op(*Dlop::create_integer(bit))));
+    }
+    if (bit >= pin_width(address)) {
+      return address;
+    }
+    if (address_width == 1) {
+      return konst(0);
+    }
+    if (bit == 0) {
+      return slice(address, 1, address_width - 1);
+    }
+    if (bit == address_width - 1) {
+      return slice(address, 0, bit);
+    }
+    auto combined = node(Ntype_op::Concat);
+    slice(address, bit + 1, address_width - bit - 1).connect_sink(livehd::graph_util::setup_sink_pid(combined, 0));
+    konst(address_width - bit - 1).connect_sink(livehd::graph_util::setup_sink_pid(combined, 1));
+    slice(address, 0, bit).connect_sink(livehd::graph_util::setup_sink_pid(combined, 2));
+    konst(bit).connect_sink(livehd::graph_util::setup_sink_pid(combined, 3));
+    return output(combined, address_width - 1);
+  }
   Pin pack(const std::vector<Pin>& lanes, int width) {
     if (lanes.size() == 1) {
       return lanes.front();
     }
     auto n = node(Ntype_op::Concat);
     for (int i = static_cast<int>(lanes.size()) - 1; i >= 0; --i) {
-      konst(width).connect_sink(n.create_sink_pin(2 * i + 1));
-      lanes[lanes.size() - 1 - i].connect_sink(n.create_sink_pin(2 * i));
+      konst(width).connect_sink(livehd::graph_util::setup_sink_pid(n, 2 * i + 1));
+      lanes[lanes.size() - 1 - i].connect_sink(livehd::graph_util::setup_sink_pid(n, 2 * i));
     }
     return output(n, static_cast<int>(lanes.size()) * width);
   }
@@ -215,11 +245,12 @@ struct Proofs {
     // The whole source descriptor gates the original graph. Include the direct
     // inputs too so generated enable/address helpers cannot share a query key
     // merely because their allocation order gave them the same node id.
-    for (const auto& e : n.inp_edges()) {
-      key += std::format("|{}:{}:{}",
-                         e.sink.get_port_id(),
-                         e.driver.get_debug_pid(),
-                         e.driver.is_const() ? satopt_constant_key(gu::const_of(e.driver)) : "");
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv  = in_pin.get_driver_pin();
+      key               += std::format("|{}:{}:{}",
+                                       in_pin.get_port_id(),
+                                       in_drv.get_debug_pid(),
+                                       in_drv.is_const() ? satopt_constant_key(gu::const_of(in_drv)) : "");
     }
     identities[p] = key;
     return key;
@@ -290,12 +321,13 @@ struct Proofs {
 void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& queries) {
   std::map<int, Pin>                globals;
   std::map<int, std::map<int, Pin>> blocks;
-  for (const auto& e : mem.inp_edges()) {
-    int raw = e.sink.get_port_id(), off = raw % stride;
+  for (const auto& in_pin : mem.inp_sorted_pins()) {
+    const auto in_drv = in_pin.get_driver_pin();
+    int        raw = in_pin.get_port_id(), off = raw % stride;
     if (off == addr || off == clock || off == din || off == enable || off == rdport) {
-      blocks[raw / stride][off] = e.driver;
+      blocks[raw / stride][off] = in_drv;
     } else {
-      globals[off] = e.driver;
+      globals[off] = in_drv;
     }
   }
   const int word = literal(globals[bits], 0), depth = literal(globals[size], 0), lanes = literal(globals[wensize], 1);
@@ -371,8 +403,8 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
   // bit, the depth is a power of two, and no whole-array view can observe the
   // discarded entries. Preserve the selected initialization words exactly.
   bool   has_readall = false;
-  for (const auto& e : mem.out_edges()) {
-    has_readall |= e.driver.get_port_id() == Ntype::Memory_readall_pid;
+  for (const auto& out_pin : mem.out_sorted_pins()) {  // a port test: pins, not consumers
+    has_readall |= out_pin.get_port_id() == Ntype::Memory_readall_pid;
   }
   if (!has_readall && depth > 1 && (depth & (depth - 1)) == 0 && depth <= 65536 && static_cast<uint64_t>(word) * depth <= 1048576
       && (globals[init].is_invalid() || (globals[init].is_const() && !gu::const_of(globals[init]).has_unknowns()))) {
@@ -427,16 +459,7 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
       globals[size] = B.konst(depth / 2);
       for (auto* ports : {&writes, &reads}) {
         for (auto& port : *ports) {
-          if (port.a.is_const()) {
-            const auto& value  = gu::const_of(port.a);
-            auto        select = Dlop::get_mask_value(std::max(width(port.a), bit + 1));
-            select             = select->xor_op(Dlop::get_mask_value(bit, bit));
-            port.a             = gu::create_const(g, *value.get_mask_op(select));
-          } else if (bit < width(port.a)) {
-            auto select = Dlop::get_mask_value(width(port.a));
-            select      = select->xor_op(Dlop::get_mask_value(bit, bit));
-            port.a      = B.mask(port.a, *select, std::max(1, width(port.a) - 1));
-          }
+          port.a = B.remove_address_bit(port.a, bit);
         }
       }
       proof.address_bits = std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(depth / 2 - 1))));
@@ -604,8 +627,9 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
       gu::create_const(g, *Dlop::from_binary(value, true)).connect_sink(result.create_sink_pin(matrix));
     }
     absl::flat_hash_map<Pin, Pin> rewired;
-    for (const auto& e : mem.out_edges()) {
-      int pid = e.driver.get_port_id();
+    // SNAPSHOT of the dout driver pins: the body rewires the fan-out below.
+    for (const auto& out_pin : mem.out_pins_snapshot()) {
+      int pid = out_pin.get_port_id();
       Pin replacement;
       if (pid == Ntype::Memory_readall_pid) {
         replacement = result.create_driver_pin(pid);
@@ -625,10 +649,18 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
         }
       }
       if (!replacement.is_const()) {
-        gu::carry_pin_attrs(e.driver, replacement);
+        gu::carry_pin_attrs(out_pin, replacement);
       }
-      rewired[e.driver] = replacement;
-      replacement.connect_sink(e.sink);
+      rewired[out_pin] = replacement;
+      // Snapshot the fan-out before rewiring it: connect_sink() mutates the
+      // very edge storage the old lazy `mem.out_edges()` walk was standing in.
+      std::vector<Pin> readers;
+      for (const auto& e : out_pin.out_edges()) {
+        readers.push_back(e.sink);
+      }
+      for (const auto& reader : readers) {
+        replacement.connect_sink(reader);
+      }
     }
     for (auto* ports : {&writes, &reads}) {
       for (auto& port : *ports) {

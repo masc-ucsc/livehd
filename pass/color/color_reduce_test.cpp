@@ -47,7 +47,7 @@ Occ make_cone(hhds::Graph* g, const hhds::Pin_class& xor_in, const hhds::Pin_cla
   xor_in.connect_sink(x.create_sink_pin(0));
   auto a = create_typed_node(*g, Ntype_op::And);
   x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
-  and_in.connect_sink(a.create_sink_pin(0));
+  and_in.connect_sink(a.create_sink_pin(1));
   a.create_driver_pin(0).connect_sink(sink);
   return {x, a};
 }
@@ -99,9 +99,11 @@ hhds::Pin_class driver_into(const hhds::Node_class& sub, const std::shared_ptr<h
       pid = static_cast<uint32_t>(d.port_id);
     }
   }
-  for (const auto& e : sub.inp_edges()) {
-    if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
-      return e.driver;
+  for (auto e_sink : sub.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      if (static_cast<uint32_t>(e_sink.get_port_id()) == pid) {
+        return e_drv;
+      }
     }
   }
   return {};
@@ -129,7 +131,12 @@ TEST(ColorReduce, ExtractsThreeIdenticalCones) {
   // binding must not care.
   {
     auto a = create_typed_node(*g, Ntype_op::And);
-    g->get_input_pin("in5").connect_sink(a.create_sink_pin(0));
+    // "Backwards" is the CONNECT ORDER (and-leaf before xor-leaf), not the pid
+    // roles: under ONE DRIVER PER SINK PIN each operand owns a pid, so putting
+    // the xor on a different pid here would make this a genuinely different
+    // cone, and color_reduce keys its rebuild on the raw pid on purpose
+    // (color_reduce.cpp:743). Same roles, opposite wiring order.
+    g->get_input_pin("in5").connect_sink(a.create_sink_pin(1));
     auto x = create_typed_node(*g, Ntype_op::Xor);
     g->get_input_pin("in4").connect_sink(x.create_sink_pin(0));
     x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
@@ -178,8 +185,8 @@ TEST(ColorReduce, ExtractsThreeIdenticalCones) {
   for (const char* out : {"y0", "y1", "y2"}) {
     auto op    = g->get_output_pin(out);
     bool wired = false;
-    for (const auto& e : op.inp_edges()) {
-      wired = gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub;
+    for (auto e_drv : op.get_driver_pins()) {
+      wired = gu::type_op_of(e_drv.get_master_node()) == Ntype_op::Sub;
     }
     EXPECT_TRUE(wired) << out;
   }
@@ -232,7 +239,7 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
     auto a = create_typed_node(*g, Ntype_op::And);
     x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
-    k.connect_sink(a.create_sink_pin(0));
+    k.connect_sink(a.create_sink_pin(1));
     a.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   };
   make(0, k5);
@@ -254,9 +261,11 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
   // Every site feeds its OWN value into the const port: {5,5,5,7}.
   std::vector<std::string> fed;
   for (const auto& s : subs) {
-    for (const auto& e : s.inp_edges()) {
-      if (e.driver.is_const()) {
-        fed.push_back(gu::const_of(e.driver).serialize());
+    for (auto e_sink : s.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (e_drv.is_const()) {
+          fed.push_back(gu::const_of(e_drv).serialize());
+        }
       }
     }
   }
@@ -272,8 +281,10 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      EXPECT_FALSE(e.driver.is_const()) << "the divergent const must live at the call sites";
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        EXPECT_FALSE(e_drv.is_const()) << "the divergent const must live at the call sites";
+      }
     }
   }
 }
@@ -340,7 +351,7 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
     auto a = create_typed_node(*g, Ntype_op::And);
     x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
-    k5.connect_sink(a.create_sink_pin(0));
+    k5.connect_sink(a.create_sink_pin(1));
     a.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
 
@@ -354,8 +365,10 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
   auto subs = subs_of(g.get());
   ASSERT_EQ(3u, subs.size());
   for (const auto& s : subs) {
-    for (const auto& e : s.inp_edges()) {
-      EXPECT_FALSE(e.driver.is_const()) << "an agreed const is body-internal";
+    for (auto e_sink : s.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        EXPECT_FALSE(e_drv.is_const()) << "an agreed const is body-internal";
+      }
     }
   }
   auto body = subs[0].get_subnode_graph();
@@ -365,8 +378,10 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      body_has_const = body_has_const || e.driver.is_const();
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        body_has_const = body_has_const || e_drv.is_const();
+      }
     }
   }
   EXPECT_TRUE(body_has_const);
@@ -440,9 +455,11 @@ TEST(ColorReduce, ConeFeedingFlopExtracts) {
       continue;
     }
     bool din_from_sub = false;
-    for (const auto& e : n.inp_edges()) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) == 3) {
-        din_from_sub = gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub;
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (static_cast<uint32_t>(e_sink.get_port_id()) == 3) {
+          din_from_sub = gu::type_op_of(e_drv.get_master_node()) == Ntype_op::Sub;
+        }
       }
     }
     EXPECT_TRUE(din_from_sub);
@@ -520,9 +537,11 @@ TEST(ColorReduce, ChainedPatternsRewireThroughForwarding) {
   // Every C2 instance reads some C1 instance directly.
   uint64_t sub_to_sub = 0;
   for (const auto& s : subs) {
-    for (const auto& e : s.inp_edges()) {
-      if (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub) {
-        ++sub_to_sub;
+    for (auto e_sink : s.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (gu::type_op_of(e_drv.get_master_node()) == Ntype_op::Sub) {
+          ++sub_to_sub;
+        }
       }
     }
   }
@@ -549,6 +568,10 @@ TEST(ColorReduce, DupEdgeConeRefused) {
     auto s  = create_typed_node(*g, Ntype_op::Sum);
     auto xd = x.create_driver_pin(0);
     xd.connect_sink(s.create_sink_pin(0));
+    // DELIBERATE duplicate parallel edge -- do NOT "fix" this to two pids. The
+    // test below asserts `dup_edge_skipped >= 3`: this fixture exists to prove
+    // color_reduce REFUSES a cone carrying one, so removing the duplicate
+    // removes the only thing the test checks.
     xd.connect_sink(s.create_sink_pin(0));  // x + x: parallel duplicate edge
     s.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
@@ -638,11 +661,14 @@ TEST(ColorReduce, PortHeavyBucketSkipped) {
     // 2 members, 5 distinct leaves: 5 + 1 > 2 * 2.
     auto a = create_typed_node(*g, Ntype_op::And);
     for (int j = 0; j < 4; ++j) {
-      g->get_input_pin(std::string{"in"} + std::to_string(5 * i + j)).connect_sink(a.create_sink_pin(0));
+      // One operand per pid: an And is a single BANK, so its four operands take
+      // four consecutive slots rather than piling onto pid 0.
+      g->get_input_pin(std::string{"in"} + std::to_string(5 * i + j))
+          .connect_sink(a.create_sink_pin(static_cast<hhds::Port_id>(j)));
     }
     auto o = create_typed_node(*g, Ntype_op::Or);
     a.create_driver_pin(0).connect_sink(o.create_sink_pin(0));
-    g->get_input_pin(std::string{"in"} + std::to_string(5 * i + 4)).connect_sink(o.create_sink_pin(0));
+    g->get_input_pin(std::string{"in"} + std::to_string(5 * i + 4)).connect_sink(o.create_sink_pin(1));
     o.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
 
@@ -679,7 +705,7 @@ TEST(ColorReduce, OversizePatternSkipped) {
     gu::set_bits(b, 64);
     auto mult = create_typed_node(*g, Ntype_op::Mult);
     a.connect_sink(mult.create_sink_pin(0));
-    b.connect_sink(mult.create_sink_pin(0));
+    b.connect_sink(mult.create_sink_pin(1));  // Mult is ONE bank: consecutive pids
     auto out = mult.create_driver_pin(0);
     gu::set_bits(out, 64);
     out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
@@ -820,7 +846,7 @@ TEST(ColorReduce, WideDynamicShiftWithAddressProducerBypassesTextProfitGuard) {
 
     auto address = create_typed_node(*g, Ntype_op::Sum);
     index.connect_sink(address.create_sink_pin(0));
-    one.connect_sink(address.create_sink_pin(0));
+    one.connect_sink(address.create_sink_pin(2));  // Sum "as" bank = even pids
     auto amount = address.create_driver_pin(0);
     gu::set_bits(amount, 9);
 
@@ -871,7 +897,7 @@ TEST(ColorReduce, WideDynamicShiftWithExpensiveProducerKeepsGeGuard) {
 
     auto mult = create_typed_node(*g, Ntype_op::Mult);
     a.connect_sink(mult.create_sink_pin(0));
-    b.connect_sink(mult.create_sink_pin(0));
+    b.connect_sink(mult.create_sink_pin(1));  // Mult is ONE bank: consecutive pids
     auto value = mult.create_driver_pin(0);
     gu::set_bits(value, 256);
 

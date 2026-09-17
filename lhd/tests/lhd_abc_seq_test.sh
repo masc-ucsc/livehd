@@ -372,14 +372,14 @@ echo "PASS: memory=false keeps the memory as a native instance (abc_mem)"
 
 # memory=true: the instance remains, with mapped gates inside its module.
 run_abc_lec abc_mem abc_mem.abc_mem true true
-has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem memory=true: lowered memory module missing"
+has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem memory=true: lowered memory module missing"
 ! has "$NETV" '`include.*cgen_memory' || fail "abc_mem memory=true: native memory survived"
 echo "PASS: memory=true bit-blasts the memory to gates (abc_mem)"
 
 # The default (`auto`) folds this 8 x 8 = 64-bit memory: it is well within
 # memory_max_bits, so flops are the realization a 64-bit array would have anyway.
 run_abc_lec abc_mem abc_mem.abc_mem true default
-has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem default (auto): a 64-bit memory was not folded"
+has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem default (auto): a 64-bit memory was not folded"
 ! has "$NETV" '`include.*cgen_memory' || fail "abc_mem default (auto): native memory survived"
 echo "PASS: the default memory mode folds a small memory (abc_mem)"
 
@@ -387,17 +387,20 @@ echo "PASS: the default memory mode folds a small memory (abc_mem)"
 # with the one-line note naming it. memory=true ignores the threshold entirely.
 run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.abc.memory_max_bits=63
 # Native = the shipped wrapper (`include cgen_memory_*.v) for a reset-less
-# memory, or the `cgen_memory_*_instance_*` boundary module a memory with a
-# whole-array reset is enclosed in (the wrappers have no reset port).
-{ has "$NETV" '`include.*cgen_memory' || has "$NETV" 'cgen_memory_.*_instance_'; } \
+# memory, or the boundary module a memory with a whole-array reset is enclosed in
+# (the wrappers have no reset port). That boundary module is the macro-instance
+# form: `cgen_memory_<nr>rd_<nw>wr_<hash>` with NO `_blasted` suffix -- the suffix
+# is what marks the bit-blasted realization.
+{ has "$NETV" '`include.*cgen_memory' \
+  || { has "$NETV" 'cgen_memory_' && ! has "$NETV" 'cgen_memory_.*_blasted'; }; } \
   || fail "abc_mem auto/max_bits=63: memory was folded anyway"
-! has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem auto/max_bits=63: unexpectedly lowered"
+! has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem auto/max_bits=63: unexpectedly lowered"
 grep -q '"code":"memory-max-bits"' "$ABCDIAG" \
   || fail "abc_mem auto/max_bits=63: no memory-max-bits note: $(cat "$ABCDIAG")"
 echo "PASS: auto keeps an over-memory_max_bits memory native with a note (abc_mem)"
 
 run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.abc.memory_max_bits=63
-has "$NETV" "cgen_memory_.*_lowered_" || fail "abc_mem memory=true: memory_max_bits was consulted"
+has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem memory=true: memory_max_bits was consulted"
 echo "PASS: memory=true folds regardless of memory_max_bits (abc_mem)"
 
 echo "PASS: pass.abc register/memory tech-map LEC-equivalent (DFF cells, native flops, memory bit-blast + boundary)"

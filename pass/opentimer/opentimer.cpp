@@ -121,8 +121,8 @@ template <typename Node>
 // dotted hier path plus the numeric port id — mirroring wire_name's structure
 // but with a per-instance prefix. Keying on the master node + port id (not the
 // pin's own get_hier_name) is essential: node.out_pins() yields a driver pin
-// with no pin_name while inp_edges().driver yields the SAME pin carrying its
-// port name, so the pin's own get_hier_name differs between the two (one omits
+// with no pin_name while a consumer sink's get_driver_pins() hands back the SAME
+// pin carrying its port name, so the pin's own get_hier_name differs (one omits
 // the port suffix, one appends it) and the driver/consumer nets would not meet.
 // The master node's get_hier_name is the stable, representation-independent id
 // (the same primitive LEC keys flops on). Module-IO pins keep their decl name.
@@ -231,6 +231,12 @@ inline void set_delay(const hhds::Pin_class& pin, float d) {
   if (pin.is_invalid()) {
     return;
   }
+  // NOT guarded with assert_pin_attr_role<pin_delay_t> -- see the note in
+  // graph/node_util.hpp on assert_pin_attr_role. Its only caller iterates
+  // node.out_pins(), whose handles report is_sink() because
+  // Graph::get_driver_pins(Node_class) CLEARS the driver bit that
+  // create_driver_pin sets. Until those two agree, is_driver() cannot be used as
+  // the role test here.
   pin.attr(livehd::attrs::pin_delay).set(d);
 }
 inline bool has_delay(const hhds::Pin_class& pin) {
@@ -851,18 +857,45 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   };
 
   // Driver feeding a named sink, HIER-resolved. get_driver_of_sink_name reads the
-  // pin-level inp_edges (Graph::inp_edges(Pin_class)), which is LOCAL-only — it
+  // class-level pin fan-in (Pin_class::get_driver_pins), which is LOCAL-only — it
   // never crosses a module boundary — so the tracker would build on a child
   // module's own input port (a bare "io_x") instead of the parent's driver.
-  // node.inp_edges() (the Node overload) is the hier-resolving one, so route the
-  // tracker's operand lookups through it when flattening.
+  // The OCCURRENCE readers are the hier-resolving ones — Occurrence_pin's
+  // get_driver_pins() resolves across an instance boundary exactly as the
+  // occurrence edge walk did — so route the tracker's operand lookups through
+  // them when flattening.
+  //
+  // inp_sorted_pins(), NOT the raw inp_pins(): hhds stores port 0 as the node
+  // itself, so the raw list OMITS it — and port 0 is where a banked cell's first
+  // operand lives. The sorted reader yields the node-as-pin first and then
+  // ascending port order, which is what the old node-level edge walk visited.
   auto hier_driver_of = [&](const hhds::Occurrence_node& n, std::string_view sname) -> hhds::Occurrence_pin {
-    for (auto& e : n.inp_edges()) {
-      if (sink_pin_name_of(n, e.sink) == sname) {
-        return e.driver;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      if (sink_pin_name_of(n, sink) != sname) {
+        continue;
+      }
+      for (const auto& driver : sink.get_driver_pins()) {
+        return driver;  // first driver of the first matching sink, as the edge walk returned
       }
     }
     return {};
+  };
+
+  // Every driver feeding a node, in the order the node-level edge walk yielded
+  // them (sorted sink ports, node-as-pin first; see hier_driver_of above for why
+  // the SORTED reader is load-bearing). get_driver_pins() is the PLURAL reader on
+  // purpose: a compact loop's carry-in is the one sink livehd sanctions with two
+  // drivers (external seed plus the self edge), and the singular get_driver_pin()
+  // would silently drop the seed. One entry per driver is therefore one entry per
+  // old in-EDGE, so an operand-counting client still counts the same.
+  auto inp_driver_pins = [](const hhds::Occurrence_node& n) {
+    std::vector<hhds::Occurrence_pin> drivers;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        drivers.push_back(driver);
+      }
+    }
+    return drivers;
   };
 
   auto is_resolved_const = [&](const auto& dpin) { return dpin.is_const(); };
@@ -984,11 +1017,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       if (out_sink.is_invalid()) {
         continue;
       }
-      auto inps = out_sink.inp_edges();
-      if (inps.empty()) {
+      // A graph output pin is a sink: one driver (graph/cell.hpp).
+      auto driver_dpin = out_sink.get_driver_pin();
+      if (driver_dpin.is_invalid()) {
         continue;
       }
-      auto driver_dpin = inps.front().driver;
 
       std::string driver_name{d.name};
       auto        bits = bits_of(driver_dpin);
@@ -1321,9 +1354,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           absl::flat_hash_map<hhds::Port_id, hhds::Occurrence_pin> lane_by_pid;
           bool                                                     lanes_ready = true;
-          for (auto& e : node.inp_edges()) {
-            lane_by_pid.insert_or_assign(e.sink.get_port_id(), e.driver);
-            lanes_ready = lanes_ready && tracker_ready(e.driver);
+          for (const auto& sink : node.inp_sorted_pins()) {
+            for (const auto& driver : sink.get_driver_pins()) {
+              lane_by_pid.insert_or_assign(sink.get_port_id(), driver);
+              lanes_ready = lanes_ready && tracker_ready(driver);
+            }
           }
           if (!lanes_ready) {
             deferred_nodes.push_back(node);
@@ -1348,17 +1383,17 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           // consulted: a narrowed stamp must not move a lane.
           pin_tracker.add_concat(wname, srcs, livehd::graph_util::concat_total_width(lanes));
         } else if (op == Ntype_op::Or) {
-          auto inps = node.inp_edges();
-          if (std::any_of(inps.begin(), inps.end(), [&](const auto& e) { return !tracker_ready(e.driver); })) {
+          const auto inps = inp_driver_pins(node);
+          if (std::any_of(inps.begin(), inps.end(), [&](const auto& dpin) { return !tracker_ready(dpin); })) {
             deferred_nodes.push_back(node);
             continue;
           }
-          for (auto e : inps) {
+          for (const auto& dpin : inps) {
             // add_or IGNORES an untracked operand (it returns early), so an
             // unseeded cell output silently drops its whole timing arc and the
             // Or result collapses onto the zero net.
-            seed_cell_output(e.driver);
-            pin_tracker.add_or(wname, trk_id(e.driver));
+            seed_cell_output(dpin);
+            pin_tracker.add_or(wname, trk_id(dpin));
           }
           // A packed OR of disjoint shifted lanes is wiring and every result
           // bit resolves to one source bit. Overlapping live lanes are real
@@ -1392,14 +1427,14 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         } else if (op == Ntype_op::And) {
           Dlop                 a_mask = *Dlop::create_integer(-1);
           hhds::Occurrence_pin a_dpin;
-          auto                 inps = node.inp_edges();
-          if (std::any_of(inps.begin(), inps.end(), [&](const auto& e) { return !tracker_ready(e.driver); })) {
+          const auto           inps = inp_driver_pins(node);
+          if (std::any_of(inps.begin(), inps.end(), [&](const auto& dpin) { return !tracker_ready(dpin); })) {
             deferred_nodes.push_back(node);
             continue;
           }
-          for (auto e : inps) {
-            if (e.driver.is_const()) {
-              a_mask = a_mask.and_op(const_of(e.driver));
+          for (const auto& dpin : inps) {
+            if (dpin.is_const()) {
+              a_mask = a_mask.and_op(const_of(dpin));
             } else {
               if (!a_dpin.is_invalid()) {
                 livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
@@ -1407,7 +1442,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
                     .fatal();
                 return;
               }
-              a_dpin = e.driver;
+              a_dpin = dpin;
             }
           }
           if (!a_dpin.is_invalid()) {
@@ -1717,23 +1752,30 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
 
-    // connect input pins
-    for (auto& e : node.inp_edges()) {
-      const auto& pins   = liberty_port(node, sink_pin_name_of(node, e.sink));
-      const auto& values = pin_tracker.get_pin_vector(trk_id(e.driver));
-      for (size_t bit = 0; bit < pins.size(); ++bit) {
-        std::string wire{kZeroNet};
-        if (!is_resolved_const(e.driver)) {
-          if (pins.size() == 1) {
-            wire = get_driver_net_name(e.driver);
-          } else if (bit < values.size() && values[bit].pos >= 0) {
-            wire = values[bit].pos == 0 ? values[bit].id() : std::format("{}.{}", values[bit].id(), values[bit].pos);
-          } else if (values.empty() && bit < static_cast<size_t>(std::max(bits_of(e.driver), 1))) {
-            const auto base = get_driver_net_name(e.driver);
-            wire            = bit == 0 ? base : std::format("{}.{}", base, bit);
+    // connect input pins. The Liberty pin list depends only on the SINK, so it is
+    // resolved once per sink and the driver walk nests inside: inp_sorted_pins()
+    // keeps the node-as-pin (port 0) operand the raw inp_pins() list would drop
+    // and the ascending port order the edge walk had, and the PLURAL
+    // get_driver_pins() still visits both drivers of a two-driver carry-in sink,
+    // so the connect_pin sequence is the one the edge walk emitted.
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto& pins = liberty_port(node, sink_pin_name_of(node, sink));
+      for (const auto& driver : sink.get_driver_pins()) {
+        const auto& values = pin_tracker.get_pin_vector(trk_id(driver));
+        for (size_t bit = 0; bit < pins.size(); ++bit) {
+          std::string wire{kZeroNet};
+          if (!is_resolved_const(driver)) {
+            if (pins.size() == 1) {
+              wire = get_driver_net_name(driver);
+            } else if (bit < values.size() && values[bit].pos >= 0) {
+              wire = values[bit].pos == 0 ? values[bit].id() : std::format("{}.{}", values[bit].id(), values[bit].pos);
+            } else if (values.empty() && bit < static_cast<size_t>(std::max(bits_of(driver), 1))) {
+              const auto base = get_driver_net_name(driver);
+              wire            = bit == 0 ? base : std::format("{}.{}", base, bit);
+            }
           }
+          timer.connect_pin(absl::StrCat(instance_name, ":", pins[bit]), wire);
         }
-        timer.connect_pin(absl::StrCat(instance_name, ":", pins[bit]), wire);
       }
     }
   }
@@ -1762,9 +1804,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
       std::string pname{d.name};
       int32_t     bits = 0;
-      auto        inps = pin.inp_edges();
-      if (!inps.empty()) {
-        bits = bits_of(inps.front().driver);
+      if (const auto drv = pin.get_driver_pin(); !drv.is_invalid()) {  // one driver per sink pin
+        bits = bits_of(drv);
       }
       if (bits == 0) {
         bits = static_cast<int32_t>(d.bits);
@@ -2350,14 +2391,20 @@ void Pass_opentimer::backpath_set_color(hhds::Node_class node, int color) {
 
     hhds::Pin_class dpin;
     float           dpin_delay = 0;
-    for (const auto& edge : node.inp_edges()) {
-      if (!has_delay(edge.driver)) {
-        continue;
-      }
-      const auto delay = get_delay(edge.driver);
-      if (delay >= dpin_delay) {
-        dpin       = edge.driver;
-        dpin_delay = delay;
+    // PLURAL, and the `continue` stays in the INNER loop so it advances one
+    // driver exactly as the old per-edge `continue` advanced one edge. This
+    // picks the slowest input, so a dropped driver can pick the wrong critical
+    // path.
+    for (const auto& in_pin : node.inp_sorted_pins()) {
+      for (const auto& in_drv : in_pin.get_driver_pins()) {
+        if (!has_delay(in_drv)) {
+          continue;
+        }
+        const auto delay = get_delay(in_drv);
+        if (delay >= dpin_delay) {
+          dpin       = in_drv;
+          dpin_delay = delay;
+        }
       }
     }
 

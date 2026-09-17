@@ -5,6 +5,7 @@ set -euo pipefail
 
 LHD="${LHD:-lhd/lhd}"
 PRPS=(
+  "inou/prp/tests/sim/reduce_wide.prp"
   "inou/prp/tests/sim/color_kernel_multiwrite.prp"
   "inou/prp/tests/sim/color_kernel_llvm_scalar.prp"
   "inou/prp/tests/sim/color_kernel_llvm_reg.prp"

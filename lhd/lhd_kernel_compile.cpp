@@ -804,6 +804,34 @@ std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln) {
   return out;
 }
 
+// Callee names of every `fcall` in a body, skipping imports (whose callee is
+// the literal `import`). The import-defer retry uses this to find a unit whose
+// already-rewritten call site would be left dangling by the erase below.
+std::vector<std::string> collect_called_names(const std::shared_ptr<Lnast>& ln) {
+  std::vector<std::string> out;
+  for (const auto& nid : ln->tree().body().nodes(hhds::Tree_order::preorder)) {
+    if (!Lnast_ntype::is_func_call(ln->get_type(nid))) {
+      continue;
+    }
+    auto target = ln->get_first_child(nid);
+    if (target.is_invalid()) {
+      continue;
+    }
+    auto fname = ln->get_sibling_next(target);
+    if (fname.is_invalid()) {
+      continue;
+    }
+    std::string name{ln->get_name(fname)};
+    if (name.empty() || name == "import") {
+      continue;
+    }
+    out.push_back(std::move(name));
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
 // Kernel-wide alias (declared in lhd_kernel_internal.hpp; ~15 call sites
 // across the kernel TUs). The name predates the shared escaper: it now does
 // FULL escaping via json_util, not the historical minimal set.
@@ -1384,23 +1412,68 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       }
       // Whole-file retry: restore each retried file's pristine body and drop
       // its round-derived trees so re-extraction doesn't duplicate units.
-      for (const auto& file : retry) {
-        auto pit = pristine.find(file);
+      auto restore_unit = [&](const std::string& name) {
+        auto pit = pristine.find(name);
         if (pit == pristine.end()) {
-          continue;
+          return false;
         }
         for (const auto& ln : var.lnasts) {
-          if (ln->get_top_module_name() == file) {
+          if (ln->get_top_module_name() == name) {
             ln->replace_body(pit->second->clone());
             ln->set_pub_values({});
-            break;
+            return true;
           }
         }
+        return false;
+      };
+      std::set<std::string> erased;
+      for (const auto& file : retry) {
+        if (!restore_unit(file)) {
+          continue;
+        }
         std::erase_if(var.lnasts, [&](const std::shared_ptr<Lnast>& ln) {
-          std::string name{ln->get_top_module_name()};
-          return name.size() > file.size() + 1 && name.compare(0, file.size(), file) == 0 && name[file.size()] == '.'
-                 && !pristine.contains(name);  // derived this invocation, not a loaded unit
+          std::string  name{ln->get_top_module_name()};
+          const bool drop = name.size() > file.size() + 1 && name.compare(0, file.size(), file) == 0
+                            && name[file.size()] == '.'
+                            && !pristine.contains(name);  // derived this invocation, not a loaded unit
+          if (drop) {
+            erased.insert(name);
+          }
+          return drop;
         });
+      }
+      // An erased tree may be a runner-minted TEMPLATE SPECIALIZATION
+      // (`<callee-file>.<callee>__<mangled>`, see uPass_runner's
+      // maybe_specialize_template_call). Re-walking the CALLEE's file never
+      // recreates it: only the CALL SITE that minted it does, and that call
+      // site lives in a different unit — one that may have blocked on nothing
+      // and is therefore about to be frozen as final just below. Retry the
+      // minter too, restored to its pristine body so the re-walk is a fresh
+      // elaboration rather than the corrupting re-walk the comment below warns
+      // about. Symptom when skipped: tolg reports `call to undefined function
+      // '<mangled>'` in a unit that itself looks perfectly resolved (minion's
+      // minion_dcache_tlb_array -> minion_tlb<Entries=8, NrMinions=1>).
+      if (!erased.empty()) {
+        bool grew = true;
+        while (grew) {
+          grew = false;
+          for (const auto& ln : var.lnasts) {
+            std::string name{ln->get_top_module_name()};
+            if (retry.contains(name) || !pristine.contains(name)) {
+              continue;  // already retried, or not restorable to a pristine body
+            }
+            for (const auto& callee : collect_called_names(ln)) {
+              if (!erased.contains(callee)) {
+                continue;
+              }
+              if (restore_unit(name)) {
+                retry.insert(name);
+                grew = true;
+              }
+              break;
+            }
+          }
+        }
       }
       // Everything still standing walked to completion with every import
       // resolved, so its body is FINAL. Freeze it: the next round exists only

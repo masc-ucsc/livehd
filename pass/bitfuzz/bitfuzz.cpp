@@ -59,13 +59,16 @@ constexpr int32_t kSentinelBits = 32768;
   if (node.is_invalid()) {
     return false;
   }
-  for (const auto& e : node.inp_edges()) {
-    const auto& d = e.driver;
-    if (d.is_invalid() || gu::is_graph_input_pin(d) || d.is_const()) {
-      continue;
-    }
-    if (is_pathological(gu::bits_of(d))) {
-      return true;
+  for (auto sink : node.inp_sorted_pins()) {  // read-only pin walk
+    // PLURAL: a compact loop's carry-in sink holds two drivers
+    // (pass/legalize/legalize.cpp:301).
+    for (const auto& d : sink.get_driver_pins()) {
+      if (d.is_invalid() || gu::is_graph_input_pin(d) || d.is_const()) {
+        continue;
+      }
+      if (is_pathological(gu::bits_of(d))) {
+        return true;
+      }
     }
   }
   return false;

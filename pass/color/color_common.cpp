@@ -31,11 +31,13 @@ Node2Id split_continuous(hhds::Graph* g, const Node2Id& node2id) {
     }
     auto id = node2id.at(n);
     uf.find(n);  // ensure present even if isolated
-    for (const auto& e : n.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      auto it    = node2id.find(snode);
-      if (it != node2id.end() && it->second == id) {
-        uf.merge(n, snode);
+    for (const auto& dpin : n.out_sorted_pins()) {  // fanout is a SET
+      for (const auto& e : dpin.out_edges()) {
+        auto snode = e.sink.get_master_node();
+        auto it    = node2id.find(snode);
+        if (it != node2id.end() && it->second == id) {
+          uf.merge(n, snode);
+        }
       }
     }
   }
@@ -114,8 +116,8 @@ int apply_coloring(hhds::Graph* g, const Node2Id& node2id_in, const Color_opts& 
         sizes->color_ge[color] += ge;
         if (ge > sizes->color_max_node_ge[color]) {
           uint64_t bits = 0;
-          for (const auto& e : n.out_edges()) {
-            bits = std::max<uint64_t>(bits, livehd::graph_util::bits_of(e.driver));
+          for (const auto& dpin : n.out_sorted_pins()) {  // driver side only
+            bits = std::max<uint64_t>(bits, livehd::graph_util::bits_of(dpin));
           }
           sizes->color_max_node_ge[color]   = ge;
           sizes->color_max_node_bits[color] = bits;
@@ -230,11 +232,13 @@ std::string build_coloring_info_json(hhds::Graph* g, std::string_view top, std::
     }
     color_node_cnt[it->second]++;
     uf.find(n);
-    for (const auto& e : n.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      auto sit   = node2id.find(snode);
-      if (sit != node2id.end() && sit->second == it->second) {
-        uf.merge(n, snode);
+    for (const auto& dpin : n.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        auto snode = e.sink.get_master_node();
+        auto sit   = node2id.find(snode);
+        if (sit != node2id.end() && sit->second == it->second) {
+          uf.merge(n, snode);
+        }
       }
     }
   }

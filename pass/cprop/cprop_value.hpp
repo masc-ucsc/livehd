@@ -35,8 +35,11 @@ inline int unsigned_width_impl(const hhds::Pin_class& pin, int depth, absl::flat
   }
   auto node = pin.get_master_node();
   auto op   = gu::type_op_of(node);
-  if (op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Ror) {
+  if (op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Ror || op == Ntype_op::Rxor) {
     return 1;
+  }
+  if (op == Ntype_op::Popcount) {
+    return std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(gu::reduction_count(node)))));
   }
   if (op == Ntype_op::Concat) {
     const auto width = gu::concat_total_width(node);
@@ -77,12 +80,14 @@ inline int unsigned_width_impl(const hhds::Pin_class& pin, int depth, absl::flat
   }
   const auto control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(node) : 0;
   int        width       = -1;
-  for (const auto& edge : node.inp_edges()) {
-    if ((op == Ntype_op::Mux && edge.sink.get_port_id() == 0)
-        || (op == Ntype_op::Hotmux && gu::is_hotmux_control(edge.sink.get_port_id(), control_end))) {
+  // op is restricted to And/Or/Xor/Mux/Hotmux above, so every sink pin here has
+  // exactly one driver (the compact-loop two-driver carry lives on a Sub).
+  for (auto isnk : node.inp_sorted_pins()) {
+    if ((op == Ntype_op::Mux && isnk.get_port_id() == 0)
+        || (op == Ntype_op::Hotmux && gu::is_hotmux_control(isnk.get_port_id(), control_end))) {
       continue;
     }
-    const int arm = unsigned_width_impl(edge.driver, depth + 1, memo);
+    const int arm = unsigned_width_impl(isnk.get_driver_pin(), depth + 1, memo);
     if (op == Ntype_op::And) {
       if (arm >= 0) {
         width = width < 0 ? arm : std::min(width, arm);

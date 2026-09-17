@@ -76,7 +76,7 @@ TEST(AbcMap, NativeBoundarySchedulesReverseOrderedSliceConsumers) {
   ASSERT_EQ(mapper.qor().size(), 1);
   EXPECT_GT(mapper.qor().front().gates, 0);
   int drivers = 0;
-  for ([[maybe_unused]] const auto& edge : mapped->get_output_pin("y").inp_edges()) {
+  for ([[maybe_unused]] const auto& drv : mapped->get_output_pin("y").get_driver_pins()) {
     ++drivers;
   }
   EXPECT_EQ(drivers, 1);

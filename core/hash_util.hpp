@@ -5,16 +5,21 @@
 #include <cstdint>
 #include <string_view>
 
-// The ORDER-INDEPENDENT combiners live in hhds (hhds/hash_mix.hpp) because the
-// rule they encode is about graph shape; they are re-exported here so a
-// non-graph multiset key (an option set, a file list, an SMT assertion set) can
-// reach them without pulling in the graph header.
+// The ORDER-INDEPENDENT combiner lives in hhds (hhds/hash_mix.hpp) because the
+// rule it encodes is about graph shape; it is re-exported here so a non-graph
+// multiset key (an option set, a file list, an SMT assertion set) can reach it
+// without pulling in the graph header.
+//
+// Field_combiner, NOT the older Commutative_combiner: a product in
+// F* = GF(2^61-1)* with gamma excluding 0 and 1, which is the combiner the
+// owner spec of 2026-09-16 defines. The sum/xor/count one it replaced is gone
+// from every LiveHD call site.
 #include "hhds/hash_mix.hpp"
 
 namespace livehd::hash_util {
 
-using hhds::Commutative_combiner;
-using hhds::commutative_combine;
+using hhds::field_combine;
+using hhds::Field_combiner;
 
 // Canonical 64-bit FNV-1a parameters. Every digest built on these is an
 // internal cache key or uniquifier, so a parameter change only costs a

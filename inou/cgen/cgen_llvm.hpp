@@ -57,6 +57,7 @@ public:
   [[nodiscard]] Value resize(Value value, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value unary_not(Value value, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value reduce_or(Value value, uint32_t result_width, bool result_unsign);
+  [[nodiscard]] Value count_bits(Value value, uint32_t count, uint32_t result_width, bool parity);
   [[nodiscard]] Value bitfield_insert(Value base, Value inserted, uint32_t lo, uint32_t hi, uint32_t result_width,
                                       bool result_unsign);
   [[nodiscard]] Value sign_extend_from(Value value, uint32_t sign_bit, uint32_t result_width, bool result_unsign);

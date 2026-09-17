@@ -51,30 +51,34 @@ void Color_mincut::gather_neighs(hhds::Graph* g) {
     if (!is_partitionable(curr_node)) {
       continue;
     }
-    for (const auto& e : curr_node.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      if (!is_partitionable(snode)) {
-        continue;
-      }
-      auto it = node2id.find(snode);
-      if (it == node2id.end()) {
-        continue;
-      }
-      if (curr_id != it->second) {
-        id2neighs[curr_id].insert(it->second);
+    for (const auto& dpin : curr_node.out_sorted_pins()) {  // fanout is a SET
+      for (const auto& e : dpin.out_edges()) {
+        auto snode = e.sink.get_master_node();
+        if (!is_partitionable(snode)) {
+          continue;
+        }
+        auto it = node2id.find(snode);
+        if (it == node2id.end()) {
+          continue;
+        }
+        if (curr_id != it->second) {
+          id2neighs[curr_id].insert(it->second);
+        }
       }
     }
-    for (const auto& e : curr_node.inp_edges()) {
-      auto dnode = e.driver.get_master_node();
-      if (!is_partitionable(dnode)) {
-        continue;
-      }
-      auto it = node2id.find(dnode);
-      if (it == node2id.end()) {
-        continue;
-      }
-      if (curr_id != it->second) {
-        id2neighs[curr_id].insert(it->second);
+    for (auto sink : curr_node.inp_sorted_pins()) {     // read-only pin walk
+      for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+        auto dnode = drv.get_master_node();
+        if (!is_partitionable(dnode)) {
+          continue;
+        }
+        auto it = node2id.find(dnode);
+        if (it == node2id.end()) {
+          continue;
+        }
+        if (curr_id != it->second) {
+          id2neighs[curr_id].insert(it->second);
+        }
       }
     }
   }

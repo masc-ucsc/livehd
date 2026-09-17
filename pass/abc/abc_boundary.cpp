@@ -521,15 +521,17 @@ static bool import_def(Refine& R, Imp_def& d) {
   };
   Fanin_lookup driver_of_pid;
 
-  // Enumerate driven pins from edges, including node-as-pin consumers (port
-  // zero). The pinned HHDS out_pins() omits a driver whose readers are all
-  // node-as-pin sinks, such as Q feeding Get_mask.a, leaving its slices opaque.
+  // The node's CONNECTED driver pins. out_sorted_pins() is exactly that set --
+  // each pin once, ascending port -- so it keeps the property this lambda was
+  // written for: it is driven by EDGES, so it still reports a driver whose
+  // readers are all node-as-pin sinks (Q feeding Get_mask.a), which the pinned
+  // HHDS out_pins() omits and which would leave those slices opaque. The old
+  // shape re-derived it by visiting every consumer and linear-scanning `pins`
+  // to drop repeats: O(fanout * pins) work for an O(pins) answer.
   const auto driven_pins = [](const hhds::Node_class& node) {
     std::vector<hhds::Pin_class> pins;
-    for (const auto& e : node.out_edges()) {
-      if (std::find(pins.begin(), pins.end(), e.driver) == pins.end()) {
-        pins.push_back(e.driver);
-      }
+    for (const auto& out_pin : node.out_sorted_pins()) {
+      pins.push_back(out_pin);
     }
     return pins;
   };
@@ -638,14 +640,15 @@ static bool import_def(Refine& R, Imp_def& d) {
       for (const auto& out : driven_pins(node)) {
         mark_opaque(node, out, -1, "");
       }
-      for (const auto& e : node.inp_edges()) {
-        const auto pid = e.sink.get_port_id();
+      for (const auto& in_pin : node.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        const auto pid    = in_pin.get_port_id();
         if (op != Ntype_op::Memory && (pid == 2 || pid == 0 || pid == 1 || pid == 6 || pid == 5)) {
           continue;  // clock / async / initial / posclk / negreset: not a data load
         }
-        const int w = width_of(e.driver);
+        const int w = width_of(in_drv);
         for (int b = 0; b < w; ++b) {
-          cut_ins.push_back({e.driver, b, Terminal{}});
+          cut_ins.push_back({in_drv, b, Terminal{}});
         }
       }
       continue;
@@ -656,10 +659,11 @@ static bool import_def(Refine& R, Imp_def& d) {
         for (const auto& out : driven_pins(node)) {
           mark_opaque(node, out, -1, "");
         }
-        for (const auto& e : node.inp_edges()) {
-          const int w = width_of(e.driver);
+        for (const auto& in_pin : node.inp_sorted_pins()) {
+          const auto in_drv = in_pin.get_driver_pin();
+          const int  w      = width_of(in_drv);
           for (int b = 0; b < w; ++b) {
-            cut_ins.push_back({e.driver, b, Terminal{}});
+            cut_ins.push_back({in_drv, b, Terminal{}});
           }
         }
         continue;
@@ -676,10 +680,11 @@ static bool import_def(Refine& R, Imp_def& d) {
     for (const auto& out : driven_pins(node)) {
       mark_opaque(node, out, -1, "");
     }
-    for (const auto& e : node.inp_edges()) {
-      const int w = width_of(e.driver);
+    for (const auto& in_pin : node.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      const int  w      = width_of(in_drv);
       for (int b = 0; b < w; ++b) {
-        cut_ins.push_back({e.driver, b, Terminal{}});
+        cut_ins.push_back({in_drv, b, Terminal{}});
       }
     }
   }
@@ -775,10 +780,11 @@ static bool import_def(Refine& R, Imp_def& d) {
       for (const auto& o : driven_pins(node)) {
         mark_opaque(node, o, -1, "");
       }
-      for (const auto& e : node.inp_edges()) {
-        const int w = width_of(e.driver);
+      for (const auto& in_pin : node.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        const int  w      = width_of(in_drv);
         for (int b = 0; b < w; ++b) {
-          cut_ins.push_back({e.driver, b, Terminal{}});
+          cut_ins.push_back({in_drv, b, Terminal{}});
         }
       }
       progress = true;
@@ -918,11 +924,10 @@ static bool import_def(Refine& R, Imp_def& d) {
     if (opin.is_invalid()) {
       continue;
     }
-    hhds::Pin_class drv;
-    for (const auto& e : opin.inp_edges()) {
-      drv = e.driver;
-      break;
-    }
+    // A graph output pin is a sink: one driver (graph/cell.hpp), which is what
+    // the scan-and-break took. An undriven output yields an invalid pin, which
+    // `resolve` already handles below exactly as the empty-loop case did.
+    const auto drv = opin.get_driver_pin();
     for (int b = 0; b < d.out_bits[o]; ++b) {
       auto* net = resolve(drv, b);
       auto* po  = Abc_NtkCreatePo(ntk);

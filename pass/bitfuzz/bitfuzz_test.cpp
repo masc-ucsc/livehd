@@ -44,8 +44,8 @@ TEST(Bitfuzz, PipelineLeavesRecoveryToNormalPasses) {
   io->set_bits("out", 8);
   auto g  = io->create_graph();
   auto op = gu::create_typed_node(*g, Ntype_op::And, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   auto out = op.create_driver_pin(0);
   gu::set_sign(out);
   out.connect_sink(g->get_output_pin("out"));
@@ -109,8 +109,8 @@ TEST(Bitfuzz, RecoversHonestCombinational) {
   auto g = gio->create_graph();
 
   auto op = gu::create_typed_node(*g, Ntype_op::And, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -135,7 +135,7 @@ TEST(Bitfuzz, KeepsGraphIoWidths) {
   auto g = gio->create_graph();
 
   auto op = gu::create_typed_node(*g, Ntype_op::Not, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -168,8 +168,8 @@ TEST(Bitfuzz, FlagsImplicitTruncationAsWider) {
   // Both operands on `as` (pid 0, a multi-driver sink) so this is a+b, which
   // over [0..127] spans [0..254] and genuinely needs 9 bits.
   auto op = gu::create_typed_node(*g, Ntype_op::Sum, 8);  // declared narrower than a+b needs
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -197,8 +197,8 @@ TEST(Bitfuzz, ExplicitGetMaskIsClean) {
   auto g = gio->create_graph();
 
   auto sum = gu::create_typed_node(*g, Ntype_op::Sum, 9);
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(sum.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
 
   // 9, not 8: every LGraph value is SIGNED and unsigned is just the
   // non-negative subset, so a mask of 0xff yields the range [0..255], whose
@@ -314,7 +314,7 @@ TEST(Bitfuzz, OffModeIsNoOp) {
   auto g = gio->create_graph();
 
   auto op = gu::create_typed_node(*g, Ntype_op::Not, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();

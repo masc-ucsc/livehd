@@ -106,9 +106,13 @@ void Pass_sample::do_wirecount(hhds::Graph* g, int indent) {
     if (type_op_of(node) == Ntype_op::Sub) {
       ++n_subs;
     }
-    for (const auto& edge : node.out_edges()) {
-      ++n_wire;
-      n_wire_bits += bits_of(edge.driver);
+    // One "wire" per fanout edge, as before; the driver side is the pin.
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& edge : dpin.out_edges()) {
+        (void)edge;
+        ++n_wire;
+        n_wire_bits += bits_of(dpin);
+      }
     }
   }
 
@@ -185,10 +189,12 @@ void Pass_sample::compute_max_depth(hhds::Graph* g) {
   int max_depth = 0;
   for (const auto& node : g->body().nodes(hhds::Node_order::forward)) {
     int local_max = 0;
-    for (const auto& edge : node.inp_edges()) {
-      int d = depth[edge.driver.get_master_node().get_class_index()];
-      if (local_max <= d) {
-        local_max = d + 1;
+    for (auto sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+        int d = depth[drv.get_master_node().get_class_index()];
+        if (local_max <= d) {
+          local_max = d + 1;
+        }
       }
     }
     std::print("{} {}\n", debug_name(node), local_max);

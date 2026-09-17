@@ -270,6 +270,12 @@ std::string Lnast_builder::create_bit_xor_stmts(std::string_view a_var, std::str
   return emit_binary_result(Lnast_ntype::create_bit_xor(), a_var, b_var);
 }
 
+std::string Lnast_builder::create_red_xor_stmts(std::string_view var_name) {
+  auto result = emit_unary_result(Lnast_ntype::create_red_xor(), var_name);
+  note_unsigned_bits(result, 1);
+  return result;
+}
+
 std::string Lnast_builder::create_shl_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());

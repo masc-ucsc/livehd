@@ -57,22 +57,27 @@ TEST(BitwidthInfer, FoldedConstantsPreserveOperandMultiplicity) {
     auto g        = io->create_graph();
     auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
     auto producer = gu::create_typed_node(*g, Ntype_op::SHL);
-    constant(1).connect_sink(producer.create_sink_pin(0));
-    constant(1).connect_sink(producer.create_sink_pin(1));
+    constant(1).connect_sink(livehd::graph_util::setup_sink_pid(producer, 0));
+    constant(1).connect_sink(livehd::graph_util::setup_sink_pid(producer, 1));
     auto consumer = gu::create_typed_node(*g, op);
-    auto sink     = consumer.create_sink_pin(pid);
-    constant(2).connect_sink(sink);
-    producer.create_driver_pin(0).connect_sink(sink);
+    // MULTIPLICITY, in the one-driver-per-sink-pin spelling. The point of this
+    // case is that a repeated/accumulated operand must not be collapsed, and
+    // that used to be written as several drivers piled onto one sink pin. Each
+    // operand now owns a CONSECUTIVE pid of the same bank, so setup_sink_pid is
+    // called once per operand -- the multiplicity is in the pin count.
+    constant(2).connect_sink(livehd::graph_util::setup_sink_pid(consumer, pid));
+    producer.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(consumer, pid));
     if (op == Ntype_op::Sum || op == Ntype_op::Mult) {
-      constant(4).connect_sink(sink);
+      constant(4).connect_sink(livehd::graph_util::setup_sink_pid(consumer, pid));
     } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
-      constant(3).connect_sink(consumer.create_sink_pin(1));
+      constant(3).connect_sink(livehd::graph_util::setup_sink_pid(consumer, 1));
     }
     consumer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
     Bitwidth(10).do_trans(g);
-    auto edges = g->get_output_pin("out").inp_edges();
-    ASSERT_EQ(edges.size(), 1);
-    auto    output = edges.begin()->driver;
+    // One driver per sink pin: a graph output is driven by exactly one pin.
+    auto out_drv = g->get_output_pin("out").get_driver_pin();
+    ASSERT_FALSE(out_drv.is_invalid());
+    auto    output = out_drv;
     int64_t actual = 0;
     if (output.is_const()) {
       actual = gu::const_of(output).to_just_i64();
@@ -82,10 +87,15 @@ TEST(BitwidthInfer, FoldedConstantsPreserveOperandMultiplicity) {
       ASSERT_TRUE(producer.is_invalid());
       int64_t lhs = op == Ntype_op::Mult ? 1 : 0;
       int64_t rhs = 0;
-      for (const auto& edge : output.get_master_node().inp_edges()) {
-        ASSERT_TRUE(edge.driver.is_const());
-        const auto value = gu::const_of(edge.driver).to_just_i64();
-        if (edge.sink.get_port_id() == 1) {
+      const auto consumer_node = output.get_master_node();
+      const auto consumer_op   = gu::type_op_of(consumer_node);
+      for (const auto& in_pin : consumer_node.inp_sorted_pins()) {
+        const auto in_drv = in_pin.get_driver_pin();
+        ASSERT_TRUE(in_drv.is_const());
+        const auto value = gu::const_of(in_drv).to_just_i64();
+        // BANK, not raw pid: an operand of a banked cell owns its own pid, so
+        // "is this the b side" is a bank question (graph/cell.hpp).
+        if (Ntype::sink_bank(consumer_op, in_pin.get_port_id()) == 1) {
           rhs += value;
         } else if (op == Ntype_op::Xor) {
           lhs ^= value;
@@ -182,8 +192,8 @@ TEST(BitwidthUnbounded, WarnsOnUnboundedDriverPin) {
   auto g = gio->create_graph();
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);  // no bits
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(sum.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(sum, 1));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   auto& sink = livehd::diag::sink();
@@ -212,8 +222,8 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum, 8);
   livehd::graph_util::set_sbits(sum.create_driver_pin(0), 8);
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(sum.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(sum, 1));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   auto& sink = livehd::diag::sink();
@@ -241,8 +251,8 @@ TEST(BitwidthInfer, SignedProductKeepsCrossZeroRange) {
   gio->add_output("o", 3);
   auto g       = gio->create_graph();
   auto product = gu::create_typed_node(*g, Ntype_op::Mult);
-  g->get_input_pin("a").connect_sink(product.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(product.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(product, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(product, 0));
   product.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
   Bitwidth(10).do_trans(g);
   EXPECT_FALSE(gu::is_unsign(product.get_driver_pin(0)));
@@ -260,9 +270,9 @@ TEST(BitwidthInfer, MaskDoesNotFoldNonmonotoneInterval) {
   gio->set_bits("o", 1);
   auto g   = gio->create_graph();
   auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   auto one = gu::create_const(*g, *Dlop::create_integer(1));
-  one.connect_sink(sum.create_sink_pin(0));
+  one.connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
   sum.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(mask, "a"));
   one.connect_sink(gu::setup_sink_by_name(mask, "mask"));
@@ -524,8 +534,8 @@ TEST(BitwidthInfer, SextReinterpretsUnsignedMask) {
 TEST(BitwidthInfer, MultProductWidth) {
   auto g  = bounded_inputs("bw_mult", 8, 4);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Mult);  // no bits
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, op);
@@ -546,8 +556,8 @@ TEST(BitwidthInfer, MultProductWidth) {
 TEST(BitwidthInfer, SumSubtractSurvivesAndKeepsWidth) {
   auto g  = bounded_inputs("bw_sum", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);  // no bits
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, op);
@@ -560,8 +570,8 @@ TEST(BitwidthInfer, SumSubtractSurvivesAndKeepsWidth) {
 TEST(BitwidthInfer, SumAddWidens) {
   auto g  = bounded_inputs("bw_sum_add", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, op);
@@ -577,8 +587,8 @@ TEST(BitwidthInfer, SumAddWidens) {
 TEST(BitwidthInfer, SumWithConstantOperand) {
   auto g  = bounded_inputs("bw_sum_const", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);  // no bits
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, op);
@@ -590,8 +600,8 @@ TEST(BitwidthInfer, SumWithConstantOperand) {
 TEST(BitwidthInfer, MultWithConstantOperand) {
   auto g  = bounded_inputs("bw_mult_const", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Mult);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_GT(run_and_read_driver(g, op), 8) << "a*2 over [-128..127] spans [-256..254]: wider than 8 bits";
@@ -609,9 +619,9 @@ TEST(BitwidthInfer, MuxWithConstantArm) {
   auto g = gio->create_graph();
 
   auto mux = livehd::graph_util::create_typed_node(*g, Ntype_op::Mux);
-  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
-  g->get_input_pin("d0").connect_sink(mux.create_sink_pin(1));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(mux.create_sink_pin(2));
+  g->get_input_pin("sel").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+  g->get_input_pin("d0").connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
   mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_GE(run_and_read_driver(g, mux), 8) << "a mux with one constant arm must still infer the data-arm width";
@@ -630,9 +640,9 @@ TEST(BitwidthInfer, PrestampedMuxIsReinferredFromDataArms) {
   auto g = gio->create_graph();
 
   auto mux = livehd::graph_util::create_typed_node(*g, Ntype_op::Mux, 66);
-  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(mux.create_sink_pin(1));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(mux.create_sink_pin(2));
+  g->get_input_pin("sel").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
   mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_EQ(run_and_read_driver(g, mux), 1) << "the mux range [0..1] is an unsigned one-bit value";
@@ -700,8 +710,8 @@ TEST(BitwidthInfer, MaskedInputPlusOneKeepsCarry) {
   livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
-  gm.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  gm.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, sum);
@@ -732,8 +742,8 @@ TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
   livehd::graph_util::setup_sink_by_name(sx, "b").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(5)));
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
-  sx.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  sx.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, sum);
@@ -765,8 +775,8 @@ TEST(BitwidthInfer, AllOnesMaskOverSignedPortKeepsFullRange) {
       .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(-1)));
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
-  gm.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  gm.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, sum);
@@ -792,8 +802,8 @@ TEST(BitwidthInfer, VariableSraKeepsRangeAndSurvives) {
   livehd::graph_util::setup_sink_by_name(nm, "a").connect_driver(g->get_input_pin("n"));
   livehd::graph_util::setup_sink_by_name(nm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(3)));
   auto amt = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
-  nm.create_driver_pin(0).connect_sink(amt.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(amt.create_sink_pin(0));
+  nm.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(amt, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(amt, 0));
 
   auto sra = livehd::graph_util::create_typed_node(*g, Ntype_op::SRA);
   livehd::graph_util::setup_sink_by_name(sra, "a").connect_driver(
@@ -829,11 +839,11 @@ TEST(BitwidthInfer, NotOfBooleanIsTwoBitSignedNeverZero) {
   auto g = gio->create_graph();
 
   auto cmp = livehd::graph_util::create_typed_node(*g, Ntype_op::LT);
-  g->get_input_pin("a").connect_sink(cmp.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(cmp.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(cmp, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(cmp, 1));
 
   auto nt = livehd::graph_util::create_typed_node(*g, Ntype_op::Not);
-  cmp.create_driver_pin(0).connect_sink(nt.create_sink_pin(0));
+  cmp.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(nt, 0));
   nt.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_EQ(run_and_read_driver(g, nt), 2) << "~{0,1} spans {-2,-1}: 2 signed bits";
@@ -857,8 +867,8 @@ TEST(BitwidthInfer, BitOrOfOneBitSignedValues) {
   auto g = gio->create_graph();
 
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Or);  // no bits
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_EQ(run_and_read_driver(g, op), 1) << "a|b over [-1..0] stays 1 signed bit";
@@ -868,8 +878,8 @@ TEST(BitwidthInfer, BitOrOfOneBitSignedValues) {
 TEST(BitwidthInfer, BitXorWidth) {
   auto g  = bounded_inputs("bw_xor", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Xor);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_GT(run_and_read_driver(g, op), 0) << "process_bit_xor must infer a bounded width";
@@ -879,8 +889,8 @@ TEST(BitwidthInfer, BitXorWidth) {
 TEST(BitwidthInfer, BitAndWidth) {
   auto g  = bounded_inputs("bw_and", 8, 4);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::And);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_GT(run_and_read_driver(g, op), 0) << "process_bit_and must infer a bounded width";
@@ -893,8 +903,8 @@ TEST(BitwidthInfer, BitAndWidth) {
 TEST(BitwidthInfer, ComparatorIsUnsignedBoolean) {
   auto g  = bounded_inputs("bw_cmp", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::LT);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_EQ(run_and_read_driver(g, op), 1) << "a boolean is [0..1]: u1";
@@ -909,8 +919,8 @@ TEST(BitwidthInfer, ComparatorIsUnsignedBoolean) {
 TEST(BitwidthInfer, ShiftedComparatorStaysNonNegative) {
   auto g   = bounded_inputs("bw_cmp_shl", 8, 8);
   auto cmp = livehd::graph_util::create_typed_node(*g, Ntype_op::LT);
-  g->get_input_pin("a").connect_sink(cmp.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(cmp.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(cmp, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(cmp, 1));
 
   auto shl = livehd::graph_util::create_typed_node(*g, Ntype_op::SHL);
   livehd::graph_util::setup_sink_by_name(shl, "a").connect_driver(cmp.create_driver_pin(0));
@@ -961,9 +971,9 @@ TEST(BitwidthInfer, MuxUnionsDataArms) {
   auto g = gio->create_graph();
 
   auto mux = livehd::graph_util::create_typed_node(*g, Ntype_op::Mux);  // no bits
-  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
-  g->get_input_pin("d0").connect_sink(mux.create_sink_pin(1));
-  g->get_input_pin("d1").connect_sink(mux.create_sink_pin(2));
+  g->get_input_pin("sel").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+  g->get_input_pin("d0").connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+  g->get_input_pin("d1").connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
   mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_GE(run_and_read_driver(g, mux), 8) << "process_mux must union the data-arm widths";
@@ -987,10 +997,10 @@ TEST(BitwidthInfer, MuxUnionsDataArms) {
 TEST(BitwidthInfer, ConcatWidthIsSumOfDeclaredLanes) {
   auto g  = bounded_inputs("bw_concat", 3, 5);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);  // no bits
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));              // lane 0 value (MSB lane)
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(3)).connect_sink(op.create_sink_pin(1));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(2));  // lane 1 value (LSB lane)
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(5)).connect_sink(op.create_sink_pin(3));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));              // lane 0 value (MSB lane)
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(3)).connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 2));  // lane 1 value (LSB lane)
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(5)).connect_sink(livehd::graph_util::setup_sink_pid(op, 3));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_EQ(run_and_read_driver(g, op), 8) << "a concat is exactly the sum of its declared lane widths";
@@ -1005,8 +1015,8 @@ TEST(BitwidthInfer, OversizedConcatLaneReportsError) {
   livehd::graph_util::create_const(*g, *Dlop::create_integer(15))
       .connect_sink(livehd::graph_util::setup_sink_by_name(select, "mask"));
   auto concat = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);
-  select.create_driver_pin(0).connect_sink(concat.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(concat.create_sink_pin(1));
+  select.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
   concat.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
   EXPECT_THROW((void)run_and_read_driver(g, concat), std::runtime_error);
 }
@@ -1027,8 +1037,8 @@ TEST(BitwidthMasks, DropsOnlyFiniteLowMaskIdentities) {
           src.connect_sink(gu::setup_sink_by_name(node, "a"));
           constant.connect_sink(gu::setup_sink_by_name(node, "mask"));
         } else {
-          src.connect_sink(node.create_sink_pin(0));
-          constant.connect_sink(node.create_sink_pin(0));
+          src.connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
+          constant.connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
         }
         node.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
         Bitwidth bw(10);
@@ -1056,8 +1066,8 @@ TEST(BitwidthMasks, KeepsDeclaredWidthAndDuplicateConsumers) {
     gu::create_const(*g, *Dlop::create_integer(15)).connect_sink(gu::setup_sink_by_name(node, "mask"));
     if (duplicate) {
       auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
-      src.connect_sink(sum.create_sink_pin(0));
-      node.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
+      src.connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+      node.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
       sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
     } else {
       g->get_io()->set_bits("o", 8);
@@ -1086,7 +1096,7 @@ TEST(BitwidthMasks, KeepsInstancePortWidth) {
   gu::create_const(*g, *Dlop::create_integer(15)).connect_sink(gu::setup_sink_by_name(node, "mask"));
   auto sub = gu::create_typed_node(*g, Ntype_op::Sub);
   sub.set_subnode(child);
-  node.create_driver_pin(0).connect_sink(sub.create_sink_pin("a"));
+  node.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_by_name(sub, "a"));
   sub.create_driver_pin("o").connect_sink(g->get_output_pin("o"));
   Bitwidth bw(10);
   bw.do_trans(g);
@@ -1157,10 +1167,10 @@ TEST(BitwidthMemory, BackwardAddressSeedPreservesUnsignedConcat) {
   auto memory = gu::create_typed_node(*g, Ntype_op::Memory);
   auto addr   = gu::create_typed_node(*g, Ntype_op::Concat, 3);
   gu::set_ubits(addr.create_driver_pin(0), 3);
-  g->get_input_pin("a").connect_sink(addr.create_sink_pin(0));
-  gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(addr.create_sink_pin(1));
-  g->get_input_pin("b").connect_sink(addr.create_sink_pin(2));
-  gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(addr.create_sink_pin(3));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(addr, 0));
+  gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(addr, 1));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(addr, 2));
+  gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(addr, 3));
   addr.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(memory, "addr"));
   gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(memory, "bits"));
   gu::create_const(*g, *Dlop::create_integer(8)).connect_sink(gu::setup_sink_by_name(memory, "size"));
@@ -1199,14 +1209,14 @@ TEST(BitwidthMemory, WriteDataDoesNotWidenSharedMaskedExpression) {
   constant(255).connect_sink(gu::setup_sink_by_name(mask, "mask"));
   mask.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(memory, "din"));
   auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
-  g->get_input_pin("select").connect_sink(mux.create_sink_pin(0));
-  constant(0).connect_sink(mux.create_sink_pin(1));
-  mask.create_driver_pin(0).connect_sink(mux.create_sink_pin(2));
+  g->get_input_pin("select").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+  constant(0).connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+  mask.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
   auto concat = gu::create_typed_node(*g, Ntype_op::Concat);
-  constant(165).connect_sink(concat.create_sink_pin(0));
-  constant(8).connect_sink(concat.create_sink_pin(1));
-  mux.create_driver_pin(0).connect_sink(concat.create_sink_pin(2));
-  constant(8).connect_sink(concat.create_sink_pin(3));
+  constant(165).connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
+  constant(8).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
+  mux.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(concat, 2));
+  constant(8).connect_sink(livehd::graph_util::setup_sink_pid(concat, 3));
   concat.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
   Bitwidth(10).do_trans(g);
   EXPECT_EQ(gu::bits_of(mux.create_driver_pin(0)), 8);

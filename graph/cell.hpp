@@ -127,6 +127,13 @@ enum class Ntype_op : uint8_t {
   // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
   AttrSet,
 
+  // Appended to preserve existing serialized op numbers. Both inspect the
+  // low `b` bits of operand `a`; b is a non-negative constant bit COUNT.
+  // Extension of a follows its signed value, independently of output hints.
+  // Rxor returns parity (0/1); Popcount returns the number of set bits (0..b).
+  Rxor,
+  Popcount,
+
   Last_invalid
 };
 
@@ -185,6 +192,8 @@ protected:
     a[static_cast<size_t>(Ntype_op::Or)]       = "or";
     a[static_cast<size_t>(Ntype_op::Xor)]      = "xor";
     a[static_cast<size_t>(Ntype_op::Ror)]      = "ror";
+    a[static_cast<size_t>(Ntype_op::Rxor)]       = "rxor";
+    a[static_cast<size_t>(Ntype_op::Popcount)]   = "popcount";
     a[static_cast<size_t>(Ntype_op::Not)]      = "not";
     a[static_cast<size_t>(Ntype_op::Get_mask)] = "get_mask";
     a[static_cast<size_t>(Ntype_op::Set_mask)] = "set_mask";
@@ -234,7 +243,9 @@ public:
   static inline constexpr bool is_loop_last(Ntype_op op) { return op >= Ntype_op::Memory && op <= Ntype_op::Sub; }
   // A computed combinational cell: every op in [Sum .. Clock_cell]. Not the
   // boundary (IO), not state, not the AttrSet marker.
-  static inline constexpr bool is_comb(Ntype_op op) { return op >= Ntype_op::Sum && op <= Ntype_op::Clock_cell; }
+  static inline constexpr bool is_comb(Ntype_op op) {
+    return (op >= Ntype_op::Sum && op <= Ntype_op::Clock_cell) || op == Ntype_op::Rxor || op == Ntype_op::Popcount;
+  }
 
   // Ops that only MOVE bits: a pin-tracker maps each result bit back to the
   // (source pin, source bit) it came from, so these mint no gate and add no
@@ -259,30 +270,94 @@ public:
   // pin being fed by several drivers; for that, see is_sink_single_driver().
   static inline constexpr bool has_multiple_driver_pins(Ntype_op op) { return is_unlimited_driver(op); }
 
-  // True when a given SINK pin accepts at most one driver pin. The handful of
-  // sinks that legally take several drivers fold them with the cell's identity
-  // op (Sum sums, And/Or/Xor reduce):
-  //   Sum/LT/GT               a (pid 0) and b (pid 1)
-  //   Mult/And/Or/Xor/Ror/EQ  a (pid 0)
-  // These multi-driver sinks carry an 's'-suffixed name ("as"/"bs") so the
-  // distinction is visible at every use. Every other sink is single-driver --
-  // including SHL/SRA b (the shift amount takes exactly one driver; the old
-  // one-hot `a<<(b0,b1)` multi-driver SHL form was removed, comptime-folded
-  // only). Keep this op/pid list in sync with get_sink_name_slow's 's' suffixes.
-  static inline constexpr bool is_sink_single_driver(Ntype_op op, hhds::Port_id pid) {
+  // ===========================================================================
+  // ONE DRIVER PER SINK PIN -- and the OPERAND BANK convention that follows.
+  // ===========================================================================
+  //
+  // EVERY sink pin of EVERY cell takes exactly one driver. A commutative cell
+  // that folds N operands under its identity op therefore spends N CONSECUTIVE
+  // sink pids, one per operand, instead of piling N drivers onto one pin. The
+  // operand's ROLE ("which bank it belongs to") rides on the PID, not on the
+  // fan-in of a shared pin.
+  //
+  // THE CONVENTION, defined here and nowhere else -- pid PARITY selects the
+  // bank, and the bank count is `sink_bank_count(op)`:
+  //
+  //   Sum / LT / GT              TWO banks, so bank = pid % 2:
+  //                                EVEN pid -> the "as" bank (Sum: ADDED,
+  //                                            LT/GT: left-hand operand)
+  //                                ODD  pid -> the "bs" bank (Sum: SUBTRACTED,
+  //                                            LT/GT: right-hand operand)
+  //                              Operand k of "as" is pid 2k; operand k of
+  //                              "bs" is pid 2k+1. The banks are independent:
+  //                              a Sum with three adds and one subtract
+  //                              occupies {0, 2, 4} and {1}, and pid 3 simply
+  //                              does not exist. NOTHING requires the pids to
+  //                              be dense; only sorted and bank-tagged.
+  //
+  //   Mult/And/Or/Xor/Ror/EQ     ONE bank ("as"), so bank = 0 for every pid:
+  //                              operand k is pid k.
+  //
+  //   every other op             NOT banked. The pid IS the role, one operand
+  //                              each (SHL/SRA b is the shift amount, Mux pid 0
+  //                              is the selector, ...), and sink_bank() is the
+  //                              identity.
+  //
+  // WHY parity rather than "adds below a split point": the split point would
+  // have to be stored somewhere or recomputed, and every graph->graph copy that
+  // preserves pids (legalize, flatten, inline_sub, occurrence materialize,
+  // color_reduce) would have to preserve it too. Parity is carried by the pid
+  // itself, so a copy that preserves pids preserves the bank for free.
+  //
+  // The NAME of a banked sink is its BANK's name ("as"/"bs") for every pid in
+  // the bank -- see get_sink_name -- so `sink_pin_name(e.sink) == "bs"` keeps
+  // meaning "this operand is subtracted" no matter which slot it landed in.
+  // Conversely get_sink_pid("as"/"bs") answers the BANK pid (0/1), which is the
+  // FIRST slot of the bank; use graph_util::setup_sink_by_name to append a new
+  // operand and graph_util::inp_drivers_of to read a whole bank.
+
+  // Number of operand banks a commutative cell folds into, or 0 when the op is
+  // not banked at all.
+  static inline constexpr int sink_bank_count(Ntype_op op) {
     switch (op) {
       case Ntype_op::Sum:
       case Ntype_op::LT:
-      case Ntype_op::GT: return pid != 0 && pid != 1;  // as, bs
+      case Ntype_op::GT: return 2;  // as (even pid) / bs (odd pid)
       case Ntype_op::Mult:
       case Ntype_op::And:
       case Ntype_op::Or:
       case Ntype_op::Xor:
       case Ntype_op::Ror:
-      case Ntype_op::EQ: return pid != 0;  // as
-      default: return true;
+      case Ntype_op::EQ: return 1;  // as
+      default: return 0;
     }
   }
+  static inline constexpr bool is_banked_sink_op(Ntype_op op) { return sink_bank_count(op) != 0; }
+
+  // The operand bank a sink pid belongs to. For a banked op this is the pid of
+  // the bank's FIRST slot (0 = "as", 1 = "bs"); for every other op it is the
+  // pid itself, so a consumer can apply it unconditionally:
+  //
+  //   const auto pid = Ntype::sink_bank(op, e.sink.get_port_id());
+  //   if (pid == 1) { ... }   // "the subtract side" / "the b operand"
+  //
+  static inline constexpr hhds::Port_id sink_bank(Ntype_op op, hhds::Port_id pid) {
+    const int banks = sink_bank_count(op);
+    if (banks == 0) {
+      return pid;
+    }
+    if (banks == 1) {
+      return 0;
+    }
+    return static_cast<hhds::Port_id>(pid & 1U);
+  }
+
+  // Kept as a TRUE-for-everything predicate: after the one-driver-per-sink-pin
+  // change no sink pin anywhere takes more than one driver. It stays as a named
+  // concept because call sites read better asking the question than asserting
+  // the constant, and because `is_banked_sink_op` is what they usually want
+  // instead (the banked ops are the ones whose operands are a MULTISET).
+  static inline constexpr bool is_sink_single_driver(Ntype_op, hhds::Port_id) { return true; }
 
   // Returns the hhds::Port_id for a LiveHD sink name on the given op, or
   // hhds::Port_invalid when the name is not a valid sink for this op.
@@ -322,6 +397,15 @@ public:
   }
 
   static inline std::string get_sink_name(Ntype_op op, hhds::Port_id pid) {
+    // A banked op names every slot of a bank after the BANK, so a consumer
+    // asking "is this operand subtracted?" gets "bs" from pid 1, 3, 5, ...
+    // (see the ONE DRIVER PER SINK PIN block above). The static name table is
+    // untouched -- it still only holds the bank pids -- so the `n_sinks`
+    // bookkeeping in cell.cpp and the get_sink_pid fast path keep their old,
+    // one-name-per-pid shape.
+    if (is_banked_sink_op(op)) {
+      return sink_bank(op, pid) == 0 ? std::string{"as"} : std::string{"bs"};
+    }
     if (pid >= Memory_port_stride) {
       auto pid_index = pid % Memory_port_stride;  // wrap names for multi inputs like the memory cell (port stride)
       auto name      = sink_pid2name[pid_index][static_cast<std::size_t>(op)];

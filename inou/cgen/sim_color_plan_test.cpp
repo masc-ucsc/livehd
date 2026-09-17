@@ -293,17 +293,17 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
   gu::set_unsign(feedback_value);
   auto feedback_masked = gu::create_typed_node(*graph, Ntype_op::And);
   feedback_value.connect_sink(feedback_masked.create_sink_pin(0));
-  gu::create_const(*graph, *Dlop::create_integer(0xf)).connect_sink(feedback_masked.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(0xf)).connect_sink(feedback_masked.create_sink_pin(1));
   auto feedback = feedback_masked.create_driver_pin(0);
   gu::set_bits(feedback, 16);
   gu::set_unsign(feedback);
   auto feedback_pack = gu::create_typed_node(*graph, Ntype_op::Or);
   feedback.connect_sink(feedback_pack.create_sink_pin(0));
-  gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(feedback_pack.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(feedback_pack.create_sink_pin(1));
   auto feedback_packed = feedback_pack.create_driver_pin(0);
   gu::set_bits(feedback_packed, 16);
   gu::set_unsign(feedback_packed);
-  feedback_packed.connect_sink(packed_or.create_sink_pin(0));
+  feedback_packed.connect_sink(packed_or.create_sink_pin(1));
   return graph;
 }
 
@@ -332,13 +332,13 @@ std::shared_ptr<hhds::Graph> make_cross_child_packed_feedback(std::string_view t
   gu::set_unsign(mux_value);
   auto masked = gu::create_typed_node(*select, Ntype_op::And);
   mux_value.connect_sink(masked.create_sink_pin(0));
-  gu::create_const(*select, *Dlop::create_integer(0xffff)).connect_sink(masked.create_sink_pin(0));
+  gu::create_const(*select, *Dlop::create_integer(0xffff)).connect_sink(masked.create_sink_pin(1));
   auto masked_value = masked.create_driver_pin(0);
   gu::set_bits(masked_value, 16);
   gu::set_unsign(masked_value);
   auto merge = gu::create_typed_node(*select, Ntype_op::Or);
   masked_value.connect_sink(merge.create_sink_pin(0));
-  gu::create_const(*select, *Dlop::create_integer(0)).connect_sink(merge.create_sink_pin(0));
+  gu::create_const(*select, *Dlop::create_integer(0)).connect_sink(merge.create_sink_pin(1));
   auto selected = merge.create_driver_pin(0);
   gu::set_bits(selected, 16);
   gu::set_unsign(selected);
@@ -354,7 +354,7 @@ std::shared_ptr<hhds::Graph> make_cross_child_packed_feedback(std::string_view t
   auto low     = low_io->create_graph();
   auto low_xor = gu::create_typed_node(*low, Ntype_op::Xor);
   low->get_input_pin("shift").connect_sink(low_xor.create_sink_pin(0));
-  low->get_input_pin("data").connect_sink(low_xor.create_sink_pin(0));
+  low->get_input_pin("data").connect_sink(low_xor.create_sink_pin(1));
   auto low_value = low_xor.create_driver_pin(0);
   gu::set_bits(low_value, 8);
   gu::set_unsign(low_value);
@@ -398,7 +398,7 @@ std::shared_ptr<hhds::Graph> make_cross_child_packed_feedback(std::string_view t
   auto computed_low = low_call.create_driver_pin(2);
   gu::set_bits(computed_low, 8);
   gu::set_unsign(computed_low);
-  computed_low.connect_sink(packed_or.create_sink_pin(0));
+  computed_low.connect_sink(packed_or.create_sink_pin(1));
 
   auto high_shift = gu::create_typed_node(*parent, Ntype_op::SHL);
   parent->get_input_pin("high").connect_sink(high_shift.create_sink_pin(0));
@@ -661,6 +661,48 @@ TEST(SimColorPlan, ReportIgnoresConstructionOrderGraphNamesAndNodeNames) {
   for (const auto& kernel : a.kernel_classes()) {
     EXPECT_EQ(kernel.colors.size(), 1u);
   }
+}
+
+TEST(SimColorPlan, StructuralHashPreservesPortRolesAndOperandMultiplicity) {
+  const auto sum_shape = [](std::string_view tag, bool reverse, bool subtract, bool repeat) {
+    auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_shape_multiset_") + std::string(tag));
+    auto  io  = lib.create_io("top");
+    io->add_input("a", 0);
+    io->add_input("b", 1);
+    io->add_input("c", 2);
+    io->add_output("y", 3);
+    for (auto name : {"a", "b", "c", "y"}) {
+      io->set_bits(name, 8);
+      io->set_unsign(name, true);
+    }
+    auto       graph   = io->create_graph();
+    auto       sum     = gu::create_typed_node(*graph, Ntype_op::Sum, 8);
+    const auto a       = graph->get_input_pin("a");
+    const auto b       = gu::create_const(*graph, *Dlop::create_integer(5));
+    const auto first   = reverse ? b : a;
+    const auto second  = reverse ? a : b;
+    const auto connect = [&](const hhds::Pin_class& pin) { pin.connect_sink(sum.create_sink_pin(subtract && pin == b ? 1 : 0)); };
+    connect(first);
+    connect(second);
+    if (repeat) {
+      // Two graph inputs have the same discovery shape, but both edges count.
+      graph->get_input_pin("c").connect_sink(sum.create_sink_pin(0));
+    }
+    sum.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
+    const auto plan = livehd::sim::Color_plan::discover(graph.get());
+    EXPECT_TRUE(plan.complete()) << plan.report();
+    for (const auto& site : plan.sites()) {
+      if (gu::type_op_of(site.node) == Ntype_op::Sum) {
+        return site.structural_id;
+      }
+    }
+    ADD_FAILURE() << "sum missing from the discovery plan";
+    return std::string{};
+  };
+  const auto base = sum_shape("base", false, false, false);
+  EXPECT_EQ(base, sum_shape("reverse", true, false, false));
+  EXPECT_NE(base, sum_shape("subtract", false, true, false));
+  EXPECT_NE(base, sum_shape("repeat", false, false, true));
 }
 
 TEST(SimColorPlan, ChildPortCastKeepsProducerStorageAndConsumerWidthsSeparate) {
