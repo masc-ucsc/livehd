@@ -756,7 +756,8 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   // 2c-wire — a store to a wire is its single combinational driver, consumed by
   // tolg as the net's value; never symbolically bind it (reads are
   // position-independent runtime, resolved to the buffered net by tolg).
-  if (decl_mode_of(dst_name) == upass::Mode::reg_kind || decl_mode_of(dst_name) == upass::Mode::wire_kind) {
+  const auto dst_mode = decl_mode_of(dst_name);
+  if (dst_mode == upass::Mode::reg_kind || dst_mode == upass::Mode::wire_kind) {
     return classify_vote();
   }
   if (src.size() <= 1) {
@@ -780,7 +781,8 @@ void uPass_constprop::process_assign() {
   //
   // 2c-wire — a store to a wire is its single combinational driver: tolg owns it
   // and reads are position-independent, so never bind it here (same as reg).
-  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind || decl_mode_of(lhs_text) == upass::Mode::wire_kind) {
+  const auto lhs_mode = decl_mode_of(lhs_text);
+  if (lhs_mode == upass::Mode::reg_kind || lhs_mode == upass::Mode::wire_kind) {
     move_to_parent();
     return;
   }
@@ -5057,7 +5059,8 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
   // can't hold a value — this guard is belt-and-braces against stale state).
   // 2c-wire — a wire's store is its single combinational driver: always keep it
   // (tolg wires the net from it); never drop as a "known const".
-  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind || decl_mode_of(lhs_text) == upass::Mode::wire_kind) {
+  const auto lhs_mode = decl_mode_of(lhs_text);
+  if (lhs_mode == upass::Mode::reg_kind || lhs_mode == upass::Mode::wire_kind) {
     return upass::Emit_decision::emit_node();
   }
 

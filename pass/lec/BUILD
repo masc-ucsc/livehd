@@ -70,6 +70,9 @@ cc_test(
 # graphs.
 cc_test(
     name = "query_test",
+    # ~45s optimized, ~7.5min at -c dbg (every miter is solved by an -O0
+    # encoder), so the default medium 300s timeout expires in a debug build.
+    size = "enormous",
     srcs = ["tests/query_test.cpp"],
     copts = COPTS,
     linkopts = ["-lz"],  # via :lec_query -> @abc (zlib-backed aiger/liberty readers)

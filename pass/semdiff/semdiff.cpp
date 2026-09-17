@@ -2043,12 +2043,12 @@ enum class Term_kind : uint8_t { Const, Input, Node, SumMod, Fit };
 using Term_id = uint32_t;
 
 struct Term {
-  Term_kind                              kind  = Term_kind::Const;
-  uint32_t                               op    = 0;  // Ntype_op, for Node
-  int32_t                                width = 0;  // compare modulus / native width
-  int32_t                                port  = 0;  // driver port_id (Node); unsign flag (Input)
-  std::string                            text;       // Dlop::serialize() bytes, or the input pin NAME
-  std::vector<std::pair<int32_t, Term_id>> kids;     // (sink_bank role, child id), canonicalized
+  Term_kind                                kind  = Term_kind::Const;
+  uint32_t                                 op    = 0;   // Ntype_op, for Node
+  int32_t                                  width = 0;   // compare modulus / native width
+  int32_t                                  port  = 0;   // driver port_id (Node); unsign flag (Input)
+  std::string                              text  = {};  // Dlop::serialize() bytes, or the input pin NAME
+  std::vector<std::pair<int32_t, Term_id>> kids  = {};  // (sink_bank role, child id), canonicalized
 
   bool operator==(const Term&) const = default;  // <== THE CONFIRMATION
 

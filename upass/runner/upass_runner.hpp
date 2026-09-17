@@ -1010,9 +1010,9 @@ protected:
   // to learn how its result `dst_name` is consumed: each `tuple_get(dst_name,
   // 'field')` adds to `req_fields`; any OTHER reference to `dst_name` sets
   // `whole_used`. Cursor-neutral (saves/restores). Feeds return_matches.
-  void collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
+  bool collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
                                   absl::flat_hash_set<std::string>& req_fields, bool& whole_used,
-                                  bool* scalar_destination = nullptr);
+                                  bool* scalar_destination = nullptr, std::string_view stop_field = {});
   // >0 while a synthesized constructor call is being spliced.
   int  init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't

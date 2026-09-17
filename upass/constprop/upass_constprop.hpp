@@ -319,15 +319,17 @@ protected:
     if (declared_mut_fields_.contains(var)) {
       return upass::Mode::mut_kind;
     }
-    const auto b = st().get_bundle(var);
-    const auto m = b ? b->get_mode() : upass::Mode::unknown;
-    if (m != upass::Mode::unknown || bundle_key::is_single_level(var)) {
-      return m;  // a bare name: the binding itself answers (unchanged)
+    if (bundle_key::is_single_level(var)) {
+      const auto b = st().get_bundle(var);
+      return b ? b->get_mode() : upass::Mode::unknown;
     }
     // A DOTTED field path -- a detupled `reg`/`wire` leaf (`flags.active`,
-    // `io.a`). Symbol_table::get_bundle hands back a scalar sub-bundle CLONED
-    // from the leaf Entry, and Bundle::get_bundle never lifts Entry.mode into
-    // the clone's mode_, so the field's storage class was invisible here and
+    // `io.a`). Do not ask Symbol_table::get_bundle for it: that API clones the
+    // selected sub-bundle, while Bundle::get_bundle never lifts Entry.mode into
+    // the clone's mode_ anyway. Besides making the field's storage class
+    // invisible, that pointless clone sat on every dotted-store hot path.
+    //
+    // Before declared facts were consulted here,
     // every reg/wire guard that consumes this (process_store's "never
     // symbolically bind a reg/wire store", process_assign's twin, and
     // classify_statement_impl's "always emit a reg/wire store") silently never

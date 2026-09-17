@@ -310,12 +310,12 @@ struct Result {
   //   unknown   the solver gave up / timed out / could not decide
   struct Lec_verdict {
     bool        present{false};
-    std::string verdict;         // proven | refuted | unknown
-    std::string solver;          // cvc5 | bitwuzla | lgyosys | …
+    std::string verdict{};       // proven | refuted | unknown
+    std::string solver{};        // cvc5 | bitwuzla | lgyosys | …
     bool        bounded{false};  // proven only to `bound` cycles from reset
     int64_t     bound{0};        // the depth `bounded` refers to
     // Independent oracle result; a native proof cannot stand in for this.
-    std::string crosscheck_verdict;  // empty until invoked; proven | refuted | unknown
+    std::string crosscheck_verdict{};  // empty until invoked; proven | refuted | unknown
     int         crosscheck_exit_code{-1};
   } lec;
 

@@ -697,6 +697,8 @@ sh_test(
     name = "slang_minion_features_test",
     size = "large",
     srcs = ["slang_minion_features_test.sh"],
+    # Three simulator host builds overlap; reserve their compiler fan-out.
+    tags = ["cpu:6"],
     data = ["//lhd"],
 )
 
@@ -1488,6 +1490,9 @@ sh_test(
     name = "lhd_abc_memlower_test",
     size = "large",
     srcs = ["lhd_abc_memlower_test.sh"],
+    # Ten independent mappings run concurrently, then two LEC queries per
+    # fixture. Reserve the fan-out so it does not oversubscribe other tests.
+    tags = ["cpu:8"],
     data = _FLOW_DATA + [
         "abc_memall.sv",
         "abc_memtile.sv",
@@ -1953,6 +1958,9 @@ sh_test(
     name = "lhd_ware_options_smoke",
     size = "large",
     srcs = ["lhd_ware_options_smoke.sh"],
+    # ~70 independent single-threaded synth/lec runs, driven 8 at a time.
+    # Reserve the fan-out so the pool does not oversubscribe concurrent tests.
+    tags = ["cpu:8"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 

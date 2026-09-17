@@ -7843,9 +7843,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       constexpr size_t kMaxCrossAddressProofs = 4096;
       auto             address_groups         = [](const std::vector<Encoded::Mem_rd_port>& ports) {
         std::vector<std::vector<size_t>>       groups;
-        std::unordered_map<cvc5::Term, size_t> shared, forwarded;
+        std::unordered_map<cvc5::Term, size_t> from_shared, from_forwarded;
         for (size_t k = 0; k < ports.size(); ++k) {
-          auto& index               = ports[k].from_shared_cur ? shared : forwarded;
+          auto& index               = ports[k].from_shared_cur ? from_shared : from_forwarded;
           auto [group_it, inserted] = index.emplace(ports[k].addr, groups.size());
           if (inserted) {
             groups.emplace_back();

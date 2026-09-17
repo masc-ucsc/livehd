@@ -406,8 +406,13 @@ import json, sys
 r = json.load(open(sys.argv[1]))['lec']
 assert r['verdict'] == 'proven' and r['bounded'], r
 PYBOUND
+# A refuted run also writes the counterexample as a Pyrope replay test and then
+# BUILDS AND RUNS it, which is a ~5.5s host clang build. This check asserts the
+# VERDICT, not the replay, so keep the witness emission and skip only its host
+# build (`lhd lec` still writes simfail_*.prp/.json here).
 if "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
-  --set formal.engine=bmc --set formal.bound=10 --workdir "$W/c2_bounded_deep" \
+  --set formal.engine=bmc --set formal.bound=10 --set formal.simfail_run=false \
+  --workdir "$W/c2_bounded_deep" \
   --result-json "$W/bounded_deep.json" >"$W/bounded_deep.log" 2>&1; then
   fail "deeper BMC missed the delayed mismatch"
 fi
@@ -532,8 +537,13 @@ V
   --top blocking_order --workdir "$W/blocking_order_lec" -q \
   || fail "blocking assignments lost process order or partial-write state"
 sed 's/sum = first + d/sum = first ^ d/' "$W/blocking_order_ref.v" > "$W/blocking_order_bad.v"
+# A refuted run also writes the counterexample as a Pyrope replay test and then
+# BUILDS AND RUNS it, which is a ~5.5s host clang build. This check asserts the
+# VERDICT, not the replay, so keep the witness emission and skip only its host
+# build (`lhd lec` still writes simfail_*.prp/.json here).
 "$LHD" lec --impl "$W/blocking_order_bad.v" --ref "$W/blocking_order.v" \
   --top blocking_order --workdir "$W/blocking_order_bad_lec" -q \
+  --set formal.simfail_run=false \
   --result-json "$W/blocking_order_bad.json" > "$W/blocking_order_bad.log" 2>&1
 [ $? -eq 10 ] || fail "blocking assignment corruption was not refuted: $(cat "$W/blocking_order_bad.log")"
 echo "PASS: blocking process order, partial writes, and negative control"
@@ -560,12 +570,26 @@ V
 sed 's/mux_528 \^ mux_524/mux_528 | mux_524/' "$W/temp_names_impl.v" >"$W/temp_names_bad.v"
 LGCHECK="$PWD/inou/yosys/lgcheck"
 YOSYS_ABS="$PWD/$YOSYS"
+# lgcheck drives the BAZEL-BUILT yosys, so its solve time follows the build
+# mode: the 16-word memory refutation below is ~6s under `-c opt` and ~35s
+# under `-c dbg` (an -O0 yosys), and slower still when the whole suite is
+# running beside it. Budget for the slow build -- every check here asserts a
+# DEFINITIVE verdict, and lgcheck exits as soon as it has one, so the headroom
+# is only ever spent on a regression. The budget-scheduling case at the end of
+# this file keeps its own tiny budget: there the budget IS the subject.
+LGCHECK_BUDGET="${LGCHECK_BUDGET:-300}"
+# The proof and the refutation are independent yosys runs; start both, then
+# read their verdicts in order.
 for variant in impl bad; do
   mkdir -p "$W/temp_names_$variant"
-  (cd "$W/temp_names_$variant" && LGCHECK_EQUIV_TIMEOUT=15 "$LGCHECK" \
+  (cd "$W/temp_names_$variant" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" "$LGCHECK" \
     --yosys "$YOSYS_ABS" --top temp_names \
     --reference "$W/temp_names_ref.v" --implementation "$W/temp_names_$variant.v") \
-    >"$W/temp_names_$variant.log" 2>&1
+    >"$W/temp_names_$variant.log" 2>&1 &
+  eval "temp_names_${variant}_pid=$!"
+done
+for variant in impl bad; do
+  eval "wait \"\${temp_names_${variant}_pid}\""
   rc=$?
   if [ "$variant" = impl ]; then
     [ "$rc" -eq 0 ] || { cat "$W/temp_names_$variant.log"; fail "temporary names blocked equivalence"; }
@@ -628,12 +652,18 @@ for variant in ("impl", "bad"):
     lines += ["assign y = " + " ^ ".join(f"state_{i}" for i in range(32)) + ";", "endmodule"]
     (w / f"packed_state_{variant}.v").write_text("\n".join(lines) + "\n")
 PYSTATE
+# The proof and the refutation are independent yosys runs; start both, then
+# read their verdicts in order.
 for variant in impl bad; do
   mkdir -p "$W/packed_state_$variant"
-  (cd "$W/packed_state_$variant" && LGCHECK_EQUIV_TIMEOUT=15 "$LGCHECK" \
+  (cd "$W/packed_state_$variant" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" "$LGCHECK" \
     --yosys "$YOSYS_ABS" --top packed_state \
     --reference "$W/packed_state_ref.v" --implementation "$W/packed_state_$variant.v") \
-    >"$W/packed_state_$variant.log" 2>&1
+    >"$W/packed_state_$variant.log" 2>&1 &
+  eval "packed_state_${variant}_pid=$!"
+done
+for variant in impl bad; do
+  eval "wait \"\${packed_state_${variant}_pid}\""
   rc=$?
   if [ "$variant" = impl ]; then
     [ "$rc" -eq 0 ] || { cat "$W/packed_state_$variant.log"; fail "packed/scalar state relation was not proven"; }
@@ -665,12 +695,18 @@ module state_encoding(input clk, d, output y);
 endmodule
 """)
 PYSTATE_ENCODING
+# The proof and the refutation are independent yosys runs; start both, then
+# read their verdicts in order.
 for variant in impl bad; do
   mkdir -p "$W/state_encoding_$variant"
-  (cd "$W/state_encoding_$variant" && LGCHECK_EQUIV_TIMEOUT=15 "$LGCHECK" \
+  (cd "$W/state_encoding_$variant" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" "$LGCHECK" \
     --yosys "$YOSYS_ABS" --top state_encoding \
     --reference "$W/state_encoding_ref.v" --implementation "$W/state_encoding_$variant.v") \
-    >"$W/state_encoding_$variant.log" 2>&1
+    >"$W/state_encoding_$variant.log" 2>&1 &
+  eval "state_encoding_${variant}_pid=$!"
+done
+for variant in impl bad; do
+  eval "wait \"\${state_encoding_${variant}_pid}\""
   rc=$?
   if [ "$variant" = impl ]; then
     [ "$rc" -eq 0 ] || { cat "$W/state_encoding_$variant.log"; fail "changed internal state encoding was not proven"; }
@@ -709,12 +745,18 @@ for variant in ("impl", "bad"):
               "endmodule"]
     (w / f"memory_names_{variant}.v").write_text("\n".join(lines) + "\n")
 PYMEMORY_NAMES
+# The proof and the refutation are independent yosys runs; start both, then
+# read their verdicts in order.
 for variant in impl bad; do
   mkdir -p "$W/memory_names_$variant"
-  (cd "$W/memory_names_$variant" && LGCHECK_EQUIV_TIMEOUT=15 "$LGCHECK" \
+  (cd "$W/memory_names_$variant" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" "$LGCHECK" \
     --yosys "$YOSYS_ABS" --top memory_names \
     --reference "$W/memory_names_ref.v" --implementation "$W/memory_names_$variant.v") \
-    >"$W/memory_names_$variant.log" 2>&1
+    >"$W/memory_names_$variant.log" 2>&1 &
+  eval "memory_names_${variant}_pid=$!"
+done
+for variant in impl bad; do
+  eval "wait \"\${memory_names_${variant}_pid}\""
   rc=$?
   if [ "$variant" = impl ]; then
     [ "$rc" -eq 0 ] || { cat "$W/memory_names_$variant.log"; fail "memory word/bit correspondence was not proven"; }

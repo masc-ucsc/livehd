@@ -110,17 +110,40 @@ run_abc_lec() {
   cat "$d/netv/"*.v "$d/modelsv/"*.v > "$d/impl.v"
   cat "$d/rev/"*.v > "$d/ref.v"
 
-  # LEC: the tech-mapped netlist must equal the original logic in every mode
-  run lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+  # The refutation below is an independent solver run over files that already
+  # exist, so start it alongside the proof rather than after it.
+  local neg_pid=""
   if [ "$fix" = abc_mem ] && [ "$mem" = true ] && [ "$reg_max" = 0 ] && [ $# -eq 0 ]; then
-    grep -q '"bounded":false' "$r" || fail "mapped memory only proved to a bounded depth"
     # Preserve all hierarchy and state names while corrupting one stored bit.
     # The memory/bank relation must verify the write logic, not assume it.
     sed "s/<= wdata;/<= wdata ^ 8'h01;/" "$d/ref.v" > "$d/bad_ref.v"
     cmp -s "$d/ref.v" "$d/bad_ref.v" && fail "memory negative control changed nothing"
-    "$LHD" lec --impl "$d/impl.v" --ref "$d/bad_ref.v" --top "$top" \
-      --workdir "$d/wc_bad" -q --result-json "$d/bad.json" > "$d/bad.log" 2>&1
-    [ $? -eq 10 ] || fail "mapped memory corruption was not refuted: $(cat "$d/bad.log")"
+    (
+      "$LHD" lec --impl "$d/impl.v" --ref "$d/bad_ref.v" --top "$top" \
+        --workdir "$d/wc_bad" -q --result-json "$d/bad.json" > "$d/bad.log" 2>&1
+      [ $? -eq 10 ]
+    ) &
+    neg_pid=$!
+  fi
+
+  # LEC: the tech-mapped netlist must equal the original logic in every mode.
+  # Two modes that emit a byte-identical (impl, ref) pair pose the SAME query --
+  # abc_mem folds to the identical blasted netlist under memory=true, under the
+  # `auto` default and under memory=true with memory_max_bits=63 -- so prove each
+  # distinct pair once and record the identity for the repeats. The key is the
+  # content, so a change that ever makes two modes diverge puts the solver back
+  # on both of them automatically.
+  local key
+  key="$W/proven.$(cat "$d/impl.v" "$d/ref.v" <(printf '%s' "$top") | md5sum | cut -d' ' -f1)"
+  if [ -e "$key" ]; then
+    echo "LEC: $fix[reg=$reg,mem=$mem] emits the impl+ref already proven by $(cat "$key")"
+  else
+    run lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+    printf '%s' "${d##*/}" > "$key"
+  fi
+  if [ -n "$neg_pid" ]; then
+    grep -q '"bounded":false' "$r" || fail "mapped memory only proved to a bounded depth"
+    wait "$neg_pid" || fail "mapped memory corruption was not refuted: $(cat "$d/bad.log")"
   fi
   NETV="$d/netv"
 }

@@ -1965,7 +1965,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // returns in ~0ms, so this separates it from a genuine give-up without naming
     // any single refusal reason -- and it scales with whatever formal.timeout is.
     const long long cheap_ms               = o.timeout > 0 ? static_cast<long long>(o.timeout) * 100 : 1000;
-    const bool      cheap_unknown          = r.elapsed_ms >= 0 && r.elapsed_ms < cheap_ms;
+    // Spent against SOLVER time, because that is what formal.timeout budgets:
+    // solve_spent_ms draws the cap down with r.solve_ms, so "barely spent it"
+    // has to be denominated the same way. r.elapsed_ms also carries graph
+    // transforms, encoding and cvc5 term construction -- LiveHD code, ~9x
+    // slower in an unoptimized build while cvc5 itself (prebuilt -O2 in every
+    // mode) is unchanged -- so keying off it made the SAME def take the retry
+    // under `-c opt` and skip it under `-c dbg`: matched_filter_4's collapsed
+    // leg costs 1.5s optimized and 13.1s debug against the same 12s threshold,
+    // and the debug build shipped the collapsed UNKNOWN (exit 7) for a def the
+    // flat retry proves.
+    const bool      cheap_unknown          = r.solve_ms < cheap_ms;
     const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
                                              && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
     //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one

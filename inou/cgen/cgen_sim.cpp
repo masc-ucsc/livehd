@@ -5201,18 +5201,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   absl::flat_hash_map<const hhds::Graph*, Loop_storage_shape>            loop_storage_memo;
   absl::flat_hash_set<const hhds::Graph*>                                loop_storage_visiting;
   std::function<Loop_storage_shape(const std::shared_ptr<hhds::Graph>&)> loop_storage_shape;
-  loop_storage_shape = [&](const std::shared_ptr<hhds::Graph>& graph) -> Loop_storage_shape {
-    if (!graph) {
+  loop_storage_shape = [&](const std::shared_ptr<hhds::Graph>& body_graph) -> Loop_storage_shape {
+    if (!body_graph) {
       return {false, false};
     }
-    if (auto it = loop_storage_memo.find(graph.get()); it != loop_storage_memo.end()) {
+    if (auto it = loop_storage_memo.find(body_graph.get()); it != loop_storage_memo.end()) {
       return it->second;
     }
-    if (!loop_storage_visiting.insert(graph.get()).second) {
+    if (!loop_storage_visiting.insert(body_graph.get()).second) {
       return {false, false};
     }
     Loop_storage_shape shape;
-    for (auto node : graph->body().nodes()) {
+    for (auto node : body_graph->body().nodes()) {
       const auto op = type_op_of(node);
       if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Clock_cell) {
         shape.stateless = false;
@@ -5229,8 +5229,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         shape.nested_loop |= node.is_loop_subnode() || child.nested_loop;
       }
     }
-    loop_storage_visiting.erase(graph.get());
-    loop_storage_memo.emplace(graph.get(), shape);
+    loop_storage_visiting.erase(body_graph.get());
+    loop_storage_memo.emplace(body_graph.get(), shape);
     return shape;
   };
 

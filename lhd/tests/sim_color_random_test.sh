@@ -54,13 +54,17 @@ grep -q '__rt.__color_quiescent = !__any_state_changed' "$xbody" \
   || fail "unknown-only design cannot quiesce"
 
 # A fixed seed must reproduce the same serial trace; changing it must alter the
-# ordering-none memory trace.
+# ordering-none memory trace. All three runs share ONE workdir so the driver is
+# built once (the build is ~5s, the simulation itself is milliseconds) and the
+# SEED is the only thing that differs between them -- which is exactly the claim
+# under test. `--seed` is a run-time argument, so the reused workdir re-executes
+# drv.bin every time; nothing caches the trace.
 for run in a b; do
   "$LHD" sim "$PRP" --seed 123 --probe dut.last --probe-from 0 --probe-to 4 \
-    --result-json "$work/${run}.json" --workdir "$work/run-${run}" -q >/dev/null
+    --result-json "$work/${run}.json" --workdir "$work/seeded" -q >/dev/null
 done
 "$LHD" sim "$PRP" --seed 124 --probe dut.last --probe-from 0 --probe-to 4 \
-  --result-json "$work/seed124.json" --workdir "$work/seed124" -q >/dev/null
+  --result-json "$work/seed124.json" --workdir "$work/seeded" -q >/dev/null
 
 python3 - "$work/a.json" "$work/b.json" "$work/seed124.json" <<'PY' || fail "random trace comparison failed"
 import json

@@ -3396,11 +3396,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       return {};  // recursive hierarchy is already diagnosed by discovery
     }
     Module_shape shape;
-    if (auto io = graph->get_io()) {
-      for (const auto& port : io->get_input_pin_decls()) {
+    if (auto mod_io = graph->get_io()) {
+      for (const auto& port : mod_io->get_input_pin_decls()) {
         shape.interface_words += (static_cast<uint64_t>(std::max<uint32_t>(1, port.bits)) + 63) / 64;
       }
-      for (const auto& port : io->get_output_pin_decls()) {
+      for (const auto& port : mod_io->get_output_pin_decls()) {
         shape.interface_words += (static_cast<uint64_t>(std::max<uint32_t>(1, port.bits)) + 63) / 64;
       }
     }

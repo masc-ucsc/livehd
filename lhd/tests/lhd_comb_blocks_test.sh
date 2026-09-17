@@ -17,18 +17,24 @@ for i in range(600):
 s+='endmodule\n'
 (w/'source.v').write_text(s)
 (w/'gold.v').write_text(s.replace('module chain(', 'module gold('))
-connections=', '.join(f'.y{i}(actual[{8*i}+:8])' for i in range(600))
+connections=', '.join(f'.y{i}(actual[{i}])' for i in range(600))
 golden=connections.replace('actual','expected')
+# One 8-bit net per stage, NOT one 4800-bit net part-selected 600 times: a wide
+# net with 600 partial drivers makes iverilog re-resolve all 4800 bits on every
+# stage update, which is quadratic (156s of vvp here) and buys no coverage. The
+# per-stage array runs in 3s and names the stage that diverged.
 (w/'tb.v').write_text(f'''module tb;
 reg [7:0] a,b;
-wire [4799:0] actual,expected;
+wire [7:0] actual[0:599];
+wire [7:0] expected[0:599];
 chain dut(.a(a), .b(b), {connections});
 gold ref_dut(.a(a), .b(b), {golden});
-integer i;
+integer i,j;
 initial begin
   for(i=0;i<64;i=i+1) begin
     a=$random; b=$random; #1;
-    if(actual !== expected) $fatal(1,"process boundary changed chain at %d",i);
+    for(j=0;j<600;j=j+1)
+      if(actual[j] !== expected[j]) $fatal(1,"process boundary changed chain at vector %d stage %d",i,j);
   end
   $finish;
 end

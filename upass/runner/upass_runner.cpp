@@ -6231,13 +6231,13 @@ bool uPass_runner::try_inline_func_call() {
     }
     logical[lname].emplace_back(std::move(sub), output_ref(o));
   }
-  absl::flat_hash_set<std::string> consumed_fields;
-  bool                             whole_result_used = false;
-  collect_return_consumption(saved, dst_name, consumed_fields, whole_result_used);
-  const bool named_result
-      = (logical_order.size() == 1 && std::any_of(consumed_fields.begin(), consumed_fields.end(), [&](const std::string& field) {
-           return field == logical_order.front() || field.starts_with(logical_order.front() + ".");
-         }));
+  bool named_result = false;
+  if (logical_order.size() == 1) {
+    absl::flat_hash_set<std::string> consumed_fields;
+    bool                             whole_result_used = false;
+    named_result = collect_return_consumption(
+        saved, dst_name, consumed_fields, whole_result_used, nullptr, logical_order.front());
+  }
   if (logical_order.empty()) {
     // Void comb (e.g. `top()` called for its casserts) — nothing to bind back.
   } else if (logical_order.size() == 1 && !named_result) {
@@ -10035,9 +10035,9 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
   return true;
 }
 
-void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
+bool uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
                                               absl::flat_hash_set<std::string>& req_fields, bool& whole_used,
-                                              bool* scalar_destination) {
+                                              bool* scalar_destination, std::string_view stop_field) {
   // The destructure `(p1,p2) = f()` lowers to `fcall(dst, …)` followed by
   // sibling `tuple_get(tmp, dst, 'p1')` / `tuple_get(tmp, dst, 'p2')` picks
   // (see the parse dump); a whole bind `c = f()` lowers to `store(c, dst)` and
@@ -10053,44 +10053,56 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
   // has) would otherwise look unconsumed, and the epilogue would drop the lone
   // TUPLE output's NAME (`u = (f=…)` instead of `u = (out=(f=…))`), making the
   // branch read fail with `unknown field out`.
-  const auto here = lm->save_cursor();
-  lm->restore_cursor(fcall_cursor);  // cursor on the func_call node
-  absl::flat_hash_set<std::string> result_aliases{std::string(dst_name)};
+  // This query is on the immutable source tree. Walking it through Lnast_manager
+  // used to save/restore the cursor several times per visited node. Large
+  // generated modules have hundreds of calls, so scanning each call's suffix
+  // that way made this pass both quadratic and needlessly expensive inside the
+  // quadratic term. Use the tree's node API directly; all references in this
+  // source frame receive the same inline renaming, so raw-name equality is the
+  // same relation as current_text() equality.
+  const auto& ln        = *lm->get_lnast();
+  const auto  fcall_dst = ln.get_first_child(fcall_cursor.current);
+  absl::flat_hash_set<std::string> result_aliases{
+      fcall_dst.is_invalid() ? std::string(dst_name) : std::string(ln.get_name(fcall_dst))};
+  bool target_found = false;
 
-  // One statement (cursor on it, cursor-neutral). `self` recurses into the
-  // statement's nested blocks.
-  const auto scan_stmt = [&](const auto& self) -> void {
-    const auto node     = lm->save_cursor();
-    const auto raw      = lm->get_raw_ntype();
+  // One statement. `self` recurses into the statement's nested blocks.
+  const auto scan_stmt = [&](const auto& self, Lnast_nid node) -> bool {
+    const auto raw      = ln.get_type(node);
     const bool is_tget  = Lnast_ntype::is_tuple_get(raw);
-    const bool is_alias = Lnast_ntype::is_store(raw) && lm->current_num_children() == 2;
-    if (!lm->move_to_child()) {
-      lm->restore_cursor(node);
-      return;
+    const auto first    = ln.get_first_child(node);
+    if (first.is_invalid()) {
+      return false;
     }
+    const auto second   = ln.get_sibling_next(first);
+    const bool is_alias = Lnast_ntype::is_store(raw) && !second.is_invalid() && ln.get_sibling_next(second).is_invalid();
     // children in order: [dst, src/operand, field/operand, …]
     std::size_t       idx         = 0;
     bool              names_dst   = false;  // dst_name appears as a non-leading child
     std::size_t       dst_at_idx  = std::string::npos;
     // Only an alias store can extend the set, so only it needs the dst COPIED
-    // (the cursor has moved on by the time it is inserted below).
-    const std::string destination = is_alias ? std::string(lm->current_text()) : std::string{};
-    do {
-      // Heterogeneous lookup: no std::string per child, per sibling.
-      if (idx > 0 && Lnast_ntype::is_ref(lm->get_raw_ntype()) && result_aliases.contains(lm->current_text())) {
+    // (the walk has moved on by the time it is inserted below).
+    const std::string destination = is_alias ? std::string(ln.get_name(first)) : std::string{};
+    for (auto child = first; !child.is_invalid(); child = ln.get_sibling_next(child)) {
+      // Heterogeneous lookup: no std::string per child, per sibling. Raw names
+      // are intentional; every ref in this source frame has the same tag/salt.
+      if (idx > 0 && Lnast_ntype::is_ref(ln.get_type(child)) && result_aliases.contains(ln.get_name(child))) {
         names_dst  = true;
         dst_at_idx = idx;
       }
       ++idx;
-    } while (lm->move_to_sibling());
+    }
     if (is_tget && dst_at_idx == 1) {
       // tuple_get(tmp, dst, field): read the field const (3rd child).
-      lm->restore_cursor(node);
-      lm->move_to_child();    // tmp
-      lm->move_to_sibling();  // dst
-      if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
-        if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
-          req_fields.insert(v->to_field());
+      const auto field = second.is_invalid() ? second : ln.get_sibling_next(second);
+      if (!field.is_invalid() && Lnast_ntype::is_const(ln.get_type(field))) {
+        if (auto v = Dlop::from_pyrope(ln.get_name(field)); v && !v->is_invalid()) {
+          auto picked = v->to_field();
+          req_fields.insert(picked);
+          if (!stop_field.empty() && (picked == stop_field || picked.starts_with(std::string(stop_field) + "."))) {
+            target_found = true;
+            return true;
+          }
         }
       }
     } else if (names_dst) {
@@ -10098,9 +10110,15 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
       if (is_alias) {
         result_aliases.insert(destination);
         if (scalar_destination != nullptr) {
-          if (const auto facts = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), destination);
-              facts && facts->kind != upass::decl_facts::Num::none) {
-            *scalar_destination = true;
+          // Declaration facts are keyed by the frame-renamed destination. User
+          // names take the regular tag here; compiler temps are not meaningful
+          // scalar destinations for overload selection.
+          const auto fact_name = Lnast::is_tmp(destination) ? std::string{} : lm->frame_variable(destination);
+          if (!fact_name.empty()) {
+            if (const auto facts = upass::decl_facts::lookup(symbol_table_, &ln, fact_name);
+                facts && facts->kind != upass::decl_facts::Num::none) {
+              *scalar_destination = true;
+            }
           }
         }
       }
@@ -10109,33 +10127,32 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
     // A func_def body is a separate name scope (its `dst_name` is a different
     // variable) — never descend into one.
     if (!Lnast_ntype::is_func_def(raw) && !Lnast_ntype::is_comp_type_lambda(raw)) {
-      lm->restore_cursor(node);
-      if (lm->move_to_child()) {
-        do {
-          const auto craw = lm->get_raw_ntype();
-          if (Lnast_ntype::is_stmts(craw)) {
-            // Scoped block: if/match arm, for/while/tick body, rolled_for payload.
-            const auto blk = lm->save_cursor();
-            if (lm->move_to_child()) {
-              do {
-                self(self);
-              } while (lm->move_to_sibling());
+      for (auto child = first; !child.is_invalid(); child = ln.get_sibling_next(child)) {
+        const auto craw = ln.get_type(child);
+        if (Lnast_ntype::is_stmts(craw)) {
+          // Scoped block: if/match arm, for/while/tick body, rolled_for payload.
+          for (auto stmt = ln.get_first_child(child); !stmt.is_invalid(); stmt = ln.get_sibling_next(stmt)) {
+            if (self(self, stmt)) {
+              return true;
             }
-            lm->restore_cursor(blk);
-          } else if (Lnast_ntype::is_if_like(raw) && !Lnast_ntype::is_ref(craw) && !Lnast_ntype::is_const(craw)
-                     && !Lnast_ntype::is_type(craw)) {
-            self(self);  // flat when/unless: body statements are direct children
           }
-        } while (lm->move_to_sibling());
+        } else if (Lnast_ntype::is_if_like(raw) && !Lnast_ntype::is_ref(craw) && !Lnast_ntype::is_const(craw)
+                   && !Lnast_ntype::is_type(craw)) {
+          if (self(self, child)) {  // flat when/unless: body statements are direct children
+            return true;
+          }
+        }
       }
     }
-    lm->restore_cursor(node);
+    return false;
   };
 
-  while (lm->move_to_sibling()) {
-    scan_stmt(scan_stmt);
+  for (auto stmt = ln.get_sibling_next(fcall_cursor.current); !stmt.is_invalid(); stmt = ln.get_sibling_next(stmt)) {
+    if (scan_stmt(scan_stmt, stmt)) {
+      break;
+    }
   }
-  lm->restore_cursor(here);
+  return target_found;
 }
 
 bool uPass_runner::return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used,

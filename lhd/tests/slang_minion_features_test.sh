@@ -223,10 +223,12 @@ EOF
 ${LHD} compile "$W/uwiden.sv" --reader slang --top uwiden \
   --emit-dir lg:"$W/uwiden_lg/" --workdir "$W/uwiden_lgw" -q \
   || fail "unsigned-widening LGraph emission failed"
+# Each `lhd sim` below builds its own C++ simulator host (~6s of clang), and the
+# three are independent. Start each one as soon as its graph exists and collect
+# the verdicts where they are actually needed, so the three builds overlap.
 ${LHD} sim lg:"$W/uwiden_lg/" "$W/uwiden_tb.prp"  \
-  --workdir "$W/uwiden_sim" -q \
-  || fail "mask-free unsigned widening simulated a set source msb incorrectly"
-echo "PASS: mask-free LGraph unsigned widening keeps the physical input non-negative"
+  --workdir "$W/uwiden_sim" -q &
+uwiden_sim_pid=$!
 
 # Effective width equal to a signed destination width is not a no-op: bit 3
 # becomes the sign. This is the boundary case for the mask-elision predicate.
@@ -342,9 +344,8 @@ ${LHD} compile "$W/dynamic_packed_write.sv" --reader slang --top dynamic_packed_
   || fail "dynamic packed-lvalue LGraph emission failed"
 ${LHD} sim lg:"$W/dynamic_packed_write_lg/" "$W/dynamic_packed_write_tb.prp" \
   --set sim.init_zero=true  \
-  --workdir "$W/dynamic_packed_write_sim" -q \
-  || fail "dynamic packed-lvalue generated simulation failed"
-echo "PASS: dynamic packed-lvalue update keeps its declared-width boundary explicit"
+  --workdir "$W/dynamic_packed_write_sim" -q &
+dynamic_packed_write_sim_pid=$!
 
 # A write to a CONSTANT inner element of a multi-dimensional packed array must
 # convert the element ordinal into a BIT offset. For five-bit elements, inner
@@ -436,7 +437,17 @@ ${LHD} compile "$W/sub_output_boundary.sv" --reader slang --top sub_output_bound
   --workdir "$W/sub_output_boundary_lgw" -q \
   || fail "sub-output boundary LGraph emission failed"
 ${LHD} sim lg:"$W/sub_output_boundary_lg/" "$W/sub_output_boundary_tb.prp" \
-   --workdir "$W/sub_output_boundary_sim" -q \
+   --workdir "$W/sub_output_boundary_sim" -q &
+sub_output_boundary_sim_pid=$!
+
+# Collect the three overlapped simulator builds.
+wait "$uwiden_sim_pid" \
+  || fail "mask-free unsigned widening simulated a set source msb incorrectly"
+echo "PASS: mask-free LGraph unsigned widening keeps the physical input non-negative"
+wait "$dynamic_packed_write_sim_pid" \
+  || fail "dynamic packed-lvalue generated simulation failed"
+echo "PASS: dynamic packed-lvalue update keeps its declared-width boundary explicit"
+wait "$sub_output_boundary_sim_pid" \
   || fail "fused sub-output boundary generated simulation failed"
 # The child's packed value must reach the parent through an EXPLICIT boundary
 # conversion at the child's DECLARED output width (2), not as whatever carrier

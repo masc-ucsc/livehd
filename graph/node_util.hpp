@@ -35,6 +35,18 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 
+// GCC's -Wdangling-reference heuristic flags `const T& x = f(temporary())`
+// for any `f` that returns a reference and takes one by reference, even when
+// the result aliases something else entirely. `const_of` is exactly that case:
+// it hands back a reference into the GRAPH's constant pool, never into the
+// (often temporary) Pin_class it was asked about. Mark it so the heuristic
+// stops guessing; clang/older GCC simply lack the attribute.
+#if __has_cpp_attribute(gnu::no_dangling)
+#define LIVEHD_NO_DANGLING [[gnu::no_dangling]]
+#else
+#define LIVEHD_NO_DANGLING
+#endif
+
 namespace livehd::graph_util {
 
 // A snapshot of a DRIVER's fan-out edges. Matches the element type and inline
@@ -304,17 +316,19 @@ inline constexpr uint32_t kFormalAssumeHier   = 5;
 // across load/copy/clear of that graph. A NON-constant pin is a BUG at the
 // call site, never a 0: hard failure in every build mode. Where a pin may
 // legitimately be non-constant, probe `pin.is_const()` / `pin.const_value()`.
-[[nodiscard]] inline const Dlop& const_of(const hhds::Pin_class& pin) {
+[[nodiscard]] LIVEHD_NO_DANGLING inline const Dlop& const_of(const hhds::Pin_class& pin) {
   const Dlop* v = pin.const_value();
   if (v == nullptr) [[unlikely]] {
     not_a_constant(pin);
   }
   return *v;
 }
-[[nodiscard]] inline const Dlop& const_of(const hhds::Occurrence_pin& pin) { return const_of(pin.base_pin()); }
+[[nodiscard]] LIVEHD_NO_DANGLING inline const Dlop& const_of(const hhds::Occurrence_pin& pin) {
+  return const_of(pin.base_pin());
+}
 // Nodes never carry a value: probing one is a compile error, not a silent 0.
-const Dlop&                      const_of(const hhds::Node_class&)      = delete;
-const Dlop&                      const_of(const hhds::Occurrence_node&) = delete;
+const Dlop&                                         const_of(const hhds::Node_class&)      = delete;
+const Dlop&                                         const_of(const hhds::Occurrence_node&) = delete;
 
 
 // hhds `NodeEntry::type` is 16 bits whose bit 0 is hhds's own per-node

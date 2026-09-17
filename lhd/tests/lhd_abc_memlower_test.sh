@@ -95,24 +95,79 @@ lec_both() {
   run compile lg:"$d/re" --top "$top.$top" --emit-dir verilog:"$d/rev" --workdir "$d/w8"
   cat "$d/netv/"*.v "$d/modelsv/"*.v > "$d/impl.v"
   cat "$d/rev/"*.v > "$d/ref.v"
+  # The two queries below share no state (separate inputs, separate workdirs,
+  # separate result JSON), so they are solved side by side rather than in turn.
   # Default LEC: graph-level, netlist as IMPL (the direction mem_lower's refinements are sound in)
   "$LHD" lec --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top.$top" \
-      --workdir "$d/wc5" -q --result-json "$d/lec_graph.json" \
-    || fail "$top: graph LEC failed: $(cat "$d/lec_graph.json" 2>/dev/null)"
-  grep -q '"verdict":"proven"' "$d/lec_graph.json" \
-    || fail "$top: graph LEC did not PROVE the bit-blasted memory: $(grep -o '"lec":{[^}]*}' "$d/lec_graph.json")"
+      --workdir "$d/wc5" -q --result-json "$d/lec_graph.json" &
+  local graph_pid=$!
   # default LEC: Verilog-level (the lhdtrack lec_netlist path)
   "$LHD" lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" \
-      --workdir "$d/wc" -q --result-json "$d/lec_verilog.json" \
-    || fail "$top: Verilog LEC failed: $(cat "$d/lec_verilog.json" 2>/dev/null)"
+      --workdir "$d/wc" -q --result-json "$d/lec_verilog.json" &
+  local verilog_pid=$!
+  wait "$graph_pid" || fail "$top: graph LEC failed: $(cat "$d/lec_graph.json" 2>/dev/null)"
+  grep -q '"verdict":"proven"' "$d/lec_graph.json" \
+    || fail "$top: graph LEC did not PROVE the bit-blasted memory: $(grep -o '"lec":{[^}]*}' "$d/lec_graph.json")"
+  wait "$verilog_pid" || fail "$top: Verilog LEC failed: $(cat "$d/lec_verilog.json" 2>/dev/null)"
   ! grep -q '"verdict":"refuted"' "$d/lec_verilog.json" || fail "$top: default LEC REFUTED the bit-blasted memory"
 }
+
+
+# Every mapping below is independent: its own output directory, its own workdirs
+# and its own result JSON. Run them all concurrently up front and have each
+# section wait for the one it asserts on, instead of walking them in turn. The
+# BUILD target reserves the fan-out with a cpu: tag.
+cat > "$W/mem1r1w.sv" <<'EOF'
+module mem1r1w (
+  input  logic       clk,
+  input  logic       we,
+  input  logic [2:0] waddr,
+  input  logic [7:0] wdata,
+  input  logic [2:0] raddr,
+  output logic [7:0] rdata
+);
+  logic [7:0] mem[8];                            // 8 x 8 = 64 storage bits
+  always_ff @(posedge clk) if (we) mem[waddr] <= wdata;
+  assign rdata = mem[raddr];
+endmodule
+EOF
+cat > "$W/eqt.sv" <<'EOF'
+module eqt (input logic [3:0] x, output logic y, output logic z);
+  assign y = (x == 8'd100);   // 1100100b: always 0 for a 4-bit x
+  assign z = (x == 8'd20);    //   10100b: always 0; low 4 bits = 4, so a narrow compare gives x == 4
+endmodule
+EOF
+
+declare -A MAP_PID=()
+map_bg() {  # map_bg <dir> <map_design args...>: start a mapping in the background
+  local d="$1"
+  map_design "$@" &
+  MAP_PID["$d"]=$!
+}
+map_wait() {  # map_wait <dir>: block until <dir>'s mapping finished (once)
+  local d="$1"
+  [ -n "${MAP_PID[$d]:-}" ] || return 0
+  local pid="${MAP_PID[$d]}"
+  unset 'MAP_PID[$d]'
+  wait "$pid" || fail "mapping for ${d##*/} failed (see the message above)"
+}
+
+map_bg "$W/tile32"         "$TILE"          memtile -GN=32 --set pass.abc.memory=true
+map_bg "$W/tile8"          "$TILE"          memtile -GN=8  --set pass.abc.memory=true
+map_bg "$W/memall"         "$MEMALL"        memall  ""     --set pass.abc.memory=true
+map_bg "$W/tile8_off"      "$TILE"          memtile -GN=8  --set pass.abc.memory=false
+map_bg "$W/mem_auto_over"  "$W/mem1r1w.sv"  mem1r1w ""     --set pass.abc.memory_max_bits=63
+map_bg "$W/mem_auto_under" "$W/mem1r1w.sv"  mem1r1w ""     --set pass.abc.memory_max_bits=64
+map_bg "$W/mem_true_over"  "$W/mem1r1w.sv"  mem1r1w ""     --set pass.abc.memory=true --set pass.abc.memory_max_bits=63
+map_bg "$W/tile32_max"     "$TILE"          memtile -GN=32 --set pass.abc.memory_max_bits=255
+map_bg "$W/tile32_max0"    "$TILE"          memtile -GN=32 --set pass.abc.memory_max_bits=0
+map_bg "$W/eqt"            "$W/eqt.sv"      eqt     ""
 
 # ---------------------------------------------------------------------------
 # 1a. N=32 tile: lowered, guards on ABC input nodes and mapped cells
 # ---------------------------------------------------------------------------
 D="$W/tile32"
-map_design "$D" "$TILE" memtile -GN=32 --set pass.abc.memory=true
+map_wait "$D"
 ! grep -q '"code":"memory-unlowered"' "$D/diag.jsonl" || fail "tile32: memory was NOT bit-blasted: $(grep memory-unlowered "$D/diag.jsonl")"
 ! grep -hq '`include.*cgen_memory\|reg .*\[.*:.*\].*\[' "$D/netv/"*.v || fail "tile32: a native memory instance survived memory=true"
 dff=$(dffs "$D/netv")
@@ -143,7 +198,7 @@ echo "PASS: 32x8 constant-index tile bit-blasts to $dff DFFs + $gates cells from
 # 1b. N=8 tile: LEC-equivalent to the source memory under both solvers
 # ---------------------------------------------------------------------------
 D="$W/tile8"
-map_design "$D" "$TILE" memtile -GN=8 --set pass.abc.memory=true
+map_wait "$D"
 ! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "tile8: a native memory instance survived memory=true"
 lec_both "$D" memtile
 echo "PASS: 8x8 constant-index tile is LEC-equivalent to its source memory (default LEC on graphs and Verilog)"
@@ -152,7 +207,7 @@ echo "PASS: 8x8 constant-index tile is LEC-equivalent to its source memory (defa
 # 2. read_all: lowers and LECs (bit layout: entry 0 in the low bits)
 # ---------------------------------------------------------------------------
 D="$W/memall"
-map_design "$D" "$MEMALL" memall "" --set pass.abc.memory=true
+map_wait "$D"
 ! grep -q '"code":"memory-unlowered"' "$D/diag.jsonl" || fail "memall: read_all memory was NOT bit-blasted: $(grep memory-unlowered "$D/diag.jsonl")"
 ! grep -hq '`include.*cgen_memory\|reg .*\[.*:.*\].*\[' "$D/netv/"*.v || fail "memall: a native array survived memory=true"
 dff=$(dffs "$D/netv")
@@ -167,50 +222,36 @@ echo "PASS: whole-array read_all memory bit-blasts and is LEC-equivalent (defaul
 # 3. the three memory modes and the auto thresholds
 # ---------------------------------------------------------------------------
 D="$W/tile8_off"
-map_design "$D" "$TILE" memtile -GN=8 --set pass.abc.memory=false
+map_wait "$D"
 grep -hq "cgen_memory" "$D/netv/"*.v || fail "memory=false: memory was not kept as a native instance"
 echo "PASS: memory=false keeps the memory a native instance"
 
 # A 2-port memory is the shape an SRAM macro CAN have, so `auto` decides it on
 # size alone: native above memory_max_bits, folded below.
-cat > "$W/mem1r1w.sv" <<'EOF'
-module mem1r1w (
-  input  logic       clk,
-  input  logic       we,
-  input  logic [2:0] waddr,
-  input  logic [7:0] wdata,
-  input  logic [2:0] raddr,
-  output logic [7:0] rdata
-);
-  logic [7:0] mem[8];                            // 8 x 8 = 64 storage bits
-  always_ff @(posedge clk) if (we) mem[waddr] <= wdata;
-  assign rdata = mem[raddr];
-endmodule
-EOF
 D="$W/mem_auto_over"
-map_design "$D" "$W/mem1r1w.sv" mem1r1w ""  --set pass.abc.memory_max_bits=63
+map_wait "$D"
 grep -q '"code":"memory-max-bits"' "$D/diag.jsonl" || fail "auto/max_bits=63: no memory-max-bits note for a 64-bit memory: $(cat "$D/diag.jsonl")"
 grep -q "8 x 8 = 64 bits" "$D/diag.jsonl" || fail "memory-max-bits note does not name the memory size: $(grep memory-max-bits "$D/diag.jsonl")"
 grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "auto/max_bits=63: the 64-bit memory was bit-blasted anyway"
 D="$W/mem_auto_under"
-map_design "$D" "$W/mem1r1w.sv" mem1r1w ""  --set pass.abc.memory_max_bits=64
+map_wait "$D"
 ! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "auto/max_bits=64: a memory within the limit was kept native"
 # ...and `true` folds it whatever the threshold says.
 D="$W/mem_true_over"
-map_design "$D" "$W/mem1r1w.sv" mem1r1w "" --set pass.abc.memory=true --set pass.abc.memory_max_bits=63
+map_wait "$D"
 ! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory=true consulted memory_max_bits"
 echo "PASS: auto folds within memory_max_bits and keeps a larger memory native; true ignores the threshold"
 
 # The 34-port tile is over the same threshold, but no macro has 34 ports, so
 # `auto` folds it anyway and says why.
 D="$W/tile32_max"
-map_design "$D" "$TILE" memtile -GN=32  --set pass.abc.memory_max_bits=255
+map_wait "$D"
 grep -q '"code":"memory-ports"' "$D/diag.jsonl" || fail "auto: no memory-ports note for the 34-port tile: $(cat "$D/diag.jsonl")"
 ! grep -hq '`include.*cgen_memory\|reg .*\[.*:.*\].*\[' "$D/netv/"*.v || fail "auto: the 34-port tile was kept native"
 echo "PASS: auto folds an over-3-port memory whatever its size"
 
 D="$W/tile32_max0"
-map_design "$D" "$TILE" memtile -GN=32  --set pass.abc.memory_max_bits=0
+map_wait "$D"
 ! grep -hq '`include.*cgen_memory' "$D/netv/"*.v || fail "memory_max_bits=0 must lift the size limit"
 if "$LHD" pass abc --top memtile.memtile lg:"$W/tile32/lg" --emit-dir lg:"$W/bad_net" --set synth.liberty="$LIB" \
     --set pass.abc.memory_max_bits=lots --workdir "$W/bad_w" -q --result-json "$W/bad.json" 2>/dev/null; then
@@ -225,14 +266,8 @@ echo "PASS: memory_max_bits=0 lifts the size limit; malformed memory/memory_max_
 # ---------------------------------------------------------------------------
 # 4. all-constant / wide-constant EQ maps to constant 0
 # ---------------------------------------------------------------------------
-cat > "$W/eqt.sv" <<'EOF'
-module eqt (input logic [3:0] x, output logic y, output logic z);
-  assign y = (x == 8'd100);   // 1100100b: always 0 for a 4-bit x
-  assign z = (x == 8'd20);    //   10100b: always 0; low 4 bits = 4, so a narrow compare gives x == 4
-endmodule
-EOF
 D="$W/eqt"
-map_design "$D" "$W/eqt.sv" eqt ""
+map_wait "$D"
 [ "$(cells "$D/netv")" -eq 0 ] || fail "eqt: a compare against a constant wider than its operand mapped to logic: $(cat "$D/netv/"*.v)"
 [ "$(cat "$D/netv/"*.v | grep -c "_const0_ ")" -eq 2 ] || fail "eqt: expected both outputs driven by constant 0: $(cat "$D/netv/"*.v)"
 echo "PASS: x[3:0] == 8'd100 maps to constant 0"

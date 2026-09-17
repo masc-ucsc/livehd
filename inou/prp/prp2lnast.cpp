@@ -5103,9 +5103,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
               const auto peel_balanced = [](std::string_view t) {
                 while (t.size() >= 2 && t.front() == '(' && t.back() == ')') {
                   int depth = 0;
-                  for (std::size_t i = 0; i < t.size(); ++i) {
-                    depth += t[i] == '(' ? 1 : (t[i] == ')' ? -1 : 0);
-                    if (depth == 0 && i + 1 != t.size()) {
+                  for (std::size_t pos = 0; pos < t.size(); ++pos) {
+                    depth += t[pos] == '(' ? 1 : (t[pos] == ')' ? -1 : 0);
+                    if (depth == 0 && pos + 1 != t.size()) {
                       return t;  // the leading '(' is not the one the last ')' closes
                     }
                   }

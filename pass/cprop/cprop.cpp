@@ -787,6 +787,24 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
     return false;
   }
 
+  // A private link consumed only as the next Set_mask's BASE is an interior
+  // chain node. The consumer-side pass will consider the outer head and absorb
+  // this link if the chain is canonicalizable; retrying from every interior
+  // link makes a refused N-write chain O(N^2). Be role-aware here: a Set_mask
+  // feeding another Set_mask's VALUE is an independent pack head, as is a
+  // version with any additional observer.
+  hhds::Pin_class only_sink;
+  size_t          consumers = 0;
+  for (const auto& edge : head_out.out_edges()) {
+    only_sink = edge.sink;
+    if (++consumers > 1) {
+      break;
+    }
+  }
+  if (consumers == 1 && type_op_of(only_sink.get_master_node()) == Ntype_op::Set_mask && sink_pin_name(only_sink) == "a") {
+    return false;
+  }
+
   std::vector<Pack_lane>                 lanes;
   std::vector<hhds::Node_class>          chain;  // head first
   absl::flat_hash_set<hhds::Class_index> in_chain;
@@ -1035,10 +1053,11 @@ constexpr bool kOrPackEnabled = true;
 // would leave the outer walk staring at a Concat where it needs a constant-zero
 // base, and the chain would only fragment.
 //
-// Do NOT try to pre-classify a link as "interior" by looking for a same-op
+// Do NOT pre-classify a link as "interior" merely by looking for a same-op
 // consumer: a Set_mask feeding another Set_mask's `value` port (pid 4), or an
 // Or pack feeding an unrelated non-pack Or, is a real head whose consumer never
-// absorbs it -- skipping those left the pack un-canonicalized forever.
+// absorbs it. canonicalize_set_mask_pack has the narrower safe check: one
+// consumer, specifically the next Set_mask's `a` input.
 bool canonicalize_concat_pack(hhds::Graph* g, hhds::Node_class& node) {
   if (node.is_invalid() || !node.has_out_edges()) {
     return false;

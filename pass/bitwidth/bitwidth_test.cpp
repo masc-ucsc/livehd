@@ -44,7 +44,7 @@ TEST(BitwidthInfer, FoldedConstantsPreserveOperandMultiplicity) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_BitwidthInfer_multiplicity");
   int   index  = 0;
-  for (const auto [op, pid, expected] : {
+  for (const auto& [op, pid, expected] : {
            std::tuple{ Ntype_op::Xor, 0,  0},
            std::tuple{ Ntype_op::Sum, 0,  8},
            std::tuple{ Ntype_op::Sum, 1, -8},

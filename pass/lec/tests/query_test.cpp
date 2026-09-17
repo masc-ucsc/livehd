@@ -530,7 +530,15 @@ TEST(CombEquiv, NestedLoopCertificatesSurviveUnresolvedParents) {
       auto graph = io->create_graph();
       auto node  = graph_util::create_typed_node(*graph, Ntype_op::Sub);
       if (outer_loop) {
-        node.set_subnode(child->get_io(), hhds::Subnode_loop{.count = count});
+        node.set_subnode(child->get_io(),
+                         hhds::Subnode_loop{
+                             .first              = 0,
+                             .step               = 1,
+                             .count              = count,
+                             .index_input        = std::nullopt,
+                             .activation_input   = std::nullopt,
+                             .next_active_output = std::nullopt,
+                         });
         node.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
       } else {
         node.set_subnode(child->get_io());
