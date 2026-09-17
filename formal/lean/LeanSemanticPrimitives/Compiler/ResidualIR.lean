@@ -102,12 +102,18 @@ structure ResidualFlopUpdate where
   resetPin       : Option Nat
   resetValue     : Int
   resetActiveLow : Bool
+  /-- ordinal of the clock domain this flop commits on (`FlopDesc.clock`) -/
+  clock          : Nat
+  /-- the reset acts even in a step where `clock` is quiet (`FlopDesc.asyncReset`) -/
+  asyncReset     : Bool
 deriving Repr, Inhabited, DecidableEq
 
 structure ResidualMemoryUpdate where
   aw      : Nat
   dw      : Nat
   nextImg : Nat
+  /-- ordinal of the clock domain this memory commits on (`MemoryDesc.clock`) -/
+  clock   : Nat
 deriving Repr, Inhabited, DecidableEq
 
 /-- The compiled program.  `sources` is carried so `denoteResidual` needs no

@@ -176,10 +176,36 @@ the IR semantics.
 
 ### 4.4 Clock scope
 
-One call represents one step of the normalized single-edge design accepted by
-the certificate exporter.  Native multi-clock/event scheduling is outside the
-current `DesignCert` model and must be rejected or normalized before export.
-Calling the result cycle-accurate is relative to this documented cycle boundary.
+The certificate names its clock DOMAINS (`DesignCert.clocks`, provenance only)
+and every `FlopDesc` / `MemoryDesc` carries the ordinal of the domain it commits
+on.  One call represents one STEP: `interpretDesign D e i s` takes an edge
+vector `e : ClockEdges` — which declared domains fire in this step — and every
+element whose domain fires evaluates against the pre-step state and commits
+simultaneously, while an element whose domain is quiet HOLDS.  An asynchronous
+reset (`FlopDesc.asyncReset`, the commit-side twin of `SourceDesc.flopQAsync`)
+acts regardless of the edge; a synchronous reset is sampled at the edge like
+`din`, so in a quiet step it does not.  A memory whose domain is quiet keeps its
+pre-step image.  This is one batch of `pass/lec`'s microstep schedule: a source
+period of two unrelated clocks is a SEQUENCE of steps, each with its own edge
+vector; nothing in the semantics relates the domains' rates.
+
+The one-clock semantics every earlier certificate was written against is the
+constant vector `allEdges D` (every declared domain fires), and it is kept
+verbatim as `interpretDesignLegacy`.  **Conservativity** is a theorem, not a
+claim: `interpretDesign_allEdges` proves that for every design whose clock
+ordinals are declared, `interpretDesign D (allEdges D) i s =
+interpretDesignLegacy D i s` at every input and state; a certificate that spells
+no `clocks` is the one-domain design it always was (the field defaults to one
+domain, every ordinal to 0).
+
+What the exporter does before the certificate exists is unchanged in kind:
+`pass.single_edge` still lowers latches and negedge state into posedge flops on
+the design's REFERENCE clock (domain 0, the root carrying the most state) with a
+phase divider, and — with `multi_clock=true` — leaves plain posedge state on any
+OTHER root untouched and exports it as its own domain.  A latch or negedge
+element off the reference clock is still refused by name.  Calling the result
+cycle-accurate is relative to this step boundary; an event-driven (delta-cycle)
+model of time between edges is still out of scope.
 
 ### 4.5 Observations
 
@@ -279,9 +305,18 @@ memory.
 
 Two things are recorded as trusted rather than checked:
 
-* **Single-edge normalisation.**  The certificate carries no clock-model
-  provenance, so no Lean predicate can discover whether the C++ graph was
-  correctly normalised.  This stays an exporter precondition.
+* **Clock-domain assignment and the single-edge lowering.**  The certificate now
+  carries clock provenance, so the checker CAN establish that a domain exists
+  (`noClocks`), that every element names a declared one
+  (`flopClockOutOfRange`, `memClockOutOfRange`), that an asynchronous flop is
+  asynchronous on both its read and its commit side (`asyncFlagMismatch`), and,
+  per step, that the stimulus drives exactly the declared domains
+  (`edgesMismatch`).  What no Lean predicate can see is whether the C++ side put
+  each element in the RIGHT domain, and whether `pass.single_edge`'s lowering of
+  latches and negedge state into posedge flops on the reference clock was
+  faithful.  Both are transcriptions across the exporter boundary, validated by
+  the iverilog differentials in `lhd/tests/single_edge_*` (including a two-clock
+  fixture), and stay trusted.
 * **Asynchronous-reset POLARITY.**  An async flop's `resetPin` slot and its
   `resetInput` ordinal legitimately disagree on polarity — the census finds
   9,262 async sources whose `activeLow` is the opposite of their
@@ -377,8 +412,9 @@ The honest current claim is therefore stronger than the previous revision's:
 > runs real CORE-ET, CVA6 and DINO designs — every distinct generated
 > certificate is accepted, up to a 107,213-node CVA6 cache subsystem with twelve
 > mutable memories.  What remains trusted is the C++
-> LGraph → `DesignCert` exporter and the single-edge clock normalisation it
-> performs — neither is a Lean theorem, and §3 states the boundary.
+> LGraph → `DesignCert` exporter — its clock-domain assignment and the
+> single-edge lowering it performs on the reference domain — neither is a Lean
+> theorem, and §3 states the boundary.
 
 ---
 
@@ -391,7 +427,11 @@ Direction 2 does not by itself:
 - derive a residual compiler through Futamura projection;
 - replace B1+B2's compiled simulator;
 - verify the C++ exporter or RTL frontend;
-- provide native multi-clock/event-driven semantics.
+- provide an event-driven (delta-cycle) semantics of time BETWEEN edges.
+  Several clock domains ARE modelled — as per-step edge vectors over the
+  declared domains (§4.4) — but how the domains' edges interleave in real time is
+  stimulus, supplied by whoever drives `runDirect`, not a property of the
+  certificate.
 
 Pre-/post-pass trace comparison remains a plausible application once
 `runDirect` exists.  It should have its own plan and claims.  It is not the
@@ -412,5 +452,8 @@ A statement the artifacts support:
 > proved to implement the same one-cycle semantics that is already the verified
 > compiler's specification; iterating it is proved to produce the same trace as
 > iterating the specification.  The resulting binary runs real CORE-ET, CVA6 and
-> DINO certificates.  The formal claim begins at `DesignCert`: the C++ exporter
-> and its single-edge clock normalisation remain trusted.
+> DINO certificates.  The certificate names its clock domains and the step
+> semantics takes an edge vector, with the one-clock reading recovered by a
+> conservativity theorem.  The formal claim begins at `DesignCert`: the C++
+> exporter — its clock-domain assignment and single-edge lowering — remains
+> trusted.

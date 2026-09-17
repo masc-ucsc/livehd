@@ -55,16 +55,17 @@ def benchMain (name : String) (D : DesignCert) (args : List String) : IO UInt32 
     return 1
   let s0 := zeroState D
   let i0 := zeroInput D
+  let e0 := allEdges D
   -- direct: first step, then steady state
   let t2 ← IO.monoMsNow
-  echoNat "direct_step1_outsum" (outSum (directStepRaw D i0 s0))
+  echoNat "direct_step1_outsum" (outSum (directStepRaw D e0 i0 s0))
   let t3 ← IO.monoMsNow
   IO.println s!"direct_step1_ms {t3 - t2}"
   let t4 ← IO.monoMsNow
   let mut st := s0
   let mut acc := 0
   for _ in [0:cycles] do
-    let r := directStepRaw D i0 st
+    let r := directStepRaw D e0 i0 st
     acc := acc + outSum r
     st := r.nextState
   echoNat "direct_run_outsum" acc
@@ -86,14 +87,14 @@ def benchMain (name : String) (D : DesignCert) (args : List String) : IO UInt32 
       let mut st2 := s0
       let mut acc2 := 0
       for _ in [0:cycles] do
-        let r := denoteResidual R i0 st2
+        let r := denoteResidual R e0 i0 st2
         acc2 := acc2 + outSum r
         st2 := r.nextState
       echoNat "residual_run_outsum" acc2
       let t9 ← IO.monoMsNow
       IO.println s!"residual_run_ms {t9 - t8}"
       let t10 ← IO.monoMsNow
-      let msg := diffTrace D R addrs s0 (List.replicate cycles i0) 0
+      let msg := diffTrace D R addrs s0 (ticksAll D (List.replicate cycles i0)) 0
       IO.println s!"diff_result {msg.getD "OK"}"
       let t11 ← IO.monoMsNow
       IO.println s!"diff_ms {t11 - t10} cycles {cycles}"

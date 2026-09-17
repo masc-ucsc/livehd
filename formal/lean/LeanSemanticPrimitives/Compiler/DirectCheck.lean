@@ -86,17 +86,30 @@ census finds real arity-0 `Op_Or` nodes in CVA6 (`cva6_icache`, `csr_regfile`,
 `id_stage`, `cva6_ptw`, `cva6_hpdcache_if_adapter`) — a driverless reduce node,
 whose `eval_op` value is a defined `mk_bv w 0`, not a fallback.
 
-## What this checker CANNOT prove
+## What this checker can and cannot prove about TIME
 
-The certificate carries no clock-model provenance, so no Lean predicate here can
-discover whether the C++ graph was correctly normalised to a single edge.
-Single-edge normalisation stays an EXPORTER PRECONDITION, outside `DesignSemWF`,
-and is reported as trusted rather than checked.  Likewise, an async flop's
-`resetPin` slot and its `resetInput` ordinal legitimately differ in POLARITY —
-the census shows 9,262 async sources whose `activeLow` is the opposite of their
-`FlopDesc.resetActiveLow`, because the pin slot reads an already-inverted node
-while the ordinal reads the raw port.  Only the reset VALUE, the width, and the
-existence of a reset pin are cross-checkable, and only those are checked.
+The certificate carries clock provenance — `DesignCert.clocks`, and a clock
+ordinal on every `FlopDesc` and `MemoryDesc` — so the checker CAN establish that
+at least one domain exists (`noClocks`), that every state element names a
+declared domain (`flopClockOutOfRange`, `memClockOutOfRange`), that an
+asynchronous flop is asynchronous on BOTH its read side (`flopQAsync`) and its
+commit side (`FlopDesc.asyncReset`; `asyncFlagMismatch`), and, per step in
+`checkRuntime`, that the stimulus drives exactly the declared domains
+(`edgesMismatch`).  Before provenance existed the first three were not even
+statable, and single-edge normalisation was reported as a wholly trusted
+exporter precondition.
+
+What it still cannot see is whether the C++ side put each element in the RIGHT
+domain, and whether `pass.single_edge`'s lowering of latches and negedge state
+into posedge flops on the reference clock was faithful.  Both are transcriptions
+across the LGraph → DesignCert trust boundary, validated by the iverilog
+differentials in `lhd/tests/single_edge_*`, and are reported as trusted rather
+than checked.  Likewise, an async flop's `resetPin` slot and its `resetInput`
+ordinal legitimately differ in POLARITY — the census shows 9,262 async sources
+whose `activeLow` is the opposite of their `FlopDesc.resetActiveLow`, because the
+pin slot reads an already-inverted node while the ordinal reads the raw port.
+Only the reset VALUE, the width, the existence of a reset pin and the
+asynchronous flag are cross-checkable, and only those are checked.
 -/
 import LeanSemanticPrimitives.Compiler.DesignSemantics
 
@@ -153,6 +166,17 @@ inductive SimError where
   | flopStateMismatch        (required : Nat) (got : Nat)
   /-- the supplied memory state does not have one entry per `MemoryDesc` -/
   | memStateMismatch         (required : Nat) (got : Nat)
+  /-- the certificate declares no clock domain, so no element can name one -/
+  | noClocks
+  /-- flop `idx` commits on a clock ordinal the certificate does not declare -/
+  | flopClockOutOfRange      (idx : Nat) (clock : Nat)
+  /-- memory `idx` commits on a clock ordinal the certificate does not declare -/
+  | memClockOutOfRange       (idx : Nat) (clock : Nat)
+  /-- an asynchronous flop source whose `FlopDesc` is not marked `asyncReset`,
+  so the read side and the commit side disagree about the reset's timing -/
+  | asyncFlagMismatch        (slot : Nat) (idx : Nat)
+  /-- the supplied edge vector does not have one entry per declared clock -/
+  | edgesMismatch            (required : Nat) (got : Nat)
 deriving Repr, Inhabited, DecidableEq
 
 /-- The error's constructor name.  Used by the simulator's diagnostics and by
@@ -179,6 +203,11 @@ def SimError.tag : SimError → String
   | .inputTooShort _ _         => "inputTooShort"
   | .flopStateMismatch _ _     => "flopStateMismatch"
   | .memStateMismatch _ _      => "memStateMismatch"
+  | .noClocks                  => "noClocks"
+  | .flopClockOutOfRange _ _   => "flopClockOutOfRange"
+  | .memClockOutOfRange _ _    => "memClockOutOfRange"
+  | .asyncFlagMismatch _ _     => "asyncFlagMismatch"
+  | .edgesMismatch _ _         => "edgesMismatch"
 
 /-- A one-line human-readable rendering, for the simulator's stderr. -/
 def SimError.render : SimError → String
@@ -202,6 +231,11 @@ def SimError.render : SimError → String
   | .inputTooShort req got     => s!"input vector has {got} entries; the design reads {req}"
   | .flopStateMismatch req got => s!"flop state has {got} entries; the design declares {req}"
   | .memStateMismatch req got  => s!"memory state has {got} entries; the design declares {req}"
+  | .noClocks                  => "the certificate declares no clock domain"
+  | .flopClockOutOfRange i c   => s!"flop {i}: clock ordinal {c} is not declared"
+  | .memClockOutOfRange i c    => s!"memory {i}: clock ordinal {c} is not declared"
+  | .asyncFlagMismatch s i     => s!"source slot {s}: async flop {i} is not marked asyncReset"
+  | .edgesMismatch req got     => s!"edge vector has {got} entries; the design declares {req} clock(s)"
 
 /-- First error wins.  A local definition rather than `Option.orElse` so the
 `= none` decomposition below is a two-case `cases`, with no reliance on which
@@ -437,6 +471,7 @@ def checkSource (D : DesignCert) (j : Nat) : SourceDesc → Option SimError
             if f.width != w then some (.flopWidthMismatch j idx)
             else if f.resetPin.isNone then some (.asyncResetMissing j idx)
             else if f.resetValue != rv then some (.asyncResetValueMismatch j idx)
+            else if !f.asyncReset then some (.asyncFlagMismatch j idx)
             else none
   | .memImg idx aw dw =>
       if dw == 0 then some (.zeroWidth j)
@@ -496,14 +531,18 @@ def checkOutput (D : DesignCert) (_k : Nat) (o : OutputDesc) : Option SimError :
 def outputErrors (D : DesignCert) : Option SimError :=
   scan D.outputs.size (fun k => D.outputs[k]?) (checkOutput D)
 
-def checkFlopSlot (D : DesignCert) (_k : Nat) (f : FlopDesc) : Option SimError :=
-  if f.width == 0 then some (.zeroWidth f.din) else checkFlop D f
+def checkFlopSlot (D : DesignCert) (k : Nat) (f : FlopDesc) : Option SimError :=
+  if f.width == 0 then some (.zeroWidth f.din)
+  else if D.clocks.size ≤ f.clock then some (.flopClockOutOfRange k f.clock)
+  else checkFlop D f
 
 def flopErrors (D : DesignCert) : Option SimError :=
   scan D.flops.size (fun k => D.flops[k]?) (checkFlopSlot D)
 
-def checkMemory (D : DesignCert) (_k : Nat) (m : MemoryDesc) : Option SimError :=
-  if m.dw == 0 then some (.zeroWidth m.nextImg) else checkRef D true m.nextImg
+def checkMemory (D : DesignCert) (k : Nat) (m : MemoryDesc) : Option SimError :=
+  if m.dw == 0 then some (.zeroWidth m.nextImg)
+  else if D.clocks.size ≤ m.clock then some (.memClockOutOfRange k m.clock)
+  else checkRef D true m.nextImg
 
 def memoryErrors (D : DesignCert) : Option SimError :=
   scan D.memories.size (fun k => D.memories[k]?) (checkMemory D)
@@ -536,12 +575,17 @@ def inputWidthErrors (D : DesignCert) : Option SimError :=
 -- `checkDesign`
 --------------------------------------------------------------------------------
 
+/-- Ordinal 0 must exist: with no domain declared, no element could name one. -/
+def clockErrors (D : DesignCert) : Option SimError :=
+  if D.clocks.size == 0 then some .noClocks else none
+
 def designErrors (D : DesignCert) : Option SimError :=
-  firstOf (sourceErrors D)
-    (firstOf (inputWidthErrors D)
-      (firstOf (nodeErrors D)
-        (firstOf (outputErrors D)
-          (firstOf (flopErrors D) (memoryErrors D)))))
+  firstOf (clockErrors D)
+    (firstOf (sourceErrors D)
+      (firstOf (inputWidthErrors D)
+        (firstOf (nodeErrors D)
+          (firstOf (outputErrors D)
+            (firstOf (flopErrors D) (memoryErrors D))))))
 
 /-- The admission test.  Independent of `compileDesign` by construction: nothing
 above mentions the residual language. -/
@@ -593,6 +637,13 @@ structure DesignSemWF (D : DesignCert) : Prop where
   certificate has exactly one opinion about each port -/
   inputWidths  : ∀ (j idx w : Nat), D.sources[j]? = some (.input idx w) →
                    ∀ w', inputWidthOf D idx = some w' → w = w'
+  /-- at least one clock domain is declared, so ordinal 0 exists -/
+  clocksDeclared : 0 < D.clocks.size
+  /-- every flop commits on a DECLARED clock -/
+  flopClocks   : ∀ (k : Nat) (f : FlopDesc), D.flops[k]? = some f → f.clock < D.clocks.size
+  /-- every memory commits on a DECLARED clock -/
+  memClocks    : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
+                   m.clock < D.clocks.size
 
 --------------------------------------------------------------------------------
 -- Soundness
@@ -656,15 +707,17 @@ theorem checkRef_sound {needMem : Bool} {r : Nat} (h : checkRef D needMem r = no
         cases needMem <;> simp at h
 
 theorem designErrors_parts (h : designErrors D = none) :
-    sourceErrors D = none ∧ inputWidthErrors D = none ∧ nodeErrors D = none ∧
-    outputErrors D = none ∧ flopErrors D = none ∧ memoryErrors D = none := by
+    clockErrors D = none ∧ sourceErrors D = none ∧ inputWidthErrors D = none ∧
+    nodeErrors D = none ∧ outputErrors D = none ∧ flopErrors D = none ∧
+    memoryErrors D = none := by
   unfold designErrors at h
+  obtain ⟨h0, h⟩ := firstOf_eq_none h
   obtain ⟨h1, h⟩ := firstOf_eq_none h
   obtain ⟨h2, h⟩ := firstOf_eq_none h
   obtain ⟨h3, h⟩ := firstOf_eq_none h
   obtain ⟨h4, h⟩ := firstOf_eq_none h
   obtain ⟨h5, h6⟩ := firstOf_eq_none h
-  exact ⟨h1, h2, h3, h4, h5, h6⟩
+  exact ⟨h0, h1, h2, h3, h4, h5, h6⟩
 
 /-- **Checker soundness.**  A design the direct simulator accepts really does
 satisfy every semantic condition `DesignSemWF` names. -/
@@ -674,7 +727,13 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
     cases he : designErrors D with
     | none   => rfl
     | some e => rw [he] at h; exact absurd h (by simp)
-  obtain ⟨hsrc, hiw, hnode, hout, hflop, hmem⟩ := designErrors_parts hnone
+  obtain ⟨hclk, hsrc, hiw, hnode, hout, hflop, hmem⟩ := designErrors_parts hnone
+  -- clocks: ordinal 0 exists
+  have hclocks : 0 < D.clocks.size := by
+    unfold clockErrors at hclk
+    by_cases hz : D.clocks.size == 0
+    · simp only [if_pos hz] at hclk; exact absurd hclk (by simp)
+    · exact Nat.pos_of_ne_zero (by simpa using hz)
   rw [sourceErrors] at hsrc
   rw [inputWidthErrors] at hiw
   rw [nodeErrors] at hnode
@@ -701,36 +760,54 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
     by_cases hw : o.width == 0
     · simp only [if_pos hw] at this; exact absurd this (by simp)
     · simp only [if_neg hw] at this; exact checkRef_sound this
-  -- flops
-  have hflops : ∀ (k : Nat) (f : FlopDesc), D.flops[k]? = some f →
-      slotIsMem D f.din = some false ∧
+  -- flops: clock range and pin kinds, from one scan
+  have hflopsAll : ∀ (k : Nat) (f : FlopDesc), D.flops[k]? = some f →
+      f.clock < D.clocks.size ∧
+      (slotIsMem D f.din = some false ∧
       (∀ e, f.enable = some e → slotIsMem D e = some false) ∧
-      (∀ r, f.resetPin = some r → slotIsMem D r = some false) := by
+      (∀ r, f.resetPin = some r → slotIsMem D r = some false)) := by
     intro k f hf
     have hall := scan_none hflop k (lt_of_getElem?_some hf) f hf
     unfold checkFlopSlot at hall
     by_cases hw : f.width == 0
     · simp only [if_pos hw] at hall; exact absurd hall (by simp)
     · simp only [if_neg hw] at hall
-      unfold checkFlop at hall
-      obtain ⟨hd, hall⟩ := firstOf_eq_none hall
-      obtain ⟨he, hr⟩ := firstOf_eq_none hall
-      refine ⟨checkRef_sound hd, ?_, ?_⟩
-      · intro e hee; rw [hee] at he; exact checkRef_sound he
-      · intro r hrr; rw [hrr] at hr; exact checkRef_sound hr
-  -- memories
-  have hmems : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
-      slotIsMem D m.nextImg = some true := by
+      by_cases hc : D.clocks.size ≤ f.clock
+      · simp only [if_pos hc] at hall; exact absurd hall (by simp)
+      · simp only [if_neg hc] at hall
+        unfold checkFlop at hall
+        obtain ⟨hd, hall⟩ := firstOf_eq_none hall
+        obtain ⟨he, hr⟩ := firstOf_eq_none hall
+        refine ⟨by omega, checkRef_sound hd, ?_, ?_⟩
+        · intro e hee; rw [hee] at he; exact checkRef_sound he
+        · intro r hrr; rw [hrr] at hr; exact checkRef_sound hr
+  have hflops : ∀ (k : Nat) (f : FlopDesc), D.flops[k]? = some f →
+      slotIsMem D f.din = some false ∧
+      (∀ e, f.enable = some e → slotIsMem D e = some false) ∧
+      (∀ r, f.resetPin = some r → slotIsMem D r = some false) :=
+    fun k f hf => (hflopsAll k f hf).2
+  -- memories: clock range and image kind, from one scan
+  have hmemsAll : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
+      m.clock < D.clocks.size ∧ slotIsMem D m.nextImg = some true := by
     intro k m hm
-    have := scan_none hmem k (lt_of_getElem?_some hm) m hm
-    unfold checkMemory at this
+    have hall := scan_none hmem k (lt_of_getElem?_some hm) m hm
+    unfold checkMemory at hall
     by_cases hw : m.dw == 0
-    · simp only [if_pos hw] at this; exact absurd this (by simp)
-    · simp only [if_neg hw] at this; exact checkRef_sound this
+    · simp only [if_pos hw] at hall; exact absurd hall (by simp)
+    · simp only [if_neg hw] at hall
+      by_cases hc : D.clocks.size ≤ m.clock
+      · simp only [if_pos hc] at hall; exact absurd hall (by simp)
+      · simp only [if_neg hc] at hall
+        exact ⟨by omega, checkRef_sound hall⟩
+  have hmems : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
+      slotIsMem D m.nextImg = some true :=
+    fun k m hm => (hmemsAll k m hm).2
   refine
     { depsBounded := ?_, slotsInRange := ?_, nodeShapes := hshape, nodeKinds := ?_,
       outputKinds := houts, flopKinds := hflops, memKinds := hmems, sourceOK := ?_,
-      inputWidths := ?_ }
+      inputWidths := ?_, clocksDeclared := hclocks,
+      flopClocks := fun k f hf => (hflopsAll k f hf).1,
+      memClocks := fun k m hm => (hmemsAll k m hm).1 }
   · -- deps bounded: from `checkDeps`, via the index of each dep
     intro i c hc d hd
     obtain ⟨p, hp⟩ := exists_getElem?_of_mem_toList hd
@@ -779,15 +856,21 @@ def inputArity (D : DesignCert) : Nat :=
     | _                      => acc) 0
 
 /-- The runtime counterpart of `DesignSemWF`.  Strictly stronger than the
-inherited `RuntimeWF`, which constrains only the two state arrays. -/
-structure RuntimeSemWF (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) : Prop where
+inherited `RuntimeWF`, which constrains only the two state arrays.  The edge
+vector must name exactly the declared clocks: `fires` reads an undeclared
+ordinal as quiet, and a short vector would silently freeze the missing domains. -/
+structure RuntimeSemWF (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    Prop where
+  edgesSized  : e.size = D.clocks.size
   inputsSized : inputArity D ≤ i.size
   flopsSized  : s.flops.size = D.flops.size
   memsSized   : s.mems.size  = D.memories.size
 
-def checkRuntime (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) :
+def checkRuntime (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     Except SimError Unit :=
-  if i.size < inputArity D then
+  if e.size != D.clocks.size then
+    .error (.edgesMismatch D.clocks.size e.size)
+  else if i.size < inputArity D then
     .error (.inputTooShort (inputArity D) i.size)
   else if s.flops.size != D.flops.size then
     .error (.flopStateMismatch D.flops.size s.flops.size)
@@ -795,22 +878,26 @@ def checkRuntime (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) :
     .error (.memStateMismatch D.memories.size s.mems.size)
   else .ok ()
 
-theorem checkRuntime_sound {D : DesignCert} {i : RuntimeInput} {s : RuntimeState} {u : Unit}
-    (h : checkRuntime D i s = .ok u) : RuntimeSemWF D i s := by
+theorem checkRuntime_sound {D : DesignCert} {e : ClockEdges} {i : RuntimeInput}
+    {s : RuntimeState} {u : Unit}
+    (h : checkRuntime D e i s = .ok u) : RuntimeSemWF D e i s := by
   unfold checkRuntime at h
-  by_cases h1 : i.size < inputArity D
-  · simp only [if_pos h1] at h; exact absurd h (by simp)
-  · simp only [if_neg h1] at h
-    by_cases h2 : s.flops.size != D.flops.size
-    · simp only [if_pos h2] at h; exact absurd h (by simp)
-    · simp only [if_neg h2] at h
-      by_cases h3 : s.mems.size != D.memories.size
-      · simp only [if_pos h3] at h; exact absurd h (by simp)
-      · exact ⟨by omega, by simpa using h2, by simpa using h3⟩
+  by_cases h0 : e.size != D.clocks.size
+  · simp only [if_pos h0] at h; exact absurd h (by simp)
+  · simp only [if_neg h0] at h
+    by_cases h1 : i.size < inputArity D
+    · simp only [if_pos h1] at h; exact absurd h (by simp)
+    · simp only [if_neg h1] at h
+      by_cases h2 : s.flops.size != D.flops.size
+      · simp only [if_pos h2] at h; exact absurd h (by simp)
+      · simp only [if_neg h2] at h
+        by_cases h3 : s.mems.size != D.memories.size
+        · simp only [if_pos h3] at h; exact absurd h (by simp)
+        · exact ⟨by simpa using h0, by omega, by simpa using h2, by simpa using h3⟩
 
 /-- The inherited minimal runtime condition is implied. -/
-theorem RuntimeSemWF.toRuntimeWF {D : DesignCert} {i : RuntimeInput} {s : RuntimeState}
-    (h : RuntimeSemWF D i s) : RuntimeWF D i s :=
+theorem RuntimeSemWF.toRuntimeWF {D : DesignCert} {e : ClockEdges} {i : RuntimeInput}
+    {s : RuntimeState} (h : RuntimeSemWF D e i s) : RuntimeWF D i s :=
   ⟨h.flopsSized, h.memsSized⟩
 
 --------------------------------------------------------------------------------

@@ -582,6 +582,24 @@ std::optional<Icg_cone> resolve_icg(const hhds::Pin_class& clock_pin, const Desi
       // `~clk & en` gates the FALLING edge; an inversion on the way down to the
       // And (a latch's `Mux(cone,0,1)` shaping, or an explicit `!`) flips it too.
       icg.clock_inverted = ph.inverted != outer.inverted;
+      // NESTED GATING: `(clk & en1) & en2`. The clock operand is itself a gate
+      // output -- minion's CSR file holds latches on `clock_wb & sel` where
+      // `clock_wb = clk_i & en_q` is a prim_clk_gate's output -- and it counts
+      // as a clock by Design_clocks' root rule (the flops on `clock_wb` root
+      // there), so this branch used to stop at the INNER And and report it as
+      // the domain. Four CORE-ET tops (intpipe_csr_file, intpipe_mul_div_top,
+      // intpipe_top, core_top) refused as "2/3 clock nets" for exactly that:
+      // one real clock plus 12-14 latches whose gate was a gate of a gate. A
+      // gate of a gate is one gate with the enables conjoined and the edge
+      // inversions composed, so flatten it. Terminates because every step
+      // descends strictly toward the inputs.
+      if (!gu::is_graph_input_pin(ph.net)) {
+        if (auto inner = resolve_icg(ph.net, clocks)) {
+          icg.clock          = inner->clock;
+          icg.clock_inverted = icg.clock_inverted != inner->clock_inverted;
+          icg.enables.insert(icg.enables.end(), inner->enables.begin(), inner->enables.end());
+        }
+      }
     } else {
       icg.enables.push_back(e.driver);
     }

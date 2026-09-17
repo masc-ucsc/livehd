@@ -364,10 +364,18 @@ PROVEN (5.7 s–76.7 s).
 
 ### What remains genuinely out of reach
 
-**Multi-clock.** A single `_next` function is one edge of one clock;
-`pass.single_edge` refuses such designs upstream of this pass. Supporting it needs
-clock-ratio unrolling or an event-driven model — a different model shape, not a
-missing pin. One CORE-ET module (`core_top`) is blocked this way.
+**Multi-clock.** *(Superseded in this worktree by the multi-clock plan, Phase B —
+`pass/lean/DIRECTION2_RESULTS.md` §10.)* The certificate now names its clock
+domains and every flop/memory carries a clock ordinal; `interpretDesign`,
+`denoteResidual` and `compileAndRun` take a per-step edge vector, and
+`compileDesign_correct` is stated for every edge vector.  `pass.single_edge
+multi_clock=true` exports plain posedge state on a second root as its own
+domain.  Of the five CORE-ET tops the census called multi-clock, four were one
+clock plus latches gated by a gate of a gate (`resolve_icg` now flattens nested
+gating); the genuinely two-clock `vpu_ctrl` (600 flops on `clock_sec`, 185 on
+`clock_aon`) is refused by name for a different reason — a latch-array register
+file (`memory-latch-array`) — not for its clocks.  The legacy `_next` model of
+this document is untouched by the change.
 
 **`posclk` = 0 and pipe depth > 1** are implementable and nothing is currently
 blocked on them: negedge is `pass.single_edge`'s job, and depth > 1 would need N

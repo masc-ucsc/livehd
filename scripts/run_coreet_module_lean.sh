@@ -88,6 +88,12 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
 #    --relax-enum-conversions is REQUIRED (92 typedef enum in core-et; mk/yosys.mk
 #    passes it on every synthesis run).
 # ---------------------------------------------------------------------------
+# --allow-use-before-declare: slang rejects a signal read above its declaration
+# (`intpipe_mul_div_top`'s start_mul_2p, `vpu_defs_pkg`'s TXFMA_EXP_FRAC_OFFSET),
+# which is legal in every other front-end CORE-ET is built with.  The relaxation
+# changes elaboration order only, never a value, and it is what stood between
+# five modules (minion_frontend, intpipe_mul_div_top, intpipe_top, core_top,
+# vpu_ctrl) and a certificate.
 "$LHD" compile verilog "$ANCHOR" \
   --reader yosys-slang --top "$TOP" \
   --workdir "$WORK_DIR" --result-json "$LOG_DIR/lhd_compile_result.json" \
@@ -95,7 +101,7 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
-  -- --ignore-assertions --relax-enum-conversions \
+  -- --ignore-assertions --relax-enum-conversions --allow-use-before-declare \
   > "$LOG_DIR/lhd_compile.log" 2>&1
 status=$?
 echo "compile exit=$status"
@@ -108,7 +114,13 @@ echo "compile exit=$status"
 #    on the blocks that do not need it.  Fails closed: it declines a whole
 #    design rather than half-transform it.
 # ---------------------------------------------------------------------------
+# multi_clock=true: a design with several unrelated clock roots is exported
+# with clock DOMAINS (the certificate carries a clock ordinal per element and
+# the Lean step takes an edge vector) instead of being refused.  The reference
+# domain is still normalized exactly as before; a latch or negedge element OFF
+# the reference clock still refuses by name.
 "$LHD" pass single_edge --top "$TOP" lg:"$LG_RAW" --emit-dir lg:"$LG_NORM" \
+  --set multi_clock=true \
   --workdir "$WORK_DIR/se" > "$LOG_DIR/single_edge.log" 2>&1
 se_status=$?
 se_note="$(grep -oP '"message":"\K[^"]*' "$LOG_DIR/single_edge.log" | head -1)"

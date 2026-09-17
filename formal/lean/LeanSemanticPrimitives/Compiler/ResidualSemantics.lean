@@ -205,26 +205,32 @@ def runBindings (bs : List ResidualBinding) (env : SlotEnv) : SlotEnv :=
 /-- Flop next value.  RESET HAS PRIORITY over enable; polarity is explicit;
 `resetValue` is loaded rather than assumed zero. All three are exactly what the
 manual emitter got wrong (it read 3 of a Flop's 8 pins with no `else`). -/
-def flopNext (env : SlotEnv) (s : RuntimeState) (idx : Nat) (f : ResidualFlopUpdate) : BV :=
+def flopNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (f : ResidualFlopUpdate) : BV :=
   let inReset : Bool :=
     match f.resetPin with
     | none   => false
     | some r => let rv := bv_nonzero (refBV env r)
                 if f.resetActiveLow then !rv else rv
-  if inReset then mk_bv f.width f.resetValue
+  let edge : Bool := fires e f.clock
+  -- a quiet domain holds, except for an ASYNCHRONOUS reset, which does not wait
+  if inReset && (edge || f.asyncReset) then mk_bv f.width f.resetValue
   else
     let en : Bool :=
       match f.enable with
-      | none   => true
-      | some e => bv_nonzero (refBV env e)
-    if en then bv_resize f.width (refBV env f.din)
+      | none    => true
+      | some en => bv_nonzero (refBV env en)
+    if edge && en then bv_resize f.width (refBV env f.din)
     else s.flops[idx]?.getD (mk_bv f.width 0)
 
-def denoteResidual (R : ResidualProgram) (i : RuntimeInput) (s : RuntimeState) : RuntimeResult :=
+def denoteResidual (R : ResidualProgram) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    RuntimeResult :=
   let env := runBindings R.bindings.toList (sourceEnvArr R.sources i s)
   { outputs   := R.outputs.map fun o => bv_resize o.width (refBV env o.slot)
     nextState :=
-      { flops := R.flopUpdates.mapIdx fun idx f => flopNext env s idx f
-        mems  := R.memoryUpdates.map fun m => refMem env m.nextImg } }
+      { flops := R.flopUpdates.mapIdx fun idx f => flopNext env e s idx f
+        mems  := R.memoryUpdates.mapIdx fun idx m =>
+          if fires e m.clock then refMem env m.nextImg
+          else s.mems[idx]?.getD (fun _ => mk_bv 0 0) } }
 
 end Compiler

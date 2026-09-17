@@ -352,7 +352,7 @@ The chain, link by link, with the strongest word each one has earned:
 |---|---|
 | RTL → post-lowering LGraph | **checked** by LEC (`lhd lec`), per-design.  LEC relates RTL to a graph; it says nothing about how that graph was written out. |
 | LGraph → `DesignCert` (C++ `pass_lean.cpp` + `design_cert_export.hpp`) | **TRUSTED**.  Not proved.  The exporter's own remap failures are loud, and the census cross-checks its operator/arity/width output against the Lean table, but neither is a proof. |
-| single-edge clock normalisation | **TRUSTED**, and *not checkable here*: the certificate carries no clock-model provenance, so no Lean predicate can discover whether the C++ graph was normalised correctly.  Multi-clock graphs must be rejected or normalised before export. |
+| clock-domain assignment and the single-edge lowering | **TRUSTED**, with the boundary moved (§10): the certificate now carries clock provenance, so the checker refuses an undeclared or out-of-range domain, an inconsistent async flag and an edge vector of the wrong width — but whether each element is in the RIGHT domain, and whether `pass.single_edge` lowered the reference domain's latches and negedge state faithfully, are C++ transcriptions validated by the iverilog differentials, not by Lean. |
 | async reset polarity between `FlopDesc.resetPin` and `SourceDesc.flopQAsync`'s ordinal | **TRUSTED**, deliberately.  The two routes read the same signal through different logic and legitimately disagree; only the reset value, the width and the pin's existence are cross-checked. |
 | `DesignCert` is in the accepted fragment | **CHECKED**, and the check is **PROVED SOUND** (`checkDesign_sound`). |
 | accepted `DesignCert` → one cycle of `interpretDesign` | **PROVED** (`directStep_correct`). |
@@ -366,8 +366,10 @@ Three sentences that must not be upgraded:
 
 * a successful differential run on three designs is not a universal proof;
 * `directStep_correct` begins at `DesignCert`, not at SystemVerilog;
-* "cycle-accurate" is relative to the documented single-edge cycle boundary of
-  §4.4, which is an exporter precondition rather than a checked property.
+* "cycle-accurate" is relative to the documented step boundary of §4.4 — one
+  step, one edge vector over the declared domains; which domains fire in a step
+  is stimulus, and which domain an element belongs to is an exporter
+  transcription rather than a checked property.
 
 ---
 
@@ -465,10 +467,10 @@ what makes the pass correct on its own.
 | outcome | modules |
 |---|---|
 | **certificate emitted, `checkDesign` ACCEPTED, 4 cycles simulated** | 13: `vpu_tensor{a,b,c,tmp}_rf`, `vpu_lane_tima` (7 gated clocks, 2 memories), `minion_tlb`, `minion_dcache_{128x64,128x72}_1r1w_lram`, `minion_dcache_{buffer,data,metadata,tlb}_array` (up to 8 memories), `minion_dcache_replay_queue` (129 flops) |
-| `minion_dcache_top` | normalises -- P=2, 12 latches retyped, **302 gated clocks folded, 21 memories slotted**, 985 elements -- but the `pass.lean` emission of the resulting ~100k-node graph exceeded the pipeline's 90-minute budget (11 GB resident) and was killed. The first time this design has reached the emitter at all: the census recorded it as a `single_edge` refusal. An emitter-scaling question, not a lowering one; relaunched with an 8-hour budget, outcome not yet known |
+| `minion_dcache_top` | normalises -- P=2, 12 latches retyped, **302 gated clocks folded, 21 memories slotted**, 985 elements -- but the `pass.lean` emission of the resulting ~100k-node graph exceeded the pipeline's 90-minute budget (11 GB resident) and was killed. The first time this design has reached the emitter at all: the census recorded it as a `single_edge` refusal. An emitter-scaling question, not a lowering one. An 8-hour relaunch was stopped after ~2 h when the exporter changed under it (Phase B, §10); it has not been re-run, so the budget item stands |
 | refused: latch array (new named refusal) | `vpu_rf` |
 | refused: mixed read-port clocking encoded as `type=24` | `minion_frontend_thread_buffer` -- normalises (37 gated clocks folded, 2 memories slotted) but the certificate cannot represent it |
-| blocked in core-et RTL, not LiveHD | `minion_frontend`: slang rejects `vpu_defs_pkg.sv:875` (`TXFMA_EXP_FRAC_OFFSET` used before its declaration at `:892`); `livehd-new`'s Sep-1 binary fails identically, so it is the RTL, which has changed since the census recorded this module as a `single_edge` refusal |
+| blocked at the front end (at the time) | `minion_frontend`: slang rejects `vpu_defs_pkg.sv:875` (`TXFMA_EXP_FRAC_OFFSET` used before its declaration at `:892`). *Superseded in §10*: the RTL had not changed (core-et's last commit predates the census); slang's `--allow-use-before-declare` compiles it, and it is then refused by `memory-type-unsupported` — the same `type=24` thread buffer as `minion_frontend_thread_buffer` above |
 
 * **Differential against B1+B2** on the newly unblocked, memory-bearing
   `minion_dcache_data_array` (517 nodes, 26 flops, **8 memories**): `diff OK`
@@ -507,3 +509,201 @@ COREET_TOP=vpu_tensora_rf LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LEC_GAT
 python3 pass/lean/scripts/direct_sweep.py --out SWEEP.tsv --max-rec-depth 20000000 /tmp/pa
 ```
 
+---
+
+## 10. Multi-clock plan, Phase B: clock provenance in the certificate
+
+Phase A (§9) left the certificate untouched.  Phase B changes it: `DesignCert`
+names its clock domains, every state element carries the ordinal of the one it
+commits on, and the step semantics takes an edge vector.  The change is made
+IN PLACE — every route theorem is re-derived over the new type — and its
+conservativity is a theorem.  Only this worktree is changed; the same type
+change is the user's to port to the other branches (see *Porting* below).
+
+### The type and the semantics
+
+```lean
+structure ClockDesc where name : String                      -- provenance only
+structure FlopDesc   where ... clock : Nat := 0; asyncReset : Bool := false
+structure MemoryDesc where ... clock : Nat := 0                -- one per memory
+structure DesignCert where ... clocks : Array ClockDesc := #[{ name := "clock" }]
+
+abbrev ClockEdges := Array Bool                                 -- which domains fire this step
+def interpretDesign (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState)
+```
+
+One step is one batch of `pass/lec`'s microstep schedule.  A flop whose domain
+fires commits as before; a flop whose domain is quiet HOLDS — unless its reset is
+asynchronous and asserted, in which case it resets regardless (`asyncReset` is
+the commit-side twin of `SourceDesc.flopQAsync`; a synchronous reset is sampled
+at the edge and must NOT act in a quiet step).  A memory whose domain is quiet
+keeps its pre-step image.  The one-clock semantics is kept verbatim as
+`interpretDesignLegacy`, and
+
+```lean
+theorem interpretDesign_allEdges (D) (hf : ∀ f ∈ D.flops, f.clock < D.clocks.size)
+    (hm : ∀ m ∈ D.memories, m.clock < D.clocks.size) (i s) :
+    interpretDesign D (allEdges D) i s = interpretDesignLegacy D i s
+```
+
+says that adding clocks changed the meaning of no existing certificate: a
+certificate that spells no `clocks` is the one-domain design it always was (the
+field defaults to one domain, every ordinal to 0).  `interpretDesign_allEdges_of_wf`
+discharges the range hypotheses from `DesignSemWF`.
+
+The checker gained what item 9 of the implementation plan reserved for it:
+`noClocks`, `flopClockOutOfRange`, `memClockOutOfRange`, `asyncFlagMismatch`
+(a `flopQAsync` source whose `FlopDesc` is not marked async) and, per step,
+`edgesMismatch` — with `DesignSemWF.clocksDeclared/flopClocks/memClocks` and
+`RuntimeSemWF.edgesSized` as their propositional content and `checkDesign_sound`
+/ `checkRuntime_sound` extended.  `directStep D e i s`, `Tick := {edges, input}`,
+`runDirect D s (ts : List Tick)`, `compiledTrace`, `diffStep`/`diffTrace` and the
+in-worktree B1+B2 copies (`ResidualFlopUpdate.clock/asyncReset`,
+`ResidualMemoryUpdate.clock`, `flopNext env e ...`, `denoteResidual R e i s`,
+`compileAndRun D e inp st`, `compileDesign_correct : ∀ e inp st, ...`) are all
+threaded through.  `#print axioms` on `interpretDesign_allEdges`,
+`directStep_correct`, `runDirect_correct`, `compileDesign_correct`,
+`directStep_eq_compileAndRun`, `runDirect_eq_compiledTrace`, `checkDesign_sound`
+and `checkRuntime_sound`: `propext`, `Classical.choice`, `Quot.sound` only.
+
+The simulator reads an optional leading `@<bits>` token per trace line — one
+`0`/`1` per declared clock, ordinal 0 first — and fires every clock when the
+token is absent; an edge vector of the wrong width is refused.
+
+### The exporter, and what it refuses now
+
+`pass.lean` now emits the clock table and a clock ordinal per element, deriving
+identity from `latch_contract`'s resolved root net (the notion `pass.single_edge`
+and the LEC clock forest already share): ordinal 0 is the root carrying the most
+state, a Pyrope implicit clock joins the unique other root (the LEC's "unique
+other root" rule) and is otherwise a domain of its own named `clock`, and the
+`async` pin becomes `asyncReset`.  Two things the exporter used to model silently
+are refused by name: a flop or memory port still clocked through a GATED-clock
+cone (`clk & en`) that `pass.single_edge` has not folded into its enable — this
+model has no per-step commit term for a gate — and a falling-edge commit spelled
+as an inversion in the clock cone.  A latch-array (constant-clock) write port and
+a memory whose committing ports sit on different nets are refused too.  The
+per-design theorem is now `∀ edges inp st, X_step edges inp st = interpretDesign
+X_designCert edges inp st`.
+
+`pass.single_edge` gained `multi_clock=true`: the reference domain is normalized
+exactly as before, a plain posedge flop or memory on ANOTHER root is left on its
+own clock (its gated clock still folds into its enable — at P=1 too, which the
+Phase-A memory fold had missed) and exported as its own domain, and a latch or
+negedge element off the reference clock is refused by name (it would need a
+divider of its own).  Off by default: `pass/lec` and `sim` model a second domain
+themselves and keep seeing the skip they always saw.  Its multi-clock refusal
+now NAMES the nets (`clk_i: 409 element(s) e.g. ... ; <internal>: 14 element(s)
+e.g. latch_12796 via sext_45648`), which is what made the next finding possible.
+
+### The five "multi-clock" designs, resolved by name
+
+The census refused five CORE-ET tops as "N clock nets and no known integer
+ratio between them".  Four of them were never multi-clock.
+
+| module | census | what it is, and where it stands now |
+|---|---|---|
+| `intpipe_csr_file` | 2 clock nets | **ONE clock.**  The second "net" was 14 latches gated by `clock_wb & sel`, where `clock_wb = clk_i & en_q` is a `prim_clk_gate` output: a gate of a gate.  `resolve_icg` identified the inner `And` as "the clock" (flops root there) and stopped; it now flattens nested gating, conjoining the enables.  Normalizes: P=2, **1055 latches** retyped, 175 gated clocks folded, 1462 elements, 1 memory slotted, 1 clock domain.  Certificate emission of the resulting graph was still running when this was written (`SWEEP_multiclock6.tsv` carries the outcome) |
+| `intpipe_mul_div_top` | 2 clock nets; then a slang error | one clock, the same nested-gate shape (12 latches).  The compile failure — `start_mul_2p` used before its declaration — is a slang strictness, not an RTL change (core-et's last commit predates the census); `--allow-use-before-declare` is now passed by the sweep.  Normalizes: P=2, 529 latches retyped, 29 gated clocks folded.  **Certificate emitted, `checkDesign` ACCEPTED, 4 cycles run** — 9,343 nodes, 536 flops, 95 s |
+| `intpipe_top` | 3 clock nets; then a slang error | compiles with the flag; one clock after the fix; refused by the pre-existing L1 rule `coincident-commit-edge`: `latch_27604` and `rf.u_rf.wr_data_del_q` commit on the same edge and the flop reads the latch combinationally.  A named fail-closed refusal about a latch/flop pair, not about clocks |
+| `core_top` | 3 clock nets; then a slang error | compiles with the flag; refused `memory-type-unsupported` — `u_frontend.gen_thread_buf[0].u_tb.buffer_pc` has `type=24`, the mixed clocked/unclocked read-port bitmask of §9 |
+| `vpu_ctrl` | 2 clock nets; then a slang error | **the one genuinely two-clock design**: 600 flops on `clock_sec`, 185 on `clock_aon` (both top-level ports), 2 negedge flops and 3 latches, all on `clock_sec`.  With `multi_clock=true` the clocks are no longer the reason it stops: it is refused `memory-latch-array` (`tena_rf.u_rf.rf_q`, the same latch-array register file as `vpu_rf` in §9) |
+| `minion_frontend` (§9's RTL-blocked module) | slang error | compiles with the flag; refused `memory-type-unsupported` (the same thread buffer) |
+
+So "true multi-clock in `DesignCert`" unblocks no CORE-ET module today: the
+only two-clock design is stopped by a latch-array memory, a Memory-cell
+representation gap that Phase A named.  What the change buys is honesty of the
+model — the certificate now says which edge each element commits on and the
+Lean side checks what it can — plus three designs reached by the two LiveHD-side
+fixes it forced (the nested-gate recognizer and the slang flag).
+
+### Validation
+
+* **Every Lean `#guard`** in `DirectTests` passes: the five original shapes, the
+  refusal tags (four new), and a new section — two free-running counters in two
+  domains (counter 1 advances only when `clk_b` fires), a synchronous reset in a
+  quiet domain HOLDS while the same reset in a firing domain clears, an
+  asynchronous reset in a quiet domain acts and is visible in the same step, a
+  write port in a quiet domain does not commit, direct execution agrees with
+  `interpretDesign` under partial edge vectors, and the edge vector's width is
+  enforced.  `conservative` executes `interpretDesign_allEdges` on every one-clock
+  example.  A `mutFlopClock` negative control shows the ordinal is live.
+* **Old versus new certificates, trace by trace.**  Every Phase-A certificate
+  emitted by the OLD exporter (no clock table) and its re-emission by the new one
+  were elaborated side by side under the new semantics and run for 8 zero-stimulus
+  cycles with `ticksAll`; outputs, flop state and the first 16 addresses of every
+  memory image are compared cycle by cycle.  Result: **equal on all 13**
+  (`vpu_tensor{a,b,c,tmp}_rf`, `vpu_lane_tima`, `minion_tlb`,
+  `minion_dcache_{128x64,128x72}_1r1w_lram`,
+  `minion_dcache_{buffer,data,metadata,tlb}_array`, `minion_dcache_replay_queue`);
+  the probe elaborates `generated/core-et/phaseA/lean/X_Lgraph.lean` and
+  `generated/core-et/phaseB/lean/X_Lgraph.lean` in two namespaces and compares
+  `runDirectRaw` traces.  The old certificates also pass the new `checkDesign`
+  unchanged (none of the 13 has an asynchronous reset, so `asyncFlagMismatch`
+  does not fire on them; a pre-provenance certificate WITH async flops would be
+  refused and must be re-emitted).
+* **Re-emission sweep** (`SWEEP_direction2_phaseB.tsv`): the 13 Phase-A modules
+  plus `intpipe_mul_div_top` — **14/14 emitted, `checkDesign` ACCEPTED, 4 cycles
+  run**, every certificate with a one-entry clock table (`clk_i` or `clock`).
+* **`lhd/tests/single_edge_multi_clock_test.sh`** — a posedge and a negedge flop
+  on `clk_a`, a posedge flop on `clk_b`, async resets.  Without `multi_clock` the
+  pass refuses by name and names both nets; with it, P=2 on the reference and
+  `2 clock domain(s) exported`; the normalized emission has no `negedge` and still
+  clocks `b` on `posedge clk_b`; the certificate declares `clocks := #[clk_a,
+  clk_b]` with `a`, `n` and the divider on ordinal 0, `b` on ordinal 1 and
+  `asyncReset := true`; **iverilog** agrees over 39 periods with `clk_b` identical
+  on both sides, and the P=1 negative control fails as it must.  The fixture's
+  resets are asynchronous on purpose: slang folds a synchronous reset into the
+  next-value mux, leaving no `reset_pin` for the divider to copy, and a divider
+  with only an `initial` value starts as X under iverilog.
+* The nine pre-existing `single_edge_*`, latch-contract, clock-cell and
+  LEC-clock-blindness tests still pass with the nested-gate recognizer change.
+
+### What this does and does not establish
+
+The conservativity theorem is about the semantics; the trace comparison is about
+the exporter (that emitting a clock table changed nothing else it writes).
+Neither says the exporter puts each element in the RIGHT domain: that, and the
+faithfulness of the reference-domain lowering, are validated by the iverilog
+differentials on fixtures and stay trusted on the real modules — the §7 table
+says so.  No real multi-domain certificate exists yet, because the one two-clock
+design is stopped upstream; the two-clock fixture's certificate is the only one.
+
+### Porting to the other branches
+
+`DesignCert.lean` was byte-identical across `livehd-new`, `d3`, `d4` and
+`futamura`; this worktree's copy now differs.  What a port has to carry:
+
+* `DesignCert.lean`: `ClockDesc`; `FlopDesc.clock : Nat := 0`,
+  `FlopDesc.asyncReset : Bool := false`; `MemoryDesc.clock : Nat := 0`;
+  `DesignCert.clocks : Array ClockDesc := #[{ name := "clock" }]`.
+* `Runtime.lean`: `ClockEdges`, `fires`, `allEdges`, `allEdges_size`,
+  `fires_allEdges`.
+* `DesignSemantics.lean`: `srcFlopNext rho e s idx f` (edge + async rule),
+  `srcMemNext`, `interpretDesign D e i s`, the `Legacy` copies,
+  `interpretDesign_allEdges`.
+* B1+B2: `ResidualFlopUpdate.clock/asyncReset`, `ResidualMemoryUpdate.clock`,
+  `flopNext env e s idx f`, `denoteResidual R e i s` (memories via `mapIdx` with
+  the hold), `compileFlop`/`compileMemory` carry the fields, `flopNext_agree`
+  takes `e`, `compileDesign_correct`/`compileAndRun`/`compileAndRun_correct`
+  quantify over `e`.
+* Exporter output: `clocks := #[{ name := ".." }, ..]` after `memories`;
+  `, clock := k, asyncReset := b` on every flop line; `, clock := k` on every
+  memory line; `def X_step : ClockEdges → RuntimeInput → RuntimeState →
+  RuntimeResult`; `theorem X_step_correct : ∀ edges inp st, ...`.
+* Futamura's `Projection/DesignEncoding.lean` needs tags for the three new
+  fields and the clock table, with round-trip proofs; D4's `DCERT1` parser needs
+  the fields; D3's emitted models take the edge vector.
+
+### Reproducing
+
+```bash
+bazel build -c dbg //lhd:lhd
+bash lhd/tests/single_edge_multi_clock_test.sh            # or: bazel test //lhd/tests:single_edge_multi_clock_test
+cd formal/lean && lake build LeanSemanticPrimitives.Compiler.DirectTests LgraphSim
+printf '@11 0\n@10 0\n@11 0\n@10 0\n' > /tmp/edges.txt
+.lake/build/bin/lgraph-sim two-domain-counters --inputs /tmp/edges.txt --show-state
+COREET_TOP=intpipe_mul_div_top LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LEC_GATE=false \
+  STOP_AFTER=lean OUT=/tmp/pb/intpipe_mul_div_top scripts/run_coreet_module_lean.sh
+python3 pass/lean/scripts/direct_sweep.py --out SWEEP.tsv --max-rec-depth 20000000 /tmp/pb
+```

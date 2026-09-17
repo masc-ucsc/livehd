@@ -94,7 +94,8 @@ fallbacks into silently accepted semantics.
    - grounded RTL/LGraph examples.
 3. State the cycle boundary: current inputs/state produce current outputs and
    next state for one normalized single-edge step.
-4. Record unsupported features explicitly, especially native multi-clock graphs.
+4. Record unsupported features explicitly, especially event-driven (delta-cycle)
+   time; several clock domains are modelled as per-step edge vectors (§4.4).
 5. Audit reset and memory rules: asynchronous visibility, reset priority and
    polarity, write collision order, byte enables, ROM bounds, and synchronous
    read-data state.
@@ -139,7 +140,11 @@ It must check at least:
 6. bit-vector versus memory typing for every dependency and shell reference;
 7. reset-source and reset-polarity consistency;
 8. memory/ROM descriptor consistency;
-9. cycle-model provenance, if that metadata is added to the certificate.
+9. cycle-model provenance, if that metadata is added to the certificate —
+   **added** (multi-clock plan, Phase B): the checker now requires a declared
+   domain, an in-range clock ordinal on every flop and memory, an `asyncReset`
+   flag consistent with every `flopQAsync` source, and, per step, an edge vector
+   of the declared width.
 
 Define a propositional `DesignSemWF D` and a Boolean/`Except` implementation,
 then prove checker soundness:
@@ -148,10 +153,11 @@ then prove checker soundness:
 checkDesign D = .ok () -> DesignSemWF D
 ```
 
-Define a corresponding `RuntimeSemWF D i s` and prove `checkRuntime` sound.  The
-current certificate carries no clock metadata, so single-edge normalization
-cannot yet be proved by this checker; it remains an exporter precondition and
-must be reported as such.
+Define a corresponding `RuntimeSemWF D e i s` and prove `checkRuntime` sound.  The
+certificate now carries clock metadata; what the checker still cannot prove is
+that the exporter put each element in the RIGHT domain and that the single-edge
+lowering of the reference domain was faithful — those remain exporter
+transcriptions and must be reported as such.
 
 Malformed-certificate tests must cover every error constructor.  In particular,
 wrong arity and BV/memory confusion must be refused rather than evaluated as
@@ -169,8 +175,12 @@ The scan is `scanFrom`, a tail recursion on the COUNT — materialising
 by tag, not merely by failure, in `Compiler/DirectTests.lean`.  Every one of the
 147 distinct generated certificates is ACCEPTED — see `SWEEP_direction2.tsv`.
 
-Single-edge normalisation is NOT provable here (no clock provenance in the
-certificate) and is reported as an exporter precondition, as the plan requires.
+Clock provenance landed in Phase B of the multi-clock plan
+(`DIRECTION2_RESULTS.md` §10): `noClocks`, `flopClockOutOfRange`,
+`memClockOutOfRange`, `asyncFlagMismatch` and `edgesMismatch` are the new
+refusals, each asserted by tag in `DirectTests`.  The single-edge LOWERING is
+still not provable here and is reported as an exporter transcription, as the
+plan requires.
 Async reset POLARITY is also not cross-checkable; §5.4 of the semantic document
 says why, and the `mutFlopResetPolarity` negative control shows the evaluator is
 sensitive to the field that is left unchecked.
@@ -488,8 +498,22 @@ What is deliberately NOT done, and why:
   w = 5,772, which is the whole of the per-cycle cost for both implementations.
 * **The memory closure chain is not collapsed.**  Same category: a
   representation change plus an extensionality proof.
-* **Single-edge normalisation is not proved**, and cannot be until the exporter
-  emits clock provenance into the certificate.
+* **The single-edge lowering is not proved.**  The exporter now emits clock
+  provenance (Phase B below), which lets the checker refuse an undeclared or
+  out-of-range domain and an inconsistent async flag; whether each element was
+  put in the RIGHT domain, and whether the reference domain's latches and
+  negedge state were lowered faithfully, remain C++-side transcriptions
+  validated by the iverilog differentials.
+* **Phase B of the multi-clock plan has landed** (`DIRECTION2_RESULTS.md` §10):
+  `DesignCert.clocks`, a clock ordinal on every `FlopDesc`/`MemoryDesc`,
+  `FlopDesc.asyncReset`; `interpretDesign D e i s` takes an edge vector, a
+  quiet domain holds, `interpretDesign_allEdges` proves the one-clock reading is
+  recovered under `allEdges`; `directStep`/`runDirect` take `ClockEdges`/`Tick`s
+  and every route theorem is re-derived; the exporter emits the clock table and
+  refuses an unfolded gated clock; `pass.single_edge multi_clock=true` exports
+  plain posedge state on a second root as its own domain.  The in-worktree
+  B1+B2 copies (`ResidualIR`, `ResidualSemantics`, `CompileDesign`) are threaded
+  through the same way; the other branches' copies are the user's to port.
 * **Phase A of the multi-clock plan has landed** (`DIRECTION2_RESULTS.md` §9):
   `pass.single_edge` now slot-gates `Memory` cells under the phase divider, so
   13 of the 17 CORE-ET register-file/array blocks it used to refuse emit

@@ -27,6 +27,10 @@ Deterministic and line-oriented, so two implementations' traces diff cleanly:
     cycle <t> mem <i>[<addr>] <v>     (with --watch-mem i:addr)
     final flop <v> <v> ...
 
+An input-trace line may start with `@<bits>` — one `0`/`1` per declared clock,
+ordinal 0 first — naming which clocks fire that cycle; without it every clock
+fires, which is the one-clock reading every pre-provenance certificate had.
+
 Signal NAMES are metadata the certificate does not carry; they are a usability
 feature, not a prerequisite for the evaluator, and are deliberately absent.
 -/
@@ -126,6 +130,19 @@ def buildInput (D : DesignCert) (vals : Array Int) : RuntimeInput :=
   (Array.range (inputArity D)).map fun idx =>
     mk_bv ((inputWidthOf D idx).getD 64) (vals[idx]?.getD 0)
 
+/-- One line of the input trace: which clocks fire (`none` = every declared
+clock) and the primary-input values by ordinal. -/
+structure TraceRow where
+  edges : Option ClockEdges := none
+  vals  : Array Int         := #[]
+deriving Inhabited
+
+/-- One step's stimulus from a trace row.  An unnamed edge vector fires every
+declared clock; a named one is passed through as written, so a vector of the
+wrong length is refused by `checkRuntime` rather than padded. -/
+def buildTick (D : DesignCert) (row : TraceRow) : Tick :=
+  { edges := row.edges.getD (allEdges D), input := buildInput D row.vals }
+
 /-- External initial state: flop values by ordinal, memory images by ordinal. -/
 structure StateExt where
   flops : Array (Nat × Int)         := #[]
@@ -154,17 +171,30 @@ theorem StateExt.build_mems (D : DesignCert) (st : StateExt) :
 -- File formats
 --------------------------------------------------------------------------------
 
-/-- Input trace: one cycle per non-empty, non-comment line; whitespace-separated
-values, ordinal 0 first.  Missing trailing values are zero. -/
-def parseInputTrace (text : String) : Except String (Array (Array Int)) := do
-  let mut out : Array (Array Int) := #[]
+/-- `@<bits>`: one `0`/`1` per declared clock, ordinal 0 FIRST. -/
+def parseEdges? (tok : String) : Option ClockEdges :=
+  let bits : List Char := tok.toList.drop 1
+  if bits.isEmpty || !bits.all (fun c => c == '0' || c == '1') then none
+  else some (bits.map (fun c => c == '1')).toArray
+
+/-- Input trace: one cycle per non-empty, non-comment line; an optional leading
+`@<bits>` token naming which clocks fire that cycle (default: all), then
+whitespace-separated values, ordinal 0 first.  Missing trailing values are zero. -/
+def parseInputTrace (text : String) : Except String (Array TraceRow) := do
+  let mut out : Array TraceRow := #[]
   for line in text.splitOn "\n" do
     let fs := fields (stripComment line)
     if fs.isEmpty then continue
-    let mut row : Array Int := #[]
-    for f in fs do
+    let mut row : TraceRow := {}
+    let mut rest := fs
+    if let f :: fs' := fs then
+      if f.startsWith "@" then
+        match parseEdges? f with
+        | some e => row := { row with edges := some e }; rest := fs'
+        | none   => throw s!"bad edge token '{f}' (expected @ followed by one 0/1 per clock)"
+    for f in rest do
       match parseInt? f with
-      | some v => row := row.push v
+      | some v => row := { row with vals := row.vals.push v }
       | none   => throw s!"not a number: '{f}'"
     out := out.push row
   return out
@@ -221,7 +251,9 @@ deriving Inhabited
 def usage : String :=
   "usage: lgraph-sim DESIGN [options]\n" ++
   "  --list                 list the certificates this binary carries\n" ++
-  "  --inputs FILE          input trace, one cycle per line (default: all zeros)\n" ++
+  "  --inputs FILE          input trace, one cycle per line (default: all zeros);\n" ++
+  "                         a line may start with @<bits>, one 0/1 per declared clock\n" ++
+  "                         (ordinal 0 first) = which clocks fire that cycle (default: all)\n" ++
   "  --state FILE           initial state (default: all zeros)\n" ++
   "  --cycles N             cycles to run (default: the input trace's length, else 1)\n" ++
   "  --show-state           also print the flop state each cycle\n" ++
@@ -261,7 +293,7 @@ def parseArgs : List String → SimOptions → Except String SimOptions
 def header (name : String) (D : DesignCert) : String :=
   s!"# lgraph-sim {name} sources={D.sources.size} nodes={D.nodes.size} " ++
   s!"outputs={D.outputs.size} flops={D.flops.size} mems={D.memories.size} " ++
-  s!"inputs={inputArity D}"
+  s!"inputs={inputArity D} clocks={D.clocks.size}"
 
 def renderCycle (o : SimOptions) (t : Nat) (r : RuntimeResult) : List String :=
   let outs := s!"cycle {t} out " ++ String.intercalate " " (r.outputs.toList.map (fmtBV o.hex))
@@ -279,8 +311,8 @@ def renderCycle (o : SimOptions) (t : Nat) (r : RuntimeResult) : List String :=
 cycle aborts with a diagnostic rather than producing a partial trace that looks
 like a result. -/
 def runAndRender (o : SimOptions) (name : String) (D : DesignCert)
-    (s0 : RuntimeState) (ins : List RuntimeInput) : Except SimError (List String) :=
-  match runDirect D s0 ins with
+    (s0 : RuntimeState) (ticks : List Tick) : Except SimError (List String) :=
+  match runDirect D s0 ticks with
   | .error e => .error e
   | .ok t =>
       let body := (t.steps.zipIdx.map fun (r, k) => renderCycle o k r).flatten
@@ -296,24 +328,24 @@ inductive SimOutcome where
 /-- Everything after the files are read is PURE, so the simulator's behaviour is
 a function of the certificate and the trace, not of the process. -/
 def simRun (o : SimOptions) (name : String) (D : DesignCert)
-    (stExt : StateExt) (rows : Array (Array Int)) : SimOutcome :=
+    (stExt : StateExt) (rows : Array TraceRow) : SimOutcome :=
   let s0 := stExt.build D
   let n := match o.cycles with
     | some n => n
     | none   => if rows.isEmpty then 1 else rows.size
-  let ins := (List.range n).map fun k => buildInput D (rows[k]?.getD #[])
+  let ticks := (List.range n).map fun k => buildTick D (rows[k]?.getD {})
   if o.checkOnly then
     match checkDesign D with
     | .error e => .refused e
     | .ok _ =>
-      match ins.head? with
+      match ticks.head? with
       | none    => .ok [header name D, "ok"]
-      | some i0 =>
-        match checkRuntime D i0 s0 with
+      | some t0 =>
+        match checkRuntime D t0.edges t0.input s0 with
         | .error e => .refused e
         | .ok _    => .ok [header name D, "ok"]
   else
-    match runAndRender o name D s0 ins with
+    match runAndRender o name D s0 ticks with
     | .error e     => .refused e
     | .ok lines    => .ok lines
 
@@ -327,7 +359,7 @@ def loadState : Option String → IO (Except String StateExt)
         | .ok st   => pure (.ok st)
       catch e => pure (.error s!"cannot read {f}: {e}")
 
-def loadInputs : Option String → IO (Except String (Array (Array Int)))
+def loadInputs : Option String → IO (Except String (Array TraceRow))
   | none   => pure (.ok #[])
   | some f => do
       try
@@ -351,7 +383,7 @@ def simMain (registry : List (String × DesignCert)) (args : List String) : IO U
   | .ok o =>
     if o.list then do
       for (n, D) in registry do
-        IO.println s!"{n} sources={D.sources.size} nodes={D.nodes.size} outputs={D.outputs.size} flops={D.flops.size} mems={D.memories.size}"
+        IO.println s!"{n} sources={D.sources.size} nodes={D.nodes.size} outputs={D.outputs.size} flops={D.flops.size} mems={D.memories.size} clocks={D.clocks.size}"
       return 0
     else if o.design.isEmpty then do
       IO.eprintln usage

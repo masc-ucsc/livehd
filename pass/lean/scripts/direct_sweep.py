@@ -40,7 +40,7 @@ PROBE_TAIL = r"""
 open Compiler Compiler.Direct in
 #eval show IO Unit from do
   let D := @BASE@_designCert
-  IO.println s!"SHAPE sources={D.sources.size} nodes={D.nodes.size} outputs={D.outputs.size} flops={D.flops.size} mems={D.memories.size} inputs={inputArity D}"
+  IO.println s!"SHAPE sources={D.sources.size} nodes={D.nodes.size} outputs={D.outputs.size} flops={D.flops.size} mems={D.memories.size} inputs={inputArity D} clocks={D.clocks.size}"
   let t0 ← IO.monoMsNow
   let verdict := match designErrors D with
     | none   => "ACCEPTED"
@@ -52,7 +52,8 @@ open Compiler Compiler.Direct in
     let s0 := zeroState D
     let i0 := zeroInput D
     let t2 ← IO.monoMsNow
-    let r1 := directStepRaw D i0 s0
+    let e0 := allEdges D
+    let r1 := directStepRaw D e0 i0 s0
     let h1 := r1.outputs.foldl (fun a b => a + (bv_uint b).toNat) 0
     let t3 ← IO.monoMsNow
     IO.println s!"STEP1_MS {t3 - t2} outsum {h1}"
@@ -60,13 +61,13 @@ open Compiler Compiler.Direct in
     let mut st := s0
     let mut acc := 0
     for _ in [0:@CYCLES@] do
-      let r := directStepRaw D i0 st
+      let r := directStepRaw D e0 i0 st
       acc := acc + r.outputs.foldl (fun a b => a + (bv_uint b).toNat) 0
       st := r.nextState
     let t5 ← IO.monoMsNow
     IO.println s!"RUN_MS {t5 - t4} cycles @CYCLES@ outsum {acc}"
     -- the CHECKED public entry point must agree that this is runnable
-    match runDirect D s0 (List.replicate @CYCLES@ i0) with
+    match runDirect D s0 (ticksAll D (List.replicate @CYCLES@ i0)) with
     | .error e => IO.println s!"RUNDIRECT\tREFUSED\t{e.tag}"
     | .ok t    => IO.println s!"RUNDIRECT\tOK\t{t.steps.length}"
 """

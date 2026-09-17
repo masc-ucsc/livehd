@@ -817,6 +817,16 @@ sh_test(
     tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+sh_test(
+    name = "single_edge_multi_clock_test",
+    size = "large",
+    srcs = ["single_edge_multi_clock_test.sh"],
+    data = [
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 # LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
 # latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
 # DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and

@@ -80,12 +80,21 @@ struct FlopIn {
   std::optional<uint32_t> reset_pin;
   std::string             reset_value = "0";  // Lean `Int` expression (the `initial` pin)
   bool                    reset_active_low = false;  // `negreset` rather than `reset_pin`
+  uint32_t                clock = 0;  // ordinal into DesignIn::clocks of the domain it commits on
+  bool                    async_reset = false;  // the reset acts even in a step where `clock` is quiet
 };
 
 struct MemoryIn {
   uint32_t addr_w   = 0;
   uint32_t data_w   = 0;
   uint32_t next_img = 0;  // emitter id of the write-chain tail
+  uint32_t clock    = 0;  // ordinal into DesignIn::clocks (one per memory, see MemoryDesc.clock)
+};
+
+// One clock domain: provenance only (the resolved root net's name).  The
+// semantics reads ORDINALS; the name lets a trace be related back to the RTL.
+struct ClockIn {
+  std::string name;
 };
 
 struct DesignIn {
@@ -94,6 +103,7 @@ struct DesignIn {
   std::vector<OutputIn> outputs;
   std::vector<FlopIn>   flops;
   std::vector<MemoryIn> memories;
+  std::vector<ClockIn>  clocks;   // ordinal 0 = the reference clock (most state); never empty
 };
 
 // Why a remap can fail.  Each is a genuine exporter bug, reported loudly rather
@@ -244,16 +254,48 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
     std::optional<uint32_t> rst = f.reset_pin.has_value()
                                       ? std::optional<uint32_t>(rm.slot(*f.reset_pin, err, "flop reset"))
                                       : std::nullopt;
+    if (f.clock >= d.clocks.size()) {
+      err.failed  = true;
+      err.message = "flop clock ordinal " + std::to_string(f.clock) + " names no declared clock domain";
+      return false;
+    }
     flop_lines.push_back("{ width := " + std::to_string(f.width) + ", din := "
                          + std::to_string(rm.slot(f.din, err, "flop din")) + ", enable := " + detail::opt_nat(en)
                          + ", resetPin := " + detail::opt_nat(rst) + ", resetValue := (" + f.reset_value
-                         + "), resetActiveLow := " + (f.reset_active_low ? "true" : "false") + " }");
+                         + "), resetActiveLow := " + (f.reset_active_low ? "true" : "false")
+                         + ", clock := " + std::to_string(f.clock)
+                         + ", asyncReset := " + (f.async_reset ? "true" : "false") + " }");
   }
 
   std::vector<std::string> mem_lines;
   for (const auto& m : d.memories) {
+    if (m.clock >= d.clocks.size()) {
+      err.failed  = true;
+      err.message = "memory clock ordinal " + std::to_string(m.clock) + " names no declared clock domain";
+      return false;
+    }
     mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w)
-                        + ", nextImg := " + std::to_string(rm.slot(m.next_img, err, "memory nextImg")) + " }");
+                        + ", nextImg := " + std::to_string(rm.slot(m.next_img, err, "memory nextImg"))
+                        + ", clock := " + std::to_string(m.clock) + " }");
+  }
+
+  // The clock table.  Never empty: `checkDesign` refuses a certificate with no
+  // domain (`noClocks`), because ordinal 0 must exist for the elements to name.
+  if (d.clocks.empty()) {
+    err.failed  = true;
+    err.message = "the design declares no clock domain (the exporter must always name at least one)";
+    return false;
+  }
+  std::vector<std::string> clock_lines;
+  for (const auto& c : d.clocks) {
+    std::string esc;
+    for (char ch : c.name) {
+      if (ch == '\\' || ch == '"') {
+        esc += '\\';
+      }
+      esc += ch;
+    }
+    clock_lines.push_back("{ name := \"" + esc + "\" }");
   }
 
   if (err.failed) {
@@ -291,6 +333,7 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
   emit_array("outputs ", out_lines, false);
   emit_array("flops   ", flop_lines, false);
   emit_array("memories", mem_lines, true);
+  emit_array("clocks  ", clock_lines, false);
   os << "  }\n\n";
 
   // The residual program is DERIVED, not re-emitted: `compileDesign` is the
@@ -305,7 +348,7 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
   // the shape below.  `compileAndRun` keeps the program inside a function body.
   os << "/-- Compile-and-run.  The model IS the verified compiler applied to this\n";
   os << "certificate -- there is no separately emitted model to disagree with it. -/\n";
-  os << "def " << base << "_step : RuntimeInput → RuntimeState → RuntimeResult :=\n";
+  os << "def " << base << "_step : ClockEdges → RuntimeInput → RuntimeState → RuntimeResult :=\n";
   os << "  compileAndRun " << base << "_designCert\n\n";
   os << "/-- The whole per-design obligation: ONE boolean check.\n\n";
   os << "`native_decide`, not `.get!`: a compile failure is a BUILD failure rather\n";
@@ -314,8 +357,8 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
   os << "theorem " << base << "_compiles : compilesOk " << base << "_designCert = true := by\n";
   os << "  native_decide\n\n";
   os << "/-- The theorem, by direct instantiation.  No per-design proof script. -/\n";
-  os << "theorem " << base << "_step_correct : ∀ inp st,\n";
-  os << "    " << base << "_step inp st = interpretDesign " << base << "_designCert inp st :=\n";
+  os << "theorem " << base << "_step_correct : ∀ edges inp st,\n";
+  os << "    " << base << "_step edges inp st = interpretDesign " << base << "_designCert edges inp st :=\n";
   os << "  compileAndRun_correct " << base << "_designCert " << base << "_compiles\n\n";
   os << "/-- For evaluation only.  Deliberately NOT mentioned in any theorem\n";
   os << "statement -- see the comment above. -/\n";

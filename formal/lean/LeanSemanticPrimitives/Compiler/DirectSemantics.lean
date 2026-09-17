@@ -268,25 +268,30 @@ theorem evalDense_slot_agree (D : DesignCert) (hdb : DesignCert.DepsBounded D)
 /-- The flop rule, spelled against the dense array.  Written with nested `if`s
 over explicit reads rather than delegating to `srcFlopNext`, so
 `directFlopNext_agree` genuinely re-checks reset PRIORITY over enable, reset
-POLARITY, the reset VALUE and the hold fallback instead of unfolding to them. -/
-def directFlopNext (env : SlotEnv) (s : RuntimeState) (idx : Nat) (f : FlopDesc) : BV :=
+POLARITY, the reset VALUE, the hold fallback — and, with clocks, that a quiet
+domain holds while an ASYNCHRONOUS reset does not wait for the edge — instead of
+unfolding to them. -/
+def directFlopNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (f : FlopDesc) : BV :=
   let inReset : Bool :=
     match f.resetPin with
     | none   => false
     | some r => let rv := bv_nonzero (denoteRef env r).asBV
                 if f.resetActiveLow then !rv else rv
-  if inReset then mk_bv f.width f.resetValue
+  let edge : Bool := fires e f.clock
+  if inReset && (edge || f.asyncReset) then mk_bv f.width f.resetValue
   else
     let en : Bool :=
       match f.enable with
-      | none   => true
-      | some e => bv_nonzero (denoteRef env e).asBV
-    if en then bv_resize f.width (denoteRef env f.din).asBV
+      | none    => true
+      | some en => bv_nonzero (denoteRef env en).asBV
+    if edge && en then bv_resize f.width (denoteRef env f.din).asBV
     else s.flops[idx]?.getD (mk_bv f.width 0)
 
 theorem directFlopNext_agree (rho : Nat → CertVal) (env : SlotEnv)
-    (hag : ∀ k, rho k = denoteRef env k) (st : RuntimeState) (idx : Nat) (f : FlopDesc) :
-    srcFlopNext rho st idx f = directFlopNext env st idx f := by
+    (hag : ∀ k, rho k = denoteRef env k) (e : ClockEdges) (st : RuntimeState) (idx : Nat)
+    (f : FlopDesc) :
+    srcFlopNext rho e st idx f = directFlopNext env e st idx f := by
   have hb : ∀ r, (rho r).asBV = (denoteRef env r).asBV := by intro r; rw [hag r]
   have hxor : ∀ rv : Bool,
       xor f.resetActiveLow rv = (if f.resetActiveLow = true then !rv else rv) := by
@@ -294,26 +299,30 @@ theorem directFlopNext_agree (rho : Nat → CertVal) (env : SlotEnv)
   simp only [srcFlopNext, directFlopNext, hb, hxor]
   rfl
 
-/-- One transition of the post-lowering IR, unchecked.  `directStep` is the
-public entry point; this is the body its theorem is about. -/
-def directStepRaw (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) : RuntimeResult :=
+/-- One transition of the post-lowering IR, unchecked, in a step where the
+clocks `e` fire.  `directStep` is the public entry point; this is the body its
+theorem is about.  A memory whose domain is quiet keeps its pre-step image. -/
+def directStepRaw (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    RuntimeResult :=
   let env := evalDense D.nodes (sourceEnvArr D.sources i s)
   { outputs   := D.outputs.map fun o => bv_resize o.width (denoteRef env o.slot).asBV
     nextState :=
-      { flops := D.flops.mapIdx fun idx f => directFlopNext env s idx f
-        mems  := D.memories.map fun m => (denoteRef env m.nextImg).asMem } }
+      { flops := D.flops.mapIdx fun idx f => directFlopNext env e s idx f
+        mems  := D.memories.mapIdx fun idx m =>
+          if fires e m.clock then (denoteRef env m.nextImg).asMem
+          else s.mems[idx]?.getD (fun _ => mk_bv 0 0) } }
 
 /-- **The public one-step API.**  Fail-closed: a certificate outside the
-accepted fragment, or an input/state of the wrong shape, is refused BEFORE any
-evaluation, so no fallback branch is ever user-visible. -/
-def directStep (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) :
+accepted fragment, or an edge vector / input / state of the wrong shape, is
+refused BEFORE any evaluation, so no fallback branch is ever user-visible. -/
+def directStep (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     Except SimError RuntimeResult :=
   match checkDesign D with
-  | .error e => .error e
+  | .error err => .error err
   | .ok _ =>
-    match checkRuntime D i s with
-    | .error e => .error e
-    | .ok _ => .ok (directStepRaw D i s)
+    match checkRuntime D e i s with
+    | .error err => .error err
+    | .ok _ => .ok (directStepRaw D e i s)
 
 --------------------------------------------------------------------------------
 -- Correctness
@@ -322,12 +331,12 @@ def directStep (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) :
 /-- The unchecked evaluator already implements the reference semantics; the only
 thing it needs is dependency ordering. -/
 theorem directStepRaw_correct (D : DesignCert) (hdb : DesignCert.DepsBounded D)
-    (i : RuntimeInput) (s : RuntimeState) :
-    directStepRaw D i s = interpretDesign D i s := by
+    (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    directStepRaw D e i s = interpretDesign D e i s := by
   have hrho : evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s)
       = denoteRef (evalDenseList D.nodes.toList (sourceEnvArr D.sources i s)) := by
     funext k; exact evalDense_slot_agree D hdb i s k
-  simp only [directStepRaw, interpretDesign, evalDense_eq_list, hrho]
+  simp only [directStepRaw, interpretDesign, evalDense_eq_list, hrho, srcMemNext]
   congr 1
   congr 1
   apply Array.ext
@@ -338,40 +347,62 @@ theorem directStepRaw_correct (D : DesignCert) (hdb : DesignCert.DepsBounded D)
     exact (directFlopNext_agree
       (denoteRef (evalDenseList D.nodes.toList (sourceEnvArr D.sources i s)))
       (evalDenseList D.nodes.toList (sourceEnvArr D.sources i s))
-      (fun _ => rfl) s idx D.flops[idx]).symm
+      (fun _ => rfl) e s idx D.flops[idx]).symm
 
 /-- **`directStep_correct`.**  Successful direct execution IS the certificate's
-one-cycle meaning.  The `.ok` premise is the only semantic hypothesis: it
+one-step meaning.  The `.ok` premise is the only semantic hypothesis: it
 witnesses dependency ordering (through `checkDesign_sound`), so no separate
 well-formedness assumption is needed. -/
-theorem directStep_correct (D : DesignCert) (i : RuntimeInput) (s : RuntimeState)
-    (r : RuntimeResult) (h : directStep D i s = .ok r) :
-    r = interpretDesign D i s := by
+theorem directStep_correct (D : DesignCert) (e : ClockEdges) (i : RuntimeInput)
+    (s : RuntimeState) (r : RuntimeResult) (h : directStep D e i s = .ok r) :
+    r = interpretDesign D e i s := by
   unfold directStep at h
   cases hc : checkDesign D with
-  | error e => rw [hc] at h; exact absurd h (by simp)
+  | error err => rw [hc] at h; exact absurd h (by simp)
   | ok u =>
       rw [hc] at h
-      cases hr : checkRuntime D i s with
-      | error e => rw [hr] at h; exact absurd h (by simp)
+      cases hr : checkRuntime D e i s with
+      | error err => rw [hr] at h; exact absurd h (by simp)
       | ok v =>
           rw [hr] at h
           injection h with h
           subst h
-          exact directStepRaw_correct D (checkDesign_sound hc).depsBounded i s
+          exact directStepRaw_correct D (checkDesign_sound hc).depsBounded e i s
 
 /-- Determinism, and preservation of every array shape the certificate declares. -/
-theorem directStep_deterministic (D : DesignCert) (i : RuntimeInput) (s : RuntimeState)
-    (r₁ r₂ : RuntimeResult) (h₁ : directStep D i s = .ok r₁) (h₂ : directStep D i s = .ok r₂) :
+theorem directStep_deterministic (D : DesignCert) (e : ClockEdges) (i : RuntimeInput)
+    (s : RuntimeState) (r₁ r₂ : RuntimeResult)
+    (h₁ : directStep D e i s = .ok r₁) (h₂ : directStep D e i s = .ok r₂) :
     r₁ = r₂ := by
   have hEq := h₁.symm.trans h₂
   injection hEq with h
 
-theorem directStepRaw_sizes (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) :
-    (directStepRaw D i s).outputs.size = D.outputs.size ∧
-    (directStepRaw D i s).nextState.flops.size = D.flops.size ∧
-    (directStepRaw D i s).nextState.mems.size = D.memories.size := by
+theorem directStepRaw_sizes (D : DesignCert) (e : ClockEdges) (i : RuntimeInput)
+    (s : RuntimeState) :
+    (directStepRaw D e i s).outputs.size = D.outputs.size ∧
+    (directStepRaw D e i s).nextState.flops.size = D.flops.size ∧
+    (directStepRaw D e i s).nextState.mems.size = D.memories.size := by
   simp [directStepRaw]
+
+--------------------------------------------------------------------------------
+-- Conservativity, for checked designs
+--------------------------------------------------------------------------------
+
+/-- A certificate the checker accepts means, under the one-clock stimulus,
+exactly what it meant before clocks existed (`interpretDesign_allEdges`, with
+its range hypotheses discharged by `DesignSemWF`).  Every route theorem about a
+pre-provenance certificate therefore still holds of it, verbatim, under
+`allEdges`. -/
+theorem interpretDesign_allEdges_of_wf (D : DesignCert) (hwf : DesignSemWF D)
+    (i : RuntimeInput) (s : RuntimeState) :
+    interpretDesign D (allEdges D) i s = interpretDesignLegacy D i s := by
+  apply interpretDesign_allEdges
+  · intro f hf
+    obtain ⟨k, hk⟩ := exists_getElem?_of_mem_toList (Array.mem_def.mp hf)
+    exact hwf.flopClocks k f hk
+  · intro m hm
+    obtain ⟨k, hk⟩ := exists_getElem?_of_mem_toList (Array.mem_def.mp hm)
+    exact hwf.memClocks k m hk
 
 end Direct
 end Compiler

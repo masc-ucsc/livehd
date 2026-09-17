@@ -174,17 +174,19 @@ def compileOutput (o : OutputDesc) : ResidualOutput := { slot := o.slot, width :
 `resetActiveLow` here is what `flopNext_agree` refuses to prove. -/
 def compileFlop (f : FlopDesc) : ResidualFlopUpdate :=
   { width := f.width, din := f.din, enable := f.enable, resetPin := f.resetPin,
-    resetValue := f.resetValue, resetActiveLow := f.resetActiveLow }
+    resetValue := f.resetValue, resetActiveLow := f.resetActiveLow,
+    clock := f.clock, asyncReset := f.asyncReset }
 
 def compileMemory (m : MemoryDesc) : ResidualMemoryUpdate :=
-  { aw := m.aw, dw := m.dw, nextImg := m.nextImg }
+  { aw := m.aw, dw := m.dw, nextImg := m.nextImg, clock := m.clock }
 
 /-- Reset priority, reset polarity, reset value, enable behaviour, and the
 old-state fallback — all five checked at once, against two independently
 written rules (`xor` + `match` on the source side, nested `if`s on the target). -/
 theorem flopNext_agree (rho : Nat → CertVal) (env : SlotEnv)
-    (hag : ∀ k, rho k = denoteRef env k) (st : RuntimeState) (idx : Nat) (f : FlopDesc) :
-    srcFlopNext rho st idx f = flopNext env st idx (compileFlop f) := by
+    (hag : ∀ k, rho k = denoteRef env k) (e : ClockEdges) (st : RuntimeState) (idx : Nat)
+    (f : FlopDesc) :
+    srcFlopNext rho e st idx f = flopNext env e st idx (compileFlop f) := by
   have hb : ∀ r, (rho r).asBV = refBV env r := by intro r; rw [hag r]; rfl
   have hxor : ∀ rv : Bool,
       xor f.resetActiveLow rv = (if f.resetActiveLow = true then !rv else rv) := by
@@ -269,10 +271,10 @@ depends on the state's size, so no runtime shape condition is required either.
 Fewer hypotheses is strictly more theorem. -/
 theorem compileDesign_correct (D : DesignCert) (R : ResidualProgram)
     (hc : compileDesign D = .ok R) :
-    ∀ (inp : RuntimeInput) (st : RuntimeState),
-      denoteResidual R inp st = interpretDesign D inp st := by
+    ∀ (e : ClockEdges) (inp : RuntimeInput) (st : RuntimeState),
+      denoteResidual R e inp st = interpretDesign D e inp st := by
   obtain ⟨hdb, hbs, hsrcs, houts, hflops, hmems⟩ := compileDesign_parts D R hc
-  intro inp st
+  intro e inp st
   set env := runBindings R.bindings.toList (sourceEnvArr D.sources inp st) with henv
   -- the ONE fact that does all the work: both sides read every slot alike
   have hrho : evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D inp st) = denoteRef env := by
@@ -287,12 +289,12 @@ theorem compileDesign_correct (D : DesignCert) (R : ResidualProgram)
       · intro i h1 h2
         have hi : i < D.flops.size := by simpa using h2
         simp only [Array.getElem_mapIdx, Array.getElem_map]
-        exact (flopNext_agree (denoteRef env) env (fun _ => rfl) st i D.flops[i]).symm
-    · -- memories: the post-write image slot
+        exact (flopNext_agree (denoteRef env) env (fun _ => rfl) e st i D.flops[i]).symm
+    · -- memories: the post-write image slot when the domain fires, else the old image
       apply Array.ext
       · simp
       · intro i h1 h2
-        simp only [Array.getElem_map, compileMemory, refMem]
+        simp only [Array.getElem_mapIdx, Array.getElem_map, compileMemory, refMem, srcMemNext]
   · -- outputs
     apply Array.ext
     · simp
@@ -344,9 +346,10 @@ theorem compileDesign_ok_witness (D : DesignCert) (h : compilesOk D = true) :
 
 /-- Compile and run, in one total function.  A design the compiler refuses
 returns `default` rather than being a partial function. -/
-def compileAndRun (D : DesignCert) (inp : RuntimeInput) (st : RuntimeState) : RuntimeResult :=
+def compileAndRun (D : DesignCert) (e : ClockEdges) (inp : RuntimeInput) (st : RuntimeState) :
+    RuntimeResult :=
   match compileDesign D with
-  | .ok R    => denoteResidual R inp st
+  | .ok R    => denoteResidual R e inp st
   | .error _ => default
 
 /-- The whole per-design obligation, reduced to ONE boolean check.
@@ -355,12 +358,12 @@ def compileAndRun (D : DesignCert) (inp : RuntimeInput) (st : RuntimeState) : Ru
 evaluating it, so neither this proof nor its instantiation ever reduces
 `compileDesign` in the kernel. -/
 theorem compileAndRun_correct (D : DesignCert) (h : compilesOk D = true) :
-    ∀ inp st, compileAndRun D inp st = interpretDesign D inp st := by
-  intro inp st
+    ∀ e inp st, compileAndRun D e inp st = interpretDesign D e inp st := by
+  intro e inp st
   unfold compileAndRun
   unfold compilesOk at h
   cases hc : compileDesign D with
-  | error e => rw [hc] at h; exact absurd h (by simp)
-  | ok R    => simpa using compileDesign_correct D R hc inp st
+  | error err => rw [hc] at h; exact absurd h (by simp)
+  | ok R      => simpa using compileDesign_correct D R hc e inp st
 
 end Compiler

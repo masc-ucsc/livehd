@@ -38,10 +38,11 @@
 //
 // FAIL CLOSED. A partial lowering reproduces the exact step-1 counterexample
 // M4 died on, with no diagnostic anywhere. So anything not understood — a
-// stateful `Sub`, a second clock domain with no known ratio, a yosys raw-D/EN
-// latch, a coincident-edge latch/flop pair — DECLINES the whole design (the
-// caller then keeps the old, honestly-refusing behavior) or errors, never
-// half-transforms.
+// stateful `Sub`, a second clock domain with no known ratio (unless the caller
+// opts into `Options::multi_clock`, which EXPORTS a plain-posedge second domain
+// rather than lowering it), a yosys raw-D/EN latch, a coincident-edge
+// latch/flop pair — DECLINES the whole design (the caller then keeps the old,
+// honestly-refusing behavior) or errors, never half-transforms.
 namespace livehd::single_edge {
 
 // Outcome of one normalize() call. `applied` false + `error` false is the
@@ -58,6 +59,10 @@ struct Result {
   // under a divider it gets the same `enable &= (phase == slot)`; the pass used
   // to refuse every memory at P > 1 instead ("would commit on every sub-step").
   int  memories_slotted = 0;
+  // Distinct clock roots state commits on AFTER the rewrite. 1 unless
+  // `Options::multi_clock` let a non-reference domain through; the consumer
+  // (pass.lean's certificate) then carries a clock ordinal per element.
+  int  clock_domains = 1;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is
@@ -81,6 +86,17 @@ struct Options {
   int force_slots = 0;
   // Suppress the refusal diagnostics (probe callers report their own).
   bool quiet = false;
+  // Export unrelated clock DOMAINS instead of refusing them. The reference
+  // domain (the root carrying the most state) is normalized exactly as before;
+  // an element on another root is left as the plain posedge flop it is (a gated
+  // clock on it still folds into its enable), and the consumer -- pass.lean's
+  // verified-compiler certificate, which carries a clock ordinal per element
+  // and whose Lean step takes an edge vector -- reads which domain each element
+  // commits on. A latch or negedge element OFF the reference clock still
+  // refuses by name: it would need a divider of its own. Off by default: pass/lec
+  // and sim model a second domain themselves and must keep seeing the skip they
+  // always saw.
+  bool multi_clock = false;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library

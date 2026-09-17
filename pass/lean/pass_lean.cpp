@@ -30,6 +30,7 @@
 #include "cell.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "latch_contract.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
 
@@ -121,6 +122,8 @@ std::string sanitize_lean(std::string_view name) {
 using Node     = hhds::Node_class;
 using Node_pin = hhds::Pin_class;
 using Edge     = hhds::Edge_class;
+namespace lc   = livehd::latch_contract;
+namespace gu   = livehd::graph_util;
 
 struct Emit_error : std::runtime_error {
   using std::runtime_error::runtime_error;
@@ -1448,6 +1451,9 @@ struct CertBuild {
   // certificate already models it as `if read_enable then table[addr] else old`
   // (an Op_MuxBool).  These become ordinary FlopDescs in the DesignCert.
   std::map<uint32_t, std::pair<uint32_t, uint32_t>> sync_read_regs;
+  // ...and the memory each one belongs to (source id -> memory nid), so the
+  // register inherits its memory's CLOCK ordinal in the certificate.
+  std::map<uint32_t, uint32_t> sync_read_owner;
   uint32_t next_synth_id = 1000000000;
 
   // ---- Memory decomposition (step 5 memory path) --------------------------
@@ -1919,6 +1925,7 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
       ids.rdreg_src[pidx]     = reg_src;
       ids.rdreg_next[pidx]    = nxt_id;
       build.sync_read_regs[reg_src] = {mi.bits, nxt_id};
+      build.sync_read_owner[reg_src] = mi.nid;
       ids.read_out[pidx]      = reg_src;
       build.mem_read_id[rkey] = reg_src;
       // No ctx.mem_read_fv entry: driver_expr resolves a sync read to `s.<field>`.
@@ -2573,8 +2580,181 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       din.outputs.push_back({it->second, ctx.output_width.at(kv.first)});
     }
 
+    // ---- Clock provenance -------------------------------------------------
+    // The certificate names its clock DOMAINS and every flop / memory carries
+    // the ordinal of the one it commits on, so the Lean step semantics can be
+    // told which clocks fire (`interpretDesign D edges i s`). Identity is
+    // latch_contract's resolved ROOT net -- the same notion pass.single_edge
+    // and the LEC clock forest use -- so a domain here is a domain there.
+    //
+    // Before this the exporter READ the clock (`Memory_port_info::clock`, the
+    // flop `clock_pin` arm above) and dropped it, which is what made single-edge
+    // normalization a wholly trusted precondition: the certificate could not
+    // even say which edge an element committed on. Two things are refused here
+    // rather than silently modelled:
+    //   * a GATED clock still on `clock_pin` (`clk & en`): this model has no
+    //     per-step commit term for a gate. pass.single_edge folds it into the
+    //     element's enable; a design that reached here with the gate in place
+    //     would have every gated element modelled as committing on every edge;
+    //   * a FALLING-edge commit spelled as an inversion in the clock cone: the
+    //     `posclk` arm only sees the pin form, and `always @(posedge ~clk)` is
+    //     the same machine as a negedge flop.
+    // Ordinal 0 is the domain carrying the most state (ties by key), the same
+    // rule pass.single_edge picks its reference by. A Pyrope `reg x = 0`
+    // (implicit clock) joins the unique other root when there is exactly one --
+    // it IS the module clock, which tolg spells `clock` -- and is otherwise a
+    // domain of its own, named `clock`.
+    const lc::Design_clocks            dclocks(g);
+    std::map<std::string, int>         clock_weight;   // net key -> #elements committing on it
+    std::map<std::string, std::string> clock_display;  // net key -> name written to the certificate
+    std::map<uint32_t, std::string>    flop_clock_key; // flop nid -> net key
+    std::map<uint32_t, std::string>    mem_clock_key;  // memory nid -> net key
+    const std::string implicit_key = [] {
+      lc::Commit_class c;
+      c.implicit_clock = true;
+      return c.net_key();
+    }();
+    const auto display_of = [](const lc::Commit_class& cc) -> std::string {
+      if (cc.implicit_clock) {
+        return "clock";
+      }
+      if (!cc.net.is_invalid() && gu::is_graph_input_pin(cc.net)) {
+        return std::string(gu::pin_name_of(cc.net));
+      }
+      return "derived:" + gu::debug_name(cc.net.get_master_node());
+    };
+    const auto note_clock = [&](const lc::Commit_class& cc) {
+      const auto k = cc.net_key();
+      ++clock_weight[k];
+      clock_display.try_emplace(k, display_of(cc));
+      return k;
+    };
+    for (auto& fn : flop_nodes) {
+      const auto nid = node_id(fn);
+      if (auto clk = gu::get_driver_of_sink_name(fn, "clock_pin"); !clk.is_invalid()) {
+        if (auto icg = lc::resolve_icg(clk, dclocks)) {
+          fatal(ctx, "flop n_" + std::to_string(nid) + " is clocked through a gated-clock cone (`clk & en`, "
+                         + std::to_string(icg->enables.size())
+                         + " enable(s)) that pass.single_edge has not folded into its enable. This model has no "
+                           "per-step commit term for a gate; run pass.single_edge first.");
+        }
+      }
+      auto cc = lc::commit_class_of(fn, &dclocks);
+      if (!cc) {
+        fatal(ctx, "flop n_" + std::to_string(nid)
+                       + " has a clock cone that does not resolve to a root net, so the certificate cannot name "
+                         "its clock domain.");
+      }
+      if (!cc->rising) {
+        fatal(ctx, "flop n_" + std::to_string(nid)
+                       + " commits on a FALLING edge (an inversion in its clock cone). pass.single_edge normalizes "
+                         "negedge state away; it evidently did not run.");
+      }
+      flop_clock_key[nid] = note_clock(*cc);
+    }
+    for (auto mnid : mem_order) {
+      const auto& mi = ctx.memory_info.at(mnid);
+      if (mi.posclk == Ntype::Memory_posclk_mixed) {
+        fatal(ctx, "memory n_" + std::to_string(mnid)
+                       + " commits on more than one clock edge across its ports (posclk=mixed); one MemoryDesc "
+                         "carries one clock, and pass.single_edge refuses this shape too.");
+      }
+      std::optional<lc::Commit_class> mcc;
+      for (const auto& port : mi.ports) {
+        if (port.rdport && !mi.sync) {
+          continue;  // an async read commits nothing
+        }
+        if (port.clock.is_invalid()) {
+          continue;  // implicit module clock
+        }
+        if (gu::is_const_pin(port.clock)) {
+          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
+                         + " has a constant clock: a level-sensitive (latch-array) write, which this "
+                           "edge-triggered model does not represent.");
+        }
+        if (auto icg = lc::resolve_icg(port.clock, dclocks)) {
+          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
+                         + " is clocked through a gated-clock cone that pass.single_edge has not folded into the "
+                           "port's enable; run pass.single_edge first.");
+        }
+        const auto cr = lc::control_root(port.clock);
+        if (cr.net.is_invalid() || gu::is_const_pin(cr.net)) {
+          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
+                         + " has a clock cone that does not resolve to a root net.");
+        }
+        lc::Commit_class cc;
+        cc.role   = lc::Net_role::Clock;
+        cc.net    = cr.net;
+        cc.rising = (mi.posclk != 0) != cr.inverted;
+        if (!cc.rising) {
+          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
+                         + " commits on a FALLING edge; pass.single_edge normalizes negedge state away.");
+        }
+        if (mcc && mcc->net_key() != cc.net_key()) {
+          fatal(ctx, "memory n_" + std::to_string(mnid) + " has committing ports on different clock nets (`"
+                         + display_of(*mcc) + "` and `" + display_of(cc) + "`); one MemoryDesc carries one clock.");
+        }
+        mcc = cc;
+      }
+      if (!mcc) {
+        lc::Commit_class cc;
+        cc.implicit_clock = true;
+        cc.role           = lc::Net_role::Clock;
+        cc.rising         = true;
+        mcc               = cc;
+      }
+      mem_clock_key[mnid] = note_clock(*mcc);
+    }
+    if (clock_weight.count(implicit_key) != 0 && clock_weight.size() == 2) {
+      // The implicit module clock IS the one named root (the LEC clock forest's
+      // "unique other root" rule); two spellings of one domain must not become two.
+      std::string other;
+      for (const auto& [k, w] : clock_weight) {
+        if (k != implicit_key) {
+          other = k;
+        }
+      }
+      clock_weight[other] += clock_weight[implicit_key];
+      clock_weight.erase(implicit_key);
+      for (auto& [n, k] : flop_clock_key) {
+        if (k == implicit_key) {
+          k = other;
+        }
+      }
+      for (auto& [n, k] : mem_clock_key) {
+        if (k == implicit_key) {
+          k = other;
+        }
+      }
+    }
+    std::vector<std::pair<std::string, int>> clock_order(clock_weight.begin(), clock_weight.end());
+    std::sort(clock_order.begin(), clock_order.end(), [](const auto& a, const auto& b) {
+      return a.second != b.second ? a.second > b.second : a.first < b.first;
+    });
+    std::map<std::string, uint32_t> clock_ordinal;
+    for (const auto& [k, w] : clock_order) {
+      clock_ordinal[k] = static_cast<uint32_t>(din.clocks.size());
+      din.clocks.push_back({clock_display.at(k)});
+    }
+    if (din.clocks.empty()) {
+      // A purely combinational design still declares its (unused) domain:
+      // `checkDesign` requires ordinal 0 to exist.
+      din.clocks.push_back({"clock"});
+    }
+    const auto flop_clock = [&](uint32_t fid) -> uint32_t {
+      if (auto it = flop_clock_key.find(fid); it != flop_clock_key.end()) {
+        return clock_ordinal.at(it->second);
+      }
+      if (auto ow = cert_build.sync_read_owner.find(fid); ow != cert_build.sync_read_owner.end()) {
+        return clock_ordinal.at(mem_clock_key.at(ow->second));
+      }
+      fatal(ctx, "internal: flop source id " + std::to_string(fid) + " has no clock domain");
+      return 0;
+    };
+
     for (auto fid : flop_order) {
       lean_design_cert::FlopIn f;
+      f.clock = flop_clock(fid);
       // A synthetic sync-read register: width and next value come from the
       // memory decomposition, and it has no enable and no reset -- the enable is
       // already folded into its next value by cert_memory_expand.
@@ -2600,12 +2780,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         f.reset_value = it->second;
       }
       f.reset_active_low = flop_negreset.count(fid) != 0;
+      f.async_reset      = flop_async.count(fid) != 0;
       din.flops.push_back(f);
     }
 
     for (auto mnid : mem_order) {
       const auto& mi = ctx.memory_info.at(mnid);
-      din.memories.push_back({mi.addr_width, mi.bits, mem_cert_ids.at(mnid).next_chain});
+      din.memories.push_back(
+          {mi.addr_width, mi.bits, mem_cert_ids.at(mnid).next_chain, clock_ordinal.at(mem_clock_key.at(mnid))});
     }
 
     const std::string vc_tmp = lean_path + ".tmp";

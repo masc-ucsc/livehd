@@ -50,7 +50,7 @@ def counterAsyncReset : DesignCert where
   nodes    := #[ { op := .Op_Sum 2, width := 4, deps := #[1, 2] } ]
   outputs  := #[ { slot := 1, width := 4 } ]
   flops    := #[ { width := 4, din := 3, enable := none, resetPin := some 0,
-                   resetValue := 0, resetActiveLow := true } ]
+                   resetValue := 0, resetActiveLow := true, asyncReset := true } ]
   memories := #[]
 
 /-- **Inlined ROM.**  A four-entry, 8-bit table read combinationally.  A ROM has
@@ -78,6 +78,43 @@ def memReadWrite : DesignCert where
   flops    := #[]
   memories := #[ { aw := 2, dw := 8, nextImg := 7 } ]
 
+/-- **Two clock domains.**  Two free-running 4-bit counters, one per domain:
+flop 0 commits on clock 0 (`clk_a`), flop 1 on clock 1 (`clk_b`).  With `clk_b`
+fired every other step, counter 1 advances at half the rate — the observable a
+one-clock model cannot express.  Flop 1 also has a SYNCHRONOUS reset from
+input 0, so a step in which `clk_b` is quiet while reset is asserted must HOLD
+it (`srcFlopNext`): a synchronous reset is sampled at the edge.
+
+    slot 0 = Qa, slot 1 = Qb, slot 2 = 1, slot 3 = rst_b, slot 4 = Qa+1, slot 5 = Qb+1 -/
+def twoDomainCounters : DesignCert where
+  sources  := #[ .flopQ 0 4, .flopQ 1 4, .const 4 1, .input 0 1 ]
+  nodes    := #[ { op := .Op_Sum 2, width := 4, deps := #[0, 2] }
+               , { op := .Op_Sum 2, width := 4, deps := #[1, 2] } ]
+  outputs  := #[ { slot := 0, width := 4 }, { slot := 1, width := 4 } ]
+  flops    := #[ { width := 4, din := 4, enable := none, resetPin := none,
+                   resetValue := 0, resetActiveLow := false, clock := 0 }
+               , { width := 4, din := 5, enable := none, resetPin := some 3,
+                   resetValue := 0, resetActiveLow := false, clock := 1 } ]
+  memories := #[]
+  clocks   := #[ { name := "clk_a" }, { name := "clk_b" } ]
+
+/-- **Asynchronous reset across domains.**  `counterAsyncReset`'s flop moved to
+a second domain: its reset must act in a step where `clk_b` is quiet, because
+that is what asynchronous means. -/
+def asyncResetOffDomain : DesignCert :=
+  { counterAsyncReset with
+    flops  := #[ { width := 4, din := 3, enable := none, resetPin := some 0,
+                   resetValue := 0, resetActiveLow := true, clock := 1, asyncReset := true } ]
+    clocks := #[ { name := "clk_a" }, { name := "clk_b" } ] }
+
+/-- **Memory in a second domain.**  `memReadWrite`'s write port on clock 1: a
+step in which only clock 0 fires must leave the image unchanged, write enable
+notwithstanding. -/
+def memOffDomain : DesignCert :=
+  { memReadWrite with
+    memories := #[ { aw := 2, dw := 8, nextImg := 7, clock := 1 } ]
+    clocks   := #[ { name := "clk_a" }, { name := "clk_b" } ] }
+
 /-- **Scale.**  A synthetic dependency chain of `n` adders: node `i` reads node
 `i-1`, so nothing about it can be reordered or skipped.  It exists for phase 2's
 stack-safety requirement — the evaluator must survive a certificate far larger
@@ -98,6 +135,9 @@ def registry : List (String × DesignCert) :=
   , ("counter-async-reset", counterAsyncReset)
   , ("rom-table",           romTable)
   , ("mem-read-write",      memReadWrite)
+  , ("two-domain-counters", twoDomainCounters)
+  , ("async-reset-off-domain", asyncResetOffDomain)
+  , ("mem-off-domain",      memOffDomain)
   , ("chain-1k",            addChain 1000)
   , ("chain-200k",          addChain 200000) ]
 
@@ -160,6 +200,26 @@ def badRomSize : DesignCert :=
   { romTable with
     sources := #[ .memConst 1 8 #[10, 20, 30, 40], .input 0 2, .const 1 1 ] }
 
+/-- A flop naming a clock ordinal the certificate does not declare. -/
+def badFlopClock : DesignCert :=
+  { counterEnabled with
+    flops := #[ { width := 4, din := 3, enable := some 2, resetPin := none,
+                  resetValue := 0, resetActiveLow := false, clock := 1 } ] }
+
+/-- A memory naming a clock ordinal the certificate does not declare. -/
+def badMemClock : DesignCert :=
+  { memReadWrite with memories := #[ { aw := 2, dw := 8, nextImg := 7, clock := 3 } ] }
+
+/-- No clock domain at all: ordinal 0 does not exist. -/
+def badNoClocks : DesignCert := { combAddMask with clocks := #[] }
+
+/-- An async flop source whose `FlopDesc` lacks the ASYNC flag: the read side
+says the reset does not wait for the edge, the commit side says it does. -/
+def badAsyncFlag : DesignCert :=
+  { counterAsyncReset with
+    flops := #[ { width := 4, din := 3, enable := none, resetPin := some 0,
+                  resetValue := 0, resetActiveLow := true } ] }
+
 --------------------------------------------------------------------------------
 -- Negative controls: mutate ONE live field, require the trace to change
 --
@@ -198,7 +258,16 @@ change, which is what makes that a judgement call rather than an oversight. -/
 def mutFlopResetPolarity : DesignCert :=
   { counterAsyncReset with
     flops := #[ { width := 4, din := 3, enable := none, resetPin := some 0,
-                  resetValue := 0, resetActiveLow := false } ] }
+                  resetValue := 0, resetActiveLow := false, asyncReset := true } ] }
+
+/-- a CLOCK ordinal: the counter moved to a second domain, which the test then
+leaves quiet — under `allEdges` this mutant is indistinguishable, which is
+exactly why the edge vector, not the ordinal alone, is what the evaluator reads -/
+def mutFlopClock : DesignCert :=
+  { counterEnabled with
+    flops  := #[ { width := 4, din := 3, enable := some 2, resetPin := none,
+                   resetValue := 0, resetActiveLow := false, clock := 1 } ]
+    clocks := #[ { name := "clk_a" }, { name := "clk_b" } ] }
 
 /-- a MEMORY UPDATE: the next image is the PRE-write one, so writes vanish -/
 def mutMemoryNextImg : DesignCert :=
@@ -214,7 +283,11 @@ def rejectRegistry : List (String × DesignCert) :=
   , ("bad-flop-ordinal",     badFlopOrdinal)
   , ("bad-output-kind",      badOutputKind)
   , ("bad-async-reset-value", badAsyncResetValue)
-  , ("bad-rom-size",         badRomSize) ]
+  , ("bad-rom-size",         badRomSize)
+  , ("bad-flop-clock",       badFlopClock)
+  , ("bad-mem-clock",        badMemClock)
+  , ("bad-no-clocks",        badNoClocks)
+  , ("bad-async-flag",       badAsyncFlag) ]
 
 end Examples
 end Direct
