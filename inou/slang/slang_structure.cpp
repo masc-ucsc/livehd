@@ -363,6 +363,55 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
 // classify each array as constant- or runtime-indexed (a selector that folds,
 // or references only loop-induction vars / params / genvars, is constant after
 // the reader unrolls). Recurses through generate instances.
+// `$past(x, n)` needs a HISTORY FLOP per depth, and the flops must be declared
+// before the body that reads them and updated after it. So the calls are
+// collected in a pre-scan: this records, per signal, the DEEPEST $past applied
+// to it, which is the length of the shift chain to build.
+//
+// Only a plain signal reference is accepted. `$past(a && b)` would need the
+// expression re-lowered inside the epilogue, in a scope where its operands may
+// not be live; refusing it matches the Pyrope-side rule ("takes one signal, not
+// an expression") and keeps a wrong answer from being invented.
+struct Past_collector : public slang::ast::ASTVisitor<Past_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, int> depth;  // symbol -> deepest n
+  bool                                                     saw_unsupported = false;
+
+  void handle(const slang::ast::CallExpression& e) {
+    // $rose/$fell/$stable/$changed are one cycle of history each, so they need
+    // a chain just as much as $past does. Collecting only $past left a design
+    // that uses ONLY the edge forms with no history register declared, and the
+    // lowering then refused with "not resolved to a history register".
+    const auto nm = e.isSystemCall() ? e.getSubroutineName() : std::string_view{};
+    if (nm == "$past" || nm == "$rose" || nm == "$fell" || nm == "$stable" || nm == "$changed") {
+      auto args = e.arguments();
+      if (!args.empty()) {
+        int n = 1;
+        if (nm == "$past" && args.size() >= 2) {
+          // The collector has no EvalContext; a literal depth is a constant the
+          // expression already carries. Anything else is refused at lowering.
+          if (const auto* cv = args[1]->getConstant(); cv != nullptr && cv->isInteger()) {
+            if (auto i = cv->integer().as<int>(); i && *i >= 0) {
+              n = *i;
+            } else {
+              saw_unsupported = true;
+            }
+          } else {
+            saw_unsupported = true;
+          }
+        }
+        if (args[0]->kind == slang::ast::ExpressionKind::NamedValue) {
+          const auto& sym = args[0]->as<slang::ast::NamedValueExpression>().symbol;
+          auto&       d   = depth[&sym];
+          d               = std::max(d, n);
+        } else {
+          saw_unsupported = true;
+        }
+      }
+    }
+    visitDefault(e);
+  }
+};
+
 struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collector, slang::ast::VisitFlags::AllGood> {
   std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> selects;
   // Element-selects whose base is a PACKED array with a >1-bit element (a true
@@ -2242,7 +2291,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // NOT get the poison store — the wire is single-driver, and a split wire's
   // accumulator carries the poison as its declare init instead).
 
+  declare_past_chains(*body);
   lower_members(*body);
+  emit_past_chain_updates();
   finalize_pending_async_resets();
   for (const auto* sym : emit_ordered(reg_init_applied_)) {
     if (reset_attr_syms_.contains(sym)) {
@@ -6210,6 +6261,60 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
       emit_attr(target.name, "negreset", "true", false);
     }
   }
+}
+
+// Declare one flop per (signal, depth) for every `$past` in the body. Done
+// BEFORE the body is lowered, because the body reads these names.
+void Slang_context::declare_past_chains(const slang::ast::Symbol& body) {
+  Past_collector pc;
+  body.visit(pc);
+  for (const auto& [sym, deepest] : pc.depth) {
+    if (deepest <= 0) {
+      continue;  // $past(x, 0) is x itself; no state needed
+    }
+    auto&      chain = past_chain_[sym];
+    const auto ti    = tinfo(sym->getType());
+    for (int k = 1; k <= deepest; ++k) {
+      auto nm = unique_suffixed(lname_of(*sym), "__past" + std::to_string(k));
+      // No reset value: before k cycles have elapsed there IS no history, and
+      // seeding a 0 would assert a value the design never produced. An
+      // unconstrained start is the honest model, and it is what makes an
+      // obligation over $past refutable only for real reasons.
+      builder_.create_declare_stmts(nm, "reg", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+      chain.push_back(nm);
+    }
+  }
+}
+
+// The shift chain, emitted after the body so each stage captures the value its
+// source SETTLED to this cycle. Deepest first: Pyrope's body is sequential, so
+// assigning `p1 = x` before reading p1 for p2 would shift twice in one cycle.
+void Slang_context::emit_past_chain_updates() {
+  for (const auto& [sym, chain] : past_chain_) {
+    for (size_t k = chain.size(); k-- > 0;) {
+      if (k == 0) {
+        builder_.create_assign_stmts(chain[0], lname_of(*sym));
+      } else {
+        builder_.create_assign_stmts(chain[k], chain[k - 1]);
+      }
+    }
+  }
+}
+
+// `$past(x, n)` -> the n-th history flop. n == 0 is x itself.
+std::string Slang_context::past_ref(const slang::ast::ValueSymbol& sym, int n, slang::SourceRange where) {
+  if (n <= 0) {
+    return lname_of(sym);
+  }
+  auto it = past_chain_.find(&sym);
+  if (it == past_chain_.end() || static_cast<size_t>(n) > it->second.size()) {
+    // The pre-scan and this lookup must agree; a miss means the call was not
+    // seen (a shape the collector skipped), so refuse rather than read a flop
+    // that nothing drives.
+    emit_unsupported(where, "unsupported-past", "$past() here was not resolved to a history register");
+    return "0";
+  }
+  return it->second[n - 1];
 }
 
 void Slang_context::finalize_pending_async_resets() {

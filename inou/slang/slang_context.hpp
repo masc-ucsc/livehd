@@ -644,6 +644,14 @@ private:
   // Pyrope `assert` emits (tolg makes it an `fproperty` Sub). Dropping these,
   // as the reader used to, makes a design whose properties are all immediate
   // asserts verify as "no obligations found" — proving nothing at exit 0.
+  // `$past(x, n)` history chain: sym -> the per-depth register names, index 0
+  // being one cycle back. Declared before the body (they are read inside it)
+  // and updated after it (the update must see the value x settles to).
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, std::vector<std::string>> past_chain_;
+  void        declare_past_chains(const slang::ast::Symbol& body);
+  void        emit_past_chain_updates();
+  std::string past_ref(const slang::ast::ValueSymbol& sym, int n, slang::SourceRange where);
+
   void lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt);
   // A CONCURRENT `assert/assume/restrict/cover property(...)`. Returns false
   // when the property carries real temporal structure this reader cannot prove;

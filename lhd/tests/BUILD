@@ -423,6 +423,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# SystemVerilog `$past`/`$rose`/`$fell`/`$stable`/`$changed` in DESIGN source.
+# History is a real flop chain in the DESIGN (declared before the body, updated
+# after it, deepest stage first), not a monitor-side trick -- a flop inside a
+# combinational monitor would be a fresh free symbol per step. The depth-2 case
+# is what catches a chain that shifts twice in a cycle or lands one stage short.
+sh_test(
+    name = "lhd_sv_past_test",
+    size = "large",
+    srcs = ["lhd_sv_past_test.sh"],
+    data = ["//lhd"],
+)
+
 # WINDOWED temporal operators: SVA's `##[m:n]`. The window looks FORWARD from
 # the anchor cycle, which the engine (backward-indexing only) supports by
 # RETIMING the statement, so the monitor stays combinational here too. The

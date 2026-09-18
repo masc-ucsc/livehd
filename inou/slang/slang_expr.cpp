@@ -1712,6 +1712,55 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
       }
       return to_pattern(v, ai.bits, ai.is_signed);
     }
+    // `$past(x, n)` and the edge functions built on it. The history comes from
+    // a REAL flop chain in the design (declare_past_chains / the epilogue
+    // update), not from a monitor-side trick: a flop inside a combinational
+    // monitor would be a fresh free symbol every step and would silently refute
+    // tautologies, which is why the Pyrope formal-block path resolves history by
+    // indexing the unroll instead. Here the state belongs to the design, so the
+    // BMC/induction engine models it correctly.
+    if ((name == "$past" || name == "$rose" || name == "$fell" || name == "$stable" || name == "$changed")
+        && !args.empty()) {
+      if (args[0]->kind != slang::ast::ExpressionKind::NamedValue) {
+        emit_unsupported(expr.sourceRange,
+                         "unsupported-past",
+                         std::string(name) + " takes one signal; an expression argument is not supported");
+        return "0";
+      }
+      const auto& sym = args[0]->as<slang::ast::NamedValueExpression>().symbol;
+      int         n   = 1;
+      if (name == "$past" && args.size() >= 2) {
+        auto d = try_eval_int(*args[1]);
+        if (!d || *d < 0) {
+          emit_unsupported(expr.sourceRange, "unsupported-past", "$past() depth must be a literal cycle count");
+          return "0";
+        }
+        n = static_cast<int>(*d);
+      }
+      const auto cur  = to_int_value(lower_rvalue(*args[0]));
+      const auto prev = to_int_value(past_ref(sym, name == "$past" ? n : 1, expr.sourceRange));
+      if (name == "$past") {
+        return prev;
+      }
+      // rose/fell/stable/changed are sugar over one cycle of history. Each is
+      // a 1-bit result, so compare rather than mask: the operand may be wider.
+      // The comparisons yield pyrope BOOLs, but a SystemVerilog expression is
+      // integer-valued (SV has no bool type), so each is converted back on the
+      // way out -- otherwise `$rose(a) == (a && !$past(a))` fails typecheck
+      // with "`==` requires both operands to be the same type".
+      const auto cur_nz  = mark_bool(builder_.create_ne_stmts(cur, "0"));
+      const auto prev_nz = mark_bool(builder_.create_ne_stmts(prev, "0"));
+      if (name == "$rose") {
+        return to_int_value(mark_bool(builder_.create_log_and_stmts(cur_nz, mark_bool(builder_.create_log_not_stmts(prev_nz)))));
+      }
+      if (name == "$fell") {
+        return to_int_value(mark_bool(builder_.create_log_and_stmts(prev_nz, mark_bool(builder_.create_log_not_stmts(cur_nz)))));
+      }
+      if (name == "$stable") {
+        return to_int_value(mark_bool(builder_.create_eq_stmts(cur, prev)));
+      }
+      return to_int_value(mark_bool(builder_.create_ne_stmts(cur, prev)));  // $changed
+    }
     if (name == "$countones" && args.size() == 1) {
       const auto& a  = *args[0];
       auto        ai = tinfo(*a.type);
