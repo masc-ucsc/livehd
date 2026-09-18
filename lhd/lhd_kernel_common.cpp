@@ -1840,6 +1840,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["unknown_zero"] = v;
     } else if (k == "sim.live_words") {
       labels["live_words"] = v;
+    } else if (k == "sim.fence_ratio") {
+      labels["fence_ratio"] = v;
     }
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path

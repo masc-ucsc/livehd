@@ -104,6 +104,7 @@ private:
   // back-edge sink, producing a WRONG simulation with no diagnostic. These flags
   // turn that into a loud, located build failure.
   bool        cycle_unresolved_ = false;  // hit an unschedulable comb-cycle back-edge this graph
+  size_t      unresolved_operands_ = 0;  // operand() 0-fallbacks emitted; a canonical kernel must add none
   bool        cycle_reported_   = false;  // a located error was already emitted for this graph
   std::string cycle_first_label_;         // first offending value (for the generic message)
 
@@ -298,7 +299,7 @@ public:
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,
-           bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0)
+           bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0, int64_t _fence_ratio = -1)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -313,7 +314,8 @@ public:
       , debug_(_debug)
       , unknown_zero_(_unknown_zero)
       , dut_(_dut)
-      , live_words_(_live_words) {}
+      , live_words_(_live_words)
+      , fence_ratio_(_fence_ratio) {}
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
@@ -348,6 +350,7 @@ private:
   // them by version (see "Versioned wide inputs" in do_from_graph).
   bool                           dut_            = false;
   uint32_t                       live_words_     = 0;  // sim.live_words (0 = the plan's default); folded into the key
+  int64_t                        fence_ratio_    = -1;  // sim.fence_ratio (-1 = the plan's default); folded into the key
 
 public:
   // The C++ TYPE a stored unsigned value of `bits` literal LiveHD bits is

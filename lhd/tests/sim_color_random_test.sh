@@ -44,9 +44,10 @@ refute "random simulation still contains a parallel runtime" \
 grep -q '\.stage_write<' "$body" || fail "ordering-none collision set is not staged"
 grep -q '\.read<' "$body" || fail "ordering-none read was not emitted"
 
-# Unknown source literals are concretized to zero by sim_const_text(); they do
-# not draw from the PRNG and must not disable color dirty-gating/quiescence.
-"$LHD" sim "$X_PRP" --setup-only --workdir "$work/xconst" -q >/dev/null
+# Unknown source literals are drawn once, not on every period, and must not
+# disable color dirty-gating/quiescence. Enable the optional activation cache
+# explicitly: sim.color_dirty defaults to false.
+"$LHD" sim "$X_PRP" --set sim.color_dirty=true --setup-only --workdir "$work/xconst" -q >/dev/null
 xplan="$(ls "$work"/xconst/sim/*packer.color-plan.txt | head -1)"
 xbody="$(ls "$work"/xconst/sim/*packer.cpp | head -1)"
 grep -q 'runtime-random false' "$xplan" || fail "unknown literal was misclassified as runtime randomness"

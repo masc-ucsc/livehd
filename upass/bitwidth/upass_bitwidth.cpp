@@ -540,7 +540,18 @@ upass::Vote uPass_bitwidth::process_mult(std::string_view dst_name, Bundle& dst,
 upass::Vote uPass_bitwidth::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // |a / d| <= |a| for any integer |d| >= 1.
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
-  return stamp(dst_name, dst, range_of_operand(src[0]).div(range_of_operand(src[1])));
+  // An input divisor has no derived range, only its declared envelope. That is
+  // enough to know its SIGN -- the one fact div() takes from the divisor when
+  // the dividend is non-negative -- exactly as the shift checks use it. It only
+  // TIGHTENS the stamp ([-|a|,|a|] -> [0,a.max]): a `u25 / u15` quotient
+  // otherwise failed its own declared unsigned range (fixme_hier_test's leaf2).
+  auto divisor = range_of_operand(src[1]);
+  if (divisor.is_unbounded()) {
+    if (const auto env = envelope_of_operand(src[1]); !env.is_unbounded() && env.min >= 0) {
+      divisor = env;
+    }
+  }
+  return stamp(dst_name, dst, range_of_operand(src[0]).div(divisor));
 }
 
 upass::Vote uPass_bitwidth::process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) {

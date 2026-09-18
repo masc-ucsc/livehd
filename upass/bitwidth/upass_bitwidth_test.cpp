@@ -75,6 +75,23 @@ TEST(LnastRangeLattice, SubConstants) {
   EXPECT_EQ(r.min, 7);
 }
 
+// An unsigned dividend over an unsigned divisor that may be 0 (x / 0 has no
+// value) stays unsigned: the quotient range must not drop below 0.
+TEST(LnastRangeLattice, DivNonNegativeByDivisorIncludingZero) {
+  Lnast_range a;
+  a.unbounded = false;
+  a.min       = 0;
+  a.max       = (int64_t{1} << 25) - 1;
+  Lnast_range d;
+  d.unbounded = false;
+  d.min       = 0;
+  d.max       = (int64_t{1} << 15) - 1;
+  const auto q = a.div(d);
+  EXPECT_FALSE(q.unbounded);
+  EXPECT_EQ(q.min, 0);
+  EXPECT_EQ(q.max, a.max);
+}
+
 TEST(LnastRangeLattice, MulConstants) {
   auto r = Lnast_range::constant(3).mul(Lnast_range::constant(4));
   EXPECT_TRUE(r.is_constant());

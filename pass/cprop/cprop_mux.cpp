@@ -345,6 +345,20 @@ class Mux_sharing {
     if (!data_count) {
       return;
     }
+    // A selection among PROVEN 0/1 values stays the Mux nest it is. Flattening
+    // pays one conjunction per path and one disjunction per value -- 1-bit
+    // predicate gates, as wide as the data -- to save 1-bit selects, and the
+    // scalar folds already turn a nest's constant arms into And/Or. (An LRU bit
+    // matrix lane became ~10 gates plus a Hotmux here.) The proof is cprop's
+    // own structural bound, never a width hint; a flop hold arm is excluded
+    // because its enable extraction is handled on the flop itself.
+    bool all_bool01 = true;
+    for (size_t k = 0; k < groups.size() && all_bool01; ++k) {
+      all_bool01 = k == hold || livehd::cprop_value::is_bool01(groups[k].value);
+    }
+    if (all_bool01) {
+      return;
+    }
     const size_t new_cost = data_count - 1;
     // Count only private, removable word muxes. Width annotations cannot
     // influence this structural heuristic; repeated alternatives or a hold

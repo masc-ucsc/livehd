@@ -196,14 +196,21 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
   if (op == Ntype_op::Or || op == Ntype_op::Xor) {
     // A nested pack is often another Or tree. Its possible support is the
     // union of its operands' supports; unlike the unique-owner query below,
-    // every operand must be bounded before that union is useful.
+    // every operand must be bounded before that union is useful. When one is
+    // not, the union is unknown but this pin's own unsigned width (the generic
+    // bound below) still holds: returning a bail here instead made XS Rob's
+    // deqPtr bundle, whose 141-bit inner pack sits at <<179, look like it could
+    // own ANY bit, so a 3-bit read at [94,97) found two owners and the word
+    // kept a false memory -> pack -> memory-address cycle.
     std::pair<int, int> bound{std::numeric_limits<int>::max(), 0};
-    bool                any = false;
+    bool                any     = false;
+    bool                bounded = true;
     for (const auto& sink : node.inp_sorted_pins()) {
       for (const auto& driver : sink.get_driver_pins()) {
         const auto operand = occurrence_packed_footprint(driver, depth + 1, &visits);
         if (operand.first < 0) {
-          return kPacked_footprint_bail;
+          bounded = false;
+          break;
         }
         if (operand.second <= operand.first) {
           continue;
@@ -212,8 +219,13 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
         bound.second = std::max(bound.second, operand.second);
         any          = true;
       }
+      if (!bounded) {
+        break;
+      }
     }
-    return any ? bound : std::pair<int, int>{0, 0};
+    if (bounded) {
+      return any ? bound : std::pair<int, int>{0, 0};
+    }
   }
   const int bits = gu::bits_of(pin);
   return gu::is_unsign(pin) && bits > 0 ? std::pair<int, int>{0, bits} : kPacked_footprint_bail;
@@ -1056,7 +1068,8 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
 // until 2026-09-13, when measuring showed a boundary slot (store + compare +
 // dirty mark per value) costs more than the register pressure it avoids: 256
 // words gave minion 1.75x, matched_filter 1.15x, RenameTable -4%.
-Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bool separate_runtime_calls, uint64_t live_words) {
+Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bool separate_runtime_calls, uint64_t live_words,
+                                int64_t fence_ratio) {
   Color_plan plan;
   plan.live_word_budget_ = live_words > 0 ? live_words : kDefaultLiveWords;
   if (root == nullptr) {
@@ -2301,6 +2314,26 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
   };
 
+  // A design whose state is only rising-edge (no latch, nothing on the fall)
+  // needs no separate rise-commit evaluation for its flops: a flop's capture
+  // reads exactly the pre-rise values, and its commit still runs at the rise
+  // barrier after every slot-0/1 color. Evaluating the capture in pre-rise-eval
+  // lets it fuse with its own input cone instead of receiving every next-state
+  // value through a stored boundary slot (axi_demux: 92 of them). Memories keep
+  // rise-commit: their staged-write/forwarding order is a separate protocol.
+  bool rise_only = true;
+  for (size_t base = 0; base < plan.sites_.size() && rise_only; ++base) {
+    if (!plan.sites_[base].live || plan.sites_[base].kind != Site_kind::state) {
+      continue;
+    }
+    if (gu::type_op_of(plan.sites_[base].node) == Ntype_op::Latch) {
+      rise_only = false;
+      break;
+    }
+    const auto rising = update_on_rise(plan.sites_[base].node, clocks, plan.summary_.versioning_complete);
+    rise_only         = !rising || *rising;
+  }
+
   // Every state endpoint gets one update action. Its input cone is evaluated
   // at the version immediately before that endpoint's closing/active edge.
   for (size_t base = 0; base < plan.sites_.size(); ++base) {
@@ -2313,7 +2346,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     state_rising[base]                 = *rising;
     const State_version  input_version = *rising ? State_version::pre_rise : State_version::post_rise;
-    const Execution_slot commit_slot   = *rising ? Execution_slot::rise_commit : Execution_slot::fall_commit;
+    const auto           state_op      = gu::type_op_of(plan.sites_[base].node);
+    const bool           fused_capture = rise_only && (state_op == Ntype_op::Flop || state_op == Ntype_op::Fflop);
+    const Execution_slot commit_slot   = !*rising       ? Execution_slot::fall_commit
+                                         : fused_capture ? Execution_slot::pre_rise_eval
+                                                         : Execution_slot::rise_commit;
     const size_t         update        = ensure_version(base, input_version, Version_role::state_update, commit_slot, 0);
     state_updates[base]                = update;
     // consumer_input still counts one per DRIVER, which is what one per edge
@@ -3447,14 +3484,21 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     module_shapes.emplace(graph->get_gid(), shape);
     return shape;
   };
-  // A module is a REUSE unit only when its body occurs more than once. Fencing
-  // off a single-occurrence module shares no kernel; it only splits the
-  // caller -> module -> caller sandwich into three or more colors whose seams
-  // are stored, change-tested and dirty-marked every cycle. Measured on the
-  // bedrock tests under their lhdtrack harness (one DUT instance each):
-  // br_enc_gray2bin 4.5x and br_csr_demux 6x slower than before the fence.
-  // A very large single body keeps it as a natural cut for the live-word budget.
-  constexpr size_t                                kSingleBodyFenceSites = 1024;
+  // A fence is a trade-off. It lets dirty-bit gating skip a mostly idle
+  // module (xs_alu's AluDataModule sees constant operands: 26 MHz fenced vs
+  // 11 MHz fused; dino's register file and issue unit idle once the program
+  // spins: 3.36 vs 2.64 MHz; XS RenameTable's tables under a read-only driver:
+  // 61 vs 39 kHz), but every value crossing it is a stored, change-tested,
+  // dirty-marked slot, and the interval contraction below cuts a new color at
+  // every owner switch -- pure cost when the module toggles every cycle (an
+  // LFSR-driven lhdtrack DUT: br_enc_gray2bin 4.4 -> 46 MHz unfenced). Skipping
+  // an idle module saves work in proportion to its SITES; its seam costs in
+  // proportion to its INTERFACE WORDS. A module used once (no shared kernel)
+  // therefore keeps its fence only when sites / interface_words reaches
+  // `fence_ratio` (sim.fence_ratio; 0 = always). Reused or very large bodies
+  // always keep it.
+  constexpr size_t kSingleBodyFenceSites = 1024;
+  const int64_t    single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
   absl::flat_hash_map<const hhds::Graph*, size_t> body_occurrences;
   for (const auto& body : bodies) {
     if (!body.path.steps().empty() && body.graph != nullptr) {
@@ -3467,10 +3511,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       continue;
     }
     const auto shape = module_shape(body.graph);
-    if (shape.sites < 32 || (shape.height > 1 && shape.interface_words > 20)) {
+    if (fence_ratio == kNoFences || shape.sites < 32 || (shape.height > 1 && shape.interface_words > 20)) {
       continue;
     }
-    if (body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites) {
+    // A single-occurrence body keeps its fence only when it is big for its seam.
+    const bool single = body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites;
+    const bool fenced
+        = !single || static_cast<int64_t>(shape.sites) >= single_body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
+    if (!fenced) {
       continue;
     }
     size_t trie_node = 0;

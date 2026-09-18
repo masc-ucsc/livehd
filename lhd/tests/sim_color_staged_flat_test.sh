@@ -65,16 +65,25 @@ refute "color root retained module-local settle API" -q 'void __settle' "$header
 refute "color root retained module-local settle generation" -q '::__settle()' "$body"
 grep -q '::__color_run()' "$body" || fail "serial color schedule body was not emitted"
 grep -q '::__color_eval(std::size_t' "$body" || fail "planned colors were not lowered"
-grep -q '__color_slot_' "$body" || fail "cross-color values lack producer-owned storage"
+plan="$(ls "$work"/setup/sim/*accum.color-plan.txt | head -1)"
+# A rise-only design evaluates each flop capture with its own input cone
+# (pre-rise-eval): no separate rise-commit color, so `d + 1` never crosses a
+# color. Any value that DOES cross colors must still own producer storage.
+refute "rise-only flop capture was not fused into its input cone" -q '^color .* slot=rise-commit' "$plan"
+if grep -q 'kind=color-value' "$plan"; then
+  grep -q '__color_slot_' "$body" || fail "cross-color values lack producer-owned storage"
+fi
 grep -q 'struct .*::__Color_runtime' "$runtime" || fail "runtime details are not isolated from the module header"
 refute "generated simulator still contains Taskflow" -Eq 'taskflow|tf::Executor|tf::Taskflow' "$header" "$body" "$runtime"
 
 commit_body="$(sed -n '/::__color_commit(std::size_t/,/^}/p' "$body")"
 # A scalar (non-pipelined) commit lands the pending value with a plain
-# assignment: the dynamic `__state_commit` flag is only raised after proving
-# D != Q, so slop_update's compare-on-write would repeat that test. A pipe
-# stage still needs slop_update (it carries its own per-stage change bit).
-grep -Eq 'slop_update\(state, state_din\)|state = state_din;' <<<"$commit_body" \
+# assignment: the dynamic `__state_commit` flag already says the capture ran
+# (and, under sim.color_dirty, that D != Q), so slop_update's compare-on-write
+# would only repeat work. Without dirty gating the flag is read as a select
+# (`q = flag ? q_din : q`): a data-driven enable mispredicts as a branch. A
+# pipe stage still needs slop_update (it carries its own per-stage change bit).
+grep -Eq 'slop_update\(state, state_din\)|state = state_din;|state = __rt\.__state_commit\[[0-9]+\] \? state_din : state;' <<<"$commit_body" \
   || fail "rise commit does not consume pending state"
 grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evaluates combinational logic"
 

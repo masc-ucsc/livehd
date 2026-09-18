@@ -57,6 +57,10 @@ protected:
   void            scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
   // EQ(EQ(x,0),0) -> x / EQ(b,1) -> b boolean-chain folds. true = node deleted.
   bool            scalar_eq(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
+  // 0/1 hygiene on Xor/And/Or: x^1 -> EQ(x,0), complementary literals,
+  // absorption, duplicate operands. true = node deleted or rewired (the caller
+  // re-reads its type and operands).
+  bool            scalar_bool(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
   // Constant shift-of-shift composition (SRA/SHL chains). true = node rewired
   // in place (caller must re-read input edges).
   bool            scalar_shift(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
@@ -81,6 +85,10 @@ protected:
   // scalar sweep, so downstream passes see the canonical `din = data` form.
   void canonicalize_latch_hold(const hhds::Node_class& latch);
   void canonicalize_flop_hold(const hhds::Node_class& flop);
+  // din only matters while `enable` holds: resolve din's private Mux/Or/
+  // Set_mask spine under the facts an Or-of-literals enable implies (the
+  // per-lane hold Mux of `if (rst) q[k] <= i; else if (en) q[k] <= d;`).
+  void canonicalize_flop_enable(const hhds::Node_class& flop);
 
   // Retype And(x, 2^n-1) [binary, one const] into the value-identical
   // Get_mask(x, 2^n-1) so every low-mask truncation shares ONE shape.
@@ -92,6 +100,9 @@ protected:
   // One round of bit-slice vectorization: runs of 1-bit Mux(s, x[j], y[j+d])
   // over consecutive j become one Mux(s, x[j0..], y[j0+d..]). true = changed.
   bool vectorize_bit_muxes();
+  // And/Or whose operands are one 1-bit expression over single-bit slices at
+  // shifted positions -> one word expression tested under a mask. true = changed.
+  bool vectorize_bit_reductions();
   // Merge adjacent Concat lanes that are contiguous slices of one source.
   // true = node rewritten (it may have been forwarded and deleted).
   bool merge_concat_slices(hhds::Node_class& node);

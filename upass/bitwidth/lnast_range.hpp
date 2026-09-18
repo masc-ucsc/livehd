@@ -260,7 +260,12 @@ struct Lnast_range {
     if (!magnitude(m)) {
       return make_unbounded();  // INT64_MIN — can't take |.|
     }
-    if (min >= 0 && !b.unbounded && b.min >= 1) {
+    // A divisor range that includes 0 changes nothing here: x / 0 has no value
+    // (Dlop yields invalid) and is not modeled, and every defined quotient of a
+    // non-negative dividend by a non-negative divisor is in [0, a.max]. Keying
+    // this on b.min >= 1 put a u25 / u15 quotient at [-2^25+1, ...] and failed
+    // its own declared unsigned range (fixme_hier_test's leaf2).
+    if (min >= 0 && !b.unbounded && b.min >= 0) {
       return bounded(0, max);
     }
     return bounded(-m, m);

@@ -1032,6 +1032,7 @@ sh_test(
     tags = ["cpu:4"],
     data = [
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
+        "//inou/prp:tests/sim/color_kernel_unsigned_msb.prp",
         "//lhd",
     ],
 )

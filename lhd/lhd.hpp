@@ -431,6 +431,13 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "costs a stored slot, a compare and a dirty mark per value, so a larger budget means fewer, bigger colors "
      "(minion 20->256 words: 1.75x cycles/s); a smaller one keeps idle logic finer-grained. 0 (the default) means "
      "Color_plan::kDefaultLiveWords, which is the ONE place the number lives"                                     },
+    {            "fence_ratio",
+     "",  Sim_set_option::Kind::non_neg_num,
+     "fence a module used ONCE into its own simulator colors only when it has at least this many sites per "
+     "interface word. A fence lets dirty-bit gating skip a mostly idle module (xs_alu's AluDataModule: 2.4x), but "
+     "every value crossing it is a stored, change-tested slot, which only costs when the module toggles every "
+     "cycle (an LFSR-driven DUT: up to 10x). 0 fences every such module; empty (the default) means "
+     "Color_plan::kDefaultFenceRatio. Reused modules always keep their fence"                                     },
     {           "compile_only",
      "false",      Sim_set_option::Kind::boolean,
      "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "

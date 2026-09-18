@@ -65,4 +65,16 @@ wait "$llvm_pid" || fail "llvm-backend simulation failed"
 "$LHD" sim "$PRP" --setup-only --set sim.debug=true --set sim.live_words=20 --workdir "$work/setup" -q >/dev/null
 grep -Eq 'register-budget words=20 ' "$plan" || fail "explicit live-word budget did not replace the cached plan"
 
+# A shared kernel reads an unsigned boundary slot at its own width. It must be
+# bound as the Slop_u it is: a plain Slop<W> copy made the top bit a sign bit
+# (x = 5 as a u3 reached the adder as -3). A one-word budget forces the gate
+# into its own reused color; the test block asserts every exact sum.
+MSB="inou/prp/tests/sim/color_kernel_unsigned_msb.prp"
+"$LHD" sim "$MSB" --set sim.live_words=1 --workdir "$work/msb" -q >/dev/null \
+  || fail "a shared kernel misread an unsigned same-width input (top bit as sign)"
+ls "$work"/msb/sim/*color-kernel-s_*.cpp >/dev/null 2>&1 \
+  || fail "sim.live_words=1 no longer emits a shared kernel for $MSB; the check above tests nothing"
+grep -q 'const auto& __k_in_[0-9]* = \*static_cast<const Slop_u<3>\*>' "$work"/msb/sim/*color-kernel-s_*.cpp \
+  || fail "same-width unsigned kernel input was not bound as its Slop_u slot"
+
 echo "PASS: fused multi-write colors preserve unsigned storage and exact values in Slop and LLVM"

@@ -51,6 +51,7 @@
 #include <functional>
 #include <limits>
 #include <print>
+#include <regex>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -911,6 +912,161 @@ void compact_body_temps(std::string& body) {
   fold_compare_bools(body);
   collapse_same_width_wraps(body);
 }
+
+// Split every LHD_SIM_COLD member in `text` into noinline, unoptimized lambdas
+// of at most kColdChunkStatements top-level statements.
+//
+// The checkpoint/debug/reset members are one statement per state field. On XS
+// Rob each is 7-16 MB of straight-line code, and clang's backend time on ONE
+// function of that size is superlinear even with optnone (every member of
+// Rob.cpp took over 10 minutes alone while the whole cycle kernel compiled in
+// 16 s). A lambda is its own backend function and captures `this`, the
+// parameters and any leading local by reference, so the statement text is
+// untouched. Anything this cannot prove safe leaves the member as it was: a
+// `return` before the tail (it would return from the lambda instead), a local
+// declared after the first statement (a later chunk could not see it), or
+// unbalanced braces.
+std::string chunk_cold_members(std::string_view text) {
+  constexpr size_t kColdChunkStatements = 2000;
+
+  std::vector<std::string_view> lines;
+  for (size_t pos = 0; pos < text.size();) {
+    const auto nl = text.find('\n', pos);
+    const auto e  = nl == std::string_view::npos ? text.size() : nl;
+    lines.push_back(text.substr(pos, e - pos));
+    pos = e + 1;
+  }
+  const auto brace_delta = [](std::string_view line) {
+    int  delta  = 0;
+    char quote  = 0;
+    bool escape = false;
+    for (const char c : line) {
+      if (quote != 0) {
+        if (escape) {
+          escape = false;
+        } else if (c == '\\') {
+          escape = true;
+        } else if (c == quote) {
+          quote = 0;
+        }
+      } else if (c == '"' || c == '\'') {
+        quote = c;
+      } else if (c == '{') {
+        ++delta;
+      } else if (c == '}') {
+        --delta;
+      }
+    }
+    return delta;
+  };
+  const auto is_declaration = [](std::string_view line) {
+    static const std::regex decl(R"(^\s*(const\s+)?(auto|std::[\w:]+|u?int\d+_t)\s+[A-Za-z_]\w*\s*(=|\{))");
+    return std::regex_search(line.begin(), line.end(), decl);
+  };
+  const auto has_return = [](std::string_view line) {
+    static const std::regex ret(R"(\breturn\b)");
+    return std::regex_search(line.begin(), line.end(), ret);
+  };
+  const auto is_return = [](std::string_view line) {
+    const auto first = line.find_first_not_of(' ');
+    return first != std::string_view::npos && line.substr(first).starts_with("return");
+  };
+
+  std::string out;
+  out.reserve(text.size() + text.size() / 64);
+  const auto put = [&out](std::string_view line) {
+    out.append(line);
+    out.push_back('\n');
+  };
+  size_t i = 0;
+  while (i < lines.size()) {
+    const auto head = lines[i];
+    if (!head.starts_with("LHD_SIM_COLD ") || !head.ends_with("{")) {
+      put(head);
+      ++i;
+      continue;
+    }
+    size_t end = i + 1;
+    while (end < lines.size() && lines[end] != "}") {
+      ++end;
+    }
+    if (end == lines.size()) {  // not a column-0 closed member: leave the rest alone
+      for (; i < lines.size(); ++i) {
+        put(lines[i]);
+      }
+      break;
+    }
+
+    // Top-level statement units, a prologue of leading locals and an epilogue
+    // of trailing returns.
+    std::vector<std::pair<size_t, size_t>> units;  // [first, last] line of each statement
+    bool                                   safe  = true;
+    int                                    depth = 0;
+    size_t                                 start = i + 1;
+    for (size_t l = i + 1; l < end && safe; ++l) {
+      depth += brace_delta(lines[l]);
+      if (depth < 0) {
+        safe = false;
+      } else if (depth == 0) {
+        units.emplace_back(start, l);
+        start = l + 1;
+      }
+    }
+    safe = safe && depth == 0;
+    size_t prologue = 0;
+    while (safe && prologue < units.size() && units[prologue].first == units[prologue].second
+           && is_declaration(lines[units[prologue].first])) {
+      ++prologue;
+    }
+    size_t epilogue = units.size();
+    while (safe && epilogue > prologue && units[epilogue - 1].first == units[epilogue - 1].second
+           && is_return(lines[units[epilogue - 1].first])) {
+      --epilogue;
+    }
+    for (size_t u = prologue; u < epilogue && safe; ++u) {
+      for (size_t l = units[u].first; l <= units[u].second; ++l) {
+        if (has_return(lines[l]) || (l == units[u].first && is_declaration(lines[l]))) {
+          safe = false;
+          break;
+        }
+      }
+    }
+    if (!safe || epilogue - prologue <= kColdChunkStatements) {
+      for (size_t l = i; l <= end; ++l) {
+        put(lines[l]);
+      }
+      i = end + 1;
+      continue;
+    }
+
+    put(head);
+    for (size_t u = 0; u < prologue; ++u) {
+      put(lines[units[u].first]);
+    }
+    for (size_t u = prologue; u < epilogue; u += kColdChunkStatements) {
+      put("  [&]() LHD_SIM_COLD {");
+      const size_t last = std::min(epilogue, u + kColdChunkStatements) - 1;
+      for (size_t l = units[u].first; l <= units[last].second; ++l) {
+        put(lines[l]);
+      }
+      put("  }();");
+    }
+    for (size_t u = epilogue; u < units.size(); ++u) {
+      for (size_t l = units[u].first; l <= units[u].second; ++l) {
+        put(lines[l]);
+      }
+    }
+    put(lines[end]);
+    i = end + 1;
+  }
+  return out;
+}
+
+// Rewrite the LHD_SIM_COLD members appended since `mark` (see chunk_cold_members).
+void chunk_cold_region(File_output& out, size_t mark) {
+  const auto text = out.detach_from(mark);
+  out.append(chunk_cold_members(text));
+}
 }  // namespace
 
 std::string Cgen_sim::cpp_port_path(std::string_view name) {
@@ -1152,6 +1308,26 @@ std::string cpp_string_literal(std::string_view text) {
 // the value folded into it turns out to be a compare.
 static std::string emit_known_true(std::string_view expr) { return absl::StrCat("(", expr, ").is_known_true()"); }
 
+// `(Slop<W>::create_integer(K)).is_known_true()` with K != 0: a guard that a
+// folded clock tick or a constant enable leaves behind. It adds no condition.
+static bool is_constant_true_guard(std::string_view expr) {
+  constexpr std::string_view head = "(Slop<";
+  constexpr std::string_view mid  = ">::create_integer(";
+  constexpr std::string_view tail = ")).is_known_true()";
+  if (!expr.starts_with(head) || !expr.ends_with(tail)) {
+    return false;
+  }
+  const auto at = expr.find(mid);
+  if (at == std::string_view::npos) {
+    return false;
+  }
+  const auto value = expr.substr(at + mid.size(), expr.size() - tail.size() - at - mid.size());
+  if (value.empty() || value == "0") {
+    return false;
+  }
+  return std::ranges::all_of(value, [](char c) { return c >= '0' && c <= '9'; });
+}
+
 static std::string append_zext(std::string expr, int target_bits) {
   const std::string_view tail = expr;
   if (tail.ends_with(">()")) {
@@ -1220,6 +1396,7 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     // schedule; record it so do_from_graph() fails loudly instead of silently
     // simulating 0. (A genuinely undriven pin already returned at is_invalid above.)
     cycle_unresolved_ = true;
+    ++unresolved_operands_;
     if (cycle_first_label_.empty()) {
       cycle_first_label_ = absl::StrCat("`", debug_name(dpin.get_master_node()), "` (a combinational-cycle back-edge)");
     }
@@ -1307,6 +1484,7 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
     // Same unschedulable-comb-cycle guard as operand(): record it so
     // do_from_graph() fails loudly instead of silently simulating 0.
     cycle_unresolved_ = true;
+    ++unresolved_operands_;
     if (cycle_first_label_.empty()) {
       cycle_first_label_ = absl::StrCat("`", debug_name(dpin.get_master_node()), "` (a combinational-cycle back-edge)");
     }
@@ -1343,6 +1521,7 @@ std::string Cgen_sim::stored_operand(const hhds::Pin_class& dpin, int fallback_b
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
     cycle_unresolved_ = true;
+    ++unresolved_operands_;
     if (cycle_first_label_.empty()) {
       cycle_first_label_ = absl::StrCat("`", debug_name(dpin.get_master_node()), "` (a combinational-cycle back-edge)");
     }
@@ -3418,6 +3597,7 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
   // other (a dut_=false body reused as the DUT ignores every driver poke).
   gd          = fnv1a(gd, (color_root ? 2u : 0u) | (observation_on ? 1u : 0u) | (dut_ ? 4u : 0u));
   gd          = fnv1a(gd, live_words_);
+  gd          = fnv1a(gd, static_cast<uint64_t>(fence_ratio_));
   char hex[17];
   std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
   return hex;
@@ -3934,6 +4114,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       "#elif defined(__GNUC__)\n"
       "#define LHD_SIM_PRESERVE_LOOP _Pragma(\"GCC unroll 1\")\n"
       "#else\n#define LHD_SIM_PRESERVE_LOOP\n#endif\n#endif\n");
+  // The checkpoint/debug/reset members are straight-line, one statement per
+  // state field, and run once or on demand -- never in the cycle loop. On XS
+  // Rob they are 68 of the 71 MB of Rob.cpp, and clang's -O2 time on a single
+  // function that size is superlinear (the TU compiled for over 50 minutes).
+  // Compile them unoptimized; the cycle kernels keep -O2.
+  hout->append(
+      "#ifndef LHD_SIM_COLD\n"
+      "#if defined(__clang__)\n"
+      "#define LHD_SIM_COLD __attribute__((cold, noinline, optnone))\n"
+      "#elif defined(__GNUC__)\n"
+      "#define LHD_SIM_COLD __attribute__((cold, noinline, optimize(\"O0\")))\n"
+      "#else\n#define LHD_SIM_COLD\n#endif\n#endif\n");
   if (color_root) {
     hout->append("#include <memory>\n");
   }
@@ -6568,7 +6760,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
          {livehd::sim::Color_plan::Execution_slot::rise_commit, livehd::sim::Color_plan::Execution_slot::fall_commit}) {
       for (size_t member = 0; member < color_plan_->version_sites().size(); ++member) {
         const auto& version = color_plan_->version_sites()[member];
-        if (version.role != livehd::sim::Color_plan::Version_role::state_update || version.slot != slot) {
+        if (version.role != livehd::sim::Color_plan::Version_role::state_update
+            || livehd::sim::Color_plan::commit_slot_of(version) != slot) {
           continue;
         }
         if (direct_commit_shards.empty() || direct_commit_shards.back().slot != slot
@@ -6591,13 +6784,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  hout->append("struct ", mod, " {\n");
-  if (color_runtime_root) {
-    // The plan's slots, generations, and bindings are body details.
-    // Keeping the nested type incomplete here makes a leaf body edit rewrite
-    // generated .cpp files only; a parent sees the same module ABI/header.
-    hout->append("  struct __Color_runtime;\n  std::shared_ptr<__Color_runtime> __color_runtime;\n");
-  }
   // Each state element carries its Q and, alongside it, the D it will take at
   // the next edge (`_din`) plus the boolean saying whether that edge fires for
   // it (`_cen`). Both are DERIVED: the settle recomputes them from Q and the
@@ -6609,17 +6795,53 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // commit are separate methods: the commit runs with NO combinational value in
   // scope, so anything it needs — the next value, the ICG enable, a secondary
   // clock's edge test — has to have been computed and parked by the settle.
+  std::vector<std::string> flop_decls;
   for (const auto& f : flops) {
     const auto type = value_type(f.bits, f.unsign);
     for (const auto& s : f.stages) {
-      hout->append("  ", type, " ", s, "{};  // pipe stage\n");
-      hout->append("  ", type, " ", s, "_din{};  // ...its next value\n");
+      flop_decls.push_back(absl::StrCat("  ", type, " ", s, "{};  // pipe stage\n"));
+      flop_decls.push_back(absl::StrCat("  ", type, " ", s, "_din{};  // ...its next value\n"));
     }
-    hout->append("  ", type, " ", f.member, "{};  // flop\n");
-    hout->append("  ", type, " ", f.member, "_din{};  // ...its next value\n");
+    flop_decls.push_back(absl::StrCat("  ", type, " ", f.member, "{};  // flop\n"));
+    flop_decls.push_back(absl::StrCat("  ", type, " ", f.member, "_din{};  // ...its next value\n"));
     if (!f.clock_guards.empty() || !f.sec_clock.is_invalid()) {
-      hout->append("  bool ", f.member, "_cen = true;  // ...and whether its edge fires this period\n");
+      flop_decls.push_back(absl::StrCat("  bool ", f.member, "_cen = true;  // ...and whether its edge fires this period\n"));
     }
+  }
+  // A huge flop set goes into base structs of bounded size. clang keeps a
+  // constructor's initializer count in an 18-bit field, so the implicit
+  // constructor of a class with 2^18+ members silently DROPS every initializer
+  // past the wrapped count: xs_rob's Verilog side (275,786 members) ran with
+  // `__in.clock__tick` false -- it sits past the wrap -- and no flop ever
+  // captured. Each base has its own constructor, so the count per class stays
+  // far below the field. The flop members only use value types, so a base can
+  // hold them before the module's own nested types exist.
+  constexpr size_t         kMaxStateMembersPerClass = size_t{1} << 15;
+  std::vector<std::string> state_bases;
+  if (flop_decls.size() > kMaxStateMembersPerClass) {
+    for (size_t begin = 0; begin < flop_decls.size(); begin += kMaxStateMembersPerClass) {
+      state_bases.push_back(absl::StrCat(mod, "__state", state_bases.size()));
+      hout->append("struct ", state_bases.back(), " {  // flop state chunk of ", mod, "\n");
+      for (size_t index = begin; index < std::min(begin + kMaxStateMembersPerClass, flop_decls.size()); ++index) {
+        hout->append(flop_decls[index]);
+      }
+      hout->append("};\n");
+    }
+    flop_decls.clear();
+  }
+  std::string base_clause;
+  for (const auto& state_base : state_bases) {
+    absl::StrAppend(&base_clause, base_clause.empty() ? " : " : ", ", state_base);
+  }
+  hout->append("struct ", mod, base_clause, " {\n");
+  if (color_runtime_root) {
+    // The plan's slots, generations, and bindings are body details.
+    // Keeping the nested type incomplete here makes a leaf body edit rewrite
+    // generated .cpp files only; a parent sees the same module ABI/header.
+    hout->append("  struct __Color_runtime;\n  std::shared_ptr<__Color_runtime> __color_runtime;\n");
+  }
+  for (const auto& decl : flop_decls) {
+    hout->append(decl);
   }
   // Previous-value bit per SECONDARY clock net (2f-latch M6), deduped: every
   // flop on the same net shares one, which is also what makes them commit
@@ -7393,7 +7615,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // sim.init_zero policy: it supplies an initial zero ONLY when neither an
   // initializer nor reset exists. It never changes the reset expression used
   // by eval_rise/eval_negedge. ----
-  fout->append("void ", mod, "::reset_cycle(bool zero_uninitialized) {\n");
+  const auto reset_cycle_mark = fout->mark();
+  fout->append("LHD_SIM_COLD void ", mod, "::reset_cycle(bool zero_uninitialized) {\n");
   fout->append("    (void)zero_uninitialized;\n");
   for (const auto& f : flops) {
     auto        init  = get_driver(find_sink_pin(f.node, "initial"));
@@ -7485,6 +7708,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("    __compact_publish();\n");
   }
   fout->append("}\n");
+  chunk_cold_region(*fout, reset_cycle_mark);
 
   // ---- compact-loop body kernels ----
   // Ordinary hierarchy never reaches this emitter: it is storage-only and the
@@ -9817,10 +10041,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
 
   if (runtime_support_on) {
+    const auto debug_members_mark = fout->mark();
     // ---- dump_state: flops/regs -> the `_r` map (by hierarchical name, pyrope
     // literal); memories -> one editable `<_dir>/<_p><member>.hex` each; recurse
     // into sub-instances. Mirrors the reset_cycle/peek member walk. ----
-    fout->append("void ",
+    fout->append("LHD_SIM_COLD void ",
                  mod,
                  "::dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const {\n");
     for (const auto& f : flops) {
@@ -9860,7 +10085,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // ---- load_state: set each flop/reg from the map IF PRESENT (a missing key
     // keeps the reset value -> cross-version reload tolerance); memories from the
     // hex file if present; recurse into sub-instances. ----
-    fout->append("void ",
+    fout->append("LHD_SIM_COLD void ",
                  mod,
                  "::load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir) {\n");
     for (const auto& f : flops) {
@@ -9950,7 +10175,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // ---- design_hash: FNV-fold of every member name+width (+ mem size + sub
     // callee + recursion). Stamped into meta.json; a mismatch on load is a WARNING
     // (editable checkpoints are cross-version on purpose), never a hard reject. ----
-    fout->append("std::uint64_t ", mod, "::design_hash() const {\n");
+    fout->append("LHD_SIM_COLD std::uint64_t ", mod, "::design_hash() const {\n");
     fout->append("  std::uint64_t _h = hlop::ckpt::kFnvOffset;\n");
     if (color_root) {
       // Keep checkpoint compatibility diagnostic-only, but make the diagnostic
@@ -10051,7 +10276,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // hierarchical name (flops, pipe stages, sync-read regs, inputs; whole memories
     // and combinational outputs are excluded). describe_* lists name+bits+kind for
     // --list-signals; probe_* reads the current values for --probe / --break-when. ----
-    fout->append("void ", mod, "::describe_signals(const std::string& _p, std::vector<hlop::ckpt::Signal>& _v) const {\n");
+    fout->append("LHD_SIM_COLD void ", mod, "::describe_signals(const std::string& _p, std::vector<hlop::ckpt::Signal>& _v) const {\n");
     for (const auto& f : flops) {
       for (const auto& s : f.stages) {
         fout->append(absl::StrCat("  _v.push_back({_p + \"", s, "\", ", f.bits, ", \"pipe\"});\n"));
@@ -10075,7 +10300,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     fout->append("}\n");
 
-    fout->append("void ", mod, "::probe_signals(const std::string& _p, std::map<std::string, long>& _m) const {\n");
+    fout->append("LHD_SIM_COLD void ", mod, "::probe_signals(const std::string& _p, std::map<std::string, long>& _m) const {\n");
     for (const auto& f : flops) {
       for (const auto& s : f.stages) {
         fout->append(absl::StrCat("  _m[_p + \"", s, "\"] = ", s, ".to_i64_low();\n"));
@@ -10111,7 +10336,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     //   * OUTPUTS, served from __last_out (recorded by cycle()). Inputs keep their
     //     historical `__in.` spelling here; the catalog publishes the clean port
     //     name and carries this one as an alias.
-    fout->append("void ", mod, "::observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const {\n");
+    fout->append("LHD_SIM_COLD void ", mod, "::observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const {\n");
     const auto hexdigits = [](int bits) { return std::to_string((std::max(1, bits) + 3) / 4); };
     for (const auto& f : flops) {
       for (const auto& s : f.stages) {
@@ -10160,7 +10385,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // ("mem" here, "sub.mem" one level down), so the walk mirrors the catalog's
     // dotted names. Staged same-cycle writes are transient between ticks by
     // construction, so what is read here is exactly the entry array.
-    fout->append("bool ", mod, "::observe_mem(const std::string& _n, long _i, std::string& _o) const {\n");
+    fout->append("LHD_SIM_COLD bool ", mod, "::observe_mem(const std::string& _n, long _i, std::string& _o) const {\n");
     for (const auto& m : mems) {
       fout->append(absl::StrCat("  if (_n == \"", m.member, "\") {\n"));
       fout->append(absl::StrCat("    if (_i < 0 || _i >= ", m.size, ") { return false; }\n"));
@@ -10177,6 +10402,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     fout->append("  return false;\n}\n");
+    chunk_cold_region(*fout, debug_members_mark);
   }
 
   if (color_runtime_root) {
@@ -11138,6 +11364,79 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       std::ranges::sort(abi.reads, {}, &Direct_kernel_read::key);
       std::ranges::sort(abi.writes, {}, &Direct_kernel_write::key);
       return abi;
+    };
+    // Bind a member's inputs that the plan resolved to a producer in the SAME
+    // color. These reads go through wiring the planner does not schedule (a
+    // packed Or/SHL/Concat spelling, an erased GraphIO boundary), so no
+    // boundary slot carries them: the consumer takes the producer's local value
+    // with the use's extract/extend/shift applied. Shared by the inline
+    // evaluator and the canonical kernel emitter. The kernel used to skip it,
+    // which left such an operand unbound, and operand() silently put a 0 in its
+    // place (br_credit_sender_vc: `get_mask(0 /*UNRESOLVED-CYCLE*/, 1, 2)`).
+    const auto bind_internal_value_uses = [&](size_t                                          member,
+                                              size_t                                          color_index,
+                                              const hhds::Node_class&                         node,
+                                              const absl::flat_hash_map<size_t, std::string>& version_value,
+                                              const absl::flat_hash_set<size_t>&              version_slop_u) {
+      for (const auto* use : direct_value_uses_by_consumer[member]) {
+        if (use->top_input || use->producer_version == livehd::sim::Color_plan::invalid_index
+            || direct_version_color[use->producer_version] != color_index) {
+          continue;
+        }
+        const auto value_it = version_value.find(use->producer_version);
+        I(value_it != version_value.end() && !value_it->second.empty());
+        std::string value              = value_it->second;
+        bool        value_is_u         = version_slop_u.contains(use->producer_version);
+        // `use->consumer_width` is the value width AFTER any erased GraphIO
+        // boundary, while version_value names the actual producer
+        // temporary. A
+        // fused hierarchy color can therefore hold a Slop<4> child-internal
+        // packed expression whose public unsigned-u2 boundary is Slop<3>.
+        // Canonicalize the materialized producer to the consumer ABI before
+        // the next ordinary operation; otherwise fusion bypasses the module
+        // boundary and HLOP correctly rejects (for example) Slop<3>::or over
+        // that Slop<4> temporary.
+        uint32_t    materialized_width = use->width;
+        const auto& producer_version   = color_plan_->version_sites()[use->producer_version];
+        const auto  producer_output    = find_site_output(producer_version.base_site, producer_version.output_port);
+        if (!producer_output.is_invalid()) {
+          materialized_width = static_cast<uint32_t>(std::max(1, wbits_of(producer_output)));
+        }
+        if (use->preextracted) {
+          value      = range_extract_expr(value, use->width, use->unsign, use->producer_extract_lo, use->producer_extract_hi);
+          value_is_u = slop_u_ && use->unsign;
+          materialized_width = use->width;
+        }
+        if (materialized_width != use->consumer_width) {
+          value      = use->unsign ? append_zext(value, static_cast<int>(use->consumer_width))
+                                   : absl::StrCat("Slop<", use->consumer_width, ">{", value, "}");
+          value_is_u = false;
+        }
+        if (use->producer_shift != 0) {
+          value      = absl::StrCat("Slop<", use->consumer_width, ">::shl_op(", value, ", ", use->producer_shift, ")");
+          value_is_u = false;
+        }
+        uint32_t input_index = 0;
+        for (auto edge_sink : node.inp_sorted_pins()) {
+          for (auto edge_drv : edge_sink.get_driver_pins()) {
+            if (input_index++ != use->consumer_input) {
+              continue;
+            }
+            I(edge_sink.get_port_id() == use->consumer_port);
+            pin2var[edge_drv.get_class_index()] = std::move(value);
+            if (use->preextracted) {
+              preextracted_get_masks_.insert(node.get_class_index());
+            }
+            if (!use->unsign || use->width <= use->consumer_width) {
+              canonical_.insert(edge_drv.get_class_index());
+            }
+            if (value_is_u) {
+              slop_u_values_.insert(edge_drv.get_class_index());
+            }
+            break;
+          }
+        }
+      }
     };
     const auto kernel_read_is_addressable = [&](const Direct_kernel_read& read) {
       const auto& slot = color_plan_->boundary_slots()[read.slot_index];
@@ -12739,14 +13038,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       for (size_t i = 0; i < abi.reads.size(); ++i) {
         const auto& slot  = color_plan_->boundary_slots()[abi.reads[i].slot_index];
         const auto  stype = slot_type(abi.reads[i].slot_index, slot.width);
-        if (abi.reads[i].consumer.width == slot.width && !slot_is_u(abi.reads[i].slot_index)) {
+        if (abi.reads[i].consumer.width == slot.width) {
+          // Same width: bind the slot in its own type, Slop_u included. The
+          // registration below records a same-width unsigned read in
+          // slop_u_values_, so the body treats it as a Slop_u (W bits in a
+          // W+1 carrier). A `->zext_to<W>()` here handed it a plain Slop<W>
+          // instead, whose top bit is a SIGN: the next widening turned a u3 5
+          // into -3 (br_credit_sender_vc's credit counters computed 21+5=18).
           kernel_out->append(
               absl::StrCat("  [[maybe_unused]] const auto& __k_in_", i, " = *static_cast<const ", stype, "*>(__bind[", i, "]);\n"));
         } else {
-          // zext_to on a Slop_u is MASK-FREE when the target covers its width
-          // (the invariant already guarantees it), so the same-width case goes
-          // through here too rather than binding a Slop_u reference that the
-          // arithmetic below could not consume.
+          // A width change goes through zext_to, exactly as the inline read
+          // does; a narrowing unsigned read is outside canonical_, so the
+          // consumer re-applies its own conversion.
           kernel_out->append(absl::StrCat("  [[maybe_unused]] const auto __k_in_",
                                           i,
                                           " = static_cast<const ",
@@ -12811,6 +13115,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto                                    kernel_mark = kernel_out->mark();
       size_t                                        temporary   = 0;
       absl::flat_hash_map<std::string, std::string> extraction_cse;
+      absl::flat_hash_map<size_t, std::string>      kernel_version_value;
+      absl::flat_hash_set<size_t>                   kernel_version_slop_u;
+      const size_t                                  unresolved_before = unresolved_operands_;
       for (const size_t member : members) {
         const auto&     version = color_plan_->version_sites()[member];
         const auto      node    = color_plan_->sites()[version.base_site].node.base_node();
@@ -12823,6 +13130,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           output = node.get_driver_pin(0);
         }
         I(!output.is_invalid());
+        bind_internal_value_uses(member, representative, node, kernel_version_value, kernel_version_slop_u);
         sub_width_expr_             = false;
         const int  width            = wbits_of(output);
         const bool unsigned_result  = proven_unsigned_result(node, output);
@@ -12858,7 +13166,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         if (use_u) {
           slop_u_values_.insert(output.get_class_index());
+          kernel_version_slop_u.insert(member);
         }
+        kernel_version_value.insert_or_assign(member, temp);
         pin2var[output.get_class_index()] = temp;
         canonical_.insert(output.get_class_index());
         for (size_t write_index = 0; write_index < abi.writes.size(); ++write_index) {
@@ -12913,6 +13223,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         kernel_out->append(body);
       }
       kernel_out->append("}\n");
+      // A canonical kernel sees only its ABI reads, its own members and the
+      // internal uses bound above. Any operand still unbound was replaced by a
+      // silent 0: on the color root the cycle flag is noise (register reads
+      // set it), so fail closed on the count this body added instead.
+      if (unresolved_operands_ != unresolved_before) {
+        livehd::diag::err("inou.cgen.sim", "kernel-operand-unbound", "internal")
+            .msg("module `{}`: shared color kernel `{}` reads {} operand(s) with no binding ({}); the kernel would read 0",
+                 gname,
+                 instance_name,
+                 unresolved_operands_ - unresolved_before,
+                 cycle_first_label_.empty() ? std::string{"(unnamed)"} : cycle_first_label_)
+            .hint("every value a kernel member reads must be an ABI boundary read, a member of the same color, or an "
+                  "internal value use of one")
+            .emit();
+        cycle_reported_ = true;
+      }
     }
 
     std::vector<std::shared_ptr<File_output>> color_eval_outputs;
@@ -13110,6 +13436,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       I(edge.producer < direct_incoming_versions.size() && edge.consumer < direct_incoming_versions.size());
       direct_incoming_versions[edge.consumer].push_back(edge.producer);
     }
+    // Without dirty gating, a state capture in an always-run domain of an
+    // always-run color raises its commit flag every period. Such a member
+    // commits unconditionally instead: no flag store, no flag test.
+    std::vector<bool> direct_always_commit(color_plan_->version_sites().size(), false);
     for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
       const auto& color = color_plan_->colors()[color_index];
       if (!color_eval_outputs.empty()) {
@@ -13312,6 +13642,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // guard/enable/activation conjunction below funnels through this so the
       // spelling (and the parenthesization the string matchers rely on) is one.
       const auto combine_activation = [](std::string lhs, std::string_view rhs) {
+        if (is_constant_true_guard(lhs)) {
+          lhs.clear();
+        }
+        if (is_constant_true_guard(rhs)) {
+          rhs = {};
+        }
         if (lhs.empty()) {
           return std::string(rhs);
         }
@@ -13401,65 +13737,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             break;
           }
         }
-        for (const auto* use : direct_value_uses_by_consumer[member]) {
-          if (use->top_input || use->producer_version == livehd::sim::Color_plan::invalid_index
-              || direct_version_color[use->producer_version] != color_index) {
-            continue;
-          }
-          const auto value_it = local_version_value.find(use->producer_version);
-          I(value_it != local_version_value.end() && !value_it->second.empty());
-          std::string value              = value_it->second;
-          bool        value_is_u         = local_version_slop_u.contains(use->producer_version);
-          // `use->consumer_width` is the value width AFTER any erased GraphIO
-          // boundary, while local_version_value names the actual producer
-          // temporary. A
-          // fused hierarchy color can therefore hold a Slop<4> child-internal
-          // packed expression whose public unsigned-u2 boundary is Slop<3>.
-          // Canonicalize the materialized producer to the consumer ABI before
-          // the next ordinary operation; otherwise fusion bypasses the module
-          // boundary and HLOP correctly rejects (for example) Slop<3>::or over
-          // that Slop<4> temporary.
-          uint32_t    materialized_width = use->width;
-          const auto& producer_version   = color_plan_->version_sites()[use->producer_version];
-          const auto  producer_output    = find_site_output(producer_version.base_site, producer_version.output_port);
-          if (!producer_output.is_invalid()) {
-            materialized_width = static_cast<uint32_t>(std::max(1, wbits_of(producer_output)));
-          }
-          if (use->preextracted) {
-            value      = range_extract_expr(value, use->width, use->unsign, use->producer_extract_lo, use->producer_extract_hi);
-            value_is_u = slop_u_ && use->unsign;
-            materialized_width = use->width;
-          }
-          if (materialized_width != use->consumer_width) {
-            value      = use->unsign ? append_zext(value, static_cast<int>(use->consumer_width))
-                                     : absl::StrCat("Slop<", use->consumer_width, ">{", value, "}");
-            value_is_u = false;
-          }
-          if (use->producer_shift != 0) {
-            value      = absl::StrCat("Slop<", use->consumer_width, ">::shl_op(", value, ", ", use->producer_shift, ")");
-            value_is_u = false;
-          }
-          uint32_t input_index = 0;
-          for (auto edge_sink : node.inp_sorted_pins()) {
-            for (auto edge_drv : edge_sink.get_driver_pins()) {
-              if (input_index++ != use->consumer_input) {
-                continue;
-              }
-              I(edge_sink.get_port_id() == use->consumer_port);
-              pin2var[edge_drv.get_class_index()] = std::move(value);
-              if (use->preextracted) {
-                preextracted_get_masks_.insert(node.get_class_index());
-              }
-              if (!use->unsign || use->width <= use->consumer_width) {
-                canonical_.insert(edge_drv.get_class_index());
-              }
-              if (value_is_u) {
-                slop_u_values_.insert(edge_drv.get_class_index());
-              }
-              break;
-            }
-          }
-        }
+        bind_internal_value_uses(member, color_index, node, local_version_value, local_version_slop_u);
         // Bind only the definition's REFERENCE clock. The old spelling walked
         // every input declaration of the member's module for every occurrence
         // version, even though clock_input_of() had already identified the one
@@ -13891,7 +14169,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   continue;
                 }
                 const auto root       = livehd::latch_contract::control_root(resolved_input->driver);
-                const auto activation = occurrence_guard_expr(resolved_input->driver, root.net.base_pin(), version.slot, 0);
+                const auto activation = occurrence_guard_expr(resolved_input->driver, root.net.base_pin(), livehd::sim::Color_plan::commit_slot_of(version), 0);
                 commit_test = emit_known_true(activation.empty() ? operand(state_clock, 1) : activation);
                 break;
               }
@@ -13935,7 +14213,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                         && pin_name_of(state_clock) == clock_input_of(node.get_graph());
                 if (((local_flop != nullptr && local_flop->sec_clock.is_invalid()) || definition_reference_clock)
                     && !resolved_root.net.is_invalid()) {
-                  const auto activation = occurrence_guard_expr(resolved, resolved_root.net.base_pin(), version.slot, 0);
+                  const auto activation = occurrence_guard_expr(resolved, resolved_root.net.base_pin(), livehd::sim::Color_plan::commit_slot_of(version), 0);
                   commit_test           = activation.empty() ? std::string{} : emit_known_true(activation);
                   break;
                 }
@@ -14024,8 +14302,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // current representation back. This retains edge/reset semantics
             // (the pending value was computed above) while avoiding the commit
             // shard, slop_update, and dirty propagation for stable lanes.
-            std::string       value_changed     = absl::StrCat("!", state, "_din.identical(", state, ")");
-            if (pipe_depth > 1) {
+            // Without dirty-bit gating (sim.color_dirty=false) nothing downstream
+            // uses the "changed" answer: the flag only saves a copy of an equal
+            // value, and Slop::identical costs more than that copy (axi_demux:
+            // 1207 -> 890 ms with the compare dropped). Commit unconditionally.
+            std::string       value_changed     = color_dirty_ ? absl::StrCat("!", state, "_din.identical(", state, ")") : "true";
+            if (color_dirty_ && pipe_depth > 1) {
               const auto stage = [&](int index) { return absl::StrCat(state, "_p", index); };
               for (int index = 0; index < pipe_depth - 1; ++index) {
                 value_changed = absl::StrCat("(", value_changed, " || !", stage(index), "_din.identical(", stage(index), "))");
@@ -14501,9 +14783,34 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
 
       for (size_t position = 0; position < direct_member_bodies.size(); ++position) {
-        if (domains[position].always) {
-          fout->append(direct_member_bodies[position].text);
+        if (!domains[position].always) {
+          continue;
         }
+        auto&        body   = direct_member_bodies[position];
+        const size_t member = body.member;
+        // Unsharded commits only: a shard's commit runs only when its mask
+        // has a bit, so an always-commit member there still needs its bit.
+        if (!color_dirty_ && direct_commit_shards.empty() && member != livehd::sim::Color_plan::invalid_index
+            && direct_color_condition_phase[color_index] == livehd::sim::Color_plan::invalid_index
+            && color_plan_->version_sites()[member].role == livehd::sim::Color_plan::Version_role::state_update
+            && direct_state_commit_flag_of_member[member] != livehd::sim::Color_plan::invalid_index
+            && type_op_of(color_plan_->sites()[color_plan_->version_sites()[member].base_site].node.base_node())
+                   != Ntype_op::Memory) {
+          const std::string flag
+              = (member < direct_commit_shard_of_member.size()
+                 && direct_commit_shard_of_member[member] != livehd::sim::Color_plan::invalid_index)
+                    ? absl::StrCat("  __rt.__commit_shard_mask[",
+                                   direct_commit_shard_of_member[member],
+                                   "] |= uint64_t{1} << ",
+                                   direct_commit_shard_bit_of_member[member],
+                                   ";\n")
+                    : absl::StrCat("  __rt.__state_commit[", direct_state_commit_flag_of_member[member], "] = true;\n");
+          if (const auto at = body.text.find(flag); at != std::string::npos && body.text.find(flag, at + 1) == std::string::npos) {
+            body.text.erase(at, flag.size());
+            direct_always_commit[member] = true;
+          }
+        }
+        fout->append(body.text);
       }
       std::vector<std::string>                 activation_order;
       absl::flat_hash_map<std::string, size_t> activation_index;
@@ -14520,8 +14827,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         activation_members[it->second].push_back(position);
       }
+      // No branch hint: an activation is a clock edge or a data-driven enable,
+      // and with fused captures the block holds the flop's whole next-state
+      // cone. `[[unlikely]]` made clang optimize that hot cone as cold code
+      // (br_enc_gray2bin: +31% instructions).
       for (size_t activation = 0; activation < activation_order.size(); ++activation) {
-        fout->append("  if (", activation_order[activation], ") [[unlikely]] {\n");
+        fout->append("  if (", activation_order[activation], ") {\n");
         for (const size_t position : activation_members[activation]) {
           fout->append(direct_member_bodies[position].text);
         }
@@ -14585,7 +14896,45 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       I(!state.empty());
       I(member < direct_state_commit_flag_of_member.size()
         && direct_state_commit_flag_of_member[member] != livehd::sim::Color_plan::invalid_index);
-      if (direct_commit_shards.empty()) {
+      // Without dirty gating a scalar flop commit reports nothing, so spell it
+      // as a SELECT, not a branch: its flag follows the captured enable, which
+      // a data-driven design toggles unpredictably, and the host compiler will
+      // not if-convert a conditional store for us (axi_demux: 780 -> 704 ms).
+      if (!color_dirty_ && op != Ntype_op::Memory) {
+        const auto pipe_min = get_driver(find_sink_pin(site.node.base_node(), "pipe_min"));
+        const bool scalar   = !pipe_min.is_const() || const_of(pipe_min).to_just_i64() <= 1;
+        if (scalar) {
+          if (direct_always_commit[member]) {
+            fout->append("  ", state, " = ", state, "_din;\n");
+          } else if (direct_commit_shards.empty()) {
+            fout->append(absl::StrCat("  ",
+                                      state,
+                                      " = __rt.__state_commit[",
+                                      direct_state_commit_flag_of_member[member],
+                                      "] ? ",
+                                      state,
+                                      "_din : ",
+                                      state,
+                                      ";\n"));
+          } else {
+            fout->append(absl::StrCat("  ",
+                                      state,
+                                      " = (__rt.__commit_shard_mask[",
+                                      direct_commit_shard_of_member[member],
+                                      "] & (uint64_t{1} << ",
+                                      direct_commit_shard_bit_of_member[member],
+                                      ")) != 0 ? ",
+                                      state,
+                                      "_din : ",
+                                      state,
+                                      ";\n"));
+          }
+          return;
+        }
+      }
+      if (direct_always_commit[member]) {
+        fout->append("  {\n");  // captured every period: the flag would always be set
+      } else if (direct_commit_shards.empty()) {
         fout->append("  if (__rt.__state_commit[", std::to_string(direct_state_commit_flag_of_member[member]), "]) {\n");
       } else {
         I(member < direct_commit_shard_of_member.size()
@@ -14622,7 +14971,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // The dynamic commit flag is emitted only after proving D != Q, so a
           // scalar state commit need not repeat the same identical() test.
           fout->append("    ", state, " = ", state, "_din;\n");
-          fout->append("    constexpr bool __changed = true;\n");
+          if (color_dirty_) {
+            fout->append("    constexpr bool __changed = true;\n");
+          }
         } else {
           fout->append("    bool __changed = false;\n");
           for (int index = 0; index < pipe_depth - 1; ++index) {
@@ -14631,7 +14982,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
           fout->append("    __changed |= slop_update(", state, ", ", state, "_din) != 0;\n");
         }
-        fout->append("    __rt.__color_state_changed |= __changed;\n");
+        // Without dirty gating nothing reads a per-state change bit:
+        // __color_run marks the period changed once (see below).
+        if (color_dirty_ || pipe_depth > 1) {
+          fout->append("    __rt.__color_state_changed |= __changed;\n");
+        }
       }
       if (color_dirty_) {
         fout->append("    if (__changed) {\n");
@@ -14709,7 +15064,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         std::vector<size_t> members;
         for (size_t member = 0; member < color_plan_->version_sites().size(); ++member) {
           const auto& version = color_plan_->version_sites()[member];
-          if (version.role == livehd::sim::Color_plan::Version_role::state_update && version.slot == slot) {
+          if (version.role == livehd::sim::Color_plan::Version_role::state_update
+              && livehd::sim::Color_plan::commit_slot_of(version) == slot) {
             members.push_back(member);
           }
         }
@@ -15172,10 +15528,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append("__attribute__((flatten)) ");
     }
     fout->append("void ", mod, "::__color_run() {\n");
-    fout->append(
-        "  __color_prepare_runtime();\n"
-        "  [[maybe_unused]] auto& __rt = *__color_runtime;\n"
-        "  __rt.__color_state_changed = false;\n");
+    fout->append("  __color_prepare_runtime();\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
+    // Without dirty gating nothing is skipped, so conservatively count every
+    // period as a state change (it only advances the observation generation).
+    fout->append(color_dirty_ ? "  __rt.__color_state_changed = false;\n" : "  __rt.__color_state_changed = true;\n");
     for (size_t site = 0; site < color_plan_->sites().size(); ++site) {
       if (color_plan_->sites()[site].kind == livehd::sim::Color_plan::Site_kind::loop_control) {
         fout->append("  __rt.__loop_advanced_", std::to_string(site), " = false;\n");

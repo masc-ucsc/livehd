@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -2229,6 +2230,50 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     }
   }
 
+  // One constant arm over 0/1 values is plain logic:
+  //   s ? 1 : f -> s | f          s ? t : 0 -> s & t
+  //   s ? 0 : f -> !s & f         s ? t : 1 -> !s | t
+  // A per-bit `if (rst) b = 1; else if (en) b = d;` nest and the enable
+  // chain tolg builds next to it are exactly this shape. As a Mux tree they
+  // reach mux sharing, which rebuilds them as a Hotmux over path conjunctions
+  // (an LRU bit matrix grew ~3x). As And/Or they flatten and meet
+  // scalar_bool. Both-constant arms keep the rules above (see Mux(s,1,0)).
+  if (is_two_arm_mux(inp_edges_ordered)) {
+    const auto sel     = inp_edges_ordered[0].get_driver_pin();
+    const auto f       = inp_edges_ordered[1].get_driver_pin();
+    const auto t       = inp_edges_ordered[2].get_driver_pin();
+    const auto k       = t.is_const() ? t : f;
+    const auto other   = t.is_const() ? f : t;
+    const bool one_arm = f.is_const() != t.is_const();
+    if (one_arm && !sel.is_const() && is_bool01(sel) && is_bool01(other) && !const_of(k).has_unknowns()
+        && const_of(k).is_just_i64() && (const_of(k).to_just_i64() == 0 || const_of(k).to_just_i64() == 1)) {
+      const bool k_one   = const_of(k).to_just_i64() == 1;
+      const bool negated = t.is_const() ? !k_one : k_one;
+      auto       literal = sel;
+      if (negated) {
+        auto sel_master = sel.get_master_node();
+        auto inner      = sel_master.is_invalid() ? hhds::Pin_class{} : eq_against_const(sel_master, 0);
+        if (!inner.is_invalid() && !inner.is_const() && is_bool01(inner)) {
+          literal = inner;  // !(y == 0) is y for y in {0,1}
+        } else {
+          auto eq = create_typed_node(*current_graph, Ntype_op::EQ);
+          livehd::graph_util::append_sink_operand(eq, Ntype_op::EQ, 0).connect_driver(sel);
+          livehd::graph_util::append_sink_operand(eq, Ntype_op::EQ, 0)
+              .connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
+          literal = eq.create_driver_pin(0);
+          livehd::graph_util::set_ubits(literal, 1);
+        }
+      }
+      const auto new_op = k_one ? Ntype_op::Or : Ntype_op::And;
+      clear_all_sinks(node);
+      livehd::graph_util::set_type_op(node, new_op);
+      livehd::graph_util::append_sink_operand(node, new_op, 0).connect_driver(literal);
+      livehd::graph_util::append_sink_operand(node, new_op, 0).connect_driver(other);
+      inp_edges_ordered = ordered_inp_edges(node);
+      return false;  // retyped: scalar_node continues it as And/Or
+    }
+  }
+
   bool false_path_zero = false;
   if (inp_edges_ordered[1].get_driver_pin().is_const()) {
     const auto& v   = const_of(inp_edges_ordered[1].get_driver_pin());
@@ -2347,6 +2392,250 @@ bool Cprop::scalar_eq(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     return false;
   }
   return collapse_forward_for_pin(node, y_pin);  // inner EQ dies via DCE when unused
+}
+
+// Boolean hygiene for the 0/1 logic a lowered `if` chain leaves behind: path
+// conditions, flop enables and bit-matrix updates. tolg spells `x != 0` as
+// `(x == 0) ^ 1`, and a per-bit reset/enable nest folds into And/Or cones
+// that repeat a condition next to its own negation. Every rule is exact:
+//   x ^ 1 -> EQ(x,0)                     x in {0,1}
+//   and(.., c, .., !c, ..) -> 0          any widths: one of the pair is 0
+//   or(.., c, .., !c, ..) -> 1           every operand in {0,1}
+//   or(b, and(b, r..), ..) -> or(b, ..)  absorption, any widths
+//   or(b, and(!b, r..), ..) -> or(b, and(r..), ..)
+//                                        b, !b and and(r..) in {0,1}
+//   and(x, x, ..) / or(x, x, ..)         duplicate operands dropped
+// `c`/`!c` are compared through decode_bool_condition, so `x==0`, `(x==0)^1`
+// after its rewrite, and `s ? 0 : 1` all name the same literal.
+bool Cprop::scalar_bool(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
+  const auto op = type_op_of(node);
+  if (op == Ntype_op::Xor) {
+    if (inp_edges_ordered.size() != 2) {
+      return false;
+    }
+    hhds::Pin_class value;
+    bool            has_one = false;
+    for (const auto& sink : inp_edges_ordered) {
+      const auto driver = sink.get_driver_pin();
+      if (driver.is_const()) {
+        const auto& c = const_of(driver);
+        has_one       = !c.has_unknowns() && c.is_just_i64() && c.to_just_i64() == 1;
+      } else {
+        value = driver;
+      }
+    }
+    if (!has_one || value.is_invalid() || !is_bool01(value)) {
+      return false;
+    }
+    clear_all_sinks(node);
+    livehd::graph_util::set_type_op(node, Ntype_op::EQ);
+    livehd::graph_util::append_sink_operand(node, Ntype_op::EQ, 0).connect_driver(value);
+    livehd::graph_util::append_sink_operand(node, Ntype_op::EQ, 0).connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
+    livehd::graph_util::set_ubits(node.create_driver_pin(0), 1);
+    return true;
+  }
+  if (op != Ntype_op::And && op != Ntype_op::Or) {
+    return false;
+  }
+
+  // Consumer-side flattening: a private operand of the same op joins this
+  // node. The producer-side collapse cannot do it when this node was minted
+  // after the producer's visit (a Mux retyped to Or), and a 120-level shadow
+  // enable chain `en = rst | upd | en_prev` then stays 120 levels deep -- past
+  // the 0/1 proof's depth bound, so every rule above it stops applying.
+  bool changed = false;
+  for (bool spliced = true; spliced;) {
+    spliced = false;
+    for (const auto& sink : inp_edges_ordered) {
+      const auto driver = sink.get_driver_pin();
+      if (driver.is_const() || is_graph_input_pin(driver) || !has_single_consumer(driver)) {
+        continue;
+      }
+      auto inner = driver.get_master_node();
+      if (inner.is_invalid() || type_op_of(inner) != op || livehd::graph_util::has_color(inner)) {
+        continue;
+      }
+      std::vector<hhds::Pin_class> operands;
+      for (auto inner_sink : inner.inp_sorted_pins()) {
+        operands.push_back(inner_sink.get_driver_pin());
+      }
+      sink.del_sink();
+      for (const auto& operand : operands) {
+        livehd::graph_util::append_sink_operand(node, op, 0).connect_driver(operand);
+      }
+      inner.del_node();
+      inp_edges_ordered = ordered_inp_edges(node);
+      spliced           = true;
+      changed           = true;
+      break;
+    }
+  }
+
+  // Duplicate operands: x & x == x and x | x == x.
+  {
+    absl::flat_hash_set<hhds::Class_index> seen;
+    for (const auto& sink : inp_edges_ordered) {
+      const auto driver = sink.get_driver_pin();
+      if (!driver.is_const() && !seen.insert(driver.get_class_index()).second) {
+        sink.del_sink();
+        changed = true;
+      }
+    }
+    if (changed) {
+      inp_edges_ordered = ordered_inp_edges(node);
+    }
+  }
+
+  struct Literal {
+    hhds::Pin_class pin;
+    Bool_condition  cond;
+  };
+  std::vector<Literal> literals;
+  bool                 all_bool01 = true;
+  hhds::Pin_class      only_const;
+  size_t               n_consts = 0;
+  for (const auto& sink : inp_edges_ordered) {
+    const auto driver = sink.get_driver_pin();
+    all_bool01        = all_bool01 && is_bool01(driver);
+    if (driver.is_const()) {
+      only_const = sink;
+      ++n_consts;
+      continue;
+    }
+    if (auto cond = decode_bool_condition(driver); cond.has_value()) {
+      literals.push_back({driver, *cond});
+    }
+  }
+  // and(x.., c) over 0/1 operands only reads c's bit 0: 1 is the identity
+  // (only -1 was recognized), 0 the annihilator.
+  if (op == Ntype_op::And && n_consts == 1 && inp_edges_ordered.size() > 1) {
+    bool rest_bool01 = true;
+    for (const auto& sink : inp_edges_ordered) {
+      rest_bool01 = rest_bool01 && (sink == only_const || is_bool01(sink.get_driver_pin()));
+    }
+    const auto& c = const_of(only_const.get_driver_pin());
+    if (rest_bool01 && !c.has_unknowns() && c.is_just_i64()) {
+      if ((c.to_just_i64() & 1) == 0) {
+        replace_node(node, *Dlop::create_integer(0));
+        return true;
+      }
+      only_const.del_sink();
+      inp_edges_ordered = ordered_inp_edges(node);
+      return true;
+    }
+  }
+  for (size_t i = 0; i < literals.size(); ++i) {
+    for (size_t j = i + 1; j < literals.size(); ++j) {
+      if (!same_pin(literals[i].cond.base, literals[j].cond.base)) {
+        continue;
+      }
+      if (literals[i].cond.true_when_base == literals[j].cond.true_when_base) {
+        // Two spellings of one 0/1 literal (`(x==0)==0` and `x==0 ? 0 : 1`)
+        // are the same value: keep one.
+        if (is_bool01(literals[i].pin) && is_bool01(literals[j].pin)) {
+          for (const auto& sink : inp_edges_ordered) {
+            if (sink.get_driver_pin() == literals[j].pin) {
+              sink.del_sink();
+              break;
+            }
+          }
+          inp_edges_ordered = ordered_inp_edges(node);
+          return true;
+        }
+        continue;
+      }
+      if (op == Ntype_op::And) {
+        replace_node(node, *Dlop::create_integer(0));
+        return true;
+      }
+      if (all_bool01) {
+        replace_node(node, *Dlop::create_integer(1));
+        return true;
+      }
+    }
+  }
+  if (op != Ntype_op::Or) {
+    return changed;
+  }
+
+  // Absorption and complement elimination against a sibling And operand.
+  for (const auto& sink : inp_edges_ordered) {
+    const auto and_pin = sink.get_driver_pin();
+    if (and_pin.is_const() || is_graph_input_pin(and_pin)) {
+      continue;
+    }
+    auto and_node = and_pin.get_master_node();
+    if (and_node.is_invalid() || type_op_of(and_node) != Ntype_op::And) {
+      continue;
+    }
+    bool absorbed = false;
+    for (const auto& other : inp_edges_ordered) {
+      const auto b = other.get_driver_pin();
+      if (other == sink || b.is_const()) {
+        continue;
+      }
+      for (auto and_sink : and_node.inp_sorted_pins()) {
+        if (same_pin(and_sink.get_driver_pin(), b)) {
+          absorbed = true;  // b | (b & r) == b
+          break;
+        }
+      }
+      if (absorbed) {
+        break;
+      }
+    }
+    if (absorbed) {
+      sink.del_sink();
+      if (!and_node.has_out_edges()) {
+        bwd_del_node(and_node);
+      }
+      inp_edges_ordered = ordered_inp_edges(node);
+      return true;
+    }
+  }
+  for (const auto& sink : inp_edges_ordered) {
+    const auto and_pin = sink.get_driver_pin();
+    if (and_pin.is_const() || is_graph_input_pin(and_pin) || !is_bool01(and_pin)) {
+      continue;
+    }
+    auto and_node = and_pin.get_master_node();
+    if (and_node.is_invalid() || type_op_of(and_node) != Ntype_op::And || !has_single_consumer(and_pin)) {
+      continue;
+    }
+    for (const auto& literal : literals) {
+      if (literal.pin == and_pin || !is_bool01(literal.pin)) {
+        continue;
+      }
+      hhds::Pin_class              negated;
+      std::vector<hhds::Pin_class> rest;
+      for (auto and_sink : and_node.inp_sorted_pins()) {
+        const auto x = and_sink.get_driver_pin();
+        if (negated.is_invalid() && !x.is_const() && is_bool01(x)) {
+          auto cond = decode_bool_condition(x);
+          if (cond.has_value() && same_pin(cond->base, literal.cond.base)
+              && cond->true_when_base != literal.cond.true_when_base) {
+            negated = and_sink;
+            continue;
+          }
+        }
+        rest.push_back(x);
+      }
+      // b | (!b & r) == b | r needs r in {0,1} as well: with b == 1 the left
+      // side is 1, so a wider r would leak its high bits into the new form.
+      if (negated.is_invalid() || rest.empty() || std::ranges::none_of(rest, [](const auto& p) { return is_bool01(p); })) {
+        continue;
+      }
+      negated.del_sink();
+      if (rest.size() == 1) {
+        sink.del_sink();
+        livehd::graph_util::append_sink_operand(node, Ntype_op::Or, 0).connect_driver(rest.front());
+        bwd_del_node(and_node);
+      }
+      inp_edges_ordered = ordered_inp_edges(node);
+      return true;
+    }
+  }
+  return changed;
 }
 
 // Compose chained constant shifts. All rules are exact under the unlimited-
@@ -3217,6 +3506,270 @@ bool Cprop::vectorize_bit_muxes() {
   return changed;
 }
 
+// ---- bit-slice reductions ----------------------------------------------------
+//
+// A bit-matrix reduction spells a word test one bit at a time. bedrock's
+// pairwise arbiter computes
+//
+//   can_grant[i] = AND_{j != i} (!request[j] | priority[i][j])
+//
+// as fifteen Or(EQ(request[j], 0), priority[16i + j]) operands of one And per
+// row. When operands of an And (Or) are the SAME 1-bit expression over
+// single-bit slices whose positions keep one per-leaf offset -- operand `a`
+// reads leaf l at a + d_l -- the group is one word expression under a mask:
+//
+//   AND_a f(src_l[a + d_l]) == (f(Y_l) & M) == M     Y_l = src_l[lo+d_l +: n]
+//   OR_a  f(src_l[a + d_l]) == (f(Y_l) & M) != 0     M   = sum of 2^(a - lo)
+//
+// with f's 1-bit operations applied bitwise: And/Or/Xor stay, a negation
+// (EQ(x,0), Mux(s,1,0)) becomes Xor with the n-bit all-ones word, a constant
+// 1 becomes that word. Bit k of every Y_l is src_l[lo + k + d_l], so bit a-lo
+// of f(Y) is exactly operand a. Every intermediate is an n-bit unsigned word.
+bool Cprop::vectorize_bit_reductions() {
+  constexpr int    kMinTerms  = 4;
+  constexpr int    kMaxDepth  = 6;
+  constexpr size_t kMaxLeaves = 8;
+
+  struct Leaf {
+    hhds::Pin_class src;
+    int             pos{0};
+  };
+  struct Term {
+    std::string       shape;  // canonical, includes each leaf's source identity
+    std::vector<Leaf> leaves;  // in shape order
+  };
+  const auto bit_read = [](const hhds::Pin_class& p) -> std::optional<Leaf> {
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p)) {
+      return std::nullopt;
+    }
+    auto m = p.get_master_node();
+    if (m.is_invalid() || type_op_of(m) != Ntype_op::Get_mask) {
+      return std::nullopt;
+    }
+    const auto r = const_mask_range(m);
+    auto       x = drv_at(m, 0);
+    if (r.first < 0 || r.second != r.first + 1 || x.is_invalid()) {
+      return std::nullopt;
+    }
+    return Leaf{x, r.first};
+  };
+  const auto const_bit = [](const hhds::Pin_class& p) -> std::optional<int> {
+    if (!p.is_const()) {
+      return std::nullopt;
+    }
+    const auto& c = const_of(p);
+    if (c.has_unknowns() || !c.is_just_i64() || (c.to_just_i64() != 0 && c.to_just_i64() != 1)) {
+      return std::nullopt;
+    }
+    return static_cast<int>(c.to_just_i64());
+  };
+  // The negated operand of a 1-bit negation spelling, if `node` is one.
+  const auto negated_operand = [&](const hhds::Node_class& node) -> hhds::Pin_class {
+    if (type_op_of(node) == Ntype_op::EQ) {
+      auto x = eq_against_const(node, 0);
+      return !x.is_invalid() && !x.is_const() && is_bool01(x) ? x : hhds::Pin_class{};
+    }
+    if (type_op_of(node) == Ntype_op::Mux && is_two_arm_mux(ordered_inp_edges(node))) {
+      const auto f = const_bit(drv_at(node, 1));
+      const auto t = const_bit(drv_at(node, 2));
+      const auto s = drv_at(node, 0);
+      if (f == 1 && t == 0 && !s.is_invalid() && is_bool01(s)) {
+        return s;
+      }
+    }
+    return {};
+  };
+
+  std::function<bool(const hhds::Pin_class&, int, Term&)> describe;
+  describe = [&](const hhds::Pin_class& p, int depth, Term& term) -> bool {
+    if (depth > kMaxDepth || term.leaves.size() > kMaxLeaves) {
+      return false;
+    }
+    if (auto c = const_bit(p); c.has_value()) {
+      term.shape = *c ? "1" : "0";
+      return true;
+    }
+    if (auto leaf = bit_read(p); leaf.has_value()) {
+      term.shape = absl::StrCat("L", leaf->src.get_class_index().value);
+      term.leaves.push_back(*leaf);
+      return true;
+    }
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p) || !is_bool01(p)) {
+      return false;
+    }
+    auto node = p.get_master_node();
+    if (auto x = negated_operand(node); !x.is_invalid()) {
+      Term inner;
+      if (!describe(x, depth + 1, inner)) {
+        return false;
+      }
+      term.shape = absl::StrCat("N(", inner.shape, ")");
+      term.leaves.insert(term.leaves.end(), inner.leaves.begin(), inner.leaves.end());
+      return true;
+    }
+    const auto op = type_op_of(node);
+    if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor) {
+      return false;
+    }
+    std::vector<Term> kids;
+    for (auto sink : node.inp_sorted_pins()) {
+      Term kid;
+      if (!describe(sink.get_driver_pin(), depth + 1, kid)) {
+        return false;
+      }
+      kids.push_back(std::move(kid));
+    }
+    if (kids.size() < 2) {
+      return false;
+    }
+    // Commutative: order by shape, which names sources but never positions,
+    // so every operand of one family sorts the same way.
+    std::ranges::stable_sort(kids, [](const Term& x, const Term& y) { return x.shape < y.shape; });
+    term.shape = op == Ntype_op::And ? "A(" : op == Ntype_op::Or ? "O(" : "X(";
+    for (const auto& kid : kids) {
+      absl::StrAppend(&term.shape, kid.shape, ",");
+      term.leaves.insert(term.leaves.end(), kid.leaves.begin(), kid.leaves.end());
+    }
+    term.shape += ")";
+    return term.leaves.size() <= kMaxLeaves;
+  };
+
+  bool changed = false;
+  for (auto node : stable_nodes(current_graph)) {
+    if (node.is_invalid() || !node.has_out_edges()) {
+      continue;
+    }
+    const auto op = type_op_of(node);
+    if (op != Ntype_op::And && op != Ntype_op::Or) {
+      continue;
+    }
+    const auto edges = ordered_inp_edges(node);
+    if (edges.size() < static_cast<size_t>(kMinTerms)) {
+      continue;
+    }
+    struct Member {
+      hhds::Pin_class sink;
+      Term            term;
+    };
+    absl::flat_hash_map<std::string, std::vector<Member>> families;
+    std::vector<std::string>                              order;  // first-seen: deterministic
+    for (const auto& sink : edges) {
+      Term term;
+      if (!describe(sink.get_driver_pin(), 0, term) || term.leaves.empty()) {
+        continue;
+      }
+      std::string key = term.shape;
+      for (const auto& leaf : term.leaves) {
+        absl::StrAppend(&key, "|", leaf.pos - term.leaves.front().pos);
+      }
+      auto [it, inserted] = families.try_emplace(key);
+      if (inserted) {
+        order.push_back(key);
+      }
+      it->second.push_back(Member{sink, std::move(term)});
+    }
+    for (const auto& key : order) {
+      auto& members = families[key];
+      if (members.size() < static_cast<size_t>(kMinTerms)) {
+        continue;
+      }
+      absl::flat_hash_set<int> seen;
+      int                      lo = std::numeric_limits<int>::max();
+      int                      hi = std::numeric_limits<int>::min();
+      bool                     ok = true;
+      for (const auto& m : members) {
+        const int a = m.term.leaves.front().pos;
+        ok          = ok && seen.insert(a).second;
+        lo          = std::min(lo, a);
+        hi          = std::max(hi, a);
+      }
+      const int n = hi - lo + 1;
+      if (!ok || n > 4096) {
+        continue;
+      }
+      const auto& rep = members.front().term;
+      for (const auto& leaf : rep.leaves) {
+        ok = ok && lo + (leaf.pos - rep.leaves.front().pos) >= 0;
+      }
+      if (!ok) {
+        continue;
+      }
+      Dlop mask = *Dlop::create_integer(0);
+      for (const auto& m : members) {
+        mask = *mask.or_op(*Dlop::create_integer(1)->shl_op(*Dlop::create_integer(m.term.leaves.front().pos - lo)));
+      }
+      const Dlop ones = *Dlop::create_integer(1)->shl_op(*Dlop::create_integer(n))->sub_op(*Dlop::create_integer(1));
+
+      // Rebuild the representative's expression over n-bit words. Its term
+      // index is its first CANONICAL leaf; each raw leaf keeps its own offset
+      // from it. Operands are commutative, so another family member is this
+      // same expression with every position shifted by (a_m - a_rep).
+      const int                                               a_rep = rep.leaves.front().pos;
+      std::function<hhds::Pin_class(const hhds::Pin_class&)> build;
+      const auto word = [&](Ntype_op word_op, const std::vector<hhds::Pin_class>& operands) {
+        auto w = create_typed_node(*current_graph, word_op);
+        for (const auto& operand : operands) {
+          livehd::graph_util::append_sink_operand(w, word_op, 0).connect_driver(operand);
+        }
+        auto out = w.create_driver_pin(0);
+        livehd::graph_util::set_ubits(out, n);
+        return out;
+      };
+      build = [&](const hhds::Pin_class& p) -> hhds::Pin_class {
+        if (auto c = const_bit(p); c.has_value()) {
+          return create_const(*current_graph, *c ? ones : *Dlop::create_integer(0));
+        }
+        if (auto leaf = bit_read(p); leaf.has_value()) {
+          const int base = lo + (leaf->pos - a_rep);
+          auto      get  = livehd::graph_util::create_get_mask(*current_graph, leaf->src, base, base + n);
+          auto        out  = get.create_driver_pin(0);
+          livehd::graph_util::set_ubits(out, n);
+          return out;
+        }
+        auto m = p.get_master_node();
+        if (auto x = negated_operand(m); !x.is_invalid()) {
+          return word(Ntype_op::Xor, {build(x), create_const(*current_graph, ones)});
+        }
+        // Snapshot the drivers first: build() mints cells, and a live
+        // sorted-pin iterator is invalidated by any body mutation.
+        std::vector<hhds::Pin_class> drivers;
+        for (auto sink : m.inp_sorted_pins()) {
+          drivers.push_back(sink.get_driver_pin());
+        }
+        std::vector<hhds::Pin_class> operands;
+        for (const auto& driver : drivers) {
+          operands.push_back(build(driver));
+        }
+        return word(type_op_of(m), operands);
+      };
+      const auto f      = build(members.front().sink.get_driver_pin());
+      const auto masked = word(Ntype_op::And, {f, create_const(*current_graph, mask)});
+      hhds::Pin_class result;
+      if (op == Ntype_op::And) {
+        auto eq = create_typed_node(*current_graph, Ntype_op::EQ);
+        livehd::graph_util::append_sink_operand(eq, Ntype_op::EQ, 0).connect_driver(masked);
+        livehd::graph_util::append_sink_operand(eq, Ntype_op::EQ, 0).connect_driver(create_const(*current_graph, mask));
+        result = eq.create_driver_pin(0);
+      } else {
+        auto any = create_typed_node(*current_graph, Ntype_op::Ror);
+        livehd::graph_util::append_sink_operand(any, Ntype_op::Ror, 0).connect_driver(masked);
+        result = any.create_driver_pin(0);
+      }
+      livehd::graph_util::set_ubits(result, 1);
+      for (const auto& m : members) {
+        m.sink.del_sink();
+      }
+      livehd::graph_util::append_sink_operand(node, op, 0).connect_driver(result);
+      changed = true;
+    }
+    // Every operand joined one family: the reduction is now that one test.
+    if (const auto left = ordered_inp_edges(node); left.size() == 1) {
+      collapse_forward_for_pin(node, left.front().get_driver_pin());
+    }
+  }
+  return changed;
+}
+
 // Concat lanes that are CONTIGUOUS slices of one source, in order, are one
 // wider slice: {x[b +: w2], x[a +: w1]} with b == a + w1 is x[a +: w1 + w2].
 // This is what re-packs a vectorized bit row (`out = {m63, ..., m0}` becomes
@@ -3311,6 +3864,80 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   }
 
   const auto& mask_const = const_of(mask_pin);
+
+  // A low window keeps only the low W bits, which a bitwise op computes from
+  // its operands' low W bits alone, and SHL(x, k) from x's low W-k bits:
+  //   mask(a op b, W) == mask(a, W) op mask(b, W)       op in And/Or/Xor
+  //   mask(SHL(x, k), W) == SHL(mask(x, W-k), k)        0 < k < W  (0 when k >= W)
+  // Pyrope's `wrap acc = ((acc << 1) | acc#[63]) ^ r` builds a 65-bit value per
+  // fold only to cut it back to 64; pushing the window down keeps every step
+  // one machine word (an lhdtrack harness folds 10-38 outputs per cycle).
+  // Private ops only: rewriting a shared op would change its other readers.
+  // Windowing every operand grows the graph (br_enc_gray2bin's
+  // `bit0((Y >>> 1) ^ Y)` became Y[1] ^ Y[0] per output bit, 67 -> 167
+  // Get_masks and a 1.25x slower sim), so a bitwise op narrows only when at
+  // most ONE operand needs a new window (the mask just moves down a level) or
+  // the window drops the value to one machine word (the case above; the width
+  // annotation is only a cost hint here, never a correctness proof).
+  if (const int w = low_mask_width(mask_const);
+      w > 0 && !a_pin.is_const() && !is_graph_input_pin(a_pin) && has_single_consumer(a_pin) && !fits_unsigned_window(a_pin, w)) {
+    auto       inner    = a_pin.get_master_node();
+    const auto inner_op = inner.is_invalid() ? Ntype_op::Invalid : type_op_of(inner);
+    const auto window   = [&](const hhds::Pin_class& p, int bits) -> hhds::Pin_class {
+      if (p.is_const()) {
+        return create_const(*current_graph, *const_of(p).and_op(*Dlop::create_integer(1)->shl_op(*Dlop::create_integer(bits))->sub_op(*Dlop::create_integer(1))));
+      }
+      if (fits_unsigned_window(p, bits)) {
+        return p;
+      }
+      auto get = livehd::graph_util::create_get_mask(*current_graph, p, 0, bits);
+      auto out = get.create_driver_pin(0);
+      livehd::graph_util::set_ubits(out, bits);
+      return out;
+    };
+    if (inner_op == Ntype_op::And || inner_op == Ntype_op::Or || inner_op == Ntype_op::Xor) {
+      std::vector<hhds::Pin_class> operands;
+      int                          new_windows = 0;
+      for (auto sink : inner.inp_sorted_pins()) {
+        operands.push_back(sink.get_driver_pin());
+        new_windows += operands.back().is_const() || fits_unsigned_window(operands.back(), w) ? 0 : 1;
+      }
+      const auto inner_bits = livehd::graph_util::bits_of(a_pin);
+      if (new_windows <= 1 || (inner_bits > 64 && w <= 64)) {
+        auto narrow = create_typed_node(*current_graph, inner_op);
+        for (const auto& operand : operands) {
+          livehd::graph_util::append_sink_operand(narrow, inner_op, 0).connect_driver(window(operand, w));
+        }
+        auto out = narrow.create_driver_pin(0);
+        livehd::graph_util::set_ubits(out, w);
+        if (collapse_forward_for_pin(node, out)) {
+          return true;
+        }
+        narrow.del_node();
+      }
+    } else if (inner_op == Ntype_op::SHL) {
+      const auto x      = livehd::graph_util::get_driver_of_sink_name(inner, "a");
+      const auto amount = livehd::graph_util::get_driver_of_sink_name(inner, "b");
+      if (!x.is_invalid() && amount.is_const() && const_of(amount).is_just_i64() && !const_of(amount).has_unknowns()) {
+        const int64_t k = const_of(amount).to_just_i64();
+        if (k >= w) {
+          replace_node(node, *Dlop::create_integer(0));
+          return true;
+        }
+        if (k > 0) {
+          auto shl = create_typed_node(*current_graph, Ntype_op::SHL);
+          setup_sink_by_name(shl, "a").connect_driver(window(x, w - static_cast<int>(k)));
+          setup_sink_by_name(shl, "b").connect_driver(amount);
+          auto out = shl.create_driver_pin(0);
+          livehd::graph_util::set_ubits(out, w);
+          if (collapse_forward_for_pin(node, out)) {
+            return true;
+          }
+          shl.del_node();
+        }
+      }
+    }
+  }
 
   // A fixed-width accumulator commonly lowers as
   //
@@ -3782,6 +4409,16 @@ void Cprop::scalar_node(hhds::Node_class& node) {
     if (del) {
       return;
     }
+    if (type_op_of(node) != Ntype_op::Mux) {
+      // A constant-arm rule retyped it to And/Or: continue as that op.
+      inp_edges_ordered = ordered_inp_edges(node);
+      for (int guard = 0; guard < 16 && scalar_bool(node, inp_edges_ordered); ++guard) {
+        if (node.is_invalid() || !node.has_out_edges()) {
+          return;
+        }
+        inp_edges_ordered = ordered_inp_edges(node);
+      }
+    }
   } else if (op == Ntype_op::EQ) {
     if (scalar_eq(node, inp_edges_ordered)) {
       return;
@@ -3793,9 +4430,23 @@ void Cprop::scalar_node(hhds::Node_class& node) {
       // one (an amount rewritten to 0 collapses right there).
       inp_edges_ordered = ordered_inp_edges(node);
     }
-  } else if (op == Ntype_op::Or) {
-    if (try_broadcast_or(node, inp_edges_ordered)) {
+  } else if (op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
+    if (op == Ntype_op::Or && try_broadcast_or(node, inp_edges_ordered)) {
       return;
+    }
+    for (int guard = 0; guard < 16 && scalar_bool(node, inp_edges_ordered); ++guard) {
+      if (node.is_invalid() || !node.has_out_edges()) {
+        return;
+      }
+      inp_edges_ordered = ordered_inp_edges(node);
+      if (type_op_of(node) == Ntype_op::EQ) {
+        // x ^ 1 became EQ(x,0): let the double-negation fold see it now.
+        if (scalar_eq(node, inp_edges_ordered) || node.is_invalid()) {
+          return;
+        }
+        inp_edges_ordered = ordered_inp_edges(node);
+        break;
+      }
     }
   } else if (op == Ntype_op::Get_mask) {
     bool del = scalar_get_mask(node);
@@ -3865,6 +4516,177 @@ void Cprop::canonicalize_flop_hold(const hhds::Node_class& flop) {
       mux.del_node();
     }
   }
+}
+
+// A flop samples din only while `enable` is 1, so din may be simplified under
+// that assumption. tolg's enable is the Or of the write conditions -- `rst |
+// en` for `if (rst) q <= i; else if (en) q <= d;` -- and after the reset arm
+// is peeled (by the Or it became, or by a Mux on rst) the remaining hold
+// `en ? d : q` is dead: with rst false and the enable true, en is true. A
+// per-bit write (a generate loop over a packed reg) leaves one such hold per
+// Set_mask lane, which canonicalize_flop_hold cannot reach.
+//
+// Walk din's PRIVATE spine -- Set_mask lanes, two-arm Muxes, 0/1 Ors, each
+// rewritten only when its sole consumer is the node above it -- carrying the
+// literal facts each branch implies. When every enable literal but one is
+// known false, the last is true. A Mux whose selector is then known collapses
+// to its live arm.
+void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
+  if (flop.is_invalid() || type_op_of(flop) != Ntype_op::Flop) {
+    return;
+  }
+  const auto enable = livehd::graph_util::get_driver_of_sink_name(flop, "enable");
+  if (enable.is_invalid() || enable.is_const()) {
+    return;
+  }
+  std::vector<Bool_condition> literals;
+  auto                        add_literal = [&](const hhds::Pin_class& p) {
+    auto cond = decode_bool_condition(p);
+    if (!cond.has_value()) {
+      return false;
+    }
+    for (const auto& l : literals) {
+      if (same_pin(l.base, cond->base)) {
+        return l.true_when_base == cond->true_when_base;  // x | !x: no fact to use
+      }
+    }
+    literals.push_back(*cond);
+    return true;
+  };
+  if (!is_graph_input_pin(enable) && type_op_of(enable.get_master_node()) == Ntype_op::Or) {
+    for (auto sink : enable.get_master_node().inp_sorted_pins()) {
+      const auto operand = sink.get_driver_pin();
+      if (operand.is_const() || !is_bool01(operand) || !add_literal(operand)) {
+        return;
+      }
+    }
+  } else if (!add_literal(enable)) {
+    return;
+  }
+
+  using Facts        = std::vector<std::pair<hhds::Pin_class, bool>>;  // base, is truthy
+  const auto truth_of = [](const Facts& facts, const hhds::Pin_class& base) -> std::optional<bool> {
+    for (const auto& [pin, truthy] : facts) {
+      if (same_pin(pin, base)) {
+        return truthy;
+      }
+    }
+    return std::nullopt;
+  };
+  const auto implied = [&](Facts facts) {
+    const Bool_condition* open = nullptr;
+    size_t                unknown = 0;
+    for (const auto& l : literals) {
+      auto t = truth_of(facts, l.base);
+      if (!t.has_value()) {
+        open = &l;
+        ++unknown;
+      } else if (*t == l.true_when_base) {
+        return facts;  // a write condition already holds: nothing is forced
+      }
+    }
+    if (unknown == 1) {
+      facts.emplace_back(open->base, open->true_when_base);
+    }
+    return facts;
+  };
+  const auto rewire = [](const hhds::Pin_class& sink, const hhds::Pin_class& old_driver, const hhds::Pin_class& driver) {
+    if (driver == old_driver) {
+      return false;
+    }
+    sink.del_sink();
+    driver.connect_sink(sink);
+    return true;
+  };
+
+  bool                                                      changed = false;
+  std::function<hhds::Pin_class(hhds::Pin_class, Facts, int)> simplify;
+  simplify = [&](hhds::Pin_class p, Facts facts, int depth) -> hhds::Pin_class {
+    if (depth > 64 || p.is_invalid() || p.is_const() || is_graph_input_pin(p)) {
+      return p;
+    }
+    facts       = implied(std::move(facts));
+    auto node   = p.get_master_node();
+    auto op     = type_op_of(node);
+    if (op == Ntype_op::Mux) {
+      auto edges = ordered_inp_edges(node);
+      if (!is_two_arm_mux(edges)) {
+        return p;
+      }
+      auto sel = decode_bool_condition(edges[0].get_driver_pin());
+      if (sel.has_value()) {
+        if (auto t = truth_of(facts, sel->base); t.has_value()) {
+          const bool taken = *t == sel->true_when_base;
+          return simplify(edges[taken ? 2 : 1].get_driver_pin(), facts, depth + 1);
+        }
+      }
+      if (!has_single_consumer(p)) {
+        return p;
+      }
+      for (size_t arm = 1; arm <= 2; ++arm) {
+        Facts arm_facts = facts;
+        if (sel.has_value()) {
+          arm_facts.emplace_back(sel->base, arm == 2 ? sel->true_when_base : !sel->true_when_base);
+        }
+        const auto old_driver = edges[arm].get_driver_pin();
+        changed |= rewire(edges[arm], old_driver, simplify(old_driver, std::move(arm_facts), depth + 1));
+      }
+      return p;
+    }
+    if (op == Ntype_op::Or) {
+      if (!is_bool01(p) || !has_single_consumer(p)) {
+        return p;
+      }
+      for (const auto& edge : ordered_inp_edges(node)) {
+        // Every OTHER 0/1 literal operand is false here: were one true, this
+        // operand could not change the Or.
+        Facts operand_facts = facts;
+        for (const auto& other : ordered_inp_edges(node)) {
+          const auto d = other.get_driver_pin();
+          if (other == edge || d.is_const() || !is_bool01(d)) {
+            continue;
+          }
+          if (auto cond = decode_bool_condition(d); cond.has_value()) {
+            operand_facts.emplace_back(cond->base, !cond->true_when_base);
+          }
+        }
+        const auto old_driver = edge.get_driver_pin();
+        changed |= rewire(edge, old_driver, simplify(old_driver, std::move(operand_facts), depth + 1));
+      }
+      return p;
+    }
+    if (op == Ntype_op::Set_mask) {
+      if (!has_single_consumer(p)) {
+        return p;
+      }
+      // Walk the base chain in a loop: a per-bit write loop leaves one link
+      // per lane (120 for a 16x16 matrix), far past the recursion bound. Every
+      // link sees the same facts, so only each lane value recurses.
+      for (auto link = node; !link.is_invalid();) {
+        auto value_sink = livehd::graph_util::find_sink_pin(link, "value");
+        if (!value_sink.is_invalid()) {
+          const auto old_driver = value_sink.get_driver_pin();
+          changed |= rewire(value_sink, old_driver, simplify(old_driver, facts, depth + 1));
+        }
+        const auto base = livehd::graph_util::get_driver_of_sink_name(link, "a");
+        if (base.is_invalid() || base.is_const() || is_graph_input_pin(base) || !has_single_consumer(base)) {
+          break;
+        }
+        auto next = base.get_master_node();
+        link      = type_op_of(next) == Ntype_op::Set_mask ? next : hhds::Node_class{};
+      }
+      return p;
+    }
+    return p;
+  };
+
+  auto       din_sink = livehd::graph_util::find_sink_pin(flop, "din");
+  const auto din      = din_sink.is_invalid() ? hhds::Pin_class{} : din_sink.get_driver_pin();
+  if (din.is_invalid()) {
+    return;
+  }
+  changed |= rewire(din_sink, din, simplify(din, {}, 0));
+  (void)changed;
 }
 
 void Cprop::canonicalize_latch_hold(const hhds::Node_class& latch) {
@@ -3978,6 +4800,11 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // only additional graph traversal; one forward round is sufficient because
   // every key sees already-folded producer pins.
   auto order    = stable_nodes(current_graph);
+  absl::flat_hash_set<hhds::Class_index> swept;
+  swept.reserve(order.size());
+  for (const auto& n : order) {
+    swept.insert(n.get_class_index());
+  }
   if (std::getenv("LHD_DBG_XOR")) {
     for (const auto& n : order) {
       if (n.is_invalid() || type_op_of(n) != Ntype_op::Xor) {
@@ -4006,6 +4833,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   for (auto node : order) {
     canonicalize_latch_hold(node);
     canonicalize_flop_hold(node);
+    canonicalize_flop_enable(node);
   }
   for (auto node : order) {
     if (node.is_invalid()) {
@@ -4063,11 +4891,39 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
       cleanup_dead_nodes(current_graph);
     }
   } while (packs_changed);
+  // Folds mint cells mid-sweep (a factored per-lane Mux, a boolean rewrite)
+  // that `order` predates, so the sweep never visited them. Visit them before
+  // CSE and mux sharing see their raw shape: an unswept 1-bit lane Mux nest is
+  // exactly what mux sharing would rebuild as a Hotmux over path conjunctions.
+  // A recycled index reads as already swept, which only skips an optional fold.
+  for (int round = 0; round < 8; ++round) {
+    bool fresh = false;
+    for (auto node : stable_nodes(current_graph)) {
+      if (node.is_invalid() || !swept.insert(node.get_class_index()).second) {
+        continue;
+      }
+      fresh = true;
+      canonicalize_and_mask(node);
+      scalar_node(node);
+    }
+    if (!fresh) {
+      break;
+    }
+    cleanup_dead_nodes(current_graph);
+  }
   // Merge duplicate nodes after the scalar/canonical folds (duplicated inlined
   // cones merge wholesale). Re-materialize again: canonicalize_concat_pack
   // mints the Concat cells, and a stale vector would hide every freshly
   // created twin from the hash-cons.
   cse_pass(stable_nodes(current_graph));
+  // The swept enable is now an Or of literals, so din's holds under it can be
+  // resolved. Do it BEFORE mux sharing: a hold left in din is what sharing
+  // extracts into a second enable term AND-ed onto tolg's (equivalent) one.
+  for (auto node : stable_nodes(current_graph)) {
+    canonicalize_flop_hold(node);
+    canonicalize_flop_enable(node);
+  }
+  cleanup_dead_nodes(current_graph);
   mux_share_pass();
   // Bit-sliced mux vectors -> word muxes, one tree level per round, then fold
   // the Concats that re-pack their lanes. Each round removes 1-bit lane muxes
@@ -4087,6 +4943,9 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
       cleanup_dead_nodes(current_graph);
     }
   }
+  if (vectorize_bit_reductions()) {
+    cleanup_dead_nodes(current_graph);
+  }
   // The front ends sometimes spell an unconditional latch write as a
   // tautological enable cone (for example, a full case/default). The sweep
   // above reduces that cone to a constant; revisit the latches so the now
@@ -4096,6 +4955,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   for (auto node : stable_nodes(current_graph)) {
     canonicalize_latch_hold(node);
     canonicalize_flop_hold(node);
+    canonicalize_flop_enable(node);
   }
   // This must be the final structural phase. Get-mask revisiting, CSE, and the
   // post-fold latch canonicalization above all run after the earlier pack DCE

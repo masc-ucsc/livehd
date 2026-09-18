@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <limits>
 #include <vector>
 
 #include "hhds/graph.hpp"
@@ -109,6 +110,13 @@ public:
     Version_role   role            = Version_role::data;
     uint64_t       execution_order = 0;
   };
+  // The edge a state update COMMITS on. A rise-only design evaluates its flop
+  // captures in pre-rise-eval (fused with their input cones), but they still
+  // commit at the rise barrier.
+  [[nodiscard]] static Execution_slot commit_slot_of(const Version_site& v) noexcept {
+    return v.role == Version_role::state_update && v.slot == Execution_slot::pre_rise_eval ? Execution_slot::rise_commit
+                                                                                         : v.slot;
+  }
 
   struct Version_dependency {
     size_t   producer      = 0;
@@ -235,9 +243,22 @@ public:
   // (LLVM). Compact loops may share colors with surrounding logic; their
   // runtime guards each stateful advance once per phase across output colors.
   // `live_words` = the per-color live-word budget (0 = the built-in default).
+  // `fence_ratio` = sites per interface word a single-use module needs to keep
+  // its own colors (<0 = the built-in default, 0 = fence every such module).
   static Color_plan         discover(hhds::Graph* root, bool include_observations = true, bool separate_runtime_calls = false,
-                                     uint64_t live_words = 0);
-  static constexpr uint64_t kDefaultLiveWords = 256;
+                                     uint64_t live_words = 0, int64_t fence_ratio = -1);
+  static constexpr uint64_t kDefaultLiveWords  = 256;
+  // Best weighted average (pyrope2 x4, pyrope x2, verilog x1) over lhdsuite
+  // and lhdtrack on 2026-09-18: within 1% of each benchmark's best on 19/21,
+  // the outliers being tuned per benchmark (xs_renametable 0, cdc_fifo_flops
+  // never). Values <= 3 cost the LFSR-driven lhdtrack DUTs 5-10x.
+  static constexpr int64_t  kDefaultFenceRatio = 16;
+  // No module fences at all. A fence exists only so dirty-bit gating can skip
+  // an idle module; with sim.color_dirty=false every color runs every period,
+  // so a fence is pure cost (each crossing value becomes a stored slot and the
+  // module seam cuts colors). inou.cgen selects this when dirty gating is off
+  // and sim.fence_ratio was not set explicitly.
+  static constexpr int64_t  kNoFences = std::numeric_limits<int64_t>::max();
 
   [[nodiscard]] const std::vector<Site>&                sites() const noexcept { return sites_; }
   [[nodiscard]] const std::vector<Dependency>&          dependencies() const noexcept { return dependencies_; }

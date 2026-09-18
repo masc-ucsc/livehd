@@ -1,0 +1,42 @@
+/*
+:name: color_kernel_unsigned_msb
+:type: simulation
+*/
+// Two occurrences of one gated pass-through share a canonical color kernel.
+// The kernel reads an unsigned boundary slot at its own width (x:u3). Binding
+// that read as a plain Slop<3> made the top bit a SIGN bit: x = 5 (0b101)
+// reached the adder as -3 (br_credit_sender_vc's credit counters, 21+5 -> 18).
+mod gate(v:u1, x:u3) -> (y:u3@[0]) {
+  y = if v != 0 { x } else { 0 }
+}
+
+pub mod kernel_msb(d:u8, e:u8) -> (s0:u5@[0], s1:u5@[0]) {
+  const g0 = gate(v=d#[7], x=d#[0..=2])
+  const g1 = gate(v=e#[7], x=e#[0..=2])
+  reg r0:u5 = 0
+  reg r1:u5 = 0
+  wrap r0 = r0 + g0.y
+  wrap r1 = r1 + g1.y
+  s0 = r0
+  s1 = r1
+}
+
+test kernel_msb.unsigned_top_bit {
+  mut dut = kernel_msb
+  mut e0 = 0
+  mut e1 = 0
+  tick 12 {
+    // Every x has its top bit set (4..7); the gate alternates.
+    const dv = 0x84 + (clock & 3)
+    const ev = if (clock & 1) != 0 { 0x07 } else { 0x85 }
+    dut.d = dv
+    dut.e = ev
+    step
+    wrap e0 = e0 + (dv & 7)
+    if (ev & 0x80) != 0 {
+      wrap e1 = e1 + (ev & 7)
+    }
+    assert(dut.s0 == (e0 & 0x1F))
+    assert(dut.s1 == (e1 & 0x1F))
+  }
+}

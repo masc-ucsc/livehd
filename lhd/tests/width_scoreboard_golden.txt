@@ -11,7 +11,7 @@ array_bitview_runtime 303 16
 bit_sel_sext 55 7
 bitsel_dyn 43 6
 bitset_reg 240 27
-async_reset_enable 46 11
+async_reset_enable 47 12
 comb_array_const_index_read 143 28
 assign_pattern 52 28
 packed_assign 29 5

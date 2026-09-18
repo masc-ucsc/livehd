@@ -122,4 +122,46 @@ TEST(CgenSim, EmitsNativeCountedReductions) {
     EXPECT_EQ(code.find("UNRESOLVED-CYCLE"), std::string::npos);
   }
 }
+
+// clang keeps a constructor's initializer count in an 18-bit field, so a class
+// with 2^18+ members gets an implicit constructor that silently skips every
+// initializer past the wrapped count (xs_rob: `__in.clock__tick` stayed false
+// and no flop ever captured). The flop members of a big module therefore live
+// in bounded base structs, each with its own constructor.
+TEST(CgenSim, HugeFlopSetSplitsIntoBoundedStateBases) {
+  constexpr int     kFlops = 16400;  // Q + _din per flop: just past one 2^15-member chunk
+  const std::string name   = "huge_flop_set";
+  auto&             lib    = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io     = lib.create_io(name);
+  io->add_input("clk", 0);
+  io->add_input("d", 1);
+  io->set_bits("d", 1);
+  io->set_unsign("d", true);
+  io->add_output("q", 2);
+  io->set_bits("q", 1);
+  io->set_unsign("q", true);
+  auto graph = io->create_graph();
+  auto chain = graph->get_input_pin("d");
+  for (int i = 0; i < kFlops; ++i) {
+    auto flop = gu::create_typed_node(*graph, Ntype_op::Flop);
+    graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+    chain.connect_sink(gu::setup_sink_by_name(flop, "din"));
+    chain = flop.create_driver_pin(0);
+    gu::set_ubits(chain, 1);
+  }
+  chain.connect_sink(graph->get_output_pin("q"));
+  emit(graph, name);
+
+  std::string header;
+  for (const auto& entry : std::filesystem::directory_iterator(name)) {
+    if (entry.path().extension() == ".hpp" && entry.path().stem() == name) {
+      std::ifstream input(entry.path());
+      header.append(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+  }
+  ASSERT_FALSE(header.empty());
+  EXPECT_NE(header.find("struct huge_flop_set : huge_flop_set__state0, huge_flop_set__state1 {"), std::string::npos);
+  EXPECT_NE(header.find("struct huge_flop_set__state1 {"), std::string::npos);
+  EXPECT_EQ(header.find("huge_flop_set__state2"), std::string::npos);
+}
 }  // namespace

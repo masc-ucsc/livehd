@@ -83,6 +83,10 @@ void Inou_cgen::setup() {
   m2.add_label_optional("live_words",
                         "sim.live_words: live 64-bit words one color may keep across its members (0 = built-in default)",
                         "0");
+  m2.add_label_optional("fence_ratio",
+                        "sim.fence_ratio: sites per interface word a single-use module needs to keep its own colors "
+                        "(empty = built-in default, 0 = always)",
+                        "");
   register_inou("cgen", m2);
 }
 
@@ -160,6 +164,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      debug_s           = var.get("debug");
   auto      unknown_zero_s    = var.get("unknown_zero");
   auto      live_words_s      = var.get("live_words");
+  auto      fence_ratio_s     = var.get("fence_ratio");
   auto      backend           = var.get("backend");
   if (backend != "slop" && backend != "llvm") {
     livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("sim.backend expects slop|llvm, got '{}'", backend).emit();
@@ -199,6 +204,25 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     } else {
       live_words = static_cast<uint32_t>(parsed);
     }
+  }
+  int64_t fence_ratio = -1;  // -1 = Color_plan's built-in default
+  if (!fence_ratio_s.empty()) {
+    uint64_t   parsed = 0;
+    const auto first  = fence_ratio_s.data();
+    const auto last   = first + fence_ratio_s.size();
+    const auto result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr != last || parsed > (1u << 20)) {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+          .msg("sim.fence_ratio expects a whole number of sites per interface word in [0, {}], got '{}'", 1u << 20, fence_ratio_s)
+          .emit();
+      bad_flag = true;
+    } else {
+      fence_ratio = static_cast<int64_t>(parsed);
+    }
+  }
+  // Fences only serve dirty-bit gating; without it they are pure boundary cost.
+  if (fence_ratio < 0 && !color_dirty_on) {
+    fence_ratio = livehd::sim::Color_plan::kNoFences;
   }
   if (bad_flag) {
     return;
@@ -396,7 +420,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                     unknown_zero_on,
                     backend == "llvm",
                     is_dut(g),
-                    live_words);
+                    live_words,
+                    fence_ratio);
   };
   // Which modules are already generated. Asked BEFORE the color plan, because
   // on a large design discovery dominates the emitter — measured on XiangShan
@@ -446,7 +471,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       wrote_plan = true;  // the previous run's plan is still the current one
       continue;
     }
-    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), backend == "llvm", live_words);
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), backend == "llvm", live_words, fence_ratio);
     plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
@@ -494,7 +519,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   unknown_zero_on,
                   backend == "llvm",
                   is_dut(g),
-                  live_words);
+                  live_words,
+                  fence_ratio);
     p.share_digest_memo(&digest_memo);
     p.do_from_graph(g);
   }

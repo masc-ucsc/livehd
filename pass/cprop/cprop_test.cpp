@@ -537,7 +537,18 @@ int64_t mux_eval(Test_pin pin, Test_values& values) {
     if (!found && !inputs.fallback.is_invalid()) {
       result = mux_eval(inputs.fallback, values);
     }
-  } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Ror || op == Ntype_op::EQ) {
+  } else if (op == Ntype_op::Get_mask) {
+    // Constant contiguous window only: bits [lo,hi) of `a`, LSB-aligned.
+    const auto [lo, hi] = gu::const_of(gu::get_driver_of_sink_name(node, "mask")).get_mask_range();
+    EXPECT_GE(lo, 0);
+    const auto value = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);
+    result           = (value >> lo) & ((int64_t{1} << (hi - lo)) - 1);
+  } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+    // Non-negative test values only, so SRA is a logical shift here.
+    const auto value  = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);
+    const auto amount = mux_eval(gu::get_driver_of_sink_name(node, "b"), values);
+    result            = op == Ntype_op::SHL ? value << amount : value >> amount;
+  } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Ror || op == Ntype_op::EQ || op == Ntype_op::Xor) {
     result           = op == Ntype_op::And ? -1 : 0;
     bool    first    = true;
     int64_t previous = 0;
@@ -548,6 +559,8 @@ int64_t mux_eval(Test_pin pin, Test_values& values) {
           result &= value;
         } else if (op == Ntype_op::Or || op == Ntype_op::Ror) {
           result |= value;
+        } else if (op == Ntype_op::Xor) {
+          result ^= value;
         } else {
           if (first) {
             result = 1;
@@ -634,7 +647,22 @@ struct Mux_graph {
     gu::setup_sink_pid(n, 0).connect_driver(constant(value));
     return n.create_driver_pin(0);
   }
+  // tolg's `x != 0`: (x == 0) ^ 1.
+  Test_pin not_zero(Test_pin x) {
+    auto n = node(Ntype_op::Xor, 1);
+    gu::setup_sink_pid(n, 0).connect_driver(eq(x, 0));
+    gu::setup_sink_pid(n, 0).connect_driver(constant(1));
+    return n.create_driver_pin(0);
+  }
+  Test_pin logic(Ntype_op op, std::initializer_list<Test_pin> operands) {
+    auto n = node(op, 1);
+    for (auto p : operands) {
+      gu::setup_sink_pid(n, 0).connect_driver(p);
+    }
+    return n.create_driver_pin(0);
+  }
   Test_pin output() { return graph->get_output_pin("out").get_driver_pins().front(); }
+  Test_pin observed() { return graph->get_output_pin("observe").get_driver_pins().front(); }
   size_t   count(Ntype_op op) {
     size_t result = 0;
     for (auto n : graph->body().nodes()) {
@@ -825,6 +853,286 @@ TEST(CpropMuxSharing, DeepPriorityChainHasLinearGeneratedSize) {
   EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
   EXPECT_LT(nodes, 5 * depth);
   EXPECT_LT(edges, 12 * depth);
+}
+
+// The per-bit `if (rst) b <= 1; else if (upd) b <= gi ? 0 : gj ? 1 : q;` nest
+// (bedrock's LRU matrix under BR_REGLI) and tolg's shadow enable chain next to
+// it. As Mux trees they reached mux sharing, which rebuilt each as a Hotmux
+// over path conjunctions; they must become And/Or logic instead, value-exact
+// for every input.
+TEST(CpropBool, OneBitIfChainsBecomeAndOrLogic) {
+  Mux_graph f("bool_if_chain", 4, 1);
+  auto      rst  = f.not_zero(f.controls[0]);
+  auto      upd  = f.not_zero(f.controls[1]);
+  auto      gi   = f.not_zero(f.controls[2]);
+  auto      gj   = f.not_zero(f.controls[3]);
+  auto      q    = f.not_zero(f.a);
+  auto      en   = f.mux(rst, f.mux(upd, f.constant(0), f.constant(1)), f.constant(1));
+  auto      next = f.mux(gi, f.mux(gj, q, f.constant(1)), f.constant(0));
+  auto      d    = f.mux(rst, f.mux(upd, q, next), f.constant(1));
+  en.connect_sink(f.graph->get_output_pin("out"));
+  d.connect_sink(f.graph->get_output_pin("observe"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+  EXPECT_EQ(f.count(Ntype_op::Xor), 0);
+  // Left: the `upd ? q : next` hold (no flop here to make it dead), and the
+  // negated-selector swap's Mux(x,1,0), which scalar_mux keeps on purpose.
+  EXPECT_LE(f.count(Ntype_op::Mux), 2);
+  for (uint64_t mask = 0; mask < 16; ++mask) {
+    for (int64_t qv : {0, 1}) {
+      const bool r = mask & 1, u = mask & 2, i = mask & 4, j = mask & 8;
+      const int64_t nxt    = i ? 0 : (j ? 1 : qv);
+      auto          values = f.inputs(mask, qv, 0);
+      EXPECT_EQ(mux_eval(f.output(), values), r || u ? 1 : 0) << mask;
+      auto values2 = f.inputs(mask, qv, 0);
+      EXPECT_EQ(mux_eval(f.observed(), values2), r ? 1 : (u ? nxt : qv)) << mask << " q=" << qv;
+    }
+  }
+}
+
+TEST(CpropBool, ComplementaryLiteralsFold) {
+  Mux_graph f("bool_complement", 2, 1);
+  auto      x  = f.not_zero(f.controls[0]);
+  auto      nx = f.eq(f.controls[0], 0);
+  auto      y  = f.not_zero(f.controls[1]);
+  // and(x, y, !x) is 0 at any width; or(x, !x) is 1 because both are 0/1.
+  f.logic(Ntype_op::And, {x, y, nx}).connect_sink(f.graph->get_output_pin("out"));
+  f.logic(Ntype_op::Or, {x, nx}).connect_sink(f.graph->get_output_pin("observe"));
+  Cprop{}.do_trans(f.graph);
+  ASSERT_TRUE(f.output().is_const());
+  EXPECT_TRUE(gu::const_of(f.output()).is_known_zero());
+  ASSERT_TRUE(f.observed().is_const());
+  EXPECT_EQ(gu::const_of(f.observed()).to_just_i64(), 1);
+}
+
+// A flop enabled by `rst | upd` samples din only when one of them holds. After
+// the reset arm is peeled into an Or, the per-lane hold `upd ? next : q[k]` is
+// dead: rst false and the enable true force upd. canonicalize_flop_hold only
+// sees a Mux directly on din; this one sits inside a Set_mask lane.
+TEST(CpropBool, EnableMakesLaneHoldMuxDead) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cprop_flop_enable_lane");
+  auto  io  = lib.create_io("lane_hold");
+  io->add_input("rst", 1);
+  io->set_bits("rst", 1);
+  io->add_input("upd", 2);
+  io->set_bits("upd", 1);
+  io->add_input("g", 3);
+  io->set_bits("g", 1);
+  io->add_input("clock", 4);
+  io->set_bits("clock", 1);
+  io->add_output("q", 5);
+  io->set_bits("q", 4);
+  auto g         = io->create_graph();
+  auto constant  = [&](int64_t v) { return gu::create_const(*g, *Dlop::create_integer(v)); };
+  auto not_zero  = [&](Test_pin x) {
+    auto e = gu::create_typed_node(*g, Ntype_op::EQ, 1);
+    gu::setup_sink_pid(e, 0).connect_driver(x);
+    gu::setup_sink_pid(e, 0).connect_driver(constant(0));
+    gu::set_ubits(e.create_driver_pin(0), 1);
+    auto n = gu::create_typed_node(*g, Ntype_op::Xor, 1);
+    gu::setup_sink_pid(n, 0).connect_driver(e.create_driver_pin(0));
+    gu::setup_sink_pid(n, 0).connect_driver(constant(1));
+    gu::set_ubits(n.create_driver_pin(0), 1);
+    return n.create_driver_pin(0);
+  };
+  auto mux = [&](Test_pin s, Test_pin f, Test_pin t) {
+    auto n = gu::create_typed_node(*g, Ntype_op::Mux, 1);
+    n.create_sink_pin(0).connect_driver(s);
+    n.create_sink_pin(1).connect_driver(f);
+    n.create_sink_pin(2).connect_driver(t);
+    gu::set_ubits(n.create_driver_pin(0), 1);
+    return n.create_driver_pin(0);
+  };
+  auto rst  = not_zero(g->get_input_pin("rst"));
+  auto upd  = not_zero(g->get_input_pin("upd"));
+  auto next = not_zero(g->get_input_pin("g"));
+  auto flop = gu::create_typed_node(*g, Ntype_op::Flop, 4);
+  auto q    = flop.create_driver_pin(0);
+  gu::set_ubits(q, 4);
+  q.connect_sink(g->get_output_pin("q"));
+  g->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+  auto enable = gu::create_typed_node(*g, Ntype_op::Or, 1);
+  gu::setup_sink_pid(enable, 0).connect_driver(rst);
+  gu::setup_sink_pid(enable, 0).connect_driver(upd);
+  gu::set_ubits(enable.create_driver_pin(0), 1);
+  enable.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "enable"));
+  auto lane_read = gu::create_typed_node(*g, Ntype_op::Get_mask);
+  gu::connect_mask_operands(lane_read, q, constant(2));
+  gu::set_ubits(lane_read.create_driver_pin(0), 1);
+  auto lane = mux(rst, mux(upd, lane_read.create_driver_pin(0), next), constant(1));
+  auto din  = gu::create_set_mask(*g, q, constant(2), lane);
+  gu::set_ubits(din.create_driver_pin(0), 4);
+  din.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "din"));
+  Cprop{}.do_trans(g);
+  Cprop{}.do_trans(g);
+  size_t muxes = 0;
+  for (auto n : g->body().nodes()) {
+    muxes += gu::type_op_of(n) == Ntype_op::Mux;
+  }
+  EXPECT_EQ(muxes, 0);
+  // din's lane is now rst | next: check it against every rst/g with the
+  // enable held (upd forced when rst is low).
+  auto lane_now = gu::get_driver_of_sink_name(gu::get_driver_of_sink_name(flop, "din").get_master_node(), "value");
+  ASSERT_FALSE(lane_now.is_invalid());
+  for (int64_t r : {0, 1}) {
+    for (int64_t gv : {0, 1}) {
+      Test_values values;
+      values.emplace(g->get_input_pin("rst").get_class_index().value, r);
+      values.emplace(g->get_input_pin("upd").get_class_index().value, 1);
+      values.emplace(g->get_input_pin("g").get_class_index().value, gv);
+      EXPECT_EQ(mux_eval(lane_now, values), r ? 1 : gv) << r << gv;
+    }
+  }
+}
+
+// bedrock's pairwise arbiter row, can[i] = AND_{j != i} (!req[j] | prio[i][j]),
+// arrives as one And of per-bit Or terms. Every term is the same expression
+// over single-bit slices at a shifted position, so the And is one word test
+// under a mask; likewise an Or of shifted per-bit Ands.
+TEST(CpropBool, BitSliceReductionsBecomeWordTests) {
+  Mux_graph f("bool_reduce", 1, 16);
+  auto      bit = [&](Test_pin src, int pos) {
+    auto n   = gu::create_get_mask(*f.graph, src, pos, pos + 1);
+    auto out = n.create_driver_pin(0);
+    gu::set_ubits(out, 1);
+    return out;
+  };
+  auto can = f.node(Ntype_op::And, 1);
+  for (int j = 0; j < 6; ++j) {
+    if (j != 2) {
+      auto term = f.logic(Ntype_op::Or, {f.eq(bit(f.a, j), 0), bit(f.b, 8 + j)});
+      gu::setup_sink_pid(can, 0).connect_driver(term);
+    }
+  }
+  auto any = f.node(Ntype_op::Or, 1);
+  for (int j = 0; j < 5; ++j) {
+    gu::setup_sink_pid(any, 0).connect_driver(f.logic(Ntype_op::And, {bit(f.a, j), bit(f.b, j + 3)}));
+  }
+  can.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  any.create_driver_pin(0).connect_sink(f.graph->get_output_pin("observe"));
+  Cprop{}.do_trans(f.graph);
+  // One compare per family instead of a gate per bit.
+  EXPECT_LE(f.count(Ntype_op::EQ), 1);
+  EXPECT_LE(f.count(Ntype_op::Get_mask), 4);
+  uint64_t rng = 0x9E3779B97F4A7C15ULL;
+  for (int sample = 0; sample < 3000; ++sample) {
+    rng ^= rng << 13;
+    rng ^= rng >> 7;
+    rng ^= rng << 17;
+    const int64_t av = static_cast<int64_t>(rng & 0xFFFF);
+    const int64_t bv = static_cast<int64_t>((rng >> 16) & 0xFFFF);
+    int64_t       expected_can = 1;
+    for (int j = 0; j < 6; ++j) {
+      if (j != 2) {
+        expected_can &= (((av >> j) & 1) == 0 || ((bv >> (8 + j)) & 1) != 0) ? 1 : 0;
+      }
+    }
+    int64_t expected_any = 0;
+    for (int j = 0; j < 5; ++j) {
+      expected_any |= ((av >> j) & (bv >> (j + 3)) & 1);
+    }
+    auto values = f.inputs(0, av, bv);
+    EXPECT_EQ(mux_eval(f.output(), values), expected_can) << av << " " << bv;
+    auto values2 = f.inputs(0, av, bv);
+    EXPECT_EQ(mux_eval(f.observed(), values2), expected_any) << av << " " << bv;
+  }
+}
+
+// mask(a op b, W) pushes the window into a private bitwise op when at most one
+// operand needs a new window: `mask((a << 1) ^ k, 16)` keeps every step at 16
+// bits instead of computing a 17-bit value only to cut it back.
+TEST(CpropMasks, LowWindowNarrowsPrivateFold) {
+  Mux_graph f("mask_narrow_fold", 1, 16);
+  auto      shl = f.node(Ntype_op::SHL, 17);
+  gu::setup_sink_by_name(shl, "a").connect_driver(f.a);
+  gu::setup_sink_by_name(shl, "b").connect_driver(f.constant(1));
+  auto fold = f.logic(Ntype_op::Xor, {shl.create_driver_pin(0), f.constant(0x1A5A5)});
+  gu::set_ubits(fold, 17);
+  auto cut = gu::create_get_mask(*f.graph, fold, 0, 16);
+  gu::set_ubits(cut.create_driver_pin(0), 16);
+  cut.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  for (auto n : f.graph->body().nodes()) {
+    for (const auto& pin : n.out_sorted_pins()) {
+      EXPECT_LE(gu::bits_of(pin), 16) << gu::debug_name(n);
+    }
+  }
+  for (int64_t av : {0, 1, 0x7FFF, 0x8000, 0xFFFF, 0x1234}) {
+    auto values = f.inputs(0, av, 0);
+    EXPECT_EQ(mux_eval(f.output(), values), ((av << 1) ^ 0x1A5A5) & 0xFFFF) << av;
+  }
+}
+
+// ...but windowing EVERY operand splits word-level logic into bit extracts:
+// br_enc_gray2bin's `bit0((y >>> 1) ^ y)` became y[1] ^ y[0] per output bit
+// (67 -> 167 Get_masks, a 1.25x slower sim). It must stay one word-level Xor.
+TEST(CpropMasks, LowWindowDoesNotSplitWordLogicIntoBits) {
+  Mux_graph f("mask_no_bit_split", 1, 16);
+  auto      shift = [&](Ntype_op op, Test_pin x, int amount) {
+    auto n = f.node(op, 16);
+    gu::setup_sink_by_name(n, "a").connect_driver(x);
+    gu::setup_sink_by_name(n, "b").connect_driver(f.constant(amount));
+    return n.create_driver_pin(0);
+  };
+  auto y = f.logic(Ntype_op::Xor, {f.a, shift(Ntype_op::SRA, f.a, 2)});
+  gu::set_ubits(y, 16);
+  auto top = f.logic(Ntype_op::Xor, {shift(Ntype_op::SRA, y, 1), y});
+  gu::set_ubits(top, 16);
+  auto cut = gu::create_get_mask(*f.graph, top, 0, 1);
+  gu::set_ubits(cut.create_driver_pin(0), 1);
+  cut.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_LE(f.count(Ntype_op::Get_mask), 1);
+  for (int64_t av : {0, 1, 2, 3, 5, 0x7FFF, 0x8000, 0xFFFF, 0x1234}) {
+    const int64_t yv     = av ^ (av >> 2);
+    auto          values = f.inputs(0, av, 0);
+    EXPECT_EQ(mux_eval(f.output(), values), ((yv >> 1) ^ yv) & 1) << av;
+  }
+}
+
+// A window that drops a fold to ONE machine word narrows even when both
+// operands need a window: Pyrope's `wrap acc = ((acc << 1) | acc#[63]) ^ r`
+// otherwise computes a 65-bit value per step only to cut it back to 64.
+TEST(CpropMasks, LowWindowKeepsWideFoldInOneWord) {
+  Mux_graph f("mask_one_word_fold", 1, 64);
+  auto      shl = f.node(Ntype_op::SHL, 65);
+  gu::setup_sink_by_name(shl, "a").connect_driver(f.a);
+  gu::setup_sink_by_name(shl, "b").connect_driver(f.constant(1));
+  auto top_bit = gu::create_get_mask(*f.graph, f.a, 63, 64);
+  gu::set_ubits(top_bit.create_driver_pin(0), 1);
+  auto rotated = f.logic(Ntype_op::Or, {shl.create_driver_pin(0), top_bit.create_driver_pin(0)});
+  gu::set_ubits(rotated, 65);
+  auto fold = f.logic(Ntype_op::Xor, {rotated, f.b});
+  gu::set_ubits(fold, 65);
+  auto cut = gu::create_get_mask(*f.graph, fold, 0, 64);
+  gu::set_ubits(cut.create_driver_pin(0), 64);
+  cut.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  for (auto n : f.graph->body().nodes()) {
+    for (const auto& pin : n.out_sorted_pins()) {
+      EXPECT_LE(gu::bits_of(pin), 64) << gu::debug_name(n);
+    }
+  }
+}
+
+// Sharing a nest of PROVEN 0/1 values buys 1-bit selects with 1-bit predicate
+// gates (one conjunction per path); the nest must stay Muxes, value-exact.
+TEST(CpropMuxSharing, ZeroOneSelectionsStayMuxes) {
+  Mux_graph f("share_bool01", 5, 1);
+  auto      x = f.not_zero(f.controls[2]);
+  auto      y = f.not_zero(f.controls[3]);
+  auto      z = f.not_zero(f.controls[4]);
+  auto      s0 = f.not_zero(f.controls[0]);
+  auto      s1 = f.not_zero(f.controls[1]);
+  f.mux(s0, f.mux(s1, x, y), f.mux(s1, z, y)).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+  for (uint64_t mask = 0; mask < 32; ++mask) {
+    const bool b0 = mask & 1, b1 = mask & 2, bx = mask & 4, by = mask & 8, bz = mask & 16;
+    const bool expected = b0 ? (b1 ? by : bz) : (b1 ? by : bx);
+    auto       values   = f.inputs(mask, 0, 0);
+    EXPECT_EQ(mux_eval(f.output(), values), expected ? 1 : 0) << mask;
+  }
 }
 
 TEST(CpropMuxSharing, WidthHintsDoNotGateSharingButColorsDo) {

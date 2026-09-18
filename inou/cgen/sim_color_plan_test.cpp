@@ -245,7 +245,10 @@ std::shared_ptr<hhds::Graph> make_fixed_top_input_lane_extract(std::string_view 
   return graph;
 }
 
-std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag) {
+// `unbounded_inner`: the fed-back field is itself a pack with one operand of
+// unknown extent (a signed Sum), bounded only by the inner Or's own u4 width --
+// the shape of XS Rob's deqPtr bundle, whose 141-bit inner pack sits at <<179.
+std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag, bool unbounded_inner = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
   auto  io  = lib.create_io(std::string(tag) + "_or_pack_feedback");
   io->add_input("low", 0);
@@ -300,8 +303,16 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
   auto feedback_pack = gu::create_typed_node(*graph, Ntype_op::Or);
   feedback.connect_sink(feedback_pack.create_sink_pin(0));
   gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(feedback_pack.create_sink_pin(1));
+  if (unbounded_inner) {
+    auto sum = gu::create_typed_node(*graph, Ntype_op::Sum);
+    feedback.connect_sink(gu::setup_sink_pid(sum, 0));
+    gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(sum, 0));
+    auto sum_out = sum.create_driver_pin(0);
+    gu::set_sbits(sum_out, 4);
+    sum_out.connect_sink(feedback_pack.create_sink_pin(2));
+  }
   auto feedback_packed = feedback_pack.create_driver_pin(0);
-  gu::set_bits(feedback_packed, 16);
+  gu::set_bits(feedback_packed, unbounded_inner ? 4 : 16);
   gu::set_unsign(feedback_packed);
   feedback_packed.connect_sink(packed_or.create_sink_pin(1));
   return graph;
@@ -724,6 +735,14 @@ TEST(SimColorPlan, ChildPortCastKeepsProducerStorageAndConsumerWidthsSeparate) {
       }
     }
   }
+  // A rise-only design fuses the flop capture into its producer's color, so
+  // the same narrowing may be an internal value use instead of a slot; the
+  // emitter applies the identical truncation to either.
+  for (const auto& use : plan.value_uses()) {
+    if (use.width == 65 && use.consumer_width == 64) {
+      found_narrowing_boundary = true;
+    }
+  }
   EXPECT_TRUE(found_narrowing_boundary)
       << "the direct ABI must truncate a widened producer at the erased 64-bit child port rather than leak its sign bit\n"
       << plan.report();
@@ -954,6 +973,17 @@ TEST(SimColorPlan, DisjointOrPackDoesNotCreateAWordLevelFeedbackCycle) {
   }
   EXPECT_EQ(lane_uses, 2u) << "the low field binds directly to its unique Or operand at both observation versions\n"
                            << plan.report();
+}
+
+// An inner pack with one unbounded operand is still bounded by its own
+// unsigned width, so the read at bit 8 keeps a unique owner. Bailing there
+// made the whole word the read's producer and left a false feedback cycle.
+TEST(SimColorPlan, NestedPackWithUnboundedOperandIsBoundedByItsWidth) {
+  auto graph = make_disjoint_or_pack_feedback("nested_unbounded_pack", true);
+  auto plan  = livehd::sim::Color_plan::discover(graph.get());
+
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  EXPECT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
 }
 
 TEST(SimColorPlan, StateActionsMergeWithinTheirExecutionSlot) {
