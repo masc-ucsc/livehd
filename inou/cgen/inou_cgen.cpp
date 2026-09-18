@@ -69,9 +69,10 @@ void Inou_cgen::setup() {
                         "slots -- no exemption for state or module boundaries",
                         "true");
   m2.add_label_optional("color_dirty",
-                        "cross-cycle color activation cache; false emits one unconditional evaluation per color in "
-                        "the existing static phase order, with direct boundary assignments",
-                        "true");
+                        "cross-cycle color activation cache for workloads with long stable-input periods; false "
+                        "emits one unconditional evaluation per color in the existing static phase order, with "
+                        "direct boundary assignments",
+                        "false");
   m2.add_label_optional("debug",
                         "retain runtime Slop_u landing masks for checking bitwidth-proven unsigned values (true/false)",
                         "false");

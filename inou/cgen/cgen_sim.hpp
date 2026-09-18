@@ -297,7 +297,7 @@ public:
   void share_digest_memo(absl::flat_hash_map<hhds::Gid, uint64_t>* memo) { shared_digest_memo_ = memo; }
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
-           bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false,
+           bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,
            bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0)
       : odir(_odir)
       , vcd_file(_vcd)
@@ -328,7 +328,7 @@ private:
   // for state, for reset-free state, or for module boundaries.
   // false = everything is Slop<n>.
   bool                           slop_u_         = true;
-  bool                           color_dirty_    = true;  // cross-cycle color activation and boundary change tracking
+  bool                           color_dirty_    = false;  // cross-cycle color activation and boundary change tracking
   // sim.debug keeps the materializing Slop_u landing in generated code so an
   // unsigned-proof mistake remains visible while debugging. The normal path
   // uses from_proven(), whose width check is compile-time and whose runtime

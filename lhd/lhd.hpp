@@ -476,10 +476,10 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "re-masks; Slop_u pays ONE mask at the write and none at the reads. Reset-free state and other unknown-capable "
      "boundaries remain Slop. Set false only for lowering comparisons"                                            },
     {            "color_dirty",
-     "true",      Sim_set_option::Kind::boolean,
-     "cross-cycle color activation cache. false executes every color once in its existing static phase order and "
-     "emits direct boundary assignments instead of change comparisons and dirty propagation; intended for measured "
-     "scheduler-overhead comparisons"                                                                             },
+     "false",      Sim_set_option::Kind::boolean,
+     "cross-cycle color activation cache for workloads with long stable-input periods. false executes every color "
+     "once in its existing static phase order and emits direct boundary assignments instead of change comparisons "
+     "and dirty propagation"                                                                                       },
     {                  "debug",
      "false",      Sim_set_option::Kind::boolean,
      "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "
