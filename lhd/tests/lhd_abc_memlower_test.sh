@@ -138,18 +138,25 @@ module eqt (input logic [3:0] x, output logic y, output logic z);
 endmodule
 EOF
 
-declare -A MAP_PID=()
+# `#!/bin/bash` is bash 3.2 on macOS, which has no associative arrays, so the
+# dir -> pid map is two parallel indexed arrays.
+MAP_DIR=()
+MAP_PID=()
 map_bg() {  # map_bg <dir> <map_design args...>: start a mapping in the background
   local d="$1"
   map_design "$@" &
-  MAP_PID["$d"]=$!
+  MAP_DIR[${#MAP_DIR[@]}]="$d"
+  MAP_PID[${#MAP_PID[@]}]=$!
 }
 map_wait() {  # map_wait <dir>: block until <dir>'s mapping finished (once)
-  local d="$1"
-  [ -n "${MAP_PID[$d]:-}" ] || return 0
-  local pid="${MAP_PID[$d]}"
-  unset 'MAP_PID[$d]'
-  wait "$pid" || fail "mapping for ${d##*/} failed (see the message above)"
+  local d="$1" i
+  for ((i = 0; i < ${#MAP_DIR[@]}; i++)); do
+    [ "${MAP_DIR[$i]}" = "$d" ] || continue
+    MAP_DIR[$i]=""  # once
+    wait "${MAP_PID[$i]}" || fail "mapping for ${d##*/} failed (see the message above)"
+    return 0
+  done
+  return 0
 }
 
 map_bg "$W/tile32"         "$TILE"          memtile -GN=32 --set pass.abc.memory=true

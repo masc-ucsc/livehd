@@ -133,12 +133,22 @@ run_abc_lec() {
   # distinct pair once and record the identity for the repeats. The key is the
   # content, so a change that ever makes two modes diverge puts the solver back
   # on both of them automatically.
-  local key
-  key="$W/proven.$(cat "$d/impl.v" "$d/ref.v" <(printf '%s' "$top") | md5sum | cut -d' ' -f1)"
+  # `md5sum` is coreutils-only (absent on macOS); shasum ships with both, with
+  # sha256sum as the fallback. An empty digest would key every mode to the SAME
+  # file and silently skip every proof after the first, so it is a hard failure.
+  local digest key
+  digest="$(cat "$d/impl.v" "$d/ref.v" <(printf '%s' "$top") \
+            | (shasum -a 256 2>/dev/null || sha256sum) | cut -d' ' -f1)"
+  [ -n "$digest" ] || fail "no working hasher (shasum/sha256sum) to key the LEC dedup"
+  key="$W/proven.$digest"
   if [ -e "$key" ]; then
     echo "LEC: $fix[reg=$reg,mem=$mem] emits the impl+ref already proven by $(cat "$key")"
+    # The asserts below read the LEC verdict out of $r, so the recorded run's
+    # result JSON stands in for the one this identical query would have produced.
+    cp "$key.json" "$r"
   else
     run lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+    cp "$r" "$key.json"
     printf '%s' "${d##*/}" > "$key"
   fi
   if [ -n "$neg_pid" ]; then
