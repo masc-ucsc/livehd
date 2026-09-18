@@ -2890,6 +2890,415 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
   return false;  // rewired in place, not deleted
 }
 
+// A multi-bit slice that STRADDLES several lanes of a Set_mask write chain (or
+// of a Concat) -> one Concat of the pieces.
+//
+// scalar_get_mask_packed stops at the first lane that covers only part of the
+// slice, since splitting the read creates nodes, so the read stays pinned to
+// the whole chain. The measured shape is a generate loop that fills a wide
+// packed array one bit per Set_mask and reads back only its last row: bedrock's
+// br_mux_bin_structured_gates writes 480 links over a 2 Kbit word, and 1,984
+// over 12 Kbit inside br_cdc_fifo_flops. canonicalize_set_mask_pack refuses
+// both (kPackChainLimit), and in `lhd sim` every link is its own color and a
+// full-word copy: ~3 MB copied per simulated cycle for a 64-bit read.
+//
+// Walking newest-first, each bit of [lo,hi) belongs to the NEWEST write whose
+// lane covers it, and a bit no write covers reads the base version at the same
+// position. Every piece is therefore exact:
+//   * a Set_mask lane entirely inside the slice is a Concat lane of `value`: the
+//     lane holds value mod 2^w, and emit_concat adds the truncating Get_mask
+//     when `value` is not provably that narrow;
+//   * a Set_mask lane partly inside needs Get_mask(value, sub-window), guarded
+//     exactly like the packed walker's inside-lane rule (bounded footprint);
+//   * a Concat's lanes follow the same two shapes without the footprint guard
+//     (its lane is value's low w bits as spelled; see the Concat arm above);
+//   * bits above a Concat's total width read zero; the rest read the base.
+//
+// Node budget: fires only when the slice is the head's SOLE consumer and the
+// Get_masks it creates do not outnumber the private links it bypasses, so with
+// the head's sweep the rewrite is node-non-increasing.
+//
+// Returns true iff `node` was retyped into the Concat.
+bool Cprop::gather_straddling_slice(hhds::Node_class& node) {
+  constexpr int kGatherChainLimit = 1 << 16;
+
+  auto a_pin    = drv_at(node, 0);
+  auto mask_pin = drv_at(node, 2);
+  if (a_pin.is_invalid() || mask_pin.is_invalid() || !mask_pin.is_const() || a_pin.is_const() || is_graph_input_pin(a_pin)) {
+    return false;
+  }
+  auto window = livehd::graph_util::mask_window_of(const_of(mask_pin));
+  if (!window || window->second - window->first < 2) {
+    return false;  // single-bit reads are try_find_single_driver_pin's
+  }
+  const auto [lo, hi] = *window;
+
+  auto head = a_pin.get_master_node();
+  if (head.is_invalid() || (type_op_of(head) != Ntype_op::Set_mask && type_op_of(head) != Ntype_op::Concat)
+      || !has_single_consumer(a_pin)) {
+    return false;
+  }
+
+  struct Piece {
+    hhds::Pin_class value;
+    int             lo{0};  // absolute [lo,hi) inside the slice
+    int             hi{0};
+    int             src_lo{0};     // `value` bit that lands on `lo`
+    bool            whole{false};  // an entire lane: use `value` itself
+    bool            zero{false};   // above a Concat: reads 0
+  };
+  std::vector<std::pair<int, int>> uncovered{
+      {lo, hi}
+  };
+  std::vector<Piece> pieces;
+
+  // Carve [L,H) out of every still-uncovered interval. Returns false when a
+  // partial piece fails the footprint guard (nothing has been created yet).
+  auto carve = [&](int L, int H, const hhds::Pin_class& v, bool footprint_guard) -> bool {
+    std::vector<std::pair<int, int>> rest;
+    for (const auto& [s, e] : uncovered) {
+      const int is = std::max(s, L);
+      const int ie = std::min(e, H);
+      if (is >= ie) {
+        rest.emplace_back(s, e);
+        continue;
+      }
+      const bool whole = is == L && ie == H;
+      if (!whole && footprint_guard && footprint(v, 0).first < 0) {
+        return false;
+      }
+      pieces.push_back(Piece{v, is, ie, is - L, whole, false});
+      if (s < is) {
+        rest.emplace_back(s, is);
+      }
+      if (ie < e) {
+        rest.emplace_back(ie, e);
+      }
+    }
+    uncovered = std::move(rest);
+    return true;
+  };
+
+  absl::flat_hash_set<hhds::Class_index> visited;
+  hhds::Pin_class                        at            = a_pin;
+  int                                    private_links = 0;
+  bool                                   private_run   = true;
+  int                                    walked        = 0;
+  while (!uncovered.empty() && !at.is_const() && !is_graph_input_pin(at)) {
+    auto m = at.get_master_node();
+    if (m.is_invalid() || ++walked > kGatherChainLimit) {
+      break;
+    }
+    const auto op = type_op_of(m);
+    if (op != Ntype_op::Set_mask && op != Ntype_op::Concat) {
+      break;
+    }
+    if (!visited.insert(m.get_class_index()).second) {
+      return false;  // cycle through the `a` pins
+    }
+    private_run = private_run && has_single_consumer(at);
+    if (private_run) {
+      ++private_links;
+    }
+
+    if (op == Ntype_op::Concat) {
+      const auto lanes = livehd::graph_util::concat_lanes(m);
+      if (lanes.empty()) {
+        break;  // malformed: read the remainder as an opaque base
+      }
+      for (const auto& l : lanes) {
+        carve(l.offset, l.offset + l.width, l.value, false);
+      }
+      for (const auto& [s, e] : uncovered) {  // only bits above the top lane remain
+        pieces.push_back(Piece{{}, s, e, 0, false, true});
+      }
+      uncovered.clear();
+      break;
+    }
+
+    auto r = const_mask_range(m);
+    auto v = drv_at(m, 4);
+    auto a = drv_at(m, 0);
+    if (r.first < 0 || v.is_invalid() || a.is_invalid()) {
+      break;  // unknown lane: the remainder reads this exact version
+    }
+    if (!carve(r.first, r.second, v, true)) {
+      return false;
+    }
+    at = a;
+  }
+  for (const auto& [s, e] : uncovered) {
+    pieces.push_back(Piece{at, s, e, s, false, false});
+  }
+  if (pieces.size() < 2 || pieces.size() > kPackMaxLanes) {
+    return false;  // one piece is the packed walker's rewire, not a gather
+  }
+
+  int new_nodes = 0;
+  for (const auto& p : pieces) {
+    if (p.zero) {
+      continue;
+    }
+    if (p.value.get_master_node() == node) {
+      return false;  // would close a loop onto the node being rewritten
+    }
+    if (p.whole) {
+      new_nodes += fits_unsigned_window(p.value, p.hi - p.lo) ? 0 : 1;  // emit_concat's truncation
+    } else if (!p.value.is_const()) {
+      ++new_nodes;
+    }
+  }
+  if (new_nodes > private_links) {
+    return false;
+  }
+
+  std::vector<Pack_lane> lanes;
+  lanes.reserve(pieces.size());
+  for (const auto& p : pieces) {
+    hhds::Pin_class value;
+    if (p.zero) {
+      value = create_const(*current_graph, *Dlop::create_integer(0));
+    } else if (p.whole) {
+      value = p.value;
+    } else if (p.value.is_const()) {
+      value = create_const(*current_graph, *const_of(p.value).get_mask_op_opt(p.src_lo, p.src_lo + (p.hi - p.lo)));
+    } else {
+      auto get = livehd::graph_util::create_get_mask(*current_graph, p.value, p.src_lo, p.src_lo + (p.hi - p.lo));
+      value    = get.create_driver_pin(0);
+      livehd::graph_util::set_ubits(value, p.hi - p.lo);
+    }
+    lanes.push_back(Pack_lane{value, p.lo - lo, p.hi - lo});
+  }
+  const bool tiled = tile_pack_lanes(*current_graph, lanes);
+  I(tiled, "gathered slice pieces must tile the window");
+  if (!tiled) {
+    return false;
+  }
+
+  emit_concat(*current_graph, node, lanes);
+  if (!livehd::graph_util::is_builtin_node(head) && !Ntype::is_loop_last(type_op_of(head)) && !head.has_out_edges()) {
+    bwd_del_node(head);
+  }
+  return true;
+}
+
+// ---- bit-slice vectorization -------------------------------------------------
+//
+// A "structured gates" design spells a W-bit N:1 mux as W*(N-1) one-bit mux2
+// cells (bedrock's br_mux_bin_structured_gates, one per bit per tree node, so
+// the netlist keeps the gate structure). Inlined, every tree level is W cells
+//
+//   m_i = Mux(s, Get_mask(x, j0+i), Get_mask(y, j0+d+i))     i = 0..W-1
+//
+// with ONE select, which is exactly the W-bit Mux(s, x[j0 +: W], y[j0+d +: W]):
+// each output bit of a mux is the same bit of the chosen arm. Rewriting a run
+// turns every consumer's m_i into Get_mask(wide, i), which is again a one-bit
+// read with consecutive positions, so the next level vectorizes on the next
+// round. A 32:1 x 64-bit tree (br_cdc_fifo_flops) drops from 1,984 one-bit
+// muxes -- each a separate slot in `lhd sim` -- to 31 word muxes.
+//
+// Only 2-arm Muxes whose arms are both single-bit constant-window Get_masks
+// qualify; a run needs kMinLanes consecutive positions. The new cells are one
+// Mux, two arm slices and one bit read per lane, against n lane muxes (and
+// their now-dead arm reads) removed, and no rewritten cell qualifies again.
+bool Cprop::vectorize_bit_muxes() {
+  constexpr int kMinLanes = 4;
+
+  struct Bit_read {
+    hhds::Pin_class src;
+    int             pos{0};
+  };
+  const auto bit_read = [](const hhds::Pin_class& p) -> std::optional<Bit_read> {
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p)) {
+      return std::nullopt;
+    }
+    auto m = p.get_master_node();
+    if (m.is_invalid() || type_op_of(m) != Ntype_op::Get_mask) {
+      return std::nullopt;
+    }
+    const auto r = const_mask_range(m);
+    auto       x = drv_at(m, 0);
+    if (r.first < 0 || r.second != r.first + 1 || x.is_invalid()) {
+      return std::nullopt;
+    }
+    return Bit_read{x, r.first};
+  };
+
+  struct Lane {
+    hhds::Node_class mux;
+    int              pos_a{0};
+  };
+  struct Group {
+    hhds::Pin_class   sel;
+    hhds::Pin_class   src_a;
+    hhds::Pin_class   src_b;
+    int               delta{0};  // pos_b - pos_a
+    std::vector<Lane> lanes;
+  };
+  using Key = std::tuple<hhds::Class_index, hhds::Class_index, hhds::Class_index, int>;
+  absl::flat_hash_map<Key, size_t> group_index;
+  std::vector<Group>               groups;  // first-seen order keeps the rewrite deterministic
+
+  for (auto node : stable_nodes(current_graph)) {
+    if (node.is_invalid() || type_op_of(node) != Ntype_op::Mux || !node.has_out_edges()) {
+      continue;
+    }
+    if (!is_two_arm_mux(ordered_inp_edges(node))) {
+      continue;
+    }
+    auto sel = drv_at(node, 0);
+    auto a   = bit_read(drv_at(node, 1));
+    auto b   = bit_read(drv_at(node, 2));
+    if (sel.is_invalid() || !a || !b) {
+      continue;
+    }
+    const Key key{sel.get_class_index(), a->src.get_class_index(), b->src.get_class_index(), b->pos - a->pos};
+    auto [it, inserted] = group_index.try_emplace(key, groups.size());
+    if (inserted) {
+      groups.push_back(Group{sel, a->src, b->src, b->pos - a->pos, {}});
+    }
+    groups[it->second].lanes.push_back(Lane{node, a->pos});
+  }
+
+  // A full-width low slice of an operand that provably fits IS the operand.
+  const auto slice = [&](const hhds::Pin_class& src, int lo, int n) -> hhds::Pin_class {
+    if (lo == 0 && fits_unsigned_window(src, n)) {
+      return src;
+    }
+    auto get = livehd::graph_util::create_get_mask(*current_graph, src, lo, lo + n);
+    auto out = get.create_driver_pin(0);
+    livehd::graph_util::set_ubits(out, n);
+    return out;
+  };
+
+  bool changed = false;
+  for (auto& group : groups) {
+    if (group.lanes.size() < static_cast<size_t>(kMinLanes)) {
+      continue;
+    }
+    std::stable_sort(group.lanes.begin(), group.lanes.end(), [](const Lane& x, const Lane& y) { return x.pos_a < y.pos_a; });
+    size_t start = 0;
+    while (start < group.lanes.size()) {
+      // A run of STRICTLY consecutive positions. A repeated position is a
+      // duplicate lane CSE did not merge; it ends the run and stays scalar.
+      size_t end = start + 1;
+      while (end < group.lanes.size() && group.lanes[end].pos_a == group.lanes[end - 1].pos_a + 1) {
+        ++end;
+      }
+      const int n = static_cast<int>(end - start);
+      if (n >= kMinLanes && group.lanes[start].pos_a >= 0 && group.lanes[start].pos_a + group.delta >= 0) {
+        const int pos_a = group.lanes[start].pos_a;
+        auto      arm_a = slice(group.src_a, pos_a, n);
+        auto      arm_b = slice(group.src_b, pos_a + group.delta, n);
+        auto      wide  = create_typed_node(*current_graph, Ntype_op::Mux);
+        livehd::graph_util::setup_sink_pid(wide, 0).connect_driver(group.sel);
+        livehd::graph_util::setup_sink_pid(wide, 1).connect_driver(arm_a);
+        livehd::graph_util::setup_sink_pid(wide, 2).connect_driver(arm_b);
+        auto wide_out = wide.create_driver_pin(0);
+        livehd::graph_util::set_ubits(wide_out, n);
+        for (size_t i = start; i < end; ++i) {
+          auto bit     = livehd::graph_util::create_get_mask(*current_graph,
+                                                             wide_out,
+                                                             static_cast<int>(i - start),
+                                                             static_cast<int>(i - start) + 1);
+          auto bit_out = bit.create_driver_pin(0);
+          livehd::graph_util::set_ubits(bit_out, 1);
+          auto lane = group.lanes[i].mux;
+          if (collapse_forward_for_pin(lane, bit_out)) {
+            changed = true;
+          } else {
+            bit.del_node();  // the lane mux stays scalar; the wide mux is still exact
+          }
+        }
+      }
+      start = end;
+    }
+  }
+  return changed;
+}
+
+// Concat lanes that are CONTIGUOUS slices of one source, in order, are one
+// wider slice: {x[b +: w2], x[a +: w1]} with b == a + w1 is x[a +: w1 + w2].
+// This is what re-packs a vectorized bit row (`out = {m63, ..., m0}` becomes
+// one Get_mask of the word mux, or the word mux itself). A lane qualifies only
+// when its declared width equals its slice width, so no lane is zero-extended.
+bool Cprop::merge_concat_slices(hhds::Node_class& node) {
+  const auto lanes = livehd::graph_util::concat_lanes(node);  // MSB-first
+  if (lanes.size() < 2) {
+    return false;
+  }
+  struct Run {
+    hhds::Pin_class value;  // the original lane value when the run is one lane
+    hhds::Pin_class src;    // invalid unless the run is a slice
+    int             src_lo{0};
+    int             lo{0};  // window inside the Concat result
+    int             hi{0};
+    int             merged{1};
+  };
+  std::vector<Run> runs;  // LSB-first
+  for (auto it = lanes.rbegin(); it != lanes.rend(); ++it) {
+    const auto&     lane = *it;
+    hhds::Pin_class src;
+    int             src_lo = 0;
+    if (!lane.value.is_invalid() && !lane.value.is_const() && !is_graph_input_pin(lane.value)) {
+      auto m = lane.value.get_master_node();
+      if (!m.is_invalid() && type_op_of(m) == Ntype_op::Get_mask) {
+        const auto r = const_mask_range(m);
+        auto       x = drv_at(m, 0);
+        if (r.first >= 0 && r.second - r.first == lane.width && !x.is_invalid()) {
+          src    = x;
+          src_lo = r.first;
+        }
+      }
+    }
+    if (!runs.empty() && !src.is_invalid() && !runs.back().src.is_invalid() && same_pin(runs.back().src, src)
+        && runs.back().src_lo + (runs.back().hi - runs.back().lo) == src_lo) {
+      runs.back().hi += lane.width;
+      ++runs.back().merged;
+      continue;
+    }
+    runs.push_back(Run{lane.value, src, src_lo, lane.offset, lane.offset + lane.width, 1});
+  }
+  if (runs.size() == lanes.size()) {
+    return false;
+  }
+
+  const auto run_value = [&](const Run& r) -> hhds::Pin_class {
+    if (r.merged == 1) {
+      return r.value;
+    }
+    const int w = r.hi - r.lo;
+    if (r.src_lo == 0 && fits_unsigned_window(r.src, w)) {
+      return r.src;
+    }
+    auto get = livehd::graph_util::create_get_mask(*current_graph, r.src, r.src_lo, r.src_lo + w);
+    auto out = get.create_driver_pin(0);
+    livehd::graph_util::set_ubits(out, w);
+    return out;
+  };
+
+  if (runs.size() == 1) {
+    auto value = run_value(runs.front());
+    if (collapse_forward_for_pin(node, value)) {
+      return true;
+    }
+    if (!value.is_invalid() && !same_pin(value, runs.front().src)) {
+      auto m = value.get_master_node();
+      if (!m.is_invalid() && !m.has_out_edges()) {
+        m.del_node();
+      }
+    }
+    return false;
+  }
+  std::vector<Pack_lane> merged;
+  merged.reserve(runs.size());
+  for (const auto& r : runs) {
+    merged.push_back(Pack_lane{run_value(r), r.lo, r.hi});
+  }
+  emit_concat(*current_graph, node, merged);
+  return true;
+}
+
 bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   auto a_pin    = drv_at(node, 0);
   auto mask_pin = drv_at(node, 2);
@@ -3050,7 +3459,10 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     // the packed-wire fold (Or / SHL / Get_mask operands) is the complement.
     // Running it here keeps `a_pin`/`mask_const` fresh: the fold may rewire this
     // node's `a`+`mask` in place, which would invalidate both.
-    return scalar_get_mask_packed(node, mask_const);
+    if (scalar_get_mask_packed(node, mask_const) || node.is_invalid()) {
+      return true;
+    }
+    return gather_straddling_slice(node);  // re-reads the (possibly rewired) operands
   }
 
   auto [range_begin, range_end] = mask_const.get_mask_range();
@@ -3077,8 +3489,12 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // why a packed struct's per-field write chain kept every read pinned to the
   // LAST version -- the word-level false cycle. The packed-slice walker now has
   // a Set_mask arm that skips the writes whose lane is provably disjoint from
-  // this slice, so hand the node to it instead of giving up.
-  return scalar_get_mask_packed(node, mask_const);
+  // this slice, so hand the node to it instead of giving up. What it cannot
+  // resolve -- a slice straddling several lanes -- is the gather's.
+  if (scalar_get_mask_packed(node, mask_const) || node.is_invalid()) {
+    return true;
+  }
+  return gather_straddling_slice(node);
 }
 
 bool Cprop::scalar_set_mask(hhds::Node_class& node) {
@@ -3653,6 +4069,24 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // created twin from the hash-cons.
   cse_pass(stable_nodes(current_graph));
   mux_share_pass();
+  // Bit-sliced mux vectors -> word muxes, one tree level per round, then fold
+  // the Concats that re-pack their lanes. Each round removes 1-bit lane muxes
+  // and mints none, so the fixed point terminates (the cap is a safety net).
+  {
+    bool vectorized = false;
+    for (int round = 0; round < 64 && vectorize_bit_muxes(); ++round) {
+      vectorized = true;
+      cleanup_dead_nodes(current_graph);
+    }
+    if (vectorized) {
+      for (auto node : stable_nodes(current_graph)) {
+        if (!node.is_invalid() && type_op_of(node) == Ntype_op::Concat) {
+          merge_concat_slices(node);
+        }
+      }
+      cleanup_dead_nodes(current_graph);
+    }
+  }
   // The front ends sometimes spell an unconditional latch write as a
   // tautological enable cone (for example, a full case/default). The sweep
   // above reduces that cone to a constant; revisit the latches so the now

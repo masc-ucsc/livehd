@@ -875,3 +875,162 @@ TEST(CpropMasks, CyclicPackedReadDoesNotRotateAtWalkBudget) {
   EXPECT_FALSE(read.is_invalid());
   EXPECT_EQ(gu::get_driver_of_sink_name(read, "a"), source);
 }
+
+// A generate loop that fills a wide packed array one bit per Set_mask and reads
+// back only its last row (bedrock's br_mux_bin_structured_gates). The chain is
+// longer than canonicalize_set_mask_pack's limit, so the multi-bit read used to
+// stay pinned to every link. It must become a Concat of just the lanes it reads.
+TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_gather_chain");
+  auto  io     = lib.create_io("gather_chain");
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->add_input("b", 2);
+  io->set_bits("b", 8);
+  io->add_input("s", 3);
+  io->set_bits("s", 1);
+  io->add_output("q", 4);
+  io->set_bits("q", 4);
+  auto g = io->create_graph();
+
+  constexpr int kLinks = 300;  // > kPackChainLimit
+  auto          value  = gu::create_const(*g, *Dlop::from_pyrope("0sb?"));
+  for (int i = 0; i < kLinks; ++i) {
+    auto bit = [&](const char* in) {
+      auto get = gu::create_get_mask(*g, g->get_input_pin(in), i % 8, i % 8 + 1);
+      gu::set_ubits(get.create_driver_pin(0), 1);
+      return get.create_driver_pin(0);
+    };
+    auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
+    gu::setup_sink_pid(mux, 0).connect_driver(g->get_input_pin("s"));
+    gu::setup_sink_pid(mux, 1).connect_driver(bit("a"));
+    gu::setup_sink_pid(mux, 2).connect_driver(bit("b"));
+    gu::set_ubits(mux.create_driver_pin(0), 1);
+
+    auto write = gu::create_typed_node(*g, Ntype_op::Set_mask);
+    gu::setup_sink_by_name(write, "a").connect_driver(value);
+    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, gu::mask_window_const(i, i + 1)));
+    gu::setup_sink_by_name(write, "value").connect_driver(mux.create_driver_pin(0));
+    gu::set_ubits(write.create_driver_pin(0), kLinks);
+    value = write.create_driver_pin(0);
+  }
+  auto read = gu::create_get_mask(*g, value, kLinks - 4, kLinks);
+  gu::set_ubits(read.create_driver_pin(0), 4);
+  read.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+
+  Cprop{}.do_trans(g);
+
+  for (auto n : g->body().nodes()) {
+    EXPECT_NE(gu::type_op_of(n), Ntype_op::Set_mask) << "the bypassed write chain must be swept";
+  }
+  auto out = g->get_output_pin("q").get_driver_pin();
+  ASSERT_FALSE(out.is_invalid());
+  auto head = out.get_master_node();
+  // The four lane muxes vectorize too: {m299..m296} is one 4-bit Mux over
+  // a[3:0] / b[3:0] (300 % 8 == 4, so the lanes read bits 4..7).
+  ASSERT_EQ(gu::type_op_of(head), Ntype_op::Mux);
+  EXPECT_EQ(gu::bits_of(out), 4);
+  size_t muxes = 0;
+  for (auto n : g->body().nodes()) {
+    muxes += gu::type_op_of(n) == Ntype_op::Mux ? 1 : 0;
+  }
+  EXPECT_EQ(muxes, 1u);
+}
+
+// A shared chain head is not the read's to retire: gathering would duplicate
+// work for the other reader, so the read keeps its (straddling) slice.
+TEST(CpropMasks, StraddlingSliceOfSharedChainIsNotGathered) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_gather_shared");
+  auto  io     = lib.create_io("gather_shared");
+  io->add_input("d", 1);
+  io->set_bits("d", 1);
+  io->add_output("q", 2);
+  io->set_bits("q", 2);
+  io->add_output("w", 3);
+  io->set_bits("w", 8);
+  auto g     = io->create_graph();
+  auto value = gu::create_const(*g, *Dlop::create_integer(0));
+  for (int i = 0; i < 8; ++i) {
+    auto write = gu::create_typed_node(*g, Ntype_op::Set_mask);
+    gu::setup_sink_by_name(write, "a").connect_driver(value);
+    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, gu::mask_window_const(i, i + 1)));
+    gu::setup_sink_by_name(write, "value").connect_driver(g->get_input_pin("d"));
+    gu::set_ubits(write.create_driver_pin(0), 8);
+    value = write.create_driver_pin(0);
+  }
+  auto read = gu::create_get_mask(*g, value, 3, 5);
+  gu::set_ubits(read.create_driver_pin(0), 2);
+  read.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  value.connect_sink(g->get_output_pin("w"));
+
+  Cprop{}.do_trans(g);
+
+  auto q = g->get_output_pin("q").get_driver_pin();
+  ASSERT_FALSE(q.is_invalid());
+  EXPECT_EQ(gu::type_op_of(q.get_master_node()), Ntype_op::Get_mask);
+}
+
+// W one-bit muxes sharing a select over consecutive bits of the same two words
+// are one W-bit mux, and a tree of them vectorizes level by level: a 4:1 x 8
+// structured-gates mux (24 one-bit mux2 cells) becomes three 8-bit muxes.
+TEST(CpropMux, BitSlicedMuxTreeVectorizes) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_vectorize");
+  auto  io     = lib.create_io("vectorize_tree");
+  io->add_input("in", 1);
+  io->set_bits("in", 32);
+  io->add_input("s0", 2);
+  io->set_bits("s0", 1);
+  io->add_input("s1", 3);
+  io->set_bits("s1", 1);
+  io->add_output("q", 4);
+  io->set_bits("q", 8);
+  auto g   = io->create_graph();
+  auto in  = g->get_input_pin("in");
+  auto mux = [&](const hhds::Pin_class& sel, const hhds::Pin_class& x, const hhds::Pin_class& y) {
+    auto m = gu::create_typed_node(*g, Ntype_op::Mux);
+    gu::setup_sink_pid(m, 0).connect_driver(sel);
+    gu::setup_sink_pid(m, 1).connect_driver(x);
+    gu::setup_sink_pid(m, 2).connect_driver(y);
+    gu::set_ubits(m.create_driver_pin(0), 1);
+    return m.create_driver_pin(0);
+  };
+  auto bit = [&](const hhds::Pin_class& src, int pos) {
+    auto get = gu::create_get_mask(*g, src, pos, pos + 1);
+    gu::set_ubits(get.create_driver_pin(0), 1);
+    return get.create_driver_pin(0);
+  };
+  std::vector<hhds::Pin_class> level1;
+  for (int i = 0; i < 8; ++i) {
+    auto lo = mux(g->get_input_pin("s0"), bit(in, i), bit(in, 8 + i));
+    auto hi = mux(g->get_input_pin("s0"), bit(in, 16 + i), bit(in, 24 + i));
+    level1.push_back(mux(g->get_input_pin("s1"), lo, hi));
+  }
+  auto cat = gu::create_typed_node(*g, Ntype_op::Concat);
+  for (int i = 0; i < 8; ++i) {  // MSB-first lanes
+    gu::setup_sink_pid(cat, 2 * i).connect_driver(level1[7 - i]);
+    gu::setup_sink_pid(cat, 2 * i + 1).connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
+  }
+  gu::set_ubits(cat.create_driver_pin(0), 8);
+  cat.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+
+  Cprop{}.do_trans(g);
+
+  size_t muxes = 0;
+  for (auto n : g->body().nodes()) {
+    if (gu::type_op_of(n) == Ntype_op::Mux) {
+      ++muxes;
+      EXPECT_EQ(gu::bits_of(n.get_driver_pin(0)), 8) << "no one-bit lane mux may survive";
+    }
+  }
+  EXPECT_EQ(muxes, 3u);
+  auto q = g->get_output_pin("q").get_driver_pin();
+  ASSERT_FALSE(q.is_invalid());
+  auto top = q.get_master_node();
+  ASSERT_EQ(gu::type_op_of(top), Ntype_op::Mux) << "the re-packing Concat must fold into the word mux";
+  auto sel = top.get_sink_pin(0).get_driver_pins();
+  ASSERT_EQ(sel.size(), 1u);
+  EXPECT_EQ(sel.front(), g->get_input_pin("s1"));
+}

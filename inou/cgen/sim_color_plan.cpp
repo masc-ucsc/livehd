@@ -3421,6 +3421,20 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     module_shapes.emplace(graph->get_gid(), shape);
     return shape;
   };
+  // A module is a REUSE unit only when its body occurs more than once. Fencing
+  // off a single-occurrence module shares no kernel; it only splits the
+  // caller -> module -> caller sandwich into three or more colors whose seams
+  // are stored, change-tested and dirty-marked every cycle. Measured on the
+  // bedrock tests under their lhdtrack harness (one DUT instance each):
+  // br_enc_gray2bin 4.5x and br_csr_demux 6x slower than before the fence.
+  // A very large single body keeps it as a natural cut for the live-word budget.
+  constexpr size_t                                kSingleBodyFenceSites = 1024;
+  absl::flat_hash_map<const hhds::Graph*, size_t> body_occurrences;
+  for (const auto& body : bodies) {
+    if (!body.path.steps().empty() && body.graph != nullptr) {
+      ++body_occurrences[body.graph];
+    }
+  }
   std::vector<Control_trie_node> module_trie(1);
   for (const auto& body : bodies) {
     if (body.path.steps().empty() || body.graph == nullptr) {
@@ -3428,6 +3442,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     const auto shape = module_shape(body.graph);
     if (shape.sites < 32 || (shape.height > 1 && shape.interface_words > 20)) {
+      continue;
+    }
+    if (body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites) {
       continue;
     }
     size_t trie_node = 0;

@@ -70,6 +70,9 @@ protected:
   // operand that drives it. true = node deleted (folded to a constant); false
   // may still have rewired the node in place.
   bool            scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_const);
+  // Multi-bit slice straddling several Set_mask/Concat lanes -> one Concat of
+  // the covering pieces. true = node retyped (no longer a Get_mask).
+  bool            gather_straddling_slice(hhds::Node_class& node);
 
   void bwd_del_node(hhds::Node_class& node);
 
@@ -86,6 +89,12 @@ protected:
   void cse_pass(const std::vector<hhds::Node_class>& order);
   // Expected-linear mux sharing over disjoint, single-consumer regions.
   void mux_share_pass();
+  // One round of bit-slice vectorization: runs of 1-bit Mux(s, x[j], y[j+d])
+  // over consecutive j become one Mux(s, x[j0..], y[j0+d..]). true = changed.
+  bool vectorize_bit_muxes();
+  // Merge adjacent Concat lanes that are contiguous slices of one source.
+  // true = node rewritten (it may have been forwarded and deleted).
+  bool merge_concat_slices(hhds::Node_class& node);
   void scalar_node(hhds::Node_class& node);
 
 public:
