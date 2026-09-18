@@ -50,7 +50,11 @@ C "$WORK/C.v"  --top top --emit-dir "lg:$WORK/C"  --workdir "$WORK/cc"
 
 WD="$WORK/wd"; mkdir -p "$WD"
 H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
-  OUT=$(LEC_PHASE_PLAN=1 "$LHD" lec "$@" --top top  --workdir "$WD" 2>&1); RC=$?
+# A REFUTED `lhd lec` also writes the counterexample as a Pyrope replay test and
+# then BUILDS AND RUNS it -- ~5.5s of host clang per refutation. Nothing here
+# reads that replay, so keep the witness (simfail_*.prp/.json is still written)
+# and skip only its host build.
+  OUT=$(LEC_PHASE_PLAN=1 "$LHD" lec "$@" --set formal.simfail_run=false --top top  --workdir "$WD" 2>&1); RC=$?
 }
 
 # 1) Cold run A vs B: nothing cached yet; verdicts get stored.

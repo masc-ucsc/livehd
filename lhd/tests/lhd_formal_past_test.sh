@@ -28,6 +28,11 @@ LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_formal_past_$$}"
 mkdir -p "$W"
 
+# A REFUTED `formal verify` writes simfail_<test>.prp/.json for the failing
+# obligation and then BUILDS AND RUNS that replay -- ~5.5s of host clang each,
+# and three of the runs below refute on purpose. The assertions here read the
+# REFUTED verdict and the pretty counterexample trace, both of which come from
+# the formal engine, so only the replay build is skipped; the witness stays.
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -56,7 +61,8 @@ formal dly.mirrors_past {
 }
 EOF
 OUT="$W/good.out"
-"$LHD" formal verify "$W/dly.prp" "$W/good.verify.prp" --top dly --workdir "$W/wg" --diag-fmt pretty >"$OUT" 2>&1 \
+"$LHD" formal verify "$W/dly.prp" "$W/good.verify.prp" --top dly --workdir "$W/wg" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a true past() property must pass: $(cat "$OUT")"
 grep -q 'PROVEN' "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
 # The stateless-monitor refusal must NOT fire: past() is engine-resolved history,
@@ -77,7 +83,8 @@ formal dly.wrong_depth {
 }
 EOF
 OUT="$W/bad.out"
-"$LHD" formal verify "$W/dly.prp" "$W/bad.verify.prp" --top dly --workdir "$W/wb" --diag-fmt pretty >"$OUT" 2>&1
+"$LHD" formal verify "$W/dly.prp" "$W/bad.verify.prp" --top dly --workdir "$W/wb" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "a false past() property must fail the run: $(cat "$OUT")"
 grep -q 'REFUTED' "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
 grep -q 'counterexample inputs' "$OUT" || fail "a refuted past() must carry the input trace: $(cat "$OUT")"
@@ -96,7 +103,8 @@ formal dly.unguarded {
 }
 EOF
 OUT="$W/unguarded.out"
-"$LHD" formal verify "$W/dly.prp" "$W/unguarded.verify.prp" --top dly --workdir "$W/wu" --diag-fmt pretty >"$OUT" 2>&1
+"$LHD" formal verify "$W/dly.prp" "$W/unguarded.verify.prp" --top dly --workdir "$W/wu" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "an unguarded mirror claim must refute across reset: $(cat "$OUT")"
 grep -q 'REFUTED' "$OUT" || fail "expected REFUTED for the unguarded claim: $(cat "$OUT")"
 
@@ -110,7 +118,8 @@ formal dly.depth_zero {
 }
 EOF
 OUT="$W/zero.out"
-"$LHD" formal verify "$W/dly.prp" "$W/zero.verify.prp" --top dly --workdir "$W/wz" --diag-fmt pretty >"$OUT" 2>&1 \
+"$LHD" formal verify "$W/dly.prp" "$W/zero.verify.prp" --top dly --workdir "$W/wz" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "past(x, 0) must be the current value: $(cat "$OUT")"
 grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for past(x,0): $(cat "$OUT")"
 
@@ -124,7 +133,8 @@ formal dly.expr_arg {
 }
 EOF
 OUT="$W/expr.out"
-"$LHD" formal verify "$W/dly.prp" "$W/expr.verify.prp" --top dly --workdir "$W/we" --diag-fmt pretty >"$OUT" 2>&1
+"$LHD" formal verify "$W/dly.prp" "$W/expr.verify.prp" --top dly --workdir "$W/we" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "past() over an expression must be refused: $(cat "$OUT")"
 grep -qi 'past' "$OUT" || fail "the refusal must name past(): $(cat "$OUT")"
 
@@ -137,7 +147,8 @@ formal dly.nonliteral_depth {
 }
 EOF
 OUT="$W/nonlit.out"
-"$LHD" formal verify "$W/dly.prp" "$W/nonlit.verify.prp" --top dly --workdir "$W/wn" --diag-fmt pretty >"$OUT" 2>&1
+"$LHD" formal verify "$W/dly.prp" "$W/nonlit.verify.prp" --top dly --workdir "$W/wn" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "a non-literal past() depth must be refused: $(cat "$OUT")"
 
 # ---- rose / fell / stable / changed all reduce to depth-1 history ----------
@@ -166,7 +177,8 @@ formal dly1.edges {
 }
 EOF
 OUT="$W/edges.out"
-"$LHD" formal verify "$W/dly1.prp" "$W/edges.verify.prp" --top dly1 --workdir "$W/we2" --diag-fmt pretty >"$OUT" 2>&1 \
+"$LHD" formal verify "$W/dly1.prp" "$W/edges.verify.prp" --top dly1 --workdir "$W/we2" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "rose/fell/stable/changed identities must prove: $(cat "$OUT")"
 grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the edge identities: $(cat "$OUT")"
 ! grep -qi 'holds STATE' "$OUT" || fail "edge operators must not be monitor state: $(cat "$OUT")"
@@ -182,7 +194,8 @@ formal dly1.bad_edge {
 }
 EOF
 OUT="$W/badedge.out"
-"$LHD" formal verify "$W/dly1.prp" "$W/badedge.verify.prp" --top dly1 --workdir "$W/wbe" --diag-fmt pretty >"$OUT" 2>&1
+"$LHD" formal verify "$W/dly1.prp" "$W/badedge.verify.prp" --top dly1 --workdir "$W/wbe" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "rose == fell must refute: $(cat "$OUT")"
 grep -q 'REFUTED' "$OUT" || fail "expected REFUTED for rose == fell: $(cat "$OUT")"
 
@@ -196,7 +209,8 @@ formal dly.bad_arity {
 }
 EOF
 OUT="$W/arity.out"
-"$LHD" formal verify "$W/dly.prp" "$W/arity.verify.prp" --top dly --workdir "$W/wa" --diag-fmt pretty >"$OUT" 2>&1
+"$LHD" formal verify "$W/dly.prp" "$W/arity.verify.prp" --top dly --workdir "$W/wa" \
+  --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "rose() with a bare count must be refused: $(cat "$OUT")"
 grep -qi 'must be a window' "$OUT" || fail "the refusal must point at the window syntax: $(cat "$OUT")"
 

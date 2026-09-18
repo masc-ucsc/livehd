@@ -70,8 +70,13 @@ module top(input clk, input [1:0] ra, input we, input [1:0] wa, input [3:0] wd,
 endmodule
 EOF
 
+# A REFUTED `lhd lec` also writes the counterexample as a Pyrope replay test and
+# then BUILDS AND RUNS it -- ~5.5s of host clang per refutation. Nothing below
+# reads that replay, so keep the witness (simfail_*.prp/.json is still written)
+# and skip only its host build.
 run_lec() { # $1 = impl .v, $2 = extra flags
   "$LHD" lec --ref "pyrope:$W/ref.prp" --impl "verilog:$1" --top top \
+         --set formal.simfail_run=false \
          --workdir "$W/w_$(basename "$1" .v)${3:-}" ${2:-} 2>&1
 }
 

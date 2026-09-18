@@ -1074,7 +1074,9 @@ _V2PRP2V_VERILOG_FIXME = [
         # pure-comb sub-instance (flatten_false_loop_subs). sim_prp_packed_selfref
         # now compiles too: cgen_sim splits the false WORD-level packed-wire cycle
         # (split_packed_selfref_wires). The rest are still gaps.
-        tags = [] if name in (
+        # cpu:4 -- the v2prp-sim mode builds its two simulator sides (and their
+        # comparison drivers) concurrently; the others build one side at a time.
+        tags = (["cpu:4"] if mode == "v2prp-sim" else []) if name in (
             "sim_lg_atomic_feedback",
             "sim_prp_packed_selfref",
             # 2026-07-03: the generalized slice-resolution engine in

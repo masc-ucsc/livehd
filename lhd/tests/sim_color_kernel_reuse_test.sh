@@ -36,9 +36,13 @@ grep -Eq 'Slop_u<[0-9]+> __color_tmp_[0-9]+ = Slop_u<[0-9]+>::land' "$body" \
   || fail "sim.debug=true did not retain the checked Slop_u landing"
 
 # Run both generated backends. A mismatch between ABI write order and
-# changed-bit order swaps or starves one of the exact-value assertions.
-"$LHD" sim "$PRP" --workdir "$work/serial" -q >/dev/null
-"$LHD" sim "$PRP" --set sim.backend=llvm --workdir "$work/llvm" -q >/dev/null
+# changed-bit order swaps or starves one of the exact-value assertions. Each is
+# ~7s of host clang in its own workdir and they share nothing, so build them
+# side by side; the header/body greps below read the setup-only tree.
+"$LHD" sim "$PRP" --workdir "$work/serial" -q >/dev/null &
+serial_pid=$!
+"$LHD" sim "$PRP" --set sim.backend=llvm --workdir "$work/llvm" -q >/dev/null &
+llvm_pid=$!
 
 # Unsigned GraphIO and state are canonical boundaries too. A u8 flop feeding a
 # same-width equality used to become `ar0.zext_to<8>()`, even though both the
@@ -53,6 +57,9 @@ grep -q 'lnot_op(ar0)' "$body" || fail "unsigned state did not feed the zero tes
   || fail "the zero test still materializes a full-width zero constant"
 ! grep -Eq 'ar0\.zext_to<8>|reset\.zext_to<1>' "$body" \
   || fail "same-width state/input conversion survived Slop_u storage"
+
+wait "$serial_pid" || fail "serial-backend simulation failed"
+wait "$llvm_pid" || fail "llvm-backend simulation failed"
 
 # Changing the budget in the same workdir must invalidate generated artifacts.
 "$LHD" sim "$PRP" --setup-only --set sim.debug=true --set sim.live_words=20 --workdir "$work/setup" -q >/dev/null

@@ -160,7 +160,7 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {       "inou.slang",                   "defines",                                                                            "Pass -D NAME=VALUE after -- to the slang reader."},
     {       "inou.slang",                  "includes",                                                                                   "Pass -I DIR after -- to the slang reader."},
     {       "inou.slang",                 "undefines",                                                                                  "Pass -U NAME after -- to the slang reader."},
-    {         "pass.abc",                   "threads",                                             "Use --set synth.threads=N for the shared ABC worker limit (0 = available CPUs)."},
+    {         "pass.abc",                   "threads",                                      "Use --set synth.threads=N for the shared ABC worker limit (0 = automatic, up to 8)."},
     {         "pass.abc",                "small_flow",                                                                  "This unused optional policy was removed; drop the setting."},
     {         "pass.abc",                  "small_ge",                                                                  "This unused optional policy was removed; drop the setting."},
     {         "pass.abc",              "small_min_ge",                                                                  "This unused optional policy was removed; drop the setting."},

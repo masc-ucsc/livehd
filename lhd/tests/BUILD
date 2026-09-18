@@ -965,6 +965,9 @@ sh_test(
     name = "sim_color_staged_flat_test",
     size = "large",
     srcs = ["sim_color_staged_flat_test.sh"],
+    # The two simulator builds run concurrently; each saturates ~2 cores
+    # (drv.cpp is one serial TU and dominates), so reserve 4.
+    tags = ["cpu:4"],
     data = ["//lhd"],
 )
 
@@ -1024,6 +1027,9 @@ sh_test(
     name = "sim_color_kernel_reuse_test",
     size = "large",
     srcs = ["sim_color_kernel_reuse_test.sh"],
+    # The two simulator builds run concurrently; each saturates ~2 cores
+    # (drv.cpp is one serial TU and dominates), so reserve 4.
+    tags = ["cpu:4"],
     data = [
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//lhd",
@@ -1034,10 +1040,11 @@ sh_test(
     name = "sim_color_llvm_smoke",
     size = "large",
     srcs = ["sim_color_llvm_smoke.sh"],
-    # Two batched drivers (4 compiler jobs each), plus the shard and backend
-    # switch checks (2 jobs each). Reserve their actual host compiler fan-out
-    # so the test does not oversubscribe concurrent solver tests.
-    tags = ["cpu:12"],
+    # Two batched drivers (SIM_COLOR_SMOKE_JOBS=8 compiler jobs each), plus the
+    # shard and backend switch checks (SIM_COLOR_BRANCH_JOBS=6 each). Reserve
+    # their actual host compiler fan-out so the test does not oversubscribe
+    # concurrent solver tests.
+    tags = ["cpu:28"],
     data = [
         "//inou/prp:tests/sim/reduce_wide.prp",
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
@@ -1941,6 +1948,9 @@ sh_test(
     name = "lhd_hotmux_pairs_smoke",
     size = "large",  # 3 compiles + 2 LECs + a slop AND an llvm simulator build
     srcs = ["lhd_hotmux_pairs_smoke.sh"],
+    # The two simulator builds run concurrently; each saturates ~2 cores
+    # (drv.cpp is one serial TU and dominates), so reserve 4.
+    tags = ["cpu:4"],
     data = ["//lhd", "//inou/prp:equiv_tests"],
 )
 

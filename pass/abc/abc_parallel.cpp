@@ -16,7 +16,7 @@ uint64_t mul(uint64_t a, uint64_t b) {
 
 unsigned synthesis_thread_limit(unsigned requested, unsigned available) {
   available = std::max(1U, available);
-  return requested ? std::min(requested, available) : available;
+  return requested ? std::min(requested, available) : std::min(kAutomaticThreadLimit, available);
 }
 
 bool admit_abc_worker(uint64_t limit, uint64_t actual, uint64_t baseline, uint64_t active_projection, uint64_t next_projection) {

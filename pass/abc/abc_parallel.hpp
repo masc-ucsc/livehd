@@ -7,6 +7,7 @@ namespace livehd::abc {
 
 // Existing ABC netlist-import allowance, also used by ware scoring.
 inline constexpr uint64_t kAbcImportNodeBytes = 1024;
+inline constexpr unsigned kAutomaticThreadLimit = 8;
 
 struct Parallel_stats {
   unsigned limit        = 1;
@@ -16,7 +17,8 @@ struct Parallel_stats {
   uint64_t memory_waits = 0;
 };
 
-// Zero selects the host's available CPUs; an explicit value is an upper bound.
+// Zero selects a throughput-oriented automatic cap; an explicit value is an
+// upper bound and can opt into more workers on a dedicated machine.
 unsigned synthesis_thread_limit(unsigned requested, unsigned available);
 
 // Actual footprint includes ALL threads and shared graph/library state once.

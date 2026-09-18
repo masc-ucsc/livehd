@@ -194,7 +194,7 @@ void Pass_abc::setup() {
                        "auto");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
-  m.add_label_optional("threads", "maximum concurrent ABC workers (0 = available CPUs); admission uses half of physical RAM", "1");
+  m.add_label_optional("threads", "maximum concurrent ABC workers (0 = automatic, up to 8); admission uses half of physical RAM", "1");
   m.add_label_optional("memory_budget_mb",
                        "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
                        "default 16384 MiB (16 GiB soft target); 0 uses physical RAM minus max(2 GiB, 25%) reserve",

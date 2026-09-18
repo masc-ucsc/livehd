@@ -113,9 +113,15 @@ def main():
     impl_arg = "pyrope:" + prpdir + "/" if len(prps) > 1 else "pyrope:" + emitted
     native_failed = False
     try:
+        # Tell the engine the budget it ACTUALLY has. Left at its 120s default it
+        # schedules against a wall twice the one this harness kills it at, and the
+        # ABC cone pre-pass takes 25% of that (pass/lec/query.cpp cone_deadline_ms)
+        # -- 30s that a datapath cone such as reduce_wide's 129-bit popcount burns
+        # in full before cvc5, which proves it in 0.1s, is asked anything.
         native = subprocess.run(
             [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
              "--impl-top", vtop, "--ref-top", ptop,
+             "--set", "formal.timeout=%d" % NATIVE_CHECK_TIMEOUT,
              "--workdir", os.path.join(work, "w_native_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             timeout=NATIVE_CHECK_TIMEOUT)

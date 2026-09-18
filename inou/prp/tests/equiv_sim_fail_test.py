@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import tempfile
 from pathlib import Path
@@ -241,29 +242,37 @@ def main():
             # from never-written leaves and its sim diverges. Both sides get
             # the same deterministic stimulus; they must match once the
             # emitter fix (lower_instance per-field output split) lands.
+            # The two sides share nothing until the comparison: side A is
+            # .v -> sim, side B is .v -> .prp -> sim, and each then builds and
+            # runs its own comparison driver. That is four host clang builds in
+            # a row (~20s) when walked in order, so run the two chains at once.
             lg_sim = work / "lg_sim"
-            rc, out = compile_sim(verilog, verilog_top, lg_sim, "slang")
-            if rc:
-                print(out)
-                return rc
-            prp_dir = work / "prp_emit"
-            rc, out = run([str(LHD), "compile", "--reader", "slang", str(verilog),
-                           "--emit-dir", f"pyrope:{prp_dir}/",
-                           "--workdir", str(work / "w_emit")])
-            if rc:
-                print(out)
-                return rc
-            emitted = sorted(prp_dir.glob("*.prp"))
-            if not emitted:
-                print("no .prp emitted from", verilog)
-                return 1
             v2_sim = work / "v2_sim"
-            rc, out = compile_sim(emitted, verilog_top, v2_sim)
-            if rc:
-                print(out)
-                return rc
-            for simdir, rundir in ((lg_sim, work / "lg_run"), (v2_sim, work / "v2_run")):
-                rc, out = drive(simdir, verilog_top, rundir)
+
+            def side_a():
+                rc, out = compile_sim(verilog, verilog_top, lg_sim, "slang")
+                if rc:
+                    return rc, out
+                return drive(lg_sim, verilog_top, work / "lg_run")
+
+            def side_b():
+                prp_dir = work / "prp_emit"
+                rc, out = run([str(LHD), "compile", "--reader", "slang", str(verilog),
+                               "--emit-dir", f"pyrope:{prp_dir}/",
+                               "--workdir", str(work / "w_emit")])
+                if rc:
+                    return rc, out
+                emitted = sorted(prp_dir.glob("*.prp"))
+                if not emitted:
+                    return 1, "no .prp emitted from {}".format(verilog)
+                rc, out = compile_sim(emitted, verilog_top, v2_sim)
+                if rc:
+                    return rc, out
+                return drive(v2_sim, verilog_top, work / "v2_run")
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = [f.result() for f in [pool.submit(side_a), pool.submit(side_b)]]
+            for rc, out in results:
                 if rc:
                     print(out)
                     return rc

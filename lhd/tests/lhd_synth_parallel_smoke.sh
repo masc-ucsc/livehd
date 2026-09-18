@@ -57,7 +57,7 @@ python3 - "$W/parallel/synth/qor.json" <<'CHECK_AUTO'
 import json, os, sys
 q = json.load(open(sys.argv[1]))
 assert q['parallel']['requested'] == 0, q['parallel']
-assert q['parallel']['limit'] == (os.cpu_count() or 1), q['parallel']
+assert q['parallel']['limit'] == min(8, os.cpu_count() or 1), q['parallel']
 assert q['incremental']['misses'] == 0, q['incremental']
 assert q['incremental']['abc_started'] == 0, q['incremental']
 CHECK_AUTO
@@ -89,7 +89,7 @@ import json, os, sys
 q = json.load(open(sys.argv[1]))
 requested = int(sys.argv[2])
 assert q['parallel']['requested'] == requested, q['parallel']
-assert q['parallel']['limit'] == (requested or os.cpu_count() or 1), q['parallel']
+assert q['parallel']['limit'] == min(requested or 8, os.cpu_count() or 1), q['parallel']
 CHECK_PASS_THREADS
 done
 

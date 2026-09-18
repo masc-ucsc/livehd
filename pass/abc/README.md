@@ -61,8 +61,9 @@ and validation. Set `pass.abc.satopt=false` to compare mapping without this pass
 ## Parallel synthesis
 
 `lhd synth` and standalone `lhd pass abc` share `--set synth.threads=0`:
-use the machine's available logical CPUs as the maximum worker count.
-A positive value caps that count; `1` selects serial mapping.
+use up to 8 workers (or the machine's available logical CPUs when fewer) as a
+throughput-oriented automatic cap. A positive value explicitly caps that count
+and may opt into more workers; `1` selects serial mapping.
 
 Independent regions within a definition can optimize concurrently in private
 ABC sessions. Graph translation, netlist read-back, cache access and graph
@@ -448,7 +449,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `memory_max_bits` | with `memory=auto`, fold a memory whose `bits x size` is within this many bits and keep a larger one native, with a one-line note naming it (`0` = no size limit); `true`/`false` ignore it | `1024` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
-| `threads` | maximum ABC workers (`0` = available CPUs); `lhd synth` sets this through `synth.threads`, which defaults to `0` | `1` |
+| `threads` | maximum ABC workers (`0` = automatic cap of 8 or available CPUs when fewer); `lhd synth` sets this through `synth.threads`, which defaults to `0` | `1` |
 | `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree` locks the multiplier and its internal adder | `auto` |

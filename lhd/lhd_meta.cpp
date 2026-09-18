@@ -1104,7 +1104,7 @@ int help_pass(const std::string& sub) {
         "                             $HAGENT_TECH_DIR default). One spelling, shared with\n"
         "                             pass.opentimer and `lhd synth`; `pass.abc.library`\n"
         "                             is refused so no two readers can disagree.\n"
-        "  --set synth.threads=N      shared ABC worker cap (0 = available CPUs; 1 = serial)\n"
+        "  --set synth.threads=N      shared ABC worker cap (0 = automatic, up to 8; 1 = serial)\n"
         "  --set pass.abc.flag=value  pass options (listed below)\n"
         "\n"
         "examples:\n"

@@ -278,7 +278,12 @@ sh_test(
     name = "lec_witness_replay_test",
     srcs = ["tests/lec_witness_replay_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # in-process cvc5 BMC + shells `lhd compile` / `lhd sim` (host-compiles the driver)
+    # no-sandbox: in-process cvc5 BMC + shells `lhd compile` / `lhd sim` (host-compiles the driver).
+    # cpu:4: the mini and struct chains overlap, so two replay host builds can run at once.
+    tags = [
+        "cpu:4",
+        "no-sandbox",
+    ],
 )
 
 # Agentic per-block progress: every resolved block emits one machine-parseable

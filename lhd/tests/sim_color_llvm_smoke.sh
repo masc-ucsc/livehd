@@ -43,7 +43,13 @@ batch="$work/smoke.prp"
 cat "${PRPS[@]}" > "$batch"
 # Checkpoint/observation behavior has dedicated tests. These assertions need
 # only the circuit and testbench; omit the unused state-walk code in the batches.
-SMOKE_JOBS="${SIM_COLOR_SMOKE_JOBS:-4}"
+# Four branches build concurrently below and every one of them is host-compiler
+# bound (the per-driver `drv.cpp` alone is ~5s at -O2), so the job counts ARE the
+# wall clock here -- the optimization level is not the lever (lhd_kernel_sim.cpp
+# documents that measurement). The BUILD target reserves SMOKE_JOBS*2 +
+# BRANCH_JOBS*2 with its cpu: tag; keep the two in step when changing either.
+SMOKE_JOBS="${SIM_COLOR_SMOKE_JOBS:-8}"
+BRANCH_JOBS="${SIM_COLOR_BRANCH_JOBS:-6}"
 run() { "$LHD" "$@" -q; }
 run sim "$batch"  --set sim.checkpoint=false \
   --set sim.jobs="$SMOKE_JOBS" --workdir "$work/slop" --result-json "$work/slop.json" &
@@ -57,14 +63,14 @@ llvm_pid=$!
 shard_work="$work/llvm-sharded-association"
 (
   set -e
-  run sim --set sim.jobs=2 inou/prp/tests/sim/color_kernel_llvm_scalar.prp --setup-only \
+  run sim --set sim.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --setup-only \
     --set sim.backend=llvm --workdir "$shard_work"
   mv "$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.cpp" \
      "$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.color-eval-0.cpp"
-  run sim --set sim.jobs=2 inou/prp/tests/sim/color_kernel_llvm_scalar.prp --run-only \
+  run sim --set sim.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --run-only \
     --set sim.backend=llvm --workdir "$shard_work"
   for prp in "${LLVM_ONLY_PRPS[@]}"; do
-    run sim --set sim.jobs=2 "$prp" --set sim.backend=llvm --workdir "$work/llvm-only"
+    run sim --set sim.jobs="$BRANCH_JOBS" "$prp" --set sim.backend=llvm --workdir "$work/llvm-only"
   done
 ) &
 shard_pid=$!
@@ -77,7 +83,7 @@ switch_work="$work/backend-switch"
   for backend in llvm slop llvm; do
     backend_args=()
     [ "$backend" = "slop" ] || backend_args=(--set "sim.backend=$backend")
-    run sim inou/prp/tests/sim/loop_hierarchy.prp --set sim.jobs=2 --set sim.checkpoint=false \
+    run sim inou/prp/tests/sim/loop_hierarchy.prp --set sim.jobs="$BRANCH_JOBS" --set sim.checkpoint=false \
       ${backend_args[@]+"${backend_args[@]}"} --workdir "$switch_work"
     if [ "$backend" = slop ]; then
       switch_objects=("$switch_work"/sim/*.llvm.o)

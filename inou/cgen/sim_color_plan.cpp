@@ -779,6 +779,27 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
 
   std::vector<uint32_t>                classes      = classes_of(seeds);
   std::vector<std::array<uint64_t, 2>> descriptions = seeds;
+  const auto same_partition = [](const std::vector<uint32_t>& lhs, const std::vector<uint32_t>& rhs) {
+    I(lhs.size() == rhs.size());
+    if (lhs.empty()) {
+      return true;
+    }
+    const auto            lhs_count = *std::ranges::max_element(lhs) + 1;
+    const auto            rhs_count = *std::ranges::max_element(rhs) + 1;
+    constexpr uint32_t    unmapped  = std::numeric_limits<uint32_t>::max();
+    std::vector<uint32_t> lhs_to_rhs(lhs_count, unmapped);
+    std::vector<uint32_t> rhs_to_lhs(rhs_count, unmapped);
+    for (size_t i = 0; i < lhs.size(); ++i) {
+      auto& mapped_rhs = lhs_to_rhs[lhs[i]];
+      auto& mapped_lhs = rhs_to_lhs[rhs[i]];
+      if ((mapped_rhs != unmapped && mapped_rhs != rhs[i]) || (mapped_lhs != unmapped && mapped_lhs != lhs[i])) {
+        return false;
+      }
+      mapped_rhs = rhs[i];
+      mapped_lhs = lhs[i];
+    }
+    return true;
+  };
   // Weisfeiler-Lehman-style partition refinement. Port roles and root IO port
   // ids are structural anchors; raw graph indices and user names never enter.
   // True automorphisms intentionally remain one symmetry class -- swapping two
@@ -868,7 +889,12 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
       descriptions[i] = hash.finish();
     }
     auto next = classes_of(descriptions);
-    if (next == classes) {
+    // Class numbers follow hash-sort order, so an unchanged partition can
+    // acquire a permutation of its numeric labels from one round to the next.
+    // Comparing the vectors directly then burns every one of the 32 rounds on
+    // an already-stable graph. Convergence is equality of the equivalence
+    // relation: each old class maps to exactly one new class and vice versa.
+    if (same_partition(next, classes)) {
       break;
     }
     classes = std::move(next);

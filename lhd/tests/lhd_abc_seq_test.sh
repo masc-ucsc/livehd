@@ -111,7 +111,10 @@ run_abc_lec() {
   cat "$d/rev/"*.v > "$d/ref.v"
 
   # The refutation below is an independent solver run over files that already
-  # exist, so start it alongside the proof rather than after it.
+  # exist, so start it alongside the proof rather than after it. It also skips
+  # the counterexample REPLAY build (`lhd lec` writes the witness either way,
+  # but building and running the Pyrope replay is ~5.5s of host clang, and this
+  # check reads only the exit code).
   local neg_pid=""
   if [ "$fix" = abc_mem ] && [ "$mem" = true ] && [ "$reg_max" = 0 ] && [ $# -eq 0 ]; then
     # Preserve all hierarchy and state names while corrupting one stored bit.
@@ -120,6 +123,7 @@ run_abc_lec() {
     cmp -s "$d/ref.v" "$d/bad_ref.v" && fail "memory negative control changed nothing"
     (
       "$LHD" lec --impl "$d/impl.v" --ref "$d/bad_ref.v" --top "$top" \
+        --set formal.simfail_run=false \
         --workdir "$d/wc_bad" -q --result-json "$d/bad.json" > "$d/bad.log" 2>&1
       [ $? -eq 10 ]
     ) &

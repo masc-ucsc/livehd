@@ -8,7 +8,8 @@
 using namespace livehd::abc;
 
 TEST(AbcParallel, CpuLimit) {
-  EXPECT_EQ(synthesis_thread_limit(0, 12), 12U);
+  EXPECT_EQ(synthesis_thread_limit(0, 12), kAutomaticThreadLimit);
+  EXPECT_EQ(synthesis_thread_limit(0, 4), 4U);
   EXPECT_EQ(synthesis_thread_limit(3, 12), 3U);
   EXPECT_EQ(synthesis_thread_limit(30, 12), 12U);
   EXPECT_EQ(synthesis_thread_limit(0, 0), 1U);

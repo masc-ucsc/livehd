@@ -50,7 +50,11 @@ run_lec() {
   shift
   OUT="$WORK/$tag.log"
   rm -rf "$WORK/wd_$tag"
-  "$LHD" lec "$@" --workdir "$WORK/wd_$tag" >"$OUT" 2>&1
+# A REFUTED `lhd lec` also writes the counterexample as a Pyrope replay test and
+# then BUILDS AND RUNS it -- ~5.5s of host clang per refutation. Nothing below
+# reads that replay, so keep the witness (simfail_*.prp/.json is still written)
+# and skip only its host build.
+  "$LHD" lec "$@" --set formal.simfail_run=false --workdir "$WORK/wd_$tag" >"$OUT" 2>&1
   return 0
 }
 

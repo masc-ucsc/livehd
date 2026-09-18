@@ -61,6 +61,46 @@ pub mod mini(clock:u1, reset:u1) -> (o:u8@[]) {
 }
 EOF
 
+# The struct scenario below is an independent chain over its own files and
+# workdirs (lec -> witness JSON -> replay sim, ~11s, nearly all of it the two
+# host clang builds the replay needs). Start it now so it overlaps the mini
+# chain; every assertion about it still runs in this shell, after the wait.
+cat > "$WORK/simpl.prp" <<'EOF'
+pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3, only_impl:u2))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  const pc:u4 = io.bits.x#+[..]
+  if io.valid { cnt = (cnt + pc + io.bits.y + io.bits.only_impl)#[0..=7] }
+}
+EOF
+cat > "$WORK/sref.prp" <<'EOF'
+pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  const pc:u4 = io.bits.x#+[..]
+  if io.valid { cnt = (cnt + pc + io.bits.y + 1)#[0..=7] }
+}
+EOF
+WT="$WORK/wt"
+rm -rf "$WT"
+ST="$WORK/rerun_t"
+rm -rf "$ST"
+(
+  $LHD lec --ref "$WORK/sref.prp" --impl "$WORK/simpl.prp" --workdir "$WT" >"$WORK/out2.log" 2>&1
+# The query follows the witness JSON's diverge_cycle rather than a fixed number.
+python3 - "$WT/simfail_dut.json" > "$WORK/qt.json" <<'PYQ'
+import json, sys
+n = json.load(open(sys.argv[1]))["diverge_cycle"]
+print(json.dumps({"schema_version": 1, "kind": "sim_query",
+                  "queries": [{"id": f"o{c}", "op": "values", "kind": "output",
+                               "at": {"cycle": c}} for c in range(n + 1)]}))
+PYQ
+ST="$WORK/rerun_t"
+rm -rf "$ST"
+$LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WT/simfail_dut.prp" --workdir "$ST"      --result-json "$WORK/qt.out.json" --query "$WORK/qt.json" >/dev/null 2>&1
+) &
+struct_pid=$!
+
 W="$WORK/w"
 rm -rf "$W"
 # sim.vcd_fake_delay=false also exercises the knob forwarding in the generator
@@ -166,41 +206,13 @@ ck "verdict names the divergence" 'echo "$OUT" | grep -q "o(ref=1 impl=2)"'
 # golden: the assertion is the definition of a counterexample — the two agree at
 # every cycle before the one the witness names, and part on it with exactly the
 # values it names.
-cat > "$WORK/simpl.prp" <<'EOF'
-pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3, only_impl:u2))) -> (o:u8@[]) {
-  reg cnt:u8:[reset_pin=ref reset] = 0
-  o = cnt
-  const pc:u4 = io.bits.x#+[..]
-  if io.valid { cnt = (cnt + pc + io.bits.y + io.bits.only_impl)#[0..=7] }
-}
-EOF
-cat > "$WORK/sref.prp" <<'EOF'
-pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
-  reg cnt:u8:[reset_pin=ref reset] = 0
-  o = cnt
-  const pc:u4 = io.bits.x#+[..]
-  if io.valid { cnt = (cnt + pc + io.bits.y + 1)#[0..=7] }
-}
-EOF
-WT="$WORK/wt"
-rm -rf "$WT"
-OUT2=$($LHD lec --ref "$WORK/sref.prp" --impl "$WORK/simpl.prp" --workdir "$WT" 2>&1)
+wait "$struct_pid" || true   # a REFUTED lec exits non-zero; the cks below judge it
+OUT2=$(cat "$WORK/out2.log")
 ck "struct: REFUTED"          'echo "$OUT2" | grep -q REFUTED'
 ck "struct: wrote the prp"    '[ -f "$WT/simfail_dut.prp" ]'
 ck "struct: wrote the vcd"    '[ -s "$WT/simfail_dut.vcd" ]'
 ck "struct: no writer round trip" '[ ! -d "$WT/lecfail_impl_prp" ] && [ ! -d "$WT/lecfail_ref_prp" ]'
 
-# The query follows the witness JSON's diverge_cycle rather than a fixed number.
-python3 - "$WT/simfail_dut.json" > "$WORK/qt.json" <<'PY'
-import json, sys
-n = json.load(open(sys.argv[1]))["diverge_cycle"]
-print(json.dumps({"schema_version": 1, "kind": "sim_query",
-                  "queries": [{"id": f"o{c}", "op": "values", "kind": "output",
-                               "at": {"cycle": c}} for c in range(n + 1)]}))
-PY
-ST="$WORK/rerun_t"
-rm -rf "$ST"
-$LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WT/simfail_dut.prp" --workdir "$ST"      --result-json "$WORK/qt.out.json" --query "$WORK/qt.json" >/dev/null 2>&1
 cat > "$WORK/chkt.py" <<'PY'
 import json, sys
 w  = json.load(open(sys.argv[2]))

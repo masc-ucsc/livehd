@@ -83,13 +83,19 @@ refute "standalone BUILD still references Taskflow" -q 'runtime/taskflow' "$work
 refute "standalone BUILD requests toolchain-specific ThinLTO" -q 'thin_lto' "$work/setup/sim/BUILD"
 
 # Host-compile and execute the exact generated source, including checkpointing.
-"$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 --workdir "$work/run" -q >/dev/null
-refute "host build still references Taskflow" -q 'runtime/taskflow' "$work/run/sim/build.ninja"
-refute "checkpoint driver retained worker quiescing" -q '__color_quiesce' "$work/run/sim/drv.cpp"
+# This and the relative-workdir run below are separate ~6s host builds over
+# separate workdirs, so start both and collect them in turn.
+"$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 --workdir "$work/run" -q >/dev/null &
+run_pid=$!
 
 # A relative workdir must remain valid now that no staged include path is needed.
 lhd_abs="$(cd "$(dirname "$LHD")" && pwd)/$(basename "$LHD")"
-(cd "$work" && "$lhd_abs" sim staged.prp --workdir relwork -q >/dev/null) \
-  || fail "relative --workdir simulation failed"
+(cd "$work" && "$lhd_abs" sim staged.prp --workdir relwork -q >/dev/null) &
+rel_pid=$!
+
+wait "$run_pid" || fail "checkpointing simulation failed"
+refute "host build still references Taskflow" -q 'runtime/taskflow' "$work/run/sim/build.ninja"
+refute "checkpoint driver retained worker quiescing" -q '__color_quiesce' "$work/run/sim/drv.cpp"
+wait "$rel_pid" || fail "relative --workdir simulation failed"
 
 echo "PASS: flat posedge simulation uses the serial occurrence-wide color schedule"
