@@ -484,7 +484,9 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     });
     Pass::eprp.run_method_now("pass.cprop", parsed, {});
     Pass::eprp.run_method_now("pass.bitwidth", parsed, {});
+    Pass::eprp.run_method_now("pass.enableopt", parsed, {});
     Pass::eprp.run_method_now("pass.cprop", parsed, {});
+    Pass::eprp.run_method_now("pass.bitwidth", parsed, {});
     auto& imported = Hhds_graph_library::instance((dir / "lg").string());
     auto  result   = imported.find_io(name);
     if (!result || !result->get_graph()) {

@@ -3,6 +3,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -11,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
@@ -469,6 +471,92 @@ public:
   }
 };
 
+// The combinational fan-in of `roots` (cut like the proofs) in forward
+// topological order. Evaluating it in this order before the roots keeps the
+// memoized Seeds/Cone recursion one level deep: a pass must not recurse on
+// design depth.
+std::vector<Pin> fanin_forward(hhds::Graph* graph, std::vector<Pin> pending) {
+  absl::flat_hash_set<Node> cone;
+  while (!pending.empty()) {
+    const auto p = pending.back();
+    pending.pop_back();
+    if (p.is_invalid() || p.is_const() || cut(p)) {
+      continue;
+    }
+    const auto n = p.get_master_node();
+    if (!cone.insert(n).second) {
+      continue;
+    }
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      for (const auto& d : in_pin.get_driver_pins()) {
+        pending.push_back(d);
+      }
+    }
+  }
+  std::vector<Pin> order;
+  for (const auto n : graph->body().nodes(hhds::Node_order::forward)) {
+    if (cone.contains(n)) {
+      for (const auto& p : n.out_sorted_pins()) {
+        order.push_back(p);
+      }
+    }
+  }
+  return order;
+}
+
+// One ABC sweep over every candidate in a private frame. `build` returns one
+// refutation per candidate (nonzero exactly when its claim fails), or nullptr
+// for an unsupported one; only an output swept to constant zero is proven.
+// nullopt when no frame is available: nothing was attempted.
+std::optional<std::vector<bool>> prove_zero(const std::function<std::vector<Abc_Obj_t*>(Gates&, Cone&)>& build) {
+  auto* previous = Abc_FrameReadGlobalFrame();
+  auto* frame    = Abc_FrameCreate();
+  if (!frame) {
+    return std::nullopt;
+  }
+  Abc_FrameEnter(frame);
+  std::vector<bool> proven;
+  {
+    Gates               gates;
+    Cone                cone(gates);
+    const auto          refutes = build(gates, cone);
+    std::vector<size_t> outputs;
+    proven.assign(refutes.size(), false);
+    for (size_t i = 0; i < refutes.size(); ++i) {
+      if (refutes[i] == nullptr) {
+        continue;
+      }
+      auto* po = Abc_NtkCreatePo(gates.ntk);
+      Abc_ObjAddFanin(po, refutes[i]);
+      auto name = std::format("f{}", outputs.size());
+      Abc_ObjAssignName(po, const_cast<char*>(name.c_str()), nullptr);
+      outputs.push_back(i);
+    }
+    if (!outputs.empty()) {
+      Abc_NtkAddDummyPiNames(gates.ntk);
+      Abc_NtkAddDummyPoNames(gates.ntk);
+      Abc_Ntk_t* logic = Abc_NtkToLogic(gates.ntk);
+      if (logic) {
+        Abc_FrameReplaceCurrentNetwork(frame, logic);
+        if (Cmd_CommandExecute(frame, "strash; &get -n; &fraig -x -C 500; &put; strash") == 0) {
+          auto* swept = Abc_FrameReadNtk(frame);
+          if (Abc_NtkPoNum(swept) == static_cast<int>(outputs.size())) {
+            for (size_t i = 0; i < outputs.size(); ++i) {
+              auto* po = Abc_NtkPo(swept, static_cast<int>(i));
+              if (Abc_ObjFanin0(po) == Abc_AigConst1(swept) && Abc_ObjFaninC0(po)) {
+                proven[outputs[i]] = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  Abc_FrameLeave(previous);
+  Abc_FrameDestroy(frame);
+  return proven;
+}
+
 bool crosses(const Node& n, const Arms& arms) {
   absl::flat_hash_set<Pin> seen;
   std::vector<Pin>         pending = arms.values;
@@ -555,7 +643,7 @@ struct Cached {
 };
 std::map<std::string, Cached> saved;
 std::mutex                    saved_mutex;
-std::string                   cache_path(std::string_view dir, std::string_view name) {
+std::string                   cache_path(std::string_view dir, std::string_view name, std::string_view suffix = {}) {
   if (dir.empty()) {
     return {};
   }
@@ -563,7 +651,32 @@ std::string                   cache_path(std::string_view dir, std::string_view 
   for (unsigned char c : name) {
     h = (h ^ c) * 1099511628211ULL;
   }
-  return std::format("{}/{:016x}.json", dir, h);
+  return std::format("{}/{:016x}{}.json", dir, h, suffix);
+}
+void write_atomic(const std::string& path, const std::string& text) {
+  if (path.empty()) {
+    return;
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+  if (ec) {
+    return;
+  }
+  // Separate temporary files prevent concurrent invocations from interleaving
+  // a definition descriptor from one proof run with another run's facts.
+  auto      temporary = path + ".tmp.XXXXXX";
+  const int fd        = mkstemp(temporary.data());
+  if (fd < 0) {
+    return;
+  }
+  close(fd);
+  std::ofstream out(temporary);
+  out << text;
+  out.close();
+  if (out) {
+    std::filesystem::rename(temporary, path, ec);
+  }
+  std::filesystem::remove(temporary, ec);
 }
 Cached read_cache(const std::string& path) {
   Cached row;
@@ -598,37 +711,166 @@ void write_cache(const std::string& path, const Cached& row) {
   if (path.empty()) {
     return;
   }
-  std::error_code ec;
-  std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
-  if (ec) {
-    return;
-  }
-  // Separate temporary files prevent concurrent invocations from interleaving
-  // a definition descriptor from one proof run with another run's facts.
-  auto      temporary = path + ".tmp.XXXXXX";
-  const int fd        = mkstemp(temporary.data());
-  if (fd < 0) {
-    return;
-  }
-  close(fd);
-  std::ofstream out(temporary);
-  out << std::format("{{\"source\":\"{}\",\"colors\":\"{}\",\"all\":{},\"facts\":[",
-                     json_util::escape(row.source),
-                     json_util::escape(row.colors),
-                     row.all ? "true" : "false");
+  auto text  = std::format("{{\"source\":\"{}\",\"colors\":\"{}\",\"all\":{},\"facts\":[",
+                          json_util::escape(row.source),
+                          json_util::escape(row.colors),
+                          row.all ? "true" : "false");
   bool comma = false;
   for (const auto& [node, facts] : row.result->mux) {
     for (const auto& f : facts) {
-      out << std::format("{}[{},{},{},{},{}]", comma ? "," : "", node, f.arm, f.bit, static_cast<int>(f.kind), f.other);
-      comma = true;
+      text  += std::format("{}[{},{},{},{},{}]", comma ? "," : "", node, f.arm, f.bit, static_cast<int>(f.kind), f.other);
+      comma  = true;
     }
   }
-  out << "]}\n";
-  out.close();
-  if (out) {
-    std::filesystem::rename(temporary, path, ec);
+  write_atomic(path, text + "]}\n");
+}
+
+// Selectors of one cell, indexed like Select_fact::control. A Hotmux fallback
+// has no control of its own. Only a one-bit Flop enable is a candidate.
+std::vector<Pin> selectors(const Node& n) {
+  const auto op = gu::type_op_of(n);
+  if (op == Ntype_op::Flop) {
+    const auto en = gu::get_driver_of_sink_name(n, "enable");
+    if (en.is_invalid() || gu::bits_of(en) != 1) {
+      return {};
+    }
+    return {en};
   }
-  std::filesystem::remove(temporary, ec);
+  if (op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
+    return {};
+  }
+  auto arms = arms_of(n);
+  if (!arms.hot) {
+    return arms.controls.empty() ? std::vector<Pin>{} : std::vector<Pin>{arms.controls[0]};
+  }
+  if (!arms.controls.empty() && arms.controls.back().is_invalid()) {
+    arms.controls.pop_back();
+  }
+  return arms.controls;
+}
+struct Select_cached {
+  std::string              source;
+  std::vector<Select_fact> facts;
+};
+std::map<std::string, Select_cached> saved_selects;
+Select_cached                        read_selects(const std::string& path) {
+  Select_cached row;
+  if (path.empty()) {
+    return row;
+  }
+  std::ifstream       input(path);
+  std::string         text((std::istreambuf_iterator<char>(input)), {});
+  rapidjson::Document doc;
+  doc.Parse(text.c_str());
+  if (!doc.IsObject() || !doc.HasMember("source") || !doc["source"].IsString() || !doc.HasMember("facts")
+      || !doc["facts"].IsArray()) {
+    return row;
+  }
+  for (const auto& f : doc["facts"].GetArray()) {
+    if (!f.IsArray() || f.Size() != 3 || !f[0].IsUint64() || !f[1].IsInt() || f[1].GetInt() < 0 || !f[2].IsBool()) {
+      return {};
+    }
+    row.facts.push_back({f[0].GetUint64(), f[1].GetInt(), f[2].GetBool()});
+  }
+  row.source = doc["source"].GetString();
+  return row;
+}
+void write_selects(const std::string& path, const Select_cached& row) {
+  if (path.empty()) {
+    return;
+  }
+  auto text = std::format("{{\"source\":\"{}\",\"facts\":[", json_util::escape(row.source));
+  for (size_t i = 0; i < row.facts.size(); ++i) {
+    const auto& f  = row.facts[i];
+    text          += std::format("{}[{},{},{}]", i ? "," : "", f.node, f.control, f.value ? "true" : "false");
+  }
+  write_atomic(path, text + "]}\n");
+}
+
+// Rewrites against a proven selector. Tying a pin to the constant it always
+// carries is exact; zeroing an arm is exact because no input selects it.
+// Every replaced driver is recorded so its cone can be swept afterwards.
+struct Select_rewrite {
+  hhds::Graph&     g;
+  std::vector<Pin> released;
+  void             tie(const Node& n, hhds::Port_id pid, int64_t value) {
+    const auto sink = n.create_sink_pin(pid);
+    for (const auto& d : sink.get_driver_pins()) {
+      if (d.is_const() && gu::const_of(d).is_known_eq(*Dlop::create_integer(value))) {
+        return;
+      }
+      released.push_back(d);
+    }
+    gu::drop_drivers(sink);
+    gu::create_const(g, *Dlop::create_integer(value)).connect_sink(sink);
+  }
+  // Only logic that lost its last consumer HERE is deleted: a cell that was
+  // already dangling is not this pass's business.
+  void sweep() {
+    absl::flat_hash_set<Node> deleted;
+    while (!released.empty()) {
+      const auto p = released.back();
+      released.pop_back();
+      if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p) || gu::is_graph_output_pin(p)) {
+        continue;
+      }
+      const auto n = p.get_master_node();
+      if (deleted.contains(n) || n.is_invalid() || gu::is_builtin_node(n)) {
+        continue;
+      }
+      const auto op = gu::type_op_of(n);
+      if (!Ntype::is_comb(op) || op == Ntype_op::Clock_cell || n.has_out_edges()) {
+        continue;
+      }
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        for (const auto& d : in_pin.get_driver_pins()) {
+          released.push_back(d);
+        }
+      }
+      deleted.insert(n);
+      n.del_node();
+    }
+  }
+};
+void apply_selects(Select_rewrite& rw, const Node& n, const std::map<int, bool>& known, Select_satopt& stats) {
+  const auto op = gu::type_op_of(n);
+  if (op == Ntype_op::Flop) {
+    // A tied enable, not a removed one: a driverless sink is a malformed body.
+    rw.tie(n, 4, known.at(0));
+    ++stats.enables;
+    return;
+  }
+  if (op == Ntype_op::Mux) {
+    const bool value = known.at(0);
+    rw.tie(n, 0, value);
+    rw.tie(n, value ? 1 : 2, 0);
+    ++stats.muxes;
+    return;
+  }
+  // Priority semantics (the reference on an overlap): the first always-on
+  // control wins, so every later arm and the fallback are never selected.
+  const auto inputs = gu::hotmux_inputs(n);
+  const int  arms   = static_cast<int>(inputs.arms.size());
+  int        first  = arms;
+  for (const auto& [control, value] : known) {
+    if (value && control < first) {
+      first = control;
+    }
+  }
+  for (int i = 0; i < arms; ++i) {
+    const auto found = known.find(i);
+    if (i == first) {
+      rw.tie(n, static_cast<hhds::Port_id>(2 * i), 1);
+      ++stats.hotmux_arms;
+    } else if (i > first || (found != known.end() && !found->second)) {
+      rw.tie(n, static_cast<hhds::Port_id>(2 * i), 0);
+      rw.tie(n, static_cast<hhds::Port_id>(2 * i + 1), 0);
+      ++stats.hotmux_arms;
+    }
+  }
+  if (first < arms && !inputs.fallback.is_invalid()) {
+    rw.tie(n, static_cast<hhds::Port_id>(2 * arms), 0);
+  }
 }
 }  // namespace
 
@@ -727,16 +969,8 @@ std::shared_ptr<const Satopt_result> satopt(hhds::Graph* graph, std::string_view
     save();
     return result;
   }
-  auto* previous = Abc_FrameReadGlobalFrame();
-  auto* frame    = Abc_FrameCreate();
-  if (!frame) {
-    return result;
-  }
-  Abc_FrameEnter(frame);
-  {
-    Gates                 gates;
-    Cone                  cone(gates);
-    std::vector<Mux_fact> outputs;
+  const auto proven = prove_zero([&](Gates& gates, Cone& cone) {
+    std::vector<Abc_Obj_t*> refutes;
     for (const auto& [fact, shared_arms] : candidates) {
       const auto& arms = *shared_arms;
       try {
@@ -749,38 +983,22 @@ std::shared_ptr<const Satopt_result> satopt(hhds::Graph* graph, std::string_view
             expected = gates.inv(expected);
           }
         }
-        auto* refute = gates.and_(c, gates.xor_(a, expected));
-        auto* po     = Abc_NtkCreatePo(gates.ntk);
-        Abc_ObjAddFanin(po, refute);
-        auto name = std::format("f{}", outputs.size());
-        Abc_ObjAssignName(po, const_cast<char*>(name.c_str()), nullptr);
-        outputs.push_back(fact);
+        refutes.push_back(gates.and_(c, gates.xor_(a, expected)));
       } catch (const Unsupported&) {
+        refutes.push_back(nullptr);
       }
     }
-    if (!outputs.empty()) {
-      Abc_NtkAddDummyPiNames(gates.ntk);
-      Abc_NtkAddDummyPoNames(gates.ntk);
-      Abc_Ntk_t* logic = Abc_NtkToLogic(gates.ntk);
-      if (logic) {
-        Abc_FrameReplaceCurrentNetwork(frame, logic);
-        if (Cmd_CommandExecute(frame, "strash; &get -n; &fraig -x -C 500; &put; strash") == 0) {
-          auto* swept = Abc_FrameReadNtk(frame);
-          if (Abc_NtkPoNum(swept) == static_cast<int>(outputs.size())) {
-            for (size_t i = 0; i < outputs.size(); ++i) {
-              auto* po = Abc_NtkPo(swept, static_cast<int>(i));
-              if (Abc_ObjFanin0(po) == Abc_AigConst1(swept) && Abc_ObjFaninC0(po)) {
-                result->mux[outputs[i].node].push_back(outputs[i]);
-                ++result->proven;
-              }
-            }
-          }
-        }
-      }
+    return refutes;
+  });
+  if (!proven) {
+    return result;
+  }
+  for (size_t i = 0; i < proven->size(); ++i) {
+    if ((*proven)[i]) {
+      result->mux[candidates[i].first.node].push_back(candidates[i].first);
+      ++result->proven;
     }
   }
-  Abc_FrameLeave(previous);
-  Abc_FrameDestroy(frame);
   std::print("[pass.satopt] {}: {} candidates, {} seed survivors, {} proven mux facts\n",
              graph->get_name(),
              result->candidates,
@@ -788,6 +1006,127 @@ std::shared_ptr<const Satopt_result> satopt(hhds::Graph* graph, std::string_view
              result->proven);
   save();
   return result;
+}
+Select_satopt optimize_selects(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view cache_dir) {
+  std::lock_guard lock(saved_mutex);
+  Select_satopt   stats;
+  for (const auto& graph : graphs) {
+    if (!graph) {
+      continue;
+    }
+    std::map<uint64_t, std::pair<Node, std::vector<Pin>>> cells;
+    for (const auto n : graph->body().nodes()) {
+      if (auto controls = selectors(n); !controls.empty()) {
+        cells.emplace(static_cast<uint64_t>(n.get_debug_nid()), std::make_pair(n, std::move(controls)));
+      }
+    }
+    if (cells.empty()) {
+      continue;
+    }
+    const auto source = source_key(graph.get(), false);
+    const auto path   = cache_path(cache_dir, graph->get_name(), "-select");
+    auto&      row    = saved_selects[std::string(graph->get_name())];
+    if (row.source != source) {
+      row = read_selects(path);
+    }
+    if (row.source == source) {
+      stats.reused += row.facts.size();
+    } else {
+      Seeds                                    seeds;
+      std::vector<std::pair<Select_fact, Pin>> candidates;
+      std::vector<Pin>                         roots;
+      for (const auto& [nid, cell] : cells) {
+        roots.insert(roots.end(), cell.second.begin(), cell.second.end());
+      }
+      for (const auto& p : fanin_forward(graph.get(), std::move(roots))) {
+        try {
+          seeds.get(p);
+        } catch (const Unsupported&) {
+        }
+      }
+      for (const auto& [nid, cell] : cells) {
+        const auto& controls = cell.second;
+        for (size_t i = 0; i < controls.size(); ++i) {
+          // An unstamped width would make the condition read only bit 0.
+          const auto& c = controls[i];
+          if (c.is_invalid() || c.is_const() || gu::bits_of(c) <= 0) {
+            continue;
+          }
+          ++stats.candidates;
+          try {
+            const auto& values = seeds.get(c);
+            const bool  value  = !values[0].is_known_zero();
+            if (std::all_of(values.begin(), values.end(), [&](const Dlop& v) { return !v.is_known_zero() == value; })) {
+              candidates.push_back({{nid, static_cast<int>(i), value}, c});
+            }
+          } catch (const Unsupported&) {
+          }
+        }
+      }
+      stats.survivors += candidates.size();
+      std::optional<std::vector<bool>> proven = std::vector<bool>{};
+      if (!candidates.empty()) {
+        std::vector<Pin> survivors;
+        for (const auto& [fact, control] : candidates) {
+          survivors.push_back(control);
+        }
+        const auto order = fanin_forward(graph.get(), std::move(survivors));
+        proven           = prove_zero([&](Gates& gates, Cone& cone) {
+          for (const auto& p : order) {
+            try {
+              for (int b = 0; b < width(p); ++b) {
+                cone.bit(p, b);
+              }
+            } catch (const Unsupported&) {
+            }
+          }
+          std::vector<Abc_Obj_t*> refutes;
+          for (const auto& [fact, control] : candidates) {
+            try {
+              auto* c = cone.condition(control);
+              refutes.push_back(fact.value ? gates.inv(c) : c);
+            } catch (const Unsupported&) {
+              refutes.push_back(nullptr);
+            }
+          }
+          return refutes;
+        });
+      }
+      if (!proven) {
+        continue;
+      }
+      row = {source, {}};
+      for (size_t i = 0; i < proven->size(); ++i) {
+        if ((*proven)[i]) {
+          row.facts.push_back(candidates[i].first);
+        }
+      }
+      write_selects(path, row);
+    }
+    stats.proven += row.facts.size();
+    std::map<uint64_t, std::map<int, bool>> known;
+    for (const auto& f : row.facts) {
+      known[f.node][f.control] = f.value;
+    }
+    Select_rewrite rw{*graph, {}};
+    for (const auto& [nid, controls] : known) {
+      if (auto it = cells.find(nid); it != cells.end()) {
+        apply_selects(rw, it->second.first, controls, stats);
+      }
+    }
+    rw.sweep();
+  }
+  std::print(
+      "[pass.satopt] select: {} candidates, {} seed survivors, {} proven constant ({} reused): {} mux, {} hotmux arm, {} flop "
+      "enable\n",
+      stats.candidates,
+      stats.survivors,
+      stats.proven,
+      stats.reused,
+      stats.muxes,
+      stats.hotmux_arms,
+      stats.enables);
+  return stats;
 }
 bool                                    satopt_crosses(const Node& node) { return crosses(node, arms_of(node)); }
 std::optional<std::vector<std::string>> satopt_region_facts(const Satopt_result& facts, const partition::Region_body& rb) {

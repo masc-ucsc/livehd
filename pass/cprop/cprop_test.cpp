@@ -2,16 +2,26 @@
 
 #include "cprop.hpp"
 
+#include <chrono>
 #include <functional>
 #include <tuple>
 #include <unordered_map>
 
+#include "bitwidth.hpp"
+#include "enableopt.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 
 namespace {
+void optimize_state(const std::shared_ptr<hhds::Graph>& graph) {
+  Cprop{}.do_trans(graph);
+  Bitwidth{10}.do_trans(graph);
+  Enableopt{}.do_trans(graph);
+  Cprop{}.do_trans(graph);
+  Bitwidth{10}.do_trans(graph);
+}
 
 TEST(CpropConstants, FoldedValueIgnoresResultAndOutputWidthHints) {
   namespace gu = livehd::graph_util;
@@ -210,7 +220,7 @@ TEST(CpropLatch, DeepFeedbackIsNotMistakenForIndependence) {
   gu::setup_sink_by_name(latch, "din").connect_driver(value);
   gu::setup_sink_by_name(latch, "enable").connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
   q.connect_sink(g->get_output_pin("q"));
-  Cprop{}.do_trans(g);
+  optimize_state(g);
   ASSERT_FALSE(latch.is_invalid());
   EXPECT_EQ(gu::type_op_of(latch), Ntype_op::Latch);
   EXPECT_EQ(g->get_output_pin("q").get_driver_pin(), q);
@@ -247,8 +257,7 @@ TEST(CpropCleanup, RunsAfterFinalCanonicalization) {
   clock_shape.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_by_name(latch, "clock_pin"));
   latch.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
 
-  Cprop cp;
-  cp.do_trans(g);
+  optimize_state(g);
 
   EXPECT_TRUE(latch.is_invalid()) << "the now-always-open latch should become a wire";
   EXPECT_TRUE(clock_shape.is_invalid()) << "final cleanup must remove the control cone orphaned by that rewrite";
@@ -415,7 +424,7 @@ TEST(CpropCleanup, EnabledFlopDoesNotNeedItsDataHoldMux) {
     if (shared) {
       d.connect_sink(g->get_output_pin("observe"));
     }
-    Cprop{}.do_trans(g);
+    optimize_state(g);
     EXPECT_FALSE(flop.is_invalid());
     EXPECT_EQ(gu::get_driver_of_sink_name(flop, "din"), g->get_input_pin("d"));
     if (shared) {
@@ -560,6 +569,17 @@ int64_t mux_eval(Test_pin pin, Test_values& values) {
     if (!found && !inputs.fallback.is_invalid()) {
       result = mux_eval(inputs.fallback, values);
     }
+  } else if (op == Ntype_op::Concat) {
+    for (const auto& lane : gu::concat_lanes(node)) {
+      const auto mask  = (uint64_t{1} << lane.width) - 1;
+      result          |= static_cast<int64_t>((static_cast<uint64_t>(mux_eval(lane.value, values)) & mask) << lane.offset);
+    }
+  } else if (op == Ntype_op::Set_mask) {
+    const auto [lo, hi] = gu::const_of(gu::get_driver_of_sink_name(node, "mask")).get_mask_range();
+    const auto mask     = ((uint64_t{1} << (hi - lo)) - 1) << lo;
+    const auto base     = static_cast<uint64_t>(mux_eval(gu::get_driver_of_sink_name(node, "a"), values));
+    const auto value    = static_cast<uint64_t>(mux_eval(gu::get_driver_of_sink_name(node, "value"), values));
+    result              = static_cast<int64_t>((base & ~mask) | ((value << lo) & mask));
   } else if (op == Ntype_op::Get_mask) {
     // Constant contiguous window only: bits [lo,hi) of `a`, LSB-aligned.
     const auto [lo, hi] = gu::const_of(gu::get_driver_of_sink_name(node, "mask")).get_mask_range();
@@ -796,7 +816,7 @@ TEST(CpropMuxSharing, DistributedHoldExtractsEnableOnlyForSingleStagePrivateFlop
       root.connect_sink(f.graph->get_output_pin("observe"));
     }
     q.connect_sink(f.graph->get_output_pin("out"));
-    Cprop{}.do_trans(f.graph);
+    optimize_state(f.graph);
     const auto enable = gu::get_driver_of_sink_name(flop, "enable");
     const auto data   = gu::get_driver_of_sink_name(flop, "din");
     EXPECT_EQ(enable == f.en, variant != 0);
@@ -895,7 +915,7 @@ TEST(CpropBool, OneBitIfChainsBecomeAndOrLogic) {
   auto      d    = f.mux(rst, f.mux(upd, q, next), f.constant(1));
   en.connect_sink(f.graph->get_output_pin("out"));
   d.connect_sink(f.graph->get_output_pin("observe"));
-  Cprop{}.do_trans(f.graph);
+  optimize_state(f.graph);
   EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
   EXPECT_EQ(f.count(Ntype_op::Xor), 0);
   // Left: the `upd ? q : next` hold (no flop here to make it dead), and the
@@ -986,8 +1006,8 @@ TEST(CpropBool, EnableMakesLaneHoldMuxDead) {
   auto din  = gu::create_set_mask(*g, q, constant(2), lane);
   gu::set_ubits(din.create_driver_pin(0), 4);
   din.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "din"));
-  Cprop{}.do_trans(g);
-  Cprop{}.do_trans(g);
+  optimize_state(g);
+  optimize_state(g);
   size_t muxes = 0;
   for (auto n : g->body().nodes()) {
     muxes += gu::type_op_of(n) == Ntype_op::Mux;
@@ -995,7 +1015,7 @@ TEST(CpropBool, EnableMakesLaneHoldMuxDead) {
   EXPECT_EQ(muxes, 0);
   // din's lane is now rst | next: check it against every rst/g with the
   // enable held (upd forced when rst is low).
-  auto lane_now = gu::get_driver_of_sink_name(gu::get_driver_of_sink_name(flop, "din").get_master_node(), "value");
+  auto lane_now = gu::get_driver_of_sink_name(flop, "din");
   ASSERT_FALSE(lane_now.is_invalid());
   for (int64_t r : {0, 1}) {
     for (int64_t gv : {0, 1}) {
@@ -1003,7 +1023,8 @@ TEST(CpropBool, EnableMakesLaneHoldMuxDead) {
       values.emplace(g->get_input_pin("rst").get_class_index().value, r);
       values.emplace(g->get_input_pin("upd").get_class_index().value, 1);
       values.emplace(g->get_input_pin("g").get_class_index().value, gv);
-      EXPECT_EQ(mux_eval(lane_now, values), r ? 1 : gv) << r << gv;
+      values.emplace(q.get_class_index().value, 0);
+      EXPECT_EQ((mux_eval(lane_now, values) >> 1) & 1, r ? 1 : gv) << r << gv;
     }
   }
 }
@@ -1033,7 +1054,7 @@ TEST(CpropBool, BitSliceReductionsBecomeWordTests) {
   }
   can.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
   any.create_driver_pin(0).connect_sink(f.graph->get_output_pin("observe"));
-  Cprop{}.do_trans(f.graph);
+  optimize_state(f.graph);
   // One compare per family instead of a gate per bit.
   EXPECT_LE(f.count(Ntype_op::EQ), 1);
   EXPECT_LE(f.count(Ntype_op::Get_mask), 4);
@@ -1074,7 +1095,7 @@ TEST(CpropMasks, LowWindowNarrowsPrivateFold) {
   auto cut = gu::create_get_mask(*f.graph, fold, 0, 16);
   gu::set_ubits(cut.create_driver_pin(0), 16);
   cut.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  optimize_state(f.graph);
   for (auto n : f.graph->body().nodes()) {
     for (const auto& pin : n.out_sorted_pins()) {
       EXPECT_LE(gu::bits_of(pin), 16) << gu::debug_name(n);
@@ -1104,7 +1125,7 @@ TEST(CpropMasks, LowWindowDoesNotSplitWordLogicIntoBits) {
   auto cut = gu::create_get_mask(*f.graph, top, 0, 1);
   gu::set_ubits(cut.create_driver_pin(0), 1);
   cut.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  optimize_state(f.graph);
   EXPECT_LE(f.count(Ntype_op::Get_mask), 1);
   for (int64_t av : {0, 1, 2, 3, 5, 0x7FFF, 0x8000, 0xFFFF, 0x1234}) {
     const int64_t yv     = av ^ (av >> 2);
@@ -1130,7 +1151,7 @@ TEST(CpropMasks, LowWindowKeepsWideFoldInOneWord) {
   auto cut = gu::create_get_mask(*f.graph, fold, 0, 64);
   gu::set_ubits(cut.create_driver_pin(0), 64);
   cut.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
-  Cprop{}.do_trans(f.graph);
+  optimize_state(f.graph);
   for (auto n : f.graph->body().nodes()) {
     for (const auto& pin : n.out_sorted_pins()) {
       EXPECT_LE(gu::bits_of(pin), 64) << gu::debug_name(n);
@@ -1250,7 +1271,7 @@ TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
   gu::set_ubits(read.create_driver_pin(0), 4);
   read.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
 
-  Cprop{}.do_trans(g);
+  optimize_state(g);
 
   for (auto n : g->body().nodes()) {
     EXPECT_NE(gu::type_op_of(n), Ntype_op::Set_mask) << "the bypassed write chain must be swept";
@@ -1269,9 +1290,9 @@ TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
   EXPECT_EQ(muxes, 1u);
 }
 
-// A shared chain head is not the read's to retire: gathering would duplicate
-// work for the other reader, so the read keeps its (straddling) slice.
-TEST(CpropMasks, StraddlingSliceOfSharedChainIsNotGathered) {
+// Indexed reads may resolve a shared writer, but must preserve both the
+// narrow observation and the complete word, including lane truncation.
+TEST(CpropMasks, StraddlingSlicePreservesSharedWord) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_gather_shared");
   auto  io     = lib.create_io("gather_shared");
@@ -1300,7 +1321,15 @@ TEST(CpropMasks, StraddlingSliceOfSharedChainIsNotGathered) {
 
   auto q = g->get_output_pin("q").get_driver_pin();
   ASSERT_FALSE(q.is_invalid());
-  EXPECT_EQ(gu::type_op_of(q.get_master_node()), Ntype_op::Get_mask);
+  const auto word = g->get_output_pin("w").get_driver_pin();
+  ASSERT_FALSE(word.is_invalid());
+  for (int64_t data : {-2, -1, 0, 1, 2, 3, 255, 256}) {
+    Test_values values{
+        {static_cast<uint64_t>(g->get_input_pin("d").get_class_index().value), data}
+    };
+    EXPECT_EQ(mux_eval(q, values), (data & 1) ? 3 : 0);
+    EXPECT_EQ(mux_eval(word, values), (data & 1) ? 255 : 0);
+  }
 }
 
 // W one-bit muxes sharing a select over consecutive bits of the same two words
@@ -1347,7 +1376,7 @@ TEST(CpropMux, BitSlicedMuxTreeVectorizes) {
   gu::set_ubits(cat.create_driver_pin(0), 8);
   cat.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
 
-  Cprop{}.do_trans(g);
+  optimize_state(g);
 
   size_t muxes = 0;
   for (auto n : g->body().nodes()) {
@@ -1364,4 +1393,92 @@ TEST(CpropMux, BitSlicedMuxTreeVectorizes) {
   auto sel = top.get_sink_pin(0).get_driver_pins();
   ASSERT_EQ(sel.size(), 1u);
   EXPECT_EQ(sel.front(), g->get_input_pin("s1"));
+}
+
+// Every intermediate word has a whole-word observer as well as a slice read.
+// Expanding all prefix layouts would manufacture 1+2+...+N lane operands.
+TEST(CpropMasks, SharedWriteVersionsHaveBoundedExpansion) {
+  for (int size : {128, 256, 512, 1024}) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_cprop_shared_scaling");
+    auto  io  = lib.create_io("versions_" + std::to_string(size));
+    io->add_input("a", 1);
+    io->set_bits("a", size);
+    for (int i = 0; i < size; ++i) {
+      io->add_output("word" + std::to_string(i), 2 * i + 2);
+      io->set_bits("word" + std::to_string(i), size);
+      io->add_output("bit" + std::to_string(i), 2 * i + 3);
+      io->set_bits("bit" + std::to_string(i), 1);
+    }
+    auto graph  = io->create_graph();
+    auto source = graph->get_input_pin("a");
+    auto word   = gu::create_const(*graph, *Dlop::create_integer(0));
+    for (int i = 0; i < size; ++i) {
+      auto value = gu::create_get_mask(*graph, source, i, i + 1).create_driver_pin(0);
+      auto mask  = gu::create_const(*graph, gu::mask_window_const(i, i + 1));
+      word       = gu::create_set_mask(*graph, word, mask, value).create_driver_pin(0);
+      word.connect_sink(graph->get_output_pin("word" + std::to_string(i)));
+      auto read = gu::create_get_mask(*graph, word, i, i + 1).create_driver_pin(0);
+      read.connect_sink(graph->get_output_pin("bit" + std::to_string(i)));
+    }
+    const auto start = std::chrono::steady_clock::now();
+    Cprop{}.do_trans(graph);
+    const auto ms    = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    size_t     nodes = 0, edges = 0;
+    for (auto node : graph->body().nodes()) {
+      ++nodes;
+      for ([[maybe_unused]] auto input : node.inp_sorted_pins()) {
+        ++edges;
+      }
+    }
+    EXPECT_LT(nodes, static_cast<size_t>(12 * size));
+    EXPECT_LT(edges, static_cast<size_t>(30 * size));
+    for (int i = 0; i < size; ++i) {
+      const auto read = graph->get_output_pin("bit" + std::to_string(i)).get_driver_pin();
+      ASSERT_EQ(gu::type_op_of(read.get_master_node()), Ntype_op::Get_mask);
+      EXPECT_EQ(gu::get_driver_of_sink_name(read.get_master_node(), "a"), source);
+      EXPECT_EQ(gu::mask_window_of(gu::const_of(gu::get_driver_of_sink_name(read.get_master_node(), "mask"))),
+                (std::optional<std::pair<int, int>>{
+                    {i, i + 1}
+      }));
+    }
+    std::cout << "shared-versions n=" << size << " nodes=" << nodes << " edges=" << edges << " ms=" << ms << '\n';
+  }
+}
+
+// Each old version must retain its own overwritten value after later writes.
+TEST(CpropMasks, SharedOverwriteVersionsPreserveSignedSlices) {
+  Mux_graph f("shared_overwrites", 0, 8, true);
+  auto      write = [&](Test_pin base, Test_pin value) {
+    return gu::create_set_mask(*f.graph, base, f.constant(6), value).create_driver_pin(0);
+  };
+  auto first = write(f.a, f.b);
+  auto last  = write(first, f.constant(1));
+  first.connect_sink(f.graph->get_output_pin("observe"));
+  last.connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  for (int64_t a : {-128, -3, -1, 0, 5, 127}) {
+    for (int64_t b : {-9, -1, 0, 1, 2, 3, 8}) {
+      auto v1 = f.inputs(0, a, b), v2 = v1;
+      EXPECT_EQ(mux_eval(f.observed(), v1), (a & ~6LL) | ((b & 3) << 1));
+      EXPECT_EQ(mux_eval(f.output(), v2), (a & ~6LL) | 2);
+    }
+  }
+}
+
+// A private conjunction specialized under its Or parent's condition is no
+// longer the expression entered into CSE at its earlier forward visit.
+TEST(CpropBool, SpecializedProducerInvalidatesItsCseEntry) {
+  Mux_graph f("specialized_cse", 2, 1);
+  auto      x     = f.not_zero(f.controls[0]);
+  auto      nx    = f.eq(f.controls[0], 0);
+  auto      y     = f.not_zero(f.controls[1]);
+  auto      first = f.logic(Ntype_op::And, {nx, y});
+  f.logic(Ntype_op::Or, {x, first}).connect_sink(f.graph->get_output_pin("out"));
+  f.logic(Ntype_op::And, {nx, y}).connect_sink(f.graph->get_output_pin("observe"));
+  optimize_state(f.graph);
+  for (uint64_t mask = 0; mask < 4; ++mask) {
+    auto a = f.inputs(mask, 0, 0), b = a;
+    EXPECT_EQ(mux_eval(f.output(), a), bool(mask & 1) || bool(mask & 2));
+    EXPECT_EQ(mux_eval(f.observed(), b), !bool(mask & 1) && bool(mask & 2));
+  }
 }

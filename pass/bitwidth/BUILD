@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "//pass/cprop:pass_cprop",
         "//pass/common:pass",
     ],
     alwayslink = True,

@@ -77,6 +77,8 @@ cc_test(
     copts = COPTS,
     linkopts = ["-lz"],  # via :lec_query -> @abc (zlib-backed aiger/liberty readers)
     deps = [
+        "//pass/enableopt:pass_enableopt",
+        "//pass/bitwidth:pass_bitwidth",
         ":lec_query",
         "//graph",
         "@googletest//:gtest_main",

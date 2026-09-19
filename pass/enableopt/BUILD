@@ -4,7 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "pass_cprop",
+    name = "pass_enableopt",
     srcs = glob(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "//pass/cprop:pass_cprop",
         "//core",
         "//pass/common:pass",
     ],
@@ -22,14 +23,11 @@ cc_library(
 )
 
 cc_test(
-    name = "cprop_test",
-    srcs = ["cprop_test.cpp"],
+    name = "enableopt_test",
+    srcs = ["enableopt_test.cpp"],
     copts = COPTS,
     deps = [
-        ":pass_cprop",
-        "//pass/enableopt:pass_enableopt",
-        "//pass/bitwidth:pass_bitwidth",
-        "//core",
+        ":pass_enableopt",
         "//graph",
         "@googletest//:gtest_main",
     ],

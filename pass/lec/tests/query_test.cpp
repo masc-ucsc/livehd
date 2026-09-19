@@ -15,6 +15,8 @@
 
 #include "cell.hpp"
 #include "cprop.hpp"
+#include "enableopt.hpp"
+#include "bitwidth.hpp"
 #include "encode.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
@@ -693,6 +695,10 @@ TEST(LecState, CpropMuxSharingPreservesTransition) {
       ASSERT_TRUE(impl_lib.copy_from(ref_lib, "mux_sharing"));
       auto impl = impl_lib.find_io("mux_sharing")->get_graph();
       Cprop{}.do_trans(impl);
+      Bitwidth{10}.do_trans(impl);
+      Enableopt{}.do_trans(impl);
+      Cprop{}.do_trans(impl);
+      Bitwidth{10}.do_trans(impl);
       size_t muxes = 0;
       for (auto n : impl->body().nodes()) {
         muxes += gu::type_op_of(n) == Ntype_op::Mux;

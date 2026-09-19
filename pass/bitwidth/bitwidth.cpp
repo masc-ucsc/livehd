@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "bitwidth.hpp"
+#include "bitwidth_rewrite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -2023,6 +2024,22 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
   // the violations it can introduce.
   if (!not_finished) {
     remove_mask_identities(g);
+    Bitwidth_rewrite{}.run(
+        *g,
+        [&](const hhds::Pin_class& pin) {
+          const auto it = bwmap.find(pin.get_class_index());
+          return it != bwmap.end() && it->second.is_always_positive() ? it->second.get_ubits() : -1;
+        },
+        [&](const hhds::Pin_class& pin) { bwmap.erase(pin.get_class_index()); },
+        [&](const hhds::Pin_class& pin, int width) {
+          if (bwmap.contains(pin.get_class_index())) {
+            return;
+          }
+          Bitwidth_range range;
+          range.set_ubits_range(std::max(1, width));
+          bwmap.emplace(pin.get_class_index(), range);
+          set_bits_sign(pin, range);
+        });
     for (auto node : g->body().nodes()) {
       if (type_op_of(node) != Ntype_op::Concat) {
         continue;

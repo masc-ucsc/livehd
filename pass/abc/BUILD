@@ -44,6 +44,7 @@ genrule(
         "//inou/cgen:memory_generator_srcs",
         "//inou/yosys:memory_import_srcs",
         "//pass/cprop:pass_cprop",
+        "//pass/enableopt:pass_enableopt",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/color:pass_color",  # shared pattern identity
         "//pass/liberty:liberty_dff_srcs",
@@ -79,6 +80,7 @@ cc_library(
         "//graph",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
+        "//pass/enableopt:pass_enableopt",
         "//pass/color:pass_color",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/cost:host_mem",

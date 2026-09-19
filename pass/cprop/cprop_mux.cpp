@@ -69,6 +69,8 @@ class Mux_sharing {
   };
 
   hhds::Graph&                                                  graph;
+  bool                                                          state_context;
+  std::function<bool(const Pin&)>                               boolean_fact;
   Pin                                                           zero;
   Pin                                                           one;
   std::vector<Candidate>                                        candidates;
@@ -146,10 +148,10 @@ class Mux_sharing {
     if (p.is_const()) {
       return gu::const_of(p).is_known_zero() ? zero : one;
     }
-    if (livehd::cprop_value::is_bool01(p)) {
+    if (boolean_fact(p)) {
       return p;
     }
-    auto n = gu::create_typed_node(graph, Ntype_op::Ror, 1);
+    auto n = livehd::cprop_value::make_node(graph, Ntype_op::Ror, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
     livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
     return n.create_driver_pin(0);
@@ -162,7 +164,7 @@ class Mux_sharing {
     if (p == one) {
       return zero;
     }
-    auto n = gu::create_typed_node(graph, Ntype_op::EQ, 1);
+    auto n = livehd::cprop_value::make_node(graph, Ntype_op::EQ, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
     livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
     livehd::graph_util::setup_sink_pid(n, 0).connect_driver(zero);
@@ -179,7 +181,7 @@ class Mux_sharing {
     if (b == one) {
       return a;
     }
-    auto n = gu::create_typed_node(graph, Ntype_op::And, 1);
+    auto n = livehd::cprop_value::make_node(graph, Ntype_op::And, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
     livehd::graph_util::setup_sink_pid(n, 0).connect_driver(a);
     livehd::graph_util::setup_sink_pid(n, 0).connect_driver(b);
@@ -193,7 +195,7 @@ class Mux_sharing {
     if (pins.size() == 1) {
       return pins.front();
     }
-    auto n = gu::create_typed_node(graph, Ntype_op::Or, 1);
+    auto n = livehd::cprop_value::make_node(graph, Ntype_op::Or, 1);
     gu::set_ubits(n.create_driver_pin(0), 1);
     for (auto p : pins) {
       livehd::graph_util::setup_sink_pid(n, 0).connect_driver(p);
@@ -202,7 +204,29 @@ class Mux_sharing {
   }
 
   void collect() {
-    for (auto node : graph.body().nodes(hhds::Node_order::forward)) {
+    // Region ownership is independent of topological order: roots keep their
+    // identity, and only their private interiors can be removed. State mode
+    // collects just private data regions rooted at flop D pins.
+    std::vector<Node> pending;
+    for (auto node : graph.body().nodes()) {
+      if (!state_context) {
+        pending.push_back(node);
+        continue;
+      }
+      if (gu::type_op_of(node) != Ntype_op::Flop) {
+        continue;
+      }
+      auto data = gu::get_driver_of_sink_name(node, "din");
+      if (!data.is_invalid() && !data.is_const() && sole_consumer(data.get_master_node())) {
+        pending.push_back(data.get_master_node());
+      }
+    }
+    absl::flat_hash_set<hhds::Class_index> inspected;
+    for (size_t next = 0; next < pending.size(); ++next) {
+      auto node = pending[next];
+      if (state_context && !inspected.insert(node.get_class_index()).second) {
+        continue;
+      }
       const auto op = gu::type_op_of(node);
       if ((op != Ntype_op::Mux && op != Ntype_op::Hotmux) || !node.has_out_edges() || gu::has_color(node)
           || gu::has_runtime_check(node)) {
@@ -247,6 +271,18 @@ class Mux_sharing {
         if (!exclusive(c)) {
           continue;  // retain the ORIGINAL overlap obligation
         }
+      }
+      if (state_context) {
+        const auto append = [&](Pin pin) {
+          if (!pin.is_const() && sole_consumer(pin.get_master_node())) {
+            pending.push_back(pin.get_master_node());
+          }
+        };
+        for (const auto& [control, value] : c.arms) {
+          (void)control;
+          append(value);
+        }
+        append(c.fallback);
       }
       candidate_ids.emplace(node.get_class_index(), candidates.size());
       candidates.push_back(std::move(c));
@@ -298,7 +334,10 @@ class Mux_sharing {
   }
 
   void rewrite(size_t root_id) {
-    auto&              root = candidates[root_id];
+    auto& root = candidates[root_id];
+    if (state_context && hold_flop(root).is_invalid()) {
+      return;
+    }
     std::vector<Visit> visits{
         {root_id, {}, one}
     };
@@ -332,6 +371,18 @@ class Mux_sharing {
       append(c.fallback);
       visits[i].targets = std::move(targets);
     }
+    if (!state_context) {
+      if (auto consumer = sole_consumer(root.node); consumer) {
+        auto state = consumer->sink.get_master_node();
+        if (gu::is_type_register(state) && consumer->sink.get_port_id() == Ntype::get_sink_pid(gu::type_op_of(state), "din")) {
+          for (const auto& group : groups) {
+            if (group.value == state.get_driver_pin(0)) {
+              return;
+            }
+          }
+        }
+      }
+    }
     auto   flop = hold_flop(root);
     size_t hold = absent;
     if (!flop.is_invalid()) {
@@ -340,6 +391,11 @@ class Mux_sharing {
           hold = k;
         }
       }
+    }
+    // Q-hold regions stay in their original Mux form until enableopt has
+    // interpreted the destination's conditions. Only that pass extracts hold.
+    if ((hold != absent) != state_context) {
+      return;
     }
     const size_t data_count = groups.size() - (hold != absent);
     if (!data_count) {
@@ -354,7 +410,7 @@ class Mux_sharing {
     // because its enable extraction is handled on the flop itself.
     bool all_bool01 = true;
     for (size_t k = 0; k < groups.size() && all_bool01; ++k) {
-      all_bool01 = k == hold || livehd::cprop_value::is_bool01(groups[k].value);
+      all_bool01 = k == hold || boolean_fact(groups[k].value);
     }
     if (all_bool01) {
       return;
@@ -434,12 +490,13 @@ class Mux_sharing {
     for (size_t i = 1; i < visits.size(); ++i) {
       auto n = candidates[visits[i].candidate].node;
       I(!n.has_out_edges());
-      n.del_node();
+      livehd::cprop_value::retire(n);
     }
   }
 
 public:
-  explicit Mux_sharing(hhds::Graph& g) : graph(g) {
+  explicit Mux_sharing(hhds::Graph& g, bool state, const std::function<bool(const Pin&)>& proof)
+      : graph(g), state_context(state), boolean_fact(proof ? proof : livehd::cprop_value::is_bool01) {
     zero = gu::create_const(graph, *Dlop::create_integer(0));
     one  = gu::create_const(graph, *Dlop::create_integer(1));
   }
@@ -456,5 +513,9 @@ public:
 
 void Cprop::mux_share_pass() {
   livehd::cprop_profile::Timer timer(livehd::cprop_profile::sharing);
-  Mux_sharing(*current_graph).run();
+  livehd::share_mux_regions(*current_graph, false);
+}
+
+void livehd::share_mux_regions(hhds::Graph& graph, bool state_context, const std::function<bool(const Pin&)>& boolean_fact) {
+  Mux_sharing(graph, state_context, boolean_fact).run();
 }

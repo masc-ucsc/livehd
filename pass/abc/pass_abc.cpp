@@ -29,6 +29,7 @@
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
+#include "satopt.hpp"
 #include "satopt_memory.hpp"
 #include "ware_module.hpp"
 
@@ -45,7 +46,7 @@ void Pass_abc::setup() {
                        "bodies separately and stitches the carry connections afterwards, for benchmarking. Independent "
                        "loops always map separately; compile.unroll=true requests general front-end expansion.",
                        "true");
-  m.add_label_optional("satopt", "Prove cross-region mux and memory simplifications before ABC mapping", "true");
+  m.add_label_optional("satopt", "Prove constant selectors, cross-region mux facts and memory simplifications before ABC mapping", "true");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
@@ -1046,10 +1047,13 @@ void Pass_abc::work(Eprp_var& var) {
   opts.library = library;
 
   // Prove memory simplifications in the parent context before extracting
-  // memory implementations into separate modules.
+  // memory implementations into separate modules. Constant selectors go
+  // first: their dead cones must vanish before partitioning, and the memory
+  // proofs then see the simplified enables.
   if (opts.satopt) {
-    livehd::abc::optimize_memories(scratch_graphs,
-                                   var.get("cache_dir", "").empty() ? "" : std::string(var.get("cache_dir")) + "/../satopt_cache");
+    const auto satopt_cache = var.get("cache_dir", "").empty() ? "" : std::string(var.get("cache_dir")) + "/../satopt_cache";
+    livehd::abc::optimize_selects(scratch_graphs, satopt_cache);
+    livehd::abc::optimize_memories(scratch_graphs, satopt_cache);
   }
   // Extract before partitioning: a lowered memory remains a named instance,
   // even when its parent is flattened. The child body comes from cgen RTL.

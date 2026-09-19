@@ -9,7 +9,7 @@ public:
   explicit Pass_satopt(const Eprp_var& var) : Pass("pass.satopt", var) {}
   static void work(Eprp_var& var) {
     hhds::GraphLibrary                        scratch;
-    std::vector<std::shared_ptr<hhds::Graph>> memories, originals;
+    std::vector<std::shared_ptr<hhds::Graph>> copies, originals;
     const auto                                top = var.get("top", "");
     for (const auto& g : var.graphs) {
       if (!g || (!top.empty() && g->get_name() != top)) {
@@ -21,7 +21,7 @@ public:
           continue;
         }
         if (scratch.copy_from(*lib, def->get_name())) {
-          memories.push_back(scratch.find_io(def->get_name())->get_graph());
+          copies.push_back(scratch.find_io(def->get_name())->get_graph());
           originals.push_back(def);
         }
       }
@@ -29,9 +29,12 @@ public:
     if (!top.empty() && originals.empty()) {
       livehd::diag::err("pass.satopt", "top-not-found", "name").msg("definition '{}' was not found", top).fatal();
     }
-    livehd::abc::optimize_memories(memories, var.get("cache_dir", ""));
+    // Same order as pass.abc on its working copy, so the mux facts below are
+    // proven on the definition ABC will later look up.
+    livehd::abc::optimize_selects(copies, var.get("cache_dir", ""));
+    livehd::abc::optimize_memories(copies, var.get("cache_dir", ""));
 
-    for (const auto& g : originals) {
+    for (const auto& g : copies) {
       if (g) {
         livehd::abc::satopt(g.get(), var.get("cache_dir", ""), true);
       }

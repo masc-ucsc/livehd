@@ -1,12 +1,32 @@
 # Constant propagation and mux sharing
 
-`Cprop::do_trans` folds constants and scalar identities, canonicalizes packed
-wiring, merges identical combinational expressions, and then runs mux sharing
-before final dead-node cleanup. Bitwidth inference remains a separate pass.
-Cprop does not read pin width or sign annotations, including IO and state annotations. Constants retain their
-integer values; narrowing and sign extension must be explicit Get_mask,
-Set_mask, Concat or Sext operations. Local mask/boolean proofs inspect those
-operations and literal operands, and refuse when the expression is unknown.
+The compile schedule is `cprop -> bitwidth -> enableopt -> cprop -> bitwidth`.
+Each `Cprop::do_trans` makes one ordinary forward scalar/CSE sweep. It then
+processes explicit wiring and disjoint mux/vector groups, and deletes dead
+nodes. There is no pack fixed point, fresh-node retry sweep, or vectorization
+round loop. Vector mux groups run in dependency-level order within one call.
+
+Cprop does not use width/sign annotations as semantic evidence. Literal masks,
+Concat lane contracts, and cached structural facts can justify local rewrites.
+`pass/bitwidth/bitwidth_rewrite.cpp` owns range-dependent rewrites after
+inference converges. Its queries read the settled `bwmap`; constructors and
+retirement invalidate recycled pin facts. An aborted inference skips optional
+range-dependent rewrites.
+
+`cprop_wiring.hpp` indexes explicit Get_mask/Concat/Set_mask/constant-shift
+layouts using persistent interval treaps. Shared write versions share storage;
+updates and reads cost expected O(log L + K), rather than expanding every
+prefix. A pass-wide interval-visit budget bounds expanded lane traffic. Unknown
+or overlapping Or intervals remain opaque. Packed cycle tails may bootstrap a
+Set_mask base spine once; actual computation and state/IO ports are boundaries.
+Forwarding retains the exact source port and tracks retired/recycled identities.
+
+The scalar sweep is predominantly O(V + E). CSE operand sorting and interval
+indexing have their stated logarithmic costs; large-integer arithmetic is a
+separate cost. Boolean conjunction inspections use operand indexes and a
+pass-wide budget for shared children. Consuming private associative regions
+are flattened only at their outer consumer. Finite reduction descriptors are
+computed forward once, with a bounded representation size.
 
 ## Mux sharing
 
@@ -34,7 +54,8 @@ A rewrite must remove repeated alternatives or a hold value and reduce the
 number of word muxes. This is a structural heuristic independent of width
 annotations. Shared source muxes are not counted as removable work.
 
-When a root exclusively feeds a single-stage Flop's `din`, a terminal equal to
+Only `enableopt` invokes the state-specific part of the shared region engine.
+Ordinary cprop leaves destination-Q hold regions intact. When a root exclusively feeds a single-stage Flop's `din`, a terminal equal to
 that Flop's `Q` can become an enable: `old_enable & OR(non_hold_conditions)`.
 Clock, reset, initialization, and the state width/sign are preserved. Pipeline
 Flops, latches, and shared `din` cones do not receive this enable transformation. Index Muxes and unknown constant operands are also left
@@ -47,5 +68,5 @@ cones, pipeline holds, and a 2048-level chain with a linear generated-size bound
 induction with symbolic data, state, enables, and freely changing reset.
 
 ```
-bazel test -c dbg //pass/cprop:cprop_test //pass/bitwidth:bitwidth_test //pass/lec:query_test
+bazel test -c dbg //pass/cprop:cprop_test //pass/bitwidth:bitwidth_test //pass/enableopt:enableopt_test //pass/lec:query_test
 ```

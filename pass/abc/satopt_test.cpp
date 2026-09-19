@@ -142,3 +142,166 @@ TEST(Satopt, SharedHotmuxBlasterUsesEveryControlBit) {
     }
   }
 }
+
+namespace {
+struct Select_fixture {
+  hhds::GraphLibrary           lib;
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Pin_class              x, y, w, clk;
+  explicit Select_fixture(std::string_view name) {
+    auto io = lib.create_io(name);
+    io->add_input("x", 1);
+    io->set_bits("x", 8);
+    io->add_input("y", 2);
+    io->set_bits("y", 8);
+    io->add_input("w", 3);
+    io->set_bits("w", 32);
+    io->add_input("clk", 4);
+    io->set_bits("clk", 1);
+    io->add_output("o", 5);
+    io->set_bits("o", 8);
+    io->add_output("p", 6);
+    io->set_bits("p", 9);
+    g   = io->create_graph();
+    x   = input("x", 8);
+    y   = input("y", 8);
+    w   = input("w", 32);
+    clk = input("clk", 1);
+  }
+  hhds::Pin_class input(std::string_view name, int bits) {
+    auto p = g->get_input_pin(name);
+    gu::set_ubits(p, bits);
+    return p;
+  }
+  hhds::Pin_class konst(int64_t v) { return gu::create_const(*g, *Dlop::create_integer(v)); }
+  hhds::Pin_class op(Ntype_op kind, std::initializer_list<std::pair<hhds::Port_id, hhds::Pin_class>> ins, int bits) {
+    auto n = gu::create_typed_node(*g, kind);
+    for (const auto& [pid, p] : ins) {
+      p.connect_sink(gu::setup_sink_pid(n, pid));
+    }
+    auto out = n.create_driver_pin(0);
+    gu::set_ubits(out, bits);
+    return out;
+  }
+  // x + 1 never equals x and is always greater than it: cprop sees neither.
+  hhds::Pin_class next() { return op(Ntype_op::Sum, {{0, x}, {0, konst(1)}}, 9); }
+  hhds::Pin_class never() { return op(Ntype_op::EQ, {{0, x}, {0, next()}}, 1); }
+  hhds::Pin_class always() { return op(Ntype_op::LT, {{0, x}, {1, next()}}, 1); }
+  hhds::Node_class mux(const hhds::Pin_class& sel) {
+    auto m = gu::create_typed_node(*g, Ntype_op::Mux);
+    sel.connect_sink(m.create_sink_pin(0));
+    x.connect_sink(m.create_sink_pin(1));
+    y.connect_sink(m.create_sink_pin(2));
+    auto out = m.create_driver_pin(0);
+    gu::set_ubits(out, 8);
+    out.connect_sink(g->get_output_pin("o"));
+    return m;
+  }
+  hhds::Node_class flop(const hhds::Pin_class& en) {
+    auto f = gu::create_typed_node(*g, Ntype_op::Flop);
+    clk.connect_sink(f.create_sink_pin(2));
+    x.connect_sink(f.create_sink_pin(3));
+    en.connect_sink(f.create_sink_pin(4));
+    auto q = f.create_driver_pin(0);
+    gu::set_ubits(q, 8);
+    q.connect_sink(g->get_output_pin("o"));
+    return f;
+  }
+  int count(Ntype_op kind) const {
+    int n = 0;
+    for (const auto node : g->body().nodes()) {
+      n += gu::type_op_of(node) == kind;
+    }
+    return n;
+  }
+};
+bool is_const(const hhds::Node_class& n, hhds::Port_id pid, int64_t value) {
+  const auto d = n.create_sink_pin(pid).get_driver_pin();
+  return d.is_const() && gu::const_of(d).is_known_eq(*Dlop::create_integer(value));
+}
+}  // namespace
+
+TEST(SatoptSelect, NeverTrueMuxSelectIsTiedAndItsDeadConeDeleted) {
+  Select_fixture f("select_never");
+  auto           sum = f.next();
+  gu::set_ubits(sum, 9);
+  sum.connect_sink(f.g->get_output_pin("p"));
+  auto sel = f.op(Ntype_op::EQ, {{0, f.x}, {0, sum}}, 1);
+  auto m   = f.mux(sel);
+  auto s   = livehd::abc::optimize_selects({f.g});
+  EXPECT_EQ(s.proven, 1);
+  EXPECT_EQ(s.muxes, 1);
+  EXPECT_TRUE(is_const(m, 0, 0));
+  EXPECT_TRUE(m.create_sink_pin(1).get_driver_pin() == f.x);
+  EXPECT_TRUE(is_const(m, 2, 0));  // the never-selected arm no longer reads y
+  EXPECT_EQ(f.count(Ntype_op::EQ), 0);
+  EXPECT_EQ(f.count(Ntype_op::Sum), 1);  // still drives output p
+}
+
+TEST(SatoptSelect, AlwaysTrueHotmuxControlWinsOverLaterArms) {
+  Select_fixture f("select_hotmux");
+  auto           hot = gu::create_typed_node(*f.g, Ntype_op::Hotmux);
+  f.op(Ntype_op::Ror, {{0, f.y}}, 1).connect_sink(hot.create_sink_pin(0));
+  f.x.connect_sink(hot.create_sink_pin(1));
+  f.always().connect_sink(hot.create_sink_pin(2));
+  f.y.connect_sink(hot.create_sink_pin(3));
+  f.op(Ntype_op::Ror, {{0, f.x}}, 1).connect_sink(hot.create_sink_pin(4));
+  f.konst(7).connect_sink(hot.create_sink_pin(5));
+  f.x.connect_sink(hot.create_sink_pin(6));
+  auto out = hot.create_driver_pin(0);
+  gu::set_ubits(out, 8);
+  out.connect_sink(f.g->get_output_pin("o"));
+  auto s = livehd::abc::optimize_selects({f.g});
+  EXPECT_EQ(s.proven, 1);
+  EXPECT_EQ(s.hotmux_arms, 2);
+  // The earlier free arm keeps priority over the always-on one.
+  EXPECT_FALSE(hot.create_sink_pin(0).get_driver_pin().is_const());
+  EXPECT_TRUE(hot.create_sink_pin(1).get_driver_pin() == f.x);
+  EXPECT_TRUE(is_const(hot, 2, 1));
+  EXPECT_TRUE(hot.create_sink_pin(3).get_driver_pin() == f.y);
+  EXPECT_TRUE(is_const(hot, 4, 0));
+  EXPECT_TRUE(is_const(hot, 5, 0));
+  EXPECT_TRUE(is_const(hot, 6, 0));  // fallback
+  EXPECT_EQ(f.count(Ntype_op::LT), 0);
+  EXPECT_EQ(f.count(Ntype_op::Ror), 1);
+}
+
+TEST(SatoptSelect, FreeAndRarelyTrueSelectsStay) {
+  Select_fixture f("select_free");
+  // All eight seeds miss w == K, so only the prover can reject it.
+  auto m = f.mux(f.op(Ntype_op::EQ, {{0, f.w}, {0, f.konst(0x12345678)}}, 1));
+  auto s = livehd::abc::optimize_selects({f.g});
+  EXPECT_EQ(s.survivors, 1);
+  EXPECT_EQ(s.proven, 0);
+  EXPECT_FALSE(m.create_sink_pin(0).get_driver_pin().is_const());
+  EXPECT_TRUE(m.create_sink_pin(2).get_driver_pin() == f.y);
+  EXPECT_EQ(f.count(Ntype_op::EQ), 1);
+}
+
+TEST(SatoptSelect, FlopEnablesAreTied) {
+  Select_fixture on("select_enable_on");
+  auto           a = on.flop(on.always());
+  EXPECT_EQ(livehd::abc::optimize_selects({on.g}).enables, 1);
+  EXPECT_TRUE(is_const(a, 4, 1));
+  EXPECT_EQ(on.count(Ntype_op::LT), 0);
+  Select_fixture off("select_enable_off");
+  auto           b = off.flop(off.never());
+  EXPECT_EQ(livehd::abc::optimize_selects({off.g}).enables, 1);
+  EXPECT_TRUE(is_const(b, 4, 0));
+  EXPECT_EQ(off.count(Ntype_op::EQ), 0);
+}
+
+TEST(SatoptSelect, ProofsAreReusedAcrossRuns) {
+  const auto     dir = std::string(std::getenv("TEST_TMPDIR")) + "/satopt_select";
+  Select_fixture first("select_reuse");
+  first.mux(first.never());
+  auto cold = livehd::abc::optimize_selects({first.g}, dir);
+  EXPECT_EQ(cold.proven, 1);
+  EXPECT_EQ(cold.reused, 0);
+  Select_fixture second("select_reuse");
+  auto           m    = second.mux(second.never());
+  auto           warm = livehd::abc::optimize_selects({second.g}, dir);
+  EXPECT_EQ(warm.reused, 1);
+  EXPECT_EQ(warm.survivors, 0);
+  EXPECT_TRUE(is_const(m, 0, 0));
+}

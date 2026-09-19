@@ -11,9 +11,9 @@
 mod abc_boundary(a:u1, b:u1, c:u8) -> (y:u8@[0]) {
   mut t:u1 = 0
   {::[color=1]
-    t = ~(a & b)
+    wrap t = ~(a & b)
   }
   {::[color=2]
-    y = if t { ~c } else { c }
+    wrap y = if t != 0 { ~c } else { c }
   }
 }
