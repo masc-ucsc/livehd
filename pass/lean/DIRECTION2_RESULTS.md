@@ -603,7 +603,7 @@ ratio between them".  Four of them were never multi-clock.
 
 | module | census | what it is, and where it stands now |
 |---|---|---|
-| `intpipe_csr_file` | 2 clock nets | **ONE clock.**  The second "net" was 14 latches gated by `clock_wb & sel`, where `clock_wb = clk_i & en_q` is a `prim_clk_gate` output: a gate of a gate.  `resolve_icg` identified the inner `And` as "the clock" (flops root there) and stopped; it now flattens nested gating, conjoining the enables.  Normalizes: P=2, **1055 latches** retyped, 175 gated clocks folded, 1462 elements, 1 memory slotted, 1 clock domain.  Certificate emission of the resulting graph was still running when this was written (`SWEEP_multiclock6.tsv` carries the outcome) |
+| `intpipe_csr_file` | 2 clock nets | **ONE clock.**  The second "net" was 14 latches gated by `clock_wb & sel`, where `clock_wb = clk_i & en_q` is a `prim_clk_gate` output: a gate of a gate.  `resolve_icg` identified the inner `And` as "the clock" (flops root there) and stopped; it now flattens nested gating, conjoining the enables.  Normalizes: P=2, **1055 latches** retyped, 175 gated clocks folded, 1462 elements, 1 memory slotted, 1 clock domain.  `pass.lean` emission of the resulting graph then **exceeded the 2-hour budget** (exit 124, 4.5 GB resident) — the emitter-scale wall of `minion_dcache_top`, not a clock question |
 | `intpipe_mul_div_top` | 2 clock nets; then a slang error | one clock, the same nested-gate shape (12 latches).  The compile failure — `start_mul_2p` used before its declaration — is a slang strictness, not an RTL change (core-et's last commit predates the census); `--allow-use-before-declare` is now passed by the sweep.  Normalizes: P=2, 529 latches retyped, 29 gated clocks folded.  **Certificate emitted, `checkDesign` ACCEPTED, 4 cycles run** — 9,343 nodes, 536 flops, 95 s |
 | `intpipe_top` | 3 clock nets; then a slang error | compiles with the flag; one clock after the fix; refused by the pre-existing L1 rule `coincident-commit-edge`: `latch_27604` and `rf.u_rf.wr_data_del_q` commit on the same edge and the flop reads the latch combinationally.  A named fail-closed refusal about a latch/flop pair, not about clocks |
 | `core_top` | 3 clock nets; then a slang error | compiles with the flag; refused `memory-type-unsupported` — `u_frontend.gen_thread_buf[0].u_tb.buffer_pc` has `type=24`, the mixed clocked/unclocked read-port bitmask of §9 |
@@ -614,8 +614,17 @@ So "true multi-clock in `DesignCert`" unblocks no CORE-ET module today: the
 only two-clock design is stopped by a latch-array memory, a Memory-cell
 representation gap that Phase A named.  What the change buys is honesty of the
 model — the certificate now says which edge each element commits on and the
-Lean side checks what it can — plus three designs reached by the two LiveHD-side
-fixes it forced (the nested-gate recognizer and the slang flag).
+Lean side checks what it can — plus **one** new certificate
+(`intpipe_mul_div_top`, 9,343 nodes) reached by the two LiveHD-side fixes it
+forced: the nested-gate recognizer and the slang flag.  `intpipe_csr_file` is
+reached too and normalizes, but its emission hits the same budget wall as
+`minion_dcache_top`.  Of the census's 22 `single_edge` refusals, **14 now emit**
+(13 from Phase A, `intpipe_mul_div_top` from Phase B) and the 8 that remain are:
+**emitter scale** — `intpipe_csr_file`, `minion_dcache_top`; the **Memory-cell
+`type` bitmask** — `core_top`, `minion_frontend`,
+`minion_frontend_thread_buffer`; **latch-array memories** — `vpu_ctrl`,
+`vpu_rf`; and one **L1 coincident-edge** hazard — `intpipe_top`.  None of them
+is a clock.
 
 ### Validation
 
@@ -645,6 +654,8 @@ fixes it forced (the nested-gate recognizer and the slang flag).
 * **Re-emission sweep** (`SWEEP_direction2_phaseB.tsv`): the 13 Phase-A modules
   plus `intpipe_mul_div_top` — **14/14 emitted, `checkDesign` ACCEPTED, 4 cycles
   run**, every certificate with a one-entry clock table (`clk_i` or `clock`).
+  CORE-ET coverage is then **82 of 122** modules with a Direction-2-accepted
+  certificate, against 68 in the census: +13 from Phase A, +1 from Phase B.
 * **`lhd/tests/single_edge_multi_clock_test.sh`** — a posedge and a negedge flop
   on `clk_a`, a posedge flop on `clk_b`, async resets.  Without `multi_clock` the
   pass refuses by name and names both nets; with it, P=2 on the reference and
