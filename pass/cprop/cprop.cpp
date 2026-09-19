@@ -17,6 +17,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
+#include "cprop_profile.hpp"
 #include "cprop_value.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
@@ -67,6 +68,7 @@ bool is_two_arm_mux(const Cprop::Inp_pins& edges) {
 // before cprop could inspect a single node. TolG is responsible for producing
 // a valid graph, so cprop does not run a second cycle-management algorithm.
 std::vector<hhds::Node_class> stable_nodes(hhds::Graph* g) {
+  livehd::cprop_profile::Timer  timer(livehd::cprop_profile::order);
   std::vector<hhds::Node_class> nodes;
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     nodes.push_back(node);
@@ -300,7 +302,7 @@ struct Hold_mux_match {
   return std::nullopt;
 }
 
-[[nodiscard]] bool cone_reaches_q(const hhds::Pin_class& start, const hhds::Pin_class& q) {
+[[nodiscard]] std::optional<bool> cone_reaches_q(const hhds::Pin_class& start, const hhds::Pin_class& q) {
   absl::flat_hash_set<hhds::Class_index> seen;
   std::vector<hhds::Pin_class>           work{start};
   int                                    visited = 0;
@@ -325,7 +327,9 @@ struct Hold_mux_match {
       }
     }
   }
-  return false;
+  // Exhausting a search is not evidence that the state is independent of Q.
+  // Both callers use absence of feedback to justify a structural rewrite.
+  return work.empty() ? std::optional<bool>{false} : std::nullopt;
 }
 
 // Pair `gate ? 1 : data_enable` with a din override on the same gate. The
@@ -355,7 +359,7 @@ struct Hold_mux_match {
         const bool override_on_sel1 = selected->true_when_base == override_when_base;
         auto       override_arm     = override_on_sel1 ? arm1 : arm0;
         auto       normal_arm       = override_on_sel1 ? arm0 : arm1;
-        if (!cone_reaches_q(override_arm, q) && cone_reaches_q(normal_arm, q)) {
+        if (cone_reaches_q(override_arm, q) == false && cone_reaches_q(normal_arm, q) == true) {
           return true;
         }
       }
@@ -493,6 +497,7 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
 //
 // Bounds come only from explicit cell operations, never from pin annotations.
 [[nodiscard]] std::pair<int, int> footprint(const hhds::Pin_class& p, int depth) {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::footprint);
   if (p.is_invalid() || depth > 16) {
     return kFpBail;
   }
@@ -700,7 +705,8 @@ void sweep_dead_node(const hhds::Node_class& n) {
 // an explicit phase at iteration boundaries instead of relying on the order in
 // which a particular rewrite happened to run.
 void cleanup_dead_nodes(hhds::Graph* g) {
-  auto order = stable_nodes(g);
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::dead);
+  auto                         order = stable_nodes(g);
   // Consumer-to-producer order also finishes cones deeper than
   // sweep_dead_node's per-root safety budget: if one walk stops partway up a
   // very deep cone, the remaining producers have not yet been visited here.
@@ -2245,8 +2251,8 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     const auto k       = t.is_const() ? t : f;
     const auto other   = t.is_const() ? f : t;
     const bool one_arm = f.is_const() != t.is_const();
-    if (one_arm && !sel.is_const() && is_bool01(sel) && is_bool01(other) && !const_of(k).has_unknowns()
-        && const_of(k).is_just_i64() && (const_of(k).to_just_i64() == 0 || const_of(k).to_just_i64() == 1)) {
+    if (one_arm && !sel.is_const() && is_bool01(sel) && is_bool01(other) && !const_of(k).has_unknowns() && const_of(k).is_just_i64()
+        && (const_of(k).to_just_i64() == 0 || const_of(k).to_just_i64() == 1)) {
       const bool k_one   = const_of(k).to_just_i64() == 1;
       const bool negated = t.is_const() ? !k_one : k_one;
       auto       literal = sel;
@@ -2430,7 +2436,8 @@ bool Cprop::scalar_bool(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     clear_all_sinks(node);
     livehd::graph_util::set_type_op(node, Ntype_op::EQ);
     livehd::graph_util::append_sink_operand(node, Ntype_op::EQ, 0).connect_driver(value);
-    livehd::graph_util::append_sink_operand(node, Ntype_op::EQ, 0).connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
+    livehd::graph_util::append_sink_operand(node, Ntype_op::EQ, 0)
+        .connect_driver(create_const(*current_graph, *Dlop::create_integer(0)));
     livehd::graph_util::set_ubits(node.create_driver_pin(0), 1);
     return true;
   }
@@ -2612,8 +2619,7 @@ bool Cprop::scalar_bool(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
         const auto x = and_sink.get_driver_pin();
         if (negated.is_invalid() && !x.is_const() && is_bool01(x)) {
           auto cond = decode_bool_condition(x);
-          if (cond.has_value() && same_pin(cond->base, literal.cond.base)
-              && cond->true_when_base != literal.cond.true_when_base) {
+          if (cond.has_value() && same_pin(cond->base, literal.cond.base) && cond->true_when_base != literal.cond.true_when_base) {
             negated = and_sink;
             continue;
           }
@@ -3391,7 +3397,8 @@ bool Cprop::gather_straddling_slice(hhds::Node_class& node) {
 // Mux, two arm slices and one bit read per lane, against n lane muxes (and
 // their now-dead arm reads) removed, and no rewritten cell qualifies again.
 bool Cprop::vectorize_bit_muxes() {
-  constexpr int kMinLanes = 4;
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::vectorize);
+  constexpr int                kMinLanes = 4;
 
   struct Bit_read {
     hhds::Pin_class src;
@@ -3526,16 +3533,17 @@ bool Cprop::vectorize_bit_muxes() {
 // 1 becomes that word. Bit k of every Y_l is src_l[lo + k + d_l], so bit a-lo
 // of f(Y) is exactly operand a. Every intermediate is an n-bit unsigned word.
 bool Cprop::vectorize_bit_reductions() {
-  constexpr int    kMinTerms  = 4;
-  constexpr int    kMaxDepth  = 6;
-  constexpr size_t kMaxLeaves = 8;
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::vectorize);
+  constexpr int                kMinTerms  = 4;
+  constexpr int                kMaxDepth  = 6;
+  constexpr size_t             kMaxLeaves = 8;
 
   struct Leaf {
     hhds::Pin_class src;
     int             pos{0};
   };
   struct Term {
-    std::string       shape;  // canonical, includes each leaf's source identity
+    std::string       shape;   // canonical, includes each leaf's source identity
     std::vector<Leaf> leaves;  // in shape order
   };
   const auto bit_read = [](const hhds::Pin_class& p) -> std::optional<Leaf> {
@@ -3704,7 +3712,7 @@ bool Cprop::vectorize_bit_reductions() {
       // index is its first CANONICAL leaf; each raw leaf keeps its own offset
       // from it. Operands are commutative, so another family member is this
       // same expression with every position shifted by (a_m - a_rep).
-      const int                                               a_rep = rep.leaves.front().pos;
+      const int                                              a_rep = rep.leaves.front().pos;
       std::function<hhds::Pin_class(const hhds::Pin_class&)> build;
       const auto word = [&](Ntype_op word_op, const std::vector<hhds::Pin_class>& operands) {
         auto w = create_typed_node(*current_graph, word_op);
@@ -3722,7 +3730,7 @@ bool Cprop::vectorize_bit_reductions() {
         if (auto leaf = bit_read(p); leaf.has_value()) {
           const int base = lo + (leaf->pos - a_rep);
           auto      get  = livehd::graph_util::create_get_mask(*current_graph, leaf->src, base, base + n);
-          auto        out  = get.create_driver_pin(0);
+          auto      out  = get.create_driver_pin(0);
           livehd::graph_util::set_ubits(out, n);
           return out;
         }
@@ -3742,8 +3750,8 @@ bool Cprop::vectorize_bit_reductions() {
         }
         return word(type_op_of(m), operands);
       };
-      const auto f      = build(members.front().sink.get_driver_pin());
-      const auto masked = word(Ntype_op::And, {f, create_const(*current_graph, mask)});
+      const auto      f      = build(members.front().sink.get_driver_pin());
+      const auto      masked = word(Ntype_op::And, {f, create_const(*current_graph, mask)});
       hhds::Pin_class result;
       if (op == Ntype_op::And) {
         auto eq = create_typed_node(*current_graph, Ntype_op::EQ);
@@ -3885,7 +3893,9 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     const auto inner_op = inner.is_invalid() ? Ntype_op::Invalid : type_op_of(inner);
     const auto window   = [&](const hhds::Pin_class& p, int bits) -> hhds::Pin_class {
       if (p.is_const()) {
-        return create_const(*current_graph, *const_of(p).and_op(*Dlop::create_integer(1)->shl_op(*Dlop::create_integer(bits))->sub_op(*Dlop::create_integer(1))));
+        return create_const(
+            *current_graph,
+            *const_of(p).and_op(*Dlop::create_integer(1)->shl_op(*Dlop::create_integer(bits))->sub_op(*Dlop::create_integer(1))));
       }
       if (fits_unsigned_window(p, bits)) {
         return p;
@@ -4242,6 +4252,7 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
 //  * names: prefer keeping a named twin (user wires are addressable by sim
 //    queries/VCD); when BOTH carry names, skip rather than pick a loser.
 void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::cse);
   using Key = std::pair<uint16_t, std::vector<std::pair<uint32_t, uint64_t>>>;
 
   bool                                       changed = false;
@@ -4380,6 +4391,7 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
 }
 
 void Cprop::scalar_node(hhds::Node_class& node) {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::scalar);
   if (node.is_invalid()) {
     return;
   }
@@ -4478,6 +4490,7 @@ void Cprop::scalar_node(hhds::Node_class& node) {
 // A flop samples din only while enabled. Specialize its immediate mux to
 // that condition, reconnecting only this sink so shared observers are intact.
 void Cprop::canonicalize_flop_hold(const hhds::Node_class& flop) {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::state);
   if (flop.is_invalid() || type_op_of(flop) != Ntype_op::Flop) {
     return;
   }
@@ -4532,6 +4545,7 @@ void Cprop::canonicalize_flop_hold(const hhds::Node_class& flop) {
 // known false, the last is true. A Mux whose selector is then known collapses
 // to its live arm.
 void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::state);
   if (flop.is_invalid() || type_op_of(flop) != Ntype_op::Flop) {
     return;
   }
@@ -4564,7 +4578,7 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
     return;
   }
 
-  using Facts        = std::vector<std::pair<hhds::Pin_class, bool>>;  // base, is truthy
+  using Facts         = std::vector<std::pair<hhds::Pin_class, bool>>;  // base, is truthy
   const auto truth_of = [](const Facts& facts, const hhds::Pin_class& base) -> std::optional<bool> {
     for (const auto& [pin, truthy] : facts) {
       if (same_pin(pin, base)) {
@@ -4574,7 +4588,7 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
     return std::nullopt;
   };
   const auto implied = [&](Facts facts) {
-    const Bool_condition* open = nullptr;
+    const Bool_condition* open    = nullptr;
     size_t                unknown = 0;
     for (const auto& l : literals) {
       auto t = truth_of(facts, l.base);
@@ -4599,15 +4613,15 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
     return true;
   };
 
-  bool                                                      changed = false;
+  bool                                                        changed = false;
   std::function<hhds::Pin_class(hhds::Pin_class, Facts, int)> simplify;
   simplify = [&](hhds::Pin_class p, Facts facts, int depth) -> hhds::Pin_class {
     if (depth > 64 || p.is_invalid() || p.is_const() || is_graph_input_pin(p)) {
       return p;
     }
-    facts       = implied(std::move(facts));
-    auto node   = p.get_master_node();
-    auto op     = type_op_of(node);
+    facts     = implied(std::move(facts));
+    auto node = p.get_master_node();
+    auto op   = type_op_of(node);
     if (op == Ntype_op::Mux) {
       auto edges = ordered_inp_edges(node);
       if (!is_two_arm_mux(edges)) {
@@ -4628,8 +4642,8 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
         if (sel.has_value()) {
           arm_facts.emplace_back(sel->base, arm == 2 ? sel->true_when_base : !sel->true_when_base);
         }
-        const auto old_driver = edges[arm].get_driver_pin();
-        changed |= rewire(edges[arm], old_driver, simplify(old_driver, std::move(arm_facts), depth + 1));
+        const auto old_driver  = edges[arm].get_driver_pin();
+        changed               |= rewire(edges[arm], old_driver, simplify(old_driver, std::move(arm_facts), depth + 1));
       }
       return p;
     }
@@ -4650,8 +4664,8 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
             operand_facts.emplace_back(cond->base, !cond->true_when_base);
           }
         }
-        const auto old_driver = edge.get_driver_pin();
-        changed |= rewire(edge, old_driver, simplify(old_driver, std::move(operand_facts), depth + 1));
+        const auto old_driver  = edge.get_driver_pin();
+        changed               |= rewire(edge, old_driver, simplify(old_driver, std::move(operand_facts), depth + 1));
       }
       return p;
     }
@@ -4665,8 +4679,8 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
       for (auto link = node; !link.is_invalid();) {
         auto value_sink = livehd::graph_util::find_sink_pin(link, "value");
         if (!value_sink.is_invalid()) {
-          const auto old_driver = value_sink.get_driver_pin();
-          changed |= rewire(value_sink, old_driver, simplify(old_driver, facts, depth + 1));
+          const auto old_driver  = value_sink.get_driver_pin();
+          changed               |= rewire(value_sink, old_driver, simplify(old_driver, facts, depth + 1));
         }
         const auto base = livehd::graph_util::get_driver_of_sink_name(link, "a");
         if (base.is_invalid() || base.is_const() || is_graph_input_pin(base) || !has_single_consumer(base)) {
@@ -4690,6 +4704,7 @@ void Cprop::canonicalize_flop_enable(const hhds::Node_class& flop) {
 }
 
 void Cprop::canonicalize_latch_hold(const hhds::Node_class& latch) {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::state);
   if (latch.is_invalid() || type_op_of(latch) != Ntype_op::Latch) {
     return;
   }
@@ -4720,7 +4735,7 @@ void Cprop::canonicalize_latch_hold(const hhds::Node_class& latch) {
     }
   }
   auto reset = livehd::graph_util::get_driver_of_sink_name(latch, "reset_pin");
-  if (always_open && reset.is_invalid() && !q.is_invalid() && !din.is_invalid() && !cone_reaches_q(din, q)) {
+  if (always_open && reset.is_invalid() && !q.is_invalid() && !din.is_invalid() && cone_reaches_q(din, q) == false) {
     // SNAPSHOT: out_edges() is a lazy VIEW over live edge storage (hhds
     // graph.hpp) and connect_sink() calls add_edge, which can rehome an entry
     // into the overflow set -- and growing overflow_sets() reallocates the
@@ -4793,13 +4808,14 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     ctx.event()->set_name(absl::StrCat(converted_str, name));
   });
 
-  current_graph = g.get();
+  livehd::cprop_profile::Invocation profile(name);
+  current_graph                                = g.get();
   // One topological construction, then local sweeps over that materialized
   // vector. Producer folds land before their consumers are visited, so mask
   // normalization and scalar propagation fuse into a single pass. CSE is the
   // only additional graph traversal; one forward round is sufficient because
   // every key sees already-folded producer pins.
-  auto order    = stable_nodes(current_graph);
+  auto                                   order = stable_nodes(current_graph);
   absl::flat_hash_set<hhds::Class_index> swept;
   swept.reserve(order.size());
   for (const auto& n : order) {
@@ -4866,6 +4882,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // new Set_mask/Or, so termination is guaranteed.
   bool packs_changed;
   do {
+    livehd::cprop_profile::Timer timer(livehd::cprop_profile::pack);
     packs_changed   = false;
     auto post_sweep = stable_nodes(current_graph);
     for (auto it = post_sweep.rbegin(); it != post_sweep.rend(); ++it) {
@@ -4897,7 +4914,8 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // exactly what mux sharing would rebuild as a Hotmux over path conjunctions.
   // A recycled index reads as already swept, which only skips an optional fold.
   for (int round = 0; round < 8; ++round) {
-    bool fresh = false;
+    livehd::cprop_profile::Timer timer(livehd::cprop_profile::fresh);
+    bool                         fresh = false;
     for (auto node : stable_nodes(current_graph)) {
       if (node.is_invalid() || !swept.insert(node.get_class_index()).second) {
         continue;

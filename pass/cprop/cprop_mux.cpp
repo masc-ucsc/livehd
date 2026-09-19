@@ -454,4 +454,7 @@ public:
 };
 }  // namespace
 
-void Cprop::mux_share_pass() { Mux_sharing(*current_graph).run(); }
+void Cprop::mux_share_pass() {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::sharing);
+  Mux_sharing(*current_graph).run();
+}

@@ -14970,6 +14970,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               for (const auto& enable : cone->enables) {
                 enabled = combine_activation(enabled, emit_known_true(operand(enable, 1)));
               }
+              // Data users (in particular a low-transparent ICG latch) see
+              // the gated clock LEVEL. State commits derive their activation
+              // separately above; using that predicate as the level keeps an
+              // active conditional clock permanently high and closes the ICG.
+              const auto level = operand(cone->clock, 1);
+              enabled = combine_activation(enabled, absl::StrCat(level, cone->clock_inverted ? ".is_known_false()" : ".is_known_true()"));
               const auto output = node.get_driver_pin(0);
               I(!output.is_invalid());
               const auto temp_name = absl::StrCat("__color_tmp_", temporary++);

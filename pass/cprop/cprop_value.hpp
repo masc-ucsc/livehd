@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "absl/container/flat_hash_map.h"
+#include "cprop_profile.hpp"
 #include "node_util.hpp"
 
 namespace livehd::cprop_value {
@@ -103,6 +104,7 @@ inline int unsigned_width_impl(const hhds::Pin_class& pin, int depth, absl::flat
 }
 
 inline int unsigned_width(const hhds::Pin_class& pin) {
+  cprop_profile::Timer                        timer(cprop_profile::range);
   absl::flat_hash_map<hhds::Class_index, int> memo;
   return unsigned_width_impl(pin, 0, memo);
 }

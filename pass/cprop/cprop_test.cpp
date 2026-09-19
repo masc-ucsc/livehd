@@ -97,10 +97,10 @@ TEST(CpropConstants, FoldedConstantsPreserveOperandMultiplicity) {
     auto producer = gu::create_typed_node(*g, Ntype_op::SHL);
     constant(1).connect_sink(producer.create_sink_pin(0));
     constant(1).connect_sink(producer.create_sink_pin(1));
-    auto consumer  = gu::create_typed_node(*g, op);
+    auto       consumer = gu::create_typed_node(*g, op);
     // One sink pin per operand: setup_sink_by_name APPENDS a fresh slot to the
     // named bank each time it is called on a commutative cell.
-    const auto bank = pid == 0 ? "as" : "bs";
+    const auto bank     = pid == 0 ? "as" : "bs";
     constant(2).connect_sink(gu::setup_sink_by_name(consumer, bank));
     producer.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(consumer, bank));
     if (op == Ntype_op::Sum || op == Ntype_op::Mult) {
@@ -191,6 +191,29 @@ TEST(CpropConstants, ForwardSumMergesNodeInternalDuplicateDriver) {
   ASSERT_FALSE(out_drv.is_invalid());
   ASSERT_TRUE(out_drv.is_const());
   EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 5);
+}
+
+TEST(CpropLatch, DeepFeedbackIsNotMistakenForIndependence) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_deep_latch_feedback");
+  auto  io     = lib.create_io("deep_latch_feedback");
+  io->add_output("q", 1);
+  auto g     = io->create_graph();
+  auto latch = gu::create_typed_node(*g, Ntype_op::Latch);
+  auto q     = latch.create_driver_pin(0);
+  auto value = q;
+  for (int i = 0; i < 300; ++i) {
+    auto invert = gu::create_typed_node(*g, Ntype_op::Not);
+    gu::setup_sink_by_name(invert, "a").connect_driver(value);
+    value = invert.create_driver_pin(0);
+  }
+  gu::setup_sink_by_name(latch, "din").connect_driver(value);
+  gu::setup_sink_by_name(latch, "enable").connect_driver(gu::create_const(*g, *Dlop::create_integer(1)));
+  q.connect_sink(g->get_output_pin("q"));
+  Cprop{}.do_trans(g);
+  ASSERT_FALSE(latch.is_invalid());
+  EXPECT_EQ(gu::type_op_of(latch), Ntype_op::Latch);
+  EXPECT_EQ(g->get_output_pin("q").get_driver_pin(), q);
 }
 
 // The first latch sweep cannot know that `x | -1` is an always-open enable.
@@ -880,7 +903,7 @@ TEST(CpropBool, OneBitIfChainsBecomeAndOrLogic) {
   EXPECT_LE(f.count(Ntype_op::Mux), 2);
   for (uint64_t mask = 0; mask < 16; ++mask) {
     for (int64_t qv : {0, 1}) {
-      const bool r = mask & 1, u = mask & 2, i = mask & 4, j = mask & 8;
+      const bool    r = mask & 1, u = mask & 2, i = mask & 4, j = mask & 8;
       const int64_t nxt    = i ? 0 : (j ? 1 : qv);
       auto          values = f.inputs(mask, qv, 0);
       EXPECT_EQ(mux_eval(f.output(), values), r || u ? 1 : 0) << mask;
@@ -922,9 +945,9 @@ TEST(CpropBool, EnableMakesLaneHoldMuxDead) {
   io->set_bits("clock", 1);
   io->add_output("q", 5);
   io->set_bits("q", 4);
-  auto g         = io->create_graph();
-  auto constant  = [&](int64_t v) { return gu::create_const(*g, *Dlop::create_integer(v)); };
-  auto not_zero  = [&](Test_pin x) {
+  auto g        = io->create_graph();
+  auto constant = [&](int64_t v) { return gu::create_const(*g, *Dlop::create_integer(v)); };
+  auto not_zero = [&](Test_pin x) {
     auto e = gu::create_typed_node(*g, Ntype_op::EQ, 1);
     gu::setup_sink_pid(e, 0).connect_driver(x);
     gu::setup_sink_pid(e, 0).connect_driver(constant(0));
@@ -1016,12 +1039,12 @@ TEST(CpropBool, BitSliceReductionsBecomeWordTests) {
   EXPECT_LE(f.count(Ntype_op::Get_mask), 4);
   uint64_t rng = 0x9E3779B97F4A7C15ULL;
   for (int sample = 0; sample < 3000; ++sample) {
-    rng ^= rng << 13;
-    rng ^= rng >> 7;
-    rng ^= rng << 17;
-    const int64_t av = static_cast<int64_t>(rng & 0xFFFF);
-    const int64_t bv = static_cast<int64_t>((rng >> 16) & 0xFFFF);
-    int64_t       expected_can = 1;
+    rng                        ^= rng << 13;
+    rng                        ^= rng >> 7;
+    rng                        ^= rng << 17;
+    const int64_t av            = static_cast<int64_t>(rng & 0xFFFF);
+    const int64_t bv            = static_cast<int64_t>((rng >> 16) & 0xFFFF);
+    int64_t       expected_can  = 1;
     for (int j = 0; j < 6; ++j) {
       if (j != 2) {
         expected_can &= (((av >> j) & 1) == 0 || ((bv >> (8 + j)) & 1) != 0) ? 1 : 0;
@@ -1119,9 +1142,9 @@ TEST(CpropMasks, LowWindowKeepsWideFoldInOneWord) {
 // gates (one conjunction per path); the nest must stay Muxes, value-exact.
 TEST(CpropMuxSharing, ZeroOneSelectionsStayMuxes) {
   Mux_graph f("share_bool01", 5, 1);
-  auto      x = f.not_zero(f.controls[2]);
-  auto      y = f.not_zero(f.controls[3]);
-  auto      z = f.not_zero(f.controls[4]);
+  auto      x  = f.not_zero(f.controls[2]);
+  auto      y  = f.not_zero(f.controls[3]);
+  auto      z  = f.not_zero(f.controls[4]);
   auto      s0 = f.not_zero(f.controls[0]);
   auto      s1 = f.not_zero(f.controls[1]);
   f.mux(s0, f.mux(s1, x, y), f.mux(s1, z, y)).connect_sink(f.graph->get_output_pin("out"));
