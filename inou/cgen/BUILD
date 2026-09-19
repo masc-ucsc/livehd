@@ -43,6 +43,22 @@ genrule(
           "namespace livehd { inline constexpr uint64_t kCgenSrcSalt = 0x%sULL; }\\n' \"$$h\" > $@",
 )
 
+# The sim tune vector (sim.tune.*) and the generated-C++ runtime text shared by
+# the two simulator emitters (inou.cgen.sim and prp_sim's driver). Header-only
+# with no hhds/LLVM dependency, so lhd's tune model and //inou/prp can use it
+# without linking the emitter. Its sources still feed :cgen_salt (the glob
+# above), because the helper text is part of every generated tree.
+cc_library(
+    name = "sim_tune_hdrs",
+    hdrs = [
+        "sim_tune_rt.hpp",
+        "sim_tune_vector.hpp",
+    ],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "inou_cgen",
     srcs = glob(
@@ -54,12 +70,17 @@ cc_library(
     ) + ["cgen_salt.hpp"],
     hdrs = glob(
         ["*.hpp"],
-        exclude = ["cgen_salt.hpp"],
+        exclude = [
+            "cgen_salt.hpp",
+            "sim_tune_rt.hpp",
+            "sim_tune_vector.hpp",
+        ],
     ),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":sim_tune_hdrs",
         "//core",
         "//core:file_name",
         "//graph",

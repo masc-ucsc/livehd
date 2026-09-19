@@ -16,6 +16,7 @@
 #include <map>
 #include <optional>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -26,6 +27,7 @@
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "lhd_sim_tune_session.hpp"
 #include "pass.hpp"
 #include "prp_sim.hpp"
 #include "rapidjson/document.h"
@@ -1431,7 +1433,10 @@ std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, c
 // always reproduces exactly what lhd did — unlike the bazel project, which
 // nothing executes.
 void sim_command(Options& opts, Result& res) {
-  res.command = "sim pyrope";
+  res.command             = "sim pyrope";
+  // Captured FIRST: compile_sources later mints a scratch workdir when the user
+  // named none, and the sim tuner must never keep its store in one.
+  const bool user_workdir = !opts.workdir.empty() && !opts.workdir_scratch;
   if (opts.files.empty()) {
     throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
   }
@@ -1606,27 +1611,35 @@ void sim_command(Options& opts, Result& res) {
   // under <simroot>/ckpt/<test>/ckp<cycle>/ (regs.json + *.hex + tb.json +
   // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
   // settings are forwarded to the driver, which owns the fork cadence + prune.
-  bool        ckpt_on      = true;
-  bool        init_zero    = false;
-  bool        unknown_zero = false;
+  bool        ckpt_on          = true;
+  bool        ckpt_explicit    = false;  // the user configured checkpoints (sim.tune: auto does not profile then)
+  bool        init_zero        = false;
+  bool        unknown_zero     = false;
+  bool        unknown_zero_set = false;  // an explicit sim.unknown_zero is always followed (sim.tune ruling 3)
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.checkpoint") {
-      ckpt_on = (v == "true" || v == "1" || v == "on");
+      ckpt_on       = (v == "true" || v == "1" || v == "on");
+      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_min_secs") {
       ckpt_min_secs = v;
+      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_max") {
-      ckpt_max = v;
+      ckpt_max      = v;
+      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_max_overhead") {
       ckpt_max_overhead = v;
+      ckpt_explicit     = true;
     } else if (k == "sim.checkpoint_every") {
-      ckpt_every = v;
+      ckpt_every    = v;
+      ckpt_explicit = true;
     } else if (k == "sim.init_zero") {
       init_zero = (v == "true" || v == "1" || v == "on");
     } else if (k == "sim.unknown_zero") {
       // Read here for the TESTBENCH literals (prp_sim); the DUT side gets the
       // same flag as an inou.cgen.sim label (lhd_kernel_common's sim.* mapping).
-      unknown_zero = (v == "true" || v == "1" || v == "on");
+      unknown_zero     = (v == "true" || v == "1" || v == "on");
+      unknown_zero_set = true;
     }
   }
   const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};
@@ -1660,6 +1673,28 @@ void sim_command(Options& opts, Result& res) {
                     "run the query batch on its own; a VCD or a restart is a separate invocation"};
   }
 
+  // ---- sim.tune: resolve the tune vector (explicit --set > sim.tune.file > the
+  // workdir's tuned decision > default) into opts.sim_tune BEFORE the compile,
+  // ingest pending profiles, judge or apply a trial (lhd_sim_tune_session.cpp).
+  // Its destructor finishes on every return path below.
+  Sim_tune_session tune(opts,
+                        res,
+                        Sim_tune_shape{.user_workdir        = user_workdir,
+                                       .setup_only          = setup_only,
+                                       .run_only            = run_only,
+                                       .compile_only        = compile_only,
+                                       .observation         = vcd_on || opts.sim_observe || opts.sim_list_signals
+                                                              || opts.sim_restart_cycle >= 0 || opts.sim_vcd_from >= 0,
+                                       .unknown_zero_set    = unknown_zero_set,
+                                       .unknown_zero        = unknown_zero,
+                                       .checkpoint_explicit = ckpt_on && ckpt_explicit,
+                                       .simroot             = simroot,
+                                       .simdir              = simdir,
+                                       .sources             = sources});
+  if (tune.refused()) {
+    return;  // a --run-only of a closed trial tree: res carries the usage error
+  }
+
   std::vector<prp_sim::Test_info> tests;
 
   // ---- setup: lower DUT -> Slop, generate the single driver (drv.cpp)
@@ -1685,15 +1720,29 @@ void sim_command(Options& opts, Result& res) {
     if (res.status != "pass") {
       return;
     }
+    tune.after_compile();
     std::string err;
-    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, opts.sim_observe, opts.sim_runtime_support, unknown_zero, tests, err)
-        != 0) {
+    int         gen_rc = 0;
+    {
+      Phase_timer drvgen(res, "sim.drvgen");  // the testbench driver generation (drv.cpp)
+      gen_rc = prp_sim::generate(file,
+                                 simdir,
+                                 test_sel,
+                                 vcd_dir,
+                                 opts.sim_observe,
+                                 opts.sim_runtime_support,
+                                 unknown_zero,
+                                 tests,
+                                 err);
+    }
+    if (gen_rc != 0) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
       res.exit_code     = exit_code_for(res.error_class);
       return;
     }
+    tune.after_generate();
     // Also append a single `drv` cc_binary so the generated dir stays
     // bazel-buildable (`cd <simdir> && bazel run //:drv -- --test ...`); the
     // default `lhd sim` flow runs it via the fast host-compile below, no bazel.
@@ -1752,6 +1801,7 @@ void sim_command(Options& opts, Result& res) {
   // driver lacks the trace machinery) would silently produce no waveform — reject
   // it so the user regenerates instead. The `vcd::global_timestamp` line is emitted
   // iff VCD codegen was on (prp_sim).
+  bool observation_baked = false;  // a --run-only driver built with VCD/observation code is never profiled
   if (run_only) {
     std::ifstream     dfs(drv_cpp);
     std::stringstream dss;
@@ -1762,6 +1812,7 @@ void sim_command(Options& opts, Result& res) {
     const bool baked_runtime_support = driver_source.find("runtime-control-support: true") != std::string::npos
                                        || driver_source.find(".dump_state(") != std::string::npos;
     const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
+    observation_baked                = baked_vcd || baked_observation;
     if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
       res.status        = "fail";
       res.error_class   = "usage";
@@ -1836,6 +1887,7 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
   }
+  tune.inspect_driver(observation_baked);
   const std::string hlop_inc    = sim_hlop_include_dir(opts);
   const std::string iassert_inc = sim_iassert_include_dir(opts);
   if (hlop_inc.empty() || iassert_inc.empty()) {
@@ -1981,7 +2033,7 @@ void sim_command(Options& opts, Result& res) {
   // would be O(kernels x TUs x bytes), and the sharded designs this association
   // exists for are exactly the ones with hundreds of kernels over hundreds of
   // megabytes of generated C++. Nothing is read at all when the design has no
-  // bitcode kernels (every `sim.backend=slop` run), so no body text is ever
+  // bitcode kernels (every `sim.tune.backend=slop` run), so no body text is ever
   // resident for the host build and simulation that follow.
   std::vector<std::vector<std::string>> llvm_kernels(tus.size());
   if (!direct_objects.empty()) {
@@ -2061,6 +2113,132 @@ void sim_command(Options& opts, Result& res) {
       llvm_kernels[found->second.front()].push_back(kernel);
     }
   }
+
+  // Unity batching of the SMALL generated translation units. A module body that
+  // holds only cold members (dump/load/probe/describe ...), a 70-statement
+  // commit shard, or a tune table is a few KB of source, yet each cost ~0.8 s of
+  // host compile on its own: parsing slop.hpp/<format>/<map> and instantiating
+  // the same Slop/std::format templates again, not its own code. MEASURED on
+  // minion (Verilog, 6P+12E-core arm64, same sources): a prototype on AC power
+  // went 547 CPU-s / 31.7 s wall -> ~210 CPU-s / 13.9 s; this bucketing on
+  // battery (low-power mode) went 281 TUs / 68 s -> 42 TUs / 32 s. The large
+  // evaluator shards stay one TU each: they are most of what is left, and
+  // batching them would only lengthen the critical path.
+  //
+  // A batch is an `#include` wrapper under <simdir>/unity/ (the body scan above
+  // is not recursive, so the next run does not mistake it for a module). Its
+  // depfile names every member, so ninja and the built-in path both rebuild it
+  // when any member changes. Membership is a stable hash of the file NAME into a
+  // bucket count that depends only on the design, never on the host's core
+  // count: an edit to one module rebuilds just its own batch, and two machines
+  // compile the same TUs. A design with at most kUnityMinTus small TUs is left
+  // alone -- there the per-TU parallelism is free -- as is any TU with LLVM
+  // kernels (it lowers through its own bitcode + llvm_inline pair). This needs
+  // every generated TU to be unity-safe: no two may define the same file-scope
+  // name (cgen_sim_tune.cpp's per-module table namespace exists for this).
+  {
+    constexpr std::uintmax_t kUnityMaxBytes    = 256 * 1024;
+    constexpr std::uintmax_t kUnityTargetBytes = 1024 * 1024;
+    constexpr size_t         kUnityMaxFiles    = 12;
+    constexpr size_t         kUnityMinTus      = 16;
+    std::vector<size_t>      candidates;
+    std::uintmax_t           candidate_bytes = 0;
+    for (size_t i = 0; i < bodies.size(); ++i) {  // tus[0, bodies.size()) are the simdir bodies
+      if (!llvm_kernels[i].empty()) {
+        continue;
+      }
+      std::error_code ec;
+      const auto      bytes = fs::file_size(tus[i], ec);
+      if (ec || bytes >= kUnityMaxBytes) {
+        continue;
+      }
+      candidates.push_back(i);
+      candidate_bytes += bytes;
+    }
+    const std::string     unity_dir = simdir + "/unity";
+    std::set<std::string> unity_files;
+    if (candidates.size() > kUnityMinTus) {
+      const size_t buckets = std::max<size_t>({1,
+                                               static_cast<size_t>((candidate_bytes + kUnityTargetBytes - 1) / kUnityTargetBytes),
+                                               (candidates.size() + kUnityMaxFiles - 1) / kUnityMaxFiles});
+      std::vector<std::vector<size_t>> members(buckets);
+      for (const auto i : candidates) {
+        // FNV-1a: stable across runs, hosts and standard libraries (std::hash is none of those).
+        uint64_t h = 1469598103934665603ULL;
+        for (const char c : fs::path(tus[i]).filename().string()) {
+          h = (h ^ static_cast<unsigned char>(c)) * 1099511628211ULL;
+        }
+        members[h % buckets].push_back(i);
+      }
+      std::vector<bool>                     batched(tus.size(), false);
+      std::vector<std::string>              unity_tus;
+      std::vector<std::string>              unity_objs;
+      for (size_t b = 0; b < buckets; ++b) {
+        if (members[b].size() < 2) {
+          continue;  // a lone member keeps its own TU, and so its object name
+        }
+        std::string text = "// Generated by `lhd sim`: a unity batch of small generated translation units.\n";
+        for (const auto i : members[b]) {
+          text += std::format("#include \"../{}\"\n", fs::path(tus[i]).filename().string());
+          batched[i] = true;
+        }
+        const std::string name = std::format("unity-{}.cpp", b);
+        const std::string path = unity_dir + "/" + name;
+        unity_files.insert(name);
+        // Write-if-different, like every other generated source: ninja keys on
+        // mtimes, and an unconditional rewrite would rebuild every batch.
+        std::string     old;
+        std::error_code ec;
+        if (fs::exists(path, ec)) {
+          std::ifstream in(path);
+          old.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        if (old != text) {
+          ensure_dir(unity_dir);
+          std::ofstream out(path, std::ios::trunc);
+          out << text;
+          if (!out) {
+            res.status        = "fail";
+            res.error_class   = "internal";
+            res.error_message = std::format("could not write the sim unity batch {}", path);
+            res.exit_code     = exit_code_for(res.error_class);
+            return;
+          }
+        }
+        unity_tus.push_back(path);
+        unity_objs.push_back(std::format("{}/unity-{}.o", objdir, b));
+      }
+      if (!unity_tus.empty()) {
+        std::vector<std::string>              kept_tus;
+        std::vector<std::string>              kept_objs;
+        std::vector<std::vector<std::string>> kept_kernels;
+        for (size_t i = 0; i < tus.size(); ++i) {
+          if (!batched[i]) {
+            kept_tus.push_back(std::move(tus[i]));
+            kept_objs.push_back(std::move(objs[i]));
+            kept_kernels.push_back(std::move(llvm_kernels[i]));
+          }
+        }
+        for (size_t b = 0; b < unity_tus.size(); ++b) {
+          kept_tus.push_back(std::move(unity_tus[b]));
+          kept_objs.push_back(std::move(unity_objs[b]));
+          kept_kernels.emplace_back();
+        }
+        tus          = std::move(kept_tus);
+        objs         = std::move(kept_objs);
+        llvm_kernels = std::move(kept_kernels);
+      }
+    }
+    // Batches a previous run wrote and this one does not reference (the design
+    // shrank, or no longer batches at all) would only confuse `ninja -C`.
+    std::error_code ec;
+    for (const auto& de : fs::directory_iterator(unity_dir, ec)) {
+      if (de.path().extension() == ".cpp" && !unity_files.contains(de.path().filename().string())) {
+        std::error_code rm_ec;
+        fs::remove(de.path(), rm_ec);
+      }
+    }
+  }
   std::vector<std::string> compile_objs = objs;
   bool                     has_llvm     = false;
   for (size_t i = 0; i < tus.size(); ++i) {
@@ -2090,8 +2268,8 @@ void sim_command(Options& opts, Result& res) {
       res.status        = "fail";
       res.error_class   = "dependency";
       res.error_message = std::format(
-          "the host C++ compiler ({}) does not accept -emit-llvm, which sim.backend=llvm needs to compile the "
-          "evaluator to bitcode; use a clang++ (set $CXX) or re-run with --set sim.backend=slop",
+          "the host C++ compiler ({}) does not accept -emit-llvm, which sim.tune.backend=llvm needs to compile the "
+          "evaluator to bitcode; use a clang++ (set $CXX) or re-run with --set sim.tune.backend=slop",
           cxx);
       res.exit_code = exit_code_for(res.error_class);
       return;
@@ -2529,6 +2707,7 @@ void sim_command(Options& opts, Result& res) {
     }
   }
   build_phase.stop();
+  tune.after_build();
 
   // The incremental build benchmark wants the real generated host-build path
   // (including Ninja's depfile-based reuse) but deliberately no simulation.
@@ -2563,8 +2742,11 @@ void sim_command(Options& opts, Result& res) {
   }
   run_args += " --result-json " + shell_quote(sim_tests_path);
   // Checkpoint creation (sim.checkpoint*): enabled by default; the driver owns the
-  // fork cadence / prune and only writes once the min-secs floor elapses.
-  if (!ckpt_dir.empty()) {
+  // fork cadence / prune and only writes once the min-secs floor elapses. A
+  // sim.tune profiling run takes none (driver_args() says --no-checkpoint).
+  if (tune.profiling()) {
+    // no checkpoint arguments: see driver_args()
+  } else if (!ckpt_dir.empty()) {
     run_args += " --ckpt-dir " + shell_quote(ckpt_dir);
     if (!ckpt_min_secs.empty()) {
       run_args += " --checkpoint-min-secs " + shell_quote(ckpt_min_secs);
@@ -2581,6 +2763,10 @@ void sim_command(Options& opts, Result& res) {
   } else {
     run_args += " --no-checkpoint";
   }
+  // sim.tune: `--set sim.tune.profile=on` + its raw-file dir + the zero fill of a
+  // profiling run, and on --run-only the pinned codegen knobs drv.bin checks
+  // against what it baked. Only for a driver carrying the --set parser.
+  run_args += tune.driver_args();
   // Debug replay: jump to the failure region (loads the nearest checkpoint <= N).
   if (opts.sim_restart_cycle >= 0) {
     run_args += " --restart-cycle " + shell_quote(std::to_string(opts.sim_restart_cycle));
@@ -2696,6 +2882,7 @@ void sim_command(Options& opts, Result& res) {
   // they stay visible in JSON mode too (not only in the pretty relay below).
   int         rc = 0;
   std::string out;
+  tune.before_run();
   {
     Phase_timer run_phase(res, "sim.run");  // the driver binary itself, argv assembly excluded
     out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
@@ -2738,6 +2925,10 @@ void sim_command(Options& opts, Result& res) {
   if (query_plan.active) {
     res.sim_query_json = finalize_sim_query(query_plan, query_cat, sim_query_path);
   }
+
+  // sim.tune: ingest this run's profile, judge a trial (reverting a loser with a
+  // pointer swap), propose the next step.
+  tune.after_run(rc);
 
   // The binary's EXIT CODE is the authoritative verdict (0 = all selected tests
   // passed, 1 = a test failed, 2 = a usage error, <0 = the driver crashed). The

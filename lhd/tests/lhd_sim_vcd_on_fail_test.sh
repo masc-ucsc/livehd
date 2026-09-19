@@ -59,7 +59,10 @@ if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
   exit 0
 fi
 
-"$LHD" sim "$W/bug.prp" --vcd-on-fail --vcd-fail-window 3 --set sim.checkpoint_every=2 --workdir "$W/run" \
+# sim.tune.profile=off: a profiling run (the `auto` default with a fresh
+# --workdir) takes no checkpoints, and the on-fail re-run restarts from one.
+"$LHD" sim "$W/bug.prp" --vcd-on-fail --vcd-fail-window 3 --set sim.checkpoint_every=2 \
+  --set sim.tune.profile=off --workdir "$W/run" \
   --diag-fmt pretty > "$W/run.out" 2>&1
 RC=$?
 [ "$RC" = "1" ] || fail "expected exit 1 (assert fired), got $RC: $(cat "$W/run.out")"

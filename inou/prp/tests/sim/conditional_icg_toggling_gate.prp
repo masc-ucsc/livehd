@@ -1,0 +1,47 @@
+mod lwc_icg_cell(clk:bool, en:bool) -> (g:bool@[]) {
+  reg held:bool:[latch=true]
+  if !clk {
+    held = en
+  }
+  g = clk and held
+}
+
+mod lwc_icg_leaf(gclk:bool, d:u8) -> (q:u8@[]) {
+  reg acc:u8:[clock_pin=ref gclk] = 0
+  acc = acc + d
+  q = acc
+}
+
+mod lwc_icg_wrapper(clk:bool, gate:bool, d:u8) -> (q:u8@[]) {
+  wire gclk:bool = nil
+  gclk = lwc_icg_cell(clk=clk, en=gate)
+  q = lwc_icg_leaf(gclk=gclk, d=d)
+}
+
+pub mod lwc_icg_top(clk:bool, active:bool, gate:bool, d:u8) -> (q:u8@[], ctl:u8@[]) {
+  q = 0
+  if active {
+    q = lwc_icg_wrapper(clk=clk, gate=gate, d=d)
+  }
+
+  reg every:u8:[clock_pin=ref clk] = 0
+  every = every + d
+  ctl = every
+}
+
+test lwc_icg_top.dbg {
+  mut dut = lwc_icg_top
+  tick 8 {
+    dut.active = true
+    dut.gate = (clock == 1) or (clock == 2) or (clock == 4) or (clock == 7)
+    dut.d = 1
+    step
+    assert(dut.ctl == clock + 1, "ctl")
+    mut want:u8 = 0
+    if clock >= 1 { want = 1 }
+    if clock >= 2 { want = 2 }
+    if clock >= 4 { want = 3 }
+    if clock >= 7 { want = 4 }
+    assert(dut.q == want, "q {} want {}", dut.q, want)
+  }
+}

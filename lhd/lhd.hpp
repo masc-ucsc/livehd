@@ -12,6 +12,7 @@
 // serves the LSP.
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -207,6 +208,19 @@ struct Options {
   std::string sim_query;
   bool        sim_observe         = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
   bool        sim_runtime_support = true;   // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
+  // The RESOLVED `sim.tune.*` vector (explicit --set > sim.tune.file > the
+  // workdir's tuned decision > default), set by `lhd sim` before it compiles
+  // and handed to inou.cgen.sim as concrete labels. Deliberately NOT mirrored
+  // into `sets`: those hash into the run_id and the compile-cache context, and
+  // a store-derived value must move neither. `lhd compile --emit-dir sim:`
+  // leaves it unresolved and resolves explicit + sim.tune.file itself.
+  struct Sim_tune {
+    bool     resolved   = false;
+    bool     dirty      = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
+    int64_t  fence      = 16;    // std::numeric_limits<int64_t>::max() = no fences ("none")
+    uint64_t live_words = 256;
+    bool     llvm       = false;
+  } sim_tune;
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };
@@ -370,6 +384,15 @@ struct Result {
   // kernel answered from the static catalog alone (`signals`), in REQUEST order.
   std::string sim_query_json;
 
+  // `lhd sim` profile-guided tuning (sim.tune.*): the envelope's "sim_tune"
+  // member, a pre-serialized JSON object built with a rapidjson Writer (applied
+  // vector + per-knob source, this run's activity stats, trial / verdict,
+  // pending step, convergence, the reproducing --set list). Present for every
+  // `lhd sim` that reaches setup or run, enabled or not. `sim_tune_note` is its
+  // one-line human summary for the pretty output.
+  std::string sim_tune_json;
+  std::string sim_tune_note;
+
   // `lhd pass abc` QoR payload (2opt-freq A): the qor.json sidecar content
   // (per-region + total mapped gates/area/critical delay, source-attributed),
   // embedded verbatim as the result's "qor" member.
@@ -417,108 +440,187 @@ int  run_meta_command(const Options& opts);
 // derive from it, so the three can never drift. `inline constexpr` so it is one
 // shared definition across translation units.
 struct Sim_set_option {
-  enum class Kind { boolean, non_neg_num, bool_or_file, backend };  // value grammar enforced on --set
-  std::string_view name;                                            // flag under sim.*, e.g. "checkpoint_min_secs"
-  std::string_view default_value;                                   // shown by `lhd list options`
+  // The value grammar enforced on --set:
+  //   boolean      true|false|1|0|on|off
+  //   non_neg_num  a non-negative number
+  //   bool_or_file false|true|FILE (text, not checked)
+  //   backend      auto|slop|llvm
+  //   tri          auto|on|off; true|false|1|0 are accepted aliases (TOML `dirty = true`)
+  //   tune_mode    auto|on|off exactly: a mode, not a boolean
+  //   fence        auto|none|N, N a whole number in [0, 2^20]
+  //   num_or_auto  auto|N, N a whole number in [1, 2^20] (0 is spelled `auto`)
+  //   path         FILE/DIR text; empty = unset; the consumer checks it
+  //   count        a whole number
+  enum class Kind { boolean, non_neg_num, bool_or_file, backend, tri, tune_mode, fence, num_or_auto, path, count };
+  // Where the value takes effect: lhd itself, the generated C++ (baked into
+  // drv.bin, so a --run-only value must match what setup baked -- drv.bin's
+  // `--set` parser checks it), the run (a drv.bin argument), or both.
+  enum class Stage { lhd, codegen, run, both };
+  // The sim_profile.md §3 trial-cost class of a TUNABLE knob (none = not one):
+  // R = a drv.bin argument, H = a host rebuild, G = regenerated C++.
+  enum class Tune { none, perf_r, perf_h, perf_g };
+  std::string_view name;           // flag under sim.*, e.g. "checkpoint_min_secs" or "tune.dirty"
+  std::string_view default_value;  // shown by `lhd list options`
   Kind             kind;
   std::string_view help;  // full help (also `lhd describe sim.flag`)
+  Stage            stage  = Stage::lhd;
+  Tune             tune   = Tune::none;
+  std::string_view tv_key = {};  // the knob's key in the canonical `tv1:` tune vector (d, f, lw, be)
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
-    {             "live_words",
-     "0",  Sim_set_option::Kind::non_neg_num,
-     "machine words (64 bits) of live values one simulator color may keep across its members. A color boundary "
-     "costs a stored slot, a compare and a dirty mark per value, so a larger budget means fewer, bigger colors "
-     "(minion 20->256 words: 1.75x cycles/s); a smaller one keeps idle logic finer-grained. 0 (the default) means "
-     "Color_plan::kDefaultLiveWords, which is the ONE place the number lives"                                     },
-    {            "fence_ratio",
-     "",  Sim_set_option::Kind::non_neg_num,
-     "fence a module used ONCE into its own simulator colors only when it has at least this many sites per "
-     "interface word. A fence lets dirty-bit gating skip a mostly idle module (xs_alu's AluDataModule: 2.4x), but "
-     "every value crossing it is a stored, change-tested slot, which only costs when the module toggles every "
-     "cycle (an LFSR-driven DUT: up to 10x). 0 fences every such module; empty (the default) means "
-     "Color_plan::kDefaultFenceRatio. Reused modules always keep their fence"                                     },
-    {           "compile_only",
-     "false",      Sim_set_option::Kind::boolean,
+    {"compile_only",
+     "false", Sim_set_option::Kind::boolean,
      "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "
-     "builds an existing <workdir>/sim incrementally without regenerating its sources"                            },
-    {                "backend",
-     "slop",      Sim_set_option::Kind::backend,
-     "slop|llvm — simulator color-kernel backend. llvm is experimental and emits native object files directly; "
-     "unsupported colors fall back to the reference Slop C++ lowering"                                            },
-    {                    "vcd",
+     "builds an existing <workdir>/sim incrementally without regenerating its sources"},
+    {"vcd",
      "false", Sim_set_option::Kind::bool_or_file,
      "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
      "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
-     "FILE bakes that explicit path, false bakes none"                                                            },
-    {         "vcd_fake_delay",
-     "true",      Sim_set_option::Kind::boolean,
+     "FILE bakes that explicit path, false bakes none", Sim_set_option::Stage::codegen},
+    {"vcd_fake_delay",
+     "true", Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
-     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"                                  },
-    {               "hlop_dir",
+     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)", Sim_set_option::Stage::codegen},
+    {"hlop_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
      "auto: the bazel runfiles, else the sibling ../hlop of a source checkout. Set it to build the driver against "
-     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"       },
-    {            "iassert_dir",
+     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"},
+    {"iassert_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
-     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"            },
-    {                  "ninja",
+     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"},
+    {"ninja",
      "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
      "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
      "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
      "its dependents); the built-in path reuses whatever its own depfiles and command stamps show unchanged. A "
      "`build.ninja` reproducing the exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
-    {                   "jobs",
-     "0",  Sim_set_option::Kind::non_neg_num,
+    {"jobs",
+     "0", Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
-     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"             },
-    {                 "slop_u",
-     "true",      Sim_set_option::Kind::boolean,
+     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"},
+    {"slop_u",
+     "true", Sim_set_option::Kind::boolean,
      "materialize LGraph-proven unsigned combinational values as the CANONICAL-unsigned Slop_u<n> instead of a "
      "lazily-masked Slop<n+1>. Slop makes no promise about storage above bit n-1, so every READ of a stored value "
      "re-masks; Slop_u pays ONE mask at the write and none at the reads. Reset-free state and other unknown-capable "
-     "boundaries remain Slop. Set false only for lowering comparisons"                                            },
-    {            "color_dirty",
-     "false",      Sim_set_option::Kind::boolean,
-     "cross-cycle color activation cache for workloads with long stable-input periods. false executes every color "
-     "once in its existing static phase order and emits direct boundary assignments instead of change comparisons "
-     "and dirty propagation"                                                                                       },
-    {                  "debug",
-     "false",      Sim_set_option::Kind::boolean,
+     "boundaries remain Slop. Set false only for lowering comparisons", Sim_set_option::Stage::codegen},
+    {"debug",
+     "false", Sim_set_option::Kind::boolean,
      "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "
-     "and emits only compile-time width checks, avoiding masks in production generated code"                      },
-    {              "init_zero",
-     "false",      Sim_set_option::Kind::boolean,
+     "and emits only compile-time width checks, avoiding masks in production generated code", Sim_set_option::Stage::codegen},
+    {"init_zero",
+     "false", Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
-     "Explicit initial values and runtime reset values are unchanged"                                             },
-    {           "unknown_zero",
-     "false",      Sim_set_option::Kind::boolean,
+     "Explicit initial values and runtime reset values are unchanged", Sim_set_option::Stage::run},
+    {"unknown_zero",
+     "false", Sim_set_option::Kind::boolean,
      "fill every unknown (`?`) literal bit with 0 instead of a random 0/1. Slop carries no runtime X, so a `?` must "
      "become some concrete bit; the default DRAWS it from the run's seeded PRNG (--seed / lhd.seed, reported as "
      "run.seed + rng_draws) so an unspecified bit cannot be silently relied on, and the draw is once per literal "
      "per run — the value is stable across cycles. true restores the deterministic-zero fill, which also lets the "
      "literal fold at C++ compile time. Orthogonal to sim.init_zero, which covers the power-on value of state "
-     "having neither an initializer nor a reset"                                                                  },
-    {             "checkpoint",
-     "true",      Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)"        },
-    {    "checkpoint_min_secs",
-     "10",  Sim_set_option::Kind::non_neg_num,
-     "wall-clock floor in seconds between checkpoints (a short run writes none)"                                  },
-    {         "checkpoint_max",
-     "10",  Sim_set_option::Kind::non_neg_num,
-     "max checkpoints kept per test, evenly spaced (older ones are pruned)"                                       },
+     "having neither an initializer nor a reset", Sim_set_option::Stage::both},
+    {"checkpoint",
+     "true", Sim_set_option::Kind::boolean,
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)", Sim_set_option::Stage::run},
+    {"checkpoint_min_secs",
+     "10", Sim_set_option::Kind::non_neg_num,
+     "wall-clock floor in seconds between checkpoints (a short run writes none)", Sim_set_option::Stage::run},
+    {"checkpoint_max",
+     "10", Sim_set_option::Kind::non_neg_num,
+     "max checkpoints kept per test, evenly spaced (older ones are pruned)", Sim_set_option::Stage::run},
     {"checkpoint_max_overhead",
-     "0.10",  Sim_set_option::Kind::non_neg_num,
-     "target checkpoint cost as a fraction of run time (caps how often they are taken)"                           },
-    {       "checkpoint_every",
-     "0",  Sim_set_option::Kind::non_neg_num,
-     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                             },
+     "0.10", Sim_set_option::Kind::non_neg_num,
+     "target checkpoint cost as a fraction of run time (caps how often they are taken)", Sim_set_option::Stage::run},
+    {"checkpoint_every",
+     "0", Sim_set_option::Kind::non_neg_num,
+     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)", Sim_set_option::Stage::run},
+    // ---- sim.tune.*: the profile-guided tuner (sim_profile.md). Only knobs that
+    // change SPEED, never a simulated value, may live here (the registry check
+    // below enforces it), plus the tuner's own controls.
+    {"tune.profile",
+     "auto", Sim_set_option::Kind::tune_mode,
+     "auto|on|off — profile-guided tuning of the sim.tune.* speed knobs; needs a user --workdir and lhd.incremental. "
+     "auto: while the workdir holds no CONVERGED tune data, runs profile (drv.bin samples state activity; `?` "
+     "literals zero-fill unless sim.unknown_zero is set; checkpoints are skipped) and the next setup may trial ONE "
+     "better vector, kept only if >= 7% cheaper per simulated cycle with byte-identical results; converged data is "
+     "reused with no sampling. on: profile and learn even when converged. off: ignore the workdir's tune data. An "
+     "explicit sim.tune.X or sim.tune.file always wins. The envelope's `sim_tune` member reports what was applied", Sim_set_option::Stage::both},
+    {"tune.dirty",
+     "auto", Sim_set_option::Kind::tri,
+     "auto|on|off (was sim.color_dirty) — the cross-cycle color activation cache, for workloads with long "
+     "stable-input periods. off executes every color once per cycle in static phase order with direct boundary "
+     "assignments; on change-compares boundary writes, runs a color only when an input changed and ends a fully "
+     "quiescent period early. auto = the workdir's tuned decision, else on", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "d"},
+    {"tune.fence",
+     "auto", Sim_set_option::Kind::fence,
+     "auto|none|N (was sim.fence_ratio) — fence a module used ONCE into its own simulator colors only when it has "
+     "at least N sites per interface word. A fence lets dirty gating skip a mostly idle module (xs_alu's "
+     "AluDataModule: 2.4x), but every value crossing it is a stored, change-tested slot, which only costs when the "
+     "module toggles every cycle (an LFSR-driven DUT: up to 10x). 0 fences every such module, none fences nothing; "
+     "reused modules always keep their fence. auto = the tuned decision, else none with dirty off and 16 with it on", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "f"},
+    {"tune.live_words",
+     "auto", Sim_set_option::Kind::num_or_auto,
+     "auto|N (was sim.live_words) — machine words (64 bits) of live values one simulator color may keep across its "
+     "members. A color boundary costs a stored slot, a compare and a dirty mark per value, so a larger budget means "
+     "fewer, bigger colors (minion 20->256 words: 1.75x cycles/s); a smaller one keeps idle logic finer-grained. "
+     "auto = the tuned decision, else 256", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "lw"},
+    {"tune.backend",
+     "auto", Sim_set_option::Kind::backend,
+     "auto|slop|llvm (was sim.backend) — simulator color-kernel backend. llvm is experimental and emits native "
+     "object files directly; a color its lowering rejects is a setup error. auto = the tuned decision, else slop", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "be"},
+    {"tune.file",
+     "", Sim_set_option::Kind::path,
+     "FILE — pin the tune vector from a `sim.tune.export` file (how hermetic benchmarks use tuning: a fresh workdir "
+     "never converges in place). Its knobs apply below an explicit --set sim.tune.X and above the workdir's tuned "
+     "decision, in every mode, with or without a --workdir; a file recorded for another design is only a warning"},
+    {"tune.export",
+     "", Sim_set_option::Kind::path,
+     "FILE — write the current tune decision (explicit > sim.tune.file > tuned > default) as a sim.tune.file, with "
+     "its provenance (design structure, converged, activity stats)"},
+    {"tune.profile_dir",
+     "", Sim_set_option::Kind::path,
+     "DIR — where a profiling drv.bin writes its raw run file (default <drv.bin dir>/tune_runs, which the next "
+     "`lhd sim --workdir` ingests). `lhd sim` points its own runs at <workdir>/sim_tune/inbox", Sim_set_option::Stage::run},
+    {"tune.profile_stride",
+     "0", Sim_set_option::Kind::count,
+     "N in [0, 1048576] — TEST ONLY: a fixed profiling sample stride in cycles with no jitter (0 = the "
+     "self-calibrated <= 1% overhead stride)", Sim_set_option::Stage::run},
 };
+
+// Only speed knobs live under sim.tune.*: every entry there is either a tunable
+// knob (a trial-cost class and a tv1 key) or one of the tuner's controls, and
+// every tunable knob lives there. A semantic, observability or plumbing knob
+// placed under `tune` fails the BUILD, not a test.
+consteval bool sim_tune_registry_ok() {
+  for (const auto& s : kSimSetOptions) {
+    const bool in_tune = s.name.starts_with("tune.");
+    const bool control = s.name == "tune.profile" || s.name == "tune.file" || s.name == "tune.export"
+                         || s.name == "tune.profile_dir" || s.name == "tune.profile_stride";
+    const bool knob    = s.tune != Sim_set_option::Tune::none;
+    if (in_tune != (control || knob) || (control && knob) || knob == s.tv_key.empty()) {
+      return false;
+    }
+    if (knob && s.stage != Sim_set_option::Stage::codegen && s.tune == Sim_set_option::Tune::perf_g) {
+      return false;  // a G-class knob regenerates C++: it is a codegen knob by definition
+    }
+  }
+  return true;
+}
+static_assert(sim_tune_registry_ok(), "sim.tune.* holds only speed knobs (with a tv1 key) plus the tuner controls");
 
 // The `synth.*` command-namespace options (consumed by synth_command -- the
 // one-shot compile -> pass.color reduce -> pass.color synth -> pass.abc ->

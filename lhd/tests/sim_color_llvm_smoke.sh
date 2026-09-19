@@ -54,7 +54,7 @@ run() { "$LHD" "$@" -q; }
 run sim "$batch"  --set sim.checkpoint=false \
   --set sim.jobs="$SMOKE_JOBS" --workdir "$work/slop" --result-json "$work/slop.json" &
 slop_pid=$!
-run sim "$batch" --set sim.backend=llvm --set sim.checkpoint=false \
+run sim "$batch" --set sim.tune.backend=llvm --set sim.checkpoint=false \
   --set sim.jobs="$SMOKE_JOBS" --workdir "$work/llvm" --result-json "$work/llvm.json" &
 llvm_pid=$!
 
@@ -64,27 +64,27 @@ shard_work="$work/llvm-sharded-association"
 (
   set -e
   run sim --set sim.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --setup-only \
-    --set sim.backend=llvm --workdir "$shard_work"
+    --set sim.tune.backend=llvm --workdir "$shard_work"
   mv "$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.cpp" \
      "$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.color-eval-0.cpp"
   run sim --set sim.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --run-only \
-    --set sim.backend=llvm --workdir "$shard_work"
+    --set sim.tune.backend=llvm --workdir "$shard_work"
   for prp in "${LLVM_ONLY_PRPS[@]}"; do
-    run sim --set sim.jobs="$BRANCH_JOBS" "$prp" --set sim.backend=llvm --workdir "$work/llvm-only"
+    run sim --set sim.jobs="$BRANCH_JOBS" "$prp" --set sim.tune.backend=llvm --workdir "$work/llvm-only"
   done
 ) &
 shard_pid=$!
 
 # Reusing a workdir must remove the previous backend's circuit artifacts,
 # including the separately generated compact definitions. Then switch back.
+# Every iteration names its backend: in a reused workdir an unset knob is
+# whatever the workdir's tune data resolves, not necessarily slop.
 switch_work="$work/backend-switch"
 (
   set -e
   for backend in llvm slop llvm; do
-    backend_args=()
-    [ "$backend" = "slop" ] || backend_args=(--set "sim.backend=$backend")
     run sim inou/prp/tests/sim/loop_hierarchy.prp --set sim.jobs="$BRANCH_JOBS" --set sim.checkpoint=false \
-      ${backend_args[@]+"${backend_args[@]}"} --workdir "$switch_work"
+      --set "sim.tune.backend=$backend" --workdir "$switch_work"
     if [ "$backend" = slop ]; then
       switch_objects=("$switch_work"/sim/*.llvm.o)
       [ ! -e "${switch_objects[0]}" ] || fail "backend switch retained LLVM kernels"
@@ -121,14 +121,14 @@ grep -q 'llvm_inline .* | .*llvm_sim_link' "$work"/llvm/sim/build.ninja \
   || fail "LLVM native object does not depend on the version-matched link helper"
 
 wide_objects=("$work"/llvm/sim/smoke.llvm_wide.color-kernel-*.llvm.o)
-[ -f "${wide_objects[0]}" ] || fail "sim.backend=llvm did not emit the wide kernel in LLVM"
+[ -f "${wide_objects[0]}" ] || fail "sim.tune.backend=llvm did not emit the wide kernel in LLVM"
 
 grep -q '__state_commit.*= true' "$work"/llvm/sim/smoke.llvm_reg.cpp \
   || fail "LLVM register kernel did not retain the phase-barrier commit"
 
 adapters=("$work"/llvm*/sim/*.color-kernel-*.cpp)
 [ ! -e "${adapters[0]}" ] \
-  || fail "sim.backend=llvm emitted redundant per-color C++ ABI adapters"
+  || fail "sim.tune.backend=llvm emitted redundant per-color C++ ABI adapters"
 ! grep -q 'color-kernel-[^"]*\.cpp"' "$work"/llvm/sim/gen_digests.json \
   || fail "LLVM generation manifest recorded a deleted C++ kernel adapter"
 

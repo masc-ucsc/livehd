@@ -79,7 +79,7 @@ refute "generated simulator still contains Taskflow" -Eq 'taskflow|tf::Executor|
 commit_body="$(sed -n '/::__color_commit(std::size_t/,/^}/p' "$body")"
 # A scalar (non-pipelined) commit lands the pending value with a plain
 # assignment: the dynamic `__state_commit` flag already says the capture ran
-# (and, under sim.color_dirty, that D != Q), so slop_update's compare-on-write
+# (and, under sim.tune.dirty=on, that D != Q), so slop_update's compare-on-write
 # would only repeat work. Without dirty gating the flag is read as a select
 # (`q = flag ? q_din : q`): a data-driven enable mispredicts as a branch. A
 # pipe stage still needs slop_update (it carries its own per-stage change bit).
@@ -93,8 +93,11 @@ refute "standalone BUILD requests toolchain-specific ThinLTO" -q 'thin_lto' "$wo
 
 # Host-compile and execute the exact generated source, including checkpointing.
 # This and the relative-workdir run below are separate ~6s host builds over
-# separate workdirs, so start both and collect them in turn.
-"$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 --workdir "$work/run" -q >/dev/null &
+# separate workdirs, so start both and collect them in turn. A profiling run
+# (the sim.tune.profile=auto default with a fresh --workdir) takes no
+# checkpoints, so pin it off to keep the checkpoint path executing.
+"$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 --set sim.tune.profile=off \
+  --workdir "$work/run" -q >/dev/null &
 run_pid=$!
 
 # A relative workdir must remain valid now that no staged include path is needed.

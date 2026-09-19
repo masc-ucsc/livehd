@@ -46,8 +46,8 @@ grep -q '\.read<' "$body" || fail "ordering-none read was not emitted"
 
 # Unknown source literals are drawn once, not on every period, and must not
 # disable color dirty-gating/quiescence. Enable the optional activation cache
-# explicitly: sim.color_dirty defaults to false.
-"$LHD" sim "$X_PRP" --set sim.color_dirty=true --setup-only --workdir "$work/xconst" -q >/dev/null
+# explicitly: sim.tune.dirty resolves to off when nothing else decides it.
+"$LHD" sim "$X_PRP" --set sim.tune.dirty=on --setup-only --workdir "$work/xconst" -q >/dev/null
 xplan="$(ls "$work"/xconst/sim/*packer.color-plan.txt | head -1)"
 xbody="$(ls "$work"/xconst/sim/*packer.cpp | head -1)"
 grep -q 'runtime-random false' "$xplan" || fail "unknown literal was misclassified as runtime randomness"

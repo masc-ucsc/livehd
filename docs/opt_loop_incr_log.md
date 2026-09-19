@@ -110,7 +110,7 @@ time is a net loss disguised as a win. That is ruling **I3**.
 | **I6** | **The loop starts now.** Every milestone — including the shared substrate — is a **lever** drawn one at a time and measured, not a prerequisite phase. Ordering constraints live on the individual levers (§7), not on the calendar. The one exception is the harness (§6): nothing below is meaningful until the numbers are trustworthy. |
 | **I7** | **One lever per iteration; the ledger is the product.** A two-change iteration cannot be attributed. A measured negative result is recorded and is worth as much as a positive one. |
 | **I11** | **Numbers are per-host and per-baseline; nothing in this document is a target.** Every figure printed here is a proxy from one machine (see the banner above). The loop takes its own baseline on its own host before gating anything, stamps `host` / `lhd_git_sha` / `lhdsuite_git_sha` / `pdk_version` on every ledger row, and compares **only deltas within one host**. A cross-host or cross-baseline comparison is not evidence and must never appear in a land/revert decision. Re-baseline after any PDK change (T6), toolchain change, or move to a different box. |
-| **I8** | **No per-design tuning.** Every lever must be a shared default that works on all targets. The only user action a warm build may require is naming a `--workdir`; per-design cache knobs are out of scope, exactly as per-design synthesis options are in the sibling loop. |
+| **I8** | **No per-design tuning.** Every lever must be a shared default that works on all targets. The only user action a warm build may require is naming a `--workdir`; per-design cache knobs are out of scope, exactly as per-design synthesis options are in the sibling loop. *(Amended 2026-09-18 by **I14** in [`opt_loop_incr.md`](opt_loop_incr.md) §9: tool-MEASURED per-design `*.tune.*` speed/QoR decisions are allowed; per-design cache knobs stay out of scope.)* |
 | **I9** | **Current XS synthesis targets are `xs_alu` (routine smoke), `Dispatch` (next medium target), and `xs_rob` (periodic stress); `xs_backend` is excluded because it is too large for useful iteration latency.** LEC stays on dino/minion, whose paired Verilog/Pyrope sources provide a real oracle. A 2026-08-17 import-cone audit of the checked-in Backend snapshot found `Rob` = 566,236 lines, `Dispatch` = 832,115, `Rename` = 378,907, and `Backend` = 2,578,417. There are not two additional >1M-line sub-block cones in this snapshot; do not relabel smaller blocks to satisfy that threshold. A later `xs_rob` probe reached the 30-minute ABC cap without completing its first region, so it is not an every-edit target at the current partition grain. If more scale points are needed before another snapshot is imported, use `Dispatch` first, then `CtrlBlock`/`MemBlock`, based on measured runtime rather than the top file's line count. |
 | **I10** | **One ledger, shared with `opt_loop_synth`; rows carry a `flow` field.** Both loops run on the same box, PDK and lhd sha, and they interact in both directions (an abc recipe change moves cache hit rate; a cache-key change changes which QoR number is being reported). Ownership split: the abc **key and salt soundness fixes** (F5/F8, i.e. that plan's W4.1/W4.2) are implemented **here** and consumed there; the abc **recipe/arithmetic/partition knobs** are theirs and never touched here. |
 
@@ -177,7 +177,7 @@ whether it lands or reverts.
 | synthesis `pass.abc` | `<wd>/abc_cache/` + `abc_cache_pre/` (two GraphLibraries + json) | region **module name** `<top>__c<N>` + verbatim recipe | **exact structural compare vs the stored old graph**, traversal-bijection fallback | **manual** `"abc-incr-v6"` + liberty content + modes (`pass/abc/abc_incr.cpp:528`) | user `--workdir` **and** `lhd.incremental` |
 | STA `pass.opentimer` (**I-7, landed 2026-08-24**) | `<wd>/sta_cache/sta_cache.json` (one record per netlist, 32 max) | 128-bit **netlist** canonical digest (Merkle, through every region body) + a 64-bit environment hash (timing-file CONTENT, `--top`, `hier`, `margin`, `--stats`) | digest only | **auto** `kStaSrcSalt` (`pass/opentimer/BUILD` genrule over the pass + `pass/partition` + the `@opentimer` pin) | user `--workdir` **and** `lhd.incremental` |
 | sim `inou.cgen.sim` | `<odir>/gen_digests.json` | module name | **64-bit single-lane FNV**, traversal-order and name sensitive, **not hierarchical** (`inou/cgen/cgen_sim.cpp:1994`) | **manual** `kSimGenVersion = "simgen-62"` (`cgen_sim.cpp:2110`) | any `--emit-dir sim:` odir; `--workdir` only indirectly |
-| sim host build | `<wd>/sim/build.ninja` | mtime + depfile | — | — | ninja on PATH |
+| sim host build | `<wd>/sim/build.ninja` | mtime + depfile; small TUs compile through `<wd>/sim/unity/unity-<k>.cpp` batches (name-hash buckets, write-if-different, depfile names every member), so an edit rebuilds its batch | — | — | ninja on PATH |
 | color kernel reuse (intra-run) | memory | 128-bit class hash | occurrence verify | — | always |
 | `color_reduce` (intra-run) | memory | private 2-lane digest | exact walk | — | `pass.color reduce` |
 
@@ -1594,7 +1594,8 @@ Each iteration:
 
 1. **Pick one lever** from §7 (I7). Respect its stated dependencies.
 2. **Check the shared-default constraint (I8).** If it only helps with
-   per-design tuning, it is out of scope; record it under "future work" at the
+   per-design tuning, it is out of scope (I14 admits measured `*.tune.*`
+   speed/QoR decisions, not cache knobs); record it under "future work" at the
    bottom of the ledger and pick another.
 3. **Measure** on the flow-specific routine set: dino for LEC; `xs_alu` and the
    selected medium XS block for synthesis. Use `xs_rob` periodically as a
@@ -1703,13 +1704,14 @@ Read the SHAPE, not the absolutes (I11). Six durable facts in it:
    re-parsing the single touched 44.6 MB source unit. Everything downstream is
    restored in 1.7 ms. F16/T9 has become the whole cost: the Pyrope PARSER at
    sub-file granularity is now this target's only lever.
-5. **`sim.backend=llvm` is a bad trade on `xs_renametable`,** and this is the
-   first target that shows it at scale: 652,913 ms of `--setup-only` against the
-   slop backend's 32,619 ms (**20×** the codegen) to produce a binary that then
-   runs **3.3× slower** (2,551 ms vs 779 ms for 5,000 cycles). dino (46 vs 39)
-   and minion (3,328 vs 3,126) hint at the same direction; `xs_renametable` makes
-   it unarguable. That is an I3-shaped result about a *backend choice*, not
-   about a lever, and it belongs to whoever owns the llvm backend.
+5. **`sim.tune.backend=llvm` (then spelled `sim.backend=llvm`) is a bad trade
+   on `xs_renametable`,** and this is the first target that shows it at scale:
+   652,913 ms of `--setup-only` against the slop backend's 32,619 ms (**20×**
+   the codegen) to produce a binary that then runs **3.3× slower** (2,551 ms vs
+   779 ms for 5,000 cycles). dino (46 vs 39) and minion (3,328 vs 3,126) hint at
+   the same direction; `xs_renametable` makes it unarguable. That is an
+   I3-shaped result about a *backend choice*, not about a lever, and it belongs
+   to whoever owns the llvm backend.
 6. **minion LEC records `refuted` in every mode** — a real, pre-existing
    correctness failure, not a timing result. The timings are valid (the prover
    reached a verdict) but the phase is not green, so §8 rule 5 is not satisfied
@@ -2382,7 +2384,8 @@ Seven of its nine bazel scenarios pass; the two `*_synth` ones fail only on T15.
   would mask algorithmic regressions in exactly the numbers this loop reads.
   (Same ruling as `opt_loop_synth` §9.)
 - **Per-design cache tuning** (I8). The only user action a warm build may
-  require is naming a `--workdir`.
+  require is naming a `--workdir`. (I14 covers measured speed/QoR `*.tune.*`
+  decisions, not cache knobs.)
 - **Synthesis QoR** — delay, area, recipe, adder architecture, partition shape.
   That is `opt_loop_synth`; this loop must not move those numbers, and §8 rule 2
   will catch it if it does.

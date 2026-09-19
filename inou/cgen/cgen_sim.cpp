@@ -71,6 +71,7 @@
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
 #include "sim_color_plan.hpp"
+#include "sim_tune_rt.hpp"    // kUnknownLiteralHelper / kTuneHashHelper — generated runtime text shared with prp_sim
 #include "split_selfref.hpp"  // //graph — word-level cycle analysis for scheduling
 #include "str_tools.hpp"      // str_tools::ends_with
 
@@ -377,13 +378,15 @@ void inline_single_use_temps(std::string& body) {
   bool                                  changed = true;
   bool                                  any     = false;
   // OWNING keys: a fold rewrites the use line, which would dangle views into
-  // it. A fold never changes any OTHER identifier's count (the initializer's
-  // operands merely move from the dropped line into the use line), so the
-  // counts stay valid for the rest of the pass.
+  // it. A fold never changes any OTHER temporary's count (the initializer's
+  // operands merely move from the dropped line into the use line, and the
+  // folded name leaves both), so ONE count serves every sweep. Recounting per
+  // sweep hashed every identifier of the body once per fixpoint round: most of
+  // this pass's time on minion's multi-MB evaluator bodies, for the same answer.
   absl::flat_hash_map<std::string, int> uses;
+  count_identifier_uses(lines, alive, uses);
   while (changed) {
     changed = false;
-    count_identifier_uses(lines, alive, uses);
     for (size_t i = 0; i < lines.size(); ++i) {
       if (!alive[i]) {
         continue;
@@ -710,32 +713,108 @@ void fold_negated_compares(std::string& body) {
     }
     return args;
   };
-  for (size_t scan = 0;;) {
-    const auto at = body.find(kXor, scan);
-    if (at == std::string::npos) {
-      break;
-    }
-    scan             = at + kXor.size();
-    const size_t open = at + kXor.size() - 1;
-    const auto close = match_delim(body, open, '(', ')');
-    if (close == std::string::npos) {
-      break;
-    }
-    // The receiver: `Slop<N>` (or `Slop_u<N>`) immediately before `::xor_op`.
-    const auto recv_start = body.rfind("Slop", at);
-    if (recv_start == std::string::npos || body.find("::", recv_start) != at) {
-      continue;
-    }
-    const auto args = split_args(std::string_view{body}.substr(open + 1, close - open - 1));
-    if (args.size() != 2) {
-      continue;
-    }
-    for (int ci = 0; ci < 2; ++ci) {
-      const auto konst = unwrap_parens(args[ci]);
-      const auto cmp   = unwrap_parens(args[1 - ci]);
-      if (!konst.ends_with("::create_integer(1)") || !konst.starts_with("Slop")) {
+  // Both sweeps build their output in ONE forward pass. Rewriting in place
+  // (`body.replace` per match) moved the whole tail of the body per fold: on
+  // minion's multi-MB evaluator bodies, with thousands of `!=` compares, that
+  // was most of compact_body_temps. A replacement is swept again on its own
+  // (recursively) -- the in-place version re-scanned from its start -- because
+  // the compare's operands can hold further negated compares; nothing outside
+  // the replacement can, so the scan then resumes after it.
+  std::function<std::string(std::string_view)> fold_xor = [&](std::string_view text) {
+    std::string out;
+    size_t      copied = 0;
+    for (size_t scan = 0;;) {
+      const auto at = text.find(kXor, scan);
+      if (at == std::string_view::npos) {
+        break;
+      }
+      scan              = at + kXor.size();
+      const size_t open = at + kXor.size() - 1;
+      const auto   close = match_delim(text, open, '(', ')');
+      if (close == std::string_view::npos) {
+        break;
+      }
+      // The receiver: `Slop<N>` (or `Slop_u<N>`) immediately before `::xor_op`,
+      // i.e. the last "Slop" before `at` with no "::" between the two. Walked
+      // BACKWARD from `at` by hand: libc++'s string_view::rfind(const char*) is
+      // std::find_end, a FORWARD scan from the start of the text, so it cost
+      // O(body) per xor and made this sweep quadratic (100 ms per 600 KB
+      // evaluator body, eight such bodies on minion).
+      size_t recv_start = std::string_view::npos;
+      for (size_t p = at; p-- > copied;) {
+        if (text.compare(p, 2, "::") == 0) {
+          break;  // another scope ends first: `at` has no Slop receiver
+        }
+        if (text.compare(p, 4, "Slop") == 0) {
+          recv_start = p;
+          break;
+        }
+      }
+      if (recv_start == std::string_view::npos) {
         continue;
       }
+      const auto args = split_args(text.substr(open + 1, close - open - 1));
+      if (args.size() != 2) {
+        continue;
+      }
+      for (int ci = 0; ci < 2; ++ci) {
+        const auto konst = unwrap_parens(args[ci]);
+        const auto cmp   = unwrap_parens(args[1 - ci]);
+        if (!konst.ends_with("::create_integer(1)") || !konst.starts_with("Slop")) {
+          continue;
+        }
+        const auto scope = cmp.find(">::");
+        if (!cmp.starts_with("Slop") || scope == std::string_view::npos || !cmp.ends_with(")")) {
+          continue;
+        }
+        const auto tail = cmp.substr(scope + 3);
+        for (const auto& [from, to] : kNeg) {
+          if (!tail.starts_with(from)) {
+            continue;
+          }
+          // The compare must BE the whole operand, not a sub-term.
+          if (match_delim(tail, from.size() - 1, '(', ')') != tail.size() - 1) {
+            break;
+          }
+          // Keep the XOR's own receiver width: the negated compare lands where
+          // the xor did.
+          out.append(text.substr(copied, recv_start - copied));
+          out.append(fold_xor(absl::StrCat(text.substr(recv_start, at - recv_start), "::", to, tail.substr(from.size()))));
+          copied = close + 1;
+          scan   = copied;
+          break;
+        }
+        break;
+      }
+    }
+    if (copied == 0) {
+      return std::string(text);
+    }
+    out.append(text.substr(copied));
+    return out;
+  };
+  body = fold_xor(body);
+
+  // Second spelling of the same chain. `Xor(x, 1)` on a ONE-BIT x IS the
+  // all-ones complement at that width, so the Xor arm emits it as
+  // `Slop_u<1>::not_op(x)` -- still the negated compare when x is one, and only
+  // at width 1 (a wider Slop_u complement is 2^N-1-x, not 1-x).
+  static constexpr std::string_view kNot1 = "Slop_u<1>::not_op(";
+  std::function<std::string(std::string_view)> fold_not1 = [&](std::string_view text) {
+    std::string out;
+    size_t      copied = 0;
+    for (size_t scan = 0;;) {
+      const auto at = text.find(kNot1, scan);
+      if (at == std::string_view::npos) {
+        break;
+      }
+      scan               = at + kNot1.size();
+      const size_t open  = at + kNot1.size() - 1;
+      const auto   close = match_delim(text, open, '(', ')');
+      if (close == std::string_view::npos) {
+        break;
+      }
+      const auto cmp   = unwrap_parens(text.substr(open + 1, close - open - 1));
       const auto scope = cmp.find(">::");
       if (!cmp.starts_with("Slop") || scope == std::string_view::npos || !cmp.ends_with(")")) {
         continue;
@@ -745,56 +824,23 @@ void fold_negated_compares(std::string& body) {
         if (!tail.starts_with(from)) {
           continue;
         }
-        // The compare must BE the whole operand, not a sub-term.
         if (match_delim(tail, from.size() - 1, '(', ')') != tail.size() - 1) {
           break;
         }
-        // Keep the XOR's own receiver width: the negated compare lands where
-        // the xor did.
-        auto replacement = absl::StrCat(std::string_view{body}.substr(recv_start, at - recv_start), "::", to,
-                                        tail.substr(from.size()));
-        body.replace(recv_start, close + 1 - recv_start, replacement);
-        scan = recv_start;
+        out.append(text.substr(copied, at - copied));
+        out.append(fold_not1(absl::StrCat("Slop_u<1>::", to, tail.substr(from.size()))));
+        copied = close + 1;
+        scan   = copied;
         break;
       }
-      break;
     }
-  }
-
-  // Second spelling of the same chain. `Xor(x, 1)` on a ONE-BIT x IS the
-  // all-ones complement at that width, so the Xor arm emits it as
-  // `Slop_u<1>::not_op(x)` -- still the negated compare when x is one, and only
-  // at width 1 (a wider Slop_u complement is 2^N-1-x, not 1-x).
-  static constexpr std::string_view kNot1 = "Slop_u<1>::not_op(";
-  for (size_t scan = 0;;) {
-    const auto at = body.find(kNot1, scan);
-    if (at == std::string::npos) {
-      break;
+    if (copied == 0) {
+      return std::string(text);
     }
-    scan               = at + kNot1.size();
-    const size_t open  = at + kNot1.size() - 1;
-    const auto   close = match_delim(body, open, '(', ')');
-    if (close == std::string::npos) {
-      break;
-    }
-    const auto cmp   = unwrap_parens(std::string_view{body}.substr(open + 1, close - open - 1));
-    const auto scope = cmp.find(">::");
-    if (!cmp.starts_with("Slop") || scope == std::string_view::npos || !cmp.ends_with(")")) {
-      continue;
-    }
-    const auto tail = cmp.substr(scope + 3);
-    for (const auto& [from, to] : kNeg) {
-      if (!tail.starts_with(from)) {
-        continue;
-      }
-      if (match_delim(tail, from.size() - 1, '(', ')') != tail.size() - 1) {
-        break;
-      }
-      body.replace(at, close + 1 - at, absl::StrCat("Slop_u<1>::", to, tail.substr(from.size())));
-      scan = at;
-      break;
-    }
-  }
+    out.append(text.substr(copied));
+    return out;
+  };
+  body = fold_not1(body);
 }
 
 // `(Slop<2>::eq_op(a, b)).is_known_true()` materializes a compare only to read
@@ -914,7 +960,7 @@ void compact_body_temps(std::string& body) {
 }
 
 // Split every LHD_SIM_COLD member in `text` into noinline, unoptimized lambdas
-// of at most kColdChunkStatements top-level statements.
+// of at most `chunk_statements` top-level statements.
 //
 // The checkpoint/debug/reset members are one statement per state field. On XS
 // Rob each is 7-16 MB of straight-line code, and clang's backend time on ONE
@@ -926,8 +972,7 @@ void compact_body_temps(std::string& body) {
 // `return` before the tail (it would return from the lambda instead), a local
 // declared after the first statement (a later chunk could not see it), or
 // unbalanced braces.
-std::string chunk_cold_members(std::string_view text) {
-  constexpr size_t kColdChunkStatements = 2000;
+std::string chunk_cold_members(std::string_view text, size_t chunk_statements = 2000) {
 
   std::vector<std::string_view> lines;
   for (size_t pos = 0; pos < text.size();) {
@@ -959,13 +1004,82 @@ std::string chunk_cold_members(std::string_view text) {
     }
     return delta;
   };
-  const auto is_declaration = [](std::string_view line) {
-    static const std::regex decl(R"(^\s*(const\s+)?(auto|std::[\w:]+|u?int\d+_t)\s+[A-Za-z_]\w*\s*(=|\{))");
-    return std::regex_search(line.begin(), line.end(), decl);
+  // Hand-written matchers, not std::regex: these run once per line of every
+  // cold member (millions of lines on minion), and libc++'s regex engine was
+  // ~0.3 s of cgen there. Same languages as the regexes they replace:
+  //   is_declaration: ^\s*(const\s+)?(auto|std::[\w:]+|u?int\d+_t)\s+[A-Za-z_]\w*\s*(=|\{)
+  //   has_return:     \breturn\b
+  const auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; };
+  const auto is_word  = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_'; };
+  const auto is_declaration = [&](std::string_view line) {
+    size_t p = 0;
+    while (p < line.size() && is_space(line[p])) {
+      ++p;
+    }
+    // `const\s+` is optional; when the rest fails after it, the regex retried
+    // from here without it, where `const` cannot start a type -- so taking it
+    // whenever it is present decides the same.
+    if (line.substr(p).starts_with("const") && p + 5 < line.size() && is_space(line[p + 5])) {
+      p += 5;
+      while (p < line.size() && is_space(line[p])) {
+        ++p;
+      }
+    }
+    const auto rest = line.substr(p);
+    if (rest.starts_with("auto")) {
+      p += 4;
+    } else if (rest.starts_with("std::")) {
+      size_t q = p + 5;
+      while (q < line.size() && (is_word(line[q]) || line[q] == ':')) {
+        ++q;
+      }
+      if (q == p + 5) {
+        return false;
+      }
+      p = q;
+    } else {
+      size_t q = p;
+      if (q < line.size() && line[q] == 'u') {
+        ++q;
+      }
+      if (!line.substr(q).starts_with("int")) {
+        return false;
+      }
+      q += 3;
+      const size_t digits = q;
+      while (q < line.size() && std::isdigit(static_cast<unsigned char>(line[q])) != 0) {
+        ++q;
+      }
+      if (q == digits || !line.substr(q).starts_with("_t")) {
+        return false;
+      }
+      p = q + 2;
+    }
+    if (p >= line.size() || !is_space(line[p])) {
+      return false;
+    }
+    while (p < line.size() && is_space(line[p])) {
+      ++p;
+    }
+    if (p >= line.size() || !(std::isalpha(static_cast<unsigned char>(line[p])) != 0 || line[p] == '_')) {
+      return false;
+    }
+    while (p < line.size() && is_word(line[p])) {
+      ++p;
+    }
+    while (p < line.size() && is_space(line[p])) {
+      ++p;
+    }
+    return p < line.size() && (line[p] == '=' || line[p] == '{');
   };
-  const auto has_return = [](std::string_view line) {
-    static const std::regex ret(R"(\breturn\b)");
-    return std::regex_search(line.begin(), line.end(), ret);
+  const auto has_return = [&](std::string_view line) {
+    for (auto at = line.find("return"); at != std::string_view::npos; at = line.find("return", at + 1)) {
+      const size_t end = at + 6;
+      if ((at == 0 || !is_word(line[at - 1])) && (end == line.size() || !is_word(line[end]))) {
+        return true;
+      }
+    }
+    return false;
   };
   const auto is_return = [](std::string_view line) {
     const auto first = line.find_first_not_of(' ');
@@ -1031,7 +1145,7 @@ std::string chunk_cold_members(std::string_view text) {
         }
       }
     }
-    if (!safe || epilogue - prologue <= kColdChunkStatements) {
+    if (!safe || epilogue - prologue <= chunk_statements) {
       for (size_t l = i; l <= end; ++l) {
         put(lines[l]);
       }
@@ -1043,9 +1157,9 @@ std::string chunk_cold_members(std::string_view text) {
     for (size_t u = 0; u < prologue; ++u) {
       put(lines[units[u].first]);
     }
-    for (size_t u = prologue; u < epilogue; u += kColdChunkStatements) {
+    for (size_t u = prologue; u < epilogue; u += chunk_statements) {
       put("  [&]() LHD_SIM_COLD {");
-      const size_t last = std::min(epilogue, u + kColdChunkStatements) - 1;
+      const size_t last = std::min(epilogue, u + chunk_statements) - 1;
       for (size_t l = units[u].first; l <= units[last].second; ++l) {
         put(lines[l]);
       }
@@ -1063,9 +1177,15 @@ std::string chunk_cold_members(std::string_view text) {
 }
 
 // Rewrite the LHD_SIM_COLD members appended since `mark` (see chunk_cold_members).
-void chunk_cold_region(File_output& out, size_t mark) {
+// `chunk` bounds the statements per lambda. The sim.tune walkers use a much
+// smaller one: their statements are tiny and uniform, and AArch64's Machine
+// InstCombiner is superlinear in function size even under optnone -- measured
+// on XS Rob's 162k-statement walker, 2000-statement chunks compiled in 33.6 s
+// and 128-statement chunks in 5.3 s.
+inline constexpr size_t kTuneColdChunkStatements = 128;
+void chunk_cold_region(File_output& out, size_t mark, size_t chunk = 2000) {
   const auto text = out.detach_from(mark);
-  out.append(chunk_cold_members(text));
+  out.append(chunk_cold_members(text, chunk));
 }
 }  // namespace
 
@@ -1129,12 +1249,13 @@ hhds::Pin_class Cgen_sim::find_driver_pin(const hhds::Node_class& node, std::str
 }
 
 namespace {
-// The sim.unknown_zero=false runtime x-fill, emitted after `#include
-// "slop.hpp"` into every generated prelude (the module header AND the
-// standalone canonical-kernel .cpp files, which do not include that header).
-// The include guard makes a second copy inside one translation unit -- two
-// module headers -- a no-op; identical copies across TUs are ordinary header
-// semantics.
+// The `?`-literal runtime (livehd::sim::kUnknownLiteralHelper, sim_tune_rt.hpp)
+// is emitted after `#include "slop.hpp"` into every generated prelude (the
+// module header AND the standalone canonical-kernel .cpp files, which do not
+// include that header), and prp_sim emits the same bytes into drv.cpp. The
+// include guard makes a second copy inside one translation unit -- two module
+// headers, or a header plus the driver's copy -- a no-op; identical copies
+// across TUs are ordinary header semantics.
 //
 // Drawing ONCE per (width, spelling) is required, not an optimization. The same
 // LGraph constant is emitted at several sites (the color writing `__out` and
@@ -1142,24 +1263,14 @@ namespace {
 // draw per site would hand ONE net two different values. A function template's
 // local static is a single object across every TU, so the key collapses them;
 // it also initializes on FIRST CALL, which is after main() has run
-// hlop_set_random_seed() -- a namespace-scope object would instead be
-// initialized before main and could never see `--seed`.
+// hlop_set_random_seed() (and applied a run-time `--set sim.unknown_zero=true`)
+// -- a namespace-scope object would instead be initialized before main and
+// could never see `--seed`.
 //
 // Two DISTINCT nets that carry the same spelling at the same width share the
 // draw. That is the deliberate reading: an x constant has one value per run.
-constexpr std::string_view kUnknownLiteralHelper
-    = "#ifndef LHD_SIM_UNKNOWN_LITERAL\n"
-      "#define LHD_SIM_UNKNOWN_LITERAL\n"
-      "// One parse per (width, spelling) for the whole program. Serves the\n"
-      "// sim.unknown_zero=false case -- the `?` bits are drawn once from hlop's\n"
-      "// seeded PRNG, on first call, after main() sets the seed -- and every\n"
-      "// literal too wide to constant-evaluate.\n"
-      "template <int W, unsigned long long K>\n"
-      "inline Slop<W> __lhd_unknown_literal(const char* __txt) {\n"
-      "  static const Slop<W> __v = Slop<W>::from_pyrope(__txt);\n"
-      "  return __v;\n"
-      "}\n"
-      "#endif\n";
+using livehd::sim::kTuneHashHelper;
+using livehd::sim::kUnknownLiteralHelper;
 
 // Pyrope text for a constant. Under sim.unknown_zero every UNKNOWN bit is
 // forced to 0 here; otherwise the `?` characters SURVIVE into the emitted
@@ -3256,6 +3367,13 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // simgen-62: the opt-in LLVM backend emits every supported canonical color
 // kernel, including classes with one occurrence, as a native object plus a
 // narrow packed-word ABI adapter.
+// simgen-65: sim.tune (sim_profile.md P0/P1). The tune vector (dirty / fence /
+// live_words / backend) is folded into the COLOR ROOT's key only, as its
+// canonical tv1 text; the emitter-debug env switches are keyed; every module
+// gains the cold `__tune_hash` / `__tune_count` state walkers and the shared
+// canonical-hash helper; an executable root gains `<stem>.tune-id.cpp`, the
+// `__tune_support()` / `__tune_sources()` declarations and `<stem>.tune.cpp`.
+// The `?` helper became the shared V2 text (run-time zero fill, draw counter).
 // simgen-64: a literal wider than 2048 bits goes through the shared
 // __lhd_unknown_literal<W,K> helper instead of a `constexpr` local. Past that
 // width the digit-by-digit from_pyrope parse exceeds clang's -fconstexpr-steps
@@ -3327,7 +3445,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // unknown memory power-on fills per ENTRY instead of through one whole-array
 // Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
 // parent with a stale child that declares no `refresh_negedge()`.
-static constexpr std::string_view kSimGenVersion = "simgen-64";
+static constexpr std::string_view kSimGenVersion = "simgen-65";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) { return livehd::hash_util::fnv1a64_u64(v, h); }
 static inline uint64_t fnv1a_str(uint64_t h, std::string_view s) {
@@ -3586,21 +3704,52 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
   gd          = fnv1a(gd, compact_kernel_ ? 1u : 0u);
   gd          = fnv1a(gd, runtime_support_on ? 1u : 0u);
   gd          = fnv1a(gd, slop_u_ ? 1u : 0u);
-  gd          = fnv1a(gd, color_dirty_ ? 1u : 0u);
   gd          = fnv1a(gd, debug_ ? 1u : 0u);
   gd          = fnv1a(gd, unknown_zero_ ? 1u : 0u);
+  // Conservative: every emission read of the backend sits inside a color root,
+  // and the root set it changes is already keyed by the color_root bit below,
+  // but a backend flip regenerating everything is cheap insurance.
   gd          = fnv1a(gd, llvm_backend_ ? 1u : 0u);
+  gd          = fnv1a(gd, env_.bits());
   // `dut_` is NOT implied by `is_top`: with an empty --top every module reports
   // is_top, while dut_ additionally requires the module not to be instantiated.
   // It selects version-gated `__in` forwarding and the `__color_port_ver_*`
   // boundary refresh, so a body generated for one must never be reused as the
   // other (a dut_=false body reused as the DUT ignores every driver poke).
   gd          = fnv1a(gd, (color_root ? 2u : 0u) | (observation_on ? 1u : 0u) | (dut_ ? 4u : 0u));
-  gd          = fnv1a(gd, live_words_);
-  gd          = fnv1a(gd, static_cast<uint64_t>(fence_ratio_));
+  // The sim.tune vector, ROOT ONLY (see tune_dirty()): every knob in it reaches
+  // the code through the root's plan or the root's emission, so folding it into
+  // a non-root key would regenerate (and recompile) the whole tree on a tune
+  // flip for byte-identical output. The canonical text also makes spellings
+  // that build the same plan (live_words 0 vs 256, fence -1 vs 16) key alike.
+  if (color_root) {
+    gd = fnv1a_str(gd, tune_vector_);
+  }
   char hex[17];
   std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
   return hex;
+}
+
+Cgen_sim::Sim_env Cgen_sim::Sim_env::read() {
+  Sim_env env;
+  env.nogate   = ::getenv("LIVEHD_SIM_NOGATE") != nullptr;
+  env.nolazy   = ::getenv("LIVEHD_SIM_NOLAZY") != nullptr;
+  env.noinline = ::getenv("LIVEHD_SIM_NOINLINE") != nullptr;
+  return env;
+}
+
+bool Cgen_sim::tune_dirty() const {
+  // An explicit check, not I(): iassert compiles away under NDEBUG, and this
+  // guards cache soundness in the build users run. The error is also what
+  // keeps the module's Gen_record from being written (fail closed).
+  if (!emitting_color_root_ && !tune_misuse_reported_) [[unlikely]] {
+    tune_misuse_reported_ = true;
+    livehd::diag::err("inou.cgen.sim", "tune-knob-outside-root", "internal")
+        .msg("sim.tune.dirty was read while emitting a module that is not a color root")
+        .hint("the tune vector is folded into the color root's generation key only; a non-root read would be served stale")
+        .emit();
+  }
+  return tune_.dirty;
 }
 
 bool Cgen_sim::generation_current(hhds::Graph* g, bool color_root) {
@@ -3931,6 +4080,8 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
 }
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
+  emitting_color_root_ = false;  // set below, once this module's color_root verdict is known
+  emitted_files_.clear();        // the Gen_record lists THIS module's artifacts only
   pin2var.clear();
   slop_u_values_.clear();
   slop_u_binding_width_.clear();
@@ -3997,8 +4148,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // `top` may be the bare entity or the full internal `file.entity` name — the
   // full form is the only spelling that disambiguates two same-entity modules.
   const bool is_top             = top.empty() || entity == top || gname == top;
+  //
+  // `color_root` must agree with the caller's plan hand-out (inou_cgen.cpp's
+  // `root` for the pre-plan probe and its plan loop): the key folds the tune
+  // vector only for a root, so a disagreement is a stale hit or a permanent
+  // miss. In practice color_root <=> a plan was handed.
   const bool color_root         = (is_top || compact_kernel_) && color_plan_ != nullptr;
   const bool color_storage_only = !color_root && !compact_kernel_;
+  // iface.json `executable:true`: the class a testbench drives, which owns the
+  // tune identity TU and the tune support tables.
+  const bool executable_root    = color_root && !compact_kernel_;
+  emitting_color_root_          = color_root;
 
   // Liveness: only logic something REAL consumes gets emitted — backward BFS
   // from the sinks (IO nodes cover the graph outputs; state elements, Memory
@@ -4094,6 +4254,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
   }
+  // The sim.tune identity TU and support tables belong to an EXECUTABLE root
+  // only (an LLVM compact root is a root but not executable). `lhd sim`
+  // compiles every *.cpp in the directory, so a stale one would keep a dead
+  // identity in the link. A module's own `<stem>.cpp` always has a `.hpp` next
+  // to it, which is how a module literally named `<fstem>.tune` is told apart
+  // from this module's support TU.
+  if (!odir.empty() && !executable_root) {
+    std::error_code ec;
+    for (const std::string_view suffix : {".tune-id", ".tune"}) {
+      const auto stem = absl::StrCat(odir, "/", fstem, suffix);
+      if (!std::filesystem::exists(absl::StrCat(stem, ".hpp"), ec)) {
+        std::filesystem::remove(absl::StrCat(stem, ".cpp"), ec);
+      }
+    }
+  }
   auto hout = open_out(absl::StrCat(fstem, ".hpp"));  // interface
   auto fout = open_out(absl::StrCat(fstem, ".cpp"));  // definitions ("the slop")
 
@@ -4107,6 +4282,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       "#pragma once\n#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n#include <vector>\n"
       "#include \"slop.hpp\"\n#include \"memory.hpp\"\n");
   hout->append(kUnknownLiteralHelper);
+  // The canonical state hash the sim.tune walkers (__tune_hash below) and a
+  // root's __tune_sources write words with. Every module header carries it, so
+  // the walkers of any module compile without a root in the TU.
+  hout->append(kTuneHashHelper);
   hout->append(
       "#ifndef LHD_SIM_PRESERVE_LOOP\n"
       "#if defined(__clang__)\n"
@@ -5520,7 +5699,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         hout->append("  uint32_t __bcast_ver_", member, " = 0;  // version last broadcast\n");
       }
     }
-    const bool gate_loop = vcd_file.empty() && ::getenv("LIVEHD_SIM_NOGATE") == nullptr;
+    const bool gate_loop = vcd_file.empty() && !env_.nogate;
     if (gate_loop) {
       hout->append("  uint64_t __done_publish = 0, __kids_publish = 0, __done_advance = 0, __kids_advance = 0;\n");
     }
@@ -5826,6 +6005,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         "  std::uint64_t design_hash() const { std::uint64_t h = 14695981039346656037ULL; auto fold = [&](std::uint64_t v) { "
         "LHD_SIM_PRESERVE_LOOP for (int b = 0; b < 8; ++b) { h ^= (v >> (b * 8)) & 0xffU; h *= 1099511628211ULL; } }; fold(count); "
         "LHD_SIM_PRESERVE_LOOP for (const auto& lane : lanes) fold(lane.design_hash()); return h; }\n");
+    // sim.tune walkers: the STORED lanes, in ordinal order (a shared stateless
+    // lane writes no words). Inline, so they cost nothing unless called.
+    hout->append(
+        "  void __tune_hash(std::uint64_t*& __lhd_to, bool = false) const { LHD_SIM_PRESERVE_LOOP for (std::size_t i = 0; i < "
+        "storage_count; ++i) lanes[i].__tune_hash(__lhd_to); }\n");
+    hout->append(
+        "  std::size_t __tune_count(bool = false) const { std::size_t n = 0; LHD_SIM_PRESERVE_LOOP for (std::size_t i = 0; i < "
+        "storage_count; ++i) n += lanes[i].__tune_count(); return n; }\n");
     hout->append(
         "  void describe_signals(const std::string& p, std::vector<hlop::ckpt::Signal>& v) const { LHD_SIM_PRESERVE_LOOP for "
         "(std::size_t i = 0; i < "
@@ -7284,6 +7471,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append(
       "  void load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir);\n");
   hout->append("  std::uint64_t design_hash() const;\n");
+  // sim.tune state walkers (sim_profile.md §6.1): one canonical word per stored
+  // state element, pre-order through the sub-instances, then -- only when the
+  // caller says this instance is the DUT root -- the driven inputs. Declared and
+  // defined for EVERY module, whatever the build flavour, so the text is
+  // identical across tune vectors and profiling on/off.
+  hout->append("  void        __tune_hash(std::uint64_t*& __lhd_to, bool __lhd_root = false) const;\n");
+  hout->append("  std::size_t __tune_count(bool __lhd_root = false) const;\n");
+  if (executable_root) {
+    // The root's support tables and source hasher, defined in <stem>.tune.cpp.
+    hout->append("  static const __lhd_tune_support& __tune_support();\n");
+    hout->append("  void __tune_sources(std::uint64_t* __lhd_to) const;\n");
+  }
   // Observability (lhd sim --list-signals / --probe / --break-when): every scalar
   // signal (flop / pipe stage / sync-read reg / input) by hierarchical name.
   hout->append("  void describe_signals(const std::string& _p, std::vector<hlop::ckpt::Signal>& _v) const;\n");
@@ -7916,7 +8115,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // commits keep the stored pair behind until the subtree quiesces. Disabled
     // under VCD (a skipped body would freeze __vcd_tick and the waveform). ----
     std::string gate_done, gate_kids, gate_ksum;
-    if (vcd_file.empty() && ::getenv("LIVEHD_SIM_NOGATE") == nullptr) {
+    if (vcd_file.empty() && !env_.nogate) {
       if (pass_ == Pass::Rise) {
         gate_done = "__done_pos";
         gate_kids = "__kids_pos";
@@ -8852,7 +9051,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // the one arm that deliberately returns a narrower expression (the Get_mask
     // raw pass-through), where the value is an unsigned canonical whose top
     // stored bit is clear, so the ctor's sign-extend equals the zext.
-    const bool forest_ok = ::getenv("LIVEHD_SIM_NOINLINE") == nullptr;
+    const bool forest_ok = !env_.noinline;
     auto       bind_comb = [&](const hhds::Node_class& n, const hhds::Pin_class& dp, const char* tag) {
       sub_width_expr_              = false;
       const int   wb               = wbits_of(dp);
@@ -9278,8 +9477,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // BEFORE the din block here instead of after. Latch windows keep their
       // unconditional evaluation (transparency semantics), and VCD builds keep
       // the eager form (an X-window dump reads dins the gate would skip).
-      const bool  lazy_guard = !f.is_latch && !latch_low && !latch_high && vcd_file.empty()
-                               && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
+      const bool  lazy_guard = !f.is_latch && !latch_low && !latch_high && vcd_file.empty() && !env_.nolazy
                                && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
       std::string gcond;
       if (lazy_guard) {
@@ -9717,7 +9915,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // behavior-identical. The ports the loop skips below (reads, invalid
         // addr/din, const-false enable) are exactly the ones stage_through skips
         // too, so nothing that was meant to survive is dropped.
-        const bool lazy_wr = vcd_file.empty() && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr;
+        const bool lazy_wr = vcd_file.empty() && !env_.nolazy;
         bool       cleared = false;
         for (const auto& p : m.ports) {
           if (p.rd || p.addr.is_invalid() || p.din.is_invalid()) {
@@ -10403,6 +10601,84 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     fout->append("  return false;\n}\n");
     chunk_cold_region(*fout, debug_members_mark);
+  }
+
+  // ---- sim.tune state walkers (sim_profile.md §6.1) -------------------------
+  // `__tune_hash` writes one canonical word (__lhd_tune_h) per STORED state
+  // element: dump_state's element set, in dump_state's order -- flop pipeline
+  // stages then Q (latches included), the de-duplicated secondary-clock
+  // `__clkprev_*` bits, and per memory the memory then its sync-read `_q<n>`
+  // registers -- then recurses into each sub-instance (a compact loop walks its
+  // stored lanes), then, only when `__lhd_root`, this module's `__in` input
+  // fields in port order except the reference clock (the cycle model never
+  // toggles it, and a word that changed every cycle would make no pair look
+  // quiescent). `__tune_count(root)` is exactly the number of words written.
+  //
+  // Everything DERIVED is out: `_din`/`_cen`, root-only `_q<n>_din`,
+  // `__color_whole_*`, `__out`/`__last_out`, `__gen`/`__done_*`/`__kids_*`,
+  // `__fwd_*`/`__ver_*`/`*__tick`, the whole `__Color_runtime`, and a non-root
+  // `__in` (observation-only slots, stale in performance builds). What remains
+  // depends on the module's own state layout, sub list and ports -- never on
+  // the tune vector, the plan, profiling, or the build flavour -- so the text is
+  // byte-identical across all of them, and the walkers read stored state only.
+  //
+  // Emitted for EVERY module, outside the runtime_support gate: the profiler
+  // and the end-of-test digest run in lean builds too.
+  {
+    const auto tune_mark = fout->mark();
+    size_t     own_words = 0;
+    fout->append("LHD_SIM_COLD void ", mod, "::__tune_hash(std::uint64_t*& __lhd_to, bool __lhd_root) const {\n");
+    const auto put = [&](std::string_view member) {
+      fout->append("  *__lhd_to++ = __lhd_tune_h(", member, ");\n");
+      ++own_words;
+    };
+    for (const auto& f : flops) {
+      for (const auto& st : f.stages) {
+        put(st);
+      }
+      put(f.member);
+    }
+    {
+      absl::flat_hash_set<std::string> emitted;
+      for (const auto& f : flops) {
+        if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+          put(f.prev_member);
+        }
+      }
+    }
+    for (const auto& m : mems) {
+      put(m.member);
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          put(absl::StrCat(m.member, "_q", p.rdidx));
+        }
+      }
+    }
+    for (const auto& s : subs) {
+      fout->append("  ", s.inst, ".__tune_hash(__lhd_to);\n");
+    }
+    size_t in_words = 0;
+    // Always emitted, possibly empty, so `__lhd_root` is always used.
+    fout->append("  if (__lhd_root) {\n");
+    for (const auto& io : ios) {
+      if (io.is_input && io.field != clk_field) {
+        fout->append("    *__lhd_to++ = __lhd_tune_h(__in.", io.field, ");\n");
+        ++in_words;
+      }
+    }
+    fout->append("  }\n}\n");
+
+    fout->append("LHD_SIM_COLD std::size_t ", mod, "::__tune_count(bool __lhd_root) const {\n");
+    fout->append("  std::size_t __lhd_n = ",
+                 std::to_string(own_words),
+                 "u + (__lhd_root ? ",
+                 std::to_string(in_words),
+                 "u : 0u);\n");
+    for (const auto& s : subs) {
+      fout->append("  __lhd_n += ", s.inst, ".__tune_count();\n");
+    }
+    fout->append("  return __lhd_n;\n}\n");
+    chunk_cold_region(*fout, tune_mark, kTuneColdChunkStatements);
   }
 
   if (color_runtime_root) {
@@ -11241,7 +11517,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                          : absl::StrCat("Slop<", consumer.width, ">{", value, "}");
     };
     const auto emit_serial_dirty_consumers = [&](size_t slot_index, std::string_view indent) {
-      if (!color_dirty_) {
+      if (!tune_dirty()) {
         return;
       }
       absl::flat_hash_set<size_t> emitted;
@@ -11253,7 +11529,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     };
     const auto emit_serial_dirty_site_colors = [&](size_t site_index, std::string_view indent) {
-      if (!color_dirty_) {
+      if (!tune_dirty()) {
         return;
       }
       for (const size_t color_index : direct_site_colors[site_index]) {
@@ -12086,7 +12362,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!llvm_backend_) {
           return false;  // the reference backend: the shared C++ body below IS the kernel, not a fallback
         }
-        // sim.backend selects the implementation, not a profitability hint.
+        // sim.tune.backend selects the implementation, not a profitability hint.
         // The packed ABI handles wide and multi-output kernels; the scalar ABI
         // is only a calling-convention optimization for the same LLVM backend.
         for (const auto& read : abi.reads) {
@@ -13020,7 +13296,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (llvm_backend_) {
         livehd::diag::err("inou.cgen.sim", "llvm-kernel", "unsupported")
             .msg("cannot emit LLVM color kernel '{}' in '{}': {}", color_index, gname, llvm_rejection)
-            .hint("sim.backend=llvm does not substitute a Slop circuit kernel; select sim.backend=slop explicitly if needed")
+            .hint("sim.tune.backend=llvm does not substitute a Slop circuit kernel; select sim.tune.backend=slop explicitly if needed")
             .fatal();
       }
       // Reaching here means the shared C++ body is emittable: the class-selection
@@ -13078,7 +13354,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       slop_u_binding_width_.clear();
       preextracted_get_masks_.clear();
       seq_volatile_.clear();
-      for (size_t i = 0; i < abi.reads.size(); ++i) {
+      // Bind ABI read `i` into the expression tables. The key is the consumer's
+      // DEFINITION driver pin, and one kernel can hold several members that read
+      // the SAME definition pin through DIFFERENT boundary slots: the lanes of
+      // one packed GraphIO input, each feeding its own preextracted Get_mask
+      // (minion's vpu_rf `wr_data_i#[0..=31]` / `wr_data_i#[32..=63]`), or a
+      // preextracted bit next to the whole value. Binding every read once, up
+      // front, let the LAST read win the shared key, so the other member
+      // silently computed from its sibling's lane (the vpu_rf write port B
+      // stored port A's `?` half) -- only in vectors whose coarsening shares
+      // that pure-data pair as one kernel (minion: dirty=on fence=16), so the
+      // tune vector changed simulated values.
+      // The inline evaluator rebinds per member; the member loop below
+      // rebinds each member's own reads right before emitting it.
+      absl::flat_hash_map<size_t, std::vector<size_t>> reads_of_member;
+      const auto                                       bind_kernel_read = [&](size_t i) {
         const auto& read             = abi.reads[i];
         const auto& slot             = color_plan_->boundary_slots()[read.slot_index];
         const auto& consumer_version = color_plan_->version_sites()[read.consumer.version_site];
@@ -13090,21 +13380,30 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               continue;
             }
             I(edge_sink.get_port_id() == read.consumer.port);
-            pin2var[edge_drv.get_class_index()] = absl::StrCat("__k_in_", i);
+            const auto key = edge_drv.get_class_index();
+            pin2var[key]   = absl::StrCat("__k_in_", i);
             if (read.consumer.preextracted) {
               preextracted_get_masks_.insert(consumer_node.get_class_index());
             }
             if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
                 && (!slot.unsign || slot.width <= read.consumer.width)) {
-              canonical_.insert(edge_drv.get_class_index());
+              canonical_.insert(key);
+            } else {
+              canonical_.erase(key);
             }
             if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value && direct_slot_is_u[read.slot_index]
                 && slot.width == read.consumer.width) {
-              slop_u_values_.insert(edge_drv.get_class_index());
+              slop_u_values_.insert(key);
+            } else {
+              slop_u_values_.erase(key);
             }
-            break;
+            return;
           }
         }
+      };
+      for (size_t i = 0; i < abi.reads.size(); ++i) {
+        reads_of_member[abi.reads[i].consumer.version_site].push_back(i);
+        bind_kernel_read(i);
       }
       auto members = color_plan_->colors()[representative].members;
       std::ranges::sort(members, [&](size_t a, size_t b) {
@@ -13130,6 +13429,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           output = node.get_driver_pin(0);
         }
         I(!output.is_invalid());
+        if (const auto own_reads = reads_of_member.find(member); own_reads != reads_of_member.end()) {
+          preextracted_get_masks_.erase(node.get_class_index());
+          for (const size_t i : own_reads->second) {
+            bind_kernel_read(i);  // this member's lanes, not a sibling's (see bind_kernel_read)
+          }
+        }
         bind_internal_value_uses(member, representative, node, kernel_version_value, kernel_version_slop_u);
         sub_width_expr_             = false;
         const int  width            = wbits_of(output);
@@ -13202,7 +13507,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           if (!has_extract && slot.producer_shift != 0) {
             source_expr = absl::StrCat("Slop<", slot.width, ">::shl_op(", source_expr, ", ", slot.producer_shift, ")");
           }
-          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value && color_dirty_) {
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value && tune_dirty()) {
             kernel_out->append(absl::StrCat("  if (slop_update(__k_out_",
                                             write_index,
                                             ", ",
@@ -13329,7 +13634,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const bool kernel_has_state_update = std::ranges::any_of(color_plan_->colors()[color].members, [&](const size_t member) {
         return color_plan_->version_sites()[member].role == livehd::sim::Color_plan::Version_role::state_update;
       });
-      if (color_dirty_ || kernel_has_state_update) {
+      if (tune_dirty() || kernel_has_state_update) {
         const size_t changed_words = std::max<size_t>(1, (direct_abi[color].writes.size() + 63) / 64);
         fout->append(absl::StrCat(call_indent,
                                   "uint64_t __changed_",
@@ -13362,7 +13667,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                     ")) != 0) {\n"));
           if (write_slot.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
             emit_commit_flag_at(call_indent + "  ", write.version);
-          } else if (color_dirty_) {
+          } else if (tune_dirty()) {
             emit_serial_dirty_consumers(write.slot_index, call_indent + "  ");
           }
           fout->append(call_indent, "}\n");
@@ -13436,6 +13741,268 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       I(edge.producer < direct_incoming_versions.size() && edge.consumer < direct_incoming_versions.size());
       direct_incoming_versions[edge.consumer].push_back(edge.producer);
     }
+    // A same-slot latch update whose staged `_din` another state update READS
+    // (an ICG enable folded into a flop's commit guard, or a flop whose D is a
+    // latch closing on the same edge -- the planner's latch-update ->
+    // state-update edges) must keep `_din` current EVERY period: the reader
+    // binds `<latch>_din` by name, not through a boundary slot. Inside one
+    // color the activation-domain analysis below guarantees that (the reader's
+    // guard names the `_din`, or its domain widens its producer). A reader in
+    // ANOTHER color is invisible to that per-color analysis, so the latch kept
+    // its own guarded `if (enable) { _din = ...; }` form and the reader saw a
+    // stale `_din` whenever the enable was low -- after reset_cycle that is the
+    // default-constructed 0, not the reset/drawn Q. Whether the two share a
+    // color is decided by the coarsener's live-word budget, so the values
+    // depended on sim.tune.live_words
+    // (tests/sim/conditional_internal_icg_call.prp at live_words=1). Treat such
+    // a reader like any other cross-color consumer: the latch's `_din` is an
+    // external write, so its update runs in the unconditional domain (its hold
+    // mux keeps a de-asserted enable holding) exactly as the same-color case
+    // already does.
+    std::vector<bool> direct_pending_read_across_colors(color_plan_->version_sites().size(), false);
+    for (const auto& edge : color_plan_->version_dependencies()) {
+      const auto& producer = color_plan_->version_sites()[edge.producer];
+      const auto& consumer = color_plan_->version_sites()[edge.consumer];
+      if (producer.role != livehd::sim::Color_plan::Version_role::state_update
+          || consumer.role != livehd::sim::Color_plan::Version_role::state_update
+          || direct_version_color[edge.producer] == direct_version_color[edge.consumer]
+          || type_op_of(color_plan_->sites()[producer.base_site].node.base_node()) != Ntype_op::Latch) {
+        continue;
+      }
+      direct_pending_read_across_colors[edge.producer] = true;
+    }
+    // ...and under dirty gating (sim.tune.dirty=on) such a reader needs a DIRTY
+    // edge as well. A by-name `_din` read goes through no boundary slot, so no
+    // `emit_serial_dirty_consumers` ever marks the reader's color: when only
+    // the latch's inputs changed (an ICG enable toggling under constant data)
+    // the latch's color ran, rewrote `_din`, and the gated flop's color stayed
+    // idle -- the flop never committed, while dirty=off (every color runs) and
+    // a budget that fused the two colors both advanced it. Values depended on
+    // sim.tune.live_words x sim.tune.dirty (review round 2, codegen-fix:R2-1).
+    //
+    // The marks are emitted only for the colors that actually NAME
+    // `<latch>_din` (the D-driver binding, a normalized commit guard, a folded
+    // ICG guard), not for every latch-update -> state-update version edge: the
+    // ancestor-latch trie edges (sim_color_plan) tie a root latch to every
+    // same-slot flop of the design, and marking all of those would re-run most
+    // of the design whenever an enable toggles. Which colors name the `_din` is
+    // known only once they are emitted, so every latch `_din` write site carries
+    // a placeholder (`latch_din_placeholder`), each emitted color body is
+    // scanned for `_din` names (`record_latch_din_readers`), and the
+    // placeholders are resolved after the last color (`resolve_latch_din_marks`).
+    // A mark fires only when the write CHANGED `_din` (a snapshot compare):
+    // a reader that ran after the previous change already saw this value, and
+    // reset/load re-dirty every color.
+    absl::flat_hash_map<std::string, size_t> latch_din_member;  // "<latch>_din" -> the latch's state_update member
+    for (size_t member = 0; member < color_plan_->version_sites().size(); ++member) {
+      const auto& version = color_plan_->version_sites()[member];
+      if (version.role != livehd::sim::Color_plan::Version_role::state_update
+          || type_op_of(color_plan_->sites()[version.base_site].node.base_node()) != Ntype_op::Latch) {
+        continue;
+      }
+      const auto name = occurrence_member(color_plan_->sites()[version.base_site]);
+      if (!name.empty()) {
+        latch_din_member.emplace(name + "_din", member);
+      }
+    }
+    // Every latch `_din` a text names, as that latch's state_update member.
+    // Occurrence members are dotted paths (`u_a.u_b.held`), so a name is the
+    // longest `[A-Za-z0-9_.]` run ending in `_din`, and every dotted suffix of
+    // it is tried too: over-reporting a reader only costs a spurious mark,
+    // missing one is the miscompile this guards against.
+    const auto latch_dins_named = [&](std::string_view text, const auto& on_member) {
+      if (latch_din_member.empty()) {
+        return;
+      }
+      static constexpr std::string_view kDin = "_din";
+      const auto identifier_char             = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+      for (size_t at = text.find(kDin); at != std::string_view::npos; at = text.find(kDin, at + kDin.size())) {
+        const size_t end = at + kDin.size();
+        if (end < text.size() && identifier_char(text[end])) {
+          continue;
+        }
+        size_t begin = at;
+        while (begin > 0 && (identifier_char(text[begin - 1]) || text[begin - 1] == '.')) {
+          --begin;
+        }
+        for (size_t start = begin; start < at;) {
+          if (const auto it = latch_din_member.find(text.substr(start, end - start)); it != latch_din_member.end()) {
+            on_member(it->second);
+          }
+          const auto dot = text.find('.', start);
+          if (dot == std::string_view::npos || dot >= at) {
+            break;
+          }
+          start = dot + 1;
+        }
+      }
+    };
+    std::vector<std::vector<size_t>> latch_din_readers;  // latch member -> OTHER colors naming its `_din` (tune_dirty only)
+    if (tune_dirty()) {
+      latch_din_readers.resize(color_plan_->version_sites().size());
+    }
+    bool       latch_din_placeholders   = false;
+    const auto record_latch_din_readers = [&](std::string_view text, size_t color_index) {
+      if (!tune_dirty()) {
+        return;
+      }
+      latch_dins_named(text, [&](size_t member) {
+        if (direct_version_color[member] == color_index) {
+          return;  // the latch's own color: its domain analysis orders the read
+        }
+        auto& readers = latch_din_readers[member];
+        if (std::ranges::find(readers, color_index) == readers.end()) {
+          readers.push_back(color_index);
+        }
+      });
+    };
+    // The same hole for a state's CURRENT value. A commit guard resolved
+    // through an occurrence edge (a gated clock handed to a child as a
+    // SECONDARY clock port: `icg_guards` + occurrence_bool_value) names the
+    // enable latch's -- or any flop's -- member directly, with no state-current
+    // boundary slot behind it, so the state's commit marked the slot consumers
+    // and never the gated flop's color. When the ICG latch opened under
+    // constant data, the capture color stayed idle and the flop never loaded
+    // (minion's txfma f3..f5 pipeline flops on `ctrl_f<N>_clk`: they kept their
+    // power-on draws under dirty=on and loaded under dirty=off). Record every
+    // color whose activation or reset predicate names a flop/latch Q that none
+    // of that state's current slots already delivers, and have the state's
+    // commit mark it (emit_commit_member). Commits are emitted after every
+    // color, so the reader sets are complete by then.
+    absl::flat_hash_map<std::string, size_t> state_q_site;           // flop/latch occurrence member -> site
+    std::vector<std::vector<size_t>>         state_q_guard_readers;  // site -> colors naming its Q in a guard
+    if (tune_dirty()) {
+      state_q_guard_readers.resize(color_plan_->sites().size());
+      for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+        const auto& site = color_plan_->sites()[site_index];
+        if (site.kind != livehd::sim::Color_plan::Site_kind::state || type_op_of(site.node.base_node()) == Ntype_op::Memory
+            || state_update_version(site_index) == livehd::sim::Color_plan::invalid_index) {
+          continue;
+        }
+        if (const auto name = occurrence_member(site); !name.empty()) {
+          state_q_site.emplace(name, site_index);
+        }
+      }
+    }
+    const auto record_state_q_guard_readers = [&](std::string_view text, size_t color_index) {
+      if (state_q_site.empty()) {
+        return;
+      }
+      const auto identifier_char = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+      const auto note            = [&](size_t site_index) {
+        for (const size_t slot_index : direct_state_current_slots[site_index]) {
+          for (const auto& consumer : color_plan_->boundary_slots()[slot_index].consumers) {
+            if (consumer.color == color_index) {
+              return;  // already a planned reader: emit_serial_dirty_consumers marks it
+            }
+          }
+        }
+        auto& readers = state_q_guard_readers[site_index];
+        if (std::ranges::find(readers, color_index) == readers.end()) {
+          readers.push_back(color_index);
+        }
+      };
+      // A member is a dotted path (`u_a.u_b.q`), so take each maximal
+      // `[A-Za-z0-9_.]` run and try it and every dotted prefix of it (a method
+      // call such as `q.is_known_true()` extends the run past the name).
+      for (size_t at = 0; at < text.size();) {
+        if (!identifier_char(text[at])) {
+          ++at;
+          continue;
+        }
+        size_t end = at;
+        while (end < text.size() && (identifier_char(text[end]) || text[end] == '.')) {
+          ++end;
+        }
+        for (size_t stop = end; stop > at;) {
+          if (const auto it = state_q_site.find(text.substr(at, stop - at)); it != state_q_site.end()) {
+            note(it->second);
+          }
+          const auto dot = text.rfind('.', stop - 1);
+          if (dot == std::string_view::npos || dot < at) {
+            break;
+          }
+          stop = dot;
+        }
+        at = end;
+      }
+    };
+    // `kind` 'S'/'M' bracket the latch's normal `_din` writes (snapshot before,
+    // compare-and-mark after), 's'/'m' its reset slow path. Resolved (or
+    // deleted, when no other color names the `_din`) by resolve_latch_din_marks.
+    const auto latch_din_placeholder = [&](char kind, size_t member) {
+      I(tune_dirty());
+      latch_din_placeholders = true;
+      return absl::StrCat("  /*__lhd_din:", std::string_view(&kind, 1), ":", member, "*/\n");
+    };
+    const auto emit_latch_din_placeholder = [&](char kind, size_t member) {
+      if (!tune_dirty() || member >= latch_din_readers.size()) {
+        return;
+      }
+      const auto& version = color_plan_->version_sites()[member];
+      if (version.role != livehd::sim::Color_plan::Version_role::state_update
+          || type_op_of(color_plan_->sites()[version.base_site].node.base_node()) != Ntype_op::Latch) {
+        return;
+      }
+      fout->append(latch_din_placeholder(kind, member));
+    };
+    std::vector<std::pair<std::shared_ptr<File_output>, size_t>> latch_din_patch_marks;
+    latch_din_patch_marks.emplace_back(root_fout, root_fout->mark());
+    for (const auto& out : color_eval_outputs) {
+      latch_din_patch_marks.emplace_back(out, out->mark());
+    }
+    const auto resolve_latch_din_marks = [&] {
+      if (!latch_din_placeholders) {
+        return;
+      }
+      absl::flat_hash_map<size_t, std::string> din_name;
+      for (const auto& [name, member] : latch_din_member) {
+        din_name.emplace(member, name);
+      }
+      static constexpr std::string_view kOpen = "/*__lhd_din:";
+      for (const auto& [out, mark] : latch_din_patch_marks) {
+        auto text = out->detach_from(mark);
+        if (text.find(kOpen) == std::string::npos) {
+          out->append(text);
+          continue;
+        }
+        std::string patched;
+        patched.reserve(text.size());
+        size_t copied = 0;
+        for (size_t at = text.find(kOpen); at != std::string::npos; at = text.find(kOpen, copied)) {
+          const size_t line_begin = text.rfind('\n', at) == std::string::npos ? 0 : text.rfind('\n', at) + 1;
+          const size_t close      = text.find("*/", at);
+          I(close != std::string::npos);
+          size_t line_end     = text.find('\n', close);
+          line_end            = line_end == std::string::npos ? text.size() : line_end + 1;
+          const char   kind   = text[at + kOpen.size()];
+          const size_t member = std::stoul(text.substr(at + kOpen.size() + 2, close - (at + kOpen.size() + 2)));
+          I(member < latch_din_readers.size());
+          patched.append(text, copied, line_begin - copied);
+          copied             = line_end;
+          const auto name_it = din_name.find(member);
+          if (member >= latch_din_readers.size() || latch_din_readers[member].empty() || name_it == din_name.end()) {
+            continue;  // no other color names this `_din`: nothing to mark
+          }
+          auto readers = latch_din_readers[member];
+          std::ranges::sort(readers);
+          const auto& name     = name_it->second;
+          const auto  snapshot = absl::StrCat(kind == 'S' || kind == 'M' ? "__lhd_din_prev_" : "__lhd_din_rprev_", member);
+          if (kind == 'S' || kind == 's') {
+            absl::StrAppend(&patched, "  const auto ", snapshot, " = ", name, ";\n");
+            continue;
+          }
+          I(kind == 'M' || kind == 'm');
+          absl::StrAppend(&patched, "  if (!", name, ".identical(", snapshot, ")) {  // cross-color `_din` readers\n");
+          for (const size_t reader : readers) {
+            absl::StrAppend(&patched, "    __rt.__color_dirty[", dirty_word(reader), "] |= ", dirty_mask(reader), ";\n");
+          }
+          patched.append("  }\n");
+        }
+        patched.append(text, copied, std::string::npos);
+        out->append(patched);
+      }
+    };
     // Without dirty gating, a state capture in an always-run domain of an
     // always-run color raises its commit flag every period. Such a member
     // commits unconditionally instead: no flag store, no flag test.
@@ -13463,6 +14030,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto close_case = [&] {
         auto body = case_fout->detach_from(case_mark);
         compact_body_temps(body);
+        record_latch_din_readers(body, color_index);
         case_fout->append(body);
       };
       pin2var.clear();
@@ -13502,6 +14070,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             }
           }
           I(!old_expr.empty() && slot.width <= 64);
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
+            emit_latch_din_placeholder('S', write.version);  // a latch `_din`: cross-color readers' dirty marks
+          }
           fout->append("  std::uint64_t __llvm_old;\n  (", old_expr, ").copy_packed_words(&__llvm_old);\n");
           if (slot.width < 64) {
             fout->append("  __llvm_old &= UINT64_C(", std::to_string((uint64_t{1} << slot.width) - 1), ");\n");
@@ -13520,13 +14091,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                     canonical ? "Slop_u<" : "Slop<",
                                     slot.width,
                                     ">::from_packed_words(&__llvm_value);\n"));
-          if (color_dirty_ && slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+          if (tune_dirty() && slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
             fout->append("  if (__llvm_value_changed) {\n");
             emit_serial_dirty_consumers(write.slot_index, "    ");
             fout->append("  }\n");
           }
           if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
             emit_state_commit_flag(write.version, "__llvm_value_changed");
+            emit_latch_din_placeholder('M', write.version);
           }
           for (const size_t member : kernel_memory_commit_members(color_index)) {
             emit_commit_flag_at("  ", member);
@@ -13577,6 +14149,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                      "]{};\n  ",
                      llvm_inline_raw_name[color_index],
                      "(__llvm_inputs, __llvm_outputs, __llvm_changed, this);\n");
+        for (const auto& write : abi.writes) {  // snapshot every latch `_din` before the first store below
+          if (color_plan_->boundary_slots()[write.slot_index].kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
+            emit_latch_din_placeholder('S', write.version);
+          }
+        }
         output_word = 0;
         for (size_t output = 0; output < abi.writes.size(); ++output) {
           const auto& write     = abi.writes[output];
@@ -13592,7 +14169,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                     output_word,
                                     ");\n"));
           output_word += llvm_words(slot.width);
-          if (color_dirty_ && slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+          if (tune_dirty() && slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
             fout->append("  if ((__llvm_changed[",
                          std::to_string(output / 64),
                          "] & (std::uint64_t{1} << ",
@@ -13605,6 +14182,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             emit_state_commit_flag(
                 write.version,
                 absl::StrCat("(__llvm_changed[", output / 64, "] & (std::uint64_t{1} << ", output % 64, ")) != 0"));
+            emit_latch_din_placeholder('M', write.version);
           }
         }
         for (const size_t member : kernel_memory_commit_members(color_index)) {
@@ -13631,6 +14209,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       struct Direct_reset_body {
         std::string predicate;
         std::string text;
+        size_t      member = livehd::sim::Color_plan::invalid_index;  // the state_update whose reset this is
       };
       std::vector<Direct_member_body>                                  direct_member_bodies;
       std::vector<Direct_reset_body>                                   direct_reset_bodies;
@@ -13662,7 +14241,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // action runs once per period, while bindings are shared once per color: each `__compact_advance()` COMMITS every lane's
       // child state, so a second walk in the same clock stepped a two-carry tap chain twice per cycle (matched_filter: `xs`/`cs`
       // carries).
-      absl::flat_hash_set<std::string> compact_loop_controlled;
+      // The walk (and the `__in` bindings) are emitted in the body of the FIRST
+      // sibling only; every later sibling just names `__last_out.<port>`. So the
+      // owner's body is a producer of each sibling, and the activation-domain
+      // pass below must see that edge (compact_loop_owner_of: sibling -> owner).
+      absl::flat_hash_map<std::string, size_t> compact_loop_controlled;  // "<sub>#pre|#post" -> owner member
+      absl::flat_hash_map<size_t, size_t>      compact_loop_owner_of;
       for (const size_t member : members) {
         const auto& version = color_plan_->version_sites()[member];
         const auto& site    = color_plan_->sites()[version.base_site];
@@ -13773,11 +14357,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           I(sio != nullptr);
           const auto sub_member = occurrence_sub_member(site);
           I(!sub_member.empty());
-          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control
-              && compact_loop_controlled
-                     .insert(absl::StrCat(sub_member,
-                                          version.version == livehd::sim::Color_plan::State_version::pre_rise ? "#pre" : "#post"))
-                     .second) {
+          bool owns_loop_walk = false;
+          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+            const auto [owner, inserted] = compact_loop_controlled.try_emplace(
+                absl::StrCat(sub_member, version.version == livehd::sim::Color_plan::State_version::pre_rise ? "#pre" : "#post"),
+                member);
+            owns_loop_walk = inserted;
+            if (!inserted) {
+              compact_loop_owner_of.emplace(member, owner->second);
+            }
+          }
+          if (owns_loop_walk) {
             const auto loop = node.subnode_loop();
             I(loop.has_value());
             for (const auto& decl : sio->get_input_pin_decls()) {
@@ -14302,12 +14892,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // current representation back. This retains edge/reset semantics
             // (the pending value was computed above) while avoiding the commit
             // shard, slop_update, and dirty propagation for stable lanes.
-            // Without dirty-bit gating (sim.color_dirty=false) nothing downstream
+            // Without dirty-bit gating (sim.tune.dirty=off) nothing downstream
             // uses the "changed" answer: the flag only saves a copy of an equal
             // value, and Slop::identical costs more than that copy (axi_demux:
             // 1207 -> 890 ms with the compare dropped). Commit unconditionally.
-            std::string       value_changed     = color_dirty_ ? absl::StrCat("!", state, "_din.identical(", state, ")") : "true";
-            if (color_dirty_ && pipe_depth > 1) {
+            std::string       value_changed     = tune_dirty() ? absl::StrCat("!", state, "_din.identical(", state, ")") : "true";
+            if (tune_dirty() && pipe_depth > 1) {
               const auto stage = [&](int index) { return absl::StrCat(state, "_p", index); };
               for (int index = 0; index < pipe_depth - 1; ++index) {
                 value_changed = absl::StrCat("(", value_changed, " || !", stage(index), "_din.identical(", stage(index), "))");
@@ -14326,27 +14916,49 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               fout->append("  ", state, "_din = ", rstval, ";\n");
             };
 
+            // A latch's `_din` writes are bracketed for its cross-color readers'
+            // dirty marks (see latch_din_member); a no-op for every other state.
+            // The snapshot goes to the START of the member body, ahead of the
+            // binding prologue, so it never separates a prologue temporary from
+            // the `_din` store that folds it (compact_body_temps folds only into
+            // the adjacent statement).
+            const auto emit_latch_din_snapshot = [&] {
+              if (!tune_dirty() || op != Ntype_op::Latch) {
+                return;
+              }
+              auto prologue = fout->detach_from(member_body_mark);
+              emit_latch_din_placeholder('S', member);
+              fout->append(prologue);
+            };
             if (reset_always) {
               // A statically asserted reset has no normal path at all.
+              emit_latch_din_snapshot();
               emit_reset_value();
               emit_state_commit_flag(member, value_changed);
+              emit_latch_din_placeholder('M', member);
               member_activation.clear();
             } else if (!rtest.empty()) {
               // Keep reset as a separately grouped slow path. The normal region
               // is explicitly reset-false, so neither its data cone nor its
               // register landing work runs during reset, and the hot path has
               // no per-register reset mux.
+              emit_latch_din_snapshot();
               fout->append(next_value_body);
               emit_state_commit_flag(member, value_changed);
+              emit_latch_din_placeholder('M', member);
               member_activation = combine_activation(absl::StrCat("!", rtest), normal_activation);
 
               const auto reset_body_mark = fout->mark();
+              emit_latch_din_placeholder('s', member);
               emit_reset_value();
               emit_state_commit_flag(member, value_changed);
-              direct_reset_bodies.push_back(Direct_reset_body{rtest, fout->detach_from(reset_body_mark)});
+              emit_latch_din_placeholder('m', member);
+              direct_reset_bodies.push_back(Direct_reset_body{rtest, fout->detach_from(reset_body_mark), member});
             } else {
+              emit_latch_din_snapshot();
               fout->append(next_value_body);
               emit_state_commit_flag(member, value_changed);
+              emit_latch_din_placeholder('M', member);
               member_activation = normal_activation;
             }
           } else if (version.role == livehd::sim::Color_plan::Version_role::data) {
@@ -14621,7 +15233,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             source_expr = absl::StrCat("Slop<", slot.width, ">::shl_op(", source_expr, ", ", slot.producer_shift, ")");
           }
           if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
-            if (color_dirty_) {
+            if (tune_dirty()) {
               fout->append(absl::StrCat("  if (slop_update(", direct_slot_storage[slot_index], ", ", source_expr, ")) {\n"));
               emit_serial_dirty_consumers(slot_index, "    ");
               fout->append("  }\n");
@@ -14664,13 +15276,31 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       for (size_t position = 0; position < direct_member_bodies.size(); ++position) {
         local_position.emplace(direct_member_bodies[position].member, position);
       }
-      std::vector<size_t> local_outgoing(direct_member_bodies.size(), 0);
-      for (size_t consumer = 0; consumer < direct_member_bodies.size(); ++consumer) {
-        for (const size_t producer_member : direct_incoming_versions[direct_member_bodies[consumer].member]) {
+      // Same-color producers of the body at `consumer`: its plan predecessors,
+      // plus -- for a compact-loop sibling -- the sibling whose body holds the
+      // shared walk. Without that edge the walk followed only the OWNER's
+      // consumers: xs rename_table's snapshot loop carries `payloads` (read by an
+      // un-reset flop, unconditional) and `valids` (read by an async-reset flop,
+      // `!reset`); the walk landed in the `!reset` block after the payload
+      // capture, so the capture read the previous period's `__last_out` and,
+      // during reset, the never-walked power-on one. Values depended on the
+      // coarsening (dirty=off / fence=16 vs fence=0).
+      const auto for_each_local_producer = [&](size_t consumer, const auto& visit) {
+        const size_t member = direct_member_bodies[consumer].member;
+        for (const size_t producer_member : direct_incoming_versions[member]) {
           if (const auto producer = local_position.find(producer_member); producer != local_position.end()) {
-            ++local_outgoing[producer->second];
+            visit(producer->second);
           }
         }
+        if (const auto owner = compact_loop_owner_of.find(member); owner != compact_loop_owner_of.end()) {
+          const auto position = local_position.find(owner->second);
+          I(position != local_position.end() && position->second < consumer);  // the owner's body precedes its siblings
+          visit(position->second);
+        }
+      };
+      std::vector<size_t> local_outgoing(direct_member_bodies.size(), 0);
+      for (size_t consumer = 0; consumer < direct_member_bodies.size(); ++consumer) {
+        for_each_local_producer(consumer, [&](size_t producer) { ++local_outgoing[producer]; });
       }
       const auto make_always = [&](size_t position) {
         domains[position].assigned = true;
@@ -14743,6 +15373,48 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         force_expression_dependencies(body.predicate, true);
         force_expression_dependencies(body.text, false);
       }
+      // A latch whose `_din` ANOTHER member of this color names (the D-driver
+      // binding, a normalized ICG commit guard) must finish its reset override
+      // BEFORE that reader runs. The grouped reset slow path runs after every
+      // member body of the color, so a same-color reader sampled the pre-reset
+      // `_din` while a reader in a later color saw the reset value: an ICG
+      // latch with `= true` opened the gate during reset only when the
+      // coarsener split it from the flop it gates -- values depended on
+      // sim.tune.live_words even with dirty gating off. Inline that latch's
+      // reset right after its own `_din` store and keep the latch in the
+      // unconditional domain (an activation-guarded body is skipped during
+      // reset, so the inlined override would never run).
+      if (!direct_reset_bodies.empty() && !latch_din_member.empty()) {
+        absl::flat_hash_set<size_t> read_in_color;  // latch members with a same-color `_din` reader
+        for (const auto& body : direct_member_bodies) {
+          const auto note = [&](size_t latch) {
+            if (latch != body.member && local_position.contains(latch)) {
+              read_in_color.insert(latch);
+            }
+          };
+          latch_dins_named(body.text, note);
+          latch_dins_named(body.activation, note);
+        }
+        if (!read_in_color.empty()) {
+          std::vector<Direct_reset_body> grouped;
+          grouped.reserve(direct_reset_bodies.size());
+          for (auto& reset : direct_reset_bodies) {
+            if (!read_in_color.contains(reset.member)) {
+              grouped.push_back(std::move(reset));
+              continue;
+            }
+            auto& owner = direct_member_bodies[local_position.at(reset.member)];
+            absl::StrAppend(&owner.text,
+                            "  if (",
+                            reset.predicate,
+                            ") [[unlikely]] {  // reset, inline: a same-color reader binds this `_din`\n",
+                            reset.text,
+                            "  }\n");
+            force_always_members.insert(reset.member);
+          }
+          direct_reset_bodies = std::move(grouped);
+        }
+      }
 
       for (size_t position = 0; position < direct_member_bodies.size(); ++position) {
         const auto& body    = direct_member_bodies[position];
@@ -14751,7 +15423,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           make_always(position);
           continue;
         }
-        bool external_write = false;
+        // A cross-color reader of this latch's `_din` (see
+        // direct_pending_read_across_colors) is an external consumer too.
+        bool external_write = direct_pending_read_across_colors[body.member];
         for (const size_t slot_index : direct_produced_slots[body.member]) {
           const auto& produced = color_plan_->boundary_slots()[slot_index];
           if (produced.kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
@@ -14775,11 +15449,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!domains[consumer].assigned) {
           make_always(consumer);  // incomplete/side-effect dependency: conservative
         }
-        for (const size_t producer_member : direct_incoming_versions[direct_member_bodies[consumer].member]) {
-          if (const auto producer = local_position.find(producer_member); producer != local_position.end()) {
-            merge_domain(domains[producer->second], domains[consumer]);
-          }
-        }
+        for_each_local_producer(consumer, [&](size_t producer) { merge_domain(domains[producer], domains[consumer]); });
       }
 
       for (size_t position = 0; position < direct_member_bodies.size(); ++position) {
@@ -14790,7 +15460,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const size_t member = body.member;
         // Unsharded commits only: a shard's commit runs only when its mask
         // has a bit, so an always-commit member there still needs its bit.
-        if (!color_dirty_ && direct_commit_shards.empty() && member != livehd::sim::Color_plan::invalid_index
+        if (!tune_dirty() && direct_commit_shards.empty() && member != livehd::sim::Color_plan::invalid_index
             && direct_color_condition_phase[color_index] == livehd::sim::Color_plan::invalid_index
             && color_plan_->version_sites()[member].role == livehd::sim::Color_plan::Version_role::state_update
             && direct_state_commit_flag_of_member[member] != livehd::sim::Color_plan::invalid_index
@@ -14856,9 +15526,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         fout->append("  }\n");
       }
+      for (const auto& predicate : activation_order) {
+        record_state_q_guard_readers(predicate, color_index);
+      }
+      for (const auto& predicate : reset_order) {
+        record_state_q_guard_readers(predicate, color_index);
+      }
       close_case();
       fout->append("    return;\n  }\n");
     }
+    resolve_latch_din_marks();  // every color is emitted: its `_din` readers are known
     if (color_eval_outputs.empty()) {
       fout->append("  default: assert(false && \"invalid color index\"); return;\n  }\n}\n");
     } else {
@@ -14900,7 +15577,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // as a SELECT, not a branch: its flag follows the captured enable, which
       // a data-driven design toggles unpredictably, and the host compiler will
       // not if-convert a conditional store for us (axi_demux: 780 -> 704 ms).
-      if (!color_dirty_ && op != Ntype_op::Memory) {
+      if (!tune_dirty() && op != Ntype_op::Memory) {
         const auto pipe_min = get_driver(find_sink_pin(site.node.base_node(), "pipe_min"));
         const bool scalar   = !pipe_min.is_const() || const_of(pipe_min).to_just_i64() <= 1;
         if (scalar) {
@@ -14971,7 +15648,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // The dynamic commit flag is emitted only after proving D != Q, so a
           // scalar state commit need not repeat the same identical() test.
           fout->append("    ", state, " = ", state, "_din;\n");
-          if (color_dirty_) {
+          if (tune_dirty()) {
             fout->append("    constexpr bool __changed = true;\n");
           }
         } else {
@@ -14984,11 +15661,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         // Without dirty gating nothing reads a per-state change bit:
         // __color_run marks the period changed once (see below).
-        if (color_dirty_ || pipe_depth > 1) {
+        if (tune_dirty() || pipe_depth > 1) {
           fout->append("    __rt.__color_state_changed |= __changed;\n");
         }
       }
-      if (color_dirty_) {
+      if (tune_dirty()) {
         fout->append("    if (__changed) {\n");
         fout->append("      ", dirty_mark(color_idx), "\n");
         if (op == Ntype_op::Memory) {
@@ -15002,16 +15679,24 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           emit_serial_dirty_consumers(state_slot, "      ");
           fout->append("    }\n");
         }
+        if (version.base_site < state_q_guard_readers.size() && !state_q_guard_readers[version.base_site].empty()) {
+          fout->append("    if (__changed) {  // guards that name this state's Q (record_state_q_guard_readers)\n");
+          for (const size_t reader : state_q_guard_readers[version.base_site]) {
+            fout->append("      ", dirty_mark(reader), "\n");
+          }
+          fout->append("    }\n");
+        }
       }
       fout->append("  }\n");
     };
 
     // The dirty words a commit member can mark: its own color, a memory's site
-    // colors, and the consumers of its state-current slots -- the same targets
+    // colors, the consumers of its state-current slots, and the colors whose
+    // guards name its Q (state_q_guard_readers) -- the same targets
     // emit_commit_member emits, known up front so the accumulator locals can
     // be declared before the members that OR into them.
     const auto commit_member_dirty_words = [&](size_t member, absl::flat_hash_set<size_t>& words) {
-      if (!color_dirty_) {
+      if (!tune_dirty()) {
         return;
       }
       const auto& version = color_plan_->version_sites()[member];
@@ -15029,6 +15714,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           if (consumer.color != livehd::sim::Color_plan::invalid_index) {
             words.insert(dirty_word(consumer.color));
           }
+        }
+      }
+      if (version.base_site < state_q_guard_readers.size()) {
+        for (const size_t reader : state_q_guard_readers[version.base_site]) {
+          words.insert(dirty_word(reader));
         }
       }
     };
@@ -15105,7 +15795,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
 
     const auto emit_color_refresh_inputs = [&] {
-      if (color_dirty_) {
+      if (tune_dirty()) {
         const auto emit_top_input_slot = [&](size_t slot_index, std::string_view indent) {
           const auto& slot  = color_plan_->boundary_slots()[slot_index];
           const auto  field = input_field(slot.public_port);
@@ -15364,7 +16054,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append("  __rt.__commit_shard_mask.fill(0);\n");
     }
     fout->append("  __color_refresh_inputs();\n");
-    if (color_dirty_) {
+    if (tune_dirty()) {
       fout->append("  __rt.__color_dirty.fill(~uint64_t{0});  // reset/load invalidates the serial activation cache\n");
     }
     std::vector<bool> reset_required(color_plan_->colors().size(), false);
@@ -15418,7 +16108,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // fixed point, including for stateful designs: the same state and inputs
       // produce the same pending values on the next period. Runtime-random and
       // VCD modes remain active because they have observable per-period work.
-      if (color_dirty_ && !color_plan_->summary().runtime_random && !vcd_on) {
+      if (tune_dirty() && !color_plan_->summary().runtime_random && !vcd_on) {
         fout->append("  __rt.__color_quiescent = !__any_state_changed;\n");
       } else {
         fout->append("  __rt.__color_quiescent = false;\n");
@@ -15440,7 +16130,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // THE one definition of "this color is gated by its activation bit", shared
     // by the emitter and the word grouping below: a color grouped by one and
     // emitted unguarded by the other would never test its bit.
-    const auto dirty_guarded        = [&](size_t color) { return color_dirty_ && !direct_random_color[color]; };
+    const auto dirty_guarded        = [&](size_t color) { return tune_dirty() && !direct_random_color[color]; };
     const auto emit_scheduled_color = [&](size_t color, std::string_view snapshot = {}) {
       const size_t condition_phase = direct_color_condition_phase[color];
       if (condition_phase != livehd::sim::Color_plan::invalid_index) {
@@ -15531,7 +16221,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("  __color_prepare_runtime();\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
     // Without dirty gating nothing is skipped, so conservatively count every
     // period as a state change (it only advances the observation generation).
-    fout->append(color_dirty_ ? "  __rt.__color_state_changed = false;\n" : "  __rt.__color_state_changed = true;\n");
+    fout->append(tune_dirty() ? "  __rt.__color_state_changed = false;\n" : "  __rt.__color_state_changed = true;\n");
     for (size_t site = 0; site < color_plan_->sites().size(); ++site) {
       if (color_plan_->sites()[site].kind == livehd::sim::Color_plan::Site_kind::loop_control) {
         fout->append("  __rt.__loop_advanced_", std::to_string(site), " = false;\n");
@@ -15542,7 +16232,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     } else {
       fout->append("  __rt.__commit_shard_mask.fill(0);\n");
     }
-    if (color_dirty_) {
+    if (tune_dirty()) {
       fout->append(
           "  __rt.__color_input_changed = false;\n"
           "  __color_refresh_inputs();\n"
@@ -15588,6 +16278,64 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("}\n");
   }
 
+  // ---- sim.tune: the executable root's support tables and identity TU ----
+  // Both are root artifacts registered through open_out, so they are in this
+  // module's Gen_record and a missing one is a generation miss.
+  if (executable_root) {
+    emit_tune_support(g, fstem, mod, occurrence_member, occurrence_sub_member);
+
+    // <stem>.tune-id.cpp: what this binary was generated with, for drv.bin
+    // (weak defaults in the driver, overridden here) and the tune ledger.
+    // Self-contained -- no include -- and named per module: with no --top every
+    // uninstantiated module is a root, and `lhd sim` links every *.cpp in the
+    // directory. Everything baked here is already folded into the ROOT key
+    // (tune vector, slop_u, debug, unknown_zero, vcd, vcd_fake_delay,
+    // runtime_support, observe; the plan flag derives from them), so a cache
+    // hit can never serve a stale identity.
+    //
+    // `structure` is the ledger's comparability key ACROSS vectors: the cone,
+    // the emitter and the env switches, but deliberately neither the tune
+    // vector nor the backend (a backend A/B must compare).
+    const std::string structure = absl::StrCat(absl::Hex(hier_graph_digest(g), absl::kZeroPad16),
+                                               "-",
+                                               absl::Hex(livehd::kCgenSrcSalt, absl::kZeroPad16),
+                                               "-",
+                                               kSimGenVersion,
+                                               "-e",
+                                               env_.bits());
+    const auto        flag      = [](bool b) -> std::string_view { return b ? "true" : "false"; };
+    const std::string codegen   = absl::StrCat("sim.tune.dirty=",
+                                               tune_.dirty_str(),
+                                               "\nsim.tune.fence=",
+                                               tune_.fence_str(),
+                                               "\nsim.tune.live_words=",
+                                               tune_.live_words_str(),
+                                               "\nsim.tune.backend=",
+                                               tune_.backend_str(),
+                                               "\nsim.slop_u=",
+                                               flag(slop_u_),
+                                               "\nsim.debug=",
+                                               flag(debug_),
+                                               "\nsim.unknown_zero=",
+                                               flag(unknown_zero_),
+                                               "\nsim.vcd=",
+                                               vcd_file.empty() ? std::string_view{"false"} : std::string_view{vcd_file},
+                                               "\nsim.vcd_fake_delay=",
+                                               flag(vcd_fakedelay),
+                                               "\nplan.runtime_random=",
+                                               flag(color_plan_->summary().runtime_random),
+                                               "\nruntime_support=",
+                                               flag(runtime_support_on),
+                                               "\nobserve=",
+                                               flag(observation_on),
+                                               "\n");
+    auto              tid       = open_out(absl::StrCat(fstem, ".tune-id.cpp"));
+    tid->append("// Generated by inou.cgen.sim (LiveHD). Do not edit.\n");
+    tid->append("extern \"C\" const char* __lhd_tune_vector_", mod, "()    { return ", cpp_string_literal(tune_vector_), "; }\n");
+    tid->append("extern \"C\" const char* __lhd_tune_structure_", mod, "() { return ", cpp_string_literal(structure), "; }\n");
+    tid->append("extern \"C\" const char* __lhd_tune_codegen_", mod, "()   { return ", cpp_string_literal(codegen), "; }\n");
+  }
+
   // ---- <stem>.iface.json — the machine-readable module manifest (2f-sim B0) ----
   // Replaces the historical TEXT SCRAPE of this module's generated .hpp
   // (prp_sim.cpp's parse_hpp), which silently bit-rotted the day memories stopped
@@ -15617,7 +16365,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // testbench cannot drive it directly — a `test` naming one used to reach
     // the host compiler as `no member named 'step'`. prp_sim reads this to
     // refuse with an actionable diagnostic instead.
-    absl::StrAppend(&j, " \"executable\":", (!color_storage_only && !compact_kernel_) ? "true" : "false", ",\n");
+    absl::StrAppend(&j, " \"executable\":", executable_root ? "true" : "false", ",\n");
 
     // IO, in port_id order (the order the In/Out structs are emitted in).
     absl::StrAppend(&j, " \"io\":[");

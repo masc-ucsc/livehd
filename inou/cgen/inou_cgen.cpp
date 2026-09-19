@@ -2,7 +2,6 @@
 
 #include "inou_cgen.hpp"
 
-#include <charconv>
 #include <map>
 #include <string>
 #include <string_view>
@@ -16,6 +15,7 @@
 #include "perf_tracing.hpp"
 #include "sim_color_plan.hpp"
 #include "sim_loop_fusion.hpp"
+#include "sim_tune_vector.hpp"  // the shared sim.tune.* knob grammar and defaults
 #include "split_selfref.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
@@ -50,7 +50,12 @@ void Inou_cgen::setup() {
   // <name>.hpp written into `odir`; the standalone Bazel module scaffold around
   // them is written by the kernel's emit_sim_outputs.
   Eprp_method m2("inou.cgen.sim", "export executable simulator code from an Lgraph", &Inou_cgen::to_cgen_sim);
-  m2.add_label_optional("backend", "sim.backend: slop (reference C++) or llvm (direct native color objects)", "slop");
+  // The four sim.tune codegen knobs (sim.tune.dirty / fence / live_words /
+  // backend) keep their historical label names: lhd resolves the `--set
+  // sim.tune.*` spellings and hands this pass CONCRETE values.
+  m2.add_label_optional("backend",
+                        "sim.tune.backend: slop (reference C++) or llvm (direct native color objects); auto or empty = slop",
+                        "slop");
   m2.add_label_optional("vcd",
                         "baked-in VCD trace path (the sim.vcd knob: the kernel maps false->none, true-><top>.vcd, "
                         "FILE->that path); empty = no VCD",
@@ -69,10 +74,10 @@ void Inou_cgen::setup() {
                         "slots -- no exemption for state or module boundaries",
                         "true");
   m2.add_label_optional("color_dirty",
-                        "cross-cycle color activation cache for workloads with long stable-input periods; false "
-                        "emits one unconditional evaluation per color in the existing static phase order, with "
-                        "direct boundary assignments",
-                        "false");
+                        "sim.tune.dirty: cross-cycle color activation cache for workloads with long stable-input periods "
+                        "(true/false; auto or empty = the built-in default, on); false emits one unconditional "
+                        "evaluation per color in the existing static phase order, with direct boundary assignments",
+                        "");
   m2.add_label_optional("debug",
                         "retain runtime Slop_u landing masks for checking bitwidth-proven unsigned values (true/false)",
                         "false");
@@ -81,11 +86,13 @@ void Inou_cgen::setup() {
                         "per literal from the run's seeded PRNG. true also lets the literal fold at C++ compile time",
                         "false");
   m2.add_label_optional("live_words",
-                        "sim.live_words: live 64-bit words one color may keep across its members (0 = built-in default)",
+                        "sim.tune.live_words: live 64-bit words one color may keep across its members, N in [1, 2^20] "
+                        "(auto, empty or 0 = built-in default)",
                         "0");
   m2.add_label_optional("fence_ratio",
-                        "sim.fence_ratio: sites per interface word a single-use module needs to keep its own colors "
-                        "(empty = built-in default, 0 = always)",
+                        "sim.tune.fence: sites per interface word a single-use module needs to keep its own colors, N in "
+                        "[0, 2^20] (0 = always); none = no module fences; auto or empty = none with color_dirty off, the "
+                        "built-in ratio with it on",
                         "");
   register_inou("cgen", m2);
 }
@@ -165,11 +172,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      unknown_zero_s    = var.get("unknown_zero");
   auto      live_words_s      = var.get("live_words");
   auto      fence_ratio_s     = var.get("fence_ratio");
-  auto      backend           = var.get("backend");
-  if (backend != "slop" && backend != "llvm") {
-    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("sim.backend expects slop|llvm, got '{}'", backend).emit();
-    return;
-  }
+  auto       backend_s         = var.get("backend");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
@@ -184,49 +187,35 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   const bool observe_on         = flag_on("observe", observe_s);
   const bool runtime_support_on = flag_on("runtime_support", runtime_support_s);
   const bool slop_u_on          = flag_on("sim.slop_u", slop_u_s);
-  const bool color_dirty_on     = flag_on("sim.color_dirty", color_dirty_s);
   const bool debug_on           = flag_on("sim.debug", debug_s);
   const bool unknown_zero_on    = flag_on("sim.unknown_zero", unknown_zero_s);
   flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
-  // Same loud grammar as the booleans above: a typo must not silently mean
-  // "the default". 0 = Color_plan's built-in default.
-  uint32_t live_words = 0;
-  if (!live_words_s.empty()) {
-    uint64_t   parsed = 0;
-    const auto first  = live_words_s.data();
-    const auto last   = first + live_words_s.size();
-    const auto result = std::from_chars(first, last, parsed);
-    if (result.ec != std::errc{} || result.ptr != last || parsed > (1u << 20)) {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-          .msg("sim.live_words expects a whole number of 64-bit words in [0, {}], got '{}'", 1u << 20, live_words_s)
-          .emit();
+  // The numeric/enum knobs share sim_tune_vector.hpp's grammar with lhd, so the
+  // two cannot disagree on what a spelling means. Same loud policy as the
+  // booleans: a typo must not silently mean "the default". The label keeps its
+  // historical `0` = default for live_words (the shared parser starts at 1).
+  const auto knob = [&bad_flag](std::string_view label, const auto& parsed) {
+    if (!parsed.ok) {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} {}", label, parsed.err).emit();
       bad_flag = true;
-    } else {
-      live_words = static_cast<uint32_t>(parsed);
     }
-  }
-  int64_t fence_ratio = -1;  // -1 = Color_plan's built-in default
-  if (!fence_ratio_s.empty()) {
-    uint64_t   parsed = 0;
-    const auto first  = fence_ratio_s.data();
-    const auto last   = first + fence_ratio_s.size();
-    const auto result = std::from_chars(first, last, parsed);
-    if (result.ec != std::errc{} || result.ptr != last || parsed > (1u << 20)) {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-          .msg("sim.fence_ratio expects a whole number of sites per interface word in [0, {}], got '{}'", 1u << 20, fence_ratio_s)
-          .emit();
-      bad_flag = true;
-    } else {
-      fence_ratio = static_cast<int64_t>(parsed);
-    }
-  }
-  // Fences only serve dirty-bit gating; without it they are pure boundary cost.
-  if (fence_ratio < 0 && !color_dirty_on) {
-    fence_ratio = livehd::sim::Color_plan::kNoFences;
-  }
+    return parsed.value;
+  };
+  // Unset (or auto) takes the built-in default, like the other tune knobs:
+  // parsed as a tri-state, not as a flag whose absence would mean off.
+  const auto dirty_knob = knob("sim.tune.dirty", livehd::sim::parse_tune_dirty(color_dirty_s));
+  const auto fence_knob = knob("sim.tune.fence", livehd::sim::parse_tune_fence(fence_ratio_s));
+  const auto live_words_knob
+      = knob("sim.tune.live_words", livehd::sim::parse_tune_live_words(live_words_s == "0" ? std::string_view{} : live_words_s));
+  const auto backend_knob = knob("sim.tune.backend", livehd::sim::parse_tune_backend(backend_s));
   if (bad_flag) {
     return;
   }
+  // Whatever was left `auto` takes the built-in default. The fence default
+  // FOLLOWS dirty (none with it off -- fences only serve dirty-bit gating, and
+  // without it they are pure boundary cost -- the built-in ratio with it on).
+  const auto tune = livehd::sim::resolve_tune_defaults(dirty_knob, fence_knob, live_words_knob, backend_knob);
+  const bool llvm = tune.llvm;
   // Simulator lowering still performs backend-specific structural rewrites
   // (the clock-gate-cell fold and compact-loop realization -- `sim.flatten` is
   // gone). Build those into a private output library: the EPRP input
@@ -404,25 +393,30 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       dut_graphs.insert(g.get());
     }
   }
-  const auto is_dut    = [&](const std::shared_ptr<hhds::Graph>& g) { return dut_graphs.contains(g.get()); };
-  const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) {
+  const auto is_dut   = [&](const std::shared_ptr<hhds::Graph>& g) { return dut_graphs.contains(g.get()); };
+  // THE one constructor call, shared by the pre-plan probe (plan = nullptr) and
+  // the emitter: the key is computed from these arguments, so the two must see
+  // identical values or the probe keys a different generation than the one
+  // that emits (a permanent miss, or a stale hit).
+  const auto cgen_for = [&](const std::shared_ptr<hhds::Graph>& g, const livehd::sim::Color_plan* plan) {
     return Cgen_sim(dir,
                     vcd_out,
                     top,
                     fakedelay,
-                    /*color_plan=*/nullptr,
+                    plan,
                     compact_kernel_defs.contains(g.get()),
                     observe_on,
                     runtime_support_on,
                     slop_u_on,
-                    color_dirty_on,
+                    tune.dirty,
                     debug_on,
                     unknown_zero_on,
-                    backend == "llvm",
+                    tune.llvm,
                     is_dut(g),
-                    live_words,
-                    fence_ratio);
+                    static_cast<uint32_t>(tune.live_words),
+                    tune.fence);
   };
+  const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) { return cgen_for(g, /*plan=*/nullptr); };
   // Which modules are already generated. Asked BEFORE the color plan, because
   // on a large design discovery dominates the emitter — measured on XiangShan
   // `Rob`, ~25 s of a ~32 s warm codegen against ~4 s of actual C++ emission.
@@ -438,7 +432,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (!entity.empty() && entity.front() == '%') {
       continue;  // a `test` block's minted comb is never emitted at all
     }
-    const bool root  = is_selected_root(full, entity) || (backend == "llvm" && compact_kernel_defs.contains(g.get()));
+    // Who gets a plan (the plan loop below) -- and so who is a color root in
+    // do_from_graph. The key folds the tune vector for a root only, so this
+    // verdict and the plan loop's must stay the same rule.
+    const bool root  = is_selected_root(full, entity) || (llvm && compact_kernel_defs.contains(g.get()));
     auto       probe = probe_for(g);
     probe.share_digest_memo(&digest_memo);
     if (!probe.generation_current(g.get(), root)) {
@@ -463,7 +460,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const bool selected       = is_selected_root(full, entity);
     // A compact body is a separate executable definition. Give LLVM the same
     // versioned schedule used by the root instead of emitting a Slop body.
-    const bool compact_root   = backend == "llvm" && compact_kernel_defs.contains(g.get());
+    const bool compact_root   = llvm && compact_kernel_defs.contains(g.get());
     if ((!selected && !compact_root) || (!entity.empty() && entity.front() == '%')) {
       continue;
     }
@@ -471,7 +468,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       wrote_plan = true;  // the previous run's plan is still the current one
       continue;
     }
-    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), backend == "llvm", live_words, fence_ratio);
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), llvm, tune.live_words, tune.fence);
     plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
@@ -505,22 +502,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
     const auto  plan_it = root_color_plans.find(g.get());
     const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
-    Cgen_sim    p(dir,
-                  vcd_out,
-                  top,
-                  fakedelay,
-                  plan,
-                  compact_kernel_defs.contains(g.get()),
-                  observe_on,
-                  runtime_support_on,
-                  slop_u_on,
-                  color_dirty_on,
-                  debug_on,
-                  unknown_zero_on,
-                  backend == "llvm",
-                  is_dut(g),
-                  live_words,
-                  fence_ratio);
+    auto        p       = cgen_for(g, plan);
     p.share_digest_memo(&digest_memo);
     p.do_from_graph(g);
   }

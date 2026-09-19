@@ -1,0 +1,67 @@
+/*
+:name: loop_carry_split_reset_domains
+:type: simulation
+*/
+// One rolled loop, two carries, two DIFFERENT activation domains, one walk.
+//
+// Shape (lhdsuite xs RenameTable's four-entry snapshot queue, reduced): a
+// rolled `for` keeps `payloads` and `valids` as two carried outputs of ONE
+// compact-loop instance. `payloads` lands in an UN-RESET register (captured
+// every edge), `valids` in an async-reset one (captured only while `!reset`).
+// The emitter runs the loop's native walk once per period, inside the body of
+// the FIRST carried output in the color; the activation-domain pass placed that
+// body by ITS consumers only, i.e. inside `!reset`, while the `payloads`
+// capture stayed outside. During reset the walk never ran and `snap` captured
+// the reset-time `__last_out` (zero) instead of holding its power-on value;
+// with a different emission order the capture read the PREVIOUS period's walk.
+// Only the coarsening decided it: dirty=off and dirty=on fence=16 were wrong,
+// dirty=on fence=0 (walk and capture in different colors) was right.
+//
+// `snap` has no reset and no initializer, so it powers on to a seeded draw
+// (sim.init_zero=false, the default): it must HOLD that draw through reset and
+// until the first push, then take one byte per push.
+pub mod loop_carry_split_reset_domains(reset:u1, en:u1, d:u8) -> (q:u32@[], v:u4@[]) {
+  reg snap:u32 = nil
+  reg valids:u4:[reset_pin = ref reset, async = true] = 0
+  reg ptr:u2:[reset_pin = ref reset, async = true] = 0
+  reg ren:u1:[reset_pin = ref reset, async = true] = 0
+  ren = en
+  mut nxt:u32 = snap
+  mut nv:u4 = valids
+  for slot in 0..<4 {
+    if (ren != 0) and (ptr == slot) {
+      nxt#[(slot * 8)..+8] = d
+      nv#[slot] = 1
+    }
+  }
+  if ren != 0 {
+    ptr = ptr + 1
+  }
+  snap = nxt
+  valids = nv
+  q = snap
+  v = valids
+}
+
+test loop_carry_split_reset_domains.holds_power_on_until_push {
+  mut acc = loop_carry_split_reset_domains
+  const first = acc.q  // the settled power-on draw, before any edge
+  tick 8 {
+    acc.reset = clock < 2
+    acc.en = (clock == 4) or (clock == 5)  // `ren` pushes at edges 5 and 6
+    acc.d = 0x5A + clock
+    step
+    if clock < 5 {
+      assert(acc.q == first, "no push yet: the un-reset payload holds its power-on value (also through reset)")
+      assert(acc.v == 0, "no push yet")
+    }
+    if clock == 5 {
+      assert(acc.q == ((first & 0xFFFF_FF00) | 0x5F), "push 0 wrote slot 0 only")
+      assert(acc.v == 1, "slot 0 valid")
+    }
+    if clock >= 6 {
+      assert(acc.q == ((first & 0xFFFF_0000) | 0x605F), "push 1 wrote slot 1 only")
+      assert(acc.v == 3, "slots 0 and 1 valid")
+    }
+  }
+}

@@ -4,7 +4,7 @@
 # Contract: the LiveHD docs. lhd links the pass/inou registry
 # and drives it via argv; the legacy lgshell REPL was removed 2026-06-04.
 
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 # Formal-source content salt (2f-fcore ruling 2026-07-10): hash every prover
@@ -71,6 +71,40 @@ genrule(
           "namespace livehd { inline constexpr uint64_t kCompileSrcSalt = 0x%sULL; }\\n' \"$$h\" > $@",
 )
 
+# The profile-guided sim tuner's model (sim_profile.md §5-§8): the JSONL tune
+# store, the workdir lock and CoW retention (lhd_tune), and the pure sim policy
+# (lhd_sim_tune). Its own small library so lhd_sim_tune_test pins the policy
+# without linking the engine, and deliberately OUTSIDE :compile_salt -- no tune
+# change can touch a cached LNAST/LGraph, so none may cold-start a compile scope.
+cc_library(
+    name = "lhd_tune",
+    srcs = [
+        "lhd_sim_tune.cpp",
+        "lhd_tune.cpp",
+    ],
+    hdrs = [
+        "lhd_sim_tune.hpp",
+        "lhd_tune.hpp",
+    ],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//inou/cgen:sim_tune_hdrs",
+        "@rapidjson",
+    ],
+)
+
+cc_test(
+    name = "lhd_sim_tune_test",
+    srcs = ["lhd_sim_tune_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lhd_tune",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "lhd_lib",
     srcs = [
@@ -93,12 +127,15 @@ cc_library(
         "lhd_meta.cpp",
         "lhd_options.cpp",
         "lhd_result.cpp",
+        "lhd_sim_tune_session.cpp",
+        "lhd_sim_tune_session.hpp",
     ],
     hdrs = ["lhd.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":lhd_tune",
         "//core",
         "//core:file_name",
         "//graph",

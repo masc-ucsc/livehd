@@ -30,6 +30,7 @@
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
@@ -785,6 +786,13 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    // The sim.* command namespace owns DOTTED flags (sim.tune.dirty): route every
+    // `sim.`-prefixed key whole, never split at its last dot into a pass
+    // `sim.tune` that does not exist.
+    if (key.starts_with("sim.")) {
+      pass = "sim";
+      flag = key.substr(4);
+    }
     const auto option_method = pass == "sim" ? std::string_view{"sim"} : set_pass_method(pass);
     if (const auto hint = retired_set_hint(option_method, flag); !hint.empty()) {
       throw Lhd_error{"usage", std::format("--set/--config '{}' is no longer a public option", key), std::string{hint}};
@@ -922,33 +930,22 @@ void check_known_set_passes(const Options& opts) {
             throw Lhd_error{"usage", std::format("--set/--config 'sim.{}' was removed", flag), std::string{why}};
           }
         }
-        if (flag == "vcdfakedelay") {
+        // An old spelling (sim.color_dirty, sim.fence_ratio, sim.live_words,
+        // sim.backend, sim.vcdfakedelay): a directed, copy-pasteable rename.
+        if (const auto rn = renamed_sim_set(flag, value)) {
           throw Lhd_error{"usage",
-                          "--set/--config 'sim.vcdfakedelay' was renamed",
-                          std::format("use --set sim.vcd_fake_delay={} instead", value)};
+                          std::format("--set/--config 'sim.{}' was renamed", flag),
+                          std::format("use --set {}={} instead", rn->first, rn->second)};
         }
-        auto near = leaf_match_hint(flag);
+        auto near = leaf_match_hint(std::string_view{flag}.substr(flag.rfind('.') + 1));
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
                         near.empty() ? std::format("the sim.* namespace takes: {}", known)
                                      : std::format("{}\nthe sim.* namespace takes: {}", near, known)};
       }
-      if (opt->kind == Sim_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
-          && value != "on" && value != "off") {
-        throw Lhd_error{"usage", std::format("--set/--config sim.{} expects true|false, got '{}'", flag, value), ""};
-      }
-      if (opt->kind == Sim_set_option::Kind::backend && value != "slop" && value != "llvm") {
-        throw Lhd_error{"usage", std::format("--set/--config sim.backend expects slop|llvm, got '{}'", value), ""};
-      }
-      // The numeric checkpoint knobs must be non-negative numbers, else a typo would
-      // silently reach the driver as 0 (checkpoint every cycle / divide-by-zero cadence).
-      if (opt->kind == Sim_set_option::Kind::non_neg_num) {
-        errno         = 0;
-        char*  endp   = nullptr;
-        double parsed = std::strtod(value.c_str(), &endp);
-        if (value.empty() || endp == value.c_str() || *endp != '\0' || parsed < 0.0 || errno == ERANGE) {
-          throw Lhd_error{"usage", std::format("--set/--config sim.{} expects a non-negative number, got '{}'", flag, value), ""};
-        }
+      // The value grammar of every Sim_set_option::Kind (lhd_sim_tune_session.cpp).
+      if (auto [msg, hint] = sim_set_value_error(*opt, value); !msg.empty()) {
+        throw Lhd_error{"usage", std::move(msg), std::move(hint)};
       }
       continue;
     }
@@ -965,11 +962,29 @@ void check_known_set_passes(const Options& opts) {
       // A REMOVED namespace gets a directed answer, not a guessing game: name
       // the exact canonical spelling for THIS flag.
       for (const auto& rn : kRenamedSetPasses) {
+        // `compile.sim.tune.dirty` splits as pass `compile.sim.tune`: the sim
+        // namespace owns dotted flags, so a prefix match carries the rest over.
+        std::string flag_full{flag};
         if (rn.old_ns != pass) {
-          continue;
+          if (rn.new_ns != "sim" || !pass.starts_with(std::string{rn.old_ns} + ".")) {
+            continue;
+          }
+          flag_full = std::format("{}.{}", pass.substr(rn.old_ns.size() + 1), flag);
         }
-        std::string_view f2  = renamed_flag(flag);
+        std::string_view f2  = renamed_flag(flag_full);
         std::string      ns2 = std::string{rn.new_ns};
+        std::string      v2  = value;
+        // An old sim.* spelling reached through the removed namespace goes
+        // straight to its CURRENT name: `compile.sim.color_dirty=1` -> use
+        // sim.tune.dirty=on, never the rejected sim.color_dirty (a two-step dead end).
+        std::string      renamed_sim_flag;
+        if (ns2 == "sim") {
+          if (const auto r = renamed_sim_set(f2, value)) {
+            renamed_sim_flag = r->first.substr(4);
+            v2               = r->second;
+            f2               = renamed_sim_flag;
+          }
+        }
         if (rn.formal_split) {
           bool common = false;
           for (const auto& cf : kFormalCommonFlags) {
@@ -1006,9 +1021,10 @@ void check_known_set_passes(const Options& opts) {
             }
           }
         }
-        throw Lhd_error{"usage",
-                        std::format("--set/--config '{}.{}' was removed (the {}.* spelling no longer exists)", pass, flag, pass),
-                        std::format("use --set {}.{}={} instead", ns2, f2, value)};
+        throw Lhd_error{
+            "usage",
+            std::format("--set/--config '{}.{}' was removed (the {}.* spelling no longer exists)", pass, flag, rn.old_ns),
+            std::format("use --set {}.{}={} instead", ns2, f2, v2)};
       }
       std::string known;
       for (const auto& sp : kSetPasses) {
@@ -1826,23 +1842,21 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
       labels["vcd"] = v;
-    } else if (k == "sim.backend") {
-      labels["backend"] = v;
-    } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
+    } else if (k == "sim.vcd_fake_delay") {
       labels["vcd_fake_delay"] = v;
     } else if (k == "sim.slop_u") {
       labels["slop_u"] = v;
-    } else if (k == "sim.color_dirty") {
-      labels["color_dirty"] = v;
     } else if (k == "sim.debug") {
       labels["debug"] = v;
     } else if (k == "sim.unknown_zero") {
       labels["unknown_zero"] = v;
-    } else if (k == "sim.live_words") {
-      labels["live_words"] = v;
-    } else if (k == "sim.fence_ratio") {
-      labels["fence_ratio"] = v;
     }
+  }
+  // The tune vector always reaches cgen RESOLVED and concrete (explicit --set >
+  // sim.tune.file > the workdir's tuned decision > default), never through
+  // opts.sets: see Options::sim_tune.
+  for (auto& [label, value] : sim_tune_codegen_labels(opts, res)) {
+    labels[label] = std::move(value);
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path
   // derived from the top ("<entity>.vcd" next to wherever the binary runs).
@@ -2154,8 +2168,12 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
       // manifest.json describing a tree that cannot link. `lhd sim`'s own build
       // globs the directory, so only the hand-buildable bazel/manifest path was
       // affected — which is precisely the path nothing in CI exercises.
+      // The root-only sim.tune TUs (`.tune-id.cpp`: the baked vector/structure
+      // identity; `.tune.cpp`: the profiler's support tables) and the
+      // `.color-bind-` shards link into the same library.
       if ((filename.find(".color-kernel-") != std::string::npos || filename.find(".color-eval-") != std::string::npos
-           || filename.find(".color-commit-") != std::string::npos)
+           || filename.find(".color-commit-") != std::string::npos || filename.find(".color-bind-") != std::string::npos
+           || filename.ends_with(".tune-id.cpp") || filename.ends_with(".tune.cpp"))
           && filename.ends_with(".cpp")) {
         color_aux_sources.push_back(filename);
       } else if (filename.find(".color-kernel-") != std::string::npos && filename.ends_with(".llvm.o")) {
@@ -2207,7 +2225,7 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   // toolchains). The caller's compilation mode still supplies the usual
   // optimization flags.
   //
-  // `.llvm.o` is NOT in srcs, and must not be: under `sim.backend=llvm` those
+  // `.llvm.o` is NOT in srcs, and must not be: under `sim.tune.backend=llvm` those
   // files hold lhd-version LLVM BITCODE (Cgen_llvm::write_object writes it with
   // WriteBitcodeToFile), not relocatable objects, and bazel would hand a `.o`
   // in srcs straight to the system linker. Lowering them needs `llvm_sim_link`,
@@ -2219,12 +2237,12 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     std::ofstream ofs(std::format("{}/BUILD", dir));
     ofs << "load(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n";
     if (!color_objects.empty()) {
-      ofs << "# INCOMPLETE: this design was generated with --set sim.backend=llvm, whose color\n"
+      ofs << "# INCOMPLETE: this design was generated with --set sim.tune.backend=llvm, whose color\n"
              "# kernels are LLVM bitcode (*.llvm.o) that only lhd's version-matched llvm_sim_link\n"
              "# can lower to a native object. They are deliberately NOT in srcs -- bazel would pass\n"
              "# bitcode to the system linker -- so this target is missing every\n"
              "# __lhd_color_kernel_*_llvm definition the evaluator calls and will not link.\n"
-             "# Re-run with --set sim.backend=slop for a standalone bazel module, or use `lhd sim`,\n"
+             "# Re-run with --set sim.tune.backend=slop for a standalone bazel module, or use `lhd sim`,\n"
              "# which links the bitcode itself.\n\n";
     }
     ofs << "cc_library(\n    name = \"sim\",\n    srcs = [\n";
@@ -2238,6 +2256,12 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     ofs << "    hdrs = glob([\"*.hpp\"]),\n";
     ofs << "    copts = [\"-std=c++23\", \"-pthread\"],\n"
            "    linkopts = [\"-pthread\"],\n";
+    // alwayslink: nothing references a `<stem>.tune-id.cpp` object by name --
+    // the driver DEFINES weak fallbacks of its identity functions -- so a
+    // static-archive link would never pull that member in, and drv.bin would
+    // silently lose its baked vector/structure/codegen identity (and with it
+    // the run-time `--set` codegen checks). Force every member in.
+    ofs << "    alwayslink = True,\n";
     ofs << "    deps = [\"@hlop//hlop\"],\n"
            "    visibility = [\"//visibility:public\"],\n"
            ")\n";

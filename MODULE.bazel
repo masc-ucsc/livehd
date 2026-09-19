@@ -101,7 +101,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "5e6099a8d2611309801611b50f9cfdcc0547b7d1",
+    commit = "2e4e41297f996c789a21198569fd356b1a9eab67",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -132,7 +132,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "4e1e58538622476a2e50e92ece0b6bd2ed508b3a",
+    commit = "83cb51175803943ed3273f049deb41152d85ecab",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:

@@ -37,6 +37,11 @@ exports_files([
     "tests/sim/loop_roll_carry.prp",
     "tests/sim/loop_hierarchy.prp",
     "tests/sim/loop_invariant_broadcast.prp",
+    "tests/sim/tune_idle_tables.prp",
+    "tests/sim/tune_lfsr.prp",
+    "tests/sim/loop_carry_split_reset_domains.prp",
+    "tests/sim/kernel_lane_split_negedge_rf.prp",
+    "tests/sim/icg_secondary_clock_dirty.prp",
 ])
 
 # The pyrope/verilog golden pairs (used by the lhd flow-matrix tests).
@@ -100,6 +105,9 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        # The generated-C++ helper text (`?` literals, tune hashing) prp_sim emits
+        # into drv.cpp VERBATIM, shared with inou.cgen.sim. Header-only.
+        "//inou/cgen:sim_tune_hdrs",
         "//lnast",
         "//pass/common:pass",
         # THE attribute-name vocabulary (battr.hpp). Header-only, so this does
@@ -167,6 +175,28 @@ sh_test(
     data = [
         "//inou/prp:tests/p2p_recompile_test.py",
         "//inou/prp:tests/pyrope/sibling_recompile.prp",
+        "//lhd",
+    ],
+)
+
+# sim.tune DRIVER contract (prp_sim_rt.hpp, sim_profile.md §6): run-time
+# `--set sim.unknown_zero=true` == a generated sim.unknown_zero=true build, the
+# per-test metrics + digests of every --result-json row, profiling changes no
+# simulated value and reproduces its counts under a fixed stride, the `--set`
+# key classes, and `set` as a reserved test-parameter name. Hermetic like the
+# prp-sim targets (runfiles hlop/iassert headers + the host C++ compiler).
+sh_test(
+    name = "prp-sim-tune-driver",
+    srcs = ["tests/sim_tune_driver_test.py"],
+    args = [
+        "-i",
+        "$(location //inou/prp:tests/sim/unknown_tb_literal_once.prp)",
+    ],
+    data = [
+        "//inou/prp:sim_runtime_hdrs",
+        "//inou/prp:tests/prpsim.py",
+        "//inou/prp:tests/sim/unknown_tb_literal_once.prp",
+        "//inou/prp:tests/sim_tune_driver_test.py",
         "//lhd",
     ],
 )

@@ -35,14 +35,12 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   }
   // The `sim.*` command namespace (sim_command + the cgen.sim codegen labels,
   // kSimSetOptions) is its own vocabulary. Like `.log`, it must never collect
-  // a command-path prefix under a `compile`/describe context.
+  // a command-path prefix under a `compile`/describe context -- and EVERY sim
+  // key stays verbatim, registered or not, so a renamed spelling
+  // (sim.color_dirty) reaches its directed rename error and a typo its
+  // unknown-sim-flag error instead of resolving somewhere else.
   if (key.size() > 4 && key.substr(0, 4) == "sim.") {
-    auto flag = key.substr(4);
-    for (const auto& s : kSimSetOptions) {
-      if (s.name == flag) {
-        return std::string{key};
-      }
-    }
+    return std::string{key};
   }
   // Same for the `synth.*` command namespace (synth_command, kSynthSetOptions).
   if (key.size() > 6 && key.substr(0, 6) == "synth.") {

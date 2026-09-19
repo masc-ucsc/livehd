@@ -4,13 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <limits>
 #include <vector>
 
 #include "hhds/graph.hpp"
+#include "sim_tune_vector.hpp"
 
 namespace livehd::sim {
 
@@ -234,6 +235,103 @@ public:
     bool     color_dag_acyclic         = true;
   };
 
+  // ---- sim.tune support tables (sim_profile.md §6.1 / §8.1) ----
+  //
+  // Both are computed by discover() BEFORE the module-fence decision, from the
+  // versions, value uses and version DAG alone. None of those depends on
+  // sim.tune.dirty / fence / live_words / backend (those only coarsen), so both
+  // tables are a pure function of the design: the color root's
+  // `<stem>.tune.cpp` is byte-identical across tune vectors.
+
+  // One executable body occurrence -- an instance path from the root. The root
+  // (path "") is always present; the others are the occurrences that own at
+  // least one executable site. A compact loop and an opaque call belong to the
+  // body that CALLS them. An anonymous wrapper is transparent in the formatted
+  // path, so two occurrences can share a path; they still differ in `def` or
+  // in their position.
+  struct Occurrence {
+    std::string path;  // hhds::format_occurrence_path spelling, "" = the root
+    std::string def;   // LGraph definition name
+    // GE of the own executable sites (live, with at least one version). A
+    // compact loop weighs its native body's GE x its lane count, not the 1 GE
+    // of its Sub node: the rolled work is otherwise invisible.
+    uint64_t    ge          = 0;
+    uint64_t    cost        = 0;  // simulation word cost of the own sites (Support_class::cost)
+    uint64_t    cost_flat   = 0;  // the same without the loop/opaque body multiplier
+    uint64_t    sites       = 0;  // own executable sites
+    uint64_t    state_sites = 0;  // of which flops, latches and memories
+    uint64_t    sources     = 0;  // support sources this occurrence owns
+  };
+
+  // The single-period fan-in frontier ("support") of every executable site
+  // over the plan's own value-flow graph: which stored values (state at the
+  // start of the period, root inputs) a site's computation in one period can
+  // read. A site whose support did not change between two sampled periods
+  // computes the same value again -- idle work a dirty-gated schedule skips.
+  struct Support_source {
+    enum class Kind : uint8_t {
+      state,      // a flop, latch or memory (its stored value)
+      opaque,     // a compact loop or an opaque call: the instance's whole walked state
+      top_input,  // a root input port
+    };
+    Kind     kind       = Kind::state;
+    size_t   site       = invalid_index;  // state / opaque: the Site index
+    uint32_t port       = 0;              // top_input: the root input port id
+    uint32_t bucket     = 0;              // activity-mask bit in [0, 64 * words)
+    uint32_t occurrence = 0;              // occurrences() index; occurrences().size() for a top input
+  };
+  // Executable sites hash-consed by (support bits, occurrence) -- by the bits
+  // alone when that split would exceed kMaxSupportClasses (exact: equal rows
+  // are idle in the same pairs), then folded (see Support::fold_*). Every
+  // executable site joins a class, with four weights the profiler can average
+  // idleness over (the tuner picks one; sim_profile.md §8.1 I_s):
+  //   ge        -- the synthesis gate estimate (0 for pure wiring);
+  //   sites     -- 1 per site;
+  //   cost      -- simulation words: max(1, ceil(widest output bits / 64)) (a
+  //                memory: its data width), a compact loop its native body's
+  //                cost x its lanes (nested loops multiply), an opaque call
+  //                with a body its body's cost; always >= 1 (wiring is still
+  //                emitted code);
+  //   cost_flat -- cost with no body multiplier: a loop or opaque call weighs
+  //                only its own words.
+  struct Support_class {
+    uint64_t ge         = 0;
+    uint64_t sites      = 0;
+    uint64_t cost       = 0;
+    uint64_t cost_flat  = 0;
+    uint32_t occurrence = 0;  // occurrences().size() = spans several occurrences (merged or folded over the cap)
+  };
+  struct Support {
+    bool                        available       = false;  // false: the version DAG is cyclic (the plan failed)
+    bool                        exact           = true;   // one bucket per source; false = contiguous bucketing
+    uint32_t                    words           = 0;      // activity-mask words per class
+    uint64_t                    total_ge        = 0;      // sum of the classes' GE
+    uint64_t                    total_sites     = 0;      // sum of the classes' sites (every executable site)
+    uint64_t                    total_cost      = 0;      // sum of the classes' cost
+    uint64_t                    total_cost_flat = 0;      // sum of the classes' cost_flat
+    // Over kMaxSupportClasses the lightest classes fold into fold_classes
+    // TRAILING groups whose row ORs their members' rows (conservative: a group
+    // is idle only when every member is). fold_* is the weight that sits in
+    // them -- the share of each total the idle columns can only under-report
+    // (the I_s ceiling the profiler cannot see past). All zero below the cap.
+    uint32_t                    fold_classes    = 0;  // trailing folded (approximate-row) classes
+    uint32_t                    fold_members    = 0;  // row classes folded into them
+    uint64_t                    fold_ge         = 0;
+    uint64_t                    fold_sites      = 0;
+    uint64_t                    fold_cost       = 0;
+    uint64_t                    fold_cost_flat  = 0;
+    std::vector<Support_source> sources;  // in hashing order: sites by path rank, then root inputs
+    std::vector<Support_class>  classes;
+    std::vector<uint64_t>       class_bits;  // classes.size() * words
+  };
+  // Bounds that keep support() cheap on the largest designs: a class table the
+  // sampler can AND in microseconds, and per-version bitmaps (freed before
+  // discover() returns) that never exceed kMaxSupportBitmapBytes.
+  static constexpr size_t   kMaxSupportClasses     = 4096;
+  static constexpr size_t   kSupportFoldGroups     = 128;  // table slots the over-the-cap fold may use
+  static constexpr uint32_t kMaxSupportWords       = 16;
+  static constexpr uint64_t kMaxSupportBitmapBytes = uint64_t{64} << 20;
+
   Color_plan() = default;
 
   // `root` must already be fully prepared.  The plan holds lazy occurrence
@@ -247,18 +345,18 @@ public:
   // its own colors (<0 = the built-in default, 0 = fence every such module).
   static Color_plan         discover(hhds::Graph* root, bool include_observations = true, bool separate_runtime_calls = false,
                                      uint64_t live_words = 0, int64_t fence_ratio = -1);
-  static constexpr uint64_t kDefaultLiveWords  = 256;
+  static constexpr uint64_t kDefaultLiveWords  = livehd::sim::kTuneDefaultLiveWords;
   // Best weighted average (pyrope2 x4, pyrope x2, verilog x1) over lhdsuite
   // and lhdtrack on 2026-09-18: within 1% of each benchmark's best on 19/21,
   // the outliers being tuned per benchmark (xs_renametable 0, cdc_fifo_flops
   // never). Values <= 3 cost the LFSR-driven lhdtrack DUTs 5-10x.
-  static constexpr int64_t  kDefaultFenceRatio = 16;
+  static constexpr int64_t  kDefaultFenceRatio = livehd::sim::kTuneDefaultFenceRatio;
   // No module fences at all. A fence exists only so dirty-bit gating can skip
-  // an idle module; with sim.color_dirty=false every color runs every period,
+  // an idle module; with sim.tune.dirty=off every color runs every period,
   // so a fence is pure cost (each crossing value becomes a stored slot and the
   // module seam cuts colors). inou.cgen selects this when dirty gating is off
-  // and sim.fence_ratio was not set explicitly.
-  static constexpr int64_t  kNoFences = std::numeric_limits<int64_t>::max();
+  // and sim.tune.fence was not set explicitly.
+  static constexpr int64_t  kNoFences          = livehd::sim::kTuneNoFences;
 
   [[nodiscard]] const std::vector<Site>&                sites() const noexcept { return sites_; }
   [[nodiscard]] const std::vector<Dependency>&          dependencies() const noexcept { return dependencies_; }
@@ -282,6 +380,9 @@ public:
   [[nodiscard]] const Summary&                          summary() const noexcept { return summary_; }
   [[nodiscard]] const std::vector<std::string>&         errors() const noexcept { return errors_; }
   [[nodiscard]] bool                                    complete() const noexcept { return summary_.complete; }
+  // sim.tune: see Occurrence / Support above. Occurrences are ordered by path.
+  [[nodiscard]] const std::vector<Occurrence>&          occurrences() const noexcept { return occurrences_; }
+  [[nodiscard]] const Support&                          support() const noexcept { return support_; }
 
   // Re-resolves lazy edges after construction.  Besides checking the retained
   // handles, this pins the policy-lifetime contract: moving a Color_plan must
@@ -296,6 +397,12 @@ public:
 
 private:
   using Policy = std::function<hhds::Instance_action(const hhds::Instance_site&)>;
+
+  // Fills occurrences_ and support_. discover() calls it once the version DAG
+  // is ordered and before the fence decision; `compact_body[s]` = site s sits
+  // inside a compact loop's native body.
+  void build_tune_tables(hhds::Graph* root, const std::vector<std::vector<size_t>>& versions_by_base,
+                         const std::vector<size_t>& site_path_rank, const std::vector<bool>& compact_body);
 
   // Heap allocation is intentional. Hierarchy_policy is function_ref, so the
   // callable address -- not merely the Color_plan object -- must remain stable
@@ -320,6 +427,8 @@ private:
   std::vector<std::vector<size_t>>   canonical_members_;
   Summary                            summary_;
   std::vector<std::string>           errors_;
+  std::vector<Occurrence>            occurrences_;
+  Support                            support_;
   // Live machine words this plan's coarsener was allowed to keep alive across
   // one color's members. Per-PLAN, not a global: report() prints the budget the
   // colors below were actually built at, so a later discover() at a different

@@ -9,10 +9,27 @@
 //   * `--list-tests`        print the tests + parameters as JSON, then exit
 //   * `--test NAME`         run only test NAME (repeatable; default = all)
 //   * `--seed N`            hlop PRNG seed
+//   * `--set KEY=VALUE`     an lhd `--set` key that applies to a BUILT simulator
+//                           (lhd.seed, sim.init_zero, sim.unknown_zero=true,
+//                           sim.checkpoint*, sim.tune.profile*); a codegen key
+//                           (sim.tune.dirty, ...) is accepted only when it
+//                           restates the value the binary was generated with.
+//                           Repeatable, applied in argv order; `set` is therefore
+//                           a reserved test-parameter name.
 //   * `--<param> N`         bind a `test name(params)` parameter (per test)
 //   * `--help` / `-h`       usage
 // Values are bound at RUN time (argv), never baked in, so one built binary can be
 // re-run with any test selection / parameters / seed.
+//
+// sim.tune (sim_profile.md §6): every `--result-json` row of a test that ran also
+// carries its run metrics (sim_cycles, init_ns / sim_ns, cpu_ns, cpu_cycles,
+// instructions, pcore_frac, counters, rng_draws, ckpt_taken) and two digests
+// (end_digest: DUT state + testbench frame at test end; out_digest: the bytes the
+// test body printed + its verdict). `--set sim.tune.profile=on` wakes the dormant
+// state sampler and writes a raw run file (prp_sim_rt.hpp) for lhd to ingest; its
+// `profile.weights` reports the sampled idleness under every support-class weight
+// (ge / sites / cost / cost_flat), and the raw file alone adds the per-class
+// calibration dump `profile.class_dump`.
 //
 // Supported `test` body: decls + `mut acc = Module` instances driven by a
 // `tick N { ... step ... }` loop with poke/peek field access and end-of-loop
@@ -48,9 +65,11 @@ struct Test_info {
 // `tests`; on an unsupported construct or parse error returns non-zero + sets
 // `err`. `vcd_dir` (empty = no VCD): each test points its DUT at
 // `<vcd_dir>/<test_name>.vcd` so every test dumps its own waveform.
-// `unknown_zero` (sim.unknown_zero) fills a testbench literal's `?` bits with 0
-// instead of drawing them from hlop's seeded PRNG; it mirrors the flag
-// inou.cgen.sim applies to the DUT so one knob covers the whole simulation.
+// `unknown_zero` (an EXPLICIT sim.unknown_zero=true) folds a testbench literal's
+// `?` bits to 0 at generation time, mirroring the flag inou.cgen.sim applies to
+// the DUT so one knob covers the whole simulation. Otherwise a testbench `?`
+// literal is drawn ONCE per program (the DUT's __lhd_unknown_literal helper), and
+// drv.bin's run-time `--set sim.unknown_zero=true` zero-fills it instead.
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
              bool observation_on, bool runtime_support_on, bool unknown_zero, std::vector<Test_info>& tests, std::string& err);
 

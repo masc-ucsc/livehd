@@ -143,6 +143,8 @@ Reuse requires all of the following. Anything else is a cold compile.
         lowering sources.  Rebuilding lhd invalidates every cache.
 4.  option context matches
         top, recipe, source paths, input directories, and --set flags
+        except compile.cache, lhd.stats and every sim.* key (no sim.*
+        knob reaches the front end or lowering)
 5.  per file: path unchanged AND (bytes identical OR parsed tree identical)
 6.  the design's set of graphs matches the stored inventory, row by row:
         name, interface hash, has-body, body digest, and an owner that is
@@ -339,6 +341,9 @@ Five things that reads out of:
    Adding `--set pass.abc.area_relax=200` throws the whole compile cache away.
    The key should cover the options that actually feed the front end and
    lowering — the same closure the code salt already hashes.
+   *(2026-09-18: `sim.*` keys no longer enter the context, so flipping a
+   `sim.tune.*` knob keeps every compile-cache hit — [`simopt.md`](simopt.md)
+   §13. The rest of the narrowing is still open.)*
 
 4. **`pass.formal` is 44% of a cold compile** (2.08 s of 4.71 s) and has no
    cache. Irrelevant to a hit, paid on every miss — which today means every real
@@ -410,11 +415,12 @@ these by number.
 | **I5** | A `store-failed` is a bug; a principled refusal is reported, not hidden. "This shape is not reusable" is a design decision and must be counted separately from "the cache tried to snapshot this and could not", which recomputes forever. |
 | **I6** | Every item is a **lever**, drawn one at a time and measured — never a prerequisite phase to be completed first. Ordering constraints live on the individual levers, not on a calendar. The one exception is the measurement harness: nothing is meaningful until the numbers are trustworthy. |
 | **I7** | One lever per iteration; the ledger is the product. A two-change iteration cannot be attributed. A measured negative result is recorded and is worth as much as a positive one. |
-| **I8** | No per-design tuning. Every lever is a shared default. The only action a warm build may require of a user is naming a `--workdir`. |
+| **I8** | No per-design tuning *by hand*. Every lever is a shared default; the only per-design values are the tool-measured `*.tune.*` decisions of **I14**. The only action a warm build may require of a user is naming a `--workdir`. *(Amended 2026-09-18 by I14.)* |
 | **I10** | One ledger, shared with `opt_loop_synth`; rows carry a `flow` field. The ABC **key and salt soundness** rules are owned here and consumed there; the ABC **recipe and partition knobs** are owned there and never touched here. |
 | **I11** | Numbers are per-host and per-baseline; nothing here is a target. Stamp `host`, `lhd_git_sha`, `lhdsuite_git_sha` and `pdk_version` on every row and compare only within one host. Re-baseline after any PDK, toolchain or machine change. |
 | **I12** | *(2026-08-30)* **Source units compile independently.** Elaboration does not propagate constants or values across a module boundary — only inlining does, and inlining is not on by default. A **body** change dirties its own unit; only an **interface** change dirties the units that import it. The current transitive-import-closure invalidation is over-conservative with respect to the language, not merely unoptimized. Its one true exception is legalize's inlining repair (§5), which must be recorded explicitly. |
 | **I13** | *(2026-08-30)* **A warning never blocks reuse.** Errors do — a failed compile stores nothing — but a warning is not a correctness signal. Warm-equals-cold in the diagnostic stream is achieved by attributing records to source units and replaying the clean ones (§6), never by refusing to reuse. |
+| **I14** | *(2026-09-18, amends I8)* **Measured per-design tuning is allowed** — the `<owner>.tune.*` knobs, learned per workdir under `<cmd>.tune.profile` — iff all five hold. (1) **It never changes results.** Sim values, stdout, verdicts and checkpoints are byte-identical for one seed whenever `?` is zero-filled (a profiling run, or an explicit `sim.unknown_zero=true`); under random fill a `?` draw may differ between vectors, which is legal nondeterminism of an unspecified bit. A synthesized netlist stays equivalent; LEC may change only time-to-verdict. Enforced by the knob allowlist AND by an oracle on every trial. (2) **An explicit `--set` always wins**; explicit knobs are frozen. (3) **`lhd.incremental=false` or `<cmd>.tune.profile=off` yields the shared defaults** and reads or writes no tune data. (4) **Every run prints the applied vector** as the `--set` list that reproduces it. (5) **A prediction only proposes a trial**; the ledger's measured result on the same host, structure and testbench decides. Hand-picked per-design knob lists stay out of scope. The sim implementation is documented in [`simopt.md`](simopt.md) §13. |
 
 *(**I9** selects which designs are routine benchmark targets and which are
 periodic stress runs; it is recorded with the rest of the target selection in
@@ -458,6 +464,7 @@ periodic stress runs; it is recorded with the rest of the target selection in
 | implementation | `lhd/lhd_compile_cache.cpp`, driven from `lhd/lhd_kernel_compile.cpp` (`compile_sources`) |
 | acceptance tests | `lhd/tests/lhd_compile_cache_test.sh` — gating and telemetry, exact comment-only reuse, semantic invalidation (including a manufactured digest collision that the exact tree compare must still reject), context mismatch, cache damage as a refused cold miss, `store_failed` as a hard failure, structural warm≡cold over a mixed dirty cone, ghost-definition pruning, shared-workdir coexistence, diagnostic replay |
 | benchmark harness | `../lhdsuite/bench/matrix.sh` — one row per (phase, mode) into `bench/ledger.jsonl` |
+| sim tune store (I14) | `<workdir>/incr/scopes/sim/<scope>/tune.jsonl`, beside the compile scope; outside every generation key (only the resolved vector reaches the color root's key) — [`simopt.md`](simopt.md) §13 |
 | live scoreboard | [`current_opt_loop_incr.html`](current_opt_loop_incr.html), rendered from the ledger |
 | detailed record | [`opt_loop_incr_log.md`](opt_loop_incr_log.md) |
 | sibling loop | [`opt_loop_synth.md`](opt_loop_synth.md) |

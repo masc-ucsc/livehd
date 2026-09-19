@@ -99,7 +99,15 @@ def run_simulation(runner, tmp_dir, test):
     # from scratch rather than composing on lhd_upass, so without this a fixture
     # that sets e.g. the default (`compile.unroll=false`) would assert a rolled graph elsewhere and
     # still SIMULATE the default (unrolled) lowering.
-    extra = runner._extra_sets(test)
+    #
+    # sim.tune.profile=off FIRST, so a fixture's own `:set:` can still override
+    # it (the last `--set` of a key wins). The fixtures assert the DEFAULT `?`
+    # policy (unknown_bits_random: the draws must be random), but under the
+    # `auto` default an `lhd sim --workdir` run PROFILES, and a profiling run
+    # zero-fills `?` and takes no checkpoints (sim_profile.md ruling 3). The
+    # hermetic path below runs drv.bin directly and never profiles; the pin
+    # keeps the `--run-only` fallback and the generated code on the same policy.
+    extra = ['--set', 'sim.tune.profile=off'] + runner._extra_sets(test)
 
     setup = [runner.lhd, 'sim', prp, '--setup-only', '--workdir', simroot, '-q'] + extra
     proc  = subprocess.Popen(setup, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -174,6 +182,15 @@ def run_simulation(runner, tmp_dir, test):
     if kernel_prefixes:
         bodies += [os.path.join(abs_simdir, fn) for fn in sorted(os.listdir(abs_simdir))
                    if fn.endswith('.cpp') and fn.startswith(kernel_prefixes)]
+    # A color root's sim.tune TUs. `<stem>.tune.cpp` defines the root's
+    # `__tune_support()` / `__tune_sources()`, which the driver's profiler
+    # references, so it is one more body. `<stem>.tune-id.cpp` is NOT: it holds
+    # the strong `__lhd_tune_*_<mod>()` identity functions whose WEAK defaults
+    # drv.cpp itself defines, and a translation unit cannot hold both, so it
+    # links beside the unity TU as its own (include-free, tiny) TU.
+    stems = [h[:-4] for h in sorted(incs_h) if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
+    bodies += [p for p in (os.path.join(abs_simdir, s + '.tune.cpp') for s in stems) if os.path.exists(p)]
+    tune_ids = [p for p in (os.path.join(abs_simdir, s + '.tune-id.cpp') for s in stems) if os.path.exists(p)]
     exe = os.path.join(abs_simdir, 'drv.bin')
 
     # UNITY BUILD: one `#include`-ing translation unit instead of one clang++ TU
@@ -227,13 +244,13 @@ def run_simulation(runner, tmp_dir, test):
                 f.write('#include "{}"\n'.format(b))
             f.write('#include "{}"\n'.format(drv))
 
-        cc = [cxx] + cflags + [uni, '-o', exe]
+        cc = [cxx] + cflags + [uni] + tune_ids + ['-o', exe]
         cp = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if cp.returncode != 0 and bodies:
             print('{} - simulation - NOTE: unity build failed (generated files collide at file '
                   'scope?); falling back to one TU per body, which is slower'.format(name))
             print(cp.stdout.decode('utf-8', 'ignore'))
-            cc = [cxx] + cflags + bodies + [drv, '-o', exe]
+            cc = [cxx] + cflags + bodies + tune_ids + [drv, '-o', exe]
             cp = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if cp.returncode != 0:
             print('{} - simulation - FAILED: driver did not compile'.format(name))

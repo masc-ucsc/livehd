@@ -81,6 +81,11 @@ For performance measurements:
 - use 100,000 cycles for Minion and 4,000,000 cycles for DINO;
 - keep the exact same LGraph, testbench, compiler, and arguments across an A/B
   simulator experiment;
+- pin the tune vector on BOTH the setup and the run-only command:
+  `--set sim.tune.profile=off` (the built-in defaults) or
+  `--set sim.tune.file=F`. Under the default `sim.tune.profile=auto` a
+  persistent workdir profiles its runs (zero-filled `?`, no checkpoints) and a
+  later setup may regenerate the color root with a trial vector (§13);
 - use retired instructions as the primary low-noise metric, cycles/IPC as the
   next metric, and elapsed time only on an otherwise idle machine;
 - run samples serially, not concurrently;
@@ -334,7 +339,10 @@ the suite may benchmark a registry/pinned LiveHD instead of the transferred
 working tree.
 
 The benchmark definitions and cycle counts are in `bench/defs.bzl`; shared
-measurement logic is in `bench/sim.sh` and `bench/sim_verilator.sh`.
+measurement logic is in `bench/sim.sh` and `bench/sim_verilator.sh`. Every
+target starts from a fresh workdir, so the `sim.tune` learning loop never
+converges there: a core that wants a tuned vector pins it through its
+`sim_sets` (§13.6).
 
 The Verilator benchmark is single-threaded simulation unless `--threads N` is
 explicitly passed to Verilator. `make -j$(nproc)` only parallelizes the host
@@ -352,6 +360,12 @@ export RUN_ROOT=simopt_runs/baseline
 mkdir -p "${RUN_ROOT}/minion" "${RUN_ROOT}/dino"
 ```
 
+Every `lhd sim` below pins `--set sim.tune.profile=off`, so the retained
+binary is the built-in default vector and no run is profiled. To measure a
+tuned vector instead, replace it with `--set sim.tune.file=F` (§13.6). The
+direct `drv.bin` runs need nothing: a driver never profiles unless it is given
+`--set sim.tune.profile=on`.
+
 ### 7.1 Minion
 
 ```bash
@@ -363,11 +377,12 @@ mkdir -p "${RUN_ROOT}/minion" "${RUN_ROOT}/dino"
 
 "${LHD}" sim "lg:${RUN_ROOT}/minion/lg" minion/sim/minion_prog_tb.prp \
   --setup-only --set sim.vcd=false --set sim.init_zero=true \
-  --workdir "${RUN_ROOT}/minion/SW"
+  --set sim.tune.profile=off --workdir "${RUN_ROOT}/minion/SW"
 
 "${LHD}" sim "lg:${RUN_ROOT}/minion/lg" minion/sim/minion_prog_tb.prp \
   --run-only --arg cycles=100000 --set sim.ninja=false \
-  --set sim.init_zero=true --workdir "${RUN_ROOT}/minion/SW"
+  --set sim.init_zero=true --set sim.tune.profile=off \
+  --workdir "${RUN_ROOT}/minion/SW"
 
 "${RUN_ROOT}/minion/SW/sim/drv.bin" --cycles 100000 \
   --result-json "${RUN_ROOT}/minion/SW/sim/direct-result.json" \
@@ -383,12 +398,12 @@ mkdir -p "${RUN_ROOT}/minion" "${RUN_ROOT}/dino"
   -F dino/verilog/filelist.f -DSYNTHESIS
 
 "${LHD}" sim "lg:${RUN_ROOT}/dino/lg" dino/sim/dino_prog_tb.prp \
-  --setup-only --set sim.vcd=false \
+  --setup-only --set sim.vcd=false --set sim.tune.profile=off \
   --workdir "${RUN_ROOT}/dino/SW"
 
 "${LHD}" sim "lg:${RUN_ROOT}/dino/lg" dino/sim/dino_prog_tb.prp \
   --run-only --arg cycles=4000000 --set sim.ninja=false \
-  --workdir "${RUN_ROOT}/dino/SW"
+  --set sim.tune.profile=off --workdir "${RUN_ROOT}/dino/SW"
 
 "${RUN_ROOT}/dino/SW/sim/drv.bin" --cycles 4000000 \
   --result-json "${RUN_ROOT}/dino/SW/sim/direct-result.json" \
@@ -525,7 +540,10 @@ Try one technique at a time.
 5. Verify that both plan reports have identical site/version/value-use input
    counts. Differences in colors/boundaries are expected; differences in
    version sites mean the input changed and invalidate the A/B test.
-6. Compile and run both binaries with identical options.
+6. Compile and run both binaries with identical options, including the same
+   pinned tune vector: check that both envelopes report the same
+   `sim_tune.applied.vector` (a vector difference is a second, unattributed
+   change).
 7. Gate on architectural correctness before profiling.
 8. Collect at least five serial `perf stat` samples, plus compile time and
    structural/code-size counts.
@@ -643,3 +661,350 @@ how much, rather than inferring it from source file count alone.
 Historical `todosim.md` describes the earlier Minion correctness bring-up, but
 its performance numbers predate the current color runtime and must not be used
 as a baseline.
+
+## 13. Profile-guided tuning (`sim.tune.*`)
+
+Some simulator knobs change only speed, never a simulated value, and the best
+setting depends on the design's activity, not on its size. A mostly idle design
+(xs_renametable) wants dirty tracking on; a small design whose state toggles
+every cycle (the LFSR-driven lhdtrack benches) wants it off, and is 2-3x slower
+with it. Those knobs live under `sim.tune.*`. With a persistent `--workdir`,
+`lhd sim` measures the design while it runs and picks them per design. Ruling
+**I14** in [`opt_loop_incr.md`](opt_loop_incr.md) §9 states what such a
+decision may and may not do: the short version is that it never changes a
+result, and an explicit `--set` always wins.
+
+### 13.1 Knobs
+
+| key | values | default | what it controls |
+|---|---|---|---|
+| `sim.tune.profile` | `auto`\|`on`\|`off` | `auto` | the learning switch (§13.2) |
+| `sim.tune.dirty` | `auto`\|`on`\|`off` | `auto` = on | the cross-cycle color activation cache: a color runs only when an input changed, a flop commit compares before it writes, and a fully quiescent period exits early. `true`/`false`/`1`/`0` are accepted aliases |
+| `sim.tune.fence` | `auto`\|`none`\|N (0..2^20) | `auto` = `none` with dirty off, 16 with it on | fence a module used once into its own colors when it has at least N sites per interface word; `0` fences every such module. A fence pays only when dirty gating can skip what it isolates |
+| `sim.tune.live_words` | `auto`\|N (1..2^20) | `auto` = 256 | per-color live-value budget, in 64-bit words |
+| `sim.tune.backend` | `auto`\|`slop`\|`llvm` | `auto` = slop | color-kernel backend. `llvm` needs a clang host, and a color it cannot lower fails setup rather than falling back |
+| `sim.tune.file` | PATH | "" | apply a vector written by `sim.tune.export` (§13.6) |
+| `sim.tune.export` | PATH | "" | write the applied vector, with its provenance, to PATH |
+| `sim.tune.profile_dir` | DIR | "" | drv.bin only: where a profiling run writes its raw run file |
+| `sim.tune.profile_stride` | N (0..2^20) | 0 = auto | drv.bin only, for tests: a fixed sampling stride with no jitter |
+
+`dirty`, `fence`, `live_words` and `backend` form the **tune vector**, printed
+canonically as `tv1:d=on;f=16;lw=256;be=slop` (that string IS the
+default: dirty gating on, because the large designs it exists for win with it,
+and small always-toggling DUTs such as lhdtrack's pin `sim.tune.dirty=off` or
+let the ladder take them to L0). The automatic ladder moves only `dirty` and
+`fence` today; `live_words` and `backend` are applied from `--set` or a tune
+file and are never trialed on their own.
+
+Never tunable, and so never under `tune`: `sim.unknown_zero`, `sim.init_zero`
+and `lhd.seed` (they change simulated values), `sim.vcd*` and `sim.checkpoint*`
+(observability), `sim.jobs`, `sim.ninja`, `sim.hlop_dir`, `sim.iassert_dir` and
+`sim.compile_only` (build plumbing), and `sim.slop_u` / `sim.debug` (validation
+fallbacks).
+
+### 13.2 Modes
+
+- **`auto`** (the default). A workdir with no converged tune data PROFILES the
+  run. When the profile predicts a gain, the next setup builds ONE better
+  vector (a trial). The trial's own run is profiled too, and its verdict keeps
+  the trial only if it is at least 7% faster per simulated cycle AND its
+  results are byte-identical; otherwise it reverts and bans that vector. Once
+  converged, `auto` reuses the decision and samples nothing.
+- **`on`**. Profile this run even when the decision has converged, appending to
+  the history. It can re-open a converged decision (after a testbench change,
+  say). Deleting the store (§13.4) starts from scratch.
+- **`off`**. Ignore the workdir's tune data and use the built-in defaults.
+  Nothing is read or written; `sim.tune.file` and explicit `--set` still apply.
+
+The tuner is active only with a user-named `--workdir` and
+`lhd.incremental=true`, and never on an observation run (VCD, `--probe`,
+`--break-when`, `--query`, `--restart-cycle`, `--vcd-from`, `--list-signals`).
+Otherwise `auto` and `on` behave as `off`; `on` or `sim.tune.export` without a
+workdir warns (`tune-disabled`). An observation run does not learn, but under
+`auto`/`on` it still builds the workdir's decision (read without the lock and
+without writing anything), so `--list-signals` or `--restart-cycle` reuses the
+tuned tree and replays the very binary the plain runs use.
+
+A profiling run differs from a plain one in three ways, all printed in the
+envelope:
+
+- drv.bin samples pairs of consecutive cycles (hashing the state and the root
+  inputs at t and t+1) on a jittered stride calibrated to at most 1% overhead;
+- unless the user set `sim.unknown_zero`, every `?` literal bit is ZERO-filled
+  at run time (`--set sim.unknown_zero=true` to drv.bin), so two vectors can be
+  compared byte for byte. An explicit user setting is always followed; an
+  explicit `false` profiles with random fill and the verdict then decides on
+  speed alone (`oracle=skipped(random-fill)`);
+- it takes no checkpoints.
+
+A run counts toward a decision (and can be a trial's baseline) only with at
+least 64 sampled pairs, 10^4 post-warm-up cycles and 0.2 s of CPU. Smaller runs
+are "smoke" rows: they never propose a trial, and three consecutive smoke runs
+converge on the current vector (`smoke-only`). So a short test never pays a
+rebuild; it pays only the zero fill of its profiled runs (at most three per
+workdir). The 0.2 s floor is the BASELINE's noise floor: a trial's own run is
+judged once it has 10^4 post-warm-up cycles and 20 ms of CPU, because a big win
+makes the trial run short.
+
+`I_s`, the support idleness the ladder reads, weighs each idle class of the
+plan's support table by its simulation cost (`cost_flat`: the 64-bit words of
+C++ its sites execute, a loop or opaque instance counting its own words only).
+The envelope and the store also report the same idleness weighted by gate
+equivalents (`I_ge`), by site count (`I_sites`) and by cost with loop bodies
+multiplied out (`I_cost`); a driver that predates them reports `I_ge` only, and
+`I_s` then falls back to it. The ladder (its window of runs, and the busy-run
+) averages idleness under `cost_flat` only: a stored
+run carrying `I_cost_flat` uses it, and a run recorded under another weight (a
+driver before the variants, or a store kept across a model change) is ignored
+by the ladder instead of being mixed in. A plan without support tables is
+measured by the walker, which the ladder accepts. `support: true` means `I_s`
+came from the support tables, also when every class of the root is pure wiring
+(zero gate equivalents) and only the word-cost weights are non-zero.
+
+**The ladder** (one lever per step, measured stats cycle-weighted over tests):
+
+| step | vector | tried when |
+|---|---|---|
+| L1 | `d=on f=16` | the default; from L0 when idle support `I_s >= 0.45` or quiescent fraction `q >= 0.05` |
+| L0 | `d=off f=none` | from any dirty-gated vector when `I_s < 0.45` and `q < 0.05` |
+| L2 | `d=on f=0` | from L1 when `I_s >= 0.7` |
+
+Every step also needs: the target not banned, a qualifying run of the incumbent
+on this structure, and (under `auto`) the payoff gate. The up (L1) and down
+(L0) predicates are complements for one window, so they cannot oscillate. A plan
+with runtime-random memory collisions never trials. The payoff gate asks
+whether the predicted gain, times the median run CPU time, times 20 future
+runs, repays one root rebuild. The predicted gain is `I_s` going up (passing
+outright when `I_s > 0.7`) and `1 - I_s` going down to L0 (optimistic, since
+the verdict decides; passing outright in the always-toggling regime,
+`I_s < 0.3` with `q < 0.01`). At most three flips per profile generation.
+
+These thresholds are the `cm-2` model, calibrated on 25 lhdsuite + lhdtrack
+design/source pairs (2026-09-18) against measured L0/L1/L2 retired instructions
+per simulated cycle. Every pair where dirty gating loses measured `I_s <= 0.39`
+(dino, matched_filter, the LFSR-driven lhdtrack DUTs: 1.1-3.6x MORE
+instructions under L1); every pair where it wins measured `I_s >= 0.54`
+(xs_alu 4x, xs_renametable 6x on Verilog/unrolled Pyrope and 1.7x at L2 on
+pyrope2, minion 2-3x, xs_rob Verilog 158x). Gate-equivalent weights
+misclassify xs_renametable pyrope2 and xs_rob, which is why `I_s` uses
+`cost_flat`. `q` was 0 on every design.
+
+**The verdict** compares the trial with the most recent qualifying run of the
+incumbent vector on the same structure, testbench, host, seed, fill, test
+selection, arguments and non-tune codegen settings (`sim.debug`, `sim.slop_u`,
+runtime support: the baked codegen table minus the four vector lines). Oracle
+first: every common test's end-state digest, output digest and status must
+match. A mismatch is an ERROR (`sim-tune-divergence`, both vectors named), and
+the vector is banned. The oracle checks EVERY run of the trial that has a
+comparable baseline, however short: a miscompile that skips work, or that ends
+a run-until-done testbench early, makes exactly such a run. Only the speed half
+waits for a judgeable run. Then speed: the CPU-share-weighted ratio of CPU cycles
+per simulated cycle must be at most 0.93. Retired instructions decide instead
+when the two ratios differ by more than 0.2, or when either run spent less than
+90% of its time on performance cores. The incumbent's generated tree is kept as
+a clone under `<workdir>/sim_tune/`, so a revert is a directory swap, not a
+rebuild. The clone is swapped back only when it simulates the same design
+(scope, structure and testbench) as the tree it replaces; a clone taken before
+an edit is discarded, and the next setup rebuilds the incumbent, so a
+`--run-only` never runs a stale design.
+
+When the incumbent cannot be swapped back (a filesystem without copy-on-write,
+a clone of another design, a failed swap), the trial tree stays, and its
+`tune_applied.json` is marked `closed` with the verdict; a diverged tree also
+loses its `drv.bin`. A later `--run-only` of that tree is a usage error naming
+the vector and the verdict, in every mode, so a rejected, abandoned or wrong
+vector is never run and reported as the workdir's decision. A `--setup-only`
+or a full `lhd sim` rebuilds the incumbent. An unclosed trial tree that is
+neither the open attempt nor an accepted vector of the store is refused the
+same way; with the tuner off, it runs as built with a `sim-tune-trial-tree`
+warning. A `--run-only` of a tree that another design generated in a shared
+workdir runs as built (source `built`), unprofiled, with a
+`sim-tune-foreign-tree` warning naming both designs.
+
+**Trial attempts.** A pending trial is applied only at a setup whose run will
+profile it (for `--setup-only`, the `--run-only` that follows): never under
+`auto` with explicit checkpoint settings, and never on an observation run. Each
+setup that applies it is one ATTEMPT, and every attempt ends with its run, in
+exactly one of:
+
+- a verdict (accepted, rejected, divergence, or random-ineligible);
+- `abandoned`: no comparable qualifying run (other arguments, test selection,
+  an edit), or a later setup replaced the trial tree before it ran;
+- `build-failed` / `run-failed`: cgen or the host build failed, or drv.bin
+  crashed or finished without its raw run record.
+
+A setup whose tree already holds the open trial (a repeated `--setup-only`,
+or a full run after a `--setup-only`) rebuilds that same tree, a no-op for the
+generation keys, and KEEPS the attempt: the run that follows judges it. Only a
+setup that replaced the trial tree (another design sharing the workdir, an
+`off` or observation setup) supersedes it, as a charged `abandoned`; a setup
+that will not profile it (`sim.compile_only`, or explicit checkpoint settings
+under `auto`) closes it without charging an attempt.
+
+A trial that did not end in a verdict is reverted at the end of that same
+invocation. The step is proposed again only after the incumbent has run again,
+which gives the next attempt a baseline for the changed conditions. After two
+attempts of one vector on one structure, `auto` stops proposing it and
+converges (`exhausted`); an edit (a new structure) re-opens it. An explicit
+`on` re-opens an exhausted vector ONCE: the attempts made under `on` get the
+same budget of two, after which `on` converges `exhausted` as well. It keeps
+profiling but never re-applies that trial, so an `on` loop over changing
+arguments cannot rebuild the root every other run forever. A build or run
+failure bans the vector only when it happens twice on the same structure, since
+a bad `$CXX` or a full disk is not the vector's fault. A pending trial whose
+moved knob gets pinned (`--set` or `sim.tune.file`), or whose `from` is no
+longer the resolved vector, is STALE: it is closed without counting an attempt
+and never applied.
+
+### 13.3 Precedence
+
+Per knob, highest first:
+
+1. an explicit `--set sim.tune.X=V` or a `--config` `[sim.tune]` entry (a
+   CLI `--set` overrides the `--config` entry; two CLI `--set` of one key with
+   different values are a usage error); `auto` means "not set";
+2. `sim.tune.file`;
+3. the workdir's converged decision;
+4. the built-in default.
+
+Explicit knobs are frozen: the ladder never moves them, and a step that would
+only move pinned knobs does not exist. Their runs still feed the ledger. When
+`dirty` comes from (1) or (2) and `fence` does not, `fence` follows the default
+rule for that `dirty` (not the store's `fence`).
+
+### 13.4 The store
+
+One store per compile scope:
+`<workdir>/incr/scopes/sim/<scope>/tune.jsonl`. It is append-only JSONL with
+`run`, `trial`, `attempt`, `verdict` and `decision` records; the last
+`decision` is the workdir's default vector and everything else is the history
+behind it.
+
+- It survives `rm -rf <workdir>/sim`; delete the `.jsonl` to start fresh. A
+  malformed or foreign-schema file is renamed `.bad` and ignored, and a
+  trailing partial line (a crash mid-append) is ignored.
+- `lhd` holds `<workdir>/.lhd_sim.lock` from setup through the host build and
+  while it appends. Past 2000 records the file is compacted to a bounded set:
+  the newest 32 runs, the newest decision (and the newest converged one, where
+  the flip count restarts), the pending trial and its attempt, and the verdicts
+  a replay still needs. Those are every ban, the accepted verdicts of this
+  profile generation plus the newest per vector, every verdict on a structure a
+  kept run has (the attempt budgets), the failures behind a failure ban, and the
+  newest verdict per vector. Replaying the compacted file gives the same
+  decision, bans, budgets and pending trial.
+- Raw run files: an lhd-driven profiling run writes to
+  `<workdir>/sim_tune/inbox/`; a hand-run `drv.bin --set sim.tune.profile=on`
+  writes to `<workdir>/sim/tune_runs/`. The next `lhd sim` on that workdir
+  ingests both, but only into the store of the design whose tree produced them
+  (per DUT class structure); a file from another design sharing the workdir, or
+  from a tree an edit replaced, is discarded with a note. A record is appended
+  before its raw file is removed.
+- Nothing measured enters a generation key. Only the resolved vector does, and
+  only on the COLOR ROOT, so a flip regenerates only the root's TUs, a
+  default-equal decision costs nothing, switching between `on` and `auto`
+  rewrites no generated file, and no `sim.*` knob invalidates the compile
+  cache. `off` means the true defaults: in a workdir whose decision differs
+  from them, an `off` run regenerates the root, and so does the next `auto`
+  run.
+
+### 13.5 Reading a run
+
+Every `lhd sim` envelope carries a `sim_tune` member: the mode, whether the
+tuner was enabled (and why not), whether this run profiled and with which fill,
+the `applied` vector with each knob's `source` (`default`, `store`, `file` or
+`explicit`; `built` when a `--run-only` tree's provenance cannot be vouched
+for: no label, another design's tree, a refused trial tree), the run's stats (`I_s` and the `weight` it used, `I_ge`,
+`I_sites`, `I_cost`, `I_cost_flat`, `I`, `q`, `pairs`, `qualifies`,
+`judgeable`), any trial and verdict, the rejected list, the pending trial,
+`converged`, and `reproduce`: the exact `--set` list that rebuilds the applied
+vector, including `sim.unknown_zero=true` when the binary zero-filled (`fill`
+reports what the binary actually got: baked at setup, forwarded because the
+user set it, or the implicit zero fill of a profiling run). The pretty output
+prints one line such as:
+
+```
+sim.tune: applied d=on f=16 lw=256 be=slop (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none
+```
+
+A generated simulator identifies itself: `<stem>.tune-id.cpp` bakes the
+vector, a structure id and the codegen settings into `drv.bin`. `drv.bin`
+accepts `--set key=value` with lhd's spellings. A codegen key
+(`sim.tune.dirty|fence|live_words|backend`, `sim.slop_u`, `sim.debug`,
+`sim.vcd`, `sim.vcd_fake_delay`) that differs from the baked value is an error
+telling you to re-run `--setup-only`; an equal value (or `auto`) is accepted,
+so one `--set` list can be passed to both setup and run.
+
+### 13.6 Export and import
+
+```bash
+# converge in a persistent workdir (repeat until the envelope says converged)
+lhd sim DUT TB --workdir P --arg cycles=N --result-json r.json
+# write the decision, then pin it anywhere else
+lhd sim DUT TB --workdir P --setup-only --set sim.tune.export=design.simtune.json
+lhd sim DUT TB --workdir W --set sim.tune.profile=off --set sim.tune.file=design.simtune.json
+```
+
+```json
+{"schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=256;be=slop",
+ "knobs":{"dirty":"on","fence":"0","live_words":"256","backend":"slop"},
+ "provenance":{"structure":"...","converged":true,
+               "stats":{"I_s":0.93,"I":0.91,"q":0.00,"pairs":812},"created":"..."}}
+```
+
+The file's knobs apply with source `file`, in every mode, with or without a
+workdir. A structure mismatch (the design changed since the export) is a
+warning, not an error. A hand-written file may spell `dirty` as a JSON
+`true`/`false` and `fence` / `live_words` as JSON integers; any other JSON type
+is a config error naming the knob. A file that was read is listed in the
+envelope's `inputs` and in `--depfile`, so a make/ninja flow regenerates when it
+changes. This is how hermetic flows use the tuner: lhdsuite's
+bazel targets and lhdtrack start from a fresh workdir on every run, so `auto`
+could never converge there. They pin the vector instead: explicit knobs
+(lhdsuite's xs_renametable `sim_sets`), or `sim.tune.profile=off` plus a
+checked-in tune file.
+
+### 13.7 Renamed keys
+
+The old spellings are directed usage errors (`--set`, `--config` and the
+`compile.sim.*` form alike), each with a copy-pasteable replacement:
+
+| old | new |
+|---|---|
+| `sim.color_dirty=true` / `false` | `sim.tune.dirty=on` / `off` |
+| `sim.fence_ratio=N` | `sim.tune.fence=N` (empty = `auto`; a ratio meant as "never fence" = `none`) |
+| `sim.live_words=N` | `sim.tune.live_words=N` (`0` = `auto`) |
+| `sim.backend=slop` / `llvm` | `sim.tune.backend=slop` / `llvm` |
+
+`inou.cgen.sim` keeps its internal label names (`color_dirty`, `fence_ratio`,
+`live_words`, `backend`); `lhd` always hands it concrete resolved values.
+
+### 13.8 Measuring a tuned vector
+
+Report setup ms, host C++ ms, exec ms and KHz (cycles / exec ms) per design and
+variant, on a quiet machine, serially.
+
+1. `bazel build -c opt //lhd:lhd`, then copy `bazel-bin/lhd/lhd` and its
+   `lhd.runfiles` to a frozen directory so a rebuild mid-run cannot change the
+   binary being measured.
+2. Variants, each passed identically to setup AND run-only:
+   - **V0** defaults: `--set sim.tune.profile=off`;
+   - **V1** a hand-pinned vector, e.g. V0 plus
+     `--set sim.tune.dirty=on --set sim.tune.fence=0`;
+   - **V2** converged: in a persistent workdir P, repeat
+     `lhd sim DUT TB --arg cycles=N --set sim.vcd=false --set sim.ninja=false --workdir P --result-json rI.json`
+     until `sim_tune.converged` (cap it at 5 runs), recording each run's
+     `inou.cgen.sim` and `sim.hostbuild` phases as the convergence cost; then
+     export (§13.6) and measure V0 plus `--set sim.tune.file=F` in a fresh
+     workdir.
+3. Per variant, in a fresh workdir W:
+   - setup: `lhd sim DUT TB --setup-only --set sim.vcd=false <variant> --workdir W --result-json setup.json`;
+   - run: `lhd sim DUT TB --run-only --arg cycles=N --set sim.ninja=false <variant> --workdir W`,
+     gated on the testbench's marker and expected checksum;
+   - exec: best of 3 `W/sim/drv.bin --cycles N`; host C++ = run - exec.
+4. Prefer retired instructions over wall time. Each `--result-json` test row
+   carries `sim_cycles`, `cpu_ns`, `cpu_cycles`, `instructions` and
+   `pcore_frac`; on Apple Silicon a loaded machine moves work to efficiency
+   cores, which shifts cycles far more than the 7% trial margin.
+5. Never compare a profiled run's time with an unprofiled one, and never a
+   zero-filled run's checksum with a random-filled one on a design with `?`
+   literals.

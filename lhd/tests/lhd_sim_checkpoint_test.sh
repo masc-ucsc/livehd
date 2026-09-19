@@ -118,7 +118,10 @@ if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
 fi
 
 # checkpoint every 2 cycles, keep at most 3 -> evenly-spaced subset of {2,4,..,10}
-"$LHD" sim "$W/ck.prp" --set sim.checkpoint_every=2 --set sim.checkpoint_max=3 --workdir "$W/run" -q >/dev/null 2>&1 \
+# sim.tune.profile=off: a profiling run (the `auto` default with a fresh
+# --workdir) takes no checkpoints, and this run exists to take them.
+"$LHD" sim "$W/ck.prp" --set sim.checkpoint_every=2 --set sim.checkpoint_max=3 --set sim.tune.profile=off \
+  --workdir "$W/run" -q >/dev/null 2>&1 \
   || fail "checkpoint run failed"
 CKDIR="$W/run/ckpt/top_run"
 [ -d "$CKDIR" ] || fail "no checkpoint dir created under the workdir"

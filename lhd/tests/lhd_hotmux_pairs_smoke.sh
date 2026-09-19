@@ -86,9 +86,7 @@ sed 's/hotmux_unique.dec/pairs.dec/' inou/prp/tests/equiv/hotmux_unique_tb.prp >
 # Each backend is a ~7s host build in its own workdir and they share nothing, so
 # build them side by side and collect the two exit codes afterwards.
 for backend in slop llvm; do
-  backend_args=()
-  [ "$backend" = "slop" ] || backend_args=(${backend_args[@]+"${backend_args[@]}"})
-  "$LHD" sim "$W/pairs_tb.prp" --set "sim.backend=$backend" --workdir "$W/sim-$backend" &
+  "$LHD" sim "$W/pairs_tb.prp" --set "sim.tune.backend=$backend" --workdir "$W/sim-$backend" &
   eval "sim_${backend}_pid=$!"
 done
 for backend in slop llvm; do

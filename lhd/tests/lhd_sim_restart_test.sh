@@ -84,7 +84,10 @@ fi
 final_total() { grep -oE 'FINAL total [0-9]+' "$1" | grep -oE '[0-9]+'; }
 
 # full run (checkpoint every 3) -> baseline FINAL total
-"$LHD" sim "$W/cr.prp" --set sim.checkpoint_every=3 --workdir "$W/run" --diag-fmt pretty > "$W/full.out" 2>&1 \
+# sim.tune.profile=off: a profiling run (the `auto` default with a fresh
+# --workdir) takes no checkpoints, and the restarts below need them.
+"$LHD" sim "$W/cr.prp" --set sim.checkpoint_every=3 --set sim.tune.profile=off --workdir "$W/run" \
+  --diag-fmt pretty > "$W/full.out" 2>&1 \
   || fail "full run failed: $(cat "$W/full.out")"
 FULL="$(final_total "$W/full.out")"
 [ -n "$FULL" ] || fail "no FINAL total in the full run: $(cat "$W/full.out")"

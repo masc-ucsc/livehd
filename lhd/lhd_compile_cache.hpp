@@ -12,6 +12,11 @@ namespace lhd {
 struct Options;
 struct Result;
 
+// The compile scope's directory name for these seed files (--top, else the
+// first seed's unit), shared with the sim tune store so both live under the same
+// `<workdir>/incr/scopes/<kind>/<name>`. `seed_files` must be non-empty.
+std::string compile_cache_scope_name(const Options& opts, const std::vector<std::string>& seed_files);
+
 // Parse the complete Pyrope source closure through the persistent Tier-A cache.
 // `var` already contains any explicit ln: imports; source units are appended in
 // deterministic logical-name order. Returns the number of appended source file

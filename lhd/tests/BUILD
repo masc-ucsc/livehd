@@ -187,6 +187,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Unity batching of the small generated simulator TUs: batches are written and
+# linked, the batched build simulates correctly, a warm rebuild is a no-op, and
+# rewriting a batched source rebuilds its batch (the wrapper's depfile tracks
+# every member). See the unity note in lhd/lhd_kernel_sim.cpp.
+sh_test(
+    name = "sim_unity_batch_test",
+    size = "large",
+    srcs = ["sim_unity_batch_test.sh"],
+    data = ["//lhd"],
+)
+
 # Stage 0 of the cgen_sim false-combinational-loop fix: a combinational
 # sub-instance whose output feeds back through parent comb logic into one of its
 # own inputs is a FALSE comb loop the single-pass sim schedule cannot order.
@@ -2022,5 +2033,47 @@ sh_test(
     name = "upass_uncertain_array_scatter_test",
     size = "medium",
     srcs = ["upass_uncertain_array_scatter_test.sh"],
+    data = ["//lhd"],
+)
+
+# sim.tune (profile-guided `lhd sim` tuning): the option surface -- listing,
+# directed renames of the old spellings, grammar, the [sim.tune] config table,
+# P0.1 (a sim.* flip keeps the compile cache warm), the envelope member and the
+# --emit-dir sim: BUILD srcs. Setup-only: no simulation run.
+sh_test(
+    name = "sim_tune_options_test",
+    size = "medium",
+    srcs = ["sim_tune_options_test.sh"],
+    data = ["//lhd"],
+)
+
+# sim.tune end to end: an idle-tables design converges to dirty=on within 3 runs,
+# an LFSR converges with zero trials, export/import, pinned knobs, off writes
+# nothing, the --run-only codegen check and direct drv.bin ingest, and the trial
+# lifecycle (exhaustion under auto and on, crash revert, closed trial trees a
+# --run-only refuses, the oracle on a short diverging run, re-setups that keep
+# their attempt, foreign trees). The fixtures run millions of cycles to pass the
+# tuner's 0.2 s quality gate.
+sh_test(
+    name = "sim_tune_profile_test",
+    size = "large",
+    srcs = ["sim_tune_profile_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/tune_idle_tables.prp",
+        "//inou/prp:tests/sim/tune_lfsr.prp",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
+)
+
+# sim.tune.* knobs are speed-only: an ICG-gated design must pass with the same
+# per-test end_digest at live_words 256 / 1 / 2 and with dirty gating. At
+# live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
+# land in different colors; the latch kept a guarded `_din` store and the flop
+# read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
+sh_test(
+    name = "sim_live_words_invariance_test",
+    size = "large",
+    srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
 )

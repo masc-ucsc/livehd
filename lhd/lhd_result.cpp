@@ -503,6 +503,9 @@ void write_pretty(const Options& opts, const Result& res) {
   if (!res.sim_query_json.empty()) {  // --query: same always-shown policy — the answers ARE the output
     std::print("  query: {}\n", res.sim_query_json);
   }
+  if (!res.sim_tune_note.empty()) {  // `lhd sim`: the applied tune vector, what was learned, what is next
+    std::print("  sim.tune: {}\n", res.sim_tune_note);
+  }
   if (!res.qor_json.empty()) {
     write_pretty_qor(res.qor_json, opts.stats);
   }
@@ -861,6 +864,13 @@ void write_result(const Options& opts, const Result& res) {
   if (!res.sim_query_json.empty()) {
     w.Key("query");
     w.RawValue(res.sim_query_json.data(), res.sim_query_json.size(), rapidjson::kObjectType);
+  }
+
+  // Built with a rapidjson Writer (lhd_sim_tune.cpp), never string glue: RawValue
+  // does not validate, and it carries user paths and vectors.
+  if (!res.sim_tune_json.empty()) {
+    w.Key("sim_tune");
+    w.RawValue(res.sim_tune_json.data(), res.sim_tune_json.size(), rapidjson::kObjectType);
   }
 
   if (!res.qor_json.empty()) {

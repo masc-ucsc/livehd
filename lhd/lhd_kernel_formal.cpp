@@ -3738,7 +3738,9 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   if (can_import) {
     cmd += shell_quote(opts.impl_path) + " " + shell_quote(opts.ref_path) + " ";
   }
-  cmd += shell_quote(simfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
+  // A counterexample replay is an observation run: it must never create or
+  // consult a sim tune store inside the lec/formal workdir.
+  cmd += shell_quote(simfail_path) + " --set sim.vcd=true --set sim.tune.profile=off --workdir " + shell_quote(opts.workdir);
   // Forward any explicit sim-runtime header locations (sim.hlop_dir /
   // sim.iassert_dir) to the child sim host-compile — needed when `../hlop`
   // isn't beside the cwd (e.g. under `bazel test`, where the caller passes
@@ -5826,7 +5828,9 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   if (can_import) {
     cmd += shell_quote(design_path) + " ";
   }
-  cmd += shell_quote(simfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
+  // A counterexample replay is an observation run: it must never create or
+  // consult a sim tune store inside the lec/formal workdir.
+  cmd += shell_quote(simfail_path) + " --set sim.vcd=true --set sim.tune.profile=off --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
     if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);

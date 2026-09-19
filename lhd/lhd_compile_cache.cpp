@@ -854,7 +854,12 @@ std::string context_descriptor(const Options& opts) {
   for (const auto& [key, value] : sets) {
     // Reporting does not change the compiled graph; toggling --stats must keep
     // the same cache identity now that the flag is stored as lhd.stats.
-    if (key == "compile.cache" || key == "lhd.stats") {
+    // sim.* (the sim command and inou.cgen.sim codegen namespace, every
+    // sim.tune.* knob included) is consumed only by sim_command and the sim
+    // emit, which runs after the graph pipeline on a private output library
+    // (inou_cgen.cpp): it can never change a cached LNAST/LGraph, so flipping a
+    // sim knob must not cold-start the front end (sim_profile.md P0.1).
+    if (key == "compile.cache" || key == "lhd.stats" || key.starts_with("sim.")) {
       continue;
     }
     text += std::format("|{}={}", key, value);
@@ -2138,6 +2143,10 @@ void store_cache(Options& opts, Result& res, const std::string& scope, const std
 }
 
 }  // namespace
+
+std::string compile_cache_scope_name(const Options& opts, const std::vector<std::string>& seed_files) {
+  return scope_name(opts, seed_files);
+}
 
 size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, const std::vector<std::string>& seed_files,
                                    bool defer_clean_lnasts) {

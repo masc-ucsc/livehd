@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +17,9 @@
 #include <queue>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -28,6 +31,7 @@
 #include "latch_contract.hpp"
 #include "node_util.hpp"
 #include "port_reach.hpp"
+#include "worker_pool.hpp"
 
 // HOW THIS FILE READS ITS INPUTS
 //
@@ -108,17 +112,26 @@ int occurrence_const_shl_amount(const hhds::Occurrence_node& node) {
 // is deliberately the same proof direction as cprop's packed-slice fold: an
 // imprecise operand overlaps the requested lane and prevents refinement.
 //
-// `budget` bounds the TOTAL pins visited by one top-level query. The depth cap
+// `visits` bounds the TOTAL pins visited by one top-level query. The depth cap
 // alone does not: an And/Or/Xor arm recurses into every operand, so a wide
 // packed tree costs fanin^depth pin visits, and `discover` runs this once per
 // operand of every crossing Or. Exhausting the budget bails, which is the same
 // fail-closed answer an unbounded operand already produces.
-std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin, int depth = 0, int* budget = nullptr) {
-  int  local_budget = 4096;
-  int& visits       = budget == nullptr ? local_budget : *budget;
-  if (pin.is_invalid() || depth > 16 || --visits < 0) {
-    return kPacked_footprint_bail;
-  }
+//
+// `cache` holds the subtree results that no depth or budget cut touched. Such
+// a result is the pin's UNBOUNDED footprint -- the tightest answer any
+// truncation can give -- so reusing it at another depth or under another
+// remaining budget is sound (it can only make a later query more precise). A
+// result below a cut depends on where its walk started and is never stored;
+// `cut` reports one to the caller. Without this, every top-level query re-walked
+// the shared cones of minion's packed words: 1.7 s of a 9 s cgen.
+using Packed_footprint_cache = absl::flat_hash_map<hhds::Occurrence_pin, std::pair<int, int>>;
+
+std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin, int depth, int& visits,
+                                                Packed_footprint_cache* cache, bool& cut);
+
+std::pair<int, int> occurrence_packed_footprint_uncached(const hhds::Occurrence_pin& pin, int depth, int& visits,
+                                                         Packed_footprint_cache* cache, bool& cut) {
   if (pin.is_const()) {
     const auto& value = gu::const_of(pin);
     if (value.is_negative()) {
@@ -140,7 +153,7 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
   if (op == Ntype_op::SHL) {
     const int  shift = occurrence_const_shl_amount(node);
     const auto value = occurrence_driver_at(node, 0);
-    const auto inner = occurrence_packed_footprint(value, depth + 1, &visits);
+    const auto inner = occurrence_packed_footprint(value, depth + 1, visits, cache, cut);
     if (shift < 0 || inner.first < 0) {
       return kPacked_footprint_bail;
     }
@@ -152,7 +165,7 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
       const auto& constant = gu::const_of(mask);
       const auto [lo, hi]  = constant.get_mask_range();
       if (!constant.has_unknowns() && constant.is_positive() && lo >= 0 && hi > lo) {
-        const auto inner = occurrence_packed_footprint(occurrence_driver_at(node, 0), depth + 1, &visits);
+        const auto inner = occurrence_packed_footprint(occurrence_driver_at(node, 0), depth + 1, visits, cache, cut);
         if (inner.first >= 0) {
           const int clipped_lo = std::max(inner.first, lo);
           const int clipped_hi = std::min(inner.second, hi);
@@ -171,7 +184,7 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
     std::pair<int, int> bound = kPacked_footprint_bail;
     for (const auto& sink : node.inp_sorted_pins()) {
       for (const auto& driver : sink.get_driver_pins()) {
-        const auto operand = occurrence_packed_footprint(driver, depth + 1, &visits);
+        const auto operand = occurrence_packed_footprint(driver, depth + 1, visits, cache, cut);
         if (operand.first < 0) {
           continue;
         }
@@ -207,7 +220,7 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
     bool                bounded = true;
     for (const auto& sink : node.inp_sorted_pins()) {
       for (const auto& driver : sink.get_driver_pins()) {
-        const auto operand = occurrence_packed_footprint(driver, depth + 1, &visits);
+        const auto operand = occurrence_packed_footprint(driver, depth + 1, visits, cache, cut);
         if (operand.first < 0) {
           bounded = false;
           break;
@@ -229,6 +242,37 @@ std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin,
   }
   const int bits = gu::bits_of(pin);
   return gu::is_unsign(pin) && bits > 0 ? std::pair<int, int>{0, bits} : kPacked_footprint_bail;
+}
+
+std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin, int depth, int& visits,
+                                                Packed_footprint_cache* cache, bool& cut) {
+  if (pin.is_invalid()) {
+    return kPacked_footprint_bail;
+  }
+  if (cache != nullptr) {
+    if (const auto it = cache->find(pin); it != cache->end()) {
+      return it->second;
+    }
+  }
+  if (depth > 16 || --visits < 0) {
+    cut = true;
+    return kPacked_footprint_bail;
+  }
+  bool       below_cut = false;
+  const auto result    = occurrence_packed_footprint_uncached(pin, depth, visits, cache, below_cut);
+  if (below_cut) {
+    cut = true;
+  } else if (cache != nullptr) {
+    cache->emplace(pin, result);
+  }
+  return result;
+}
+
+// One top-level query: a fresh budget of 4096 pin visits from depth 0.
+std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin, Packed_footprint_cache* cache) {
+  int  visits = 4096;
+  bool cut    = false;
+  return occurrence_packed_footprint(pin, 0, visits, cache, cut);
 }
 
 Occurrence_step_key occurrence_step_key(const hhds::Occurrence_step& step) {
@@ -391,6 +435,46 @@ Site_kind classify(const hhds::Occurrence_node& node) {
     return Site_kind::state;
   }
   return Site_kind::data;
+}
+
+// sim.tune class weight `cost` of one node's OWN emitted code: the 64-bit words
+// of its widest output -- a memory: its data width, never its whole-array
+// readall surface. Never 0: a zero-GE wiring node (Get_mask, Set_mask, Concat)
+// is still emitted code, and an unstamped width floors at one word.
+uint64_t sim_word_cost(const hhds::Node_class& node) {
+  uint64_t   bits = 0;
+  const auto op   = gu::type_op_of(node);
+  if (op == Ntype_op::Memory) {
+    const auto bits_pid = Ntype::get_sink_pid(Ntype_op::Memory, "bits");
+    for (const auto& sink : node.inp_sorted_pins()) {
+      if (sink.get_port_id() != bits_pid) {
+        continue;
+      }
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (!driver.is_const()) {
+          continue;
+        }
+        const auto& value = gu::const_of(driver);
+        if (value.is_just_i64() && !value.has_unknowns() && value.to_just_i64() > 0) {
+          bits = std::max<uint64_t>(bits, static_cast<uint64_t>(value.to_just_i64()));
+        }
+      }
+    }
+  }
+  if (bits == 0) {
+    if (const auto width = gu::bits_of(node.create_driver_pin(0)); width > 0) {
+      bits = static_cast<uint64_t>(width);
+    }
+    for (const auto& driver : node.out_sorted_pins()) {
+      if (op == Ntype_op::Memory && driver.get_port_id() == Ntype::Memory_readall_pid) {
+        continue;
+      }
+      if (const auto width = gu::bits_of(driver); width > 0) {
+        bits = std::max<uint64_t>(bits, static_cast<uint64_t>(width));
+      }
+    }
+  }
+  return std::max<uint64_t>(1, (bits + 63) / 64);
 }
 
 // Second-lane parameters for the 128-bit structural digests below; the low
@@ -882,8 +966,12 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
       neighbors.push_back(std::move(neighbor));
     }
   }
-  for (size_t round = 0; round < std::min<size_t>(sites.size() + 1, 32); ++round) {
-    for (size_t i = 0; i < sites.size(); ++i) {
+  // One round hashes every site's neighbor multiset, reading only the previous
+  // round's classes: the sites are independent, so a large plan splits them
+  // across workers and gets the SAME descriptions. MEASURED on minion (Pyrope):
+  // 202k sites with 12.4M neighbor records, 13 rounds, 6.3 s serial (battery).
+  const auto refine_sites = [&](size_t begin, size_t end) {
+    for (size_t i = begin; i < end; ++i) {
       auto& neighbors = adjacency[i];
       for (auto& neighbor : neighbors) {
         if (neighbor.site != Color_plan::invalid_index) {
@@ -899,6 +987,32 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
         }
       });
       descriptions[i] = hash.finish();
+    }
+  };
+  size_t neighbor_records = 0;
+  for (const auto& neighbors : adjacency) {
+    neighbor_records += neighbors.size();
+  }
+  constexpr size_t kParallelRecords = size_t{1} << 18;
+  constexpr size_t kSitesPerClaim   = 1024;
+  const size_t     workers
+      = neighbor_records < kParallelRecords
+            ? 1
+            : std::min<size_t>({std::max<size_t>(1, std::thread::hardware_concurrency()), 16, (sites.size() + kSitesPerClaim - 1) / kSitesPerClaim});
+  for (size_t round = 0; round < std::min<size_t>(sites.size() + 1, 32); ++round) {
+    if (workers <= 1) {
+      refine_sites(0, sites.size());
+    } else {
+      std::atomic<size_t> next_site{0};
+      livehd::run_workers(workers, [&](size_t) {
+        for (;;) {
+          const size_t begin = next_site.fetch_add(kSitesPerClaim, std::memory_order_relaxed);
+          if (begin >= sites.size()) {
+            break;
+          }
+          refine_sites(begin, std::min(begin + kSitesPerClaim, sites.size()));
+        }
+      });
     }
     auto next = classes_of(descriptions);
     // Class numbers follow hash-sort order, so an unchanged partition can
@@ -1060,7 +1174,7 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
 }  // namespace
 
 // Live machine words a color may keep alive across its members lives on the
-// PLAN (`live_word_budget_`, set here from `sim.live_words`). THE single
+// PLAN (`live_word_budget_`, set here from `sim.tune.live_words`). THE single
 // definition still: the coarsener below enforces that member and report()
 // prints that member, so a change can never desynchronize the plan report from
 // the plan -- and, unlike a global, a second discover() at another budget
@@ -1592,6 +1706,26 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   };
   std::vector<Input_use>    input_uses;
   livehd::port_reach::Cache port_reach;
+  // Top-level occurrence_packed_footprint results, per discover. The packed-Or
+  // refinement below footprints EVERY operand of a packed word once per slice
+  // read of that word, and each footprint re-walks up to 4096 pins of the
+  // operand's cone through hierarchical occurrence queries: M reads x N
+  // operands x a cone. On minion that was 35 s of a 36 s discover. A top-level
+  // call always starts from a fresh budget and depth 0, so its result is a pure
+  // function of the pin and caching it changes no answer.
+  // The top-level memo keeps a CUT answer too (it is still a pure function of
+  // the pin); `packed_footprint_exact` shares the uncut subtrees between
+  // different top-level pins.
+  absl::flat_hash_map<hhds::Occurrence_pin, std::pair<int, int>> packed_footprint_memo;
+  Packed_footprint_cache                                         packed_footprint_exact;
+  const auto packed_footprint = [&](const hhds::Occurrence_pin& pin) -> std::pair<int, int> {
+    if (const auto it = packed_footprint_memo.find(pin); it != packed_footprint_memo.end()) {
+      return it->second;
+    }
+    const auto footprint = occurrence_packed_footprint(pin, &packed_footprint_exact);
+    packed_footprint_memo.emplace(pin, footprint);
+    return footprint;
+  };
   // The value use is named by the SINK pin the caller is walking plus ONE of
   // that pin's drivers, which is what the in-pin walks below hand over. A
   // two-driver carry-in therefore calls this once per driver, exactly as the
@@ -1869,7 +2003,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                   malformed = true;
                   break;
                 }
-                const auto footprint = occurrence_packed_footprint(input_drv);
+                const auto footprint = packed_footprint(input_drv);
                 if (footprint.first < 0 || !(hi <= footprint.first || lo >= footprint.second)) {
                   overlapper = input_drv;
                   ++overlaps;
@@ -3441,6 +3575,19 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     version.control_owner = site_control_owner[version.base_site];
   }
 
+  // sim.tune support tables (occurrences() / support()). HERE, before the
+  // fence decision and the coarsener: everything they read (versions, value
+  // uses, the version DAG and its order, path ranks) is final by now and
+  // nothing below it depends on sim.tune.dirty / fence / live_words / backend,
+  // so the tables -- and the root's <stem>.tune.cpp -- are vector-invariant.
+  {
+    std::vector<bool> compact_body(plan.sites_.size());
+    for (size_t site = 0; site < plan.sites_.size(); ++site) {
+      compact_body[site] = under_compact_loop(plan.sites_[site]);
+    }
+    plan.build_tune_tables(root, versions_by_base, site_path_rank, compact_body);
+  }
+
   // Preserve useful ordinary module boundaries, rather than every wrapper.
   // A sizeable near-leaf body or a module with a narrow interface is a cheap
   // cut and a useful reuse unit. Tiny helpers can still fuse into their caller.
@@ -3495,7 +3642,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // an idle module saves work in proportion to its SITES; its seam costs in
   // proportion to its INTERFACE WORDS. A module used once (no shared kernel)
   // therefore keeps its fence only when sites / interface_words reaches
-  // `fence_ratio` (sim.fence_ratio; 0 = always). Reused or very large bodies
+  // `fence_ratio` (sim.tune.fence; 0 = always). Reused or very large bodies
   // always keep it.
   constexpr size_t kSingleBodyFenceSites = 1024;
   const int64_t    single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
@@ -4415,6 +4562,543 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   return plan;
 }
 
+// sim.tune support tables (sim_profile.md §6.1 / §8.1); the header says what
+// they mean, this is how they are built.
+//
+// OCCURRENCES. An executable site (live, outside every compact loop's native
+// body, with at least one version) belongs to the body that EXECUTES it. A
+// data/state site's own path names that body. A Sub site -- a compact loop or
+// an opaque call -- carries the CALLEE path, which ends in its own step, so it
+// belongs one step up, to its caller. Occurrences are keyed by their step
+// sequence: an Occurrence_path cannot be rebuilt from a prefix of steps, and
+// the formatted path is not injective (an anonymous wrapper is transparent).
+//
+// SUPPORT. The single-period fan-in frontier of every version, over the exact
+// value-flow record (value_uses_) plus the state-transition precedence edges:
+//   * a source site's own reads (flop/latch state-read, memory read port,
+//     loop/opaque call output) set the source's bucket -- the frontier stops at
+//     stored state;
+//   * a value use ORs its producer's bits, or sets a root input's bucket;
+//   * a precedence edge out of a STATE UPDATE ORs the update's bits: a
+//     post-rise/post-fall read of a state is that period's committed next value,
+//     and a same-edge latch hands its reader the staged value, so both depend on
+//     the update cone, not only on the stored bits.
+// Every one of those edges points forward in execution order, so one ascending
+// pass is exact. A site ORs its versions (its state update included: the
+// next-state cone is work the site does every period); classes hash-cons EVERY
+// executable site by (bits, occurrence) and carry four weights (ge, sites,
+// cost, cost_flat; see Support_class). A zero-GE wiring site (Get_mask,
+// Set_mask, Concat) still joins: it is emitted code, so its cost is >= 1.
+//
+// DETERMINISM. Occurrences sort by (path, definition, steps); sources by
+// (site_path_rank, structural_id, index), root inputs last by port id; classes
+// by (occurrence, bits); the class cap keeps the heaviest by cost, canonical
+// order breaking ties. No order comes from an absl container or from the
+// discovery order of the sites.
+void Color_plan::build_tune_tables(hhds::Graph* root, const std::vector<std::vector<size_t>>& versions_by_base,
+                                   const std::vector<size_t>& site_path_rank, const std::vector<bool>& compact_body) {
+  occurrences_.clear();
+  support_               = Support{};
+  const size_t nsites    = sites_.size();
+  const size_t nversions = version_sites_.size();
+  const auto   io        = root->get_io();
+  auto*        library   = io ? io->get_library() : nullptr;
+
+  constexpr uint64_t kMax64     = std::numeric_limits<uint64_t>::max();
+  constexpr uint32_t kNoIndex32 = std::numeric_limits<uint32_t>::max();
+  const auto         sat_add    = [](uint64_t a, uint64_t b) { return a > kMax64 - b ? kMax64 : a + b; };
+  const auto         sat_mul    = [](uint64_t a, uint64_t b) { return a != 0 && b > kMax64 / a ? kMax64 : a * b; };
+  const auto         executable = [&](size_t s) { return sites_[s].live && !compact_body[s] && !versions_by_base[s].empty(); };
+
+  // ---- weights: a compact loop does its native body's work once per lane.
+  absl::flat_hash_map<const hhds::Graph*, uint64_t> body_ge_memo;
+  absl::flat_hash_set<const hhds::Graph*>           body_ge_active;
+  std::function<uint64_t(hhds::Graph*)>             body_ge = [&](hhds::Graph* graph) -> uint64_t {
+    if (const auto it = body_ge_memo.find(graph); it != body_ge_memo.end()) {
+      return it->second;
+    }
+    if (!body_ge_active.insert(graph).second) {
+      return 0;  // recursive instantiation: discovery already failed the plan
+    }
+    uint64_t ge = 0;
+    for (const auto node : graph->body().nodes()) {
+      uint64_t weight = gu::mappable_ge_weight(node);
+      if (gu::type_op_of(node) == Ntype_op::Sub) {
+        if (const auto child = node.get_subnode_graph()) {
+          const auto loop = node.subnode_loop();
+          weight          = std::max<uint64_t>(1, sat_mul(body_ge(child.get()), loop ? std::max<uint64_t>(1, loop->count) : 1));
+        }
+      }
+      ge = sat_add(ge, weight);
+    }
+    body_ge_active.erase(graph);
+    body_ge_memo.emplace(graph, ge);
+    return ge;
+  };
+  std::vector<uint64_t> weight(nsites, 0);
+  for (size_t s = 0; s < nsites; ++s) {
+    const auto& site = sites_[s];
+    if (!executable(s)) {
+      continue;
+    }
+    if (site.kind != Site_kind::loop_control) {
+      weight[s] = site.gate_equivalents;
+      continue;
+    }
+    const auto child = site.node.get_subnode_graph();
+    const auto loop  = site.node.subnode_loop();
+    const auto lanes = loop ? std::max<uint64_t>(1, loop->count) : 1;
+    weight[s]        = std::max<uint64_t>(1, sat_mul(child ? body_ge(child.get()) : 0, lanes));
+  }
+
+  // ---- occurrences
+  using Steps = std::vector<Occurrence_step_key>;
+  std::map<Steps, uint32_t> occurrence_by_steps;
+  std::vector<const Steps*> occurrence_steps;
+  const auto                add_occurrence = [&](Steps steps, const hhds::Graph* graph) {
+    const auto [it, inserted] = occurrence_by_steps.try_emplace(std::move(steps), static_cast<uint32_t>(occurrences_.size()));
+    if (inserted) {
+      Occurrence occurrence;
+      occurrence.def = graph == nullptr ? std::string{} : std::string(graph->get_name());
+      occurrences_.push_back(std::move(occurrence));
+      occurrence_steps.push_back(&it->first);
+    }
+    return it->second;
+  };
+  add_occurrence({}, root);  // the root is always an occurrence, even with no own site
+  const auto steps_key = [](std::span<const hhds::Occurrence_step> steps, size_t count) {
+    Steps key;
+    key.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      key.push_back(occurrence_step_key(steps[i]));
+    }
+    return key;
+  };
+  absl::flat_hash_map<hhds::Occurrence_path, uint32_t> occurrence_of_body_path;
+  std::vector<uint32_t>                                site_occurrence(nsites, kNoIndex32);
+  for (size_t s = 0; s < nsites; ++s) {
+    if (!executable(s)) {
+      continue;
+    }
+    const auto& site  = sites_[s];
+    const auto  steps = site.node.path().steps();
+    uint32_t    occurrence;
+    if (!steps.empty() && steps.back().subnode == site.node.get_definition_index()) {
+      occurrence = add_occurrence(steps_key(steps, steps.size() - 1), site.node.get_graph());
+    } else if (const auto it = occurrence_of_body_path.find(site.node.path()); it != occurrence_of_body_path.end()) {
+      occurrence = it->second;
+    } else {
+      occurrence = add_occurrence(steps_key(steps, steps.size()), site.node.get_graph());
+      occurrence_of_body_path.emplace(site.node.path(), occurrence);
+    }
+    site_occurrence[s]  = occurrence;
+    auto& owner         = occurrences_[occurrence];
+    owner.ge            = sat_add(owner.ge, weight[s]);
+    owner.sites        += 1;
+    owner.state_sites  += site.kind == Site_kind::state;
+  }
+
+  // ---- simulation word costs (Support_class::cost / cost_flat). A compact
+  // loop runs its native body once per lane (nested loops multiply); an opaque
+  // call runs its body -- unless that body was descended (some occurrence at or
+  // below the callee path owns executable sites), whose work its own sites
+  // already carry: charging it again would count it twice.
+  absl::flat_hash_map<const hhds::Graph*, uint64_t> body_cost_memo;
+  absl::flat_hash_set<const hhds::Graph*>           body_cost_active;
+  std::function<uint64_t(hhds::Graph*)>             body_cost = [&](hhds::Graph* graph) -> uint64_t {
+    if (const auto it = body_cost_memo.find(graph); it != body_cost_memo.end()) {
+      return it->second;
+    }
+    if (!body_cost_active.insert(graph).second) {
+      return 0;  // recursive instantiation: discovery already failed the plan
+    }
+    uint64_t cost = 0;
+    for (const auto node : graph->body().nodes()) {
+      if (node.is_invalid() || gu::is_builtin_node(node)) {
+        continue;
+      }
+      uint64_t node_cost = 0;
+      if (const auto child = gu::type_op_of(node) == Ntype_op::Sub ? node.get_subnode_graph() : nullptr) {
+        const auto loop = node.subnode_loop();
+        node_cost       = std::max<uint64_t>(1, sat_mul(body_cost(child.get()), loop ? std::max<uint64_t>(1, loop->count) : 1));
+      } else {
+        node_cost = sim_word_cost(node);
+      }
+      cost = sat_add(cost, node_cost);
+    }
+    body_cost_active.erase(graph);
+    body_cost_memo.emplace(graph, cost);
+    return cost;
+  };
+  std::set<Steps> descended;  // every prefix of an occurrence's steps
+  for (const Steps* steps : occurrence_steps) {
+    for (size_t length = 1; length <= steps->size(); ++length) {
+      descended.emplace(steps->begin(), steps->begin() + static_cast<std::ptrdiff_t>(length));
+    }
+  }
+  std::vector<uint64_t> cost(nsites, 0);
+  std::vector<uint64_t> cost_flat(nsites, 0);
+  for (size_t s = 0; s < nsites; ++s) {
+    if (!executable(s)) {
+      continue;
+    }
+    const auto& site = sites_[s];
+    cost_flat[s]     = sim_word_cost(site.node.base_node());
+    cost[s]          = cost_flat[s];
+    if (site.kind == Site_kind::loop_control) {
+      if (const auto child = site.node.get_subnode_graph()) {
+        const auto loop = site.node.subnode_loop();
+        cost[s]         = std::max<uint64_t>(1, sat_mul(body_cost(child.get()), loop ? std::max<uint64_t>(1, loop->count) : 1));
+      }
+    } else if (site.kind == Site_kind::instance || site.kind == Site_kind::conditional_control) {
+      const auto child = site.node.get_subnode_graph();
+      if (child && !descended.contains(steps_key(site.node.path().steps(), site.node.path().steps().size()))) {
+        cost[s] = std::max<uint64_t>(1, body_cost(child.get()));
+      }
+    }
+    auto& owner     = occurrences_[site_occurrence[s]];
+    owner.cost      = sat_add(owner.cost, cost[s]);
+    owner.cost_flat = sat_add(owner.cost_flat, cost_flat[s]);
+  }
+  // Display paths. An occurrence one step above a Sub site is that caller's
+  // own body, whose instance -- another Sub site -- carries exactly its steps,
+  // so every non-root occurrence finds a site path to format.
+  if (library != nullptr) {
+    std::vector<bool>                          named(occurrences_.size(), false);
+    absl::flat_hash_set<hhds::Occurrence_path> seen;
+    named[0] = true;  // the root: ""
+    for (const auto& site : sites_) {
+      if (!seen.insert(site.node.path()).second) {
+        continue;
+      }
+      const auto steps = site.node.path().steps();
+      const auto it    = occurrence_by_steps.find(steps_key(steps, steps.size()));
+      if (it != occurrence_by_steps.end() && !named[it->second]) {
+        occurrences_[it->second].path = hhds::format_occurrence_path(*library, site.node.path());
+        named[it->second]             = true;
+      }
+    }
+  }
+  // Canonical order, fixed BEFORE anything below records an index.
+  {
+    std::vector<uint32_t> order(occurrences_.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::ranges::sort(order, [&](uint32_t lhs, uint32_t rhs) {
+      return std::tie(occurrences_[lhs].path, occurrences_[lhs].def, *occurrence_steps[lhs])
+             < std::tie(occurrences_[rhs].path, occurrences_[rhs].def, *occurrence_steps[rhs]);
+    });
+    std::vector<uint32_t>   renumber(occurrences_.size());
+    std::vector<Occurrence> sorted;
+    sorted.reserve(occurrences_.size());
+    for (size_t rank = 0; rank < order.size(); ++rank) {
+      renumber[order[rank]] = static_cast<uint32_t>(rank);
+      sorted.push_back(std::move(occurrences_[order[rank]]));
+    }
+    occurrences_ = std::move(sorted);
+    for (auto& occurrence : site_occurrence) {
+      if (occurrence != kNoIndex32) {
+        occurrence = renumber[occurrence];
+      }
+    }
+  }
+  const auto no_occurrence = static_cast<uint32_t>(occurrences_.size());  // a top input / a multi-occurrence class
+
+  // ---- sources
+  std::vector<size_t> source_sites;
+  for (size_t s = 0; s < nsites; ++s) {
+    if (executable(s) && sites_[s].kind != Site_kind::data) {
+      source_sites.push_back(s);
+    }
+  }
+  std::ranges::sort(source_sites, [&](size_t lhs, size_t rhs) {
+    return std::tie(site_path_rank[lhs], sites_[lhs].structural_id, lhs)
+           < std::tie(site_path_rank[rhs], sites_[rhs].structural_id, rhs);
+  });
+  std::vector<uint32_t> input_ports;
+  if (io != nullptr) {
+    for (const auto& decl : io->get_input_pin_decls()) {
+      input_ports.push_back(static_cast<uint32_t>(decl.port_id));
+    }
+  }
+  std::ranges::sort(input_ports);
+  input_ports.erase(std::unique(input_ports.begin(), input_ports.end()), input_ports.end());
+  const size_t nsources = source_sites.size() + input_ports.size();
+
+  // Everything below needs a total execution order (the plan's reverse-Kahn
+  // rank, a permutation when the version DAG is acyclic).
+  bool ordered = summary_.version_dag_acyclic && nversions < kNoIndex32 && value_uses_.size() < kNoIndex32 && nsources < kNoIndex32;
+  std::vector<uint32_t> order;
+  if (ordered) {
+    order.assign(nversions, kNoIndex32);
+    for (size_t v = 0; v < nversions && ordered; ++v) {
+      const auto rank = version_sites_[v].execution_order;
+      ordered         = rank < nversions && order[rank] == kNoIndex32;
+      if (ordered) {
+        order[rank] = static_cast<uint32_t>(v);
+      }
+    }
+  }
+  if (!ordered) {
+    return;  // support_.available stays false; occurrences are still valid
+  }
+
+  // ---- mask width and buckets. Contiguous bucketing keeps one occurrence's
+  // sources on neighbouring bits; an aliased bucket only over-reports activity
+  // (conservative: fewer trials, never a wrong verdict).
+  uint32_t words = static_cast<uint32_t>(std::clamp<size_t>((nsources + 63) / 64, 1, kMaxSupportWords));
+  while (words > 1 && static_cast<uint64_t>(nversions) * words * sizeof(uint64_t) > kMaxSupportBitmapBytes) {
+    words /= 2;
+  }
+  const uint64_t buckets = uint64_t{64} * words;
+  const bool     exact   = nsources <= buckets;
+  const auto     bucket
+      = [&](size_t rank) { return static_cast<uint32_t>(exact ? rank : static_cast<uint64_t>(rank) * buckets / nsources); };
+  support_.words = words;
+  support_.exact = exact;
+  support_.sources.reserve(nsources);
+  std::vector<uint32_t> site_bucket(nsites, kNoIndex32);
+  for (const size_t s : source_sites) {
+    Support_source source;
+    source.kind       = sites_[s].kind == Site_kind::state ? Support_source::Kind::state : Support_source::Kind::opaque;
+    source.site       = s;
+    source.bucket     = bucket(support_.sources.size());
+    source.occurrence = site_occurrence[s];
+    site_bucket[s]    = source.bucket;
+    support_.sources.push_back(source);
+    ++occurrences_[source.occurrence].sources;
+  }
+  absl::flat_hash_map<uint32_t, uint32_t> port_bucket;
+  for (const uint32_t port : input_ports) {
+    Support_source source;
+    source.kind       = Support_source::Kind::top_input;
+    source.port       = port;
+    source.bucket     = bucket(support_.sources.size());
+    source.occurrence = no_occurrence;
+    port_bucket.emplace(port, source.bucket);
+    support_.sources.push_back(source);
+  }
+
+  // ---- per-version frontier, one ascending pass (see the comment above)
+  std::vector<uint32_t> use_begin(nversions + 1, 0);
+  for (const auto& use : value_uses_) {
+    ++use_begin[use.consumer_version + 1];
+  }
+  for (size_t v = 0; v < nversions; ++v) {
+    use_begin[v + 1] += use_begin[v];
+  }
+  std::vector<uint32_t> use_list(value_uses_.size());
+  {
+    std::vector<uint32_t> cursor(use_begin.begin(), use_begin.end() - 1);
+    for (size_t u = 0; u < value_uses_.size(); ++u) {
+      use_list[cursor[value_uses_[u].consumer_version]++] = static_cast<uint32_t>(u);
+    }
+  }
+  std::vector<std::vector<uint32_t>> update_fanin(nversions);
+  for (const auto& edge : version_dependencies_) {
+    if (version_sites_[edge.producer].role == Version_role::state_update) {
+      update_fanin[edge.consumer].push_back(static_cast<uint32_t>(edge.producer));
+    }
+  }
+  std::vector<uint64_t> bits(nversions * words, 0);
+  const auto            or_row = [&](uint64_t* row, size_t from) {
+    const uint64_t* source = bits.data() + from * words;
+    for (uint32_t w = 0; w < words; ++w) {
+      row[w] |= source[w];
+    }
+  };
+  const auto set_bit = [](uint64_t* row, uint32_t bit) { row[bit / 64] |= uint64_t{1} << (bit % 64); };
+  for (const uint32_t v : order) {
+    uint64_t*   row     = bits.data() + static_cast<size_t>(v) * words;
+    const auto& version = version_sites_[v];
+    if (version.role != Version_role::state_update && site_bucket[version.base_site] != kNoIndex32) {
+      set_bit(row, site_bucket[version.base_site]);
+    }
+    for (uint32_t i = use_begin[v]; i < use_begin[v + 1]; ++i) {
+      const auto& use = value_uses_[use_list[i]];
+      if (!use.literal.empty()) {
+        continue;  // a fixed lane: no runtime source
+      }
+      if (use.top_input) {
+        if (const auto it = port_bucket.find(static_cast<uint32_t>(use.producer_port)); it != port_bucket.end()) {
+          set_bit(row, it->second);
+        }
+      } else if (use.producer_version < nversions) {
+        or_row(row, use.producer_version);
+      }
+    }
+    for (const uint32_t producer : update_fanin[v]) {
+      or_row(row, producer);
+    }
+  }
+
+  // ---- classes: hash-cons (site bits, occurrence)
+  std::vector<uint64_t>                                class_bits;
+  std::vector<Support_class>                           classes;
+  absl::flat_hash_map<uint64_t, std::vector<uint32_t>> class_by_hash;
+  std::vector<uint64_t>                                scratch(words);
+  for (size_t s = 0; s < nsites; ++s) {
+    if (!executable(s)) {
+      continue;
+    }
+    std::ranges::fill(scratch, 0);
+    for (const size_t v : versions_by_base[s]) {
+      or_row(scratch.data(), v);
+    }
+    const uint32_t occurrence = site_occurrence[s];
+    uint64_t       hash       = livehd::hash_util::kFnv1a64_offset ^ occurrence;
+    for (const uint64_t word : scratch) {
+      hash  = (hash ^ word) * 0x9e3779b97f4a7c15ULL;
+      hash ^= hash >> 29;
+    }
+    auto&    same_hash = class_by_hash[hash];
+    uint32_t found     = kNoIndex32;
+    for (const uint32_t candidate : same_hash) {
+      if (classes[candidate].occurrence == occurrence
+          && std::equal(scratch.begin(), scratch.end(), class_bits.begin() + static_cast<std::ptrdiff_t>(candidate) * words)) {
+        found = candidate;
+        break;
+      }
+    }
+    if (found == kNoIndex32) {
+      found = static_cast<uint32_t>(classes.size());
+      same_hash.push_back(found);
+      classes.push_back(Support_class{.occurrence = occurrence});
+      class_bits.insert(class_bits.end(), scratch.begin(), scratch.end());
+    }
+    auto& cls      = classes[found];
+    cls.ge         = sat_add(cls.ge, weight[s]);
+    cls.sites     += 1;
+    cls.cost       = sat_add(cls.cost, cost[s]);
+    cls.cost_flat  = sat_add(cls.cost_flat, cost_flat[s]);
+  }
+  // The per-version bitmaps are the only big allocation: release them now.
+  std::vector<uint64_t>().swap(bits);
+
+  const auto add_weights = [&](Support_class& into, const Support_class& from) {
+    into.ge         = sat_add(into.ge, from.ge);
+    into.sites     += from.sites;
+    into.cost       = sat_add(into.cost, from.cost);
+    into.cost_flat  = sat_add(into.cost_flat, from.cost_flat);
+    if (into.occurrence != from.occurrence) {
+      into.occurrence = no_occurrence;  // spans several occurrences
+    }
+  };
+
+  // ---- class cap, step 1 (EXACT): over the cap, re-hash-cons by the bit row
+  // alone. Two classes with the same row are idle in exactly the same sampled
+  // pairs, so summing their weights changes no idle_* column; only the
+  // occurrence split goes (the merged class keeps the shared occurrence, else
+  // the no_occurrence sentinel -- nothing reads class_occ). On minion the
+  // (bits, occurrence) split held ~2x as many classes as distinct rows, and the
+  // cap used to fold the surplus away (review round 2, driver-weights:FX2-R2-1).
+  if (classes.size() > kMaxSupportClasses) {
+    std::vector<Support_class>                           by_row;
+    std::vector<uint64_t>                                by_row_bits;
+    absl::flat_hash_map<uint64_t, std::vector<uint32_t>> row_by_hash;
+    for (size_t c = 0; c < classes.size(); ++c) {
+      const auto row  = std::span<const uint64_t>(class_bits.data() + c * words, words);
+      uint64_t   hash = livehd::hash_util::kFnv1a64_offset;
+      for (const uint64_t word : row) {
+        hash  = (hash ^ word) * 0x9e3779b97f4a7c15ULL;
+        hash ^= hash >> 29;
+      }
+      auto&    same_hash = row_by_hash[hash];
+      uint32_t found     = kNoIndex32;
+      for (const uint32_t candidate : same_hash) {
+        if (std::equal(row.begin(), row.end(), by_row_bits.begin() + static_cast<std::ptrdiff_t>(candidate) * words)) {
+          found = candidate;
+          break;
+        }
+      }
+      if (found == kNoIndex32) {
+        same_hash.push_back(static_cast<uint32_t>(by_row.size()));
+        by_row.push_back(classes[c]);
+        by_row_bits.insert(by_row_bits.end(), row.begin(), row.end());
+        continue;
+      }
+      add_weights(by_row[found], classes[c]);
+    }
+    classes.swap(by_row);
+    class_bits.swap(by_row_bits);
+  }
+
+  // Canonical class order: (occurrence, bits).
+  std::vector<uint32_t> class_order(classes.size());
+  std::iota(class_order.begin(), class_order.end(), 0);
+  const auto bits_of_class
+      = [&](uint32_t c) { return std::span<const uint64_t>(class_bits.data() + static_cast<size_t>(c) * words, words); };
+  std::ranges::sort(class_order, [&](uint32_t lhs, uint32_t rhs) {
+    if (classes[lhs].occurrence != classes[rhs].occurrence) {
+      return classes[lhs].occurrence < classes[rhs].occurrence;
+    }
+    return std::ranges::lexicographical_compare(bits_of_class(lhs), bits_of_class(rhs));
+  });
+
+  // ---- class cap, step 2 (CONSERVATIVE): still over the cap, the heaviest
+  // kMaxSupportClasses - kSupportFoldGroups classes stay -- ranked by
+  // cost_flat, the weight the tuner's ladder reads (lhd cm1::kSupportWeight),
+  // then ge, then cost, then canonical order -- and the rest, in canonical
+  // order, fold into kSupportFoldGroups CONTIGUOUS groups whose row is the OR
+  // of their members' rows. A folded group is idle only when all its members
+  // are, so the idle columns can only under-report; neighbouring (occurrence,
+  // bits) classes keep each union tight, where the old single all-ones class
+  // was idle only when nothing changed at all and capped I_s well below the
+  // ladder's thresholds (minion verilog: 36% of cost_flat, never idle).
+  std::vector<bool> kept(classes.size(), true);
+  if (classes.size() > kMaxSupportClasses) {
+    std::vector<uint32_t> by_weight(class_order);  // canonical order breaks weight ties
+    std::ranges::stable_sort(by_weight, [&](uint32_t lhs, uint32_t rhs) {
+      const auto& l = classes[lhs];
+      const auto& r = classes[rhs];
+      return std::tie(l.cost_flat, l.ge, l.cost) > std::tie(r.cost_flat, r.ge, r.cost);
+    });
+    for (size_t i = kMaxSupportClasses - kSupportFoldGroups; i < by_weight.size(); ++i) {
+      kept[by_weight[i]] = false;
+    }
+  }
+  std::vector<uint32_t> overflow;
+  for (const uint32_t c : class_order) {
+    if (!kept[c]) {
+      overflow.push_back(c);
+      continue;
+    }
+    support_.classes.push_back(classes[c]);
+    const auto row = bits_of_class(c);
+    support_.class_bits.insert(support_.class_bits.end(), row.begin(), row.end());
+  }
+  if (!overflow.empty()) {
+    const size_t groups = std::min(kSupportFoldGroups, overflow.size());
+    for (size_t group = 0; group < groups; ++group) {
+      const size_t          begin = group * overflow.size() / groups;
+      const size_t          end   = (group + 1) * overflow.size() / groups;
+      Support_class         folded{.occurrence = classes[overflow[begin]].occurrence};
+      std::vector<uint64_t> row(words, 0);
+      for (size_t i = begin; i < end; ++i) {
+        add_weights(folded, classes[overflow[i]]);
+        const auto member_row = bits_of_class(overflow[i]);
+        for (uint32_t w = 0; w < words; ++w) {
+          row[w] |= member_row[w];
+        }
+      }
+      support_.classes.push_back(folded);
+      support_.class_bits.insert(support_.class_bits.end(), row.begin(), row.end());
+      support_.fold_classes   += 1;
+      support_.fold_members   += static_cast<uint32_t>(end - begin);
+      support_.fold_ge         = sat_add(support_.fold_ge, folded.ge);
+      support_.fold_sites      = sat_add(support_.fold_sites, folded.sites);
+      support_.fold_cost       = sat_add(support_.fold_cost, folded.cost);
+      support_.fold_cost_flat  = sat_add(support_.fold_cost_flat, folded.cost_flat);
+    }
+  }
+  for (const auto& cls : support_.classes) {
+    support_.total_ge        = sat_add(support_.total_ge, cls.ge);
+    support_.total_sites     = sat_add(support_.total_sites, cls.sites);
+    support_.total_cost      = sat_add(support_.total_cost, cls.cost);
+    support_.total_cost_flat = sat_add(support_.total_cost_flat, cls.cost_flat);
+  }
+  support_.available = true;
+}
+
 const std::vector<size_t>& Color_plan::colors_in_execution_order() const {
   if (colors_in_execution_order_.size() != colors_.size()) {
     colors_in_execution_order_.assign(colors_.size(), 0);
@@ -4472,6 +5156,28 @@ std::string Color_plan::report() const {
   result += std::format("boundary-one-writer {}\n", summary_.boundary_one_writer ? "true" : "false");
   result += std::format("boundary-dominance {}\n", summary_.boundary_dominance ? "true" : "false");
   result += std::format("runtime-random {}\n", summary_.runtime_random ? "true" : "false");
+  // sim.tune support (name-free, like everything above the observation map).
+  if (support_.available) {
+    result += std::format(
+        "support words={} sources={} exact={} classes={} total-ge={} total-sites={} total-cost={} total-cost-flat={} "
+        "fold-classes={} fold-members={} fold-ge={} fold-sites={} fold-cost={} fold-cost-flat={}\n",
+        support_.words,
+        support_.sources.size(),
+        support_.exact ? "true" : "false",
+        support_.classes.size(),
+        support_.total_ge,
+        support_.total_sites,
+        support_.total_cost,
+        support_.total_cost_flat,
+        support_.fold_classes,
+        support_.fold_members,
+        support_.fold_ge,
+        support_.fold_sites,
+        support_.fold_cost,
+        support_.fold_cost_flat);
+  } else {
+    result += "support unavailable reason=version-dag-cyclic\n";
+  }
   result += std::format(
       "counts grouped-sites={} outer-sites={} live-sites={} independent-sites={} compact-loops={} "
       "conditional-regions={} carry-edges-cut={} self-edges-dropped={} version-sites={} version-edges={} fine-colors={} colors={} "
@@ -4696,6 +5402,23 @@ std::string Color_plan::report() const {
     result += observation;
   }
   result += "observation-map end\n";
+
+  // Like the observation map, a names-allowed section: instance paths and
+  // definition names identify the sim.tune occurrences for a person reading
+  // the profile; nothing above depends on them.
+  result += "occurrence-map begin\n";
+  for (const auto& occurrence : occurrences_) {
+    result += std::format("occurrence path={} def={} ge={} cost={} cost-flat={} sites={} state-sites={} sources={}\n",
+                          quote(occurrence.path),
+                          quote(occurrence.def),
+                          occurrence.ge,
+                          occurrence.cost,
+                          occurrence.cost_flat,
+                          occurrence.sites,
+                          occurrence.state_sites,
+                          occurrence.sources);
+  }
+  result += "occurrence-map end\n";
   return result;
 }
 

@@ -23,11 +23,14 @@
 #include <vector>
 
 #include "file_output.hpp"
+#include "hash_util.hpp"  // fnv1a64: the once-per-program key of a testbench `?` literal
 #include "prp_ast_facade.hpp"
+#include "prp_sim_rt.hpp"  // the emitted sim.tune driver runtime + `--set` parser
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/source_buffer.hpp"
 #include "rapidjson/document.h"  // 2f-sim B0: read cgen_sim's <stem>.iface.json manifests
+#include "sim_tune_rt.hpp"       // `?`-literal + tune-hash helper text, shared verbatim with inou.cgen.sim
 
 namespace prp_sim {
 
@@ -687,8 +690,8 @@ bool is_reserved_param_name(std::string_view n) {
   // Other identifiers the driver references at the same (function) scope but that
   // are NOT `_`-prefixed (so the leading-underscore bar in is_valid_param_name
   // does not catch them): `main`'s parameters, the reserved CLI flags
-  // (`--test NAME`, `--seed`, `--help`/`-h` — a param named like one would be
-  // swallowed by that flag instead of binding), the libc macros from <cerrno> (a
+  // (`--test NAME`, `--seed`, `--set k=v`, `--help`/`-h` — a param named like one
+  // would be swallowed by that flag instead of binding), the libc macros from <cerrno> (a
   // param named `errno` would expand `long errno = …` to `long (*__error()) = …`
   // — a hard error), and the free functions the driver calls unqualified. The
   // driver's own `_`-prefixed locals need no entry.
@@ -697,6 +700,7 @@ bool is_reserved_param_name(std::string_view n) {
       "argv",
       "main",
       "seed",
+      "set",
       "help",
       "h",
       "test",
@@ -727,6 +731,10 @@ public:
   // 2f-sim B: the DUT instances this test bound (`mut acc = M` -> var -> module
   // key), read after emit_run_fn to expand the per-test query catalog.
   const std::map<std::string, std::string>& instances() const { return inst_of_var; }
+  // The distinct testbench `?` literals this test emitted, as (Slop width,
+  // helper key): each is ONE draw per program (see literal_val), so generate()
+  // unions them over every test and bakes the count into the driver.
+  const std::set<std::pair<int, uint64_t>>& tb_unknown_keys() const { return tb_unknown_keys_; }
 
   Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir, const std::string& file,
              bool runtime_support_on, bool unknown_zero)
@@ -855,7 +863,7 @@ public:
         fail("test parameter '" + r.name
              + "' is not a usable simulation parameter name: it must be a plain identifier "
                "(a letter followed by letters/digits/underscores), not a leading-underscore name, "
-               "a C++ keyword, or a reserved driver flag (seed/help/h/argc/argv) — rename it");
+               "a C++ keyword, or a reserved driver flag (seed/set/help/h/argc/argv) — rename it");
       }
       param_names_.insert(r.name);  // for the tick clock-name collision check
       Param p;
@@ -931,6 +939,23 @@ public:
         o << "  else " << var << ".__vcd_path.clear();\n";
       }
     }
+    // sim.tune: every instance, type-erased for the cold sampler + the end digest
+    // (prp_sim_rt.hpp), and the step countdown. The countdown is ONE local so it
+    // stays in a register across the out-of-line step(): with profiling off the
+    // hook is one decrement-and-branch per step (see the step_statement arm).
+    if (inst_of_var.empty()) {
+      o << "  [[maybe_unused]] const _TpDut _tp_d{};\n";
+    } else {
+      o << "  const _TpVar _tp_v[] = {";
+      bool first = true;
+      for (const auto& [var, m] : inst_of_var) {
+        o << (first ? "" : ", ") << "_tp_var(\"" << var << "\", \"" << duts_.at(m).cls << "\", " << var << ")";
+        first = false;
+      }
+      o << "};\n";
+      o << "  [[maybe_unused]] const _TpDut _tp_d{_tp_v, " << inst_of_var.size() << "};\n";
+    }
+    o << "  [[maybe_unused]] std::uint64_t _tp_left = 1;\n";
     // Hoisted `regref` bindings land here, after every instance exists
     // and before anything that could use one. Filled in at the end of this
     // function (see the splice below kRefMark).
@@ -996,6 +1021,15 @@ public:
     for (auto s : stmts) {
       gen_stmt(o, s, 1);
     }
+    // End of the body, while the instances still live: the sampler's body_end
+    // stops the clock, then folds end_digest over the DUT state walk and this
+    // testbench frame (every local's final value, the same set a checkpoint's
+    // tb.json saves).
+    o << "  { std::uint64_t _tp_tb = _tp_fnv0;\n";
+    for (const auto& v : locals_) {
+      o << "    _tp_tb = _tp_fnv_local(_tp_tb, \"" << v << "\", " << v << ".to_pyrope());\n";
+    }
+    o << "    _tp.body_end(_tp_left, _tp_d, _tp_tb); }\n";
     // The function's stdout is the test's runtime output (puts + any ASSERT
     // FAILED lines); the returned count is the verdict main() renders.
     o << "  return _fails;\n}\n";
@@ -1062,6 +1096,7 @@ private:
   std::map<std::string, int>                  local_w_;                        // ...and the Slop width each is declared at
   std::map<std::string, int>                  local_decl_w_;                   // `mut x:u97 = …` annotation (0 = infer)
   std::set<std::string>                       param_names_;                    // test parameter names
+  std::set<std::pair<int, uint64_t>>          tb_unknown_keys_;                // distinct runtime `?` literals: (width, key)
   std::map<std::string, std::string>          inst_of_var;                     // instance var -> module name (`mut acc = M`)
   std::map<std::string, std::vector<TSNode>>  arrays_;                         // array name -> element nodes
   std::map<std::string, int>                  array_w_;                        // array name -> element Slop width
@@ -1865,8 +1900,14 @@ private:
     // int_literal_value decodes to a non-negative int64 — plain decimal, 0x
     // hex, 0ub binary; anything wider, or a `0sb…` whose value can be
     // negative, goes through a constexpr local, which FORCES the fold; and a
-    // `?`-carrying literal, which is not constant-evaluable, keeps the plain
-    // call (rare, and never in a hot poke).
+    // `?`-carrying literal goes through the once-per-program helper the DUT
+    // uses (sim_tune_rt.hpp's __lhd_unknown_literal): drawn on FIRST USE, so
+    // it is one constant per run -- a bare `from_pyrope("..?..")` here used to
+    // draw a FRESH value at every evaluation, i.e. every cycle, and an assert's
+    // message could even print a different value than its condition tested.
+    // It also honours drv.bin's run-time `--set sim.unknown_zero=true`. The key
+    // is salted with "tb:" so a testbench literal never shares a draw with a
+    // DUT literal of the same width and spelling.
     //
     // Only the create_integer arm claims `has_lit`: const_of would otherwise
     // fold a bit-select bound to a value the literal does not have.
@@ -1882,7 +1923,9 @@ private:
     } else if (lit.find('?') == std::string::npos) {
       v = slop_val("([]{ constexpr auto _k = Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\"); return _k; }())", w);
     } else {
-      v = slop_val("Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\")", w);
+      const uint64_t key = livehd::hash_util::fnv1a64(lit, livehd::hash_util::fnv1a64("tb:"));
+      tb_unknown_keys_.insert({w, key});
+      v = slop_val("__lhd_unknown_literal<" + std::to_string(w) + ", " + std::to_string(key) + "ull>(\"" + lit + "\")", w);
     }
     return v;
   }
@@ -2508,16 +2551,25 @@ private:
       if (inst_of_var.empty()) {
         fail("`step` with no instance declared (use `mut acc = Module` first)");
       }
-      TSNode cnt = field(n, "value");
+      // The sim.tune step hook follows every group of steps -- this arm is the
+      // ONLY place a DUT cycle advances (a tick iteration may step 0..N times,
+      // and steps also happen outside any tick), so the countdown sees exactly
+      // the test's DUT cycles. The first step always takes the cold path (it
+      // starts the sim_ns window); with profiling off no other one does.
+      // Cold path: prp_sim_rt.hpp's _TuneProf::hit.
+      static constexpr std::string_view kHook = "if (--_tp_left == 0) [[unlikely]] _tp_left = _tp.hit(_tp_d);\n";
+      TSNode                            cnt   = field(n, "value");
       if (ts_node_is_null(cnt)) {
         for (const auto& [var, m] : inst_of_var) {
           o << ind << var << ".step();\n";
         }
+        o << ind << kHook;
       } else {
         o << ind << "for (long _s = 0; _s < (long)(" << as_long(cnt) << "); ++_s) {\n";
         for (const auto& [var, m] : inst_of_var) {
           o << ind << "  " << var << ".step();\n";
         }
+        o << ind << "  " << kHook;
         o << ind << "}\n";
       }
       return;
@@ -2811,6 +2863,7 @@ private:
     o << ind << "  });\n";
     o << ind << "  hlop::ckpt::prune_checkpoints(_ckpt_base, _ckpt.max);\n";
     o << ind << "  _cad.taken(std::chrono::duration<double>(std::chrono::steady_clock::now() - _t0).count());\n";
+    o << ind << "  _tp.ckpt();  // ckpt_taken: a forked checkpoint's copy-on-write faults land on this run's counters\n";
     o << ind << "}\n";
   }
 
@@ -3078,7 +3131,7 @@ private:
       if (!msg.empty()) {
         fmt += "  [" + c_str_lit(msg) + "]";
       }
-      o << ind << "  std::printf(\"" << fmt << "\\n\", _clk";
+      o << ind << "  _tp_out(\"" << fmt << "\\n\", _clk";
       if (!lhs_lit) {
         o << ", " << decimal_of(lhs_cpp) << ".c_str()";
       }
@@ -3091,7 +3144,7 @@ private:
       if (!msg.empty()) {
         fmt += "  [" + c_str_lit(msg) + "]";
       }
-      o << ind << "  std::printf(\"" << fmt << "\\n\", _clk);\n";
+      o << ind << "  _tp_out(\"" << fmt << "\\n\", _clk);\n";
     }
     // First failing assert -> structured result (--result-json {test,status,cycle,failing_assert,prp_file,line,msg}).
     o << ind << "  if (!_ff.has) { _ff.has = true; _ff.cycle = _clk; _ff.assertion = \"" << cpp_str_lit(cond_src)
@@ -3111,7 +3164,7 @@ private:
     std::string prefix = c_str_lit(file_short_ + ":" + std::to_string(line_of(n)) + ":" + (newline ? "puts" : "print") + ":");
     TSNode      args   = field(n, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
-      o << ind << "std::printf(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
+      o << ind << "_tp_out(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
       return;
     }
     // format string = first arg (a constant wrapping a [interpolated_]string_literal)
@@ -3193,7 +3246,7 @@ private:
         fmt += c;
       }
     }
-    o << ind << "std::printf(\"" << prefix << fmt << (newline ? "\\n" : "") << "\"";
+    o << ind << "_tp_out(\"" << prefix << fmt << (newline ? "\\n" : "") << "\"";
     for (const auto& a : argv) {
       o << ", " << a;
     }
@@ -3314,13 +3367,18 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   }
   std::vector<std::pair<std::string, std::vector<Cat_sig>>> catalogs;  // per test, registry order
 
-  std::ostringstream       fns;       // run-function bodies, registry order
-  std::vector<std::string> fn_ids;    // run-function names, registry order
-  std::set<std::string>    includes;  // DUT headers any test drives
-  std::set<std::string>    used_ids;  // for fn_id uniqueness
-  std::string              src;       // owns the text the TSNodes reference
-  bool                     gen_failed = false;
-  std::string              gen_err;
+  std::ostringstream                 fns;       // run-function bodies, registry order
+  std::vector<std::string>           fn_ids;    // run-function names, registry order
+  std::set<std::string>              includes;  // DUT headers any test drives
+  std::set<std::string>              used_ids;  // for fn_id uniqueness
+  std::string                        src;       // owns the text the TSNodes reference
+  bool                               gen_failed = false;
+  std::string                        gen_err;
+  // sim.tune: the DUT classes any test instantiates (each gets weak identity
+  // defaults) and the distinct testbench `?` literals (the raw run file reports
+  // them: surviving `?` bits randomize outputs, which the tuner's oracle must know).
+  std::set<std::string>              dut_classes;
+  std::set<std::pair<int, uint64_t>> tb_unknown_keys;
 
   int matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name) {
     if (gen_failed) {
@@ -3343,6 +3401,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
       return;
     }
     fn_ids.push_back(fn_id);
+    for (const auto& [var, m] : gen.instances()) {
+      dut_classes.insert(duts.at(m).cls);
+    }
+    tb_unknown_keys.insert(gen.tb_unknown_keys().begin(), gen.tb_unknown_keys().end());
     // 2f-sim B: this test's query catalog, expanded through its instance tree.
     {
       std::vector<Cat_sig> cat;
@@ -3379,10 +3441,16 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   o << "// Generated by lhd sim (prp_sim). Do not edit.\n";
   o << "// hierarchical-observation: " << (observation_on ? "true" : "false") << "\n";
   o << "// runtime-control-support: " << (runtime_support_on ? "true" : "false") << "\n";
+  // sim.tune markers (lhd greps them before forwarding a `--set`: an older driver
+  // swallows `--set` as a test parameter and only warns).
+  o << "// driver-set-parser: 1\n";
+  o << "// tune-sampler: 1\n";
   o << "// One driver for every `test` block of " << file << ":\n";
   o << "//   --list-tests          print the tests + parameters as JSON, then exit\n";
   o << "//   --test NAME           run only test NAME (repeatable; default = all)\n";
   o << "//   --seed N              hlop PRNG seed for random / unknown bits\n";
+  o << "//   --set KEY=VALUE       a run-time lhd key (lhd.seed, sim.init_zero, sim.unknown_zero=true,\n";
+  o << "//                         sim.checkpoint*, sim.tune.profile*); a codegen key must restate the baked value\n";
   o << "//   --<param> N           bind a `test name(params)` parameter\n";
   o << "//   --help, -h            usage\n";
   for (const auto& h : includes) {
@@ -3392,6 +3460,11 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // (it is transitively included by every DUT header otherwise).
   o << "#include \"slop.hpp\"\n";
   o << "#include \"checkpoint.hpp\"  // periodic DUT-state checkpoint cadence/fork/prune\n";
+  // The `?`-literal and tune-hash helpers, VERBATIM the text inou.cgen.sim puts in
+  // every module header: include-guarded, so after a DUT header this is a no-op,
+  // and it is the only copy for a driver whose tests include no DUT header.
+  o << livehd::sim::kUnknownLiteralHelper;
+  o << livehd::sim::kTuneHashHelper;
   // Width-adapting input poke: a testbench value is a Slop of its OWN width, so
   // driving it into a Slop<N> port is a width change with Verilog `port = val`
   // semantics — retain the RAW low bits, then restore Slop<N>'s signed-carrier
@@ -3435,7 +3508,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     // For vcd::global_timestamp — reset between tests (see main()).
     o << "#include \"vcd_writer.hpp\"\n";
   }
-  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n#include <cctype>\n"
+  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cstring>\n#include <cerrno>\n#include <cctype>\n"
        "#include <string>\n#include <string_view>\n#include <map>\n#include <set>\n#include <vector>\n#include <memory>\n#include "
        "<fstream>\n#include "
        "<chrono>\n\n";
@@ -3813,6 +3886,32 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    std::fprintf(stderr, \"lhd sim: --%s expects a non-negative integer, got '%s'\\n\", _key.c_str(), "
        "_s.c_str());\n    std::exit(2);\n  }\n  return _r;\n}\n\n";
 
+  // ---- sim.tune (sim_profile.md §6): what this binary was generated with, the
+  // per-root identity, then the runtime + the `--set` parser (prp_sim_rt.hpp).
+  const auto cbool = [](bool b) { return b ? "true" : "false"; };
+  o << "[[maybe_unused]] static constexpr bool _baked_unknown_zero = " << cbool(unknown_zero) << ";\n";
+  o << "[[maybe_unused]] static constexpr bool _baked_runtime_support = " << cbool(runtime_support_on) << ";\n";
+  o << "[[maybe_unused]] static constexpr bool _baked_vcd = " << cbool(vcd_on) << ";\n";
+  o << "[[maybe_unused]] static constexpr bool _baked_observation = " << cbool(observation_on) << ";\n";
+  o << "[[maybe_unused]] static constexpr int _tb_unknown_literals = " << tb_unknown_keys.size() << ";\n";
+  // Identity: cgen's `<stem>.tune-id.cpp` defines these STRONG for every
+  // executable root; the WEAK defaults keep a build without it (or an older
+  // emit dir) linking, and a null answer reads as "unknown".
+  o << "struct _TpRoot { const char* cls; const char* (*vector)(); const char* (*structure)(); const char* (*codegen)(); };\n";
+  for (const auto& cls : dut_classes) {
+    for (const char* what : {"vector", "structure", "codegen"}) {
+      o << "extern \"C\" [[gnu::weak]] const char* __lhd_tune_" << what << "_" << cls << "() { return nullptr; }\n";
+    }
+  }
+  o << "static const _TpRoot _tp_roots[] = {";
+  for (const auto& cls : dut_classes) {
+    o << "{\"" << cls << "\", &__lhd_tune_vector_" << cls << ", &__lhd_tune_structure_" << cls << ", &__lhd_tune_codegen_" << cls
+      << "}, ";
+  }
+  o << "{nullptr, nullptr, nullptr, nullptr}};\n";
+  o << kTuneRuntime;
+  o << kSetParser << "\n";
+
   o << fns.str();
 
   // Registry + the canonical `--list-tests` JSON (identical to what
@@ -3846,8 +3945,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   o << "static const char* _tests_json = \"" << cpp_str_lit(tests_to_json_impl(file, tests)) << "\";\n\n";
 
   o << "static void _usage(const char* _argv0) {\n"
-       "  std::printf(\"usage: %s [--list-tests] [--test NAME]... [--seed N] [--result-json PATH] [--<param> "
-       "N]...\\n\", _argv0);\n"
+       "  std::printf(\"usage: %s [--list-tests] [--test NAME]... [--seed N] [--result-json PATH] [--set KEY=VALUE]... "
+       "[--<param> N]...\\n\", _argv0);\n"
        "  std::printf(\"  Runs the lhd-sim test(s) compiled into this binary (default: all).\\n\");\n"
        "  std::printf(\"options:\\n\");\n"
        "  std::printf(\"  --list-tests       print the tests + parameters as JSON and exit\\n\");\n"
@@ -3856,7 +3955,11 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     << kDefaultSeedShown
     << ")\\n\");\n"
        "  std::printf(\"  --init-zero        zero-initialize DUT state with no initializer or reset\\n\");\n"
-       "  std::printf(\"  --result-json PATH write a JSON {test,status,cycle,failing_assert,prp_file,line} report\\n\");\n"
+       "  std::printf(\"  --result-json PATH write a JSON {test,status,cycle,failing_assert,prp_file,line,sim_cycles,...} "
+       "report\\n\");\n"
+       "  std::printf(\"  --set KEY=VALUE    a run-time lhd key: lhd.seed, sim.init_zero, sim.unknown_zero=true, "
+       "sim.checkpoint*,\\n\");\n"
+       "  std::printf(\"                     sim.tune.profile=auto|on|off, sim.tune.profile_dir=DIR (repeatable)\\n\");\n"
        "  std::printf(\"  --<param> N        bind a test parameter (see --list-tests)\\n\");\n"
        "  std::printf(\"  --help, -h         show this message and exit\\n\");\n"
        "  std::printf(\"tests:\\n\");\n"
@@ -3916,6 +4019,9 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    else if (_key == \"--query-plan\") { _q.plan = _need(); _q.on = true; }\n"
        "    else if (_key == \"--query-json\") { _q.out = _need(); }\n"
        "    else if (_key == \"--test\") { _selected.push_back(_need()); }\n"
+       // BEFORE the generic `--<param>` arm, which would bind it as a test
+       // parameter named `set` (a reserved name for exactly that reason).
+       "    else if (_key == \"--set\") { _apply_set(_need(), _seed); }\n"
        "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _args[_key.substr(2)] = _need(); }\n"
        "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(argv[0]); return "
        "2; }\n"
@@ -3923,6 +4029,17 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  if (_list) { std::printf(\"%s\\n\", _tests_json); return 0; }\n"
        "  hlop_set_random_seed(_seed);\n"
        "  _seed_used = _seed;  // mirrored into checkpoint meta.json\n"
+       // Before any test: every `?` literal draws on FIRST USE, so this makes all
+       // of them zero -- the same values a sim.unknown_zero=true build folds.
+       "  if (_set_unknown_zero) __lhd_unknown_zero = true;\n"
+       // Profiling measures the plain run: never an observation / replay run.
+       "  if (_tp.on) {\n"
+       "    const char* _why = _baked_vcd ? \"a VCD build\" : _baked_observation ? \"an observation build\" : _dbg.list_signals ? "
+       "\"--list-signals\" : _dbg.active() ? \"--probe/--break-when\" : _q.on ? \"--query\" : _ckpt.restart_at >= 0 ? "
+       "\"--restart-cycle\" : _ckpt.vcd_from >= 0 ? \"--vcd-from\" : _ckpt.vcd_on_fail ? \"--vcd-on-fail\" : nullptr;\n"
+       "    if (_why != nullptr) { std::fprintf(stderr, \"lhd sim: note: sim.tune.profile=on ignored: %s is never profiled\\n\", "
+       "_why); _tp.on = false; }\n"
+       "  }\n"
        "  std::vector<const _Test*> _torun;\n"
        "  if (_selected.empty()) { for (const auto& _t : _tests) _torun.push_back(&_t); }\n"
        "  else { for (const auto& _nm : _selected) { const _Test* _f = nullptr; for (const auto& _t : _tests) if (_nm "
@@ -3952,7 +4069,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  for (const auto* _t : _torun) {\n"
        "    std::string _err; _Fail _ff;\n"
     << (vcd_on ? "    vcd::global_timestamp = 0;  // each test gets an independent VCD timeline (#0..)\n" : "")
-    << "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+    << "    _tp.begin_test(_t->name);\n"
+       "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+       // Freeze the test's accounting BEFORE anything else prints or re-runs it.
+       "    _tp.finish_test(_f, _ff);\n"
        // 2f-sim: the anchor a failure-relative query resolves against.
        "    if (_ff.has) _q.fail_cycle = _ff.cycle;\n"
        "    const char* _status = (_f < 0) ? \"error\" : (_f > 0 ? \"fail\" : \"pass\");\n"
@@ -3998,6 +4118,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "        _rj += \",\\\"line\\\":\"; _rj += std::to_string(_ff.line);\n"
        "        if (!_ff.msg.empty()) { _rj += \",\\\"msg\\\":\\\"\"; _rj += _json_esc(_ff.msg); _rj += \"\\\"\"; }\n"
        "      }\n"
+       // sim.tune P0.5: sim_cycles, time/counter split, digests (+ profile when on).
+       "      if (_f >= 0) _rj += _tp.row_json(_tp.done.back());\n"
        "      _rj += \"}\";\n"
        "    }\n"
        "  }\n"
@@ -4273,6 +4395,13 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     }
   )cpp";
 
+  // The raw sim.tune run file: profiling runs only, written HERE (never atexit)
+  // so a forked checkpoint child can never write one.
+  o << "  if (_tp.on) {\n"
+       "    std::vector<std::string> _sel;\n"
+       "    for (const auto* _t : _torun) _sel.emplace_back(_t->name);\n"
+       "    _tp.write_raw(argv[0], _seed, _args, _sel);\n"
+       "  }\n";
   o << "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
        "  return _fail_tests ? 1 : 0;\n}\n";
 

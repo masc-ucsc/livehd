@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -13,10 +14,8 @@
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
 #include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
-
-namespace livehd::sim {
-class Color_plan;
-}
+#include "sim_color_plan.hpp"  // Color_plan::Site (the sim.tune support hook below)
+#include "sim_tune_vector.hpp"  // livehd::sim::Tune_vector -- the ONE spelling of the sim.tune.* codegen knobs
 
 // Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
 // library (inou.cgen.sim). Structural twin of Cgen_verilog (same
@@ -299,7 +298,8 @@ public:
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,
-           bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0, int64_t _fence_ratio = -1)
+           bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0,
+           int64_t _fence_ratio = -1)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -310,12 +310,12 @@ public:
       , compact_kernel_(_compact_kernel)
       , llvm_backend_(_llvm_backend)
       , slop_u_(_slop_u)
-      , color_dirty_(_color_dirty)
       , debug_(_debug)
       , unknown_zero_(_unknown_zero)
       , dut_(_dut)
-      , live_words_(_live_words)
-      , fence_ratio_(_fence_ratio) {}
+      , tune_(livehd::sim::canonical_tune_vector(_color_dirty, _fence_ratio, _live_words, _llvm_backend))
+      , tune_vector_(tune_.tv1())
+      , env_(Sim_env::read()) {}
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
@@ -330,7 +330,6 @@ private:
   // for state, for reset-free state, or for module boundaries.
   // false = everything is Slop<n>.
   bool                           slop_u_         = true;
-  bool                           color_dirty_    = false;  // cross-cycle color activation and boundary change tracking
   // sim.debug keeps the materializing Slop_u landing in generated code so an
   // unsigned-proof mistake remains visible while debugging. The normal path
   // uses from_proven(), whose width check is compile-time and whose runtime
@@ -349,8 +348,56 @@ private:
   // so its wide inputs carry no trustworthy change version: never forward
   // them by version (see "Versioned wide inputs" in do_from_graph).
   bool                           dut_            = false;
-  uint32_t                       live_words_     = 0;  // sim.live_words (0 = the plan's default); folded into the key
-  int64_t                        fence_ratio_    = -1;  // sim.fence_ratio (-1 = the plan's default); folded into the key
+
+  // ---- sim.tune codegen knobs (sim_profile.md §3; sim.tune.dirty / fence /
+  // live_words / backend). `tune_` is the CANONICAL vector of the constructor
+  // arguments -- normalized the way Color_plan::discover consumes them (fence
+  // -1 == 16, live_words 0 == 256), so spellings that build the same plan key
+  // the same. Every knob in it is ROOT-ONLY: only a color root's emission reads
+  // it, so `tune_vector_` (its tv1 text) is folded into the COLOR ROOT's
+  // generation key alone, and a tune flip regenerates exactly the root.
+  //
+  // The dirty knob is read ONLY through tune_dirty(), which refuses (a diag
+  // error, in every build -- I() compiles away under NDEBUG) outside a color
+  // root. A non-root module that grew a dirty-dependent byte would otherwise be
+  // served stale from the cache, because its key does not fold the vector.
+  // live_words and fence reach the code only through the plan; the backend
+  // keeps its own member (llvm_backend_), which stays keyed on every module.
+  const livehd::sim::Tune_vector tune_;
+  const std::string              tune_vector_;                   // tune_.tv1()
+  bool                           emitting_color_root_  = false;  // set by do_from_graph once color_root is known
+  mutable bool                   tune_misuse_reported_ = false;
+  [[nodiscard]] bool             tune_dirty() const;
+
+  // Emitter-debug environment switches that CHANGE the emitted C++ (the
+  // `*_DEBUG` variables only print, and stay unkeyed). Read ONCE, here: lhd
+  // runs passes in-process, so a setenv between the pre-plan probe and the
+  // emitter must not split the key from the code. Folded into EVERY module's
+  // key -- LIVEHD_SIM_NOGATE shapes the header of any module holding a rolled
+  // loop, and the other two the period body of non-runtime roots and compact
+  // kernels -- and into the tune-id `structure` string.
+  struct Sim_env {
+    bool                   nogate   = false;  // LIVEHD_SIM_NOGATE: no quiescent-subtree gating of loop/period bodies
+    bool                   nolazy   = false;  // LIVEHD_SIM_NOLAZY: no lazy guarded next-state / write staging
+    bool                   noinline = false;  // LIVEHD_SIM_NOINLINE: no single-use forestation
+    [[nodiscard]] uint32_t bits() const { return (nogate ? 1u : 0u) | (nolazy ? 2u : 0u) | (noinline ? 4u : 0u); }
+    static Sim_env         read();
+  };
+  const Sim_env env_;
+
+  // ---- sim.tune support tables (sim_profile.md §6.1 / §8.1), defined in
+  // cgen_sim_tune.cpp. Called from do_from_graph for every EXECUTABLE color
+  // root (color_root && !compact_kernel_ -- iface.json `executable:true`).
+  // Emits `<fstem>.tune.cpp` through open_out: the root's static
+  // `__tune_support()` table and its `__tune_sources(std::uint64_t*) const`
+  // hasher, one canonical 64-bit word per support source, in the plan's source
+  // order. `state_member(site)` / `sub_member(site)` are do_from_graph's
+  // occurrence_member / occurrence_sub_member: the C++ member path, from the
+  // root object, of a state site / a Sub (or compact-loop) site.
+  using Tune_site_member = std::function<std::string(const livehd::sim::Color_plan::Site&)>;
+  void emit_tune_support(hhds::Graph* g, std::string_view fstem, std::string_view mod, const Tune_site_member& state_member,
+                         const Tune_site_member& sub_member);
+  // ---- end sim.tune support tables
 
 public:
   // The C++ TYPE a stored unsigned value of `bits` literal LiveHD bits is
