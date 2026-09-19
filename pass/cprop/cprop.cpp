@@ -134,12 +134,9 @@ template <typename T>
   if (driver.is_invalid() || sink.is_invalid()) {
     return false;
   }
-  for (const auto& e : driver.out_edges()) {
-    if (e.sink == sink) {
-      return true;
-    }
-  }
-  return false;
+  // These callers inspect ordinary operands: each sink has one driver.
+  // Walking a clock-like driver's fanout for each operand is quadratic.
+  return sink.get_driver_pin() == driver;
 }
 
 [[nodiscard]] std::string sink_pin_name(const hhds::Pin_class& spin) {
@@ -1080,181 +1077,77 @@ bool canonicalize_concat_pack(hhds::Graph* g, hhds::Node_class& node) {
 
 }  // namespace
 
+// Absorb an associative PRIVATE region at its final consumer. Intermediate
+// nodes defer flattening, so an N-link chain never copies operand lists of
+// lengths 1, 2, ..., N. Shared and colored nodes are opaque boundaries.
 void Cprop::collapse_forward_same_op(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
-  auto op = type_op_of(node);
-
-  // out_edges() is a lazy view; rewriting an edge (connect_driver/del_edge)
-  // invalidates an in-flight iterator. Rather than snapshot the (possibly huge)
-  // fan-out into a vector, re-scan from the front after each rewrite: find the
-  // next same-op consumer, splice this node's inputs into it, drop the edge, and
-  // restart. Edges to a different op (or mismatched port) are left in place;
-  // once none remain the node is fully collapsed and can be deleted.
-  bool progressed = true;
-  while (progressed) {
-    progressed = false;
-    for (const auto& out : node.out_edges()) {
-      if (type_op_of(out.sink.get_master_node()) != op) {
-        continue;
-      }
-      // The consumer must read us through the SAME operand role. `op` here is a
-      // single-bank commutative cell (Mult/Or/And/Xor), so that role is bank 0
-      // and this node's output pid is 0 -- compare against the BANK, not the raw
-      // sink pid, because each operand now owns a consecutive pid of its own
-      // (graph/cell.hpp's ONE DRIVER PER SINK PIN block).
-      if (out.driver.get_port_id() != Ntype::sink_bank(op, out.sink.get_port_id())) {
-        continue;
-      }
-      auto       consumer = out.sink.get_master_node();
-      const auto bank     = Ntype::sink_bank(op, out.sink.get_port_id());
-
-      // NO parallel-edge refusal any more. It existed because every operand of a
-      // commutative cell used to land on ONE sink pin, where hhds edge storage
-      // (a set keyed by (driver, sink)) silently DEDUPED a repeat: splicing `a`
-      // into a consumer that already read `a` turned Mult(Mult(a,b),a) = a*a*b
-      // into a*b. Operands now occupy distinct pins, so the multiset is
-      // representable and the splice is exact for every op here.
-
-      for (auto& inp : inp_edges_ordered) {
-        if (op == Ntype_op::Xor) {
-          // Parity cancel: `a ^ a` is 0, so a repeat REMOVES the slot holding it
-          // rather than adding one. Scan the whole bank -- the duplicate may sit
-          // on any of its slots, not just the one our edge arrived on.
-          hhds::Pin_class dup;
-          for (const auto& slot : livehd::graph_util::bank_sinks(consumer, "as")) {
-            if (is_driver_connected_to_sink(inp.get_driver_pin(), slot)) {
-              dup = slot;
-              break;
-            }
-          }
-          if (!dup.is_invalid()) {
-            dup.del_sink(inp.get_driver_pin());
-            continue;
-          }
-        }
-        I(op != Ntype_op::Sum);  // Sum has two banks; collapse_forward_sum owns it
-        livehd::graph_util::append_sink_operand(consumer, op, bank).connect_driver(inp.get_driver_pin());
-      }
-
-      out.del_edge();
-      progressed = true;
-      break;  // iterator invalidated by the rewrite; restart the scan
+  const auto op = type_op_of(node);
+  if (has_single_consumer(node) && !livehd::graph_util::has_color(node)) {
+    const auto sink = (*node.out_edges().begin()).sink;
+    if (type_op_of(sink.get_master_node()) == op) {
+      return;
     }
   }
-  if (!node.has_out_edges()) {  // every consumer collapsed -> node is dead
-    node.del_node();
+  struct Operand { hhds::Pin_class pin; unsigned bank; };
+  std::vector<Operand> pending;
+  for (const auto& sink : inp_edges_ordered) {
+    pending.push_back({sink.get_driver_pin(), Ntype::sink_bank(op, sink.get_port_id())});
   }
+  std::vector<hhds::Node_class> absorbed;
+  std::vector<Operand> leaves;
+  absl::flat_hash_set<hhds::Class_index> owned{node.get_class_index()};
+  while (!pending.empty()) {
+    auto value = pending.back();
+    pending.pop_back();
+    auto child = value.pin.get_master_node();
+    if (!value.pin.is_const() && !is_graph_input_pin(value.pin) && type_op_of(child) == op
+        && has_single_consumer(child) && !livehd::graph_util::has_color(child)) {
+      if (!owned.insert(child.get_class_index()).second) {
+        return; // cyclic region: leave it intact
+      }
+      absorbed.push_back(child);
+      for (const auto& sink : child.inp_sorted_pins()) {
+        pending.push_back({sink.get_driver_pin(), op == Ntype_op::Sum
+                            ? value.bank ^ Ntype::sink_bank(op, sink.get_port_id()) : 0u});
+      }
+    } else {
+      leaves.push_back(value);
+    }
+  }
+  if (absorbed.empty() && op != Ntype_op::Sum && op != Ntype_op::Xor) {
+    return;
+  }
+  // Preserve multiplicity for arithmetic; cancel opposite Sum signs and XOR
+  // parity through a hash lookup instead of scanning the consumer's bank.
+  struct Term { hhds::Pin_class pin; int64_t count = 0; };
+  absl::flat_hash_map<hhds::Class_index, size_t> index;
+  std::vector<Term> terms;
+  for (const auto& value : leaves) {
+    auto [it, fresh] = index.try_emplace(value.pin.get_class_index(), terms.size());
+    if (fresh) { terms.push_back({value.pin, 0}); }
+    auto& count = terms[it->second].count;
+    if (op == Ntype_op::And || op == Ntype_op::Or) { count = 1; }
+    else if (op == Ntype_op::Xor) { count ^= 1; }
+    else { count += op == Ntype_op::Sum && value.bank ? -1 : 1; }
+  }
+  clear_all_sinks(node);
+  for (const auto& term : terms) {
+    const unsigned bank = term.count < 0 ? 1 : 0;
+    for (int64_t i = 0; i < std::abs(term.count); ++i) {
+      livehd::graph_util::append_sink_operand(node, op, bank).connect_driver(term.pin);
+    }
+  }
+  // Parent before child: each absorbed node has lost its sole consumer.
+  for (auto child : absorbed) { child.del_node(); }
+  if (!node.has_inp_edges()) {
+    replace_node(node, *Dlop::create_integer(op == Ntype_op::Mult ? 1 : 0));
+    return;
+  }
+  inp_edges_ordered = ordered_inp_edges(node);
 }
 
 void Cprop::collapse_forward_sum(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
-  if (inp_edges_ordered.size() > 32) {
-    return;
-  }
-
-  I(type_op_of(node) == Ntype_op::Sum);
-  // Restart-scan the lazy out_edges view after each rewrite (no fan-out copy):
-  // splice into the next Sum consumer, drop its edge, restart. Non-Sum consumers
-  // stay; once all Sum edges are gone the node is fully merged forward.
-  bool progressed = true;
-  while (progressed) {
-    progressed = false;
-    for (const auto& out : node.out_edges()) {
-      auto next_sum_node = out.sink.get_master_node();
-      if (type_op_of(next_sum_node) != Ntype_op::Sum) {
-        continue;
-      }
-      // Where each operand LANDS in the consumer: its own sign composed with
-      // the sign of the edge being spliced (a subtrahend of a subtrahend adds).
-      //   Sum(A,Sum(B,C))  = Sum(A+C,B)
-      //   Sum(Sum(A,B),C)) = Sum(A+C,B)
-      //
-      // A shared operand -- one the consumer ALREADY reads -- decides by that
-      // landing sign. On the OPPOSITE port the two occurrences CANCEL
-      // (`(lo + 7) + 1 - lo` is the width `hi + 1 - lo` upass.tolg builds for
-      // every `x#[lo ..+ 8]` slice at a runtime offset; folding it to the
-      // literal 8 is what lets the shift+mask become a bitfield extract), so
-      // drop the consumer's edge instead of adding one. On the SAME port it
-      // would need a second parallel edge, which hhds overflow-mode sink
-      // storage (a set) silently DEDUPS -- Sum(Sum(a,b),a) = 2a+b would
-      // collapse to a+b -- so that consumer keeps its edge. A driver THIS node
-      // reads twice is decided by landing too, not refused outright: on the SAME
-      // landing the two occurrences want that one parallel edge (or, if they
-      // cancel, a double del_sink of one pair), so refuse; on OPPOSITE landings
-      // they are +D and -D, so drop BOTH and splice neither. `Sum(as:lo, bs:lo)`
-      // is the same runtime-offset width shape one level down, and forwarding it
-      // as two cancelling edges would grow the consumer's fan-in by two for a
-      // contribution of zero -- and nothing downstream folds that pair back out.
-      // Compare landings, not `inp_sink`: an illegal Sum pid >= 2 binarizes into
-      // `bs` above, and only the landing form then refuses conservatively.
-      // BANK parity decides the sign, not the raw pid: each Sum operand owns a
-      // consecutive pid, EVEN = added, ODD = subtracted (graph/cell.hpp's ONE
-      // DRIVER PER SINK PIN block). `pid == 0 ? add : sub` would have read
-      // every `as` slot above pid 0 as a subtrahend.
-      const auto        as_sink  = find_sink_pin(next_sum_node, "as");
-      const auto        bs_sink  = find_sink_pin(next_sum_node, "bs");
-      const int         out_port = static_cast<int>(Ntype::sink_bank(Ntype_op::Sum, out.sink.get_port_id()));
-      bool              refuse   = false;
-      std::vector<bool> cancel(inp_edges_ordered.size(), false);
-      std::vector<bool> drop(inp_edges_ordered.size(), false);  // node-internal +D/-D pair: splice neither
-      std::vector<int>  landing(inp_edges_ordered.size(), 0);
-      for (size_t i = 0; i < inp_edges_ordered.size(); ++i) {
-        landing[i] = static_cast<int>(Ntype::sink_bank(Ntype_op::Sum, inp_edges_ordered[i].get_port_id())) ^ out_port;
-      }
-      for (size_t i = 0; i < inp_edges_ordered.size() && !refuse; ++i) {
-        for (size_t j = 0; j < i; ++j) {
-          if (inp_edges_ordered[j].get_driver_pin() != inp_edges_ordered[i].get_driver_pin()) {
-            continue;
-          }
-          if (landing[j] == landing[i]) {
-            refuse = true;
-          } else {
-            drop[i] = drop[j] = true;
-          }
-        }
-      }
-      // Only the operands that will actually land ask the consumer anything: a
-      // dropped pair adds no edge, so a copy the consumer already reads is
-      // neither a parallel-edge hazard nor a cancellation opportunity for it.
-      for (size_t i = 0; i < inp_edges_ordered.size() && !refuse; ++i) {
-        if (drop[i]) {
-          continue;
-        }
-        const auto  inp_sink      = inp_edges_ordered[i];
-        const auto& same_sink     = landing[i] == 0 ? as_sink : bs_sink;
-        const auto& opposite_sink = landing[i] == 0 ? bs_sink : as_sink;
-        if (is_driver_connected_to_sink(inp_sink.get_driver_pin(), same_sink)) {
-          refuse = true;
-        } else if (is_driver_connected_to_sink(inp_sink.get_driver_pin(), opposite_sink)) {
-          cancel[i] = true;
-        }
-      }
-      if (refuse) {
-        continue;  // leave this consumer's edge in place
-      }
-
-      for (size_t i = 0; i < inp_edges_ordered.size(); ++i) {
-        const auto inp_sink = inp_edges_ordered[i];
-        if (drop[i]) {
-          continue;
-        }
-        if (cancel[i]) {
-          (landing[i] == 0 ? bs_sink : as_sink).del_sink(inp_sink.get_driver_pin());
-          continue;
-        }
-        setup_sink_by_name(next_sum_node, landing[i] == 0 ? "as" : "bs").connect_driver(inp_sink.get_driver_pin());
-      }
-      out.del_edge();
-      if (!next_sum_node.has_inp_edges()) {
-        // Every operand cancelled (x - x): the consumer is the constant 0.
-        replace_node(next_sum_node, *Dlop::create_integer(0));
-      }
-      progressed = true;
-      break;  // iterator invalidated by the rewrite; restart the scan
-    }
-  }
-
-  if (!node.has_out_edges()) {  // every Sum consumer merged forward -> node dead
-    bwd_del_node(node);
-  }
+  collapse_forward_same_op(node, inp_edges_ordered);
 }
 
 void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
@@ -1422,11 +1315,7 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, Inp_pins& inp_edges_ord
     }
   }
 
-  if (op == Ntype_op::Sum) {
-    collapse_forward_sum(node, inp_edges_ordered);
-  } else if (op == Ntype_op::Mult || op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
-    collapse_forward_same_op(node, inp_edges_ordered);
-  } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+  if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
     // Identical arms make the selector irrelevant, for a Hotmux as much as for a
     // Mux: an overlap that cannot change the result is not worth a decode cone
     // plus its own ABC region. (That shape is exactly an always-open latch
@@ -2445,38 +2334,7 @@ bool Cprop::scalar_bool(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     return false;
   }
 
-  // Consumer-side flattening: a private operand of the same op joins this
-  // node. The producer-side collapse cannot do it when this node was minted
-  // after the producer's visit (a Mux retyped to Or), and a 120-level shadow
-  // enable chain `en = rst | upd | en_prev` then stays 120 levels deep -- past
-  // the 0/1 proof's depth bound, so every rule above it stops applying.
   bool changed = false;
-  for (bool spliced = true; spliced;) {
-    spliced = false;
-    for (const auto& sink : inp_edges_ordered) {
-      const auto driver = sink.get_driver_pin();
-      if (driver.is_const() || is_graph_input_pin(driver) || !has_single_consumer(driver)) {
-        continue;
-      }
-      auto inner = driver.get_master_node();
-      if (inner.is_invalid() || type_op_of(inner) != op || livehd::graph_util::has_color(inner)) {
-        continue;
-      }
-      std::vector<hhds::Pin_class> operands;
-      for (auto inner_sink : inner.inp_sorted_pins()) {
-        operands.push_back(inner_sink.get_driver_pin());
-      }
-      sink.del_sink();
-      for (const auto& operand : operands) {
-        livehd::graph_util::append_sink_operand(node, op, 0).connect_driver(operand);
-      }
-      inner.del_node();
-      inp_edges_ordered = ordered_inp_edges(node);
-      spliced           = true;
-      changed           = true;
-      break;
-    }
-  }
 
   // Duplicate operands: x & x == x and x | x == x.
   {
@@ -4411,6 +4269,11 @@ void Cprop::scalar_node(hhds::Node_class& node) {
   }
 
   auto inp_edges_ordered = ordered_inp_edges(node);
+  if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
+    collapse_forward_same_op(node, inp_edges_ordered);
+    if (node.is_invalid()) { return; }
+  }
+
 
   if (op == Ntype_op::Sext) {
     if (inp_edges_ordered.size() >= 2) {
