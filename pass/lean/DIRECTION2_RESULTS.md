@@ -651,6 +651,19 @@ is a clock.
   unchanged (none of the 13 has an asynchronous reset, so `asyncFlagMismatch`
   does not fire on them; a pre-provenance certificate WITH async flops would be
   refused and must be re-emitted).
+* **Existing certificates on disk.**  The new `asyncFlagMismatch` check is the
+  one part of Phase B that refuses artifacts that used to be accepted: a
+  pre-provenance certificate has no `asyncReset` field, so it defaults to
+  `false` while its `flopQAsync` sources say the reset does not wait for the
+  edge — an inconsistency the checker will not pass.  **54 of the 147 baseline
+  certificates** carry `flopQAsync` and are refused until re-emitted; the other
+  93 are unaffected (12 sampled across the size range: all ACCEPTED, all ran 4
+  cycles, all `clocks=1` from the default).  The refusal is kept deliberately.
+  Under `allEdges` the flag is unobservable — which is why conservativity still
+  holds for those designs — but the moment a partial edge vector is supplied,
+  which is the entire point of Phase B, an unmarked async flop would silently
+  hold through its own reset.  Re-emission is the fix and costs nothing but the
+  sweep: the exporter sets the flag from the `async` pin.
 * **Re-emission sweep** (`SWEEP_direction2_phaseB.tsv`): the 13 Phase-A modules
   plus `intpipe_mul_div_top` — **14/14 emitted, `checkDesign` ACCEPTED, 4 cycles
   run**, every certificate with a one-entry clock table (`clk_i` or `clock`).
