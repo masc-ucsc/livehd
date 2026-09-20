@@ -279,19 +279,28 @@ written, so these are `#guard`s -- the same distinction Gate 0 draws.
 Two findings from writing it, both recorded in the file:
 
 - **the slot environment is the whole design problem.**  `interpretDesign`
-  carries `rho : Nat -> CertVal`, a function; `L` is first order, so the
-  environment must be data.  It is a cons chain, newest-first, read at depth
-  `n - 1 - s`; both `n` and `s` come from the certificate, so the walk is static
-  and `ucall` unrolls it.  Newest-first is what avoids `append`.
+  carries `rho : Nat -> CertVal`, a FUNCTION, and `L` is first order, so the
+  environment must be DATA -- that much is forced.  The cons chain is not: a
+  first-order language can carry an array, an indexed vector, a tuple or a
+  slot-store primitive equally well.  As written it is a cons chain,
+  newest-first, read at depth `n - 1 - s`; both `n` and `s` come from the
+  certificate, so the walk is static and `ucall` unrolls it, and newest-first
+  is what avoids `append`.
 - **what that costs.**  A dep at depth `k` residualizes to `k` `tl`s and one
-  `hd`, so an N-slot design gives O(N^2) plumbing and the residual still conses
-  its environment at run time.  The dispatch is gone, which is what the first
-  projection is for, but this is not yet the straight-line `let` chain the
-  legacy fast model emits.  The fix is a specializer-side simplification
-  (`hd (consP a b) => a`, `tl (consP a b) => b`), which collapses the chain to a
-  single variable reference once the elements are `let`-bound.  That touches
-  `PartialEvaluator.lean` and its 1783-line proof, so it is deliberately not
-  bundled with getting this correct first.
+  `hd`, so residual GENERATION is O(N^2) for the dependency patterns real
+  dataflow graphs have.  See "The scaling wall, measured" above for the numbers;
+  the practical ceiling is around N = 1000-2000 slots.  The dispatch is gone,
+  which is what the first projection is for, but this is not yet the
+  straight-line `let` chain the legacy fast model emits.
+
+  **The fix originally recorded here was wrong**, and the correction matters:
+  a specializer-side rewrite `hd (consP a b) => a` can never fire, because the
+  `.ucall .dyn` rule `let`-binds the environment and it reaches the body as a
+  residual variable rather than as a syntactic `consP`.  Post-processing cannot
+  help either -- the O(N^2) term must be built first.  The actual fix is a
+  partial VALUE DOMAIN in the specializer that preserves a known cons spine with
+  dynamic leaves.  That touches `PartialEvaluator.lean` and its 1783-line proof,
+  so it is deliberately not bundled with getting this correct first.
 
 ### Milestone 3: obtain the first projected simulator
 

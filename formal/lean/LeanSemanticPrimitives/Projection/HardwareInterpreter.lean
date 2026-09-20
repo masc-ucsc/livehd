@@ -7,25 +7,45 @@
   file is written.
 
   THE SLOT ENVIRONMENT IS THE WHOLE DESIGN PROBLEM.  `interpretDesign` carries
-  `rho : Nat -> CertVal`, a function; `L` is first order, so the environment has
-  to be data.  It is a cons chain, NEWEST FIRST, and slot `s` is read at depth
+  `rho : Nat -> CertVal`, a FUNCTION, and `L` is first order, so the environment
+  has to be DATA.  That much is forced.  What is NOT forced is the cons chain:
+  a first-order language can carry an array, an indexed vector, a tuple, or a
+  dedicated slot-store primitive just as well.  The cons chain is the encoding
+  this file happens to use, and it is the wrong one at scale.
+
+  As written, the chain is NEWEST FIRST and slot `s` is read at depth
   `n - 1 - s` where `n` is the number of slots bound so far.  Both `n` and `s`
   are static -- they come from the certificate -- so `nthD` walks a static
   number of steps down a dynamic list, which is the one shape `ucall` exists to
   unroll.  Building the chain newest-first is what avoids `append`: every slot
   is one `cons` onto the front, never a traversal.
 
-  WHAT THAT COSTS, stated plainly because the next milestone has to deal with
-  it: a dep at depth k residualizes to k `tl`s and one `hd`, so a design with N
-  slots produces O(N^2) residual plumbing, and the residual still conses its
-  environment at run time.  The dispatch is gone -- no tag test, no walk over
-  `D.nodes`, which is what the first projection is for and what Gate 0 measures
-  -- but this is not yet the straight-line `let` chain the legacy fast model
-  emits.  The fix is a specializer-side simplification (`hd (consP a b) => a`,
-  `tl (consP a b) => b`), which collapses the whole chain to a single variable
-  reference when the elements are already `let`-bound.  That touches
-  `PartialEvaluator.lean` and its proof, so it is deliberately NOT bundled here:
-  this file first has to be correct, and measured, before it is made fast.
+  WHAT THAT COSTS -- measured, in `Scaling.lean`, not estimated.  A dep at depth
+  `k` residualizes to `k` `tl`s and one `hd`, so residual GENERATION is O(N^2)
+  for dependency patterns like the ones real dataflow graphs have.  `Scaling.lean`
+  pins it exactly: `fanD`, where every read sits at maximum depth by
+  construction, produces exactly `N^2` `tl` applications.  The practical ceiling
+  is around N = 1000-2000 slots, which already puts DINO's 4,772-node
+  `SingleCycleCPU` out of reach.  The dispatch is gone -- no tag test, no walk
+  over `D.nodes`, which is what the first projection is for and what Gate 0
+  measures -- but this is not yet the straight-line `let` chain the legacy fast
+  model emits, and it cannot reach a real design at all.
+
+  AN EARLIER VERSION OF THIS COMMENT PROPOSED THE WRONG FIX, and the correction
+  is worth keeping.  It said the cure was a specializer-side rewrite
+  `hd (consP a b) => a` / `tl (consP a b) => b`.  That rewrite can never fire:
+  `PartialEvaluator.lean`'s `.ucall .dyn` case runs `wrapLets dts b'` and
+  `inlineEnv` maps each dynamic parameter to `PVal.dyn i`, so the environment
+  reaches the body as a residual VARIABLE and the `consP` is never syntactically
+  adjacent to the `hd`.  Post-processing cannot rescue it either, because the
+  O(N^2) term has to be built before anything could simplify it.
+
+  The actual fix is a partial VALUE DOMAIN in the specializer -- one that
+  preserves a known cons spine with dynamic leaves, so a slot read resolves to a
+  single variable reference at specialization time.  That touches
+  `PartialEvaluator.lean` and its correctness proof, so it is deliberately not
+  bundled here: this file first has to be correct, and measured, before it is
+  made fast.
 
   EVERY HELPER IS `inline`.  The recursions are all driven by a static list from
   the certificate, so they unfold completely and the residual is one function
