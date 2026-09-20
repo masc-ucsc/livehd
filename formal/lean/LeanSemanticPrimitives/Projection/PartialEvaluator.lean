@@ -110,15 +110,33 @@ def PEnv.shiftBy (k : Nat) : PEnv → PEnv
   | []              => []
   | v :: rest       => PVal.shift k v :: PEnv.shiftBy k rest
 
+/-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
+def wrapLets : List Term → Term → Term
+  | [],      body => body
+  | e :: es, body => .letIn e (wrapLets es body)
+
 /-- The result of specializing one term.
 
 `cons` is the same partial structure as `PVal.cons`, but its leaves may be
 arbitrary `code`: a result is not yet in the environment, so nothing has had to
-shift it. -/
+shift it.
+
+`lets` is the PACKAGE -- residual bindings carried ALONGSIDE a partial value
+rather than wrapped around reified code.  Without it a partial structure dies at
+every result binder: a dynamic `letIn` would return `.code (.letIn e (toCode r))`
+and an unfolded call `.code (wrapLets dts (toCode r))`, both of which reify `r`
+and hand the caller something opaque.  That is what would make `I_hw`'s
+per-node binding self-defeating -- it would bind the node once and then flatten
+the body's environment on the way out.
+
+The binder does have a place to hang after all: a binding LIST that travels WITH
+the value.  `toCode` of the package is exactly the term the old rules emitted,
+which is why introducing it changes no residual and can be checked inert. -/
 inductive PRes where
   | stat : Val → PRes
   | code : Term → PRes
   | cons : PRes → PRes → PRes
+  | lets : List Term → PRes → PRes
   deriving Inhabited, Repr
 
 /-- Turn any result into residual code.  On a static value this is the `lift`
@@ -129,7 +147,8 @@ letting a partial structure escape into a dynamic context. -/
 def PRes.toCode : PRes → Term
   | .stat v   => .lit v
   | .code t   => t
-  | .cons a b => .prim .consP [PRes.toCode a, PRes.toCode b]
+  | .cons a b  => .prim .consP [PRes.toCode a, PRes.toCode b]
+  | .lets bs r => wrapLets bs (PRes.toCode r)
 
 /-- Read a partial environment entry back as a result.  A preserved spine has
 to survive being looked up, or the `var` rule would flatten it the first time it
@@ -157,6 +176,7 @@ def PRes.total : PRes → Bool
   | .code (.var _) => true
   | .code _        => false
   | .cons a b      => PRes.total a && PRes.total b
+  | .lets _ _      => false
 
 inductive MixError where
   | outOfFuel
@@ -225,6 +245,7 @@ def allStatic : List PRes → Except MixError (List Val)
       | .error e => .error e
   | .code _ :: _  => .error (.notStatic "static node has a residual operand")
   | .cons _ _ :: _ => .error (.notStatic "static node has a partially static operand")
+  | .lets _ _ :: _ => .error (.notStatic "static node has a residual operand")
 
 /-- The residual code of each DYNAMIC argument, in source order.  These become
 the `let`s an unfold wraps around the inlined body. -/
@@ -260,11 +281,6 @@ def inlineEnv : Div → List PRes → Except MixError PEnv
       | .ok rest => .ok (.dyn (dynCount bs) :: rest)
       | .error e => .error e
   | _, _ => .error (.badArity "unfold: argument count does not match the division")
-
-/-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
-def wrapLets : List Term → Term → Term
-  | [],      body => body
-  | e :: es, body => .letIn e (wrapLets es body)
 
 /-- Is every parameter static?
 
@@ -323,6 +339,7 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | .ok (.stat v, rq) => .ok (.code (.lit v), rq)
       | .ok (.code _, _)  => .error (.notStatic "lift: operand is not static")
       | .ok (.cons _ _, _) => .error (.notStatic "lift: operand is not static")
+      | .ok (.lets _ _, _) => .error (.notStatic "lift: operand is not static")
     | .letIn _ e body =>
       match mixTerm n A idx Δ env e with
       | .error z => .error z
@@ -340,13 +357,12 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
           match mixTerm n A idx (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) body with
           | .error z            => .error z
           | .ok (.stat _, _)    => .error (.illAnnotated "letIn: dynamic binding with a static body")
-          -- `.code` and a partial `.cons` are handled alike: the body becomes
-          -- residual code under the binder.  A partially static body escapes its
-          -- spine here, because there is no place to hang the binder that would
-          -- keep it visible to the caller without duplicating it.
-          | .ok (rb, rq₂)       => .ok (.code (.letIn re.toCode rb.toCode), rq₁ ++ rq₂)
+          -- the binding travels WITH the body rather than around its reified
+          -- code, so a partial body keeps its spine on the way out
+          | .ok (rb, rq₂)       => .ok (.lets [re.toCode] rb, rq₁ ++ rq₂)
         | .stat, .code _ => .error (.notStatic "letIn: static binding produced code")
         | .stat, .cons _ _ => .error (.notStatic "letIn: static binding produced a partial structure")
+        | .stat, .lets _ _ => .error (.notStatic "letIn: static binding produced code")
     | .ite _ c a e =>
       match mixTerm n A idx Δ env c with
       | .error z => .error z
@@ -476,7 +492,7 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
               match mixTerm n A idx fd.params env' fd.body with
               | .error z            => .error z
               | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
-              | .ok (rb, rq₃)       => .ok (.code (wrapLets dts rb.toCode), rq₂ ++ rq₃)
+              | .ok (rb, rq₃)       => .ok (.lets dts rb, rq₂ ++ rq₃)
 
 /-- Arguments of an UNFOLDED call, mixed left to right with the residual scope
 threaded.
