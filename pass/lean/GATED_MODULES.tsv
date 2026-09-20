@@ -1,0 +1,41 @@
+module	status	stage	owner	cause_code	evidence	fix
+intpipe_csr_msgs	EMITS_NOW	-	-	census-stale	census said "emit_fast_bridge is not supported for designs with memory nodes"; that refusal exists only in pass.isabelle now	none - re-run the census
+minion_dcache_reduce	EMITS_NOW	-	-	census-stale	same fast-bridge refusal, 4 memories	none - re-run the census
+trans_exp_rom_case_c0	EMITS_NOW	-	-	census-stale	census said pass.lean ROM/memory refusal; ROM `init` support landed after 2026-08-20	none - re-run the census
+trans_exp_rom_case_c1c2	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_log_rom_case_c0	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_log_rom_case_c1c2	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_rcp_rom_case_c0	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_rcp_rom_case_c1c2	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_rsqrt_rom_case_c0	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_rsqrt_rom_case_c1c2	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_sin_rom_case_c0	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_sin_rom_case_c1c2	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+trans_top	EMITS_NOW	-	-	census-stale	as above; 96 flops, 6 ROMs (all async, so the sync-ROM bug below does not touch it)	none - re-run the census
+txfma_booth_ppg_32r4	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+txfma_booth_ppg_32r4_norm	EMITS_NOW	-	-	census-stale	as above	none - re-run the census
+txfma_f1	EMITS_NOW	-	LiveHD (fixed)	sync-rom-no-clock-domain	Phase B keyed the clock walk on mem_order, which excludes ROMs; a SYNC ROM's read register then asked for a domain that was never recorded -> undiagnosed std::map::at abort	FIXED in 2a948ced8. Emits 13,840 nodes, ACCEPTED, and is the FIRST genuinely multi-domain certificate: 4 domains (ctrl_f0_clk 20 flops, multype_f1_clk 7, ctrl_f1_clk 2, multype_f0_clk 2)
+txfmactl_top	GATED	compile	core-et RTL	net-procedural-assign	txfmactl_top.sv:1176,1367,1473,1617 "cannot assign to a net within a procedural context"; the targets are ANSI ports declared `output <name>` with no data type, so they default to wire	declare them `output logic <name>`. Not relaxable: slang --compat vcs was tested and still errors; this is illegal per LRM
+minion_top	GATED	compile	core-et RTL	net-procedural-assign	same four txfmactl_top.sv lines, reached through instantiation	clears when txfmactl_top.sv is fixed
+txfma_top	GATED	compile	core-et RTL	net-procedural-assign	same four txfmactl_top.sv lines	clears when txfmactl_top.sv is fixed
+vpu_lane	GATED	compile	core-et RTL	net-procedural-assign	same four txfmactl_top.sv lines	clears when txfmactl_top.sv is fixed
+vpu_top	GATED	compile	core-et RTL	net-procedural-assign	same four txfmactl_top.sv lines	clears when txfmactl_top.sv is fixed
+vpu_txfma_trans_top	GATED	compile	core-et RTL	net-procedural-assign	same four txfmactl_top.sv lines	clears when txfmactl_top.sv is fixed
+txfmaexp_top	GATED	compile	core-et RTL	net-procedural-assign	txfmaexp_top.sv:306 assigns ediff1_zap_f5a_h from always_ff; declared `output ediff1_zap_f5a_h,` at :91 with no data type	declare it `output logic ediff1_zap_f5a_h`
+txfma_top_fake	GATED	compile	core-et RTL	pure-dpi-output-arg	txfma_top_fake.sv:26:22 "DPI imports marked 'pure' cannot have 'output' or 'inout' arguments"	drop `pure` from the import, or make the argument an input
+txfma_adder	GATED	compile	our flow	leaf-elaborated-as-top	txfma_adder.sv declares `parameter int unsigned Width = 0`; elaborated standalone that gives logic[-1:0] ports and sum_tmp[-1:0] -> "value must be positive" at :18 and "endianness of selection must match declared range" at :21. The module is correct when instantiated	harness fix: skip parameterized leaves, pass a Width override, or reach it through a parent. Nothing wrong in LiveHD; arguably Width=0 is a poor RTL default
+core_top	GATED	single_edge	LiveHD	memory-type-unsupported	u_frontend.gen_thread_buf[0].u_tb.buffer_pc has type=24: the yosys reader writes the per-read-port RD_CLK_ENABLE BITMASK into the Memory cell's one global `type`	represent per-read-port clocking in the Memory cell (graph/cell.cpp) and the $mem_v2 reader; highest-value single fix at 3 modules
+minion_frontend	GATED	single_edge	LiveHD	memory-type-unsupported	gen_thread_buf[0].u_tb.buffer_pc, type=24	as above
+minion_frontend_thread_buffer	GATED	single_edge	LiveHD	memory-type-unsupported	buffer_pc, type=24 (5 read ports, two registered)	as above
+vpu_rf	GATED	single_edge	LiveHD	memory-latch-array	gen_latch.u_rf.rf_q port 0 clock resolves to a constant: yosys emits a level-sensitive register file as a $mem_v2 write port with WR_CLK_ENABLE=0	latch-phase analysis for memory ports, or a Memory-cell representation for a level-sensitive array
+vpu_ctrl	GATED	single_edge	LiveHD	memory-latch-array	tena_rf.u_rf.rf_q port 0, same shape. NOTE this is the ONLY genuinely two-clock CORE-ET design (clock_sec 600 flops, clock_aon 185) and its clocks are no longer why it stops	as above
+intpipe_top	GATED	single_edge	LiveHD	coincident-commit-edge	latch_27604 and rf.u_rf.wr_data_del_q commit on the same edge and the flop reads the latch combinationally (the L1/US7624363 hazard, pass_single_edge.cpp:601)	master/slave rewrite of the pair, or take the buffer-replacement arm the rule leaves open
+txfma_f0	GATED	lean-emit	LiveHD	selfref-cycle-then-hang	split_selfref (graph/split_selfref.cpp:891) reports 19 on-cycle bit-field reads it could not dissolve; pass.lean then runs past a 1h cap with no diagnostic	raise the split budget or handle the genuine bit-level self-dependency; separately, pass.lean should refuse a graph with a surviving word-level cycle instead of spinning
+txfma_f2	GATED	lean-emit	LiveHD	selfref-cycle-then-hang	4 unresolved on-cycle bit-field reads, then a 1h timeout	as above
+txfma_f3	GATED	lean-emit	LiveHD	selfref-cycle-then-hang	28 unresolved on-cycle bit-field reads, then a 1h timeout	as above
+txfma_f5	GATED	lean-emit	LiveHD	selfref-cycle-then-hang	8 unresolved on-cycle bit-field reads, then a 1h timeout	as above
+txfma_e5	GATED	lean-emit	LiveHD / scale	emit-timeout-undiagnosed	single clock, no bit-field warning; pass.lean exceeds a 1h cap with no diagnostic	profile the emitter; it should report progress or refuse, not run silently
+txfma_f6	GATED	lean-emit	LiveHD / scale	emit-timeout-undiagnosed	no bit-field warning; 1h timeout. The census recorded std::bad_alloc here, so the symptom has CHANGED -- possibly memory pressure under 4-way parallelism	re-run alone with a bigger budget to separate OOM from a hang
+intpipe_csr_file	GATED	lean-emit	LiveHD / scale	emit-timeout-undiagnosed	normalizes cleanly (P=2, 1055 latches retyped, 175 gated clocks folded, 1462 elements, 1 memory, ONE clock domain); pass.lean emission then exceeds 2h at 4.5 GB	emitter scale. Note the census called this "2 clock nets" - it is one clock; the second root was latches gated by a gate of a gate
+minion_dcache_top	GATED	lean-emit	LiveHD / scale	emit-timeout-undiagnosed	normalizes (P=2, 12 latches, 302 gated clocks folded, 985 elements, 21 memories); ~100k-node graph, emission exceeded 90 min at 11 GB and later 2h	emitter scale
+txfmafrac_top	PENDING	lean-emit	?	?	census said a type=1 (SYNCHRONOUS) memory refusal, which is the shape the sync-ROM crash above hit; re-running with the fixed binary	pending

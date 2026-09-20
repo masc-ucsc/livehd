@@ -693,6 +693,61 @@ differentials on fixtures and stay trusted on the real modules — the §7 table
 says so.  No real multi-domain certificate exists yet, because the one two-clock
 design is stopped upstream; the two-clock fixture's certificate is the only one.
 
+### Every gated CORE-ET module, and where its cause lives
+
+`GATED_MODULES.tsv` is the per-module list, re-derived with today's binary
+rather than read off the stored census — which is dated 2026-08-20 and turned
+out to be wrong about more than half of what it reports.  Of the 40 modules the
+census calls gated, **16 already emit**: the ROM `init` support and the removal
+of the fast-bridge/memory refusal both landed after the census was taken, and
+`txfma_f1` needed the sync-ROM fix below.  CORE-ET coverage is therefore **98 of
+122**, not the 82 the census-derived figure above implies.
+
+Three kinds of conflict between the recorded reason and reality, all of them
+worth knowing about before trusting a census row:
+
+* **stale reason** (16 modules) — the gate no longer exists in the code;
+* **cause-shifting** (4) — `minion_frontend`, `core_top`, `intpipe_top`,
+  `intpipe_mul_div_top` were all recorded as "N clock nets" or a slang error;
+  clear that and a completely different cause appears (`type=24`, an L1
+  coincident edge).  A census row names the FIRST failure, not the fixable one;
+* **misattribution** (1) — `txfma_adder` is recorded as a front-end failure, but
+  its RTL is fine: `parameter int unsigned Width = 0` plus our harness
+  elaborating every leaf as a top with default parameters gives `logic[-1:0]`
+  ports.  That one is ours, not core-et's and not LiveHD's.
+
+The 23 that remain gated, by owner:
+
+| owner | count | causes |
+|---|---|---|
+| core-et RTL | 8 | an untyped ANSI `output` assigned from `always_ff` — `txfmactl_top.sv` (4 lines, blocking 6 tops) and `txfmaexp_top.sv:306`; and a `pure` DPI import with an output argument (`txfma_top_fake.sv:26`) |
+| LiveHD | 10 | the Memory cell's `type` bitmask (3), latch-array memories (2), the L1 coincident-edge rule (1), and a `split_selfref` bit-field cycle that leaves `pass.lean` spinning (4) |
+| LiveHD / scale | 4 | `pass.lean` emission exceeding a 1–2 h budget with no diagnostic |
+| our flow | 1 | a parameterized leaf elaborated as a top |
+
+`--compat vcs` was tested against the net-procedural-assign errors and does not
+relax them; they are illegal SystemVerilog, so the fix has to be in core-et.
+
+### A crash Phase B introduced, and fixed
+
+Keying the clock-domain walk on `mem_order` excluded ROMs.  A SYNCHRONOUS ROM is
+immutable — no ordinal, no `MemoryDesc`, contents on `SourceDesc.memConst` — but
+its registered read port IS state, and `cert_memory_expand` gives it a synthetic
+flop that then asked for a domain never recorded: an undiagnosed `std::map::at`
+abort with zero diagnostics, where there used to be a diagnosed refusal.  Fixed
+in `2a948ced8`; the walk now covers every memory that commits, and the lookup
+fails through `fatal` rather than `.at`.  Blast radius was two certificates
+(`trans_top`, whose ROMs are asynchronous and so unaffected, and `txfma_f1`).
+
+`txfma_f1` then emits 13,840 nodes, is ACCEPTED by `checkDesign`, and is the
+**first genuinely multi-domain certificate**: four domains — `ctrl_f0_clk` (20
+flops), `multype_f1_clk` (7), `ctrl_f1_clk` (2), `multype_f0_clk` (2).  Note how
+it got there: `pass.single_edge` SKIPS it (multi-clock, but no latch and no
+negedge state, so nothing is owed), and before clock provenance existed the
+exporter would have written it out as if it were single-clock.  That is the
+class this change actually serves — not `multi_clock=true`, which so far has
+unblocked one module.
+
 ### Porting to the other branches
 
 `DesignCert.lean` was byte-identical across `livehd-new`, `d3`, `d4` and
