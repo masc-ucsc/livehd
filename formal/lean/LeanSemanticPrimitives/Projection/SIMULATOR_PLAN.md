@@ -84,7 +84,7 @@ or dispatch on `LGraphOp` at run time.
 | 0. Shared semantics | **Complete** | pinned shared semantic files; `SimulatorContract.lean`; one-cycle and trace agreement theorems | re-pin only when the shared source changes |
 | 1. Hardware encoding | **Complete** | `DesignEncoding.lean` (total over `DesignCert`, memory descriptors included), `RuntimeEncoding.lean`, `StateRel`/`ResultRel` | finite-map memory representation, deferred by design |
 | 2. Hardware interpreter | **Executable, not yet proved** | `OperatorBridge.lean` (every bridge `rfl`); `I_hw` as a 17-function object program; one cycle checked against `interpretDesign` on both fixtures | the adequacy THEOREM; `SupportedByProjection`; operators beyond `Op_And` |
-| 3. First projected simulator | **Executable, not yet proved** | `projectDesign`; both fixtures specialize; residual agrees with `interpretDesign` on every vector; no design tag survives | `projectDesign_correct`; the O(N^2) environment plumbing |
+| 3. First projected simulator | **Executable, not yet proved, does not scale** | `projectDesign`; both fixtures specialize; residual agrees with `interpretDesign` on every vector; no design tag survives; `Scaling.lean` measures the wall | `projectDesign_correct`; the O(N^2) environment plumbing, which is the blocker for every real design |
 | 4. Simulator packaging | **Partial infrastructure** | generic `refTrace`, `stepTrace`, and trace theorem | projected step, total/bounded execution, public runner |
 | 5. Cross-simulator relation | **Generic theorem complete** | `StepCorrect`, `step_agree`, and `trace_agree` | correctness instances/adapters for the concrete simulators |
 | 6. Literal second projection | **Relative theorem complete** | `secondProjection_correct` and concrete Gate 0 checks | `mixProgram_implements_mixHost` and hardware instantiation |
@@ -128,6 +128,35 @@ Verification at this audit point:
 The branch still does **not** contain a projected hardware simulator.  The
 immediate missing link is an object-language `I_hw` connected to the now-shared
 `interpretDesign`, followed by its first projection.
+
+## The scaling wall, measured (2026-09-19)
+
+`Scaling.lean` replaces the analytic argument with data.  The residual is
+O(N^2) in GENERATION, not merely at run time: `nthD` is `inline`, so a slot read
+at depth `k` unrolls into `k` `let`-bound `tl` steps, and depths sum
+quadratically.  `fanD` puts every read at maximum depth and the `tl` count comes
+out as exactly `N^2`; `chainD` is the realistic shape at `N^2/2`.
+
+| N (chain) | ms | residual size | `tl` |
+| ---: | ---: | ---: | ---: |
+| 16 | 15 | 1,004 | 136 |
+| 64 | 125 | 8,420 | 2,080 |
+| 256 | 1,665 | 107,204 | 32,896 |
+| 1024 | 24,332 | 1,608,260 | 524,800 |
+
+Extrapolated: CORE-ET's largest (14,860 nodes) is ~1.4 h and ~3.4e8 term nodes;
+CVA6's largest (27,523) is ~4.9 h and ~1.2e9.  At 40 bytes per node that is
+13 GB and 46 GB of residual, so neither is a matter of waiting longer.  The
+practical ceiling is roughly N = 1000-2000, which puts DINO's 4,772-node
+`SingleCycleCPU` already out of reach.  Fuel is not the constraint --
+`projectDesign`'s hardcoded `mixDriver 20000 200` still succeeds at N = 256.
+
+A specializer-side rewrite (`hd (consP a b) => a`) cannot fix this: the
+`.ucall .dyn` rule `let`-binds every dynamic argument, so the environment
+reaches the body as a residual VARIABLE and the `consP` is never syntactically
+adjacent.  Post-processing cannot fix it either, because the O(N^2) term would
+have to be built first.  The fix is partially-static values in the specializer,
+which makes a slot read a single variable reference.
 
 ## Current critical path
 
