@@ -74,34 +74,62 @@ def SpecRequest.beq (a b : SpecRequest) : Bool :=
 
 instance : BEq SpecRequest := ⟨SpecRequest.beq⟩
 
-/-- What a source variable is bound to during specialization: either a value
-`mix` knows, or a residual de Bruijn index. -/
+/-- What a source variable is bound to during specialization: a value `mix`
+knows, a residual de Bruijn index, or a PARTIALLY KNOWN cons cell -- a spine
+`mix` knows the shape of, whose components it may not.
+
+`cons` is what makes a slot read cost O(1) instead of O(depth).  An interpreter
+carries its environment as data, and specializing a lookup into that data is
+only possible if the specializer can see the spine while the leaves stay
+dynamic.  Without it, `consP`/`hd`/`tl` all residualize and a static index walks
+a dynamic list at run time -- which is the O(N^2) wall `Scaling.lean` measures.
+
+LEAVES ARE `stat` OR `dyn`, NEVER ARBITRARY CODE, and that is forced rather than
+chosen: `PEnv.shiftBy` has to move every residual index when a binder is
+entered, and shifting arbitrary residual TERMS would need a de Bruijn weakening
+operation plus its correctness lemma -- exactly what `mixUArgs` avoids by
+threading the environment instead.  A `dyn` index shifts by arithmetic.  So code
+placed into the environment is `let`-bound first and enters as a `dyn`. -/
 inductive PVal where
   | stat : Val → PVal
   | dyn  : Nat → PVal
+  | cons : PVal → PVal → PVal
   deriving Inhabited, Repr
 
 abbrev PEnv := List PVal
 
 /-- Entering a residual binder shifts every residual index in scope.  Static
-entries are untouched -- they name no residual variable. -/
+entries are untouched -- they name no residual variable -- and a partial cons
+shifts componentwise, because its leaves are where the indices live. -/
+def PVal.shift (k : Nat) : PVal → PVal
+  | .stat v   => .stat v
+  | .dyn i    => .dyn (i + k)
+  | .cons a b => .cons (PVal.shift k a) (PVal.shift k b)
+
 def PEnv.shiftBy (k : Nat) : PEnv → PEnv
   | []              => []
-  | .stat v :: rest => .stat v :: PEnv.shiftBy k rest
-  | .dyn i  :: rest => .dyn (i + k) :: PEnv.shiftBy k rest
+  | v :: rest       => PVal.shift k v :: PEnv.shiftBy k rest
 
-/-- The result of specializing one term. -/
+/-- The result of specializing one term.
+
+`cons` is the same partial structure as `PVal.cons`, but its leaves may be
+arbitrary `code`: a result is not yet in the environment, so nothing has had to
+shift it. -/
 inductive PRes where
   | stat : Val → PRes
   | code : Term → PRes
+  | cons : PRes → PRes → PRes
   deriving Inhabited, Repr
 
 /-- Turn any result into residual code.  On a static value this is the `lift`
 of the two-level language, and it is why lifting is always available: every
-`Val` is a legal `Term.lit`. -/
+`Val` is a legal `Term.lit`.  On a partial cons it re-emits the `consP` chain --
+the spine `mix` knew becomes ordinary residual code again, which is the price of
+letting a partial structure escape into a dynamic context. -/
 def PRes.toCode : PRes → Term
-  | .stat v => .lit v
-  | .code t => t
+  | .stat v   => .lit v
+  | .code t   => t
+  | .cons a b => .prim .consP [PRes.toCode a, PRes.toCode b]
 
 inductive MixError where
   | outOfFuel
@@ -169,6 +197,7 @@ def allStatic : List PRes → Except MixError (List Val)
       | .ok vs   => .ok (v :: vs)
       | .error e => .error e
   | .code _ :: _  => .error (.notStatic "static node has a residual operand")
+  | .cons _ _ :: _ => .error (.notStatic "static node has a partially static operand")
 
 /-- The residual code of each DYNAMIC argument, in source order.  These become
 the `let`s an unfold wraps around the inlined body. -/
@@ -264,6 +293,7 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | .error z          => .error z
       | .ok (.stat v, rq) => .ok (.code (.lit v), rq)
       | .ok (.code _, _)  => .error (.notStatic "lift: operand is not static")
+      | .ok (.cons _ _, _) => .error (.notStatic "lift: operand is not static")
     | .letIn _ e body =>
       match mixTerm n A idx Δ env e with
       | .error z => .error z
@@ -280,9 +310,14 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
         | .dyn, _ =>
           match mixTerm n A idx (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) body with
           | .error z            => .error z
-          | .ok (.code b', rq₂) => .ok (.code (.letIn re.toCode b'), rq₁ ++ rq₂)
           | .ok (.stat _, _)    => .error (.illAnnotated "letIn: dynamic binding with a static body")
+          -- `.code` and a partial `.cons` are handled alike: the body becomes
+          -- residual code under the binder.  A partially static body escapes its
+          -- spine here, because there is no place to hang the binder that would
+          -- keep it visible to the caller without duplicating it.
+          | .ok (rb, rq₂)       => .ok (.code (.letIn re.toCode rb.toCode), rq₁ ++ rq₂)
         | .stat, .code _ => .error (.notStatic "letIn: static binding produced code")
+        | .stat, .cons _ _ => .error (.notStatic "letIn: static binding produced a partial structure")
     | .ite _ c a e =>
       match mixTerm n A idx Δ env c with
       | .error z => .error z
@@ -411,8 +446,8 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
             | .ok env' =>
               match mixTerm n A idx fd.params env' fd.body with
               | .error z            => .error z
-              | .ok (.code b', rq₃) => .ok (.code (wrapLets dts b'), rq₂ ++ rq₃)
               | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
+              | .ok (rb, rq₃)       => .ok (.code (wrapLets dts rb.toCode), rq₂ ++ rq₃)
 
 /-- Arguments of an UNFOLDED call, mixed left to right with the residual scope
 threaded.

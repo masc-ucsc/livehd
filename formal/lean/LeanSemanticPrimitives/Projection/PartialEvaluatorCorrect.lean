@@ -74,29 +74,36 @@ theorem findAlt_eraseAlts : ∀ (as : List AAlt) (tag : Nat) (a : AAlt),
 
 /-! ## Shifting the partial environment -/
 
+@[simp] theorem PVal.shift_zero : ∀ v : PVal, PVal.shift 0 v = v
+  | .stat _   => rfl
+  | .dyn _    => by simp [PVal.shift]
+  | .cons a b => by simp [PVal.shift, PVal.shift_zero a, PVal.shift_zero b]
+
+theorem PVal.shift_succ : ∀ (n : Nat) (v : PVal),
+    PVal.shift 1 (PVal.shift n v) = PVal.shift (n + 1) v
+  | _, .stat _   => rfl
+  | n, .dyn _    => by simp [PVal.shift]; omega
+  | n, .cons a b => by simp [PVal.shift, PVal.shift_succ n a, PVal.shift_succ n b]
+
 @[simp] theorem PEnv.shiftBy_zero : ∀ env : PEnv, PEnv.shiftBy 0 env = env
-  | []              => rfl
-  | .stat _ :: rest => by simp [PEnv.shiftBy, PEnv.shiftBy_zero rest]
-  | .dyn _ :: rest  => by simp [PEnv.shiftBy, PEnv.shiftBy_zero rest]
+  | []        => rfl
+  | _ :: rest => by simp [PEnv.shiftBy, PEnv.shiftBy_zero rest]
 
 theorem PEnv.shiftBy_succ : ∀ (n : Nat) (env : PEnv),
     PEnv.shiftBy 1 (PEnv.shiftBy n env) = PEnv.shiftBy (n + 1) env
-  | _, []              => rfl
-  | n, .stat _ :: rest => by simp [PEnv.shiftBy, PEnv.shiftBy_succ n rest]
-  | n, .dyn k :: rest  => by
-      simp only [PEnv.shiftBy, PEnv.shiftBy_succ n rest]
-      congr 1
+  | _, []        => rfl
+  | n, v :: rest => by
+      simp only [PEnv.shiftBy, PEnv.shiftBy_succ n rest, PVal.shift_succ n v]
 
 theorem PEnv.shiftBy_append : ∀ (k : Nat) (a b : PEnv),
     PEnv.shiftBy k (a ++ b) = PEnv.shiftBy k a ++ PEnv.shiftBy k b
-  | _, [],              _ => rfl
-  | k, .stat _ :: rest, b => by simp [PEnv.shiftBy, PEnv.shiftBy_append k rest b]
-  | k, .dyn _ :: rest,  b => by simp [PEnv.shiftBy, PEnv.shiftBy_append k rest b]
+  | _, [],        _ => rfl
+  | k, _ :: rest, b => by simp [PEnv.shiftBy, PEnv.shiftBy_append k rest b]
 
 theorem PEnv.shiftBy_map_dyn : ∀ (l : List Nat) (k : Nat),
     PEnv.shiftBy k (l.map PVal.dyn) = l.map (fun i => PVal.dyn (i + k))
   | [],      _ => rfl
-  | i :: is, k => by simp [PEnv.shiftBy, PEnv.shiftBy_map_dyn is k]
+  | i :: is, k => by simp [PEnv.shiftBy, PVal.shift, PEnv.shiftBy_map_dyn is k]
 
 theorem freshDyns_succ (n : Nat) :
     freshDyns (n + 1) = .dyn 0 :: PEnv.shiftBy 1 (freshDyns n) := by
@@ -304,8 +311,20 @@ def SpecOK (A : AProgram) (Pr : Program) (reqs : List SpecRequest) (m : Nat) : P
 is an honest account of that: a static result IS the value, and residual code
 EVALUATES to it. -/
 
-def PResOK (Pr : Program) (ρr : Env) (r : PRes) (v : Val) : Prop :=
-  (∀ w, r = .stat w → w = v) ∧ (∀ c, r = .code c → Eval Pr ρr c v)
+def PResOK (Pr : Program) (ρr : Env) : PRes → Val → Prop
+  | .stat w,   v => w = v
+  | .code c,   v => Eval Pr ρr c v
+  | .cons a b, v => ∃ x y, v = .cons x y ∧ PResOK Pr ρr a x ∧ PResOK Pr ρr b y
+
+/-! The two projections the old conjunctive definition offered, kept so that
+every existing proof reads the same. -/
+
+theorem PResOK.statEq {Pr ρr r v} (h : PResOK Pr ρr r v) : ∀ w, r = .stat w → w = v := by
+  intro w hw; subst hw; exact h
+
+theorem PResOK.codeEval {Pr ρr r v} (h : PResOK Pr ρr r v) :
+    ∀ c, r = .code c → Eval Pr ρr c v := by
+  intro c hc; subst hc; exact h
 
 /-- Pointwise `PResOK` over an argument list.  Written out rather than using
 `List.Forall₂`, which is not in core. -/
@@ -313,12 +332,15 @@ inductive PResAll (Pr : Program) (ρr : Env) : List PRes → List Val → Prop w
   | nil  : PResAll Pr ρr [] []
   | cons : PResOK Pr ρr r v → PResAll Pr ρr rs vs → PResAll Pr ρr (r :: rs) (v :: vs)
 
-theorem PResOK_toCode {Pr ρr r v} (h : PResOK Pr ρr r v) : Eval Pr ρr r.toCode v := by
-  cases r with
-  | stat w => have : w = v := h.1 w rfl
-              subst this
-              exact .lit
-  | code c => exact h.2 c rfl
+theorem PResOK_toCode : ∀ {Pr ρr r v}, PResOK Pr ρr r v → Eval Pr ρr r.toCode v
+  | _, _, .stat w, v, h => by
+      have : w = v := h.statEq w rfl
+      subst this; exact .lit
+  | _, _, .code c, _, h => h.codeEval c rfl
+  | Pr, ρr, .cons a b, _, h => by
+      obtain ⟨x, y, hv, ha, hb⟩ := h
+      subst hv
+      exact .prim (.cons (PResOK_toCode ha) (.cons (PResOK_toCode hb) .nil)) rfl
 
 theorem allStatic_forall₂ : ∀ (Pr : Program) (ρr : Env) (rs : List PRes)
     (vs ws : List Val), PResAll Pr ρr rs vs → allStatic rs = .ok ws → ws = vs
@@ -330,7 +352,7 @@ theorem allStatic_forall₂ : ∀ (Pr : Program) (ρr : Env) (rs : List PRes)
         split at hw <;> try contradiction
         rename_i us hus
         cases hw
-        rw [allStatic_forall₂ Pr ρr rs vs us ht hus, hr.1 w rfl]
+        rw [allStatic_forall₂ Pr ρr rs vs us ht hus, hr.statEq w rfl]
   | _,  _,  .code _ :: _,  _,       _,  _, hw => by simp [allStatic] at hw
   | _,  _,  _ :: _,        [],      _,  h, _  => by cases h
   | _,  _,  [],            _ :: _,  _,  h, _  => by cases h
@@ -472,7 +494,7 @@ theorem splitArgs_spec {Pr : Program} {ρr : Env} :
         obtain ⟨ds, hev, hsrc, hlen⟩ := splitArgs_spec ps rs vs svs' dts' ht hrec
         cases hsp
         refine ⟨ds, hev, ?_, by simpa [dynCount] using hlen⟩
-        have : w = v := hr.1 w rfl
+        have : w = v := hr.statEq w rfl
         subst this
         simp [srcArgs, hsrc]
   | .dyn :: ps,  r :: rs,       v :: vs, svs, dts, hall, hsp => by
@@ -520,11 +542,15 @@ theorem findAAlt_of_findAlt : ∀ (as : List AAlt) (tag : Nat) (a' : Alt),
 
 /-! ## Introducing a partial result -/
 
-theorem PResOK_stat {Pr ρr w v} (h : w = v) : PResOK Pr ρr (.stat w) v :=
-  ⟨(fun _ hw => by cases hw; exact h), (fun _ hc => by cases hc)⟩
+theorem PResOK_stat {Pr ρr w v} (h : w = v) : PResOK Pr ρr (.stat w) v := h
 
-theorem PResOK_code {Pr ρr c v} (h : Eval Pr ρr c v) : PResOK Pr ρr (.code c) v :=
-  ⟨(fun _ hw => by cases hw), (fun _ hc => by cases hc; exact h)⟩
+theorem PResOK_code {Pr ρr c v} (h : Eval Pr ρr c v) : PResOK Pr ρr (.code c) v := h
+
+/-- …and the partial-structure introduction, which is what the `consP` rule
+needs: a known spine denotes a cons value built from what its parts denote. -/
+theorem PResOK_cons {Pr ρr a b x y} (ha : PResOK Pr ρr a x) (hb : PResOK Pr ρr b y) :
+    PResOK Pr ρr (.cons a b) (.cons x y) :=
+  ⟨x, y, rfl, ha, hb⟩
 
 /-! ## Alternatives of a residualized `caseT`
 
@@ -619,6 +645,7 @@ theorem mixUArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
             have hr := h Δ env t r rq₁ ρr ρs v₀ hc ht hv₀
             cases r with
             | code _ => simp [inlineEnv] at hie
+            | cons _ _ => simp [inlineEnv] at hie
             | stat w =>
                 simp only [inlineEnv] at hie
                 split at hie <;> try contradiction
@@ -627,7 +654,7 @@ theorem mixUArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
                 obtain ⟨ws, hlen, hlets, hcp⟩ :=
                   ih ts Δ env rs' _ rq₂ ρr ρs vs' env'' hc hrec hvs' hie'
                 refine ⟨ws, by simpa [dynCount] using hlen, hlets, ?_⟩
-                have hw : w = v₀ := hr.1 w rfl
+                have hw : w = v₀ := hr.statEq w rfl
                 subst hw
                 exact hcp.stat
         | dyn =>
@@ -719,7 +746,7 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
             cases hmix
             simp only [erase] at hsrc
             have := ihm Δ env e (.stat w) _ ρr ρs v hc he hsrc
-            exact PResOK_code (by rw [this.1 w rfl]; exact .lit)
+            exact PResOK_code (by rw [this.statEq w rfl]; exact .lit)
 
         | letIn _ e body =>
             simp only [mixTerm] at hmix
@@ -735,18 +762,18 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               split at hmix <;> try contradiction
               rename_i rb rq₂ hbody
               cases hmix
-              have hw : w = v₁ := hre.1 w rfl
+              have hw : w = v₁ := hre.statEq w rfl
               subst hw
               exact ihm' _ _ body r _ ρr (w :: ρs) v (hc.stat) hbody hsrc
             · -- dynamic binding: one residual binder, so everything shifts
               rename_i _
               split at hmix <;> try contradiction
-              rename_i b' rq₂ hbody
+              rename_i rb rq₂ _hne hbody
               cases hmix
               have hcb : Compat (v₁ :: ρr) (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) (v₁ :: ρs) :=
                 .dyn (by simp) (Compat_shift1 v₁ hc)
-              have hb := ihm' _ _ body (.code b') rq₂ (v₁ :: ρr) (v₁ :: ρs) v hcb hbody hsrc
-              exact PResOK_code (.letIn (PResOK_toCode hre) (hb.2 b' rfl))
+              have hb := ihm' _ _ body rb rq₂ (v₁ :: ρr) (v₁ :: ρs) v hcb hbody hsrc
+              exact PResOK_code (.letIn (PResOK_toCode hre) (PResOK_toCode hb))
 
         | prim b p ts =>
             simp only [mixTerm] at hmix
@@ -804,7 +831,7 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
                 exact ihm' _ _ a r _ ρr ρs v hc ha hsrc
               · -- `mix` decided `false`, the source went `true`
                 rename_i _
-                exact absurd (hrc.1 _ rfl) (by simp)
+                exact absurd (hrc.statEq _ rfl) (by simp)
               · split at hmix <;> try contradiction
                 rename_i ra rq₂ re' rq₃ ha he
                 cases hmix
@@ -815,7 +842,7 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               have hrc := ihm' Δ env c rc rq₁ ρr ρs (.bool false) hc hcm hcond
               split at hmix <;> try contradiction
               · rename_i _
-                exact absurd (hrc.1 _ rfl) (by simp)
+                exact absurd (hrc.statEq _ rfl) (by simp)
               · split at hmix <;> try contradiction
                 rename_i re' rq₂ he
                 cases hmix
@@ -843,7 +870,7 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
             split at hmix <;> try contradiction
             · -- static scrutinee: `mix` selected the alternative itself
               rename_i tag' vs' _
-              have hct : Val.ctor tag' vs' = Val.ctor tag vs := hs.1 _ rfl
+              have hct : Val.ctor tag' vs' = Val.ctor tag vs := hs.statEq _ rfl
               cases hct
               -- split the alternative lookup rather than rewriting into it: a
               -- `rw` leaves `match some af with …` unreduced
@@ -961,14 +988,14 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               split at hmix <;> try contradiction
               rename_i env' hie
               split at hmix <;> try contradiction
-              rename_i b' rq₃ hbody
+              rename_i rb rq₃ _hne hbody
               cases hmix
               obtain ⟨ws, _, hlets, hcp⟩ :=
                 mixUArgs_ok ihm' fd.params ts Δ env rs' dts rq₂ ρr ρs vs env' hc hua hvs hie
-              have hb := ihm' _ _ fd.body (.code b') rq₃ (ws.reverse ++ ρr) vs v hcp hbody
+              have hb := ihm' _ _ fd.body rb rq₃ (ws.reverse ++ ρr) vs v hcp hbody
                            (by simpa [eraseFunDef] using hsrc)
               exact PResOK_code
-                (wrapLets_eval dts ρr (ws.reverse ++ ρr) b' v hlets (hb.2 b' rfl))
+                (wrapLets_eval dts ρr (ws.reverse ++ ρr) rb.toCode v hlets (PResOK_toCode hb))
 
 /-! ## Tying the knot
 
@@ -1068,7 +1095,26 @@ def PResSound (A : AProgram) (Pr : Program) (mr : Nat) (ρr ρs : Env)
     (r : PRes) (t : ATerm) : Prop :=
   (∀ w, r = .stat w → Eval (eraseProgram A) ρs (erase t) w) ∧
   (∀ c v, r = .code c → evalFuel mr Pr ρr c = .value v →
+            Eval (eraseProgram A) ρs (erase t) v) ∧
+  -- a partially static result is judged through the code it reifies to: its
+  -- spine is `mix`'s bookkeeping, and what the source must agree with is the
+  -- `consP` chain the residual actually runs.
+  (∀ a b v, r = .cons a b → evalFuel mr Pr ρr (PRes.cons a b).toCode = .value v →
             Eval (eraseProgram A) ρs (erase t) v)
+
+/-! Accessors named to match `PResOK`'s, so `h.statEq` / `h.codeEval` read the
+same in both directions and dot notation picks the right one by type. -/
+
+theorem PResSound.statEq {A Pr mr ρr ρs r t} (h : PResSound A Pr mr ρr ρs r t) :
+    ∀ w, r = .stat w → Eval (eraseProgram A) ρs (erase t) w := h.1
+
+theorem PResSound.codeEval {A Pr mr ρr ρs r t} (h : PResSound A Pr mr ρr ρs r t) :
+    ∀ c v, r = .code c → evalFuel mr Pr ρr c = .value v →
+      Eval (eraseProgram A) ρs (erase t) v := h.2.1
+
+theorem PResSound.consEval {A Pr mr ρr ρs r t} (h : PResSound A Pr mr ρr ρs r t) :
+    ∀ a b v, r = .cons a b → evalFuel mr Pr ρr (PRes.cons a b).toCode = .value v →
+      Eval (eraseProgram A) ρs (erase t) v := h.2.2
 
 theorem PResSound_toCode {A Pr mr ρr ρs r t w}
     (h : PResSound A Pr mr ρr ρs r t)
@@ -1082,8 +1128,9 @@ theorem PResSound_toCode {A Pr mr ρr ρs r t w}
       | succ mq =>
           simp only [PRes.toCode, evalFuel] at hev
           cases hev
-          exact h.1 _ rfl
-  | code c => exact h.2 c w rfl hev
+          exact h.statEq _ rfl
+  | code c => exact h.codeEval c w rfl hev
+  | cons a b => exact h.consEval a b w rfl hev
 
 def SOK (A : AProgram) (Pr : Program) (reqs : List SpecRequest) (n mr : Nat) : Prop :=
   ∀ (Δ : Div) (env : PEnv) (t : ATerm) (r : PRes) (rq : List SpecRequest) (ρr ρs : Env),
@@ -1124,12 +1171,13 @@ theorem mixTerms_sound_stat {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
       cases hmix
       cases r with
       | code _ => simp [allStatic] at hst
+      | cons _ _ => simp [allStatic] at hst
       | stat u =>
           simp only [allStatic] at hst
           split at hst <;> try contradiction
           rename_i us hus
           cases hst
-          exact .cons ((h Δ env t (.stat u) rq₁ ρr ρs hc ht).1 u rfl)
+          exact .cons ((h Δ env t (.stat u) rq₁ ρr ρs hc ht).statEq u rfl)
                       (ih rs' rq₂ ρr ρs us hc hts hus)
 
 theorem mixTerms_sound_code {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
@@ -1246,6 +1294,7 @@ theorem splitArgs_sound {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
         | stat =>
             cases r with
             | code _ => simp [splitArgs] at hsp
+            | cons _ _ => simp [splitArgs] at hsp
             | stat w =>
                 simp only [splitArgs] at hsp
                 split at hsp <;> try contradiction
@@ -1254,7 +1303,7 @@ theorem splitArgs_sound {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
                 obtain ⟨vs, hsrc, hel, hlen⟩ :=
                   ih rs' rq₂ ρr ρs bs svs' _ ds hc hts hrec hev
                 exact ⟨w :: vs, by simp [srcArgs, hsrc],
-                       .cons (hr.1 w rfl) hel, by simp [hlen]⟩
+                       .cons (hr.statEq w rfl) hel, by simp [hlen]⟩
         | dyn =>
             simp only [splitArgs] at hsp
             split at hsp <;> try contradiction
@@ -1316,6 +1365,7 @@ theorem mixUArgs_sound {A Pr reqs n} :
             cases hmix
             cases r with
             | code _ => simp [inlineEnv] at hie
+            | cons _ _ => simp [inlineEnv] at hie
             | stat w =>
                 simp only [inlineEnv] at hie
                 split at hie <;> try contradiction
@@ -1325,7 +1375,7 @@ theorem mixUArgs_sound {A Pr reqs n} :
                 obtain ⟨vs, ws, mr', hlen, hle, hcp, hel, hvl, hbody⟩ :=
                   ih mr hsok ts Δ env rs' _ rq₂ ρr ρs env'' body v hc hrec hie' hev
                 exact ⟨w :: vs, ws, mr', by simpa [dynCount] using hlen, hle,
-                       hcp.stat, .cons (hr.1 w rfl) hel, by simp [hvl], hbody⟩
+                       hcp.stat, .cons (hr.statEq w rfl) hel, by simp [hvl], hbody⟩
         | dyn =>
             simp only [mixUArgs] at hmix
             split at hmix <;> try contradiction
@@ -1382,7 +1432,7 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
 
       | lit w =>
           simp only [mixTerm] at hmix; cases hmix
-          exact ⟨(fun _ hw => by cases hw; exact .lit), (fun _ _ hcd => by cases hcd)⟩
+          exact ⟨(fun _ hw => by cases hw; exact .lit), (fun _ _ hcd => by cases hcd), (fun _ _ _ hcd => by cases hcd)⟩
 
       | var i =>
           simp only [mixTerm] at hmix
@@ -1390,10 +1440,10 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
           · rename_i w _ henv
             cases hmix
             exact ⟨(fun _ hw => by cases hw; exact .var (Compat_stat_lookup hc i w henv)),
-                   (fun _ _ hcd => by cases hcd)⟩
+                   (fun _ _ hcd => by cases hcd), (fun _ _ _ hcd => by cases hcd)⟩
           · rename_i k _ henv
             cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1412,14 +1462,14 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
           split at hmix <;> try contradiction
           rename_i w rq' he
           cases hmix
-          refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_)⟩
+          refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
           cases hcd
           cases mr with
           | zero => simp [evalFuel] at hev
           | succ mq =>
               simp only [evalFuel] at hev
               cases hev
-              exact (ihm Δ env e (.stat w) _ ρr ρs hc he).1 w rfl
+              exact (ihm Δ env e (.stat w) _ ρr ρs hc he).statEq w rfl
 
       | letIn _ e body =>
           simp only [mixTerm] at hmix
@@ -1433,15 +1483,18 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             rename_i rb rq₂ hbody
             cases hmix
             have hb := ihm _ _ body r _ ρr (w :: ρs) (hc.stat) hbody
-            refine ⟨(fun u hw => ?_), (fun c v hcd hev => ?_)⟩
-            · exact .letIn (hre.1 w rfl) (hb.1 u hw)
-            · exact .letIn (hre.1 w rfl) (hb.2 c v hcd hev)
+            -- a static binding emits no residual binder, so whatever shape the
+            -- BODY came back as, the source `letIn` agrees with it the same way
+            refine ⟨(fun u hw => ?_), (fun c v hcd hev => ?_), (fun a b v hcd hev => ?_)⟩
+            · exact .letIn (hre.statEq w rfl) (hb.statEq u hw)
+            · exact .letIn (hre.statEq w rfl) (hb.codeEval c v hcd hev)
+            · exact .letIn (hre.statEq w rfl) (hb.consEval a b v hcd hev)
           · -- dynamic binding
             rename_i _
             split at hmix <;> try contradiction
-            rename_i b' rq₂ hbody
+            rename_i rb rq₂ _hne hbody
             cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1451,9 +1504,9 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
                 rename_i d hd
                 have hcb : Compat (d :: ρr) (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) (d :: ρs) :=
                   .dyn (by simp) (Compat_shift1 d hc)
-                have hb := ihle mq (by omega) _ _ body (.code b') rq₂ (d :: ρr) (d :: ρs) hcb hbody
+                have hb := ihle mq (by omega) _ _ body rb rq₂ (d :: ρr) (d :: ρs) hcb hbody
                 exact .letIn (PResSound_toCode (ihle mq (by omega) Δ env e _ rq₁ ρr ρs hc he) hd)
-                             (hb.2 b' v rfl hev)
+                             (PResSound_toCode hb hev)
 
       | prim b p ts =>
           simp only [mixTerm] at hmix
@@ -1467,9 +1520,9 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             cases hmix
             exact ⟨(fun _ hw => by cases hw
                                    exact .prim (mixTerms_sound_stat ihm Δ env ts rs _ ρr ρs ws hc hts hws) hp),
-                   (fun _ _ hcd => by cases hcd)⟩
+                   (fun _ _ hcd => by cases hcd), (fun _ _ _ hcd => by cases hcd)⟩
           · cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1492,9 +1545,9 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             cases hmix
             exact ⟨(fun _ hw => by cases hw
                                    exact .ctorT (mixTerms_sound_stat ihm Δ env ts rs _ ρr ρs ws hc hts hws)),
-                   (fun _ _ hcd => by cases hcd)⟩
+                   (fun _ _ hcd => by cases hcd), (fun _ _ _ hcd => by cases hcd)⟩
           · cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1516,20 +1569,22 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             rename_i ra rq₂ ha
             cases hmix
             have hb := ihm Δ env a r _ ρr ρs hc ha
-            exact ⟨(fun u hw => .iteT (hrc.1 _ rfl) (hb.1 u hw)),
-                   (fun c' v hcd hev => .iteT (hrc.1 _ rfl) (hb.2 c' v hcd hev))⟩
+            exact ⟨(fun u hw => .iteT (hrc.statEq _ rfl) (hb.statEq u hw)),
+                   (fun c' v hcd hev => .iteT (hrc.statEq _ rfl) (hb.codeEval c' v hcd hev)),
+                   (fun a b v hcd hev => .iteT (hrc.statEq _ rfl) (hb.consEval a b v hcd hev))⟩
           · rename_i _
             split at hmix <;> try contradiction
             rename_i re' rq₂ he
             cases hmix
             have hb := ihm Δ env e r _ ρr ρs hc he
-            exact ⟨(fun u hw => .iteF (hrc.1 _ rfl) (hb.1 u hw)),
-                   (fun c' v hcd hev => .iteF (hrc.1 _ rfl) (hb.2 c' v hcd hev))⟩
+            exact ⟨(fun u hw => .iteF (hrc.statEq _ rfl) (hb.statEq u hw)),
+                   (fun c' v hcd hev => .iteF (hrc.statEq _ rfl) (hb.codeEval c' v hcd hev)),
+                   (fun a b v hcd hev => .iteF (hrc.statEq _ rfl) (hb.consEval a b v hcd hev))⟩
           · rename_i _
             split at hmix <;> try contradiction
             rename_i ra rq₂ re' rq₃ ha he
             cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1561,15 +1616,17 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             rw [← har] at hcf
             have hb := ihm _ _ af.body r _ ρr (vs ++ ρs) hcf hbody
             have hfa := findAlt_eraseAlts alts tag af hfaf
-            exact ⟨(fun u hw => .caseT (hs.1 _ rfl) hfa (by simpa [Alt.arity] using har)
-                                  (by simpa [Alt.body] using hb.1 u hw)),
-                   (fun c' v hcd hev => .caseT (hs.1 _ rfl) hfa (by simpa [Alt.arity] using har)
-                                  (by simpa [Alt.body] using hb.2 c' v hcd hev))⟩
+            exact ⟨(fun u hw => .caseT (hs.statEq _ rfl) hfa (by simpa [Alt.arity] using har)
+                                  (by simpa [Alt.body] using hb.statEq u hw)),
+                   (fun c' v hcd hev => .caseT (hs.statEq _ rfl) hfa (by simpa [Alt.arity] using har)
+                                  (by simpa [Alt.body] using hb.codeEval c' v hcd hev)),
+                   (fun a b v hcd hev => .caseT (hs.statEq _ rfl) hfa (by simpa [Alt.arity] using har)
+                                  (by simpa [Alt.body] using hb.consEval a b v hcd hev))⟩
           · rename_i _
             split at hmix <;> try contradiction
             rename_i alts' rq₂ halts
             cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1611,16 +1668,19 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             have hb := ihm _ _ fd.body r _ ρr ws (Compat_allStat ρr fd.params ws hasd hwl) hbody
             have hel := mixTerms_sound_stat ihm Δ env ts rs _ ρr ρs ws hc hts hws
             exact ⟨(fun u hw => .call hel (eraseProgram_fn hfn)
-                        (by simpa [eraseFunDef] using hwl) (by simpa [eraseFunDef] using hb.1 u hw)),
+                        (by simpa [eraseFunDef] using hwl) (by simpa [eraseFunDef] using hb.statEq u hw)),
                    (fun c' v hcd hev => .call hel (eraseProgram_fn hfn)
                         (by simpa [eraseFunDef] using hwl)
-                        (by simpa [eraseFunDef] using hb.2 c' v hcd hev))⟩
+                        (by simpa [eraseFunDef] using hb.codeEval c' v hcd hev)),
+                   (fun a b v hcd hev => .call hel (eraseProgram_fn hfn)
+                        (by simpa [eraseFunDef] using hwl)
+                        (by simpa [eraseFunDef] using hb.consEval a b v hcd hev))⟩
           · split at hmix <;> try contradiction
             rename_i svs dts hsplit
             split at hmix <;> try contradiction
             rename_i k hidx
             cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             cases mr with
             | zero => simp [evalFuel] at hev
@@ -1664,25 +1724,28 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             have hb := ihm _ _ fd.body r _ ρr ws (Compat_allStat ρr fd.params ws hasd hwl) hbody
             have hel := mixTerms_sound_stat ihm Δ env ts rs _ ρr ρs ws hc hts hws
             exact ⟨(fun u hw => .call hel (eraseProgram_fn hfn)
-                        (by simpa [eraseFunDef] using hwl) (by simpa [eraseFunDef] using hb.1 u hw)),
+                        (by simpa [eraseFunDef] using hwl) (by simpa [eraseFunDef] using hb.statEq u hw)),
                    (fun c' v hcd hev => .call hel (eraseProgram_fn hfn)
                         (by simpa [eraseFunDef] using hwl)
-                        (by simpa [eraseFunDef] using hb.2 c' v hcd hev))⟩
+                        (by simpa [eraseFunDef] using hb.codeEval c' v hcd hev)),
+                   (fun a b v hcd hev => .call hel (eraseProgram_fn hfn)
+                        (by simpa [eraseFunDef] using hwl)
+                        (by simpa [eraseFunDef] using hb.consEval a b v hcd hev))⟩
           · split at hmix <;> try contradiction
             rename_i rs' dts rq₂ hua
             split at hmix <;> try contradiction
             rename_i env' hie
             split at hmix <;> try contradiction
-            rename_i b' rq₃ hbody
+            rename_i rb rq₃ _hne hbody
             cases hmix
-            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_)⟩
+            refine ⟨(fun _ hw => by cases hw), (fun c' v hcd hev => ?_), (fun _ _ _ hcd => by cases hcd)⟩
             cases hcd
             obtain ⟨vs, ws, mr', hwlen, hle, hcp, hel, hvl, hbev⟩ :=
-              mixUArgs_sound fd.params mr ihle ts Δ env rs' dts rq₂ ρr ρs env' b' v
+              mixUArgs_sound fd.params mr ihle ts Δ env rs' dts rq₂ ρr ρs env' rb.toCode v
                 hc hua hie hev
-            have hb := (ihle mr' hle) _ _ fd.body (.code b') rq₃ (ws.reverse ++ ρr) vs hcp hbody
+            have hb := (ihle mr' hle) _ _ fd.body rb rq₃ (ws.reverse ++ ρr) vs hcp hbody
             exact .call hel (eraseProgram_fn hfn) (by simpa [eraseFunDef] using hvl.symm)
-              (by simpa [eraseFunDef] using hb.2 b' v rfl hbev)
+              (by simpa [eraseFunDef] using PResSound_toCode hb hbev)
 
 /-! ## Tying the converse knot -/
 
