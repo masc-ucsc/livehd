@@ -800,6 +800,8 @@ void Mapper::prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>
     if (!g || graph_region_opts_.contains(g.get())) {
       continue;
     }
+    graph_ware_policy_.emplace(g.get(),
+                               ware_policy(*g, {startup_opts_.ware_arith, startup_opts_.ware_cmp, startup_opts_.ware_shift}));
     Region_opts_map options;
     if (auto info = g->get_input_node().attr(livehd::attrs::coloring_info); info.has()) {
       rapidjson::Document doc;
@@ -816,7 +818,12 @@ void Mapper::prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>
 }
 
 bool Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
-  const auto policy    = ware_policy(*rb.src, {opts_.ware_arith, opts_.ware_cmp, opts_.ware_shift});
+  auto policy_it = graph_ware_policy_.find(rb.src);
+  if (policy_it == graph_ware_policy_.end()) {
+    policy_it
+        = graph_ware_policy_.emplace(rb.src, ware_policy(*rb.src, {opts_.ware_arith, opts_.ware_cmp, opts_.ware_shift})).first;
+  }
+  const auto policy    = policy_it->second;
   opts_.ware_arith     = policy.arith;
   opts_.ware_cmp       = policy.cmp;
   opts_.ware_shift     = policy.shift;
@@ -1529,6 +1536,7 @@ void Mapper::map_regions(std::span<const livehd::partition::Region_body> regions
           worker->incr_              = incr_;
           worker->region_opts_cli_   = region_opts_cli_;
           worker->graph_region_opts_ = graph_region_opts_;
+          worker->graph_ware_policy_ = graph_ware_policy_;
           worker->dff_               = dff_;
           worker->dff_ladder_        = dff_ladder_;
           worker->dff_preset_        = dff_preset_;

@@ -22,6 +22,7 @@
 #include "memory_module.hpp"   // livehd::abc::Memory_fold
 #include "pass_partition.hpp"  // livehd::partition::Region_body
 #include "satopt.hpp"
+#include "ware_module.hpp"
 
 namespace livehd::abc {
 
@@ -440,6 +441,10 @@ private:
   std::map<std::string, float>                  region_delay_targets_;
   // coloring_info "region_opts" parse cache, one entry per source graph.
   std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;
+  // The same coloring_info carries the three ware-family switches. A large
+  // module can produce hundreds of regions, so reparsing its JSON in every
+  // apply_region_overrides call is needlessly quadratic in metadata size.
+  std::map<const hhds::Graph*, Ware_policy>     graph_ware_policy_;
   // rewrite_trivial_rems scans and rewrites a whole source def. A def is shared
   // by all of its colored Region_body callbacks, so doing it once per region is
   // an accidental O(regions * def_nodes) cost (528 full RenameBuffer walks).

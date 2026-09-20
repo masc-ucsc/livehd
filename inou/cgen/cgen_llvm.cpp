@@ -653,7 +653,7 @@ bool Cgen_llvm::add_output(size_t index, Value value, std::string& error) {
   return true;
 }
 
-bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
+bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool track_changed) {
   if (!impl_->error.empty()) {
     error = impl_->error;
     return false;
@@ -674,20 +674,24 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
   } else {
     auto*        i64           = impl_->builder.getInt64Ty();
     const size_t changed_words = std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())));
-    for (size_t word = 0; word < changed_words; ++word) {
-      auto* ptr = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word);
-      impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), ptr);
+    if (track_changed) {
+      for (size_t word = 0; word < changed_words; ++word) {
+        auto* ptr = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word);
+        impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), ptr);
+      }
     }
     size_t output_word_offset = 0;
     for (const auto& output : impl_->output_values) {
-      auto*        value = impl_->get(output.value);
-      auto*        old   = impl_->load_packed(impl_->outputs, output_word_offset, output.value.width, "out.old");
-      auto*        diff  = impl_->builder.CreateICmpNE(old, value);
-      auto*        ptr   = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, output.index / 64);
-      llvm::Value* bits  = impl_->builder.CreateLoad(i64, ptr, "changed.old");
-      auto*        flag  = llvm::ConstantInt::get(i64, uint64_t{1} << (output.index % 64));
-      bits               = impl_->builder.CreateOr(bits, impl_->builder.CreateSelect(diff, flag, llvm::ConstantInt::get(i64, 0)));
-      impl_->builder.CreateStore(bits, ptr);
+      auto* value = impl_->get(output.value);
+      if (track_changed) {
+        auto*        old  = impl_->load_packed(impl_->outputs, output_word_offset, output.value.width, "out.old");
+        auto*        diff = impl_->builder.CreateICmpNE(old, value);
+        auto*        ptr  = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, output.index / 64);
+        llvm::Value* bits = impl_->builder.CreateLoad(i64, ptr, "changed.old");
+        auto*        flag = llvm::ConstantInt::get(i64, uint64_t{1} << (output.index % 64));
+        bits              = impl_->builder.CreateOr(bits, impl_->builder.CreateSelect(diff, flag, llvm::ConstantInt::get(i64, 0)));
+        impl_->builder.CreateStore(bits, ptr);
+      }
       impl_->store_packed(value, impl_->outputs, output_word_offset, output.value.width);
       output_word_offset += word_count(output.value.width);
     }

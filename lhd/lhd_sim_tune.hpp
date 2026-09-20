@@ -210,10 +210,13 @@ struct Run {
 
 // ---- the store --------------------------------------------------------------
 struct Trial {
-  std::string from;  // tv1 of the incumbent it is measured against
-  std::string to;    // tv1 under trial
-  std::string step;  // L1 | L2 | L0 (reverse)
-  std::string gate;
+  // Initializers on every member: the designated-initializer sites name only
+  // the fields they set, and GCC warns for an un-initialized member left out of
+  // one (see Verdict below for the same reason).
+  std::string from{};  // tv1 of the incumbent it is measured against
+  std::string to{};    // tv1 under trial
+  std::string step{};  // L1 | L2 | L0 (reverse)
+  std::string gate{};
   size_t      seq = 0;  // record index (runs after it count toward the verdict)
   int64_t     t   = 0;
 };
@@ -228,19 +231,23 @@ struct Trial {
 //  - a STALE trial (a knob it moves got pinned, or its `from` is no longer the
 //    resolved vector) closes as `abandoned` with charged=false.
 struct Verdict {
-  std::string              from;
-  std::string              to;
-  std::string              result;
-  std::string              oracle;  // equal | mismatch | skipped(random-fill) | none
-  std::string              reason;
-  std::string              structure;             // the structure the attempt ran on (the exhaustion key)
-  std::string              mode;                  // the mode of the setup that applied the attempt (auto | on | "")
+  // Every member carries an initializer: the designated-initializer sites below
+  // name only the fields they set, and GCC's -Wmissing-field-initializers warns
+  // for an un-initialized member left out of one (it stays quiet for a member
+  // with a default member initializer).
+  std::string              from{};
+  std::string              to{};
+  std::string              result{};
+  std::string              oracle{};  // equal | mismatch | skipped(random-fill) | none
+  std::string              reason{};
+  std::string              structure{};           // the structure the attempt ran on (the exhaustion key)
+  std::string              mode{};                // the mode of the setup that applied the attempt (auto | on | "")
   bool                     charged      = false;  // counts as an attempt of `to` on `structure`
   double                   rho          = 0.0;
   double                   rho_c        = 0.0;
   double                   rho_i        = 0.0;
   bool                     decided_on_i = false;
-  std::vector<std::string> tests;  // the diverging tests (divergence only)
+  std::vector<std::string> tests{};  // the diverging tests (divergence only)
   // Speed and oracle losses ban at once; a failure bans only when repeated
   // (State::failures), since a bad $CXX or a full disk is not the vector's fault.
   [[nodiscard]] bool       bans() const { return result == "rejected" || result == "divergence"; }

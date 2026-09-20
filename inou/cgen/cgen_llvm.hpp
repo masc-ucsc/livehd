@@ -91,7 +91,14 @@ public:
   //                      void* owner)
   // `changed` is a packed bitset with one bit per logical output. LLVM uses
   // exact-width integers internally; uint64_t is only the stable packed ABI.
-  bool write_object(std::string_view path, std::string& error);
+  //
+  // `track_changed == false` drops that bitset, and with it the load of every
+  // output's PREVIOUS value out of the caller's buffer. The caller then has to
+  // pre-pack nothing: it learns what moved from the store it performs anyway
+  // (`slop_update`, or `_din.identical(state)`), where the old value is already
+  // the live object rather than a marshalled copy. `changed` is still a
+  // parameter, so the ABI and the adapter's call do not change shape.
+  bool write_object(std::string_view path, std::string& error, bool track_changed = true);
 
   // Inline the emitted color bitcode into one host-C++ bitcode translation
   // unit and lower the combined module to a native relocatable object.

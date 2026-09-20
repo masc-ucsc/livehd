@@ -446,8 +446,8 @@ TEST(CgenSim, TuneEnvSwitchesAreKeyed) {
     ASSERT_EQ(plain.size(), 16u) << mod;
     EXPECT_NE(plain, nolazy) << mod;
   }
-  EXPECT_NE(slurp(std::filesystem::path(tag + "_plain") / "tune_env_top.tune-id.cpp").find("-simgen-65-e0\""), std::string::npos);
-  EXPECT_NE(slurp(std::filesystem::path(tag + "_nolazy") / "tune_env_top.tune-id.cpp").find("-simgen-65-e2\""), std::string::npos);
+  EXPECT_NE(slurp(std::filesystem::path(tag + "_plain") / "tune_env_top.tune-id.cpp").find("-simgen-66-e0\""), std::string::npos);
+  EXPECT_NE(slurp(std::filesystem::path(tag + "_nolazy") / "tune_env_top.tune-id.cpp").find("-simgen-66-e2\""), std::string::npos);
 }
 
 // `<stem>.tune-id.cpp` exists exactly for executable roots, is self-contained,
@@ -474,7 +474,7 @@ TEST(CgenSim, TuneIdOnlyForExecutableRoots) {
   EXPECT_TRUE(std::regex_search(
       tid,
       std::regex(
-          R"(extern "C" const char\* __lhd_tune_structure_tune_id_top\(\) \{ return "[0-9a-f]{16}-[0-9a-f]{16}-simgen-65-e[0-7]"; \})")))
+          R"(extern "C" const char\* __lhd_tune_structure_tune_id_top\(\) \{ return "[0-9a-f]{16}-[0-9a-f]{16}-simgen-66-e[0-7]"; \})")))
       << tid;
   EXPECT_NE(tid.find("extern \"C\" const char* __lhd_tune_codegen_tune_id_top()   { return \"sim.tune.dirty=on\\nsim.tune.fence=0"
                      "\\nsim.tune.live_words=64\\nsim.tune.backend=slop\\nsim.slop_u=true\\nsim.debug=false"
