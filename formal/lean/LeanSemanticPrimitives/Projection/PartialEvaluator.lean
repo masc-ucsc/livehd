@@ -235,6 +235,71 @@ def dynCount : Div → Nat
   | .dyn :: bs  => dynCount bs + 1
   | .stat :: bs => dynCount bs
 
+/-! ## Structural answers for the list primitives
+
+`hd`/`tl`/`isNil` can often be answered from a spine `mix` already holds,
+without emitting code.  Three things make this delicate.
+
+SEEING THROUGH A PACKAGE.  A result may be `lets bs (cons a b)`, and the answer
+has to keep `bs`: those bindings are what preserve the failure or divergence of
+work already moved out of the value, which is what keeps the completeness
+direction honest.  Note the bindings themselves need NOT be total -- retaining
+them is the point.
+
+RE-WRAPPING RATHER THAN FLATTENING.  A nested package is peeled one level at a
+time and re-wrapped.  Concatenating the binding lists is the obvious move and it
+is WRONG: the inner package's de Bruijn references run under the outer bindings,
+so `outer ++ inner` is off by the outer length -- the same index-arithmetic
+class as the `wrapLets` bug this branch already hit once.
+
+DISCARDING NEEDS A GUARD.  `hd` drops the tail, `tl` the head, `isNil` both, and
+`mixDriver_complete` reads "residual value implies source value" while the
+source evaluates every operand.  `hd (consP X loop)` is the counterexample.  The
+guard is `PRes.total` on what is dropped.
+
+WHAT `total` ACTUALLY BUYS, stated precisely because the loose version is
+misleading.  Once the package exists, a discarded component holds NO
+COMPUTATION: every node's work has already been moved into some enclosing
+`lets`, and what the spine carries is references and values.  So `hd` discards
+references, not work -- which is why retaining `bs` is the real safety property
+and `total` is only about the leaves.
+
+The remaining obligation is therefore not termination but SCOPE: a
+`code (.var i)` leaf evaluates iff `i` is in range of the residual environment.
+That does not follow from the syntax, so wiring these rules in needs one more
+invariant -- that `mixTerm` produces results whose variables are in scope under
+`Compat` -- proved once by an induction over `mixTerm`.  Until that lands these
+definitions are deliberately NOT wired into the `prim` rule. -/
+
+def peelHd : PRes → Option PRes
+  | .lets bs r        => (peelHd r).map (PRes.lets bs)
+  | .cons a b         => if b.total then some a else none
+  | .stat (.cons a _) => some (.stat a)
+  | _                 => none
+
+def peelTl : PRes → Option PRes
+  | .lets bs r        => (peelTl r).map (PRes.lets bs)
+  | .cons a b         => if a.total then some b else none
+  | .stat (.cons _ b) => some (.stat b)
+  | _                 => none
+
+def peelIsNil : PRes → Option PRes
+  | .lets bs r        => (peelIsNil r).map (PRes.lets bs)
+  | .cons a b         => if a.total && b.total then some (.stat (.bool false)) else none
+  | .stat .nil        => some (.stat (.bool true))
+  | .stat (.cons _ _) => some (.stat (.bool false))
+  | _                 => none
+
+/-- `consP` discards nothing, so it may always build a spine. -/
+def primStruct (p : Prim) (rs : List PRes) : Option PRes :=
+  match p, rs with
+  | .consP, [.stat a, .stat b] => some (.stat (.cons a b))
+  | .consP, [a, b]             => some (.cons a b)
+  | .hd,    [r]                => peelHd r
+  | .tl,    [r]                => peelTl r
+  | .isNil, [r]                => peelIsNil r
+  | _, _                       => none
+
 /-- Every result must be a value; used by the static cases, where the
 congruence rule guarantees it and a violation is an annotation error. -/
 def allStatic : List PRes → Except MixError (List Val)
