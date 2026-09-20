@@ -722,7 +722,7 @@ The 23 that remain gated, by owner:
 |---|---|---|
 | core-et RTL | 8 | an untyped ANSI `output` assigned from `always_ff` — `txfmactl_top.sv` (4 lines, blocking 6 tops) and `txfmaexp_top.sv:306`; and a `pure` DPI import with an output argument (`txfma_top_fake.sv:26`) |
 | LiveHD | 10 | the Memory cell's `type` bitmask (3), latch-array memories (2), the L1 coincident-edge rule (1), and a `split_selfref` bit-field cycle that leaves `pass.lean` spinning (4) |
-| LiveHD / scale | 4 | `pass.lean` emission exceeding a 1–2 h budget with no diagnostic |
+| LiveHD / scale | 5 | `pass.lean` emission exceeding a 1–2 h budget with no diagnostic.  `txfmafrac_top` is the worst: it normalizes cleanly (P=1, one clock domain — its census `type=1` memory reason is cleared by the sync-ROM fix) and then grows without bound, 55 GB resident at 39 minutes before it was killed.  The census recorded this family as `std::bad_alloc`, which is the same unbounded growth meeting a smaller machine.  The emitter needs a memory ceiling and a refusal, not silent growth |
 | our flow | 1 | a parameterized leaf elaborated as a top |
 
 `--compat vcs` was tested against the net-procedural-assign errors and does not
