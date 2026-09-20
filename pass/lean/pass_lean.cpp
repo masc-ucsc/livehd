@@ -2652,7 +2652,25 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       flop_clock_key[nid] = note_clock(*cc);
     }
-    for (auto mnid : mem_order) {
+    // Every memory that COMMITS something needs a domain -- which is not the same
+    // set as `mem_order`.  A SYNCHRONOUS ROM is immutable, so it has no ordinal
+    // and no `MemoryDesc` (its contents ride `SourceDesc.memConst`), but its
+    // registered read port IS state: `cert_memory_expand` gives it a synthetic
+    // flop in `flop_order`, and that flop asks this map for its clock.  Keying
+    // the walk on `mem_order` left the sync ROM out and turned the lookup below
+    // into an undiagnosed `map::at` crash -- measured on `txfma_f1`, which used
+    // to fail with a diagnosed memory refusal.  An ASYNCHRONOUS ROM is skipped:
+    // it commits nothing and owns no register, so giving it a domain would
+    // invent a clock for a combinational table.
+    std::vector<uint32_t> mem_clocked;
+    for (const auto& kv : mem_cert_ids) {
+      const auto& mi = ctx.memory_info.at(kv.first);
+      if (mi.is_rom && !mi.sync) {
+        continue;
+      }
+      mem_clocked.push_back(kv.first);
+    }
+    for (auto mnid : mem_clocked) {
       const auto& mi = ctx.memory_info.at(mnid);
       if (mi.posclk == Ntype::Memory_posclk_mixed) {
         fatal(ctx, "memory n_" + std::to_string(mnid)
@@ -2746,7 +2764,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         return clock_ordinal.at(it->second);
       }
       if (auto ow = cert_build.sync_read_owner.find(fid); ow != cert_build.sync_read_owner.end()) {
-        return clock_ordinal.at(mem_clock_key.at(ow->second));
+        if (auto mk = mem_clock_key.find(ow->second); mk != mem_clock_key.end()) {
+          return clock_ordinal.at(mk->second);
+        }
+        fatal(ctx, "internal: sync read register of memory n_" + std::to_string(ow->second)
+                       + " has no clock domain");
       }
       fatal(ctx, "internal: flop source id " + std::to_string(fid) + " has no clock domain");
       return 0;
