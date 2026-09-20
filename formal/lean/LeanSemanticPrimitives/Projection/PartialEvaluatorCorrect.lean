@@ -119,11 +119,37 @@ indices are resolved in `ρr`.
 it changes only when a residual binder is entered, and that is exactly where
 `Compat_shift` applies. -/
 
+/-- What a partial environment entry DENOTES, against the residual environment.
+
+`Compat`'s dynamic case is stated through this rather than committing to a bare
+`dyn` index, so that a PRESERVED SPINE has a meaning in the invariant: its
+leaves name residual bindings, and the whole denotes the cons value built from
+what they name.  Without this a spine is not merely unproved, it is
+unstatable — and the totality guard on `hd`/`tl` would have nothing to discharge
+against.
+
+This GENERALIZES the old `dyn` constructor rather than adding a fourth one:
+`PValOK ρr (.dyn k) v` unfolds to exactly the old `ρr[k]? = some v`, so every
+induction over `Compat` still has one dynamic case. -/
+def PValOK (ρr : Env) : PVal → Val → Prop
+  | .stat w,   v => w = v
+  | .dyn k,    v => ρr[k]? = some v
+  | .cons a b, v => ∃ x y, v = .cons x y ∧ PValOK ρr a x ∧ PValOK ρr b y
+
+theorem PValOK_shift1 {ρr pv v} (w : Val) : PValOK ρr pv v → PValOK (w :: ρr) (PVal.shift 1 pv) v := by
+  induction pv generalizing v with
+  | stat _   => intro h; exact h
+  | dyn _    => intro h; simpa [PValOK, PVal.shift] using h
+  | cons a b iha ihb =>
+      intro h
+      obtain ⟨x, y, hv, ha, hb⟩ := h
+      exact ⟨x, y, hv, iha ha, ihb hb⟩
+
 inductive Compat (ρr : Env) : Div → PEnv → Env → Prop where
   | nil  : Compat ρr [] [] []
   | stat : Compat ρr Δ env ρs → Compat ρr (.stat :: Δ) (.stat v :: env) (v :: ρs)
-  | dyn  : ρr[k]? = some v → Compat ρr Δ env ρs →
-           Compat ρr (.dyn :: Δ) (.dyn k :: env) (v :: ρs)
+  | dyn  : PValOK ρr pv v → Compat ρr Δ env ρs →
+           Compat ρr (.dyn :: Δ) (pv :: env) (v :: ρs)
 
 /-- Entering ONE residual binder.  Every residual index in scope moves out by
 one, which is exactly what `PEnv.shiftBy 1` does to the partial environment --
@@ -134,8 +160,7 @@ theorem Compat_shift1 {ρr Δ env ρs} (w : Val) (h : Compat ρr Δ env ρs) :
   | nil => exact .nil
   | stat _ ih => exact .stat ih
   | dyn hk _ ih =>
-      refine .dyn ?_ ih
-      simpa using hk
+      exact .dyn (PValOK_shift1 w hk) ih
 
 /-- Entering `n` residual binders at once, as a `caseT` alternative does. -/
 theorem Compat_shift {ρr Δ env ρs} : ∀ (ws : List Val),
@@ -154,8 +179,8 @@ theorem Compat_fields_dyn {ρr Δ env ρs} : ∀ (vs : List Val), Compat ρr Δ 
            (freshDyns vs.length ++ env.shiftBy vs.length) (vs ++ ρs)
   | [],      h => by simpa [freshDyns] using h
   | v :: vs, h => by
-      have h1 := Compat.dyn (ρr := v :: (vs ++ ρr)) (k := 0) (v := v)
-        (by simp) (Compat_shift1 v (Compat_fields_dyn vs h))
+      have h1 := Compat.dyn (ρr := v :: (vs ++ ρr)) (pv := .dyn 0) (v := v)
+        (by simp [PValOK]) (Compat_shift1 v (Compat_fields_dyn vs h))
       rw [PEnv.shiftBy_append, PEnv.shiftBy_succ] at h1
       simpa [freshDyns_succ, List.replicate_succ] using h1
 
@@ -179,11 +204,39 @@ theorem Compat_stat_lookup {ρr Δ env ρs} (h : Compat ρr Δ env ρs) :
       | zero   => simp only [List.getElem?_cons_zero, Option.some.injEq] at hv
                   cases hv; simp
       | succ n => simpa using ih n v (by simpa using hv)
-  | dyn _ _ ih =>
+  | dyn hk _ ih =>
       intro i v hv
       cases i with
-      | zero   => simp at hv
+      | zero   =>
+          -- the generalized dynamic case admits a `stat` entry; `PValOK` then
+          -- says it names the same value, so the lookup still agrees
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at hv
+          subst hv
+          simp only [PValOK] at hk
+          simp [hk]
       | succ n => simpa using ih n v (by simpa using hv)
+
+/-- Reading a DYNAMIC slot, whatever partial shape it holds.  This is what a
+preserved spine needs: `Compat_dyn_lookup` only speaks about a bare index. -/
+theorem Compat_pval_lookup {ρr Δ env ρs} (h : Compat ρr Δ env ρs) :
+    ∀ (i : Nat) (pv : PVal), env[i]? = some pv → Δ[i]? = some BT.dyn →
+      ∃ v, ρs[i]? = some v ∧ PValOK ρr pv v := by
+  induction h with
+  | nil => intro i pv hv _; simp at hv
+  | stat _ ih =>
+      intro i pv hv hd
+      cases i with
+      | zero   => simp at hd
+      | succ n => obtain ⟨v, h1, h2⟩ := ih n pv (by simpa using hv) (by simpa using hd)
+                  exact ⟨v, by simpa using h1, h2⟩
+  | dyn hk _ ih =>
+      intro i pv hv hd
+      cases i with
+      | zero   => simp only [List.getElem?_cons_zero, Option.some.injEq] at hv
+                  subst hv
+                  exact ⟨_, by simp, hk⟩
+      | succ n => obtain ⟨v, h1, h2⟩ := ih n pv (by simpa using hv) (by simpa using hd)
+                  exact ⟨v, by simpa using h1, h2⟩
 
 theorem Compat_dyn_lookup {ρr Δ env ρs} (h : Compat ρr Δ env ρs) :
     ∀ (i k : Nat), env[i]? = some (PVal.dyn k) → ∃ v, ρs[i]? = some v ∧ ρr[k]? = some v := by
@@ -244,8 +297,8 @@ theorem buildEnv_Compat : ∀ (ps : Div) (svs pre ds : List Val) (env : PEnv) (�
       cases he
       simp only [srcArgs, Option.map_eq_some_iff] at hs
       obtain ⟨ρs', hρs, rfl⟩ := hs
-      refine .dyn (k := pre.length) ?_ ?_
-      · simp
+      refine .dyn (pv := .dyn pre.length) ?_ ?_
+      · simp [PValOK]
       · have : (pre ++ [d]).length = pre.length + 1 := by simp
         have hc := buildEnv_Compat bs svs (pre ++ [d]) ds rest ρs' (by rw [this]; exact hrest) hρs
         simpa using hc
@@ -552,6 +605,46 @@ theorem PResOK_cons {Pr ρr a b x y} (ha : PResOK Pr ρr a x) (hb : PResOK Pr ρ
     PResOK Pr ρr (.cons a b) (.cons x y) :=
   ⟨x, y, rfl, ha, hb⟩
 
+/-- A preserved spine's residual code can only produce the value the spine
+denotes.  Needed by the COMPLETENESS direction, which starts from the residual
+value and has to land on the source's.
+
+Stated over `Eval` rather than `evalFuel`: the fuel form forces the proof to
+unfold a nested `evalFuelList` match at every level of the spine, while the
+relation gives one constructor per level. -/
+theorem PValOK_Eval_eq {Pr ρr} : ∀ {pv : PVal} {u v : Val},
+    PValOK ρr pv u → Eval Pr ρr (PVal.toPRes pv).toCode v → v = u
+  | .stat _,   _, _, h, hev => by cases hev; exact h
+  | .dyn _,    _, _, h, hev => by
+      cases hev
+      rename_i hk
+      rw [h] at hk
+      exact (Option.some.inj hk).symm
+  | .cons a b, _, _, h, hev => by
+      obtain ⟨x, y, hu, ha, hb⟩ := h
+      subst hu
+      cases hev
+      rename_i vs hl hp
+      cases hl
+      rename_i vA vsB hA hl2
+      cases hl2
+      rename_i vB vsN hB hnil
+      cases hnil
+      simp only [evalPrim] at hp
+      cases hp
+      rw [PValOK_Eval_eq ha hA, PValOK_Eval_eq hb hB]
+
+/-- A partial environment entry read back as a result keeps its denotation --
+which is what lets the `var` rule return a spine instead of flattening it. -/
+theorem PResOK_toPRes {Pr ρr} : ∀ {pv : PVal} {v : Val},
+    PValOK ρr pv v → PResOK Pr ρr pv.toPRes v
+  | .stat _,   _, h => h
+  | .dyn _,    _, h => Eval.var h
+  | .cons a b, _, h => by
+      obtain ⟨x, y, hv, ha, hb⟩ := h
+      subst hv
+      exact ⟨x, y, rfl, PResOK_toPRes ha, PResOK_toPRes hb⟩
+
 /-! ## Alternatives of a residualized `caseT`
 
 `mixAlts` keeps each alternative's tag and arity and specializes its body under
@@ -680,8 +773,9 @@ theorem mixUArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
             refine ⟨v₀ :: ws, by simp [dynCount, hlen], ?_, ?_⟩
             · rw [heq]; exact .cons (PResOK_toCode hr) hlets
             · rw [heq]
-              refine .dyn ?_ hcp
+              refine .dyn (pv := .dyn (dynCount bs)) ?_ hcp
               have hl : ws.reverse.length = dynCount bs := by simp [hlen]
+              simp only [PValOK]
               rw [List.getElem?_append_right (by omega), hl]
               simp
 
@@ -738,6 +832,14 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               rw [hu] at hs
               cases Option.some.inj hs
               exact PResOK_code (.var hr)
+            · -- a PRESERVED SPINE: read it back structurally rather than
+              -- flattening it, which is the whole point of keeping it
+              rename_i a b hdiv henv
+              cases hmix
+              obtain ⟨u', hs, hp⟩ := Compat_pval_lookup hc i (.cons a b) henv hdiv
+              rw [hu] at hs
+              cases Option.some.inj hs
+              exact PResOK_toPRes hp
 
         | lift e =>
             simp only [mixTerm] at hmix
@@ -771,7 +873,7 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               rename_i rb rq₂ _hne hbody
               cases hmix
               have hcb : Compat (v₁ :: ρr) (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) (v₁ :: ρs) :=
-                .dyn (by simp) (Compat_shift1 v₁ hc)
+                .dyn (pv := .dyn 0) (by simp [PValOK]) (Compat_shift1 v₁ hc)
               have hb := ihm' _ _ body rb rq₂ (v₁ :: ρr) (v₁ :: ρs) v hcb hbody hsrc
               exact PResOK_code (.letIn (PResOK_toCode hre) (PResOK_toCode hb))
 
@@ -1399,8 +1501,9 @@ theorem mixUArgs_sound {A Pr reqs n} :
               refine ⟨d :: vs, d :: ws, mr', by simp [dynCount, hlen], by omega, ?_,
                       .cons (PResSound_toCode hr hd) hel, by simp [hvl], ?_⟩
               · rw [heq]
-                refine .dyn ?_ hcp
+                refine .dyn (pv := .dyn (dynCount bs)) ?_ hcp
                 have hl : ws.reverse.length = dynCount bs := by simp [hlen]
+                simp only [PValOK]
                 rw [List.getElem?_append_right (by omega), hl]
                 simp
               · rw [heq]; exact hbody
@@ -1456,6 +1559,16 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
                 rw [hu] at hr
                 cases Option.some.inj hr
                 exact .var hs
+          · -- a preserved spine, read back structurally
+            rename_i a b hdiv henv
+            cases hmix
+            refine ⟨(fun _ hw => by cases hw), (fun _ _ hcd => by cases hcd),
+                    (fun a' b' v hcd hev => ?_)⟩
+            obtain ⟨u', hs, hp⟩ := Compat_pval_lookup hc i (.cons a b) henv hdiv
+            have : v = u' :=
+              PValOK_Eval_eq hp (evalFuel_sound _ _ _ _ _ (by rw [hcd]; exact hev))
+            subst this
+            exact .var hs
 
       | lift e =>
           simp only [mixTerm] at hmix
@@ -1503,7 +1616,7 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
                 split at hev <;> try contradiction
                 rename_i d hd
                 have hcb : Compat (d :: ρr) (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) (d :: ρs) :=
-                  .dyn (by simp) (Compat_shift1 d hc)
+                  .dyn (pv := .dyn 0) (by simp [PValOK]) (Compat_shift1 d hc)
                 have hb := ihle mq (by omega) _ _ body rb rq₂ (d :: ρr) (d :: ρs) hcb hbody
                 exact .letIn (PResSound_toCode (ihle mq (by omega) Δ env e _ rq₁ ρr ρs hc he) hd)
                              (PResSound_toCode hb hev)

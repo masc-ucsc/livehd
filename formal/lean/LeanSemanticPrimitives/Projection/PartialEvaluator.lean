@@ -131,6 +131,33 @@ def PRes.toCode : PRes → Term
   | .code t   => t
   | .cons a b => .prim .consP [PRes.toCode a, PRes.toCode b]
 
+/-- Read a partial environment entry back as a result.  A preserved spine has
+to survive being looked up, or the `var` rule would flatten it the first time it
+is read and the whole point would be lost. -/
+def PVal.toPRes : PVal → PRes
+  | .stat v   => .stat v
+  | .dyn k    => .code (.var k)
+  | .cons a b => .cons (PVal.toPRes a) (PVal.toPRes b)
+
+/-- Can this result's residual code fail to produce a value?
+
+A structural rule that DISCARDS a component -- `hd` drops the tail, `tl` drops
+the head, `isNil` on a known spine drops both -- is sound only if what it drops
+cannot fail, because `mixDriver_complete` reads "residual value implies source
+value" and the source evaluates every operand.  `hd (consP X loop)` is the
+counterexample: the source has no `Eval` at all, since `EvalList` needs every
+argument to have a value, while a residual reduced to `X` does.
+
+A `stat` is already a value and a `dyn` names a residual binding.  NOTE the
+subtlety: a `dyn` is total only under the compatible-environment invariant, not
+because it is syntactically a variable -- `Compat` is what says the index is in
+scope, which is why this predicate is only ever used with a `Compat` in hand. -/
+def PRes.total : PRes → Bool
+  | .stat _        => true
+  | .code (.var _) => true
+  | .code _        => false
+  | .cons a b      => PRes.total a && PRes.total b
+
 inductive MixError where
   | outOfFuel
   | unboundVar  : Nat → MixError
@@ -284,9 +311,11 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
     | .lit v => .ok (.stat v, [])
     | .var i =>
       match Δ[i]?, env[i]? with
-      | some .stat, some (.stat v) => .ok (.stat v, [])
-      | some .dyn,  some (.dyn k)  => .ok (.code (.var k), [])
-      | some _,     some _         => .error (.illAnnotated "var: division disagrees with the environment")
+      | some .stat, some (.stat v)   => .ok (.stat v, [])
+      | some .dyn,  some (.dyn k)    => .ok (.code (.var k), [])
+      -- a preserved spine reads back structurally rather than being flattened
+      | some .dyn,  some (.cons a b) => .ok ((PVal.cons a b).toPRes, [])
+      | some _,     some _           => .error (.illAnnotated "var: division disagrees with the environment")
       | _,          _              => .error (.unboundVar i)
     | .lift e =>
       match mixTerm n A idx Δ env e with
