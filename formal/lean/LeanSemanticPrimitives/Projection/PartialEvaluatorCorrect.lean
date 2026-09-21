@@ -192,6 +192,82 @@ theorem Compat_fields_stat {ρr Δ env ρs} : ∀ (vs : List Val), Compat ρr Δ
   | v :: vs, h => by
       simpa [List.replicate_succ] using Compat.stat (Compat_fields_stat vs h)
 
+/-! ### Scope
+
+The second half of what makes a component discardable.  `PRes.total` says a
+discarded subtree holds no computation; this says its references actually denote
+residual values.  **Neither implies the other** — a well-scoped `.code <loop>`
+is in scope and must still not be dropped, and a `total` spine of variables
+still needs its indices in range.
+
+Binder-aware throughout: `letIn` and each `caseT` alternative move the depth, and
+a package's bindings each run one binder deeper than the last. -/
+
+mutual
+
+def Term.Scoped (d : Nat) : Term → Prop
+  | .lit _      => True
+  | .var i      => i < d
+  | .letIn e b  => Term.Scoped d e ∧ Term.Scoped (d + 1) b
+  | .ite c a b  => Term.Scoped d c ∧ Term.Scoped d a ∧ Term.Scoped d b
+  | .prim _ ts  => Term.ScopedList d ts
+  | .ctorT _ ts => Term.ScopedList d ts
+  | .caseT s as => Term.Scoped d s ∧ Term.ScopedAlts d as
+  | .call _ ts  => Term.ScopedList d ts
+
+def Term.ScopedList (d : Nat) : List Term → Prop
+  | []      => True
+  | t :: ts => Term.Scoped d t ∧ Term.ScopedList d ts
+
+def Term.ScopedAlts (d : Nat) : List Alt → Prop
+  | []      => True
+  | a :: as => Term.Scoped (d + a.2.1) a.2.2 ∧ Term.ScopedAlts d as
+
+end
+
+def PVal.Scoped (depth : Nat) : PVal → Prop
+  | .stat _   => True
+  | .dyn k    => k < depth
+  | .cons a b => PVal.Scoped depth a ∧ PVal.Scoped depth b
+
+/-- Each binding runs under the ones before it, so the depth grows as the list
+is walked.  This is the piece a flat `∀ t ∈ bs` would get wrong. -/
+def ScopedLets : Nat → List Term → Prop
+  | _, []      => True
+  | d, t :: ts => Term.Scoped d t ∧ ScopedLets (d + 1) ts
+
+def PRes.Scoped (depth : Nat) : PRes → Prop
+  | .stat _    => True
+  | .code t    => Term.Scoped depth t
+  | .cons a b  => PRes.Scoped depth a ∧ PRes.Scoped depth b
+  | .lets bs r => ScopedLets depth bs ∧ PRes.Scoped (depth + bs.length) r
+
+def PEnv.Scoped (depth : Nat) : PEnv → Prop
+  | []      => True
+  | v :: vs => PVal.Scoped depth v ∧ PEnv.Scoped depth vs
+
+/-- The bridge that makes the invariant free where it is already established:
+a partial value that DENOTES something names indices that exist, because
+`ρr[k]? = some v` already says `k < ρr.length`. -/
+theorem PValOK_Scoped {ρr : Env} : ∀ {pv : PVal} {v : Val},
+    PValOK ρr pv v → PVal.Scoped ρr.length pv
+  | .stat _,   _, _ => trivial
+  | .dyn _,    _, h => by
+      simp only [PValOK] at h
+      exact List.getElem?_eq_some_iff.mp h |>.1
+  | .cons a b, _, h => by
+      obtain ⟨_, _, _, ha, hb⟩ := h
+      exact ⟨PValOK_Scoped ha, PValOK_Scoped hb⟩
+
+/-- …and therefore a compatible environment is a scoped one, which is how the
+specializer obtains the hypothesis it needs at the top of every walk. -/
+theorem Compat_Scoped {ρr Δ env ρs} (h : Compat ρr Δ env ρs) :
+    PEnv.Scoped ρr.length env := by
+  induction h with
+  | nil => trivial
+  | stat _ ih => exact ⟨trivial, ih⟩
+  | dyn hk _ ih => exact ⟨PValOK_Scoped hk, ih⟩
+
 /-! ### Reading a compatible environment -/
 
 theorem Compat_stat_lookup {ρr Δ env ρs} (h : Compat ρr Δ env ρs) :

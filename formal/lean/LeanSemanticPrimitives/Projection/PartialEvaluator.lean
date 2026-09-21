@@ -257,19 +257,25 @@ DISCARDING NEEDS A GUARD.  `hd` drops the tail, `tl` the head, `isNil` both, and
 source evaluates every operand.  `hd (consP X loop)` is the counterexample.  The
 guard is `PRes.total` on what is dropped.
 
-WHAT `total` ACTUALLY BUYS, stated precisely because the loose version is
-misleading.  Once the package exists, a discarded component holds NO
-COMPUTATION: every node's work has already been moved into some enclosing
-`lets`, and what the spine carries is references and values.  So `hd` discards
-references, not work -- which is why retaining `bs` is the real safety property
-and `total` is only about the leaves.
+WHAT IS DISCARDABLE IS A CONJUNCTION, and each half does different work:
 
-The remaining obligation is therefore not termination but SCOPE: a
-`code (.var i)` leaf evaluates iff `i` is in range of the residual environment.
-That does not follow from the syntax, so wiring these rules in needs one more
-invariant -- that `mixTerm` produces results whose variables are in scope under
-`Compat` -- proved once by an induction over `mixTerm`.  Until that lands these
-definitions are deliberately NOT wired into the `prim` rule. -/
+    discardable  =  computation-free  AND  references-in-scope
+
+`PRes.total` is the first half.  Once the package exists, a discarded component
+holds no computation -- every node's work has already been moved into some
+enclosing `lets` -- so what the spine carries is values, variables and spines of
+those.  Retaining `bs` is what preserves the failure or divergence of the work
+that moved.
+
+SCOPE IS THE SECOND HALF AND DOES NOT FOLLOW FROM THE FIRST: a `code (.var i)`
+leaf evaluates only if `i` is in range of the residual environment.  Nor does
+the first follow from the second -- a well-scoped `.code <loop>` is perfectly
+in scope and still must not be dropped, which is exactly what `total` rejects.
+Both halves are needed.
+
+`PRes.Scoped` (in `PartialEvaluatorCorrect.lean`) is the second half, and
+wiring these rules in waits on the invariant that `mixTerm` preserves it.  Until
+then these definitions are deliberately NOT wired into the `prim` rule. -/
 
 def peelHd : PRes → Option PRes
   | .lets bs r        => (peelHd r).map (PRes.lets bs)
