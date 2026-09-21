@@ -24,6 +24,21 @@ namespace livehd::formal {
 // budget. Unsupported nodes OUTSIDE a property's cone are never visited, so they
 // cannot poison its verdict; an unsupported node INSIDE the cone yields Unknown
 // (sound: defer to runtime, never a wrong answer). See todo/livehd/2f-verify.
+//
+// With `descend_subs` the cone is VIRTUALLY FLAT: a Sub output continues at the
+// driver inside its definition, and that definition's inputs continue at the
+// instance's drivers. Every instance is its own scope, so state inside two
+// instances of one definition stays two independent symbols. A Sub without a
+// body, and a compact loop Sub (one body standing for N iterations), stay
+// unsupported. A caller that caches verdicts must then key them on every
+// definition in `descended()` too.
+
+// One step of that descent, for any walker of the same virtual-flat view: the
+// driver inside the definition behind a Sub output, and the instance's driver
+// behind one of that definition's inputs. Invalid when the Sub cannot be
+// descended (no body, compact loop) or the port is unconnected.
+hhds::Pin_class sub_body_driver(const hhds::Pin_class& sub_output);
+hhds::Pin_class sub_input_driver(const hhds::Node_class& inst, const hhds::Pin_class& def_input);
 
 using Verdict = livehd::lec::Verdict;  // Proven | Refuted | Unknown
 
@@ -46,6 +61,8 @@ struct Prove_options {
   // Synthesis queries cut each memory dout to an independent free word.
   bool memory_as_symbols        = false;
   bool reject_unknown_constants = false;
+  // Encode through Sub instances (virtual flat) instead of stopping at them.
+  bool descend_subs             = false;
 };
 
 struct Query_out {
@@ -98,21 +115,42 @@ public:
   // cone walk that classifies a query's `Query_out::stateful`, without
   // encoding or solving, for a caller that skipped the query (e.g. out of
   // budget) but still needs the classification. Conservative: a cone the
-  // encoder cannot handle (Sub/Fflop/Latch) answers true, since a Sub may
-  // hide state.
+  // encoder cannot handle (an undescended Sub, Fflop, Latch) answers true,
+  // since a Sub may hide state.
   bool stateful_cone(const hhds::Pin_class& cond);
 
+  // Every definition a query so far descended into (descend_subs), once each.
+  std::vector<hhds::Graph*> descended() const;
+
 private:
+  // A pin inside one instance: scope 0 is g_ itself, every other scope one
+  // descended Sub instance (see scopes_).
+  using Key = std::pair<uint32_t, hhds::Class_index>;
+  struct Scope {
+    hhds::Graph*     graph  = nullptr;
+    uint32_t         parent = 0;
+    hhds::Node_class inst;    // the Sub in `parent` (invalid for scope 0)
+    std::string      prefix;  // keeps state symbols apart per instance
+    int              depth = 0;
+  };
+  // The scope of `inst`'s body inside `scope`; nullopt past the depth cap.
+  std::optional<uint32_t> child_scope(uint32_t scope, const hhds::Node_class& inst);
+  // Where a pin of `scope` continues across an instance boundary: a Sub
+  // output into its body, a definition input up to the instance's driver.
+  // nullopt when the pin is not a boundary or cannot be crossed.
+  std::optional<std::pair<uint32_t, hhds::Pin_class>> cross(uint32_t scope, const hhds::Pin_class& pin);
+
   // Demand-encode dpin's cone to a Val; nullopt if unsupported / over budget.
-  std::optional<livehd::lec::Val> val_of(const hhds::Pin_class& dpin);
-  std::optional<livehd::lec::Val> encode_comb(const hhds::Node_class& node, const hhds::Pin_class& dpin);
+  std::optional<livehd::lec::Val> val_of(const hhds::Pin_class& dpin) { return val_of(0, dpin); }
+  std::optional<livehd::lec::Val> val_of(uint32_t scope, const hhds::Pin_class& dpin);
+  std::optional<livehd::lec::Val> encode_comb(uint32_t scope, const hhds::Node_class& node, const hhds::Pin_class& dpin);
 
   // Deterministic cone walk used for the budget + pre-gate + state detection.
   // Counts unique driver pins reachable backward from `pin`; sets `stateful`
   // (cone cuts a Flop/Memory) and `unsupported` (cone hits an op the encoder
-  // cannot handle: Memory/Sub/Fflop/Latch).
+  // cannot handle: Memory/undescended Sub/Fflop/Latch).
   int  cone_info(const hhds::Pin_class& pin, bool& stateful, bool& unsupported);
-  void cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Class_index>& seen, int& n, bool& stateful,
+  void cone_walk(uint32_t scope, const hhds::Pin_class& pin, absl::flat_hash_set<Key>& seen, int& n, bool& stateful,
                  bool& unsupported);
 
   Query_out  address_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
@@ -129,8 +167,10 @@ private:
   hhds::Graph*      g_;
   Prove_options     opts_;
 
-  absl::flat_hash_map<hhds::Class_index, livehd::lec::Val> memo_;      // driver pin -> Val (shared across queries)
-  absl::flat_hash_set<hhds::Class_index>                   on_stack_;  // combinational-cycle guard
+  std::vector<Scope>                                       scopes_;        // [0] = g_
+  absl::flat_hash_map<Key, uint32_t>                       child_scopes_;  // (parent scope, Sub) -> scope
+  absl::flat_hash_map<Key, livehd::lec::Val>               memo_;          // driver pin -> Val (shared across queries)
+  absl::flat_hash_set<Key>                                 on_stack_;      // combinational-cycle guard
   std::vector<std::pair<cvc5::Term, cvc5::Term>>           side_eqs_;  // memory read ties (asserted every query)
   std::vector<cvc5::Term>                                  assumes_;   // hypotheses (cond != 0)
   std::vector<std::pair<std::string, cvc5::Term>>          inputs_;    // seeded input symbols, for witnesses

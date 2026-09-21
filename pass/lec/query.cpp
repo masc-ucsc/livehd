@@ -3257,13 +3257,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return c;
   };
 
-  Io_name_map<uint64_t> impl_state_order;
-  for (auto node : impl->occurrences().nodes(hhds::Node_order::forward)) {
-    if (graph_util::type_op_of(node) == Ntype_op::Flop) {
-      impl_state_order.emplace(eff(node.get_hier_name()), static_cast<uint64_t>(node.get_debug_nid()));
-    }
-  }
-
   // Def-name canonicalization across front-ends. A def's FULL callee name
   // embeds its front-end namespace (Pyrope "file.entity" vs slang's flat
   // "entity"), so the SAME module never carries the same full name on a
@@ -3396,6 +3389,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
   const ankerl::unordered_dense::set<hhds::Gid>* collapse_gids_ptr = collapse_gids.empty() ? nullptr : &collapse_gids;
+
+  // State ordering only ranks visible flop cuts; proven boxes own their state.
+  Io_name_map<uint64_t> impl_state_order;
+  for (auto node : impl->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+    if (graph_util::type_op_of(node) == Ntype_op::Flop) {
+      impl_state_order.emplace(eff(node.get_hier_name()), static_cast<uint64_t>(node.get_debug_nid()));
+    }
+  }
 
   // ── Box correspondence (collapsed / blackbox Sub instances) ────────────────
   // ONE hierarchical walk per design enumerates every Sub the encoder will treat
@@ -6353,7 +6354,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     };
     auto collect_flops = [&](hhds::Graph* g) {
       Io_name_map<FlopRec> out;
-      for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {
+      // Use the same visible state as collect_mems and the encoder. Descending
+      // into a proven box needlessly expands compact loops inside that box and
+      // exposes flops that cannot participate in this obligation's bridge.
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }

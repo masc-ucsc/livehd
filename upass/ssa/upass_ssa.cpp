@@ -5,12 +5,12 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdlib>
 #include <format>
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <cctype>
 #include <optional>
 #include <print>
 #include <string>
@@ -82,16 +82,16 @@ std::optional<std::pair<size_t, size_t>> stale_ssa_suffix(std::string_view name)
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
-  int32_t bits        = 0;
-  bool    is_signed   = true;
-  Io_kind kind        = Io_kind::none;
-  bool    has_range   = false;  // explicit `int(min,max)` bounds (both known, fit i64)
-  int64_t range_min   = 0;
-  int64_t range_max   = 0;
+  int32_t     bits        = 0;
+  bool        is_signed   = true;
+  Io_kind     kind        = Io_kind::none;
+  bool        has_range   = false;  // explicit `int(min,max)` bounds (both known, fit i64)
+  int64_t     range_min   = 0;
+  int64_t     range_max   = 0;
   // `[N]T` port: packed bus of N lanes (see Lnast_io_entry).
-  int64_t array_size  = 0;
-  int32_t elem_bits   = 0;
-  bool    elem_signed = false;
+  int64_t     array_size  = 0;
+  int32_t     elem_bits   = 0;
+  bool        elem_signed = false;
   // Deferred generic-width bound leaves (see Lnast_io_entry::bound_max_text).
   std::string bound_max_text;
   std::string bound_min_text;
@@ -681,9 +681,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       }
     }
     out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
-    out.back().array_size  = ti.array_size;
-    out.back().elem_bits   = ti.elem_bits;
-    out.back().elem_signed = ti.elem_signed;
+    out.back().array_size     = ti.array_size;
+    out.back().elem_bits      = ti.elem_bits;
+    out.back().elem_signed    = ti.elem_signed;
     out.back().has_range      = ti.has_range;
     out.back().range_min      = ti.range_min;
     out.back().range_max      = ti.range_max;
@@ -739,7 +739,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         // rebuild so the specializer's in-place patch
         // (clone_template_specialized) still finds the ref leaves.
         auto leaf = [](const std::string& txt) {
-          const bool lit = txt.empty() || txt == "nil" || txt.front() == '-' || std::isdigit(static_cast<unsigned char>(txt.front())) != 0;
+          const bool lit
+              = txt.empty() || txt == "nil" || txt.front() == '-' || std::isdigit(static_cast<unsigned char>(txt.front())) != 0;
           return lit ? Lnast_node::create_const(txt.empty() ? "nil" : txt) : Lnast_node::create_ref(txt);
         };
         auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
@@ -2044,10 +2045,16 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
             }
           }
         }
-        // Separate-scope / pure-structure nodes (func_def, declare, for, …):
-        // the outer rename_map must NOT leak in, so copy verbatim. This is an
-        // EXPLICIT closed list — see stmt_is_scope_barrier.
-        copy_subtree(lnast, child, staging, new_stmts);
+        if (Lnast_ntype::is_for(type) || Lnast_ntype::is_while(type)) {
+          // Loop invariants still read the enclosing scope's live version.
+          // Only names written by the loop were reset to their base above.
+          // Copying all reads verbatim loses e.g. a runtime function argument
+          // bound before a deferred loop, leaving its declaration-time poison.
+          copy_with_rename(lnast, child, staging, new_stmts, rename_map);
+        } else {
+          // Independent function scopes must not inherit outer SSA bindings.
+          copy_subtree(lnast, child, staging, new_stmts);
+        }
       } else {
         // DEFAULT: every remaining statement kind (cassert, timecheck, tick,
         // step, …) has only READ operands in THIS scope — and so does any

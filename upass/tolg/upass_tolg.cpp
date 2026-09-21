@@ -657,7 +657,14 @@ private:
     // itself carries size*elem_mw bits. A following partial write then sized
     // its first set_mask only to the mask reach and discarded the untouched
     // high lanes.
-    if (auto mit = mem_map_.find(key); mit != mem_map_.end()) {
+    auto mit = mem_map_.find(key);
+    if (mit == mem_map_.end() && name != name_in) {
+      // Array declarations retain escaped flat names (e.g. `btb_q.valid`).
+      // Scalar pin lookup canonicalizes those names; whole-memory reads must
+      // still find the same declaration as indexed reads and writes.
+      mit = mem_map_.find(std::string(name_in));
+    }
+    if (mit != mem_map_.end()) {
       auto pin     = get_or_make_read_all(mit->second);
       mw_map_[key] = static_cast<int32_t>(mit->second.size * mit->second.elem_mw);
       return pin;
@@ -6421,6 +6428,27 @@ private:
         if (auto dit = pin_map_.find(din_key(raw)); dit != pin_map_.end()) {
           return {dit->second, mw_lookup(din_key(raw))};
         }
+      }
+      // A packed bit-view write after a whole-memory assignment must splice
+      // into the pending bulk value, just as a scalar register uses its din.
+      // Ordinary reads still use the memory's committed read_all value.
+      auto mit = mem_map_.find(raw);
+      if (mit == mem_map_.end()) {
+        mit = mem_map_.find(name);
+      }
+      if (mit != mem_map_.end() && !mit->second.is_array && mit->second.has_update) {
+        auto&      mi    = mit->second;
+        const auto width = static_cast<int32_t>(mi.size * mi.elem_mw);
+        if (mi.update_en.is_invalid()) {
+          return {mi.update_val, width};
+        }
+        auto mux = make_node(Ntype_op::Mux);
+        livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(mi.update_en);
+        livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(get_or_make_read_all(mi));
+        livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(mi.update_val);
+        auto value = mux.create_driver_pin(0);
+        set_ubits(value, width);
+        return {value, width};
       }
       if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
         return {nil_pin(), 1};

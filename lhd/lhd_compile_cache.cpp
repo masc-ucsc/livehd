@@ -2593,13 +2593,21 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
     // Scoped load: a cold compile's var holds only this closure's graphs, so
     // foreign modules living in a shared destination library must not leak
     // into var (they would ride every emit). They stay in the library itself.
+    //
+    // COLLECTED here, COMMITTED to `var` only once nothing below can refuse. A
+    // refusal sends the caller into a full lower_lnasts, where tolg deletes every
+    // same-named restored body before recreating it (uPass_tolg::run), and
+    // Eprp_var::add dedups by shared_ptr identity -- so a handle added before the
+    // refusal stayed in var.graphs as a tombstone beside its fresh twin, and the
+    // first walk over var.graphs (compile_cache_prune_graphs) read released
+    // storage: SIGBUS in opt, "graph is no longer valid" in dbg.
+    std::vector<std::shared_ptr<hhds::Graph>> restored_graphs;
     for (const hhds::Gid id : dst.all_gids()) {
       auto g = dst.get_graph(id);
       if (g && !owner_of(g->get_name(), res).empty()) {
-        var.add(g);
+        restored_graphs.push_back(std::move(g));
       }
     }
-    res.compile_cache.hits += restored_bodies;
 
     if (!full_clean && restored_bodies != 0) {
       // Replace clean post-parse file trees with their cached post-upass file
@@ -2607,12 +2615,21 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       // dirty callers, while upass/tolg skip rebuilding them. The cold order is
       // handed to pass.upass, which can restore it after dirty lambda bodies
       // have been extracted (those bodies do not exist yet here).
-      std::map<std::string, std::shared_ptr<Lnast>> cached;
+      //
+      // INDEX-aligned with lnast_order, never name-keyed: the store writes one
+      // lowered_ln/unit_<i> per ENTRY, and lnast_order legally repeats a name. A
+      // generic module called with every generic at its declaration default
+      // yields TWO trees under one name -- the template and its IDENTITY
+      // specialization (pass_upass deliberately keeps both). A name-keyed
+      // single-slot map dropped the second tree and refused the WHOLE restore
+      // at that name's second occurrence: on a Verilog-derived design full of
+      // defaulted parameters (minion: 61 such pairs) no one-module edit could
+      // ever reuse a graph.
+      std::vector<std::shared_ptr<Lnast>> cached(expected->lnast_order.size());
       for (size_t i = 0; i < expected->lnast_order.size(); ++i) {
         const auto& name = expected->lnast_order[i];
         if (owner_graph_restored(name)) {
-          auto ln = load_compact_lnast(res.compile_cache_scope + "/lg/lowered_ln/" + lowered_lnast_dir(i), name);
-          cached.emplace(name, std::move(ln));
+          cached[i] = load_compact_lnast(res.compile_cache_scope + "/lg/lowered_ln/" + lowered_lnast_dir(i), name);
         }
       }
       // Name -> queue, not name -> tree: duplicate top-module names legally
@@ -2637,17 +2654,21 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       };
       std::vector<std::shared_ptr<Lnast>> ordered;
       ordered.reserve(expected->lnast_order.size() + var.lnasts.size());
-      for (const auto& name : expected->lnast_order) {
+      for (size_t i = 0; i < expected->lnast_order.size(); ++i) {
+        const auto& name = expected->lnast_order[i];
         if (owner_graph_restored(name)) {
-          auto it = cached.find(name);
-          if (it == cached.end()) {
+          auto& cached_ln = cached[i];
+          if (!cached_ln) {
+            // Belt and braces: load_compact_lnast throws rather than return
+            // null, so the refusing exit that really fires past load_merge is
+            // the catch (...) below. Either way `var` is still untouched here,
+            // which is what keeps the caller's full re-lower safe.
             ++res.compile_cache.refused;
             return false;
           }
-          it->second->set_upass_converged(true);
-          it->second->set_graph_restored(true);
-          ordered.push_back(std::move(it->second));
-          cached.erase(it);
+          cached_ln->set_upass_converged(true);
+          cached_ln->set_graph_restored(true);
+          ordered.push_back(std::move(cached_ln));
           (void)take_current(name);
         } else if (auto ln = take_current(name)) {
           // A dirty file-level root occupies its former cold position. Cached
@@ -2665,6 +2686,12 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       var.lnasts           = std::move(ordered);
       var.lnast_order_hint = expected->lnast_order;
     }
+    // Past the last refusal: the restored graphs, their hit count and their
+    // names become visible to the caller together or not at all.
+    for (const auto& g : restored_graphs) {
+      var.add(g);
+    }
+    res.compile_cache.hits += restored_bodies;
     res.compile_cache_restored_graphs = std::move(restored_names);
     const size_t total_bodies = std::count_if(actual.begin(), actual.end(), [](const Graph_row& row) { return row.has_body; });
     const bool   total        = full_clean && restored_bodies == total_bodies && restored_bodies != 0;

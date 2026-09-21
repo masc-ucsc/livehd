@@ -111,4 +111,55 @@ TEST(Enableopt, SharedIndexedMuxKeepsEveryArm) {
   }
   EXPECT_EQ(mux.inp_pins_snapshot().size(), 1025u);
 }
+
+// An always-open latch (no enable pin: every path writes it, the shape of a
+// full `case` inside an `always @*`) stores nothing, so it is a wire even when
+// its D cone is SHARED with another reader. The private-region walk used for
+// hold muxes answers "unknown" at the first multi-consumer pin, which left all
+// three such latches in lhdsuite's picorv32 and made `lhd sim` refuse it.
+TEST(Enableopt, AlwaysOpenLatchWithSharedConeBecomesWire) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_enableopt_open_latch_shared");
+  auto  io  = lib.create_io("open_latch_shared");
+  io->add_input("a", 1);
+  io->add_input("b", 2);
+  io->add_output("q", 3);
+  io->add_output("other", 4);
+  auto graph  = io->create_graph();
+  auto shared = gu::create_typed_node(*graph, Ntype_op::And);
+  gu::append_sink_operand(shared, Ntype_op::And, 0).connect_driver(graph->get_input_pin("a"));
+  gu::append_sink_operand(shared, Ntype_op::And, 0).connect_driver(graph->get_input_pin("b"));
+  auto data = shared.create_driver_pin(0);
+  data.connect_sink(graph->get_output_pin("other"));  // the second consumer
+  auto latch = gu::create_typed_node(*graph, Ntype_op::Latch);
+  gu::setup_sink_by_name(latch, "din").connect_driver(data);
+  latch.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  Enableopt{}.do_trans(graph);
+  EXPECT_TRUE(latch.is_invalid()) << "an always-open latch over a shared cone is still a wire";
+  EXPECT_EQ(graph->get_output_pin("q").get_driver_pin(), data);
+}
+
+// ...but a REAL din -> Q combinational path must keep the cell: the wire would
+// close a combinational cycle. The path runs through a shared pin here, which
+// is exactly where the private-region walk stops looking.
+TEST(Enableopt, AlwaysOpenLatchFeedingItselfThroughSharedConeIsKept) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_enableopt_open_latch_loop");
+  auto  io  = lib.create_io("open_latch_loop");
+  io->add_input("a", 1);
+  io->add_output("q", 2);
+  io->add_output("other", 3);
+  auto graph  = io->create_graph();
+  auto latch  = gu::create_typed_node(*graph, Ntype_op::Latch);
+  auto q      = latch.create_driver_pin(0);
+  auto shared = gu::create_typed_node(*graph, Ntype_op::Xor);
+  gu::append_sink_operand(shared, Ntype_op::Xor, 0).connect_driver(graph->get_input_pin("a"));
+  gu::append_sink_operand(shared, Ntype_op::Xor, 0).connect_driver(q);
+  auto data = shared.create_driver_pin(0);
+  data.connect_sink(graph->get_output_pin("other"));  // the second consumer
+  gu::setup_sink_by_name(latch, "din").connect_driver(data);
+  q.connect_sink(graph->get_output_pin("q"));
+  Enableopt{}.do_trans(graph);
+  ASSERT_FALSE(latch.is_invalid());
+  EXPECT_EQ(gu::type_op_of(latch), Ntype_op::Latch);
+  EXPECT_EQ(gu::get_driver_of_sink_name(latch, "din"), data);
+}
 }  // namespace

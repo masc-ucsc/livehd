@@ -718,6 +718,53 @@ void Cprop::collapse_forward_same_op(hhds::Node_class& node, Inp_pins& inp_edges
       leaves.push_back(value);
     }
   }
+  // A SHARED `x + c` operand stays a boundary above: copying a shared region
+  // into every consumer is the quadratic splice this pass dropped. When this
+  // Sum also has a literal, splicing just that one variable and its literals
+  // is O(1) and folds them: `(m + 1) + 8` -> `m + 9` keeps the consumer off
+  // the shared adder, and `(lo + 7) + 1 - lo` still cancels to 8.
+  std::vector<hhds::Node_class> spliced;
+  if (op == Ntype_op::Sum && std::ranges::any_of(leaves, [](const Operand& v) { return v.pin.is_const(); })) {
+    const size_t nleaves = leaves.size();
+    for (size_t i = 0; i < nleaves; ++i) {
+      const auto pin = leaves[i].pin;
+      if (pin.is_const() || is_graph_input_pin(pin)) {
+        continue;
+      }
+      auto child = pin.get_master_node();
+      if (type_op_of(child) != Ntype_op::Sum || livehd::graph_util::has_color(child) || owned.contains(child.get_class_index())) {
+        continue;
+      }
+      Operand              variable{};
+      int                  nvariables = 0;
+      int                  ninputs    = 0;
+      bool                 foldable   = true;
+      std::vector<Operand> literals;
+      for (const auto& sink : child.inp_sorted_pins()) {
+        if (++ninputs > 3) {
+          foldable = false;
+          break;
+        }
+        const Operand operand{sink.get_driver_pin(), leaves[i].bank ^ Ntype::sink_bank(op, sink.get_port_id())};
+        if (!operand.pin.is_const()) {
+          variable = operand;
+          ++nvariables;
+        } else if (const_of(operand.pin).is_numeric()) {
+          literals.push_back(operand);
+        } else {
+          foldable = false;  // a non-numeric literal does not fold
+        }
+      }
+      if (!foldable || nvariables != 1 || literals.empty()) {
+        continue;
+      }
+      leaves[i] = variable;
+      leaves.insert(leaves.end(), literals.begin(), literals.end());
+      if (std::ranges::find(spliced, child) == spliced.end()) {
+        spliced.push_back(child);
+      }
+    }
+  }
   if (absorbed.empty() && op != Ntype_op::Sum && op != Ntype_op::Xor) {
     return;
   }
@@ -753,6 +800,12 @@ void Cprop::collapse_forward_same_op(hhds::Node_class& node, Inp_pins& inp_edges
   // Parent before child: each absorbed node has lost its sole consumer.
   for (auto child : absorbed) {
     livehd::cprop_value::retire(child);
+  }
+  // A shared operand read only through this Sum's own edges is dead now.
+  for (auto child : spliced) {
+    if (!child.has_out_edges()) {
+      bwd_del_node(child);
+    }
   }
   if (!node.has_inp_edges()) {
     replace_node(node, *Dlop::create_integer(op == Ntype_op::Mult ? 1 : 0));
@@ -1667,15 +1720,20 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
   // reach mux sharing, which rebuilds them as a Hotmux over path conjunctions
   // (an LRU bit matrix grew ~3x). As And/Or they flatten and meet
   // scalar_bool. Both-constant arms keep the rules above (see Mux(s,1,0)).
+  //
+  // A latch Q arm stays a Mux: it is the latch's hold arm, and the latch
+  // contract exempts Q only as a DIRECT Mux data arm. `s ? 1 : q` as `s | q`
+  // is a Q -> D path through logic, rejected as a transparent self-update.
   if (is_two_arm_mux(inp_edges_ordered)) {
-    const auto sel     = inp_edges_ordered[0].get_driver_pin();
-    const auto f       = inp_edges_ordered[1].get_driver_pin();
-    const auto t       = inp_edges_ordered[2].get_driver_pin();
-    const auto k       = t.is_const() ? t : f;
-    const auto other   = t.is_const() ? f : t;
-    const bool one_arm = f.is_const() != t.is_const();
-    if (one_arm && !sel.is_const() && is_bool01(sel) && is_bool01(other) && !const_of(k).has_unknowns() && const_of(k).is_just_i64()
-        && (const_of(k).to_just_i64() == 0 || const_of(k).to_just_i64() == 1)) {
+    const auto sel       = inp_edges_ordered[0].get_driver_pin();
+    const auto f         = inp_edges_ordered[1].get_driver_pin();
+    const auto t         = inp_edges_ordered[2].get_driver_pin();
+    const auto k         = t.is_const() ? t : f;
+    const auto other     = t.is_const() ? f : t;
+    const bool one_arm   = f.is_const() != t.is_const();
+    const bool latch_arm = one_arm && !is_graph_input_pin(other) && type_op_of(other.get_master_node()) == Ntype_op::Latch;
+    if (one_arm && !latch_arm && !sel.is_const() && is_bool01(sel) && is_bool01(other) && !const_of(k).has_unknowns()
+        && const_of(k).is_just_i64() && (const_of(k).to_just_i64() == 0 || const_of(k).to_just_i64() == 1)) {
       const bool k_one   = const_of(k).to_just_i64() == 1;
       const bool negated = t.is_const() ? !k_one : k_one;
       auto       literal = sel;

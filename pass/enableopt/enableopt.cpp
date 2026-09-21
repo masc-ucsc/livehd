@@ -212,6 +212,54 @@ class State_optimizer {
     return matches;
   }
 
+  // EXACT combinational reachability of `q` from `start`, for the always-open
+  // collapse only. cone_reaches_q below answers for the state's PRIVATE D
+  // region and leaves every shared (multi-consumer) pin unknown. That is the
+  // right question for a hold-mux rewrite, whose disabled value is irrelevant
+  // only on this latch's own path, but needlessly blind here: replacing an
+  // always-open latch by its din is sound whoever else reads the cone, and only
+  // a REAL din -> Q combinational path (which the wire would close into a
+  // cycle) must block it. After cprop's mux sharing nearly every real cone
+  // holds a shared pin, so the private walk declined all three always-open
+  // latches of picorv32 (a full `case` written from an `always @*`) and
+  // `lhd sim` then refused the design: its color planner has no lowering for a
+  // stateless latch. A Flop cuts the walk. Another Latch may be transparent, so
+  // it is walked THROUGH. A Sub's or a Memory's internal paths (async read) are
+  // not visible from here, so they stay unknown.
+  [[nodiscard]] std::optional<bool> comb_cone_reaches_q(const hhds::Pin_class& start, const hhds::Pin_class& q) const {
+    absl::flat_hash_set<hhds::Class_index> seen;
+    std::vector<hhds::Pin_class>           work{start};
+    bool                                   unknown = false;
+    while (!work.empty()) {
+      auto p = work.back();
+      work.pop_back();
+      if (p.is_invalid() || p.is_const() || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+        continue;
+      }
+      if (same_pin(p, q)) {
+        return true;
+      }
+      auto       n  = p.get_master_node();
+      const auto op = type_op_of(n);
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+        continue;
+      }
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
+        unknown = true;
+        continue;
+      }
+      for (auto sink : n.inp_sorted_pins()) {
+        for (auto input : sink.get_driver_pins()) {
+          work.push_back(input);
+        }
+      }
+    }
+    if (unknown) {
+      return std::nullopt;
+    }
+    return false;
+  }
+
   // Dependency results belong to this state's private D region. Shared
   // combinational boundaries are unknown unless the forward facts already
   // prove that they depend on no state. Each owned pin is evaluated once.
@@ -769,7 +817,7 @@ void State_optimizer::canonicalize_latch_hold(const hhds::Node_class& latch) {
     }
   }
   auto reset = livehd::graph_util::get_driver_of_sink_name(latch, "reset_pin");
-  if (always_open && reset.is_invalid() && !q.is_invalid() && !din.is_invalid() && cone_reaches_q(din, q) == false) {
+  if (always_open && reset.is_invalid() && !q.is_invalid() && !din.is_invalid() && comb_cone_reaches_q(din, q) == false) {
     // SNAPSHOT: out_edges() is a lazy VIEW over live edge storage (hhds
     // graph.hpp) and connect_sink() calls add_edge, which can rehome an entry
     // into the overflow set -- and growing overflow_sets() reallocates the

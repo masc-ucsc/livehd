@@ -48,8 +48,8 @@ for entry in "${DESIGNS[@]}"; do
   D="$W/$FIX"
   mkdir -p "$D"
 
-  run compile "$PRP" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
-  run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
+  run compile "$PRP" --top "$TOP" --emit-dir lg:"$D/lg" --emit verilog:"$D/ref.v" --workdir "$D/w1"
+  cp -R "$D/lg" "$D/lg0"
 
   run pass color synth --top "$TOP" --stats \
        --set color.max_gate=40 \
@@ -60,6 +60,7 @@ for entry in "${DESIGNS[@]}"; do
   # cache) key off it. It lives as a JSON blob on the top graph's INPUT_NODE, so
   # it is read back out of the serialized body.
   info_has() { LC_ALL=C grep -raq -- "$1" "$D/lg"; }
+  info_has '"forward":"all"' || fail "$FIX: default forward mode was not all"
   info_has '"synth_alg":"cones"' || fail "$FIX: coloring_info does not record synth_alg=cones"
   info_has '"max_gate":40' || fail "$FIX: coloring_info does not record max_gate"
   # A cones color is first-wins, so an earlier owner can split a later cone into
@@ -85,15 +86,13 @@ done
 # Phase 2, the forward merge across Q. Both modes must reach pass.partition and
 # stay LEC-equivalent. `all` is what the CLI picks when `forward` is omitted --
 # the runs above -- so `false` is spelled out here to keep the off path covered.
-for MODE in false pair all; do
-  forward_args=()
-  [ "$MODE" = all ] || forward_args=(--set "color.forward=$MODE")
+for MODE in false pair; do
   D="$W/fwd_$MODE"
   mkdir -p "$D"
-  run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
-  run compile lg:"$D/lg" --top hier_seq.top --emit verilog:"$D/ref.v" --workdir "$D/w2"
+  cp -R "$W/hier_seq/lg0" "$D/lg"
+  cp "$W/hier_seq/ref.v" "$D/ref.v"
   run pass color synth --top hier_seq.top  --set color.max_gate=40 \
-      ${forward_args[@]+"${forward_args[@]}"} lg:"$D/lg" --workdir "$D/w3"
+      --set "color.forward=$MODE" lg:"$D/lg" --workdir "$D/w3"
   LC_ALL=C grep -raq -- "\"forward\":\"$MODE\"" "$D/lg" || fail "forward=$MODE not recorded in coloring_info"
   run pass partition --top hier_seq.top lg:"$D/lg" --emit-dir lg:"$D/part" --workdir "$D/w4"
   run compile lg:"$D/part" --top hier_seq.top --emit verilog:"$D/post.v" --workdir "$D/w5"
@@ -120,7 +119,7 @@ echo "PASS: unknown forward mode is refused"
 # either way. The stats line counts the whole design.
 D="$W/raw"
 mkdir -p "$D"
-run compile "inou/prp/tests/pyrope/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$D/lg0" --workdir "$D/w1"
+cp -R "$W/hier_seq/lg0" "$D/lg0"
 count_colors() {  # $1 = max_gate
   rm -rf "$D/lg_$1"
   cp -R "$D/lg0" "$D/lg_$1"
@@ -174,16 +173,7 @@ echo "PASS: unknown synth_alg is refused"
 
 echo "PASS: all pass.color cones flows"
 
-# Control duplication uses the same partition/stitch seam in both hier fixtures.
-for FIX in hier_comb hier_seq; do
-  D="$W/ctrl_$FIX"; TOP="$FIX.top"; mkdir -p "$D"
-  run compile "inou/prp/tests/pyrope/$FIX.prp" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
-  run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
-  run pass color synth lg:"$D/lg" --top "$TOP"   --set color.max_gate=40 --workdir "$D/w3"
-  run pass partition lg:"$D/lg" --top "$TOP" --emit-dir lg:"$D/part" --workdir "$D/w4"
-  run compile lg:"$D/part" --top "$TOP" --emit verilog:"$D/post.v" --workdir "$D/w5"
-  run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/lec"
-done
+# The two hierarchy fixtures above already cover the default control policy.
 D="$W/ctrl_shared"; mkdir -p "$D"
 cat > "$D/ref.v" <<'VERILOG'
 module ctrl_shared(input [31:0] a, b, input [7:0] d, e, output [7:0] y, z);
@@ -287,7 +277,6 @@ run pass partition lg:"$D/lg" --top ctrl_normalizer --emit-dir lg:"$D/part" --wo
 run compile lg:"$D/part" --top ctrl_normalizer --emit verilog:"$D/post.v" --workdir "$D/w4"
 run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
 run synth "$D/ref.v" --top ctrl_normalizer --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$D/mapped.v"
-run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --emit verilog:"$D/models.v" --workdir "$D/models-work"
-cat "$D/models.v" >> "$D/mapped.v"
+cat "$W/ctrl_shared/models.v" >> "$D/mapped.v"
 run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
 echo 'PASS: default mux groups preserve normalizer wiring through partition and ABC'

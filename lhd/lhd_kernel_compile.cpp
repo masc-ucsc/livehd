@@ -1639,6 +1639,23 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       }
       auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style);
       if (g) {
+        // tolg REPLACES a body that already exists under this name (delete +
+        // recreate on the stable gid), which tombstones every older handle to
+        // it: a second unit lowering to the same name (duplicate names are
+        // legal upstream, last wins), or a body some earlier step put in `var`.
+        // Eprp_var::add dedups by pointer, so the dead handle would otherwise
+        // ride along and the next walk reads released storage.
+        const auto replaced = [&g](const std::shared_ptr<hhds::Graph>& old) {
+          return old && old != g && old->get_name() == g->get_name();
+        };
+        if (std::erase_if(var.graphs, replaced) != 0) {
+          // The body just lowered is no longer the cached FINAL graph: it must
+          // ride the recipe passes, the latch-contract check and pass.formal
+          // like any fresh graph (graph_pipeline_and_emits exempts every name
+          // still listed as restored, and the store would cache it unoptimized).
+          std::erase(res.compile_cache_restored_graphs, std::string(g->get_name()));
+        }
+        std::erase_if(lowered, replaced);
         var.add(g);
         lowered.push_back(g);
       }

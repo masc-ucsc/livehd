@@ -1,0 +1,19 @@
+/*
+:name: loop_invariant_version
+:type: equiv
+:verilog_top: loop_invariant_version.top
+:pyrope_top: top
+*/
+// An outer value overwritten before a loop is an invariant, not a carry.
+// The loop must read its latest binding, including inside nested loops.
+pub comb top(a:u8) -> (z:u12) {
+  mut value:u8 = 0
+  value = a
+  mut total:u12 = 0
+  for i in 0..<2 {
+    for j in 0..<3 {
+      total = total + value
+    }
+  }
+  z = total
+}

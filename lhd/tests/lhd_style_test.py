@@ -14,26 +14,43 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     root = Path(work)
     serial = 0
 
-    def run(source, *flags, partial=False, min_repeats=3, rule=None):
+    def run_many(sources, *flags, partial=False, min_repeats=3, rule=None):
+        """Analyze independent files together; retain per-file diagnostics/checks."""
         global serial
-        serial += 1
-        path = root / f"case_{serial}.prp"
-        path.write_text(source)
+        paths = []
+        for source in sources:
+            serial += 1
+            path = root / f"case_{serial}.prp"
+            path.write_text(source)
+            paths.append(path)
         threshold = [] if min_repeats is None else ["--min-repeats", str(min_repeats)]
-        proc = subprocess.run([LHD, "pyrope", "style", str(path), "--diag-fmt", "json", *threshold, *flags],
+        proc = subprocess.run([LHD, "pyrope", "style", *map(str, paths), "--diag-fmt", "json", *threshold, *flags],
                               text=True, capture_output=True, timeout=30)
         assert proc.returncode == 0, proc.stderr
-        assert path.read_text() == source, "style must not rewrite input"
-        records = [json.loads(line) for line in proc.stderr.splitlines()]
-        summary = next(r for r in records if r["code"] == "style-summary")
-        assert summary["attrs"]["partial"] == str(partial).lower(), proc.stderr
         codes = {"likely-unrolled-loop", "repeated-code"}
         if rule == "all":
             codes |= {"whole-tuple-copy", "flattened-bundle-arguments", "single-destination-conditional"}
         elif rule:
             codes = {rule}
-        findings = [r for r in records if r["code"] in codes]
-        return findings, records, path
+        results, records = [], []
+        for line in proc.stderr.splitlines():
+            record = json.loads(line)
+            records.append(record)
+            if record["code"] != "style-summary":
+                continue
+            index = len(results)
+            assert index < len(paths), proc.stderr
+            assert record["attrs"]["file"] == str(paths[index]), record
+            assert record["attrs"]["partial"] == str(partial).lower(), records
+            assert paths[index].read_text() == sources[index], "style must not rewrite input"
+            findings = [r for r in records if r["code"] in codes]
+            results.append((findings, records, paths[index]))
+            records = []
+        assert len(results) == len(paths) and not records, proc.stderr
+        return results
+
+    def run(source, *flags, **kwargs):
+        return run_many([source], *flags, **kwargs)[0]
 
     # The default starts reporting at seven copies; smaller explicit thresholds
     # remain supported for the detailed detection fixtures below.
@@ -83,15 +100,18 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
 
     # Distinct module ports cannot become a loop index without changing the IO.
     # Check inputs, outputs, ref arguments, nested bodies, and all lambda kinds.
+    interface_cases = []
     for kind in ("comb", "mod", "pipe[1]", "fluid"):
         timing = "@[0]" if kind == "mod" else ""
         ports = ", ".join(f"io_foo{i}:u8" for i in range(1, 4))
         inputs = "\n".join(f"const lane{i} = io_foo{i} + {i}" for i in range(1, 4))
         outputs = "\n".join(f"io_foo{i} = data#[{i}]" for i in range(1, 4))
-        assert not run(f"{kind} f({ports}) -> () {{\n{inputs}\n}}\n")[0]
+        interface_cases.append(f"{kind} f({ports}) -> () {{\n{inputs}\n}}\n")
         out_ports = ", ".join(f"io_foo{i}:u8{timing}" for i in range(1, 4))
-        assert not run(f"{kind} f(data:u8) -> ({out_ports}) {{\n{outputs}\n}}\n")[0]
-        assert not run(f"{kind} f({ports}) -> () {{\nif true {{\n{inputs}\n}}\n}}\n")[0]
+        interface_cases.append(f"{kind} f(data:u8) -> ({out_ports}) {{\n{outputs}\n}}\n")
+        interface_cases.append(f"{kind} f({ports}) -> () {{\nif true {{\n{inputs}\n}}\n}}\n")
+    for case_source, (findings, _, _) in zip(interface_cases, run_many(interface_cases)):
+        assert not findings, case_source
     ref_ports = ", ".join(f"ref io_foo{i}:u8" for i in range(1, 4))
     assert not run(f"comb f({ref_ports}) -> () {{\n{outputs}\n}}\n")[0]
     assert not run(f"comb outer({ports}) -> () {{\ncomb inner() -> () {{\n{inputs}\n}}\n}}\n")[0]
@@ -144,7 +164,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert len(findings) == 1 and findings[0]["attrs"]["statements_per_copy"] == "2", findings
     assert findings[0]["attrs"]["repetitions"] == "4", findings
 
-    for negative in [
+    negatives = [
         "const a0 = in0 + 1\nconst a1 = in1 - 1\nconst a2 = in2 * 1\n",
         "const a0:u8 = in0\nconst a1:u9 = in1\nconst a2:u10 = in2\n",
         "const a0 = in0\nconst a1 = in1\nconst a2 = in7\n",  # inconsistent stride
@@ -153,8 +173,9 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         "comb f() -> () { out[0] = data[0] }\ncomb g() -> () { out[1] = data[1] }\n"
         "comb h() -> () { out[2] = data[2] }\n",  # no joining across scopes
         "wrap out[0] = data[0]\nsat out[1] = data[1]\nwrap out[2] = data[2]\n",
-    ]:
-        assert not run(negative)[0], negative
+    ]
+    for case_source, (findings, _, _) in zip(negatives, run_many(negatives)):
+        assert not findings, case_source
 
     # Damaged siblings break sequences, but intact scopes still get analyzed.
     broken = source + "comb broken( -> () {\n"
@@ -195,7 +216,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         findings, _, _ = run(body, rule=tuple_rule)
         assert len(findings) == 1, findings
         assert findings[0]["attrs"]["destination"] == dst and findings[0]["attrs"]["source"] == src, findings
-    for body in [
+    negatives = [
         "dst.a = src.a\n",  # only one field
         "dst.a = src.a\ndst.b = src.c\n",  # renamed field
         "dst.a = src.a\ndst.b = other.b\n",  # different producer
@@ -217,8 +238,9 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         "const dst = (const a=src.a, const b=src.b)\n",  # already structured
         "if cond { dst.a = src.a } else { dst.b = src.b }\n",  # separate scopes
         "const dst = src\n",  # already a whole copy
-    ]:
-        assert not run(body, rule=tuple_rule)[0], body
+    ]
+    for case_source, (findings, _, _) in zip(negatives, run_many(negatives, rule=tuple_rule)):
+        assert not findings, case_source
 
     flat_source = "const result = child(\n  `io_in.control.enable`=enabled,\n  `io_out.ready`=ready,\n  `io_in.data`=data)\n"
     findings, _, _ = run(flat_source, rule=argument_rule)
@@ -230,7 +252,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert "callee interface" in by_bundle["io_in"]["hint"], findings
     findings, _, _ = run('child(`io_in.data`=data)\nchild(`io_in.data`=next_data)\n', rule=argument_rule)
     assert len(findings) == 2, findings  # separate calls never merge
-    for body in [
+    negatives = [
         "child(io_in.data=data)\n",  # ordinary dotted argument
         "child(io_in_data=data)\n",
         "child(io_in=bundle)\n",
@@ -241,8 +263,9 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         "child(`a.`=data)\n",
         "child(`.a`=data)\n",
         "const value = (const `io_in.data`=data)\n",  # tuple literal, not call
-    ]:
-        assert not run(body, rule=argument_rule)[0], body
+    ]
+    for case_source, (findings, _, _) in zip(negatives, run_many(negatives, rule=argument_rule)):
+        assert not findings, case_source
 
     conditional_source = "if select {\n out.value = a\n} elif other {\n out.value = b\n} elif last {\n out.value = c\n} else {\n out.value = d\n}\n"
     findings, _, _ = run(conditional_source, "--min-repeats", "100", rule=conditional_rule)
@@ -252,7 +275,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert f["span"]["start_line"] == 1 and f["span"]["end_line"] == 9, f
     assert "branch order" in f["hint"], f
     assert len(run("if select { out = a + 1; } else { /* gap */ out = b - 1; }\n", rule=conditional_rule)[0]) == 1
-    for body in [
+    negatives = [
         "if enabled { out = data }\n",  # enable/hold, not exhaustive
         "if a { out = x } elif b { out = y }\n",
         "if a { out = x } else {}\n",
@@ -273,8 +296,9 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         "if const c = a; c { out = x } else { out = y }\n",
         "if a { out = x } elif const c = b; c { out = y } else { out = z }\n",
         "out = if a { x } else { y }\n",  # already an expression
-    ]:
-        assert not run(body, rule=conditional_rule)[0], body
+    ]
+    for case_source, (findings, _, _) in zip(negatives, run_many(negatives, rule=conditional_rule)):
+        assert not findings, case_source
 
     # Intact scopes remain useful beside damaged input. Evidence includes
     # related source locations, and no new rule synthesizes repetition attrs.

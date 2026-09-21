@@ -337,6 +337,14 @@ struct Slang_module_state {
   // port's internalSymbol; body reads AND writes of the port redirect here.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> bundle_out_shadow_;
 
+  // Resolved reader-side leaves of bundle outputs. A writing procedure uses
+  // its accumulator for blocking read-after-write; other drivers use wires.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> bundle_out_resolved_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              bundle_proc_writes_;
+
+  // Cyclic local structs use the same split as scalar nets, per field.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> struct_split_tmp_;
+
   // Provenance: MODULE-LOCAL params (`localparam CNT_MAX = …` at module-body
   // scope) become body-level `comptime const` declarations, and their refs stay
   // symbolic (package_symbol_ref consults this map). Per-module state.
@@ -631,6 +639,7 @@ private:
   // the port name itself for inputs (and reg-bridged outputs, which are
   // erased from bundle_port_info_ before any body access).
   std::string                      bundle_port_body_base(const slang::ast::Symbol& sym);
+  std::string                      bundle_port_read_base(const slang::ast::Symbol& sym);
   // Whole-port value from per-field tuple_gets (mirror read_struct_whole).
   std::string                      read_bundle_port_whole(const slang::ast::ValueSymbol& sym);
   // Whole-port write: slice an already-lowered flat value onto the fields
@@ -648,8 +657,8 @@ private:
   // being one cycle back. Declared before the body (they are read inside it)
   // and updated after it (the update must see the value x settles to).
   absl::flat_hash_map<const slang::ast::ValueSymbol*, std::vector<std::string>> past_chain_;
-  void        declare_past_chains(const slang::ast::Symbol& body);
-  void        emit_past_chain_updates();
+  void                                                                          declare_past_chains(const slang::ast::Symbol& body);
+  void                                                                          emit_past_chain_updates();
   std::string past_ref(const slang::ast::ValueSymbol& sym, int n, slang::SourceRange where);
 
   void lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt);

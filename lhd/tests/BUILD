@@ -187,6 +187,59 @@ sh_test(
     data = ["//lhd"],
 )
 
+sh_test(
+    name = "sim_slot_incremental_smoke",
+    srcs = ["sim_slot_incremental_smoke.sh"],
+    data = ["//lhd"],
+)
+
+# Keep each fixture/backend under the test runtime budget. The Slop leg also
+# checks the backend-independent LEC proof and external Verilator twin.
+_ROUNDTRIP_CASES = [
+    "latch_window",
+    "cache_control",
+    "cache_control_bundle",
+    "array_copy",
+    "bundle_link",
+    "partial_pipeline",
+    "function_accumulate",
+    "packed_bulk_override",
+    "next_state_memory",
+    "data_latch_edges",
+    "gated_latch_pair",
+]
+
+[
+    sh_test(
+        name = "sim_rtl_roundtrip_" + case + "_" + backend,
+        size = "small",
+        srcs = ["sim_rtl_roundtrip.py"],
+        args = ["--case", case, "--backend", backend],
+        data = ["//lhd"],
+    )
+    for case in _ROUNDTRIP_CASES
+    for backend in ["slop", "llvm"]
+]
+
+test_suite(
+    name = "sim_rtl_roundtrip",
+    tests = [
+        "sim_rtl_roundtrip_" + case + "_" + backend
+        for case in _ROUNDTRIP_CASES
+        for backend in ["slop", "llvm"]
+    ],
+)
+
+sh_test(
+    name = "lhd_sim_explicit_clock_edges",
+    size = "small",
+    srcs = ["lhd_sim_explicit_clock_edges.sh"],
+    data = [
+        "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
+        "//lhd",
+    ],
+)
+
 # Unity batching of the small generated simulator TUs: batches are written and
 # linked, the batched build simulates correctly, a warm rebuild is a no-op, and
 # rewriting a batched source rebuilds its batch (the wrapper's depfile tracks
@@ -1498,9 +1551,11 @@ sh_test(
 # latches and return as native flops (name + reset preserved); memories and Sub
 # instances are blackbox boundaries. Each region is sequentially LEC-equivalent
 # (yosys BMC/induction) to its original-logic twin, plus a negative control.
-sh_test(
-    name = "lhd_abc_seq_test",
-    size = "large",
+# One script shares the fixtures; each target selects a distinct regression
+# family so debug runs have bounded latency without dropping any mapping mode.
+[sh_test(
+    name = name,
+    args = [group],
     srcs = ["lhd_abc_seq_test.sh"],
     data = _FLOW_DATA + [
         "abc_async_reset.prp",
@@ -1509,7 +1564,11 @@ sh_test(
         "abc_resetless_sync.prp",
         "//inou/prp:abc_tests",
     ],
-)
+) for name, group in [
+    ("lhd_abc_seq_test", "registers"),
+    ("lhd_abc_qn_test", "qn"),
+    ("lhd_abc_memory_modes_test", "memory"),
+]]
 
 # pass.abc memory=true (explicitly enabled) bit-blast, on the shapes the constant-
 # address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
@@ -2047,24 +2106,32 @@ sh_test(
     data = ["//lhd"],
 )
 
-# sim.tune end to end: an idle-tables design converges to dirty=on within 3 runs,
-# an LFSR converges with zero trials, export/import, pinned knobs, off writes
-# nothing, the --run-only codegen check and direct drv.bin ingest, and the trial
-# lifecycle (exhaustion under auto and on, crash revert, closed trial trees a
-# --run-only refuses, the oracle on a short diverging run, re-setups that keep
-# their attempt, foreign trees). The fixtures run millions of cycles to pass the
-# tuner's 0.2 s quality gate.
-sh_test(
-    name = "sim_tune_profile_test",
-    size = "large",
+# Each independent tuning lifecycle has its own scratch directory and target.
+# Keep real profiling runs above the tuner's 0.2 s quality gate.
+[sh_test(
+    name = "sim_tune_%s_test" % group,
     srcs = ["sim_tune_profile_test.sh"],
+    args = [group],
     data = [
         "//inou/prp:tests/sim/tune_idle_tables.prp",
         "//inou/prp:tests/sim/tune_lfsr.prp",
         "//lhd",
     ],
     tags = ["cpu:4"],
-)
+) for group in [
+    "profile",
+    "lfsr",
+    "pins",
+    "unknown_zero",
+    "stale",
+    "exhaustion",
+    "crash",
+    "edit",
+    "trial_gate",
+    "closed",
+    "divergence",
+    "resetup",
+]]
 
 # sim.tune.* knobs are speed-only: an ICG-gated design must pass with the same
 # per-test end_digest at live_words 256 / 1 / 2 and with dirty gating. At

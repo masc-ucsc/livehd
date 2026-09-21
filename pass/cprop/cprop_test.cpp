@@ -12,6 +12,7 @@
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hlop/dlop.hpp"
+#include "latch_contract.hpp"
 #include "node_util.hpp"
 
 namespace {
@@ -201,6 +202,89 @@ TEST(CpropConstants, ForwardSumMergesNodeInternalDuplicateDriver) {
   ASSERT_FALSE(out_drv.is_invalid());
   ASSERT_TRUE(out_drv.is_const());
   EXPECT_EQ(gu::const_of(out_drv).to_just_i64(), 5);
+}
+
+// `lo = x + 1; hi = lo + 8` with `lo` also a module output: the shared `x + 1`
+// is not absorbed, but its literal still folds into the consumer, so `hi` is
+// `x + 9` (one adder deep) rather than a second adder chained off `lo`.
+TEST(CpropConstants, ForwardSumFoldsLiteralThroughSharedOperand) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_CpropConstants_sum_shared_literal");
+  auto  io     = lib.create_io("sum_shared_literal");
+  io->add_input("x", 1);
+  io->set_bits("x", 8);
+  io->add_output("lo", 2);
+  io->add_output("hi", 3);
+  auto g        = io->create_graph();
+  auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
+  auto x        = g->get_input_pin("x");
+
+  auto inner = gu::create_typed_node(*g, Ntype_op::Sum);  // x + 1
+  x.connect_sink(gu::setup_sink_pid(inner, 0));
+  constant(1).connect_sink(gu::setup_sink_pid(inner, 0));
+  inner.create_driver_pin(0).connect_sink(g->get_output_pin("lo"));
+
+  auto outer = gu::create_typed_node(*g, Ntype_op::Sum);  // inner + 8
+  inner.create_driver_pin(0).connect_sink(gu::setup_sink_pid(outer, 0));
+  constant(8).connect_sink(gu::setup_sink_pid(outer, 0));
+  outer.create_driver_pin(0).connect_sink(g->get_output_pin("hi"));
+
+  Cprop{}.do_trans(g);
+
+  EXPECT_EQ(g->get_output_pin("lo").get_driver_pin(), inner.create_driver_pin(0));
+  auto hi_drv = g->get_output_pin("hi").get_driver_pin();
+  ASSERT_FALSE(hi_drv.is_invalid());
+  ASSERT_FALSE(hi_drv.is_const());
+  auto hi_sum = hi_drv.get_master_node();
+  ASSERT_EQ(gu::type_op_of(hi_sum), Ntype_op::Sum);
+  int  literal  = 0;
+  bool reads_x  = false;
+  int  operands = 0;
+  for (const auto& sink : hi_sum.inp_sorted_pins()) {
+    ++operands;
+    EXPECT_EQ(Ntype::sink_bank(Ntype_op::Sum, sink.get_port_id()), 0u);
+    const auto drv = sink.get_driver_pin();
+    if (drv.is_const()) {
+      literal = static_cast<int>(gu::const_of(drv).to_just_i64());
+    } else {
+      reads_x = drv == x;
+    }
+  }
+  EXPECT_EQ(operands, 2);
+  EXPECT_TRUE(reads_x);
+  EXPECT_EQ(literal, 9);
+}
+
+// `if s { q = 1 }` under a separate enable: `s ? 1 : q` over 0/1 values would
+// otherwise become `s | q`. Q must stay a DIRECT Mux arm, the one hold shape
+// the latch contract exempts; through an Or it is a transparent self-update.
+TEST(CpropLatch, HoldArmStaysAMuxArm) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_latch_hold_arm");
+  auto  io     = lib.create_io("latch_hold_arm");
+  for (const auto* name : {"s", "e", "q"}) {
+    if (name[0] == 'q') {
+      io->add_output(name, 3);
+    } else {
+      io->add_input(name, name[0] == 's' ? 1 : 2);
+    }
+    io->set_bits(name, 1);
+    io->set_unsign(name, true);
+  }
+  auto g     = io->create_graph();
+  auto latch = gu::create_typed_node(*g, Ntype_op::Latch);
+  auto q     = latch.create_driver_pin(0);
+  gu::set_ubits(q, 1);  // the declared `reg q:u1`
+  auto hold = gu::create_typed_node(*g, Ntype_op::Mux);
+  g->get_input_pin("s").connect_sink(gu::setup_sink_pid(hold, 0));
+  q.connect_sink(gu::setup_sink_pid(hold, 1));
+  gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(hold, 2));
+  gu::setup_sink_by_name(latch, "din").connect_driver(hold.create_driver_pin(0));
+  gu::setup_sink_by_name(latch, "enable").connect_driver(g->get_input_pin("e"));
+  q.connect_sink(g->get_output_pin("q"));
+  optimize_state(g);
+  ASSERT_FALSE(latch.is_invalid());
+  EXPECT_TRUE(livehd::latch_contract::check(g.get()));
 }
 
 TEST(CpropLatch, DeepFeedbackIsNotMistakenForIndependence) {

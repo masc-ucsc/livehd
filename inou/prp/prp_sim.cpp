@@ -2024,7 +2024,11 @@ private:
           }
           const Val a = eval(ts_node_named_child(args, 0));
           const Val s = to_slop(a);
-          return slop_val("(" + at_width(s, w) + ")", w);
+          // First wrap to W bits, then retain a zero sign bit in the value
+          // plane. Slop<W> alone interprets an unsigned cast's top bit as a
+          // sign: u1(true) compared unequal to a DUT output containing 1,
+          // and u8(255) became -1 in comparisons and arithmetic.
+          return slop_val("(" + at_width(s, w) + ").zext_to<" + std::to_string(w + 1) + ">()", w + 1);
         }
       }
     }

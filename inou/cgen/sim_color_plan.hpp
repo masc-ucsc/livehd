@@ -75,7 +75,8 @@ public:
 
   struct Site {
     std::string           structural_id;
-    std::string           storage_id;  // occurrence-unique ABI identity; excluded from kernel reuse
+    std::string           schedule_id;  // topology-only ordering; excludes operation and literal contents
+    std::string           storage_id;   // occurrence-unique ABI identity; excluded from kernel reuse
     Site_kind             kind = Site_kind::data;
     hhds::Occurrence_node node;
     uint64_t              gate_equivalents = 0;
@@ -109,14 +110,17 @@ public:
     State_version  version         = State_version::pre_rise;
     Execution_slot slot            = Execution_slot::pre_rise_eval;
     Version_role   role            = Version_role::data;
+    bool           latch_settle    = false;  // level-sensitive update at an evaluation barrier
+    bool           latch_input     = false;  // guarded value version; distinct from the settled observer
     uint64_t       execution_order = 0;
   };
   // The edge a state update COMMITS on. A rise-only design evaluates its flop
   // captures in pre-rise-eval (fused with their input cones), but they still
   // commit at the rise barrier.
   [[nodiscard]] static Execution_slot commit_slot_of(const Version_site& v) noexcept {
-    return v.role == Version_role::state_update && v.slot == Execution_slot::pre_rise_eval ? Execution_slot::rise_commit
-                                                                                         : v.slot;
+    return v.role == Version_role::state_update && !v.latch_settle && v.slot == Execution_slot::pre_rise_eval
+               ? Execution_slot::rise_commit
+               : v.slot;
   }
 
   struct Version_dependency {
@@ -180,6 +184,7 @@ public:
 
   struct Color {
     std::string         structural_id;
+    std::string         storage_id;  // terminal topology; activation allocation, never a kernel cache key
     Execution_slot      slot = Execution_slot::pre_rise_eval;
     std::vector<size_t> members;
     uint64_t            gate_equivalents = 0;
@@ -411,7 +416,7 @@ private:
   std::shared_ptr<Policy> discovery_policy_;
 
   // Cache for colors_in_execution_order(); built on first use.
-  mutable std::vector<size_t>        colors_in_execution_order_;
+  mutable std::vector<size_t> colors_in_execution_order_;
 
   std::vector<hhds::Occurrence_node> outer_nodes_;
   std::vector<Site>                  sites_;

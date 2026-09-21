@@ -3,7 +3,7 @@ typedef struct packed {
 } deferred_cfg_t;
 
 typedef struct packed {
-  logic [7:0] data;
+  logic [1:0] data;
   logic       valid;
 } deferred_lane_t;
 
@@ -14,11 +14,11 @@ module deferred_cva6_forms (
   input  logic [0:0]  row_i,
   input  logic [0:0]  lane_i,
   input  logic [1:0]  event_i,
-  input  logic [7:0]  data_i,
-  output logic [7:0]  data_o,
+  input  logic [1:0]  data_i,
+  output logic [1:0]  data_o,
   output logic        valid_o,
   output logic        inside_o,
-  output logic [31:0] power_o,
+  output logic [7:0] power_o,
   output logic        event_o
 );
   localparam deferred_cfg_t Cfg = '{nr_rules: 3};
@@ -30,7 +30,7 @@ module deferred_cva6_forms (
   logic events[3:1];
 
   function automatic logic inside_rules(deferred_cfg_t cfg, logic [1:0] address);
-    logic [7:0] pass;
+    logic [3:0] pass;
     pass = '0;
     for (int unsigned k = 0; k < cfg.nr_rules; k++) begin
       pass[k] = address == k;
@@ -38,7 +38,7 @@ module deferred_cva6_forms (
     return |pass;
   endfunction
 
-  function automatic logic [31:0] add_power(deferred_cfg_t cfg, logic [31:0] value);
+  function automatic logic [7:0] add_power(deferred_cfg_t cfg, logic [7:0] value);
     return value + 2 ** cfg.nr_rules;
   endfunction
 

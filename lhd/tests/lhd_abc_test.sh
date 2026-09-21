@@ -84,14 +84,12 @@ for kind in pyrope ln lnast-dump sim isabelle lean; do
 done
 
 # 4. partition the SAME regions, keeping the original logic (the LEC twin)
-run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
+run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --emit-dir verilog:"$W/rev" --workdir "$W/w4"
 # 5. behavioral model per combinational cell so the netlist Subs resolve for LEC
-run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
+run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w5"
 
 # 6. emit Verilog: impl = netlist modules + cell models ; ref = original logic
 run compile lg:"$W/net" --top "$TOP" --emit-dir verilog:"$W/netv" --workdir "$W/w6"
-run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w7"
-run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w8"
 
 # Direct pass emission and a separate compile of the mapped library agree.
 for f in "$W/netv/"*.v; do
@@ -107,12 +105,15 @@ cat "$W/rev/"*.v > "$W/ref.v"
 # 7. LEC: the tech-mapped netlist must equal the original logic
 run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
-# 8. negative control: a corrupted reference MUST fail the equivalence check
+# 8. A corrupted reference MUST refute. Witness replay is covered separately;
+# this check needs the solver verdict, not a host build of the replay driver.
 sed 's/\^/\&/g' "$W/ref.v" > "$W/ref_bad.v"
 if "$LHD" lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
-    --workdir "$W/wcn" -q --result-json "$W/rn.json" 2>/dev/null; then
+    --set formal.simfail_run=false --workdir "$W/wcn" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "negative control passed LEC against a corrupted reference (the check is not sound)"
 fi
+
+grep -q '"verdict":"refuted"' "$W/rn.json" || fail "corrupted reference did not produce a refutation"
 
 echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative control)"
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <string>
 #include <vector>
 
@@ -19,7 +20,47 @@ using cvc5::Term;
 using livehd::lec::Val;
 namespace gu = livehd::graph_util;
 
+hhds::Pin_class sub_body_driver(const hhds::Pin_class& sub_output) {
+  const auto inst = sub_output.get_master_node();
+  if (gu::type_op_of(inst) != Ntype_op::Sub || inst.is_loop_subnode()) {
+    return {};
+  }
+  const auto def = inst.get_subnode_graph();
+  const auto io  = inst.get_subnode_io();
+  if (def == nullptr || io == nullptr) {
+    return {};
+  }
+  for (const auto& d : io->get_output_pin_decls()) {
+    if (io->get_output_port_id(d.name) == sub_output.get_port_id()) {
+      const auto out = def->get_output_pin(d.name);
+      return out.is_invalid() ? hhds::Pin_class{} : out.get_driver_pin();
+    }
+  }
+  return {};
+}
+
+hhds::Pin_class sub_input_driver(const hhds::Node_class& inst, const hhds::Pin_class& def_input) {
+  const auto io   = inst.get_subnode_io();
+  const auto name = def_input.get_pin_name();
+  if (io == nullptr || name.empty()) {
+    return {};
+  }
+  for (const auto& d : io->get_input_pin_decls()) {
+    if (d.name != name) {
+      continue;
+    }
+    const auto pid = io->get_input_port_id(d.name);
+    for (const auto& sink : inst.inp_sorted_pins()) {
+      if (sink.get_port_id() == pid) {
+        return sink.get_driver_pin();
+      }
+    }
+  }
+  return {};
+}
+
 Prover::Prover(hhds::Graph* g, const Prove_options& opts) : g_(g), opts_(opts) {
+  scopes_.push_back({g_, 0, {}, "", 0});
   // Pre-seed primary inputs from the IO decls (O(#ports), not a whole-graph walk):
   // each gets one fresh free symbol, shared by every later query. This is the only
   // eager step; flops/memory are still cut lazily inside each property cone.
@@ -35,9 +76,53 @@ Prover::Prover(hhds::Graph* g, const Prove_options& opts) : g_(g), opts_(opts) {
     }
     bool sgn                      = !gio->is_unsign(d.name);
     Term t                        = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), std::string(d.name));
-    memo_[dpin.get_class_index()] = Val{t, w, sgn};
+    memo_[{0, dpin.get_class_index()}] = Val{t, w, sgn};
     inputs_.emplace_back(std::string(d.name), t);
   }
+}
+
+std::optional<uint32_t> Prover::child_scope(uint32_t scope, const hhds::Node_class& inst) {
+  const Key key{scope, inst.get_class_index()};
+  if (auto it = child_scopes_.find(key); it != child_scopes_.end()) {
+    return it->second;
+  }
+  if (scopes_[scope].depth >= 32) {  // no real hierarchy nests deeper; a cyclic one must stop
+    return std::nullopt;
+  }
+  const auto id = static_cast<uint32_t>(scopes_.size());
+  scopes_.push_back({inst.get_subnode_graph().get(),
+                     scope,
+                     inst,
+                     std::format("{}{}.", scopes_[scope].prefix, static_cast<uint64_t>(inst.get_debug_nid())),
+                     scopes_[scope].depth + 1});
+  child_scopes_.emplace(key, id);
+  return id;
+}
+
+std::optional<std::pair<uint32_t, hhds::Pin_class>> Prover::cross(uint32_t scope, const hhds::Pin_class& pin) {
+  if (!opts_.descend_subs) {
+    return std::nullopt;
+  }
+  if (gu::is_graph_input_pin(pin)) {
+    if (scope == 0) {
+      return std::nullopt;
+    }
+    const auto& here   = scopes_[scope];
+    const auto  driver = sub_input_driver(here.inst, pin);
+    if (driver.is_invalid()) {
+      return std::nullopt;
+    }
+    return std::pair{here.parent, driver};
+  }
+  const auto driver = sub_body_driver(pin);
+  if (driver.is_invalid()) {
+    return std::nullopt;
+  }
+  const auto child = child_scope(scope, pin.get_master_node());
+  if (!child) {
+    return std::nullopt;
+  }
+  return std::pair{*child, driver};
 }
 
 Term Prover::bv_const(int width, uint64_t val) {
@@ -56,7 +141,7 @@ Term Prover::bv_extract(const Term& t, int hi, int lo) {
 Term Prover::pred_to_bv(const Term& b) { return tm_.mkTerm(Kind::ITE, {b, bv_const(1, 1), bv_const(1, 0)}); }
 
 // ---- Demand-driven cone walk (no term building): count + classify the cone.
-void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Class_index>& seen, int& n, bool& stateful,
+void Prover::cone_walk(uint32_t scope, const hhds::Pin_class& pin, absl::flat_hash_set<Key>& seen, int& n, bool& stateful,
                        bool& unsupported) {
   if (pin.is_invalid()) {
     unsupported = true;
@@ -66,12 +151,18 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     unsupported |= opts_.reject_unknown_constants && gu::const_of(pin).has_unknowns();
     return;  // constants are leaves, resolved on demand
   }
-  auto ci = pin.get_class_index();
-  if (!seen.insert(ci).second) {
+  if (!seen.insert({scope, pin.get_class_index()}).second) {
     return;  // already counted (sharing collapses here)
   }
   ++n;
   if (gu::is_graph_input_pin(pin)) {
+    if (scope != 0) {  // a definition input: continue at the instance's driver
+      if (auto up = cross(scope, pin)) {
+        cone_walk(up->first, up->second, seen, n, stateful, unsupported);
+      } else {
+        unsupported = true;
+      }
+    }
     return;  // primary input leaf
   }
   auto node = pin.get_master_node();
@@ -85,21 +176,39 @@ void Prover::cone_walk(const hhds::Pin_class& pin, absl::flat_hash_set<hhds::Cla
     unsupported |= !opts_.memory_as_symbols;  // synthesis can use a free-word cut
     return;
   }
-  if (op == Ntype_op::Sub || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+  if (op == Ntype_op::Sub) {
+    if (auto down = cross(scope, pin)) {
+      cone_walk(down->first, down->second, seen, n, stateful, unsupported);
+    } else {
+      unsupported = true;
+    }
+    return;
+  }
+  if (op == Ntype_op::Fflop || op == Ntype_op::Latch) {
     unsupported = true;
     return;
   }
   for (const auto& in_pin : node.inp_sorted_pins()) {
     const auto in_drv = in_pin.get_driver_pin();
-    cone_walk(in_drv, seen, n, stateful, unsupported);
+    cone_walk(scope, in_drv, seen, n, stateful, unsupported);
   }
 }
 
 int Prover::cone_info(const hhds::Pin_class& pin, bool& stateful, bool& unsupported) {
-  absl::flat_hash_set<hhds::Class_index> seen;
-  int                                    n = 0;
-  cone_walk(pin, seen, n, stateful, unsupported);
+  absl::flat_hash_set<Key> seen;
+  int                      n = 0;
+  cone_walk(0, pin, seen, n, stateful, unsupported);
   return n;
+}
+
+std::vector<hhds::Graph*> Prover::descended() const {
+  std::vector<hhds::Graph*> out;
+  for (size_t i = 1; i < scopes_.size(); ++i) {
+    if (std::find(out.begin(), out.end(), scopes_[i].graph) == out.end()) {
+      out.push_back(scopes_[i].graph);
+    }
+  }
+  return out;
 }
 
 bool Prover::stateful_cone(const hhds::Pin_class& cond) {
@@ -109,7 +218,7 @@ bool Prover::stateful_cone(const hhds::Pin_class& cond) {
 }
 
 // ---- Demand-driven cone encode: dpin -> Val, memoized; nullopt if unsupported.
-std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
+std::optional<Val> Prover::val_of(uint32_t scope, const hhds::Pin_class& dpin) {
   if (dpin.is_invalid()) {
     enc_unsupported_ = true;
     return std::nullopt;
@@ -141,9 +250,27 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     return Val{t, width, sgn};
   }
 
-  auto ci = dpin.get_class_index();
+  const Key ci{scope, dpin.get_class_index()};
   if (auto it = memo_.find(ci); it != memo_.end()) {
     return it->second;
+  }
+
+  // A definition input or a descendable Sub output: the value is whatever
+  // drives it on the other side of the instance boundary.
+  if ((scope != 0 && gu::is_graph_input_pin(dpin))
+      || (!gu::is_graph_input_pin(dpin) && gu::type_op_of(dpin.get_master_node()) == Ntype_op::Sub)) {
+    const auto other = cross(scope, dpin);
+    if (!other || on_stack_.contains(ci)) {
+      enc_unsupported_ = true;
+      return std::nullopt;
+    }
+    on_stack_.insert(ci);
+    auto v = val_of(other->first, other->second);
+    on_stack_.erase(ci);
+    if (v) {
+      memo_[ci] = *v;
+    }
+    return v;
   }
 
   if (gu::is_graph_input_pin(dpin)) {
@@ -173,7 +300,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     }
     bool sgn       = !gu::is_unsign(dpin);
     enc_stateful_  = true;
-    std::string nm = lec::flop_state_key(*g_, node);
+    std::string nm = scopes_[scope].prefix + lec::flop_state_key(*scopes_[scope].graph, node);
     Term        t  = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), nm);
     Val         v{t, w, sgn};
     memo_[ci] = v;
@@ -181,7 +308,8 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
   }
   if (op == Ntype_op::Memory && opts_.memory_as_symbols) {
     const int w    = std::max(1, gu::real_width(dpin));
-    auto      term = tm_.mkConst(tm_.mkBitVectorSort(w), std::format("memory_{}_{}", node.get_debug_nid(), dpin.get_port_id()));
+    auto      term = tm_.mkConst(tm_.mkBitVectorSort(w),
+                                 std::format("{}memory_{}_{}", scopes_[scope].prefix, node.get_debug_nid(), dpin.get_port_id()));
     Val       value{term, w, !gu::is_unsign(dpin)};
     memo_[ci]     = value;
     enc_stateful_ = true;
@@ -202,7 +330,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     return std::nullopt;
   }
   on_stack_.insert(ci);
-  auto r = encode_comb(node, dpin);
+  auto r = encode_comb(scope, node, dpin);
   on_stack_.erase(ci);
   if (r) {
     memo_[ci] = *r;
@@ -210,7 +338,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
   return r;
 }
 
-std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds::Pin_class& dpin) {
+std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& node, const hhds::Pin_class& dpin) {
   auto op = gu::type_op_of(node);
   int  W  = gu::real_width(dpin);
   if (W == 0) {
@@ -222,7 +350,7 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
   std::vector<Val>                                     all;
   for (const auto& in_pin : node.inp_sorted_pins()) {
     const auto in_drv = in_pin.get_driver_pin();
-    auto       v      = val_of(in_drv);
+    auto       v      = val_of(scope, in_drv);
     if (!v) {
       return std::nullopt;
     }
@@ -745,11 +873,11 @@ Query_out Prover::is_false(const hhds::Pin_class& cond) {
 }
 
 Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
-  absl::flat_hash_set<hhds::Class_index> seen;
+  absl::flat_hash_set<Key> seen;
   int                                    n  = 0;
   bool                                   st = false, unsup = false;
-  cone_walk(a, seen, n, st, unsup);
-  cone_walk(b, seen, n, st, unsup);
+  cone_walk(0, a, seen, n, st, unsup);
+  cone_walk(0, b, seen, n, st, unsup);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
     return {Verdict::Unknown, st, ""};
   }
@@ -771,13 +899,13 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
 
 Query_out Prover::address_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
                                    bool equal, int address_bits) {
-  absl::flat_hash_set<hhds::Class_index> seen;
+  absl::flat_hash_set<Key> seen;
   int                                    nodes    = 0;
   bool                                   stateful = false, unsupported = false;
-  cone_walk(a, seen, nodes, stateful, unsupported);
-  cone_walk(b, seen, nodes, stateful, unsupported);
+  cone_walk(0, a, seen, nodes, stateful, unsupported);
+  cone_walk(0, b, seen, nodes, stateful, unsupported);
   for (const auto& enable : enables) {
-    cone_walk(enable, seen, nodes, stateful, unsupported);
+    cone_walk(0, enable, seen, nodes, stateful, unsupported);
   }
   if (unsupported || (opts_.cone_max > 0 && nodes > opts_.cone_max)) {
     return {Verdict::Unknown, stateful, {}};
@@ -828,9 +956,9 @@ Query_out Prover::constant_bit(const hhds::Pin_class& pin, int bit, bool value) 
 Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {
   bool                                   st = false, unsup = false;
   int                                    n = 0;
-  absl::flat_hash_set<hhds::Class_index> seen_pins;
+  absl::flat_hash_set<Key> seen_pins;
   for (const auto& control : controls) {
-    cone_walk(control, seen_pins, n, st, unsup);
+    cone_walk(0, control, seen_pins, n, st, unsup);
   }
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
     return {Verdict::Unknown, st, ""};

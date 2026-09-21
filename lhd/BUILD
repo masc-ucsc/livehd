@@ -224,3 +224,19 @@ cc_binary(
         "@tree_sitter_pyrope//:prpfmt",
     ],
 )
+
+# Validate the full retired-option matrix without a process per spelling.
+cc_test(
+    name = "lhd_options_test",
+    srcs = [
+        "lhd_options_test.cpp",
+        "lhd_kernel_internal.hpp",
+    ],
+    copts = COPTS,
+    linkopts = ["-lz"],
+    deps = [
+        ":lhd_lib",
+        "//pass/common:pass",
+        "@googletest//:gtest_main",
+    ],
+)

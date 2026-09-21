@@ -583,7 +583,15 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     auto ln = var.lnasts.at(idx);
     function_registry.ensure(var.lnasts);  // folds in any newly-appended lnasts
-    if (ln->is_template() && ln->get_top_module_name() == var.get("default_top")) {
+    // Skip when an IDENTITY specialization of this template already sits in the
+    // queue under the template's own name: a call site minted it (typically in
+    // the kernel's EARLIER pass.upass round -- the default-top round runs last,
+    // after imports converge), and that unit IS the defaulted top. Specializing
+    // again mints a SECOND unit with the same name; tolg then lowers both into
+    // one GraphIO, the second lowering deletes the first graph, and every holder
+    // of the first handle (lowered / Eprp_var::graphs) walks released storage.
+    if (ln->is_template() && ln->get_top_module_name() == var.get("default_top")
+        && !seen_module_names.contains(std::string(ln->get_top_module_name()))) {
       auto         manager = std::make_shared<upass::Lnast_manager>(ln);
       uPass_runner specializer(manager, {}, up.pass_options);
       specializer.set_function_registry(function_registry);
@@ -774,6 +782,13 @@ void Pass_upass::work(Eprp_var& var) {
     for (const auto& ln : var.lnasts) {
       auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts, up.reset_style);
       if (g) {
+        // Same rule as lhd's lower_lnasts: tolg replaces a same-named body and
+        // tombstones the older handle, which must not stay in either list.
+        const auto replaced = [&g](const std::shared_ptr<hhds::Graph>& old) {
+          return old && old != g && old->get_name() == g->get_name();
+        };
+        std::erase_if(var.graphs, replaced);
+        std::erase_if(lowered, replaced);
         var.add(g);
         lowered.push_back(g);
       }

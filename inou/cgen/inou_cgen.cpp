@@ -10,6 +10,7 @@
 #include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
 #include "diag.hpp"  // livehd::diag::err — flag-value validation
+#include "file_name.hpp"
 #include "file_utils.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
@@ -324,15 +325,6 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       }
     }
   }
-  const auto file_stem = [](std::string_view name) {
-    std::string result(name);
-    for (auto& c : result) {
-      if (c == '/' || c == '\\') {
-        c = '_';
-      }
-    }
-    return result;
-  };
   // A compact loop is one outer color whose native ordinal walk currently calls
   // a definition-local body kernel. Marked BEFORE the plan loop because it is a
   // constructor argument of every Cgen_sim, including the cheap probes below —
@@ -445,7 +437,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     // a build input, but regenerating it is exactly what the skip avoids, so a
     // missing one has to count as a miss or `lhd sim` would silently stop
     // producing it.
-    if (root && !dir.empty() && !std::filesystem::exists(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"))) {
+    if (root && !dir.empty() && !std::filesystem::exists(absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-plan.txt"))) {
       continue;
     }
     already_generated.insert(g.get());
@@ -469,7 +461,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       continue;
     }
     auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), llvm, tune.live_words, tune.fence);
-    plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
+    plan.write_report(absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
           .msg("occurrence-wide simulator discovery is incomplete for '{}'", full)

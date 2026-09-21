@@ -49,7 +49,13 @@ memory read data are free symbols. Unproved facts leave the original logic.
 
 Before partitioning, it also proves selectors constant in every region: a
 two-arm Mux select, each Hotmux control and a one-bit Flop enable (e.g.
-`x == x + 1`, which cprop cannot fold). Each proven selector is tied to its
+`x == x + 1`, which cprop cannot fold). cvc5 decides each selector; ABC
+already maps every region, so this proof is not repeated there, and an Unknown
+(a body-less Sub in the cone, a budget-out) leaves the selector alone. The
+proof sees the design virtually flat: it descends into called submodules, each
+instance with its own state, and a compact loop Sub stays opaque. Its cache
+entry records every descended definition, so editing a callee re-proves the
+caller. Each proven selector is tied to its
 constant, a never-selected arm is zeroed, and logic left without a consumer is
 deleted. An always-on Hotmux control keeps the earlier arms and drops the later
 ones and the fallback (first-wins, the reference semantics on an overlap).

@@ -175,6 +175,34 @@ std::pair<int, int> occurrence_packed_footprint_uncached(const hhds::Occurrence_
       }
     }
   }
+  if (op == Ntype_op::Concat) {
+    const auto lanes = gu::concat_lanes(node.base_node());
+    if (!lanes.empty()) {
+      std::pair<int, int> bound{std::numeric_limits<int>::max(), 0};
+      bool                any = false;
+      for (size_t i = 0; i < lanes.size(); ++i) {
+        const auto& lane      = lanes[i];
+        const auto  value     = occurrence_driver_at(node, static_cast<hhds::Port_id>(2 * i));
+        auto        footprint = occurrence_packed_footprint(value, depth + 1, visits, cache, cut);
+        // Each lane truncates its operand to its declared width. An unknown
+        // or signed operand may occupy that entire lane, but never another
+        // lane. In particular, zero padding must not overlap a disjoint Or
+        // field and invent a packed-word feedback cycle (XS Rob).
+        if (footprint.first < 0) {
+          footprint = {0, lane.width};
+        }
+        const int lo = std::min(footprint.first, lane.width);
+        const int hi = std::min(footprint.second, lane.width);
+        if (hi <= lo) {
+          continue;
+        }
+        bound.first  = std::min(bound.first, lane.offset + lo);
+        bound.second = std::max(bound.second, lane.offset + hi);
+        any          = true;
+      }
+      return any ? bound : std::pair<int, int>{0, 0};
+    }
+  }
   if (op == Ntype_op::And) {
     // The result of a bitwise And can be nonzero only where every operand can
     // be nonzero. One positive constant mask is therefore enough to bound a
@@ -837,72 +865,38 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
     seeds.push_back(stable_hash128(site.structural_id));
   }
 
-  const auto classes_of = [](const std::vector<std::array<uint64_t, 2>>& descriptions) {
-    std::vector<size_t> order(descriptions.size());
-    std::vector<size_t> scratch(descriptions.size());
-    std::iota(order.begin(), order.end(), 0);
-    // descriptions are fixed-width hashes. An LSD radix sort retains the
-    // exact unsigned lexicographic ordering used by std::array::operator<,
-    // while avoiding an N log N comparison sort on every refinement round.
-    for (int word = 1; word >= 0; --word) {
-      for (unsigned shift = 0; shift != 64; shift += 8) {
-        std::array<size_t, 256> counts{};
-        for (const size_t index : order) {
-          ++counts[(descriptions[index][word] >> shift) & 0xffU];
-        }
-        size_t position = 0;
-        for (auto& count : counts) {
-          const size_t bucket_size  = count;
-          count                     = position;
-          position                 += bucket_size;
-        }
-        for (const size_t index : order) {
-          scratch[counts[(descriptions[index][word] >> shift) & 0xffU]++] = index;
-        }
-        order.swap(scratch);
-      }
+  // Scheduling fingerprints describe a bounded neighborhood. Global ordinal
+  // class labels are unsuitable here: inserting one unrelated shape renumbers
+  // other classes and invalidates colors across the entire design. Likewise a
+  // design-wide convergence test makes an unrelated deep cone change how many
+  // rounds every site receives. Use full neighbor hashes and a fixed radius.
+  // These are ordering hints, not equivalence certificates: kernel reuse below
+  // still requires equality of the complete canonical serialization and ABI.
+  constexpr size_t                     kNeighborhoodRounds = 2;
+  auto                                 previous            = seeds;
+  auto                                 descriptions        = seeds;
+  std::vector<std::array<uint64_t, 2>> order_seeds;
+  for (const auto& site : sites) {
+    Shape_hash_builder hash;
+    hash.append_u64(static_cast<uint64_t>(site.kind));
+    std::vector<std::tuple<uint64_t, uint64_t, bool>> outputs;
+    for (const auto& pin : site.node.base_node().out_pins()) {
+      outputs.emplace_back(pin.get_port_id(), static_cast<uint64_t>(gu::bits_of(pin)), gu::is_unsign(pin));
     }
-    std::vector<uint32_t> classes(descriptions.size());
-    uint32_t              next_class = 0;
-    for (size_t position = 0; position < order.size(); ++position) {
-      if (position != 0 && descriptions[order[position - 1]] != descriptions[order[position]]) {
-        ++next_class;
-      }
-      classes[order[position]] = next_class;
+    std::ranges::sort(outputs);
+    for (const auto& [port, bits, unsign] : outputs) {
+      hash.append_u64(port);
+      hash.append_u64(bits);
+      hash.append_u64(unsign);
     }
-    return classes;
-  };
-
-  std::vector<uint32_t>                classes      = classes_of(seeds);
-  std::vector<std::array<uint64_t, 2>> descriptions = seeds;
-  const auto same_partition = [](const std::vector<uint32_t>& lhs, const std::vector<uint32_t>& rhs) {
-    I(lhs.size() == rhs.size());
-    if (lhs.empty()) {
-      return true;
-    }
-    const auto            lhs_count = *std::ranges::max_element(lhs) + 1;
-    const auto            rhs_count = *std::ranges::max_element(rhs) + 1;
-    constexpr uint32_t    unmapped  = std::numeric_limits<uint32_t>::max();
-    std::vector<uint32_t> lhs_to_rhs(lhs_count, unmapped);
-    std::vector<uint32_t> rhs_to_lhs(rhs_count, unmapped);
-    for (size_t i = 0; i < lhs.size(); ++i) {
-      auto& mapped_rhs = lhs_to_rhs[lhs[i]];
-      auto& mapped_lhs = rhs_to_lhs[rhs[i]];
-      if ((mapped_rhs != unmapped && mapped_rhs != rhs[i]) || (mapped_lhs != unmapped && mapped_lhs != lhs[i])) {
-        return false;
-      }
-      mapped_rhs = rhs[i];
-      mapped_lhs = lhs[i];
-    }
-    return true;
-  };
-  // Weisfeiler-Lehman-style partition refinement. Port roles and root IO port
-  // ids are structural anchors; raw graph indices and user names never enter.
-  // True automorphisms intentionally remain one symmetry class -- swapping two
-  // indistinguishable anonymous nodes cannot change any reported dependence.
+    order_seeds.push_back(hash.finish());
+  }
+  auto order_previous     = order_seeds;
+  auto order_descriptions = order_seeds;
   struct Neighbor {
-    std::array<uint64_t, 11> fields{};
-    size_t                   site = Color_plan::invalid_index;
+    std::array<uint64_t, 13> fields{};
+    size_t                   site            = Color_plan::invalid_index;
+    bool                     arithmetic_sink = false;
   };
   std::vector<std::vector<Neighbor>> adjacency(sites.size());
   for (size_t i = 0; i < sites.size(); ++i) {
@@ -955,8 +949,9 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
       fields[0]         = 1;
       fields[1]         = edge.driver.get_port_id();
       if (it != occurrence_index.end()) {
-        neighbor.site = it->second;
-        fields[4]     = edge.sink.get_port_id();
+        neighbor.site            = it->second;
+        fields[4]                = edge.sink.get_port_id();
+        neighbor.arithmetic_sink = gu::type_op_of(sites[it->second].node) == Ntype_op::Sum;
       } else if (edge.sink.get_master_node().is_output_node()) {
         fields[2] = 2;
         fields[4] = edge.sink.get_port_id();
@@ -966,16 +961,15 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
       neighbors.push_back(std::move(neighbor));
     }
   }
-  // One round hashes every site's neighbor multiset, reading only the previous
-  // round's classes: the sites are independent, so a large plan splits them
-  // across workers and gets the SAME descriptions. MEASURED on minion (Pyrope):
-  // 202k sites with 12.4M neighbor records, 13 rounds, 6.3 s serial (battery).
+  // Each round reads an immutable previous-round table, so parallel workers
+  // produce exactly the same fingerprints as the serial walk.
   const auto refine_sites = [&](size_t begin, size_t end) {
     for (size_t i = begin; i < end; ++i) {
       auto& neighbors = adjacency[i];
       for (auto& neighbor : neighbors) {
         if (neighbor.site != Color_plan::invalid_index) {
-          neighbor.fields[3] = classes[neighbor.site];
+          neighbor.fields[11] = previous[neighbor.site][0];
+          neighbor.fields[12] = previous[neighbor.site][1];
         }
       }
       Refinement_hash_builder hash;
@@ -987,6 +981,29 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
         }
       });
       descriptions[i] = hash.finish();
+      Refinement_hash_builder order_hash;
+      order_hash.append_u64(order_seeds[i][0]);
+      order_hash.append_u64(order_seeds[i][1]);
+      append_multiset(order_hash, neighbors, [&](auto& term, const auto& neighbor) {
+        // Operation, literal content and arithmetic sink role belong to the
+        // kernel's semantic key, not the physical slot or scheduling order.
+        for (size_t field = 0; field < 11; ++field) {
+          if (field != 1 && field != 6 && field != 9 && field != 10) {
+            // A Sum's add/subtract role appears on BOTH ends of its edge:
+            // incoming field 1 (excluded above) and outgoing field 4. Keeping
+            // the latter reordered the producer's cone after a + -> - edit.
+            const bool arithmetic_role = field == 4 && neighbor.arithmetic_sink;
+            const bool literal_shape
+                = (field == 4 || field == 7 || field == 8) && neighbor.fields[2] == 1 && neighbor.fields[5] == 0;
+            term.append_u64(arithmetic_role || literal_shape ? 0 : neighbor.fields[field]);
+          }
+        }
+        if (neighbor.site != Color_plan::invalid_index) {
+          term.append_u64(order_previous[neighbor.site][0]);
+          term.append_u64(order_previous[neighbor.site][1]);
+        }
+      });
+      order_descriptions[i] = order_hash.finish();
     }
   };
   size_t neighbor_records = 0;
@@ -995,11 +1012,12 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
   }
   constexpr size_t kParallelRecords = size_t{1} << 18;
   constexpr size_t kSitesPerClaim   = 1024;
-  const size_t     workers
-      = neighbor_records < kParallelRecords
-            ? 1
-            : std::min<size_t>({std::max<size_t>(1, std::thread::hardware_concurrency()), 16, (sites.size() + kSitesPerClaim - 1) / kSitesPerClaim});
-  for (size_t round = 0; round < std::min<size_t>(sites.size() + 1, 32); ++round) {
+  const size_t     workers          = neighbor_records < kParallelRecords
+                                          ? 1
+                                          : std::min<size_t>({std::max<size_t>(1, std::thread::hardware_concurrency()),
+                                                              16,
+                                                              (sites.size() + kSitesPerClaim - 1) / kSitesPerClaim});
+  for (size_t round = 0; round < kNeighborhoodRounds; ++round) {
     if (workers <= 1) {
       refine_sites(0, sites.size());
     } else {
@@ -1014,20 +1032,13 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
         }
       });
     }
-    auto next = classes_of(descriptions);
-    // Class numbers follow hash-sort order, so an unchanged partition can
-    // acquire a permutation of its numeric labels from one round to the next.
-    // Comparing the vectors directly then burns every one of the 32 rounds on
-    // an already-stable graph. Convergence is equality of the equivalence
-    // relation: each old class maps to exactly one new class and vice versa.
-    if (same_partition(next, classes)) {
-      break;
-    }
-    classes = std::move(next);
+    previous.swap(descriptions);
+    order_previous.swap(order_descriptions);
   }
 
   for (size_t i = 0; i < sites.size(); ++i) {
-    sites[i].structural_id = format_hash128("s:", descriptions[i]);
+    sites[i].structural_id = format_hash128("s:", previous[i]);
+    sites[i].schedule_id   = format_hash128("p:", order_previous[i]);
   }
 }
 
@@ -1164,11 +1175,19 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
   if (enable.is_known_false()) {
     return std::nullopt;  // permanently held state
   }
+  const bool negative = lc::sink_driver_hier(node, "posclk").is_known_false();
+  if (const auto cone = lc::clock_op_of(enable.base_pin(), clocks)) {
+    if (cone->div != 1) {
+      versioning_complete = false;
+      return std::nullopt;
+    }
+    return cone->clock_inverted != negative;
+  }
   const auto root = lc::control_root(enable);
   if (!root.net.is_invalid() && clocks.is_clock(root.net)) {
-    return root.inverted;  // !clk closes on rise; clk closes on fall
+    return root.inverted != negative;  // !clk closes on rise; clk closes on fall
   }
-  return true;  // data-gated latch: the established end-of-period update slot
+  return std::nullopt;  // data-enabled latches have separate actions in each settling phase
 }
 
 }  // namespace
@@ -1244,8 +1263,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   {
     std::map<std::string, size_t> occurrence_rank;
     for (auto& site : plan.sites_) {
-      const size_t rank = occurrence_rank[site.structural_id]++;
-      site.storage_id   = std::format("{}:o{}", site.structural_id, rank);
+      const size_t rank = occurrence_rank[site.schedule_id]++;
+      site.storage_id   = std::format("{}:o{}", site.schedule_id, rank);
     }
   }
   absl::flat_hash_set<hhds::Definition_index>                                  compact_steps;
@@ -1544,11 +1563,212 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // kernel rather than leaking into this occurrence-wide DAG.
   plan.summary_.versioning_complete = true;
   const lc::Design_clocks clocks(root, /*hier=*/true);
+  // Data-enabled latches settle with their cones before and after each edge.
+  // Clock-window latches retain their explicit closing-edge/storage protocol.
+  std::vector<bool>       latch_settle(plan.sites_.size(), false);
+  for (size_t base = 0; base < plan.sites_.size(); ++base) {
+    if (gu::type_op_of(plan.sites_[base].node) != Ntype_op::Latch) {
+      continue;
+    }
+    const auto enable  = lc::sink_driver_hier(plan.sites_[base].node, "enable");
+    const auto gate    = lc::control_root(enable);
+    // A clock-qualified data enable still has a clock window. In particular,
+    // opposite-phase gated latches may legally feed each other; treating both
+    // as simultaneously transparent invents a combinational cycle.
+    latch_settle[base] = gate.net.is_invalid() || !clocks.is_clock(gate.net);
+  }
+  // A latch-input cone is observed only while its destination is
+  // open. Read persistent Q from an opposite-phase source when the two gates
+  // cannot be active together under that cone's mux guards. This includes
+  // gated clocks: their level can be unknown in a phase while the low/high
+  // windows are still mutually exclusive. Shared cones retain settled reads.
+  //
+  // Small bounded DNF formulas prove exclusivity. Unsupported expressions and
+  // expansions beyond the bound remain opaque atoms, so they can only lose a
+  // proof, never manufacture one. State outputs are always opaque.
+  using Gate_literal          = std::pair<hhds::Occurrence_pin, bool>;
+  using Gate_cube             = std::vector<Gate_literal>;
+  using Gate_formula          = std::vector<Gate_cube>;
+  constexpr size_t gate_limit = 32;
+  const auto       gate_and   = [&](const Gate_formula& a, const Gate_formula& b) -> std::optional<Gate_formula> {
+    Gate_formula result;
+    for (const auto& left : a) {
+      for (const auto& right : b) {
+        auto cube       = left;
+        bool impossible = false;
+        for (const auto& term : right) {
+          const auto found = std::ranges::find(cube, term.first, &Gate_literal::first);
+          if (found != cube.end()) {
+            if (found->second != term.second) {
+              impossible = true;
+              break;
+            }
+          } else {
+            cube.push_back(term);
+          }
+        }
+        if (!impossible) {
+          if (cube.size() > gate_limit || result.size() == gate_limit) {
+            return std::nullopt;
+          }
+          result.push_back(std::move(cube));
+        }
+      }
+    }
+    return result;
+  };
+  std::array<absl::flat_hash_map<hhds::Occurrence_pin, Gate_formula>, 2> gate_formulas;
+  std::function<Gate_formula(hhds::Occurrence_pin, bool, unsigned)>      gate_formula;
+  gate_formula = [&](hhds::Occurrence_pin pin, bool positive, unsigned depth) -> Gate_formula {
+    if (pin.is_invalid()) {
+      return {{}};  // no information
+    }
+    if (pin.is_const()) {
+      if (pin.is_known_true()) {
+        return positive ? Gate_formula{{}} : Gate_formula{};
+      }
+      if (pin.is_known_false()) {
+        return positive ? Gate_formula{} : Gate_formula{{}};
+      }
+      return {{}};  // unknown constants cannot prove a gate closed
+    }
+    if (const auto found = gate_formulas[positive].find(pin); found != gate_formulas[positive].end()) {
+      return found->second;
+    }
+    const auto original          = pin;
+    const bool original_positive = positive;
+    if (gu::bits_of(pin) == 1) {
+      const auto control = lc::control_root(pin, /*stop_at_clock_cell=*/true);
+      if (!control.net.is_invalid() && gu::bits_of(control.net) == 1) {
+        pin      = control.net;
+        positive = positive != control.inverted;
+      }
+    }
+    const Gate_formula opaque{{{pin, positive}}};
+    gate_formulas[original_positive].emplace(original, opaque);  // cycle guard
+    if (depth == 16 || gu::bits_of(pin) != 1) {
+      return opaque;
+    }
+    const auto node = pin.get_master_node();
+    const auto op   = gu::type_op_of(node);
+    if (op != Ntype_op::And && op != Ntype_op::Or) {
+      return opaque;
+    }
+    const bool   conjunction = positive == (op == Ntype_op::And);
+    Gate_formula result      = conjunction ? Gate_formula{{}} : Gate_formula{};
+    for (const auto& input : gu::inp_sink_drivers(node)) {
+      if (!input.driver.is_const() && gu::bits_of(input.driver) != 1) {
+        return opaque;
+      }
+      const auto operand = gate_formula(input.driver, positive, depth + 1);
+      if (conjunction) {
+        const auto product = gate_and(result, operand);
+        if (!product) {
+          return opaque;
+        }
+        result = *product;
+      } else {
+        if (result.size() + operand.size() > gate_limit) {
+          return opaque;
+        }
+        result.insert(result.end(), operand.begin(), operand.end());
+      }
+    }
+    gate_formulas[original_positive][original] = result;
+    return result;
+  };
+  std::vector<Gate_formula> latch_open_terms(plan.sites_.size());
+  for (size_t base = 0; base < plan.sites_.size(); ++base) {
+    if (latch_settle[base]) {
+      latch_open_terms[base] = gate_formula(lc::sink_driver_hier(plan.sites_[base].node, "enable"),
+                                            !lc::sink_driver_hier(plan.sites_[base].node, "posclk").is_known_false(),
+                                            0);
+    }
+  }
+  const auto closed_during = [&](size_t source, const Gate_formula& demand) {
+    if (!latch_settle[source] || !lc::sink_driver_hier(plan.sites_[source].node, "reset_pin").is_invalid()) {
+      return false;  // an independent reset may change even a closed source
+    }
+    const auto overlap = gate_and(latch_open_terms[source], demand);
+    return overlap && overlap->empty();
+  };
+  // A private mux arm that feeds a latch's own D can represent retained Q,
+  // rather than transparent feedback (the same exemption as latch legality).
+  // Read persistent storage on that arm. Do not cut shared cones: another
+  // observer may require the phase's newly settled value there.
+  std::set<std::tuple<size_t, size_t, hhds::Port_id>> latch_hold_inputs;
+  for (size_t base = 0; base < plan.sites_.size(); ++base) {
+    if (!latch_settle[base]) {
+      continue;
+    }
+    std::vector<hhds::Occurrence_pin>           hold_walk{lc::sink_driver_hier(plan.sites_[base].node, "din")};
+    absl::flat_hash_set<hhds::Occurrence_index> seen;
+    while (!hold_walk.empty()) {
+      const auto pin = hold_walk.back();
+      hold_walk.pop_back();
+      if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
+        continue;
+      }
+      const auto node  = pin.get_master_node();
+      const auto found = index.find(node.get_occurrence_index());
+      if (found == index.end() || plan.sites_[found->second].kind != Site_kind::data
+          || !seen.insert(node.get_occurrence_index()).second) {
+        continue;
+      }
+      const auto uses = pin.base_pin().out_edges();
+      auto       use  = uses.begin();
+      if (use == uses.end() || ++use != uses.end()) {
+        continue;
+      }
+      const auto op          = gu::type_op_of(node);
+      const auto control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(node.base_node()) : 0;
+      for (const auto& sink : node.inp_sorted_pins()) {
+        const auto port = sink.get_port_id();
+        const bool data_arm
+            = (op == Ntype_op::Mux && port != 0) || (op == Ntype_op::Hotmux && !gu::is_hotmux_control(port, control_end));
+        for (const auto& driver : sink.get_driver_pins()) {
+          if (data_arm && driver.get_master_node().get_occurrence_index() == plan.sites_[base].node.get_occurrence_index()) {
+            latch_hold_inputs.emplace(base, found->second, port);
+          } else {
+            hold_walk.push_back(driver);
+          }
+        }
+      }
+    }
+  }
   using Version_key = std::tuple<size_t, State_version, Version_role, hhds::Port_id>;
   std::map<Version_key, size_t>    version_index;
   std::vector<std::vector<size_t>> versions_by_base(plan.sites_.size());
   std::queue<size_t>               version_pending;
-  auto ensure_version = [&](size_t base, State_version version, Version_role role, Execution_slot slot, hhds::Port_id output_port) {
+  auto                             ensure_version = [&](size_t         base,
+                                                        State_version  version,
+                                                        Version_role   role,
+                                                        Execution_slot slot,
+                                                        hhds::Port_id  output_port,
+                                                        bool           held_read = false) {
+    // A latch's closing-edge update preserves its held value, but Q is D
+    // while the window is open. In particular, publishing only the held Q
+    // after the fall delays a low-transparent latch by a whole cycle when
+    // its input was launched at the rise. Give open-window reads ordinary
+    // data dependencies at the requested phase, just like a wire.
+    if (role == Version_role::state_read && latch_settle[base] && !held_read) {
+      role = Version_role::state_update;
+    }
+    if (role == Version_role::state_update && latch_settle[base]) {
+      slot = version == State_version::pre_rise    ? Execution_slot::pre_rise_eval
+             : version == State_version::post_rise ? Execution_slot::post_rise_eval
+                                                   : Execution_slot::post_fall_publish;
+    }
+    if (role == Version_role::state_read && gu::type_op_of(plan.sites_[base].node) == Ntype_op::Latch) {
+      const auto enable = lc::sink_driver_hier(plan.sites_[base].node, "enable");
+      const auto gate   = lc::control_root(enable);
+      // With multiple input clocks the slot alone does not determine this
+      // net's level; its secondary-clock protocol must retain the held read.
+      if (clocks.n_clock_inputs() == 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net) && clocks.is_clock(gate.net)
+          && gate.inverted == (version != State_version::post_rise)) {
+        role = Version_role::data;
+      }
+    }
     const Version_key key{base, version, role, output_port};
     if (const auto it = version_index.find(key); it != version_index.end()) {
       return it->second;
@@ -1558,6 +1778,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     site.output_port    = output_port;
     site.version        = version;
     site.role           = role;
+    site.latch_settle   = latch_settle[base] && role == Version_role::state_update;
     site.slot           = slot;
     site.structural_id  = stable_id(plan.sites_[base].structural_id + ":" + std::string(state_version_name(version)) + ":"
                                     + std::string(version_role_name(role)) + ":p" + std::to_string(output_port));
@@ -1704,8 +1925,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     bool          top_input     = false;
     std::string   literal;
   };
-  std::vector<Input_use>    input_uses;
-  livehd::port_reach::Cache port_reach;
+  std::vector<Input_use>                                         input_uses;
+  livehd::port_reach::Cache                                      port_reach;
   // Top-level occurrence_packed_footprint results, per discover. The packed-Or
   // refinement below footprints EVERY operand of a packed word once per slice
   // read of that word, and each footprint re-walks up to 4096 pins of the
@@ -1726,15 +1947,127 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     packed_footprint_memo.emplace(pin, footprint);
     return footprint;
   };
+  // Specialize Boolean clock cones to this settling phase. A closed latch
+  // cannot depend on the unselected data arm; retaining that edge invents a
+  // transparent cycle through otherwise legal opposite-phase latch pairs.
+  const bool phase_specialization = std::ranges::any_of(latch_settle, [](bool settle) { return settle; });
+  std::array<absl::flat_hash_map<hhds::Occurrence_pin, std::optional<bool>>, 2> phase_constants;
+  std::function<std::optional<bool>(hhds::Occurrence_pin, bool)>                phase_boolean;
+  phase_boolean = [&](hhds::Occurrence_pin pin, bool high) -> std::optional<bool> {
+    if (!phase_specialization || pin.is_invalid()) {
+      return std::nullopt;
+    }
+    if (pin.is_const()) {
+      const auto& value = gu::const_of(pin);
+      if (value.is_just_i64() && !value.has_unknowns() && (value.to_just_i64() == 0 || value.to_just_i64() == 1)) {
+        return value.to_just_i64() != 0;
+      }
+      return std::nullopt;
+    }
+    if (const auto it = phase_constants[high].find(pin); it != phase_constants[high].end()) {
+      return it->second;
+    }
+    phase_constants[high].emplace(pin, std::nullopt);  // also bounds malformed cycles
+    std::optional<bool> result;
+    const auto          node = pin.get_master_node();
+    const auto          op   = gu::type_op_of(node);
+    if (gu::is_graph_input_pin(pin)) {
+      if (clocks.n_clock_inputs() == 1 && clocks.is_clock(pin) && lc::Design_clocks::name_looks_like_clock(gu::pin_name_of(pin))) {
+        result = high;
+      }
+    } else if (!gu::is_type_register(node)) {
+      const auto inputs = gu::inp_sink_drivers(node);
+      const auto value  = [&](size_t i) { return i < inputs.size() ? phase_boolean(inputs[i].driver, high) : std::nullopt; };
+      if (op == Ntype_op::EQ && inputs.size() == 2) {
+        const auto a = value(0), b = value(1);
+        if (a && b) {
+          result = *a == *b;
+        }
+      } else if (op == Ntype_op::Ror && inputs.size() == 1) {
+        result = value(0);
+      } else if (op == Ntype_op::Not && gu::bits_of(pin) == 1 && inputs.size() == 1) {
+        if (const auto a = value(0)) {
+          result = !*a;
+        }
+      } else if ((op == Ntype_op::And || op == Ntype_op::Or) && gu::bits_of(pin) == 1 && !inputs.empty()) {
+        bool       all_known = true;
+        const bool absorbing = op == Ntype_op::Or;
+        for (size_t i = 0; i < inputs.size(); ++i) {
+          const auto a = value(i);
+          if (a && *a == absorbing) {
+            result = absorbing;
+            break;
+          }
+          all_known &= a.has_value();
+        }
+        if (!result && all_known) {
+          result = !absorbing;
+        }
+      } else if (op == Ntype_op::Mux && inputs.size() == 3) {
+        if (const auto select = value(0)) {
+          result = value(*select ? 2 : 1);
+        }
+      } else if (op == Ntype_op::Get_mask) {
+        const auto source = lc::sink_driver_hier(node, "a");
+        const auto mask   = lc::sink_driver_hier(node, "mask");
+        if (!mask.is_invalid() && mask.is_const()) {
+          const auto window = gu::mask_window_of(gu::const_of(mask));
+          if (window && window->first == 0 && window->second >= 1) {
+            result = phase_boolean(source, high);
+          }
+        }
+      }
+    }
+    phase_constants[high][pin] = result;
+    return result;
+  };
+  const auto unused_phase_input = [&](const hhds::Occurrence_node& node, hhds::Port_id port, bool high) {
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Latch && port == Ntype::get_sink_pid(op, "din")) {
+      if (const auto enabled = phase_boolean(lc::sink_driver_hier(node, "enable"), high)) {
+        const bool negative = lc::sink_driver_hier(node, "posclk").is_known_false();
+        return *enabled == negative;
+      }
+    } else if (op == Ntype_op::Mux && port != 0) {
+      if (const auto select = phase_boolean(lc::sink_driver_hier(node, "s"), high)) {
+        return port != (*select ? 2 : 1);
+      }
+    } else if (op == Ntype_op::Hotmux) {
+      const auto end = gu::hotmux_control_end(node);
+      if (!gu::is_hotmux_control(port, end)) {
+        // Ports alternate control/value, followed by an optional default.
+        for (const auto& sink : node.inp_sorted_pins()) {
+          if (!gu::is_hotmux_control(sink.get_port_id(), end)) {
+            continue;
+          }
+          const auto drivers = sink.get_driver_pins();
+          if (drivers.size() != 1) {
+            return false;
+          }
+          const auto active = phase_boolean(*drivers.begin(), high);
+          if (!active) {
+            return false;
+          }
+          if (*active) {
+            return port != sink.get_port_id() + 1;
+          }
+          if (port == sink.get_port_id() + 1) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
   // The value use is named by the SINK pin the caller is walking plus ONE of
   // that pin's drivers, which is what the in-pin walks below hand over. A
   // two-driver carry-in therefore calls this once per driver, exactly as the
   // old per-edge callers did.
-  const auto                add_value_use = [&](const hhds::Occurrence_pin& use_driver,
-                                                const hhds::Occurrence_pin& use_sink,
-                                                size_t                      consumer,
-                                                uint32_t                    consumer_input,
-                                                State_version               version) {
+  const auto add_value_use = [&](const hhds::Occurrence_pin& use_driver,
+                                 const hhds::Occurrence_pin& use_sink,
+                                 size_t                      consumer,
+                                 uint32_t                    consumer_input,
+                                 State_version               version) {
     auto producer_it = index.find(use_driver.get_master_node().get_occurrence_index());
     bool top_input   = producer_it == index.end() && gu::is_graph_input_pin(use_driver);
     if (!top_input && (producer_it == index.end() || !plan.sites_[producer_it->second].live)) {
@@ -1748,8 +2081,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint32_t      producer_extract_hi = 0;
     bool          preextracted        = false;
     std::string   producer_literal;
-    int           lo = -1;
-    int           hi = -1;
+    const bool    phase_high = version == State_version::post_rise;
+    if (unused_phase_input(use_sink.get_master_node(), use_sink.get_port_id(), phase_high)) {
+      producer_literal = "0ub0";
+    } else if (const auto constant = phase_boolean(use_driver, phase_high)) {
+      producer_literal = *constant ? "0ub1" : "0ub0";
+    }
+    int lo = -1;
+    int hi = -1;
 
     // A packed child output may be a word-level cycle while the exact slice
     // demanded by its parent is acyclic. Resolve constant Get_mask and the
@@ -2385,18 +2724,22 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       preextracted        = true;
     }
 
-    const size_t producer = (top_input || !producer_literal.empty()) ? Color_plan::invalid_index
-                                                                     : producer_version(producer_base, version, producer_port);
-    const auto   key      = std::tuple{producer,
-                                       consumer,
-                                       producer_port,
-                                       producer_shift,
-                                       producer_extract_lo,
-                                       producer_extract_hi,
-                                       use_sink.get_port_id(),
-                                       consumer_input,
-                                       version,
-                                       top_input};
+    const size_t producer
+        = (top_input || !producer_literal.empty())
+              ? Color_plan::invalid_index
+              : (latch_hold_inputs.contains({producer_base, plan.version_sites_[consumer].base_site, use_sink.get_port_id()})
+                     ? ensure_version(producer_base, version, Version_role::state_read, evaluation_slot(version), 0, true)
+                     : producer_version(producer_base, version, producer_port));
+    const auto key = std::tuple{producer,
+                                consumer,
+                                producer_port,
+                                producer_shift,
+                                producer_extract_lo,
+                                producer_extract_hi,
+                                use_sink.get_port_id(),
+                                consumer_input,
+                                version,
+                                top_input};
     if (!exact_value_uses.insert(key).second) {
       return;
     }
@@ -2468,10 +2811,29 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     rise_only         = !rising || *rising;
   }
 
-  // Every state endpoint gets one update action. Its input cone is evaluated
-  // at the version immediately before that endpoint's closing/active edge.
+  // Edge-triggered endpoints get one update action whose input cone uses the
+  // pre-edge version. Data-enabled latches instead settle in all three data
+  // versions, before the rise and after each edge.
   for (size_t base = 0; base < plan.sites_.size(); ++base) {
     if (!plan.sites_[base].live || plan.sites_[base].kind != Site_kind::state) {
+      continue;
+    }
+    if (latch_settle[base]) {
+      for (const auto version : {State_version::pre_rise, State_version::post_rise, State_version::post_fall}) {
+        const size_t update = ensure_version(base, version, Version_role::state_update, Execution_slot::pre_rise_eval, 0);
+        if (version == State_version::pre_rise) {
+          state_updates[base] = update;
+        }
+        uint32_t input = 0;
+        for (const auto& sink : plan.sites_[base].node.inp_sorted_pins()) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            if (!is_timing_input(sink)) {
+              add_value_use(driver, sink, update, input, version);
+            }
+            ++input;
+          }
+        }
+      }
       continue;
     }
     const auto rising = update_on_rise(plan.sites_[base].node, clocks, plan.summary_.versioning_complete);
@@ -2482,7 +2844,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const State_version  input_version = *rising ? State_version::pre_rise : State_version::post_rise;
     const auto           state_op      = gu::type_op_of(plan.sites_[base].node);
     const bool           fused_capture = rise_only && (state_op == Ntype_op::Flop || state_op == Ntype_op::Fflop);
-    const Execution_slot commit_slot   = !*rising       ? Execution_slot::fall_commit
+    const Execution_slot commit_slot   = !*rising        ? Execution_slot::fall_commit
                                          : fused_capture ? Execution_slot::pre_rise_eval
                                                          : Execution_slot::rise_commit;
     const size_t         update        = ensure_version(base, input_version, Version_role::state_update, commit_slot, 0);
@@ -2611,7 +2973,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         const bool timing_path = is_timing_input(edge_sink);
         const auto add_latch   = [&](size_t latch) {
           const size_t latch_update = state_updates[latch];
-          if (latch != consumer && (timing_path || latch_update < consumer_update)
+          if (!latch_settle[latch] && !latch_settle[consumer] && latch != consumer
+              && (timing_path || latch_update < consumer_update)
               && plan.version_sites_[latch_update].slot == plan.version_sites_[consumer_update].slot) {
             add_version_edge(latch_update, consumer_update, latch_width[latch]);
           }
@@ -2657,7 +3020,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         trie_node = found->second;
       }
     }
-    latch_path_trie[trie_node].latches.push_back(latch);
+    if (!latch_settle[latch]) {
+      latch_path_trie[trie_node].latches.push_back(latch);
+    }
   }
   for (size_t consumer = 0; consumer < plan.sites_.size(); ++consumer) {
     if (gu::type_op_of(plan.sites_[consumer].node) == Ntype_op::Latch
@@ -3041,9 +3406,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           break;
         }
       }
-      int prefix = 0;
-      if (target != nullptr && consumer_site.version == State_version::pre_rise && type != 1) {
-        prefix = registered ? std::max(row_prefix(fwd_matrix, target->rdidx), row_prefix(undef_matrix, target->rdidx)) : writes;
+      const bool comb_read_all = !registered && consumer_site.output_port == Ntype::Memory_readall_pid;
+      int        prefix        = 0;
+      if (type != 1) {
+        if (!registered && (target != nullptr || comb_read_all)) {
+          prefix = writes;  // every settle phase recomputes combinational contents
+        } else if (target != nullptr && consumer_site.version == State_version::pre_rise) {
+          prefix = std::max(row_prefix(fwd_matrix, target->rdidx), row_prefix(undef_matrix, target->rdidx));
+        }
       }
       // consumer_input keeps ticking once per DRIVER, the same operand index
       // the per-edge walk produced.
@@ -3056,7 +3426,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (whole && !registered && (consumer_site.output_port == Ntype::Memory_readall_pid || target != nullptr)) {
           used = name == "update" || name == "update_enable" || name == "reset" || name == "initial";
         }
-        if (target != nullptr && type != 1 && port < ports.size()) {
+        if ((target != nullptr || comb_read_all) && type != 1 && port < ports.size()) {
           const auto& shape        = ports[port];
           const bool  port_enable  = name != "update_enable" && name.ends_with("enable");
           used                    |= (&shape == target && (name.ends_with("addr") || port_enable))
@@ -3075,6 +3445,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint32_t consumer_input = 0;
     for (const auto& edge_sink : base_site.node.inp_sorted_pins()) {
       for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        if (gu::type_op_of(base_site.node) == Ntype_op::Latch
+            && edge_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "din")
+            && edge_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "reset_pin")
+            && edge_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "initial")) {
+          ++consumer_input;
+          continue;  // an open-window read is the latch's D, not its timing metadata
+        }
         // Only the carry SELF-edge stays inside the native kernel; the parent's
         // seed of that carry is an ordinary value use (see the liveness walk).
         // That seed is the SECOND driver of this one sink, which is why the
@@ -3085,6 +3462,160 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           continue;
         }
         add_value_use(edge_drv, edge_sink, consumer_version, consumer_input++, consumer_site.version);
+      }
+    }
+  }
+
+  if (phase_specialization) {
+    // Shared arithmetic needs a separate value version when only a latch's
+    // guarded input may read held Q. Keep the ordinary version for observers;
+    // clone just the portion whose operands actually change. All inputs have
+    // already been resolved through hierarchy and packed slices in value_uses_.
+    std::vector<std::vector<size_t>>    incoming_uses(plan.version_sites_.size());
+    std::set<std::pair<size_t, size_t>> original_value_edges;
+    for (size_t use_index = 0; use_index < plan.value_uses_.size(); ++use_index) {
+      const auto& use = plan.value_uses_[use_index];
+      incoming_uses[use.consumer_version].push_back(use_index);
+      if (!use.top_input && use.producer_version != Color_plan::invalid_index && use.literal.empty()) {
+        original_value_edges.emplace(use.producer_version, use.consumer_version);
+      }
+    }
+    std::map<std::vector<size_t>, size_t> specialized_versions;
+    const auto guarded_demand = [&](const Version_site& consumer, hhds::Port_id port, Gate_formula demand) {
+      const auto& node    = plan.sites_[consumer.base_site].node;
+      const auto  op      = gu::type_op_of(node);
+      const auto  require = [&](hhds::Occurrence_pin guard, bool positive) {
+        if (!guard.is_invalid() && gu::bits_of(guard) == 1) {
+          if (const auto guarded = gate_and(demand, gate_formula(guard, positive, 0))) {
+            demand = *guarded;
+          }
+        }
+      };
+      if (op == Ntype_op::Mux && (port == 1 || port == 2)) {
+        require(lc::sink_driver_hier(node, "s"), port == 2);
+      } else if (op == Ntype_op::Hotmux && port > 0 && gu::is_hotmux_control(port - 1, gu::hotmux_control_end(node))) {
+        require(occurrence_driver_at(node, port - 1), true);
+      } else if ((op == Ntype_op::And || op == Ntype_op::Or)
+                 && gu::bits_of(node.base_node().get_driver_pin(consumer.output_port)) == 1) {
+        for (const auto& other : gu::inp_sink_drivers(node)) {
+          if (other.sink.get_port_id() != port) {
+            require(other.driver, op == Ntype_op::And);
+          }
+        }
+      }
+      return demand;
+    };
+    bool         specialized_inputs = false;
+    const size_t original_versions  = plan.version_sites_.size();
+    for (size_t target = 0; target < original_versions; ++target) {
+      const auto target_site = plan.version_sites_[target];
+      if (!target_site.latch_settle) {
+        continue;
+      }
+      size_t budget = 4096;
+      struct Specialization {
+        Gate_formula demand;
+        size_t       version;
+      };
+      absl::flat_hash_map<size_t, std::vector<Specialization>>     memo;
+      std::function<size_t(size_t, const Gate_formula&, unsigned)> specialize;
+      specialize = [&](size_t producer, const Gate_formula& demand, unsigned depth) -> size_t {
+        const auto version = plan.version_sites_[producer];
+        if (version.latch_settle && closed_during(version.base_site, demand)) {
+          return ensure_version(version.base_site,
+                                version.version,
+                                Version_role::state_read,
+                                evaluation_slot(version.version),
+                                0,
+                                true);
+        }
+        if (version.role != Version_role::data || plan.sites_[version.base_site].kind != Site_kind::data || depth == 64
+            || budget == 0) {
+          return producer;
+        }
+        for (const auto& cached : memo[producer]) {
+          if (cached.demand == demand) {
+            return cached.version;
+          }
+        }
+        --budget;
+        // Also stops a malformed combinational ring. A genuine ring remains
+        // present in its ordinary version and is still rejected below.
+        const size_t memo_index = memo[producer].size();
+        memo[producer].push_back({demand, producer});
+        std::vector<Value_use> uses;
+        std::vector<size_t>    key{producer};
+        bool                   changed         = false;
+        const auto             producer_inputs = incoming_uses[producer];
+        for (const size_t use_index : producer_inputs) {
+          auto use = plan.value_uses_[use_index];
+          if (!use.top_input && use.producer_version != Color_plan::invalid_index && use.literal.empty()) {
+            const auto   input_demand  = guarded_demand(version, use.consumer_port, demand);
+            const size_t replacement   = specialize(use.producer_version, input_demand, depth + 1);
+            changed                   |= replacement != use.producer_version;
+            use.producer_version       = replacement;
+          }
+          key.push_back(use.producer_version);
+          uses.push_back(std::move(use));
+        }
+        size_t result = producer;
+        if (changed) {
+          if (const auto existing = specialized_versions.find(key); existing != specialized_versions.end()) {
+            result = existing->second;
+          } else {
+            auto        clone     = version;
+            std::string signature = "latch-input:" + version.structural_id;
+            for (const auto& use : uses) {
+              if (use.producer_version != Color_plan::invalid_index) {
+                const auto& input  = plan.version_sites_[use.producer_version];
+                signature         += ":" + plan.sites_[input.base_site].storage_id + ":" + input.structural_id;
+              }
+            }
+            clone.structural_id = stable_id(signature);
+            clone.latch_input   = true;
+            result              = plan.version_sites_.size();
+            plan.version_sites_.push_back(std::move(clone));
+            versions_by_base[version.base_site].push_back(result);
+            incoming_uses.resize(plan.version_sites_.size());
+            for (auto& use : uses) {
+              use.consumer_version = result;
+              incoming_uses[result].push_back(plan.value_uses_.size());
+              plan.value_uses_.push_back(std::move(use));
+            }
+            specialized_versions.emplace(std::move(key), result);
+          }
+        }
+        memo[producer][memo_index].version = result;
+        return result;
+      };
+      // A specialization can append versions and uses, so hold neither a vector
+      // iterator nor a reference across the recursive call.
+      const auto target_inputs = incoming_uses[target];
+      for (const size_t use_index : target_inputs) {
+        const auto use = plan.value_uses_[use_index];
+        if (use.consumer_port != Ntype::get_sink_pid(Ntype_op::Latch, "din") || use.top_input
+            || use.producer_version == Color_plan::invalid_index || !use.literal.empty()) {
+          continue;
+        }
+        const size_t replacement  = specialize(use.producer_version, latch_open_terms[target_site.base_site], 0);
+        specialized_inputs       |= replacement != use.producer_version;
+        plan.value_uses_[use_index].producer_version = replacement;
+      }
+      incoming_uses.resize(plan.version_sites_.size());
+    }
+    if (specialized_inputs) {
+      auto dependencies = std::move(plan.version_dependencies_);
+      plan.version_dependencies_.clear();
+      version_edges.clear();
+      for (const auto& dep : dependencies) {
+        if (!original_value_edges.contains({dep.producer, dep.consumer})) {
+          add_version_edge(dep.producer, dep.consumer, dep.boundary_bits);
+        }
+      }
+      for (const auto& use : plan.value_uses_) {
+        if (!use.top_input && use.producer_version != Color_plan::invalid_index && use.literal.empty()) {
+          add_version_edge(use.producer_version, use.consumer_version, use.consumer_width);
+        }
       }
     }
   }
@@ -3189,8 +3720,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     if (a.slot != b.slot) {
       return a.slot < b.slot;  // Finish the latest phase first in the backward walk.
     }
-    return std::tie(site_path_rank[a.base_site], a.structural_id, lhs)
-           > std::tie(site_path_rank[b.base_site], b.structural_id, rhs);
+    return std::tie(site_path_rank[a.base_site], plan.sites_[a.base_site].schedule_id, lhs)
+           > std::tie(site_path_rank[b.base_site], plan.sites_[b.base_site].schedule_id, rhs);
   };
   std::priority_queue<size_t, std::vector<size_t>, decltype(later)> ready(later);
   for (size_t i = 0; i < remaining_consumers.size(); ++i) {
@@ -3644,8 +4175,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // therefore keeps its fence only when sites / interface_words reaches
   // `fence_ratio` (sim.tune.fence; 0 = always). Reused or very large bodies
   // always keep it.
-  constexpr size_t kSingleBodyFenceSites = 1024;
-  const int64_t    single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
+  constexpr size_t                                kSingleBodyFenceSites = 1024;
+  const int64_t                                   single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
   absl::flat_hash_map<const hhds::Graph*, size_t> body_occurrences;
   for (const auto& body : bodies) {
     if (!body.path.steps().empty() && body.graph != nullptr) {
@@ -3663,8 +4194,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     // A single-occurrence body keeps its fence only when it is big for its seam.
     const bool single = body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites;
-    const bool fenced
-        = !single || static_cast<int64_t>(shape.sites) >= single_body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
+    const bool fenced = !single
+                        || static_cast<int64_t>(shape.sites)
+                               >= single_body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
     if (!fenced) {
       continue;
     }
@@ -3920,21 +4452,35 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   std::vector<Pending_color> pending_colors;
   pending_colors.reserve(roots.size());
   for (const size_t root_index : roots) {
-    auto color_members = members[root_index];
-    std::ranges::sort(color_members, [&](size_t a, size_t b) {
-      // Member index breaks the tie: automorphic version sites share a
-      // structural_id BY DESIGN, and this order sets version_position, which is
-      // the tiebreak in the canonical rank sort.
+    auto color_members    = members[root_index];
+    auto identity_members = color_members;
+    std::ranges::sort(identity_members, [&](size_t a, size_t b) {
+      // Hash semantic membership separately from its execution order. Runtime
+      // slot and commit-flag numbering must not follow changing content hashes.
       return std::tie(plan.version_sites_[a].structural_id, a) < std::tie(plan.version_sites_[b].structural_id, b);
     });
     std::string signature = std::string(execution_slot_name(plan.version_sites_[color_members.front()].slot));
-    for (const size_t member : color_members) {
+    for (const size_t member : identity_members) {
       signature += ":" + plan.version_sites_[member].structural_id;
     }
+    // Allocate activation storage by the interval's terminal value, not by
+    // its whole implementation. An internal cone edit must not move the dirty
+    // bit marked by unchanged state commits. Semantic membership above still
+    // controls all kernel reuse. Terminal versions belong to only one color.
+    const auto&   terminal          = plan.version_sites_[color_members.back()];
+    const auto    storage_signature = std::format("{}:{}:{}:{}:{}:{}",
+                                                  execution_slot_name(terminal.slot),
+                                                  plan.sites_[terminal.base_site].storage_id,
+                                                  static_cast<unsigned>(terminal.version),
+                                                  static_cast<unsigned>(terminal.role),
+                                                  terminal.output_port,
+                                                  terminal.latch_input ? terminal.structural_id : std::string{});
     Pending_color pending_color;
+    pending_color.color.storage_id       = stable_id(storage_signature);
     pending_color.root                   = root_index;
     pending_color.color.structural_id    = stable_id(signature);
     pending_color.color.slot             = plan.version_sites_[color_members.front()].slot;
+    pending_color.color.execution_order  = plan.version_sites_[root_index].execution_order;
     pending_color.color.members          = std::move(color_members);
     pending_color.color.gate_equivalents = color_ge[root_index];
     pending_color.color.peak_live_words  = color_peak_words[root_index];
@@ -3942,9 +4488,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     pending_colors.push_back(std::move(pending_color));
   }
   std::ranges::sort(pending_colors, [](const Pending_color& a, const Pending_color& b) {
-    // Root index breaks the tie: same legitimate-tie argument, and this sort
-    // assigns the dense color indices.
-    return std::tie(a.color.slot, a.color.structural_id, a.root) < std::tie(b.color.slot, b.color.structural_id, b.root);
+    // Dense runtime indices follow the topological intervals. Sorting by the
+    // semantic hash would renumber unrelated colors after a local edit.
+    return std::tie(a.color.slot, a.color.execution_order, a.root) < std::tie(b.color.slot, b.color.execution_order, b.root);
   });
   std::vector<size_t> root_to_color(nversions, std::numeric_limits<size_t>::max());
   for (auto& pending_color : pending_colors) {
@@ -4101,14 +4647,22 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                        false);
         }
       }
-      if (update != Color_plan::invalid_index) {
-        const auto pending_signature = std::format("{}:pending:p{}", plan.sites_[base].storage_id, output.get_port_id());
+      for (const size_t pending_update : versions_by_base[base]) {
+        if (plan.version_sites_[pending_update].role != Version_role::state_update) {
+          continue;
+        }
+        const auto pending_signature = latch_settle[base]
+                                           ? std::format("{}:pending:{}:p{}",
+                                                         plan.sites_[base].storage_id,
+                                                         state_version_name(plan.version_sites_[pending_update].version),
+                                                         output.get_port_id())
+                                           : std::format("{}:pending:p{}", plan.sites_[base].storage_id, output.get_port_id());
         (void)ensure_slot(pending_signature,
                           Boundary_kind::state_pending,
-                          plan.version_sites_[update].version,
+                          plan.version_sites_[pending_update].version,
                           base,
-                          update,
-                          color_of_version(update),
+                          pending_update,
+                          color_of_version(pending_update),
                           output.get_port_id(),
                           output.get_port_id(),
                           static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(output))),
@@ -4183,8 +4737,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                              use.unsign);
         plan.boundary_slots_[source_slot].producer_shift = use.producer_shift;
       } else if (producer_color != consumer_color) {
+        const auto storage   = producer_site.latch_input ? producer_base.storage_id + ":latch-input:" + producer_site.structural_id
+                                                         : producer_base.storage_id;
         const auto signature = std::format("{}:{}:{}:value:p{}:shift{}:b{}:u{}:x{}-{}",
-                                           producer_base.storage_id,
+                                           storage,
                                            state_version_name(producer_site.version),
                                            version_role_name(producer_site.role),
                                            use.producer_port,
@@ -4277,10 +4833,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   std::ranges::sort(plan.boundary_slots_, [](const Boundary_slot& a, const Boundary_slot& b) {
     // Exact tiebreak after the digest: two slots may legitimately share a
     // structural_id, and this order is observable downstream.
-    return std::tie(a.structural_id, a.kind, a.owner_site, a.producer_version, a.producer_port, a.public_port, a.width,
-                    a.unsign)
-           < std::tie(b.structural_id, b.kind, b.owner_site, b.producer_version, b.producer_port, b.public_port, b.width,
-                      b.unsign);
+    return std::tie(a.structural_id, a.kind, a.owner_site, a.producer_version, a.producer_port, a.public_port, a.width, a.unsign)
+           < std::tie(b.structural_id, b.kind, b.owner_site, b.producer_version, b.producer_port, b.public_port, b.width, b.unsign);
   });
   for (auto& slot : plan.boundary_slots_) {
     std::ranges::sort(slot.consumers, [](const Boundary_consumer& a, const Boundary_consumer& b) {
@@ -4298,10 +4852,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     ++color_indegree[edge.consumer];
     color_next[edge.producer].push_back(edge.consumer);
   }
-  const auto color_later = [&](size_t lhs, size_t rhs) {
-    return std::tie(plan.colors_[lhs].slot, plan.colors_[lhs].structural_id, lhs)
-           > std::tie(plan.colors_[rhs].slot, plan.colors_[rhs].structural_id, rhs);
-  };
+  const auto color_later
+      = [&](size_t lhs, size_t rhs) { return std::tie(plan.colors_[lhs].slot, lhs) > std::tie(plan.colors_[rhs].slot, rhs); };
   std::priority_queue<size_t, std::vector<size_t>, decltype(color_later)> color_ready(color_later);
   for (size_t i = 0; i < color_indegree.size(); ++i) {
     if (color_indegree[i] == 0) {
@@ -5227,6 +5779,13 @@ std::string Color_plan::report() const {
   const bool omit_exhaustive_detail = version_sites_.size() > 100'000;
   if (omit_exhaustive_detail) {
     result += "detail omitted reason=large-plan threshold=100000\n";
+    for (const auto& color : colors_) {
+      result += std::format("color-summary {} slot={} order={} members={}\n",
+                            color.structural_id,
+                            execution_slot_name(color.slot),
+                            color.execution_order,
+                            color.members.size());
+    }
   } else {
     std::vector<std::string> sites;
     sites.reserve(sites_.size());

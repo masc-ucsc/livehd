@@ -58,7 +58,8 @@ std::shared_ptr<const Satopt_result>    satopt(hhds::Graph* graph, std::string_v
 // Proves selectors constant (e.g. `x == x + 1`) under the same combinational
 // model and ties each one to its constant on the caller's synthesis working
 // copy. A never-selected arm is zeroed, and logic left without a consumer is
-// deleted, so a dead cone disappears before partitioning.
+// deleted, so a dead cone disappears before partitioning. cvc5 decides each
+// selector (pass/formal's Prover); an Unknown leaves it alone.
 Select_satopt                           optimize_selects(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                                                          std::string_view                                 cache_dir = {});
 bool                                    satopt_crosses(const hhds::Node_class& node);

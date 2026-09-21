@@ -112,3 +112,11 @@ filegroup(
     srcs = ["lgyosys_tolg.cpp", "inou_yosys_api.cpp"],
     visibility = ["//visibility:public"],
 )
+
+# State-name recovery and budget scheduling belong to the external solver;
+# the lhd CLI equivalence test covers the default CVC5 driver separately.
+sh_test(
+    name = "lgcheck_state_test",
+    srcs = ["tests/yosys_state_match_test.sh"],
+    data = [":scripts"],
+)

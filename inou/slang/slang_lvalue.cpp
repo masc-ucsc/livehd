@@ -350,7 +350,11 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
     if (!flat_port_syms_.contains(&rsym)) {
       return false;
     }
-  } else if (rmi.is_tuple || lmi.rank() != 1 || rmi.rank() != 1) {
+  } else if (rmi.is_tuple) {
+    if (!flat_port_syms_.contains(&lsym) || rmi.rank() != 1 || rmi.size > 64) {
+      return false;
+    }
+  } else if (lmi.rank() != 1 || rmi.rank() != 1) {
     return false;
   }
   if (&lsym == &rsym) {
@@ -423,7 +427,8 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   for (int64_t idx = 0; idx < lmi.size; ++idx) {
     const auto index = std::to_string(idx);
     for (const auto& field : lmi.fields) {
-      auto value = extract_field(packed_rhs, idx * lmi.elem_bits + field.off, field.bits);
+      const auto lane  = lmi.descending ? idx : lmi.size - 1 - idx;
+      auto       value = extract_field(packed_rhs, lane * lmi.elem_bits + field.off, field.bits);
       emit_field_store(lname, index, field.name, value);
     }
   }
@@ -1992,7 +1997,12 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   }
   // Dynamic offset: tolg requires const set_mask masks, so lower an explicit
   // read-modify-write with shifts (and/or/shl) on the full base.
-  auto bi    = tinfo(lv.base->getType());
+  auto bi = tinfo(lv.base->getType());
+  if (flat_port_syms_.contains(lv.base)) {
+    const auto& mi = mem_info_.at(lv.base);
+    bi.bits        = static_cast<int>(mi.size * mi.elem_bits);
+    bi.is_signed   = false;
+  }
   auto cur   = read_symbol(*lv.base, sr);
   auto cur_p = to_pattern(cur, bi.bits, bi.is_signed);
 

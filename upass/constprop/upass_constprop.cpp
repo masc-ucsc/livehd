@@ -5176,6 +5176,9 @@ upass::Vote uPass_constprop::process_sext(std::string_view dst_name, Bundle& dst
   if (dst_name.empty() || src.size() < 2) {
     return classify_vote();
   }
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);  // same guard as process_get_mask: a nil-seed has no comptime value
+  }
   const auto val      = operand_value(src[0]);
   const auto nbits_lc = operand_value(src[1]);
   if (is_numeric(val) && nbits_lc.is_integer() && !nbits_lc.has_unknowns()) {
@@ -5368,6 +5371,14 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
         .hint     = "bit selection and reductions require a numeric value or an ordered packed aggregate",
     });
     return classify_vote();
+  }
+  // This hook bypasses the push_* templates, so it repeats their runtime-
+  // placeholder guard: an inliner nil-seed (or an alias of one) has NO comptime
+  // value. Folding it made the select itself nil -- the statement was dropped
+  // and its consumer kept a dangling temp, or a compare over it folded to a
+  // constant with no diagnostic. Keep the select structural instead.
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);
   }
   // A bit selection / reduction needs an integer or boolean `foo`. Record a
   // string / enum / tuple / array source so a reduction over this result can

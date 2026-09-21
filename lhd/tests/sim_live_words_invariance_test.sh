@@ -250,11 +250,17 @@ import sys
 
 work, tags = sys.argv[1], sys.argv[2:]
 digests = {}
+expected = {
+    "lw_icg_top.gated_state_advances_at_every_budget",
+    "lwc_icg_top.gate_edges_alone_advance_the_flop",
+    "lwf_icg.enable_edge_alone_loads",
+    "lwr_icg.reset_opens_the_gate_at_every_budget",
+}
 for tag in tags:
     with open(os.path.join(work, tag, "sim", "sim_tests.json"), encoding="utf-8") as stream:
         tests = json.load(stream)
-    if not tests:
-        raise SystemExit(f"{tag}: no tests ran")
+    if len(tests) != len(expected) or {t["test"] for t in tests} != expected:
+        raise SystemExit(f"{tag}: did not run all four ICG regressions")
     for test in tests:
         if test.get("status") != "pass":
             raise SystemExit(f"{tag}: {test.get('test')} status={test.get('status')}")
@@ -301,36 +307,27 @@ if not split:
 PY
 }
 
-# Guard for regression 2: the dirty-gated split build must carry the latch's
-# `_din` dirty marks (the dirty edge to the reader's color).
-marks_guard() {  # marks_guard <fixture> <tag>
-  grep -q 'cross-color `_din` readers' "$work/$1/$2"/sim/*.cpp \
-    || fail "$1/$2: no cross-color \`_din\` dirty mark in the generated evaluator"
-}
-
+# All fixtures have distinct module/test names. Build them together once per
+# tune vector instead of starting a compiler and host build for each fixture.
+cat "$work/lw_icg.prp" "$work/lw_icg_const.prp" "$work/lw_icg_flat.prp" "$work/lw_icg_reset.prp" > "$work/lw_all.prp"
 DIRTY_ON=(--set sim.tune.dirty=on --set sim.tune.fence=16)
-
-run lw_icg lw256 --set sim.tune.live_words=256 --set sim.tune.dirty=off
-run lw_icg lw1 --set sim.tune.live_words=1 --set sim.tune.dirty=off
-run lw_icg lw2 --set sim.tune.live_words=2 --set sim.tune.dirty=off
-run lw_icg lw1_dirty --set sim.tune.live_words=1 "${DIRTY_ON[@]}"
-run lw_icg lw256_dirty --set sim.tune.live_words=256 "${DIRTY_ON[@]}"
-compare lw_icg lw256 lw1 lw2 lw1_dirty lw256_dirty
-split_guard lw_icg lw_icg_top lw1
-
-# The constant-data fixtures: zero fill keeps the `= nil` flop and the
-# latches' power-on values off the RNG, so only the tune vector differs.
+# Keep power-on state deterministic for the constant-data fixtures.
 FILL=(--set sim.unknown_zero=true --set sim.init_zero=true)
-for spec in lw_icg_const:lwc_icg_top lw_icg_flat:lwf_icg lw_icg_reset:lwr_icg; do
-  fixture="${spec%%:*}"
-  root="${spec##*:}"
-  run "$fixture" lw256 "${FILL[@]}" --set sim.tune.live_words=256 --set sim.tune.dirty=off
-  run "$fixture" lw1 "${FILL[@]}" --set sim.tune.live_words=1 --set sim.tune.dirty=off
-  run "$fixture" lw1_dirty "${FILL[@]}" --set sim.tune.live_words=1 "${DIRTY_ON[@]}"
-  run "$fixture" lw256_dirty "${FILL[@]}" --set sim.tune.live_words=256 "${DIRTY_ON[@]}"
-  compare "$fixture" lw256 lw1 lw1_dirty lw256_dirty
-  split_guard "$fixture" "$root" lw1_dirty
-  marks_guard "$fixture" lw1_dirty
+run lw_all lw256 "${FILL[@]}" --set sim.tune.live_words=256 --set sim.tune.dirty=off
+run lw_all lw1 "${FILL[@]}" --set sim.tune.live_words=1 --set sim.tune.dirty=off
+run lw_all lw2 "${FILL[@]}" --set sim.tune.live_words=2 --set sim.tune.dirty=off
+run lw_all lw1_dirty "${FILL[@]}" --set sim.tune.live_words=1 "${DIRTY_ON[@]}"
+run lw_all lw256_dirty "${FILL[@]}" --set sim.tune.live_words=256 "${DIRTY_ON[@]}"
+compare lw_all lw256 lw1 lw2 lw1_dirty lw256_dirty
+split_guard lw_all lw_icg_top lw1
+for root in lwc_icg_top lwf_icg lwr_icg; do
+  split_guard lw_all "$root" lw1_dirty
+done
+# Check every fixture's evaluator, so one fixture cannot mask a missing mark
+# in another after batching the build.
+for root in lwc_icg_top lwf_icg lwr_icg; do
+  grep -q 'cross-color `_din` readers' "$work/lw_all/lw1_dirty"/sim/*"$root".cpp \
+    || fail "$root: no cross-color \`_din\` dirty mark in the generated evaluator"
 done
 
 echo "PASS: ICG-gated state is invariant across sim.tune.live_words / dirty"

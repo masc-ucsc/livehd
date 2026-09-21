@@ -25,6 +25,7 @@
 #include "json_util.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
+#include "prove.hpp"
 #include "rapidjson/document.h"
 
 // clang-format off
@@ -88,28 +89,68 @@ Arms arms_of(const Node& n) {
 
 // Eight deterministic, word-level input vectors. This is only a rejection
 // filter: unsupported operations can reject an opportunity, never prove one.
+// A descending filter walks the same virtual-flat view as a descending
+// formal::Prover, so a value fixed inside a callee is not sampled as free.
 class Seeds {
   using Values = std::array<Dlop, 8>;
-  absl::node_hash_map<Pin, Values> values_;
-  absl::flat_hash_set<Pin>         visiting_;
-  std::mt19937_64                  random_{0x7361746f7074ULL};
-  static Dlop                      fit(const Dlop& v, const Pin& p) {
+  using Key    = std::pair<uint32_t, Pin>;  // (instance scope, pin); scope 0 = the graph
+  struct Scope {
+    uint32_t parent = 0;
+    Node     inst;
+    int      depth = 0;
+  };
+  absl::node_hash_map<Key, Values>                         values_;
+  absl::flat_hash_set<Key>                                 visiting_;
+  std::vector<Scope>                                       scopes_{Scope{}};
+  absl::flat_hash_map<std::pair<uint32_t, Node>, uint32_t> children_;
+  bool                                                     descend_ = false;
+  std::mt19937_64                                          random_{0x7361746f7074ULL};
+  static Dlop                                              fit(const Dlop& v, const Pin& p) {
     if (p.is_const()) {
       return v;
     }
     auto low = v.and_op(Dlop::get_mask_value(width(p)));
     return gu::is_unsign(p) ? *low : *low->sext_op(Dlop::create_integer(width(p)));
   }
+  // Where p continues across an instance boundary when descending.
+  std::optional<std::pair<uint32_t, Pin>> cross(uint32_t scope, const Pin& p) {
+    if (!descend_) {
+      return std::nullopt;
+    }
+    if (gu::is_graph_input_pin(p)) {
+      const auto driver = scope == 0 ? Pin{} : formal::sub_input_driver(scopes_[scope].inst, p);
+      if (driver.is_invalid()) {
+        return std::nullopt;
+      }
+      return std::pair{scopes_[scope].parent, driver};
+    }
+    const auto inst = p.get_master_node();
+    if (gu::type_op_of(inst) != Ntype_op::Sub || scopes_[scope].depth >= 32) {
+      return std::nullopt;
+    }
+    const auto driver = formal::sub_body_driver(p);
+    if (driver.is_invalid()) {
+      return std::nullopt;
+    }
+    const auto [it, fresh] = children_.try_emplace({scope, inst}, static_cast<uint32_t>(scopes_.size()));
+    if (fresh) {
+      scopes_.push_back({scope, inst, scopes_[scope].depth + 1});
+    }
+    return std::pair{it->second, driver};
+  }
 
 public:
-  const Values& get(const Pin& p) {
+  explicit Seeds(bool descend = false) : descend_(descend) {}
+  const Values& get(const Pin& p) { return get(0, p); }
+  const Values& get(uint32_t scope, const Pin& p) {
     if (p.is_invalid()) {
       throw Unsupported{};
     }
-    if (auto it = values_.find(p); it != values_.end()) {
+    const Key key{scope, p};
+    if (auto it = values_.find(key); it != values_.end()) {
       return it->second;
     }
-    if (values_.size() > 50000 || width(p) > 65536 || !visiting_.insert(p).second) {
+    if (values_.size() > 50000 || width(p) > 65536 || !visiting_.insert(key).second) {
       throw Unsupported{};
     }
     Values out;
@@ -118,6 +159,8 @@ public:
         throw Unsupported{};
       }
       out.fill(gu::const_of(p));
+    } else if (const auto other = cross(scope, p)) {
+      out = get(other->first, other->second);
     } else if (cut(p)) {
       for (auto& v : out) {
         std::string bits(static_cast<size_t>(width(p)), '0');
@@ -139,7 +182,7 @@ public:
         // Bucket by operand BANK: a commutative cell spends one sink pid per
         // operand (graph/cell.hpp's ONE DRIVER PER SINK PIN block), and every
         // reader below (`arg(0)`, `arg(1)`, the Sum sign test) names the ROLE.
-        ins[Ntype::sink_bank(op, in_pin.get_port_id())].push_back(&get(in_drv));
+        ins[Ntype::sink_bank(op, in_pin.get_port_id())].push_back(&get(scope, in_drv));
       }
       for (int seed = 0; seed < 8; ++seed) {
         const auto arg = [&](int pid) -> const Dlop& {
@@ -156,23 +199,23 @@ public:
           }
           size_t selected = 0;
           if (!arms.hot) {
-            selected = get(arms.controls[0])[seed].is_known_zero() ? 0 : 1;
+            selected = get(scope, arms.controls[0])[seed].is_known_zero() ? 0 : 1;
           } else {
             selected = arms.values.size();
             for (size_t i = 0; i < arms.values.size(); ++i) {
-              if (arms.controls[i].is_invalid() || !get(arms.controls[i])[seed].is_known_zero()) {
+              if (arms.controls[i].is_invalid() || !get(scope, arms.controls[i])[seed].is_known_zero()) {
                 selected = i;
                 break;
               }
             }
           }
           if (selected < arms.values.size()) {
-            v = get(arms.values[selected])[seed];
+            v = get(scope, arms.values[selected])[seed];
           }
         } else if (op == Ntype_op::Concat) {
           std::vector<Dlop::Concat_lane> lanes;
           for (const auto& l : gu::concat_lanes(n)) {
-            lanes.push_back({&get(l.value)[seed], l.width});
+            lanes.push_back({&get(scope, l.value)[seed], l.width});
           }
           v = *Dlop::concat_op(lanes);
         } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
@@ -235,8 +278,8 @@ public:
         out[seed] = fit(v, p);
       }
     }
-    visiting_.erase(p);
-    return values_.emplace(p, std::move(out)).first->second;
+    visiting_.erase(key);
+    return values_.emplace(key, std::move(out)).first->second;
   }
   bool survives(const Arms& arms, const Mux_fact& f) {
     for (int seed = 0; seed < 8; ++seed) {
@@ -748,9 +791,12 @@ std::vector<Pin> selectors(const Node& n) {
   }
   return arms.controls;
 }
+// `children` pins every definition the proofs descended into: a callee edit
+// changes the facts although the definition itself did not change.
 struct Select_cached {
-  std::string              source;
-  std::vector<Select_fact> facts;
+  std::string                                      source;
+  std::vector<Select_fact>                         facts;
+  std::vector<std::pair<std::string, std::string>> children;  // (name, exact source key)
 };
 std::map<std::string, Select_cached> saved_selects;
 Select_cached                        read_selects(const std::string& path) {
@@ -772,8 +818,28 @@ Select_cached                        read_selects(const std::string& path) {
     }
     row.facts.push_back({f[0].GetUint64(), f[1].GetInt(), f[2].GetBool()});
   }
+  if (!doc.HasMember("children") || !doc["children"].IsArray()) {
+    return {};
+  }
+  for (const auto& c : doc["children"].GetArray()) {
+    if (!c.IsArray() || c.Size() != 2 || !c[0].IsString() || !c[1].IsString()) {
+      return {};
+    }
+    row.children.emplace_back(c[0].GetString(), c[1].GetString());
+  }
   row.source = doc["source"].GetString();
   return row;
+}
+bool children_match(hhds::Graph* graph, const Select_cached& row) {
+  auto* lib = graph->get_io() ? graph->get_io()->get_library() : nullptr;
+  for (const auto& [name, key] : row.children) {
+    const auto io  = lib ? lib->find_io(name) : nullptr;
+    const auto def = io ? io->get_graph() : nullptr;
+    if (!def || source_key(def.get(), false) != key) {
+      return false;
+    }
+  }
+  return true;
 }
 void write_selects(const std::string& path, const Select_cached& row) {
   if (path.empty()) {
@@ -783,6 +849,13 @@ void write_selects(const std::string& path, const Select_cached& row) {
   for (size_t i = 0; i < row.facts.size(); ++i) {
     const auto& f  = row.facts[i];
     text          += std::format("{}[{},{},{}]", i ? "," : "", f.node, f.control, f.value ? "true" : "false");
+  }
+  text += "],\"children\":[";
+  for (size_t i = 0; i < row.children.size(); ++i) {
+    text += std::format("{}[\"{}\",\"{}\"]",
+                        i ? "," : "",
+                        json_util::escape(row.children[i].first),
+                        json_util::escape(row.children[i].second));
   }
   write_atomic(path, text + "]}\n");
 }
@@ -1026,13 +1099,13 @@ Select_satopt optimize_selects(const std::vector<std::shared_ptr<hhds::Graph>>& 
     const auto source = source_key(graph.get(), false);
     const auto path   = cache_path(cache_dir, graph->get_name(), "-select");
     auto&      row    = saved_selects[std::string(graph->get_name())];
-    if (row.source != source) {
+    if (row.source != source || !children_match(graph.get(), row)) {
       row = read_selects(path);
     }
-    if (row.source == source) {
+    if (row.source == source && children_match(graph.get(), row)) {
       stats.reused += row.facts.size();
     } else {
-      Seeds                                    seeds;
+      Seeds                                    seeds(true);
       std::vector<std::pair<Select_fact, Pin>> candidates;
       std::vector<Pin>                         roots;
       for (const auto& [nid, cell] : cells) {
@@ -1064,42 +1137,26 @@ Select_satopt optimize_selects(const std::vector<std::shared_ptr<hhds::Graph>>& 
         }
       }
       stats.survivors += candidates.size();
-      std::optional<std::vector<bool>> proven = std::vector<bool>{};
-      if (!candidates.empty()) {
-        std::vector<Pin> survivors;
-        for (const auto& [fact, control] : candidates) {
-          survivors.push_back(control);
+      // cvc5 answers true/false at word level, through the same encoder whole-
+      // design LEC checks this rewrite with, and descends into called
+      // submodules (virtual flat). Only cvc5: ABC maps every region anyway, so
+      // a satopt proof pays off where it goes beyond what ABC finds. Unknown (a
+      // body-less Sub in the cone, an unsupported cell, a budget-out) leaves the
+      // selector alone.
+      formal::Prover prover(graph.get(),
+                            {.budget_k                 = 256,
+                             .cone_max                 = 50000,
+                             .memory_as_symbols        = true,
+                             .reject_unknown_constants = true,
+                             .descend_subs             = true});
+      row = {source, {}, {}};
+      for (const auto& [fact, control] : candidates) {
+        if ((fact.value ? prover.is_true(control) : prover.is_false(control)).verdict == formal::Verdict::Proven) {
+          row.facts.push_back(fact);
         }
-        const auto order = fanin_forward(graph.get(), std::move(survivors));
-        proven           = prove_zero([&](Gates& gates, Cone& cone) {
-          for (const auto& p : order) {
-            try {
-              for (int b = 0; b < width(p); ++b) {
-                cone.bit(p, b);
-              }
-            } catch (const Unsupported&) {
-            }
-          }
-          std::vector<Abc_Obj_t*> refutes;
-          for (const auto& [fact, control] : candidates) {
-            try {
-              auto* c = cone.condition(control);
-              refutes.push_back(fact.value ? gates.inv(c) : c);
-            } catch (const Unsupported&) {
-              refutes.push_back(nullptr);
-            }
-          }
-          return refutes;
-        });
       }
-      if (!proven) {
-        continue;
-      }
-      row = {source, {}};
-      for (size_t i = 0; i < proven->size(); ++i) {
-        if ((*proven)[i]) {
-          row.facts.push_back(candidates[i].first);
-        }
+      for (auto* def : prover.descended()) {
+        row.children.emplace_back(std::string(def->get_name()), source_key(def, false));
       }
       write_selects(path, row);
     }

@@ -668,4 +668,87 @@ gcompile "$GW/edit_cold.json" "$GW/edit_cold_lg" "$GW/edit_cold_w" --set lhd.inc
 [ "$("$LHD" tool diff "lg:$GW/edit_cold_lg" "lg:$GW/lg" --structural -q)" = identical ] \
   || fail "generic-template mixed restored+fresh result differs from cold"
 
+# The IDENTITY-specialization twin of the block above: a generic `mod` with
+# CONCRETE ports, called with every generic at its declaration default (the
+# shape a parameterized Verilog module takes in generated Pyrope). Its
+# specialization is named after the template itself, so the stored lnast_order
+# legally repeats `g.madd`. The partial restore rebuilt the cached forest
+# through a single-slot name map, hit the second `g.madd` with nothing left,
+# and REFUSED -- after it had already handed the restored graphs to the caller.
+# The fallback full re-lower then deleted every restored body under those
+# handles: SIGBUS in opt, "graph is no longer valid" in dbg. lhdsuite's minion
+# (61 such pairs) died on every one-module edit. `hits` was bumped before the
+# refusal, so only `refused` tells a real partial restore from the old crash
+# path's full re-lower.
+IW="$W/identity"
+mkdir -p "$IW/src"
+cat > "$IW/src/g.prp" <<'EOF'
+pub mod madd<W=8>(a:u8, b:u8) -> (r:u8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
+EOF
+cat > "$IW/src/leaf.prp" <<'EOF'
+pub comb bump(a:u8) -> (r:u8) { wrap r = a + 1 }
+EOF
+cat > "$IW/src/top.prp" <<'EOF'
+const madd = import("g.madd")
+const leaf = import("leaf")
+mod top(x:u8) -> (y:u8@[0]) {
+  const v = leaf.bump(a=x)
+  y = madd(a=v, b=x)
+}
+EOF
+icompile() {  # RESULT_JSON OUTPUT_LG WORKDIR [extra options]
+  local result=$1 out=$2 work=$3
+  shift 3
+  "$LHD" compile "$IW/src/top.prp" --top top --emit-dir "lg:$out" --workdir "$work" \
+    -q --result-json "$result" "$@" || fail "identity-specialization compile failed: $(cat "$result" 2>/dev/null)"
+}
+icompile "$IW/cold.json" "$IW/lg" "$IW/w"
+python3 - "$IW/src/leaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 1", "a + 2"))
+PY
+icompile "$IW/mixed.json" "$IW/lg" "$IW/w"
+[ "$(field "$IW/mixed.json" incremental.compile.refused)" -eq 0 ] \
+  || fail "identity-specialization mixed run refused its partial restore"
+[ "$(field "$IW/mixed.json" incremental.compile.hits)" -ge 1 ] \
+  || fail "identity-specialization mixed run restored no clean unit"
+[ "$(field "$IW/mixed.json" incremental.compile.misses)" -ge 1 ] \
+  || fail "identity-specialization semantic edit reported no dirty unit"
+icompile "$IW/edit_cold.json" "$IW/edit_cold_lg" "$IW/edit_cold_w" --set lhd.incremental=false
+[ "$("$LHD" tool diff "lg:$IW/edit_cold_lg" "lg:$IW/lg" --structural -q)" = identical ] \
+  || fail "identity-specialization mixed restored+fresh result differs from cold"
+
+# POST-MUTATION refusal: the cached post-upass trees are decoded only AFTER the
+# destination library was merged (load_merge) and the dirty bodies deleted. A
+# tree that fails to decode must leave `var` untouched, or the full re-lower
+# tombstones every restored handle still parked in var.graphs -- the same SIGBUS
+# as above with no duplicate name involved. The block above cannot cover this:
+# with the name collision gone it never refuses.
+IDX=$(python3 - "$IW/w/incr/scopes/compile/top/lg/graph_inventory.json" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1]))["lnast_order"].index("g.madd"))
+PY
+)
+printf 'damaged' > "$IW/w/incr/scopes/compile/top/lg/lowered_ln/$(printf 'unit_%08d' "$IDX")/tree.bin"
+python3 - "$IW/src/leaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 2", "a + 3"))
+PY
+icompile "$IW/dmg.json" "$IW/lg" "$IW/w"
+[ "$(field "$IW/dmg.json" incremental.compile.refused)" -ge 1 ] \
+  || fail "damaged cached post-upass tree was not attributed as refused"
+icompile "$IW/dmg_cold.json" "$IW/dmg_cold_lg" "$IW/dmg_cold_w" --set lhd.incremental=false
+[ "$("$LHD" tool diff "lg:$IW/dmg_cold_lg" "lg:$IW/lg" --structural -q)" = identical ] \
+  || fail "refused (post-merge) partial restore diverged from cold"
+python3 - "$IW/src/leaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 3", "a + 4"))
+PY
+icompile "$IW/heal.json" "$IW/lg" "$IW/w"
+[ "$(field "$IW/heal.json" incremental.compile.refused)" -eq 0 ] \
+  || fail "scope did not heal after a refused post-merge restore"
+
 echo "PASS: incremental Pyrope compile cache"

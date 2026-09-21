@@ -15,6 +15,37 @@ State reads, pending updates, and observations
 have explicit execution phases. Register commits remain at phase barriers and
 memory forwarding retains its value dependencies.
 
+Each reference-clock period follows this order:
+
+1. Settle input changes and latch cones before the rising edge.
+2. Sample all posedge flops, then commit their pending Q values together.
+3. Settle logic and latches with the post-rise state.
+4. Sample all negedge flops, then commit their pending Q values together.
+5. Settle logic and latches with the post-fall state and publish outputs.
+
+A data-enabled latch evaluates in each settling phase, including when its
+enable or data comes from a flop. Downstream cones see its phase-local pending
+value; persistent latch storage commits at the end of that settling phase.
+An open primary-clock latch follows data in its transparent half-period and
+retains its closing value in the other half. Opening a latch does not change
+what a flop already sampled on that edge. Flop captures never read another
+flop's pending value from the same edge.
+
+The phase-expanded dependency DAG orders the supported latch cones. This is
+a zero-delay model with no clock-skew correction. The compiler's existing
+latch legality checks still reject simultaneously transparent latch pairs;
+cyclic transparent cones are not assigned an arbitrary evaluation order.
+
+Opposite-phase latches on a gated clock may have mutually exclusive enables
+without a compile-time clock level. The planner proves exclusivity under each
+latch input's mux/reset guards and uses held state only for those guarded reads.
+Shared arithmetic gets a separate input value version, so other observers
+continue to see settled state. Unproved or simultaneously transparent feedback
+remains a dependency cycle. Minion now generates and passes its 100,000-cycle
+workload; see the [fix and validation](../../repros/minion_latch_scheduler_20260920/README.md).
+The earlier [prototype report](../../repros/latch_scheduler_20260920/README.md)
+records the original refusal. Focused validation is not whole-suite compatibility.
+
 Coloring uses reverse Kahn traversal for every graph size:
 
 1. Seed the ready queue with sites whose consumers have all been scheduled.
@@ -79,17 +110,41 @@ caller supplies disjoint buffers and module storage. Input buffers are also
 
 Large Slop binding initializers are split into translation units of at most
 128 candidate colors; small color bodies alone do not bound the compiler work
-in the generated runtime initializer. Large evaluator shards contain at most
-256 colors or 16,384 version sites (an indivisible color can exceed the latter).
-Scheduler functions contain at most 256 colors and never cross a phase barrier;
-they share the evaluator translation units. Shared-kernel calls and changed-bit
-actions use the same emitter in reset evaluation and normal scheduling.
+in the generated runtime initializer. Evaluator shards target 512 version sites
+for plans of at most 16,384 sites, and 2,048 sites for larger
+plans; each shard contains at most 256 colors. An indivisible color can exceed
+the site target. This splits host compilation without adding color boundaries
+or changing the live-word budget. Scheduler functions contain at most 256 colors
+and never cross a phase or evaluator-shard boundary. They call their local
+evaluator directly, preserving compiler inlining within the translation unit.
+Ninja compiles evaluator shards separately; unity batching is reserved for the
+small support translation units.
+Shared-kernel calls and changed-bit actions use the same emitter in reset
+evaluation and normal scheduling.
 
 LLVM memory callbacks preserve the signedness of addresses and lane enables
 when unpacking the ABI, including narrow unsigned values with their high bit set.
 
 Code-generation cache hits skip both
 coloring and emission; use a fresh workdir to measure a cold setup.
+
+Partition identity uses two fixed neighborhood-hash rounds instead of globally
+numbered refinement classes. Scheduling and storage identities omit operation
+and literal contents, including a Sum operand's add/subtract role on both its
+incoming edge and its producer's outgoing edge; semantic fingerprints and the complete canonical kernel
+serialization still distinguish changed computations. Dense color indices and
+member order follow the topological intervals. The generated
+`<module>.color-layout.txt` retains boundary-value offsets and activation-bit
+positions by identity across edits. Removed values free their addresses; new
+values occupy free addresses. Rounded array capacities absorb small changes
+without rewriting the shared runtime header, with no runtime lookup or pointer
+indirection. The layout is allocation metadata, never evidence for reusing
+logic; missing metadata is rebuilt, and duplicate or out-of-range allocations
+cannot alias live values. A fresh build may use different addresses and must
+produce the same simulation results. Width changes, capacity crossings,
+hierarchy changes and pressure-limit changes can still invalidate more files. See the
+[September 20 incremental experiment](../../repros/sim_partition_incremental_20260920/README.md)
+for measured rebuild/runtime tradeoffs and outstanding validation limits.
 
 ## Runtime protocol costs (2026-09-13 measurements)
 
@@ -131,3 +186,6 @@ and a default-equal vector keys exactly like the defaults.
 boundary slot costs a store, a compare and a dirty mark per value, which
 outweighs the register pressure it avoids (minion 1.75x, matched_filter 1.15x,
 RenameTable within 4%).
+
+The [Minion partition stability follow-up](../../repros/minion_partition_stability_20260920/README.md)
+records the arithmetic-role fingerprint bug, allocator changes, and edit measurements.

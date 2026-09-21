@@ -13747,6 +13747,22 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   if (mode != upass::Mode::unknown) {
     bundle->set_mode(mode);
   }
+  // A `wire`/`reg` binding never carries a comptime value: constprop does not
+  // bind its stores (process_store/process_assign return early), so a trivial
+  // already on the name at its declare can never be overwritten. The one
+  // producer is the comb inliner, which seeds every output `inlN_out = nil` in
+  // the call prologue BEFORE the body's own `wire out:T` re-declaration
+  // (inou.slang emits it for an output net read before its driver). The stale
+  // nil then rode the epilogue tuple into the caller: `alu.adder_out#[0..=47]`
+  // folded to nil (get_mask dropped, consumer left dangling -> tolg "unresolved
+  // ref ... wiring nil", an all-X dcache address in lhdsuite's minion) and
+  // `if alu.adder_out#[3] != 0` folded to a constant with NO diagnostic.
+  if (is_declare && (mode == upass::Mode::wire_kind || mode == upass::Mode::reg_kind)) {
+    const auto p0 = bundle_path::of_string("0");
+    if (bundle->has_trivial(p0) && !bundle->get_trivial(p0).is_invalid()) {
+      bundle->set(p0, Bundle::invalid_lconst);  // value only: the entry keeps kind/decl range/mode
+    }
+  }
   if (tuple_type && bundle->get_value_kind() == upass::Kind::unknown) {
     bundle->set_value_kind(upass::Kind::tuple);  // `()` declare — a real aggregate, not a bare scalar
   }

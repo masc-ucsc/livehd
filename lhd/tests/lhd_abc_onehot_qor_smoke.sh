@@ -71,7 +71,7 @@ cp "$W/result.json" "$W/tight.json"
 # inside the budget. (How much smaller depends on the cell library: this
 # hermetic Liberty has six cells and one alternative drive strength, so it has
 # almost no area/delay curve to trade along. The measured effect is in
-# //pass/abc:abc_incr_test's policy tests and the ../lhdtrack sweep.)
+# //pass/abc:abc_incr_test's policy tests and external benchmark sweeps.)
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/norelax" \
   --set synth.liberty="$LIB" --set abc.delay=1000 --set abc.register=false \
   --set abc.area_relax=0 --workdir "$W/norelax_work"

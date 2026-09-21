@@ -145,7 +145,7 @@ std::shared_ptr<hhds::Graph> make_conditional_pair() {
   return parent;
 }
 
-Flop_latch_fixture make_flop_feeds_high_latch(std::string_view tag) {
+Flop_latch_fixture make_flop_feeds_high_latch(std::string_view tag, bool transparent_low = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_flop_high_latch_") + std::string(tag));
   auto  io  = lib.create_io(std::string("flop_high_latch_") + std::string(tag));
   io->add_input("clk", 0);
@@ -161,7 +161,13 @@ Flop_latch_fixture make_flop_feeds_high_latch(std::string_view tag) {
   fq.connect_sink(graph->get_output_pin("qf"));
 
   auto latch = gu::create_typed_node(*graph, Ntype_op::Latch);
-  graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(latch, "enable"));
+  auto gate  = graph->get_input_pin("clk");
+  if (transparent_low) {
+    auto invert = gu::create_typed_node(*graph, Ntype_op::Not);
+    gate.connect_sink(invert.create_sink_pin(0));
+    gate = invert.create_driver_pin(0);
+  }
+  gate.connect_sink(gu::setup_sink_by_name(latch, "enable"));
   fq.connect_sink(gu::setup_sink_by_name(latch, "din"));
   latch.create_driver_pin(0).connect_sink(graph->get_output_pin("ql"));
   return {graph, flop, latch};
@@ -254,7 +260,8 @@ std::shared_ptr<hhds::Graph> make_fixed_top_input_lane_extract(std::string_view 
 // `unbounded_inner`: the fed-back field is itself a pack with one operand of
 // unknown extent (a signed Sum), bounded only by the inner Or's own u4 width --
 // the shape of XS Rob's deqPtr bundle, whose 141-bit inner pack sits at <<179.
-std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag, bool unbounded_inner = false) {
+std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag, bool unbounded_inner = false,
+                                                            bool padded_concat = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
   auto  io  = lib.create_io(std::string(tag) + "_or_pack_feedback");
   io->add_input("low", 0);
@@ -320,6 +327,16 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
   auto feedback_packed = feedback_pack.create_driver_pin(0);
   gu::set_bits(feedback_packed, unbounded_inner ? 4 : 16);
   gu::set_unsign(feedback_packed);
+  if (padded_concat) {
+    auto concat = gu::create_typed_node(*graph, Ntype_op::Concat);
+    gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(concat.create_sink_pin(0));
+    gu::create_const(*graph, *Dlop::create_integer(12)).connect_sink(concat.create_sink_pin(1));
+    feedback_packed.connect_sink(concat.create_sink_pin(2));
+    gu::create_const(*graph, *Dlop::create_integer(4)).connect_sink(concat.create_sink_pin(3));
+    feedback_packed = concat.create_driver_pin(0);
+    gu::set_bits(feedback_packed, 16);
+    gu::set_unsign(feedback_packed);
+  }
   feedback_packed.connect_sink(packed_or.create_sink_pin(1));
   return graph;
 }
@@ -860,6 +877,152 @@ TEST(SimColorPlan, ReportIgnoresConstructionOrderGraphNamesAndNodeNames) {
   }
 }
 
+TEST(SimColorPlan, LocalEditPreservesDistantStructuralFingerprints) {
+  const auto fingerprints = [](bool edited) {
+    auto& lib = livehd::Hhds_graph_library::instance(edited ? "lgdb_local_edit" : "lgdb_local_base");
+    auto  io  = lib.create_io("top");
+    io->add_input("x", 0);
+    io->add_output("y", 1);
+    io->set_bits("x", 8);
+    io->set_bits("y", 8);
+    auto                          graph = io->create_graph();
+    auto                          value = graph->get_input_pin("x");
+    std::vector<hhds::Node_class> nodes;
+    for (size_t i = 0; i < 24; ++i) {
+      auto node = gu::create_typed_node(*graph, edited && i == 2 ? Ntype_op::Or : Ntype_op::Not);
+      value.connect_sink(node.create_sink_pin(0));
+      if (edited && i == 2) {
+        graph->get_input_pin("x").connect_sink(node.create_sink_pin(0));
+      }
+      value = node.create_driver_pin(0);
+      gu::set_bits(value, 8);
+      nodes.push_back(node);
+    }
+    value.connect_sink(graph->get_output_pin("y"));
+    const auto plan = livehd::sim::Color_plan::discover(graph.get(), false);
+    EXPECT_TRUE(plan.complete()) << plan.report();
+    std::vector<std::string> ids(nodes.size());
+    for (const auto& site : plan.sites()) {
+      for (size_t i = 0; i < nodes.size(); ++i) {
+        if (site.node.base_node() == nodes[i]) {
+          ids[i] = site.structural_id;
+        }
+      }
+    }
+    return ids;
+  };
+  const auto before = fingerprints(false);
+  const auto after  = fingerprints(true);
+  ASSERT_EQ(before.size(), after.size());
+  EXPECT_NE(before[2], after[2]);
+  // node_shape already includes immediate input operations, then discovery
+  // adds two neighborhood rounds: sites beyond three edges stay unchanged.
+  for (size_t i = 6; i < before.size(); ++i) {
+    ASSERT_FALSE(before[i].empty());
+    EXPECT_EQ(before[i], after[i]) << "a local edit changed distant site " << i;
+  }
+}
+
+TEST(SimColorPlan, LiteralEditPreservesPartitionMembershipAndStorageAbi) {
+  const auto make_plan = [](bool edited) {
+    auto& lib = livehd::Hhds_graph_library::instance(edited ? "lgdb_literal_edit" : "lgdb_literal_base");
+    auto  io  = lib.create_io("top");
+    for (unsigned i = 0; i < 32; ++i) {
+      io->add_input("in" + std::to_string(i), i);
+      io->add_output("out" + std::to_string(i), 32 + i);
+      io->set_bits("in" + std::to_string(i), 8);
+      io->set_bits("out" + std::to_string(i), 8);
+    }
+    auto graph = io->create_graph();
+    for (unsigned i = 0; i < 32; ++i) {
+      auto value = graph->get_input_pin("in" + std::to_string(i));
+      for (unsigned j = 0; j < 8; ++j) {
+        auto sum = gu::create_typed_node(*graph, Ntype_op::Sum, 8);
+        value.connect_sink(sum.create_sink_pin(0));
+        gu::create_const(*graph, *Dlop::create_integer(edited && i == 7 && j == 4 ? 7 : 5)).connect_sink(sum.create_sink_pin(0));
+        value = sum.create_driver_pin(0);
+        gu::set_bits(value, 8);
+      }
+      value.connect_sink(graph->get_output_pin("out" + std::to_string(i)));
+    }
+    return livehd::sim::Color_plan::discover(graph.get(), false, false, 16);
+  };
+  const auto before = make_plan(false);
+  const auto after  = make_plan(true);
+  ASSERT_TRUE(before.complete()) << before.report();
+  ASSERT_TRUE(after.complete()) << after.report();
+  ASSERT_EQ(before.sites().size(), after.sites().size());
+  for (size_t i = 0; i < before.sites().size(); ++i) {
+    EXPECT_EQ(before.sites()[i].schedule_id, after.sites()[i].schedule_id);
+    EXPECT_EQ(before.sites()[i].storage_id, after.sites()[i].storage_id);
+  }
+  ASSERT_EQ(before.colors().size(), after.colors().size());
+  size_t changed = 0;
+  for (size_t i = 0; i < before.colors().size(); ++i) {
+    EXPECT_EQ(before.colors()[i].members, after.colors()[i].members);
+    EXPECT_EQ(before.colors()[i].storage_id, after.colors()[i].storage_id);
+    EXPECT_EQ(before.colors()[i].execution_order, after.colors()[i].execution_order);
+    changed += before.colors()[i].structural_id != after.colors()[i].structural_id;
+  }
+  EXPECT_GT(changed, 0u) << "the semantic edit must still invalidate its kernel";
+  EXPECT_LT(changed, before.colors().size()) << "unrelated partitions must remain reusable";
+  ASSERT_EQ(before.boundary_slots().size(), after.boundary_slots().size());
+  for (size_t i = 0; i < before.boundary_slots().size(); ++i) {
+    EXPECT_EQ(before.boundary_slots()[i].structural_id, after.boundary_slots()[i].structural_id);
+    EXPECT_EQ(before.boundary_slots()[i].producer_color, after.boundary_slots()[i].producer_color);
+  }
+}
+
+TEST(SimColorPlan, OperandRoleEditPreservesPartitionMembershipAndStorageAbi) {
+  const auto make_plan = [](bool edited) {
+    auto& lib = livehd::Hhds_graph_library::instance(edited ? "lgdb_operand_edit" : "lgdb_operand_base");
+    auto  io  = lib.create_io("top");
+    for (unsigned i = 0; i < 32; ++i) {
+      io->add_input("in" + std::to_string(i), i);
+      io->add_output("out" + std::to_string(i), 32 + i);
+      io->set_bits("in" + std::to_string(i), 8);
+      io->set_bits("out" + std::to_string(i), 8);
+    }
+    auto graph = io->create_graph();
+    for (unsigned i = 0; i < 32; ++i) {
+      auto value = graph->get_input_pin("in" + std::to_string(i));
+      for (unsigned j = 0; j < 8; ++j) {
+        auto sum = gu::create_typed_node(*graph, Ntype_op::Sum, 8);
+        value.connect_sink(sum.create_sink_pin(edited && i == 7 && j == 4 ? 1 : 0));
+        gu::create_const(*graph, *Dlop::create_integer(5)).connect_sink(sum.create_sink_pin(0));
+        value = sum.create_driver_pin(0);
+        gu::set_bits(value, 8);
+      }
+      value.connect_sink(graph->get_output_pin("out" + std::to_string(i)));
+    }
+    return livehd::sim::Color_plan::discover(graph.get(), false, false, 16);
+  };
+  const auto before = make_plan(false);
+  const auto after  = make_plan(true);
+  ASSERT_TRUE(before.complete()) << before.report();
+  ASSERT_TRUE(after.complete()) << after.report();
+  ASSERT_EQ(before.sites().size(), after.sites().size());
+  for (size_t i = 0; i < before.sites().size(); ++i) {
+    EXPECT_EQ(before.sites()[i].schedule_id, after.sites()[i].schedule_id);
+    EXPECT_EQ(before.sites()[i].storage_id, after.sites()[i].storage_id);
+  }
+  ASSERT_EQ(before.colors().size(), after.colors().size());
+  size_t changed = 0;
+  for (size_t i = 0; i < before.colors().size(); ++i) {
+    EXPECT_EQ(before.colors()[i].members, after.colors()[i].members);
+    EXPECT_EQ(before.colors()[i].storage_id, after.colors()[i].storage_id);
+    EXPECT_EQ(before.colors()[i].execution_order, after.colors()[i].execution_order);
+    changed += before.colors()[i].structural_id != after.colors()[i].structural_id;
+  }
+  EXPECT_GT(changed, 0u) << "the semantic edit must still invalidate its kernel";
+  EXPECT_LT(changed, before.colors().size()) << "unrelated partitions must remain reusable";
+  ASSERT_EQ(before.boundary_slots().size(), after.boundary_slots().size());
+  for (size_t i = 0; i < before.boundary_slots().size(); ++i) {
+    EXPECT_EQ(before.boundary_slots()[i].structural_id, after.boundary_slots()[i].structural_id);
+    EXPECT_EQ(before.boundary_slots()[i].producer_color, after.boundary_slots()[i].producer_color);
+  }
+}
+
 TEST(SimColorPlan, StructuralHashPreservesPortRolesAndOperandMultiplicity) {
   const auto sum_shape = [](std::string_view tag, bool reverse, bool subtract, bool repeat) {
     auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_shape_multiset_") + std::string(tag));
@@ -988,6 +1151,34 @@ TEST(SimColorPlan, ConditionalBoundaryExemptsForwardedDefinitionValid) {
                                                                    << plan.report();
     }
   }
+}
+
+TEST(SimColorPlan, TransparentLowLatchPublishesPostFallData) {
+  const auto fixture = make_flop_feeds_high_latch("low_publish", true);
+  const auto plan    = livehd::sim::Color_plan::discover(fixture.graph.get());
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  ASSERT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
+  bool saw_read = false;
+  for (size_t version = 0; version < plan.version_sites().size(); ++version) {
+    const auto& site = plan.version_sites()[version];
+    if (plan.sites()[site.base_site].node.base_node() != fixture.latch
+        || site.version != livehd::sim::Color_plan::State_version::post_fall) {
+      continue;
+    }
+    saw_read = true;
+    EXPECT_EQ(site.role, livehd::sim::Color_plan::Version_role::data);
+    bool reads_current_d = false;
+    for (const auto& use : plan.value_uses()) {
+      if (use.consumer_version != version || use.producer_version == livehd::sim::Color_plan::invalid_index) {
+        continue;
+      }
+      const auto& producer  = plan.version_sites()[use.producer_version];
+      reads_current_d      |= producer.version == livehd::sim::Color_plan::State_version::post_fall
+                              && plan.sites()[producer.base_site].node.base_node() == fixture.flop;
+    }
+    EXPECT_TRUE(reads_current_d) << "the open latch must publish D from after the edges, not its held Q";
+  }
+  EXPECT_TRUE(saw_read) << plan.report();
 }
 
 TEST(SimColorPlan, TransparentHighLatchReadsPostRiseFlopState) {
@@ -1172,6 +1363,15 @@ TEST(SimColorPlan, NestedPackWithUnboundedOperandIsBoundedByItsWidth) {
   EXPECT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
 }
 
+TEST(SimColorPlan, ZeroPaddedConcatDoesNotOverlapAnotherPackedField) {
+  for (bool unbounded : {false, true}) {
+    auto graph = make_disjoint_or_pack_feedback(unbounded ? "signed_concat_pack" : "zero_padded_concat_pack", unbounded, true);
+    auto plan  = livehd::sim::Color_plan::discover(graph.get());
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    EXPECT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
+  }
+}
+
 TEST(SimColorPlan, StateActionsMergeWithinTheirExecutionSlot) {
   auto fixture = make_flop_feeds_high_latch("singleton_state");
   auto plan    = livehd::sim::Color_plan::discover(fixture.graph.get());
@@ -1223,6 +1423,107 @@ TEST(SimColorPlan, DataGatedLatchEnableIsAValueDependency) {
   }
   EXPECT_TRUE(reads_enable) << "a changed latch enable must dirty and feed its update color";
   EXPECT_TRUE(reads_din);
+}
+
+TEST(SimColorPlan, OppositeGatedLatchFeedbackHasNoTransparentCycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_plan_gated_feedback");
+  auto  io  = lib.create_io("gated_feedback");
+  io->add_input("clk", 0);
+  io->add_input("en", 1);
+  io->add_output("q", 2);
+  auto graph  = io->create_graph();
+  auto clock  = graph->get_input_pin("clk");
+  auto enable = graph->get_input_pin("en");
+  gu::set_bits(clock, 1);
+  gu::set_bits(enable, 1);
+  auto inverse = gu::create_typed_node(*graph, Ntype_op::Not);
+  clock.connect_sink(inverse.create_sink_pin(0));
+  auto low_clock = inverse.create_driver_pin(0);
+  gu::set_bits(low_clock, 1);
+  auto low  = gu::create_typed_node(*graph, Ntype_op::Latch);
+  auto high = gu::create_typed_node(*graph, Ntype_op::Latch);
+  for (auto [latch, phase] : {
+           std::pair{ low, low_clock},
+           std::pair{high,     clock}
+  }) {
+    auto gate = gu::create_typed_node(*graph, Ntype_op::And);
+    phase.connect_sink(gate.create_sink_pin(0));
+    enable.connect_sink(gate.create_sink_pin(1));
+    auto gate_value = gate.create_driver_pin(0);
+    gu::set_bits(gate_value, 1);
+    gate_value.connect_sink(gu::setup_sink_by_name(latch, "enable"));
+  }
+  low.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(high, "din"));
+  high.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(low, "din"));
+  auto observer = gu::create_typed_node(*graph, Ntype_op::Flop);
+  clock.connect_sink(gu::setup_sink_by_name(observer, "clock_pin"));
+  high.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(observer, "din"));
+  observer.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  const auto plan = livehd::sim::Color_plan::discover(graph.get());
+  EXPECT_TRUE(plan.complete()) << plan.report();
+  EXPECT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
+}
+
+TEST(SimColorPlan, GatedLatchFeedbackRequiresExclusiveWindows) {
+  for (const bool opposite : {false, true}) {
+    const auto tag = opposite ? "exclusive_gated_ring" : "overlapping_gated_ring";
+    auto&      lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + tag);
+    auto       io  = lib.create_io(tag);
+    io->add_input("clk", 0);
+    io->add_input("gate", 1);
+    io->add_output("q", 2);
+    auto graph  = io->create_graph();
+    auto clock  = graph->get_input_pin("clk");
+    auto enable = graph->get_input_pin("gate");
+    gu::set_bits(clock, 1);
+    gu::set_bits(enable, 1);
+    auto gated = gu::create_typed_node(*graph, Ntype_op::And);
+    clock.connect_sink(gated.create_sink_pin(0));
+    enable.connect_sink(gated.create_sink_pin(1));
+    auto gated_clock = gated.create_driver_pin(0);
+    gu::set_bits(gated_clock, 1);
+    auto inverse = gu::create_typed_node(*graph, Ntype_op::Not);
+    gated_clock.connect_sink(inverse.create_sink_pin(0));
+    auto low_clock = inverse.create_driver_pin(0);
+    gu::set_bits(low_clock, 1);
+    auto low  = gu::create_typed_node(*graph, Ntype_op::Latch);
+    auto high = gu::create_typed_node(*graph, Ntype_op::Latch);
+    (opposite ? low_clock : gated_clock).connect_sink(gu::setup_sink_by_name(low, "enable"));
+    gated_clock.connect_sink(gu::setup_sink_by_name(high, "enable"));
+    auto invert_data = gu::create_typed_node(*graph, Ntype_op::Not);
+    high.create_driver_pin(0).connect_sink(invert_data.create_sink_pin(0));
+    invert_data.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(low, "din"));
+    low.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(high, "din"));
+    auto observer = gu::create_typed_node(*graph, Ntype_op::Flop);
+    clock.connect_sink(gu::setup_sink_by_name(observer, "clock_pin"));
+    high.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(observer, "din"));
+    observer.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+    const auto plan = livehd::sim::Color_plan::discover(graph.get());
+    EXPECT_EQ(plan.summary().version_dag_acyclic, opposite) << plan.report();
+    if (opposite) {
+      EXPECT_TRUE(plan.complete()) << plan.report();
+    }
+  }
+}
+
+TEST(SimColorPlan, DataGatedLatchSettlesAtEveryEvaluationBarrier) {
+  auto fixture = make_data_gated_latch("latch_settle_barriers");
+  auto plan    = livehd::sim::Color_plan::discover(fixture.graph.get());
+  using Plan   = livehd::sim::Color_plan;
+
+  ASSERT_TRUE(plan.summary().versioning_complete) << plan.report();
+  std::vector<Plan::Execution_slot> commits;
+  for (const auto& version : plan.version_sites()) {
+    if (version.role != Plan::Version_role::state_update || plan.sites()[version.base_site].node.base_node() != fixture.latch) {
+      continue;
+    }
+    EXPECT_TRUE(version.latch_settle);
+    commits.push_back(Plan::commit_slot_of(version));
+  }
+  EXPECT_EQ(commits,
+            (std::vector<Plan::Execution_slot>{Plan::Execution_slot::pre_rise_eval,
+                                               Plan::Execution_slot::post_rise_eval,
+                                               Plan::Execution_slot::post_fall_publish}));
 }
 
 TEST(SimColorPlan, NullRootIsAnExplicitIncompletePlan) {

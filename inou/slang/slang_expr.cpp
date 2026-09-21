@@ -1425,7 +1425,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
           // recurses here through the generic select path below, so its offset
           // math is already field-relative.
           if (const auto* f = find_struct_field(*bsi, dotted)) {
-            return read_leaf(absl::StrCat(bundle_port_body_base(bsym), ".", f->name));
+            return read_leaf(absl::StrCat(bundle_port_read_base(bsym), ".", f->name));
           }
           // A WHOLE SUB-STRUCT read (`ctrl.req`) is deliberately NOT special-cased.
           // An interior level is a name PREFIX, never a leaf entry, so it falls
@@ -1512,7 +1512,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     if (const Struct_info* array_info = bundle_port_of(bsym);
         array_info != nullptr && base_ty.isPackedArray() && ti.bits == stride) {
       const auto& es        = expr.as<slang::ast::ElementSelectExpression>();
-      const auto  leaf_base = bundle_port_body_base(bsym);
+      const auto  leaf_base = bundle_port_read_base(bsym);
       // A reference, not a copy: a dynamic select below asks for every lane, so
       // copying the field table per access is O(lanes * fields) of churn on the
       // arrays this path exists for.
@@ -1719,8 +1719,7 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
     // tautologies, which is why the Pyrope formal-block path resolves history by
     // indexing the unroll instead. Here the state belongs to the design, so the
     // BMC/induction engine models it correctly.
-    if ((name == "$past" || name == "$rose" || name == "$fell" || name == "$stable" || name == "$changed")
-        && !args.empty()) {
+    if ((name == "$past" || name == "$rose" || name == "$fell" || name == "$stable" || name == "$changed") && !args.empty()) {
       if (args[0]->kind != slang::ast::ExpressionKind::NamedValue) {
         emit_unsupported(expr.sourceRange,
                          "unsupported-past",

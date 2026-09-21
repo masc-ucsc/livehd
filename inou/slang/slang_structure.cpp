@@ -2923,17 +2923,17 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
                                 int_min_str(ti.bits, ti.is_signed),
                                 initial);  // concrete init requests the implicit reset; async-reset attrs can override it
   if (partial_reg_shadow_.contains(&sym)) {
-    // The composite every READ resolves to: the flop's q, then whatever the
-    // continuous driver overwrites. Seeded HERE — declares are hoisted to
-    // module start, so the seed lands ahead of every driver, and the
-    // continuous assign's own set_mask lands on top of it in driver order.
-    // An OUTPUT PORT is already the interface's own net: it takes the seed but
-    // never a second declare.
-    auto composite = lname_of(sym);
+    // Continuous slices and flop slices form one order-independent value.
+    // Keep the write accumulator separate so a clocked reader emitted before
+    // a continuous driver still observes that driver's resolved value.
+    const auto composite  = lname_of(sym);
+    const auto tmp        = unique_suffixed(composite, "__composite");
+    wire_split_tmp_[&sym] = tmp;
+    builder_.create_declare_stmts(tmp, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+    builder_.create_assign_stmts(tmp, name);
     if (!output_syms_.contains(&sym)) {
-      builder_.create_declare_stmts(composite, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+      builder_.create_declare_stmts(composite, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
     }
-    builder_.create_assign_stmts(composite, name);
   }
   // M7 bridge: tuple output leaves driven combinationally from the shadow
   // reg's q (order-free — a reg read by name is its committed value).
@@ -3094,7 +3094,10 @@ bool Slang_context::classify_scalar_struct_var(const slang::ast::ValueSymbol& sy
   // Ports are already flat (CIRCT/firtool flattens struct ports to scalars), and
   // a clocked struct keeps the existing flat-reg-bus path; only a comb/wire/mut
   // scalar packed struct becomes a per-field bundle.
-  if (input_syms_.contains(&sym) || output_syms_.contains(&sym) || reg_syms_.contains(&sym)) {
+  if (input_syms_.contains(&sym) || output_syms_.contains(&sym) || reg_syms_.contains(&sym) || sym.kind == SymbolKind::Parameter
+      || sym.kind == SymbolKind::EnumValue) {
+    // Preserved struct parameters are packed constants, not mutable field
+    // storage. Splitting them creates undriven leaves for e.g. Cfg.AxiDataWidth.
     return false;
   }
   const auto& ct = sym.getType().getCanonicalType();
@@ -3305,6 +3308,15 @@ std::string Slang_context::bundle_port_body_base(const slang::ast::Symbol& sym) 
   return lname_of(sym);
 }
 
+std::string Slang_context::bundle_port_read_base(const slang::ast::Symbol& sym) {
+  if (!bundle_proc_writes_.contains(&sym)) {
+    if (auto it = bundle_out_resolved_.find(&sym); it != bundle_out_resolved_.end()) {
+      return it->second;
+    }
+  }
+  return bundle_port_body_base(sym);
+}
+
 std::string Slang_context::read_bundle_port_whole(const slang::ast::ValueSymbol& sym) {
   // Reconstruct the packed value from the field leaves (the inverse of the
   // whole-port write decomposition): OR each leaf, shifted to its bit offset.
@@ -3313,7 +3325,7 @@ std::string Slang_context::read_bundle_port_whole(const slang::ast::ValueSymbol&
     return "0";
   }
   const auto  fields = it->second.fields;  // copy: builder calls can rehash the map
-  auto        base   = bundle_port_body_base(sym);
+  auto        base   = bundle_port_read_base(sym);
   std::string acc;
   for (const auto& f : fields) {
     auto raw    = read_leaf(absl::StrCat(base, ".", f.name));
@@ -4405,9 +4417,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       if (!is_module_level(*net)) {
         continue;
       }
-      size_t wpos = SIZE_MAX;
+      // A consumer must see every concurrent field/slice driver, including
+      // one emitted after an earlier writer of another field of the same net.
+      size_t wpos = 0;
       for (size_t w : ws) {
-        wpos = std::min(wpos, pos[w]);
+        wpos = std::max(wpos, pos[w]);
       }
       auto rit = readers_of.find(net);
       if (rit == readers_of.end()) {
@@ -4818,17 +4832,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // (`unresolved ref 'id_vpu_core_ctrl.<leaf>'`, 428 leaves in minion, emitted
   // as `65'sb1????…` in the netlist).
   //
-  // Promote to `wire` ONLY where a plain single-driver wire is valid — the SAME
-  // test the split above uses to decide it needs no accumulator. The split
-  // device is scalar-only (it skips structs at the `ct.isStruct()` guard), so a
-  // partially / multiply written struct has no accumulator to fall back on: a
-  // conditional write would branch-merge against the wire's own buffer output
-  // (a self-loop), and co-writers would silently last-wins. Those keep `mut`.
-  // A single WHOLE procedural store that STRICT definite_blocking_writes proves
-  // runs on every path is also a valid one-driver wire; allowing it is
-  // essential for an always_comb struct value consumed by an earlier instance
-  // in a coarse false SCC. Instance-output and single-continuous-assign nets
-  // remain valid position-independent wires as before.
+  // A single whole store can directly drive wire leaves. Partial/multiple
+  // stores need mutable field accumulators bridged to resolved wire leaves,
+  // preserving blocking order inside a driver and concurrency between drivers.
   for (const auto& member : scope.members()) {
     if (member.kind != SymbolKind::Variable) {
       continue;
@@ -4840,6 +4846,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     if (!vsym.getType().getCanonicalType().isStruct()) {
       continue;
     }
+    bool split_struct = false;
     if (wire_syms_.contains(&vsym)) {
       auto      wit          = writers_of.find(&vsym);
       const int driver_count = wit != writers_of.end() ? static_cast<int>(wit->second.size()) : 0;
@@ -4847,10 +4854,24 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       const int store_count  = scit != store_counts.end() ? scit->second : 0;
       if (driver_count > 1 || store_count > 1 || partial_writes.contains(&vsym)
           || (proc_written.contains(&vsym) && !definite_proc_written.contains(&vsym)) || wire_split_tmp_.contains(&vsym)) {
-        wire_syms_.erase(&vsym);  // no scalar split to fall back on: keep `mut`
+        split_struct = is_scalar_struct_var(vsym);
+        wire_syms_.erase(&vsym);  // writes retain procedural accumulator semantics
       }
     }
     declare_value_symbol(vsym, /*force_reg=*/false);
+    if (split_struct) {
+      const auto accumulator = lname_of(vsym);
+      const auto resolved    = unique_suffixed(accumulator, "__resolved");
+      const auto fields      = struct_var_info_.at(&vsym).fields;
+      for (const auto& f : fields) {
+        builder_.create_declare_stmts(absl::StrCat(resolved, ".", f.name),
+                                      "wire",
+                                      int_max_str(f.bits, f.is_signed),
+                                      int_min_str(f.bits, f.is_signed));
+      }
+      struct_split_tmp_.emplace(&vsym, accumulator);
+      sym_lname_[&vsym] = resolved;
+    }
   }
 
   // ── hoist every WIRE-classified scalar declare to module top ───────────────
@@ -5058,9 +5079,14 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       if (!stem.empty() && stem.front() == '`') {
         stem = stem.substr(1, stem.size() - 2);
       }
-      std::string shadow = unique_suffixed(stem, "__bpo");
+      std::string shadow   = unique_suffixed(stem, "__bpo");
+      std::string resolved = unique_suffixed(stem, "__bpr");
       set_pending_loc(sym->location);
       for (const auto& f : fields) {
+        builder_.create_declare_stmts(absl::StrCat(resolved, ".", f.name),
+                                      "wire",
+                                      int_max_str(f.bits, f.is_signed),
+                                      int_min_str(f.bits, f.is_signed));
         auto leaf = absl::StrCat(shadow, ".", f.name);
         builder_.create_declare_stmts(leaf, "mut", "", "");
         if (f.is_signed) {
@@ -5072,6 +5098,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       }
       clear_pending_loc();
       bundle_out_shadow_.emplace(sym, std::move(shadow));
+      bundle_out_resolved_.emplace(sym, std::move(resolved));
     }
   }
 
@@ -5086,8 +5113,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   for (const auto* wsym : emit_ordered(wire_split_tmp_)) {
     const std::string& tmp = wire_split_tmp_.at(wsym);
     const auto*        vs  = wsym->as_if<slang::ast::ValueSymbol>();
-    if (vs == nullptr) {
-      continue;
+    if (vs == nullptr || partial_reg_shadow_.contains(wsym)) {
+      continue;  // partial-register composites were declared and seeded with Q
     }
     // A FLATTENED-AGGREGATE split: the mut accumulator is the ALREADY-declared
     // flat bus — declare only the reader-side wire, at the bus's flat width.
@@ -5128,6 +5155,12 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     const auto& d            = drivers[i];
     auto        saved_prefix = genblk_prefix_;
     genblk_prefix_           = d.prefix;
+    bundle_proc_writes_.clear();
+    if (d.member->kind == SymbolKind::ProceduralBlock) {
+      for (const auto* w : d.writes) {
+        bundle_proc_writes_.insert(w);
+      }
+    }
     // Re-arm the unroll budget per DRIVER, not per process. A `for` loop can
     // also reach the lowerer from a continuous assign or a net initializer —
     // through an inlined `function automatic` body, which is how bedrock's
@@ -5135,7 +5168,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     // so a budget armed only there is still 0 and `unroll_tick` fails the very
     // first iteration ("loop unroll limit of 4000 exhausted" on `for (int i =
     // 0; i < 1; i++)`).
-    unroll_budget_           = options_.unroll_limit;
+    unroll_budget_ = options_.unroll_limit;
     // A split continuous equation reads the RESOLVED wire, not the accumulator
     // that receives its own partial store. Lower its RHS before redirecting the
     // written symbol to `__wtmp`; this makes sibling slice drivers concurrent
@@ -5143,7 +5176,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     std::optional<std::string> resolved_cont_rhs;
     if (d.member != nullptr && d.member->kind == SymbolKind::ContinuousAssign) {
       for (const auto* w : d.writes) {
-        if (resolved_cont_selfrefs.contains(w) && d.rhs_reads.contains(w)) {
+        if ((resolved_cont_selfrefs.contains(w) || partial_reg_shadow_.contains(w) || struct_split_tmp_.contains(w))
+            && d.rhs_reads.contains(w)) {
           const auto& raw = d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment();
           if (raw.kind == ExpressionKind::Assignment) {
             // Install the continuous-assign context lower_continuous_assign
@@ -5172,9 +5206,19 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       for (const auto* w : d.writes) {
         auto it = wire_split_tmp_.find(w);
         if (it != wire_split_tmp_.end()) {
+          if (partial_reg_shadow_.contains(w) && d.member->kind == SymbolKind::ProceduralBlock
+              && edge_trigger_count(d.member->as<slang::ast::ProceduralBlockSymbol>()) > 0) {
+            continue;  // edge processes read the resolved composite and write the flop
+          }
           restore.emplace_back(w, sym_lname_[w]);
           sym_lname_[w] = it->second;
         }
+      }
+    }
+    for (const auto* w : d.writes) {
+      if (auto it = struct_split_tmp_.find(w); it != struct_split_tmp_.end()) {
+        restore.emplace_back(w, sym_lname_[w]);
+        sym_lname_[w] = it->second;
       }
     }
     switch (d.member->kind) {
@@ -5284,6 +5328,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       default: break;
     }
     genblk_prefix_ = saved_prefix;
+    bundle_proc_writes_.clear();
     for (auto& [w, name] : restore) {
       sym_lname_[w] = name;  // → back to the resolved wire for other drivers
     }
@@ -5308,6 +5353,15 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     clear_pending_loc();
   }
 
+  for (const auto* sym : emit_ordered(struct_split_tmp_)) {
+    const auto fields      = struct_var_info_.at(sym).fields;
+    const auto resolved    = lname_of(*sym);
+    const auto accumulator = struct_split_tmp_.at(sym);
+    for (const auto& f : fields) {
+      emit_leaf_store(absl::StrCat(resolved, ".", f.name), read_leaf(absl::StrCat(accumulator, ".", f.name)));
+    }
+  }
+
   // M7 bundle-output bridges: `port.field = <shadow>.field`, ONE top-level
   // store per port leaf, after every body driver has written the shadow.
   // Deterministic order (pointer-keyed map iteration varies run-to-run).
@@ -5328,6 +5382,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       set_pending_loc(sym->location);
       for (const auto& f : fields) {
         auto v = read_leaf(absl::StrCat(shadow, ".", f.name));
+        emit_leaf_store(absl::StrCat(bundle_out_resolved_.at(sym), ".", f.name), v);
         emit_leaf_store(absl::StrCat(base, ".", f.name), v);
       }
       clear_pending_loc();
@@ -5429,10 +5484,8 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     // be lowered is refused loudly below.
     std::function<void(const slang::ast::Statement&)> lower_assertions = [&](const slang::ast::Statement& s) {
       switch (s.kind) {
-        case StatementKind::Empty: return;
-        case StatementKind::ImmediateAssertion:
-          lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>());
-          return;
+        case StatementKind::Empty             : return;
+        case StatementKind::ImmediateAssertion: lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>()); return;
         case StatementKind::ConcurrentAssertion:
           if (!lower_concurrent_assertion(s.as<slang::ast::ConcurrentAssertionStatement>())) {
             emit_unsupported(s.sourceRange,
@@ -6373,8 +6426,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     // `__store_clock_pin` / `__store_posclk` markers -- upass.attributes
     // deliberately does not propagate those to a Flop, so writing them here is
     // what left the register clockless.
-    if (!reg_syms_.contains(sym) || !sym->getType().getCanonicalType().isUnpackedArray()
-        || flat_port_syms_.contains(sym)) {
+    if (!reg_syms_.contains(sym) || !sym->getType().getCanonicalType().isUnpackedArray() || flat_port_syms_.contains(sym)) {
       continue;
     }
     auto&                    ln   = *builder_.lnast;
@@ -6465,8 +6517,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
       // minion's vpu_trans `id_trans_scoreboard_o:u96`, which reached
       // pass.opentimer as 96 bit-blasted flops with an unconnected CLK and
       // failed synthesis after ~4 hours.
-      if (!reg_syms_.contains(sym)
-          || (sym->getType().getCanonicalType().isUnpackedArray() && !flat_port_syms_.contains(sym))) {
+      if (!reg_syms_.contains(sym) || (sym->getType().getCanonicalType().isUnpackedArray() && !flat_port_syms_.contains(sym))) {
         continue;
       }
       auto                     name = reg_net_of(*sym);
@@ -6695,7 +6746,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
         };
         if (const auto* bsi = bundle_port_of(asym)) {  // (b) the parent's OWN bundle port: per-leaf reads
           const auto afields = bsi->fields;            // copy: builder calls can rehash the map
-          auto       aname   = bundle_port_body_base(asym);
+          auto       aname   = bundle_port_read_base(asym);
           done               = map_leaves(
               pfields,
               afields,

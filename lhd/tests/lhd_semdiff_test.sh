@@ -49,6 +49,8 @@ mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
 EOF
 compile "$W/g1.prp" "$W/g1"
 compile "$W/o1.prp" "$W/o1"
+cp -R "$W/g1" "$W/g1_clean"
+cp -R "$W/o1" "$W/o1_clean"
 "$LHD" pass semdiff --ref lg:"$W/g1" --impl lg:"$W/o1" -q --workdir "$W/w1" >/dev/null 2>&1 || fail "semdiff #1"
 [ "$(match0_count "$W/g1")" -eq 0 ] || fail "#1 ref has unmatched nodes (expected full commutative match)"
 [ "$(match0_count "$W/o1")" -eq 0 ] || fail "#1 impl has unmatched nodes (expected full commutative match)"
@@ -79,12 +81,15 @@ EOF
 compile "$W/g2.prp" "$W/g2"
 compile "$W/o2.prp" "$W/o2"
 "$LHD" pass semdiff --ref lg:"$W/g2" --impl lg:"$W/o2" -q --workdir "$W/w2" >/dev/null 2>&1 || fail "semdiff #2"
-[ "$(match0_count "$W/g2")" -gt 0 ] || fail "#2 expected the and/sum to be unmatched"
+U=$(match0_count "$W/g2")
+M=$(matched_count "$W/g2")
+[ "$U" -gt 0 ] || fail "#2 expected the and/sum to be unmatched"
 [ "$(match0_count "$W/o2")" -gt 0 ] || fail "#2 expected the or/sum to be unmatched"
-[ "$(matched_count "$W/g2")" -gt 0 ] || fail "#2 expected the shared logic to still match"
+[ "$M" -gt 0 ] || fail "#2 expected the shared logic to still match"
 "$LHD" tool grep match=0 lg:"$W/g2" --target node 2>/dev/null | grep -q '"kind":"and"' || fail "#2 the and node should be the gap"
-"$LHD" tool diff lg:"$W/g2" lg:"$W/o2" --match 2>/dev/null | grep -q '^  + ' || fail "#2 diff --match shows no impl-only (+) line"
-"$LHD" tool diff lg:"$W/g2" lg:"$W/o2" --match 2>/dev/null | grep -q '^  - ' || fail "#2 diff --match shows no ref-only (-) line"
+DIFF=$("$LHD" tool diff lg:"$W/g2" lg:"$W/o2" --match 2>/dev/null)
+grep -q '^  + ' <<<"$DIFF" || fail "#2 diff --match shows no impl-only (+) line"
+grep -q '^  - ' <<<"$DIFF" || fail "#2 diff --match shows no ref-only (-) line"
 echo "PASS: real difference -> isolated gap, surrounding logic matched, diff --match shows -/+"
 
 # ---------------------------------------------------------------------------
@@ -119,8 +124,8 @@ echo "PASS: matching_names anchors the renamed-region flop ($OFF -> $ON matched)
 # ---------------------------------------------------------------------------
 # 4. id_granularity=region unions the connected matched nodes of #1 into ONE id.
 # ---------------------------------------------------------------------------
-compile "$W/g1.prp" "$W/g4"
-compile "$W/o1.prp" "$W/o4"
+cp -R "$W/g1_clean" "$W/g4"
+cp -R "$W/o1_clean" "$W/o4"
 "$LHD" pass semdiff --ref lg:"$W/g4" --impl lg:"$W/o4" --set semdiff.id_granularity=region -q --workdir "$W/w4" >/dev/null 2>&1 || fail "semdiff #4"
 REGIONS=$("$LHD" tool grep -v match=0 lg:"$W/g4" --target node --attr match --diag-fmt jsonl 2>/dev/null | grep -o '"match":[0-9]*' | sort -u | wc -l | tr -d ' ')
 [ "$REGIONS" -eq 1 ] || fail "#4 region granularity should union the connected cone into 1 id, got $REGIONS"
@@ -130,8 +135,6 @@ echo "PASS: id_granularity=region unions the matched cone into one id"
 # 5. The grep -v invert: match=0 and -v match=0 partition the node set.
 # ---------------------------------------------------------------------------
 TOTAL=$("$LHD" tool cat lg:"$W/g2" --target node --diag-fmt jsonl 2>/dev/null | grep -c '"t":"node"')
-U=$(match0_count "$W/g2")
-M=$(matched_count "$W/g2")
 [ "$((U + M))" -eq "$TOTAL" ] || fail "#5 grep -v did not partition the node set ($U + $M != $TOTAL)"
 echo "PASS: grep -v match=0 inverts cleanly (partitions the node set)"
 
@@ -139,8 +142,8 @@ echo "PASS: grep -v match=0 inverts cleanly (partitions the node set)"
 # 5b. hier=0 single-pair arm: same #1 fixtures, explicit top-pair compare must
 #     still stamp+save the match attrs (save defaults on for non-stats runs).
 # ---------------------------------------------------------------------------
-compile "$W/g1.prp" "$W/g5b"
-compile "$W/o1.prp" "$W/o5b"
+cp -R "$W/g1_clean" "$W/g5b"
+cp -R "$W/o1_clean" "$W/o5b"
 "$LHD" pass semdiff --ref lg:"$W/g5b" --impl lg:"$W/o5b" --set semdiff.hier=0 -q --workdir "$W/w5b" >/dev/null 2>&1 || fail "semdiff #5b (hier=0)"
 [ "$(match0_count "$W/g5b")" -eq 0 ] || fail "#5b hier=0 ref has unmatched nodes"
 [ "$(matched_count "$W/g5b")" -gt 0 ] || fail "#5b hier=0 matched nothing (match attrs not saved?)"
@@ -163,11 +166,11 @@ mod mb(a:u8, b:u8) -> (y:u9@[0]) {
 EOF
 compile "$W/ma.prp" "$W/ma"
 compile "$W/mb.prp" "$W/mb"
+cp -R "$W/ma" "$W/ma2"
+cp -R "$W/mb" "$W/mb2"
 "$LHD" pass semdiff --ref lg:"$W/ma" --impl lg:"$W/mb" --ref-top ma --impl-top mb -q --workdir "$W/w5c" >/dev/null 2>&1 || fail "semdiff #5c renamed-top pair"
 [ "$(match0_count "$W/ma")" -eq 0 ] || fail "#5c renamed-top pair left unmatched nodes"
 [ "$(matched_count "$W/ma")" -gt 0 ] || fail "#5c renamed-top pair matched nothing"
-compile "$W/ma.prp" "$W/ma2"
-compile "$W/mb.prp" "$W/mb2"
 if "$LHD" pass semdiff --ref lg:"$W/ma2" --impl lg:"$W/mb2" -q --workdir "$W/w5c2" >/dev/null 2>&1; then
   fail "#5c 0-pair sweep passed; expected hard error"
 fi

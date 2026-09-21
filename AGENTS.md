@@ -11,6 +11,12 @@
 
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
+- **Test runtime**: Keep each test under 20 seconds with `-c opt` and under
+  60 seconds with `-c dbg`. Simplify oversized fixtures and avoid repeated
+  compilation; keep large design benchmarks in their own repositories.
+- **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
+  benchmark repositories. Test inputs must be provided by this repository or
+  declared build dependencies.
 - **lhd CLI**: `./bazel-bin/lhd/lhd` — the only driver, for all flows
   (`lhd help`, `lhd describe <cmd>`); `lhd pyrope lsp` serves the Pyrope LSP
   and `lhd pyrope fmt` formats Pyrope source. The old `lgshell` REPL was

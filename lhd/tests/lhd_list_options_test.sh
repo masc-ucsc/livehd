@@ -323,63 +323,18 @@ no_lec() {  # $@ = an lhd argv whose output must not advertise lec.*
     && fail "lhd $* still advertises the removed lec.* namespace"
   return 0
 }
+# The full command/format matrix is covered in-process by lhd_options_test.
 for m in pretty jsonl; do
-  no_lec describe lec --diag-fmt $m
-  no_lec describe formal --diag-fmt $m
-  no_lec describe 'formal verify' --diag-fmt $m
-  no_lec lec --help --diag-fmt $m
-  no_lec formal verify --help --diag-fmt $m
-  no_lec help formal --diag-fmt $m
-  no_lec help --diag-fmt $m
+  no_lec help --diag-fmt "$m"
 done
 
 
 # Retired labels are not public even when the kernel still uses their EPRP
 # counterparts. Cover discovery, direct setting, and namespace aliases.
 public_options=$("$LHD" list options)
-for retired in compile.cgen.verbose \
-  formal.lean.normalize \
-  formal.lean.cert_chunk_size \
-  formal.lean.cert_chunk_limit \
-  formal.lean.cert_wf_fallback \
-  pass.semdiff.alg \
-  pass.semdiff.verbose \
-  pass.color.compact \
-  sim.flatten \
-  compile.formal.enabled \
-  pass.abc.out \
-  pass.partition.out \
-  pass.liberty.out \
-  pass.single_edge.out \
-  compile.yosys.frontend \
-  compile.slang.defines \
-  compile.slang.includes \
-  compile.slang.undefines \
-  pass.abc.threads \
-  pass.abc.small_flow \
-  pass.abc.small_ge \
-  pass.abc.small_min_ge \
-  pass.abc.ctrl_flow \
-  pass.abc.ctrl_area_relax \
-  pass.abc.ctrl_time_budget_ms \
-  compile.yosys.abc \
-  compile.yosys.techmap \
-  compile.yosys.elab_top \
-  compile.yosys.rename_top \
-  compile.formal.active \
-  compile.formal.hier_preflight \
-  compile.upass.import_defer \
-  compile.upass.dce \
-  compile.upass.inherit \
-  compile.upass.preserve_param_provenance \
-  compile.upass.ssa_stream \
-  compile.slang.slang_flags \
-  compile.yosys.slang_flags \
-  pass.abc.stats \
-  pass.color.stats \
-  pass.opentimer.stats \
-  pass.semdiff.stats \
-  formal.stats; do
+# The exhaustive spelling matrix runs through parse_args and validation in
+# //lhd:lhd_options_test. Keep CLI envelope coverage for each namespace here.
+for retired in compile.cgen.verbose formal.stats pass.abc.stats sim.flatten; do
   echo "$public_options" | grep -q "\"name\":\"$retired\"" && fail "$retired remains listed"
   "$LHD" compile "$PRP" --set "$retired=1" -q >"$W/retired.json" 2>&1 && fail "$retired remains accepted"
   grep -q 'no longer a public option' "$W/retired.json" || fail "$retired lacks a removal diagnostic: $(cat "$W/retired.json")"

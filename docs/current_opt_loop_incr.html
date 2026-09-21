@@ -1,7 +1,9 @@
-<title>Incremental rebuild speedup — full vs no-change and one-file edit</title>
+<title>Incremental rebuilds, simulation validation and synthesis</title>
 <style>
 body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:2rem;max-width:82rem}
 table{border-collapse:collapse;margin:1rem 0;width:100%}
+@media(max-width:1100px){table{display:block;overflow-x:auto}}
+td:last-child{overflow-wrap:anywhere}
 th,td{border:1px solid #bbb;padding:.25rem .5rem;text-align:right}
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
 th{background:#eee}
@@ -19,14 +21,211 @@ h4{margin:1.2rem 0 0}
 code{background:#f4f4f4;padding:0 .2rem}
 dt{font-weight:bold;margin-top:.4rem}
 </style>
-<h1>Incremental rebuild speedup — full vs no-change and one-file edit</h1>
-<p>Generated from <code>bench/ledger.jsonl</code> at 2026-09-03 12:15. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out /mada/users/renau/projs/livehd/docs/current_opt_loop_incr.html --current incremental-full-flow-opt-20260903 --previous incremental-full-flow-opt-20260902</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
-<p>Synthesis resource policy: one shared color sizing for every design; ABC uses soft per-color guards of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is the maximum conservative per-color RSS growth before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic and is <b>not</b> a benchmark rejection threshold. Whole-process RSS may exceed 16 GiB during STA; only an actual tool failure marks the run failed. Incremental simulation stops after compiling and linking <code>drv.bin</code>; it does not run the testbench. Its wall clock is setup/codegen plus the generated host build.</p>
+<h1>Incremental rebuilds, simulation validation and synthesis</h1>
+<p>Generated from <code>bench/ledger.jsonl</code> at 2026-09-20 09:05. Derived, never authored — re-run <code>bazel run -c opt //bench:ledger -- render --flow incr --out /Users/renau/projs/livehd/docs/current_opt_loop_incr.html --current validated-eight-opt-20260919 --also-current synthesis-completion-opt-20260919 --also-current simulation-validation-opt-20260919 --also-current incremental-full-flow-opt-20260903</code> to refresh. Every speedup is computed within one row against that row's <b>full, caches-off build</b>; cold incremental is displayed but is not a speedup denominator. <b>2 host section(s) — never compare a number across them</b> (I11).</p>
+<p>Measurements are grouped by configuration and host. Incremental simulation timing is setup/codegen plus host compilation; the generated drivers are also executed for correctness, outside that build timer. Execution timings are reported separately below. Missing cells have no completed measurement; earlier results are shown only under their original configuration.</p>
+<p>The September 19–20 Pyrope synthesis sweep serializes complete process trees with default cones coloring (30,000 predicted-AIG soft limit), one synthesis worker, 16-GiB per-color and 15-minute per-color budgets, and a 48-GiB process-tree cap with 16 GiB reserved for the system. The requested color.max_ge=8000 is inactive in cones mode. Historical configurations retain their recorded settings. See the <a href="../repros/opt_loop_refresh_20260919/README.md">method and provenance</a> and <a href="../repros/opt_loop_refresh_20260919/synthesis_observations.md">synthesis diagnoses</a>.</p>
 <h2>At a glance</h2>
+<h3>configuration: <code>validated-eight-opt-20260919</code></h3>
+<h3>host: mascm1</h3>
+<details><summary>Measured binary and PDK identities</summary><ul>
+<li>LHD SHA-256: <code>5af1caf045658a4549d624e45acd3249868554be6422f78d815e5b55af718bff</code>; PDK: <code>not used</code></li>
+<li>LHD SHA-256: <code>5af1caf045658a4549d624e45acd3249868554be6422f78d815e5b55af718bff</code>; PDK: <code>e8daeda73ca8f5814dbc0b11d1d05802251a3750</code></li>
+</ul></details>
+<h2>Correctness scope</h2>
+<table><thead><tr><th>design / configuration</th><th>simulation</th><th>incremental versus fresh</th><th>formal scope and limits</th></tr></thead><tbody>
+<tr><td>cva6</td><td>RTL, Pyrope and Verilator agree at 50k cycles; architectural asserts pass</td><td>one-module ADD edit matches fresh; restored source passes</td><td>9 reduced round-trips and focused core modules PROVEN; whole-core proof not established; BHT/BTB timeouts UNKNOWN</td></tr>
+</tbody></table>
+<h2>Synthesis scenario gates</h2>
+<p>Full, pass1, pass2 and pass3 mean caches off, cold, comment-only and semantic edit. A gate failure stops subsequent stages; those stages remain unmeasured. Running and queued entries are snapshots; completed invocations are published independently of their unfinished scenario. Successful mapping alone does not pass these gates. Peak tree memory uses max(RSS, physical footprint) per process, summed over the whole scenario. Phase timers exclude driver overhead and need not sum to wall time.</p>
+<table><tr><th>design</th><th>finished invocations</th><th>scenario result</th><th>elapsed / time to stop (s)</th><th>peak tree / limit (GiB)</th><th>evidence</th></tr>
+<tr><td>cva6</td><td></td><td class="warn">interrupted to yield to external synthesis; no design failure or timing sample</td><td>165.867</td><td>0.694 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/cva6/run.log">log</a></td></tr>
+<tr><td>dino</td><td>full, pass1, pass2</td><td class="worse">FAIL: comment-only pass re-synthesized 9933ms of a 13772ms cold map</td><td>77.9117</td><td>0.990 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/dino/run.log">log</a></td></tr>
+<tr><td>matched_filter</td><td>full, pass1, pass2, pass3</td><td class="">all four modes passed</td><td>39.3311</td><td>0.318 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/matched_filter/run.log">log</a></td></tr>
+<tr><td>minion</td><td></td><td class="warn">interrupted by monitor on external --help command (monitor fixed); no design failure or timing sample</td><td>314.072</td><td>3.530 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/minion/run.log">log</a></td></tr>
+<tr><td>picorv32</td><td>full, pass1, pass2, pass3</td><td class="">all four modes passed</td><td>25.8872</td><td>0.405 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/picorv32/run.log">log</a></td></tr>
+<tr><td>xs_alu</td><td>full, pass1, pass2, pass3</td><td class="">all four modes passed</td><td>23.8353</td><td>0.321 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/xs_alu/run.log">log</a></td></tr>
+<tr><td>xs_renametable</td><td></td><td class="warn">interrupted to yield to external synthesis; no design failure or timing sample</td><td>144.59</td><td>6.273 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/xs_renametable/run.log">log</a></td></tr>
+<tr><td>xs_rob</td><td></td><td class="worse">guard: command memory limit exceeded</td><td>5,504</td><td>48.048 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/xs_rob/run.log">log</a></td></tr>
+</table>
+<h2>Simulation: setup, host compilation, and execution</h2>
+<p>Each row uses the stated cycle count. Verilog setup includes RTL import. Execution excludes host compilation and tracing. A matching workload is simulation evidence, not a whole-design LEC proof. Samples and provenance remain in the linked reports; these local timings may include background load.</p>
+<table class="sortable-table"><thead><tr><th>design</th><th>input / simulator</th><th>cycles</th><th>setup (ms)</th><th>host compile (ms)</th><th>execution (ms)</th><th>workload comparison</th><th>evidence</th></tr></thead><tbody>
+<tr><td>cva6</td><td>Pyrope / LHD Slop</td><td class="" data-sort="50000">50,000</td><td class="" data-sort="5484.69158285">5,485</td><td class="" data-sort="10022.625">10,023</td><td class="" data-sort="1021.85791684">1,022</td><td class="">matches Verilator: retired 43443, done 738</td><td><a href="../repros/sim_validation_20260919/cva6/README.md">report</a></td></tr>
+<tr><td>cva6</td><td>Verilog / Verilator</td><td class="" data-sort="50000">50,000</td><td class="" data-sort="2687.4986249">2,687</td><td class="" data-sort="3344.21162517">3,344</td><td class="" data-sort="112.84600012">112.846</td><td class="">reference: retired 43443, done 738</td><td><a href="../repros/sim_validation_20260919/cva6/README.md">report</a></td></tr>
+<tr><td>cva6</td><td>Verilog / LHD Slop</td><td class="" data-sort="50000">50,000</td><td class="" data-sort="5145.40233277">5,145</td><td class="" data-sort="12315">12,315</td><td class="" data-sort="1174.46570797">1,174</td><td class="">matches Verilator: retired 43443, done 738</td><td><a href="../repros/sim_validation_20260919/cva6/README.md">report</a></td></tr>
+</tbody></table>
+<h2>Synthesis: cache-disabled result and resource use</h2>
+<p>Compile, color, ABC and STA are separate phases. The ABC phase includes its proof-based preprocessing and graph import. Per-region mapping timers do not cover the whole phase. A completed mapping does not prove netlist equivalence. A failed or resource-stopped run is excluded from speedups; missing values are not zero. Area and timing are unavailable when synthesis fails or the design contains unmapped divider cones.</p>
+<table class="sortable-table"><thead><tr><th>design</th><th>status</th><th>compile (ms)</th><th>color (ms)</th><th>ABC (ms)</th><th>STA (ms)</th><th>gates</th><th>area (um²)</th><th>STA delay (ns)</th><th>peak RSS (MiB)</th><th>details</th></tr></thead><tbody>
+<tr><td>dino</td><td>completed</td><td class="" data-sort="115">115</td><td class="" data-sort="2">2</td><td class="" data-sort="26266">26,266</td><td class="" data-sort="1161">1,161</td><td class="" data-sort="37562">37,562</td><td class="" data-sort="320560.5">320,560</td><td class="" data-sort="32.8697">32.8697</td><td class="" data-sort="907.390625">907.391</td><td>one process tree at a time; max(RSS, physical footprint) guard; Sky130; netlist LEC not established by mapping</td></tr>
+<tr><td>matched_filter</td><td>completed</td><td class="" data-sort="120">120</td><td class="" data-sort="3">3</td><td class="" data-sort="11782">11,782</td><td class="" data-sort="258">258</td><td class="" data-sort="8864">8,864</td><td class="" data-sort="64254.51">64,255</td><td class="" data-sort="5.37069">5.37069</td><td class="" data-sort="299.34375">299.344</td><td>one process tree at a time; max(RSS, physical footprint) guard; Sky130; netlist LEC not established by mapping</td></tr>
+<tr><td>picorv32</td><td>completed</td><td class="" data-sort="204">204</td><td class="" data-sort="6">6</td><td class="" data-sort="6536">6,536</td><td class="" data-sort="344">344</td><td class="" data-sort="11105">11,105</td><td class="" data-sort="82395.97">82,396</td><td class="" data-sort="14.5605">14.5605</td><td class="" data-sort="387.15625">387.156</td><td>one process tree at a time; max(RSS, physical footprint) guard; Sky130; netlist LEC not established by mapping</td></tr>
+<tr><td>xs_alu</td><td>completed</td><td class="" data-sort="57">57</td><td class="" data-sort="1">1</td><td class="" data-sort="7440">7,440</td><td class="" data-sort="357">357</td><td class="" data-sort="13056">13,056</td><td class="" data-sort="101547.01">101,547</td><td class="" data-sort="26.8594">26.8594</td><td class="" data-sort="321.90625">321.906</td><td>one process tree at a time; max(RSS, physical footprint) guard; Sky130; netlist LEC not established by mapping</td></tr>
+</tbody></table>
+<h2>Simulation compile — SLOP</h2>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
+<tr><td>cva6</td><td class="" data-sort="15507.3165829">15,507.3</td><td class="" data-sort="16281.0514171">16,281.1</td><td class="" data-sort="751.154625024">751.2</td><td class="better" data-sort="20.644639687">20.64&times;</td><td class="" data-sort="15478.4567499">15,478.5</td><td class="noise" data-sort="1.00186451617">1.00&times;</td><td class="miss">-</td></tr>
+</tbody><tfoot><tr class="geomean"><td>geomean</td>
+<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
+<td class="better" data-sort="20.644639687">20.64&times; <small>(n=1)</small></td>
+<td class="miss">-</td>
+<td class="noise" data-sort="1.00186451617">1.00&times; <small>(n=1)</small></td>
+<td class="miss">-</td>
+</tr></tfoot></table>
+<h2>Simulation compile — LLVM</h2>
+<p class="warn">No simulation compile — llvm incremental measurements in this configuration.</p>
+<h2>Compile only</h2>
+<p class="warn">No compile only incremental measurements in this configuration.</p>
+<h2>Synthesis − STA</h2>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit ABC misses</small></th></tr></thead><tbody>
+<tr><td>dino</td><td class="" data-sort="26383">26,383.0</td><td class="" data-sort="23498">23,498.0</td><td class="worse">SUITE GATE FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
+<tr><td>matched_filter</td><td class="" data-sort="11905">11,905.0</td><td class="" data-sort="11970">11,970.0</td><td class="" data-sort="5158">5,158.0</td><td class="better" data-sort="2.30806514153">2.31&times;</td><td class="" data-sort="5891">5,891.0</td><td class="better" data-sort="2.02087930742">2.02&times;</td><td class="" data-sort="3">3</td></tr>
+<tr><td>picorv32</td><td class="" data-sort="6746">6,746.0</td><td class="" data-sort="6741">6,741.0</td><td class="" data-sort="2477">2,477.0</td><td class="better" data-sort="2.7234557933">2.72&times;</td><td class="" data-sort="5221">5,221.0</td><td class="better" data-sort="1.292089638">1.29&times;</td><td class="" data-sort="17">17</td></tr>
+<tr><td>xs_alu</td><td class="" data-sort="7498">7,498.0</td><td class="" data-sort="5967">5,967.0</td><td class="" data-sort="2013">2,013.0</td><td class="better" data-sort="3.72478887233">3.72&times;</td><td class="" data-sort="3583">3,583.0</td><td class="better" data-sort="2.09265978231">2.09&times;</td><td class="" data-sort="23">23</td></tr>
+</tbody><tfoot><tr class="geomean"><td>geomean</td>
+<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
+<td class="better" data-sort="2.8608166044">2.86&times; <small>(n=3)</small></td>
+<td class="miss">-</td>
+<td class="better" data-sort="1.76134277741">1.76&times; <small>(n=3)</small></td>
+<td class="miss">-</td>
+</tr></tfoot></table>
+<h2>Synthesis</h2>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
+<tr><td>dino</td><td class="" data-sort="27601">27,601.0</td><td class="" data-sort="24804">24,804.0</td><td class="worse">22,414.0 SUITE GATE FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
+<tr><td>matched_filter</td><td class="" data-sort="12207">12,207.0</td><td class="" data-sort="12298">12,298.0</td><td class="" data-sort="5233">5,233.0</td><td class="better" data-sort="2.33269635009">2.33&times;</td><td class="" data-sort="6268">6,268.0</td><td class="better" data-sort="1.94751116784">1.95&times;</td></tr>
+<tr><td>picorv32</td><td class="" data-sort="7139">7,139.0</td><td class="" data-sort="7161">7,161.0</td><td class="" data-sort="2552">2,552.0</td><td class="better" data-sort="2.7974137931">2.80&times;</td><td class="" data-sort="5676">5,676.0</td><td class="better" data-sort="1.25775193798">1.26&times;</td></tr>
+<tr><td>xs_alu</td><td class="" data-sort="7903">7,903.0</td><td class="" data-sort="6416">6,416.0</td><td class="" data-sort="2093">2,093.0</td><td class="better" data-sort="3.77591973244">3.78&times;</td><td class="" data-sort="4031">4,031.0</td><td class="better" data-sort="1.96055569338">1.96&times;</td></tr>
+</tbody><tfoot><tr class="geomean"><td>geomean</td>
+<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
+<td class="better" data-sort="2.90990777633">2.91&times; <small>(n=3)</small></td>
+<td class="miss">-</td>
+<td class="better" data-sort="1.68714099625">1.69&times; <small>(n=3)</small></td>
+</tr></tfoot></table>
+<h2>LEC</h2>
+<p class="warn">No lec incremental measurements in this configuration.</p>
+<h3>configuration: <code>synthesis-completion-opt-20260919</code></h3>
+<h3>host: mascm1</h3>
+<details><summary>Measured binary and PDK identities</summary><ul>
+<li>LHD SHA-256: <code>5af1caf045658a4549d624e45acd3249868554be6422f78d815e5b55af718bff</code>; PDK: <code>not used</code></li>
+<li>LHD SHA-256: <code>5af1caf045658a4549d624e45acd3249868554be6422f78d815e5b55af718bff</code>; PDK: <code>e8daeda73ca8f5814dbc0b11d1d05802251a3750</code></li>
+</ul></details>
+<h2>Synthesis scenario gates</h2>
+<p>Full, pass1, pass2 and pass3 mean caches off, cold, comment-only and semantic edit. A gate failure stops subsequent stages; those stages remain unmeasured. Running and queued entries are snapshots; completed invocations are published independently of their unfinished scenario. Successful mapping alone does not pass these gates. Peak tree memory uses max(RSS, physical footprint) per process, summed over the whole scenario. Phase timers exclude driver overhead and need not sum to wall time.</p>
+<table><tr><th>design</th><th>finished invocations</th><th>scenario result</th><th>elapsed / time to stop (s)</th><th>peak tree / limit (GiB)</th><th>evidence</th></tr>
+<tr><td>cva6</td><td></td><td class="warn">stopped at user request during full ABC mapping; no completed QoR or STA; time to user stop from recorded stop time and run-log creation; not a completed synthesis time</td><td>2,055</td><td>26.390 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/synthesis-completion-opt-20260919/cva6/run.log">log</a></td></tr>
+<tr><td>minion</td><td>full</td><td class="worse">guard: command timeout exceeded</td><td>21,600</td><td>24.634 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/synthesis-completion-opt-20260919/minion/run.log">log</a></td></tr>
+<tr><td>xs_backend</td><td></td><td class="warn">cancelled at user request before launch; unrun</td><td>0</td><td>-</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/synthesis-completion-opt-20260919/xs_backend/run.log">log</a></td></tr>
+<tr><td>xs_div</td><td>full, pass1, pass2, pass3</td><td class="">all four modes passed</td><td>38.3502</td><td>0.420 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/synthesis-completion-opt-20260919/xs_div/run.log">log</a></td></tr>
+<tr><td>xs_exu</td><td></td><td class="warn">cancelled at user request before launch; unrun</td><td>0</td><td>-</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/synthesis-completion-opt-20260919/xs_exu/run.log">log</a></td></tr>
+<tr><td>xs_renametable</td><td></td><td class="worse">guard: command memory limit exceeded; approximate time-to-stop from log timestamps; queue monitor crashed during macOS process inspection; process exit status not retained</td><td>4,013</td><td>48.347 / 48</td><td><a href="../repros/opt_loop_refresh_20260919/synthesis/synthesis-completion-opt-20260919/xs_renametable/run.log">log</a></td></tr>
+</table>
+<h2>Synthesis: cache-disabled result and resource use</h2>
+<p>Compile, color, ABC and STA are separate phases. The ABC phase includes its proof-based preprocessing and graph import. Per-region mapping timers do not cover the whole phase. A completed mapping does not prove netlist equivalence. A failed or resource-stopped run is excluded from speedups; missing values are not zero. Area and timing are unavailable when synthesis fails or the design contains unmapped divider cones.</p>
+<table class="sortable-table"><thead><tr><th>design</th><th>status</th><th>compile (ms)</th><th>color (ms)</th><th>ABC (ms)</th><th>STA (ms)</th><th>gates</th><th>area (um²)</th><th>STA delay (ns)</th><th>peak RSS (MiB)</th><th>details</th></tr></thead><tbody>
+<tr><td>minion</td><td>completed</td><td class="" data-sort="13796">13,796</td><td class="" data-sort="1755">1,755</td><td class="" data-sort="16544402">16,544,402</td><td class="" data-sort="24117">24,117</td><td class="" data-sort="882742">882,742</td><td class="" data-sort="6907244.55">6,907,245</td><td class="" data-sort="41.8647">41.8647</td><td class="" data-sort="25213.15625">25,213</td><td>one process tree at a time; max(RSS, physical footprint) guard; Sky130; netlist LEC not established by mapping</td></tr>
+<tr><td>xs_div</td><td>completed</td><td class="" data-sort="270">270</td><td class="" data-sort="5">5</td><td class="" data-sort="10098">10,098</td><td class="" data-sort="369">369</td><td class="" data-sort="16337">16,337</td><td class="" data-sort="116125.48">116,125</td><td class="" data-sort="27.3188">27.3188</td><td class="" data-sort="437.609375">437.609</td><td>one process tree at a time; max(RSS, physical footprint) guard; Sky130; netlist LEC not established by mapping</td></tr>
+</tbody></table>
+<h2>Simulation compile — SLOP</h2>
+<p class="warn">No simulation compile — slop incremental measurements in this configuration.</p>
+<h2>Simulation compile — LLVM</h2>
+<p class="warn">No simulation compile — llvm incremental measurements in this configuration.</p>
+<h2>Compile only</h2>
+<p class="warn">No compile only incremental measurements in this configuration.</p>
+<h2>Synthesis − STA</h2>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit ABC misses</small></th></tr></thead><tbody>
+<tr><td>minion</td><td class="" data-sort="16559953">16,559,953.0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
+<tr><td>xs_div</td><td class="" data-sort="10373">10,373.0</td><td class="" data-sort="10341">10,341.0</td><td class="" data-sort="6211">6,211.0</td><td class="better" data-sort="1.67010143294">1.67&times;</td><td class="" data-sort="6625">6,625.0</td><td class="better" data-sort="1.56573584906">1.57&times;</td><td class="" data-sort="7">7</td></tr>
+</tbody><tfoot><tr class="geomean"><td>geomean</td>
+<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
+<td class="better" data-sort="1.67010143294">1.67&times; <small>(n=1)</small></td>
+<td class="miss">-</td>
+<td class="better" data-sort="1.56573584906">1.57&times; <small>(n=1)</small></td>
+<td class="miss">-</td>
+</tr></tfoot></table>
+<h2>Synthesis</h2>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
+<tr><td>minion</td><td class="" data-sort="16584563">16,584,563.0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
+<tr><td>xs_div</td><td class="" data-sort="10787">10,787.0</td><td class="" data-sort="10802">10,802.0</td><td class="" data-sort="6288">6,288.0</td><td class="better" data-sort="1.71548982188">1.72&times;</td><td class="" data-sort="7074">7,074.0</td><td class="better" data-sort="1.52487984167">1.52&times;</td></tr>
+</tbody><tfoot><tr class="geomean"><td>geomean</td>
+<td class="miss">-</td><td class="miss">-</td><td class="miss">-</td>
+<td class="better" data-sort="1.71548982188">1.72&times; <small>(n=1)</small></td>
+<td class="miss">-</td>
+<td class="better" data-sort="1.52487984167">1.52&times; <small>(n=1)</small></td>
+</tr></tfoot></table>
+<h2>LEC</h2>
+<p class="warn">No lec incremental measurements in this configuration.</p>
+<h3>configuration: <code>simulation-validation-opt-20260919</code></h3>
+<h3>host: mascm1</h3>
+<details><summary>Measured binary and PDK identities</summary><ul>
+<li>LHD SHA-256: <code>6fe05a3410be114b2ad57e7cdbf4cd7b68a4da17094789c553ff0ae274eee841</code>; PDK: <code>not used</code></li>
+</ul></details>
+<h2>Correctness scope</h2>
+<table><thead><tr><th>design / configuration</th><th>simulation</th><th>incremental versus fresh</th><th>formal scope and limits</th></tr></thead><tbody>
+<tr><td>dino</td><td>both LHD input paths match Verilator workload</td><td>comment and one-module edit match cache-disabled builds</td><td>no new whole-design LEC claim from these simulation runs</td></tr>
+<tr><td>matched_filter</td><td>both LHD input paths match Verilator workload</td><td>comment and one-module edit match cache-disabled builds</td><td>no new whole-design LEC claim from these simulation runs</td></tr>
+<tr><td>minion</td><td>workload passes; Verilator retirement/PC mismatch remains</td><td>comment and one-module edit match cache-disabled builds</td><td>small latch RTL/Pyrope repro PROVEN; full-core LEC unresolved</td></tr>
+<tr><td>picorv32</td><td>both LHD input paths match Verilator workload</td><td>comment and one-module edit match cache-disabled builds</td><td>no new whole-design LEC claim from these simulation runs</td></tr>
+<tr><td>picorv32 BARREL=0 TWO_CYCLE_ALU=0</td><td>stored=58, done=77; agrees with Verilator</td><td>matches fresh configuration; parameter edit confined to wrapper</td><td>simulation configuration coverage; no configuration-wide formal proof claimed</td></tr>
+<tr><td>picorv32 BARREL=0 TWO_CYCLE_ALU=1</td><td>stored=58, done=86; agrees with Verilator</td><td>matches fresh configuration; parameter edit confined to wrapper</td><td>simulation configuration coverage; no configuration-wide formal proof claimed</td></tr>
+<tr><td>picorv32 BARREL=1 TWO_CYCLE_ALU=0</td><td>stored=58, done=55; agrees with Verilator</td><td>matches fresh configuration; parameter edit confined to wrapper</td><td>simulation configuration coverage; no configuration-wide formal proof claimed</td></tr>
+<tr><td>picorv32 BARREL=1 TWO_CYCLE_ALU=1</td><td>stored=58, done=70; agrees with Verilator</td><td>matches fresh configuration; parameter edit confined to wrapper</td><td>simulation configuration coverage; no configuration-wide formal proof claimed</td></tr>
+<tr><td>xs_alu</td><td>both LHD input paths match Verilator workload</td><td>comment and one-module edit match cache-disabled builds</td><td>no new whole-design LEC claim from these simulation runs</td></tr>
+<tr><td>xs_renametable</td><td>both LHD input paths match Verilator workload</td><td>comment and one-module edit match cache-disabled builds</td><td>no new whole-design LEC claim from these simulation runs</td></tr>
+<tr><td>xs_rob</td><td>both LHD input paths match Verilator workload</td><td>comment and one-module edit match cache-disabled builds</td><td>no new whole-design LEC claim from these simulation runs</td></tr>
+</tbody></table>
+<h2>Simulation: setup, host compilation, and execution</h2>
+<p>Each row uses the stated cycle count. Verilog setup includes RTL import. Execution excludes host compilation and tracing. A matching workload is simulation evidence, not a whole-design LEC proof. Samples and provenance remain in the linked reports; these local timings may include background load.</p>
+<table class="sortable-table"><thead><tr><th>design</th><th>input / simulator</th><th>cycles</th><th>setup (ms)</th><th>host compile (ms)</th><th>execution (ms)</th><th>workload comparison</th><th>evidence</th></tr></thead><tbody>
+<tr><td>dino</td><td>Pyrope / LHD Slop</td><td class="" data-sort="4000000">4,000,000</td><td class="" data-sort="186">186</td><td class="" data-sort="2987">2,987</td><td class="" data-sort="530">530</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>dino</td><td>Verilog / Verilator</td><td class="" data-sort="4000000">4,000,000</td><td class="" data-sort="114">114</td><td class="" data-sort="1294">1,294</td><td class="" data-sort="552">552</td><td class="">reference</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>dino</td><td>Verilog / LHD Slop</td><td class="" data-sort="4000000">4,000,000</td><td class="" data-sort="192">192</td><td class="" data-sort="2700">2,700</td><td class="" data-sort="665">665</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>matched_filter</td><td>Pyrope / LHD Slop</td><td class="" data-sort="5000000">5,000,000</td><td class="" data-sort="157">157</td><td class="" data-sort="2516">2,516</td><td class="" data-sort="1467">1,467</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>matched_filter</td><td>Verilog / Verilator</td><td class="" data-sort="5000000">5,000,000</td><td class="" data-sort="85">85</td><td class="" data-sort="1245">1,245</td><td class="" data-sort="508">508</td><td class="">reference</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>matched_filter</td><td>Verilog / LHD Slop</td><td class="" data-sort="5000000">5,000,000</td><td class="" data-sort="155">155</td><td class="" data-sort="2689">2,689</td><td class="" data-sort="1512">1,512</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>minion</td><td>Pyrope / LHD Slop</td><td class="" data-sort="100000">100,000</td><td class="" data-sort="19096">19,096</td><td class="" data-sort="25550">25,550</td><td class="" data-sort="1436">1,436</td><td class="warn">mismatch: opening-edge latch ordering</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>minion</td><td>Verilog / Verilator</td><td class="" data-sort="100000">100,000</td><td class="" data-sort="4552">4,552</td><td class="" data-sort="2164">2,164</td><td class="" data-sort="682">682</td><td class="warn">mismatch: opening-edge latch ordering</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>minion</td><td>Verilog / LHD Slop</td><td class="" data-sort="100000">100,000</td><td class="" data-sort="9056">9,056</td><td class="" data-sort="24952">24,952</td><td class="" data-sort="1957">1,957</td><td class="warn">mismatch: opening-edge latch ordering</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>picorv32</td><td>Pyrope / LHD Slop</td><td class="" data-sort="500000">500,000</td><td class="" data-sort="2331">2,331</td><td class="" data-sort="2660">2,660</td><td class="" data-sort="137">137</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>picorv32</td><td>Verilog / Verilator</td><td class="" data-sort="500000">500,000</td><td class="" data-sort="101">101</td><td class="" data-sort="1263">1,263</td><td class="" data-sort="53">53</td><td class="">reference</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>picorv32</td><td>Verilog / LHD Slop</td><td class="" data-sort="500000">500,000</td><td class="" data-sort="287">287</td><td class="" data-sort="2660">2,660</td><td class="" data-sort="136">136</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_alu</td><td>Pyrope / LHD Slop</td><td class="" data-sort="25000000">25,000,000</td><td class="" data-sort="132">132</td><td class="" data-sort="3067">3,067</td><td class="" data-sort="501">501</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_alu</td><td>Verilog / Verilator</td><td class="" data-sort="25000000">25,000,000</td><td class="" data-sort="23003">23,003</td><td class="" data-sort="1255">1,255</td><td class="" data-sort="1446">1,446</td><td class="">reference</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_alu</td><td>Verilog / LHD Slop</td><td class="" data-sort="25000000">25,000,000</td><td class="" data-sort="1362">1,362</td><td class="" data-sort="2754">2,754</td><td class="" data-sort="497">497</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_renametable</td><td>Pyrope / LHD Slop</td><td class="" data-sort="40000">40,000</td><td class="" data-sort="55920">55,920</td><td class="" data-sort="22196">22,196</td><td class="" data-sort="376">376</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_renametable</td><td>Verilog / Verilator</td><td class="" data-sort="40000">40,000</td><td class="" data-sort="35896">35,896</td><td class="" data-sort="12904">12,904</td><td class="" data-sort="1601">1,601</td><td class="">reference</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_renametable</td><td>Verilog / LHD Slop</td><td class="" data-sort="40000">40,000</td><td class="" data-sort="30972">30,972</td><td class="" data-sort="24268">24,268</td><td class="" data-sort="893">893</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_rob</td><td>Pyrope / LHD Slop</td><td class="" data-sort="25000">25,000</td><td class="" data-sort="135950">135,950</td><td class="" data-sort="100193">100,193</td><td class="" data-sort="62">62</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_rob</td><td>Verilog / Verilator</td><td class="" data-sort="25000">25,000</td><td class="" data-sort="104238">104,238</td><td class="" data-sort="275487">275,487</td><td class="" data-sort="1689">1,689</td><td class="">reference</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+<tr><td>xs_rob</td><td>Verilog / LHD Slop</td><td class="" data-sort="25000">25,000</td><td class="" data-sort="295211">295,211</td><td class="" data-sort="388447">388,447</td><td class="" data-sort="194">194</td><td class="">matches Verilator workload</td><td><a href="../repros/sim_validation_20260919/report.md">report</a></td></tr>
+</tbody></table>
+<h2>Simulation compile — SLOP</h2>
+<p class="warn">No simulation compile — slop incremental measurements in this configuration.</p>
+<h2>Simulation compile — LLVM</h2>
+<p class="warn">No simulation compile — llvm incremental measurements in this configuration.</p>
+<h2>Compile only</h2>
+<p class="warn">No compile only incremental measurements in this configuration.</p>
+<h2>Synthesis − STA</h2>
+<p class="warn">No synthesis − sta incremental measurements in this configuration.</p>
+<h2>Synthesis</h2>
+<p class="warn">No synthesis incremental measurements in this configuration.</p>
+<h2>LEC</h2>
+<p class="warn">No lec incremental measurements in this configuration.</p>
 <h3>configuration: <code>incremental-full-flow-opt-20260903</code></h3>
 <h3>host: mada4</h3>
+<h2>Synthesis: cache-disabled result and resource use</h2>
+<p>Compile, color, ABC and STA are separate phases. The ABC phase includes its proof-based preprocessing and graph import. Per-region mapping timers do not cover the whole phase. A completed mapping does not prove netlist equivalence. A failed or resource-stopped run is excluded from speedups; missing values are not zero. Area and timing are unavailable when synthesis fails or the design contains unmapped divider cones.</p>
+<table class="sortable-table"><thead><tr><th>design</th><th>status</th><th>compile (ms)</th><th>color (ms)</th><th>ABC (ms)</th><th>STA (ms)</th><th>gates</th><th>area (um²)</th><th>STA delay (ns)</th><th>peak RSS (MiB)</th><th>details</th></tr></thead><tbody>
+<tr><td>cva6</td><td>failed</td><td class="" data-sort="14928">14,928</td><td class="" data-sort="372">372</td><td class="" data-sort="2025532">2,025,532</td><td class="" data-sort="0">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="" data-sort="1613.90625">1,614</td><td>region &#x27;multiplier.multiplier__c2&#x27; took 1695998 ms in ABC (soft limit 900000 ms)</td></tr>
+<tr><td>dino</td><td>completed</td><td class="" data-sort="97">97</td><td class="" data-sort="14">14</td><td class="" data-sort="8646">8,646</td><td class="" data-sort="3536">3,536</td><td class="" data-sort="43814">43,814</td><td class="" data-sort="372226.84">372,227</td><td class="" data-sort="35.7935">35.7935</td><td class="" data-sort="692.359375">692.359</td><td></td></tr>
+<tr><td>matched_filter</td><td>completed</td><td class="" data-sort="69">69</td><td class="" data-sort="9">9</td><td class="" data-sort="1209">1,209</td><td class="" data-sort="735">735</td><td class="" data-sort="8237">8,237</td><td class="" data-sort="58050.04">58,050</td><td class="" data-sort="6.70376">6.70376</td><td class="" data-sort="193.38671875">193.387</td><td></td></tr>
+<tr><td>minion</td><td>completed</td><td class="" data-sort="11183">11,183</td><td class="" data-sort="595">595</td><td class="" data-sort="113504">113,504</td><td class="" data-sort="131032">131,032</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="" data-sort="20763.4726562">20,763</td><td></td></tr>
+<tr><td>xs_alu</td><td>completed</td><td class="" data-sort="74">74</td><td class="" data-sort="8">8</td><td class="" data-sort="2658">2,658</td><td class="" data-sort="1071">1,071</td><td class="" data-sort="11074">11,074</td><td class="" data-sort="85266.91">85,267</td><td class="" data-sort="24.8432">24.8432</td><td class="" data-sort="226.3125">226.312</td><td></td></tr>
+<tr><td>xs_renametable</td><td>completed</td><td class="" data-sort="39179">39,179</td><td class="" data-sort="4638">4,638</td><td class="" data-sort="64645">64,645</td><td class="" data-sort="107467">107,467</td><td class="" data-sort="867364">867,364</td><td class="" data-sort="9054744.13">9,054,744</td><td class="" data-sort="130.648">130.648</td><td class="" data-sort="16035.984375">16,036</td><td></td></tr>
+<tr><td>xs_rob</td><td>failed</td><td class="" data-sort="145367">145,367</td><td class="" data-sort="16988">16,988</td><td class="" data-sort="3786088">3,786,088</td><td class="" data-sort="0">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="" data-sort="8361.30078125">8,361</td><td>region &#x27;pat_5fa1a82a61d93ee47ba1a625ccb8e085__c2&#x27; took 3577672 ms in ABC (soft limit 900000 ms)</td></tr>
+</tbody></table>
 <h2>Simulation compile — SLOP</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
 <tr><td>cva6</td><td class="" data-sort="94453">94,453.0</td><td class="" data-sort="98344">98,344.0</td><td class="" data-sort="833">833.0</td><td class="better" data-sort="113.388955582">113.39&times;</td><td class="" data-sort="87435">87,435.0</td><td class="noise" data-sort="1.08026533997">1.08&times;</td><td class="" data-sort="24">24</td></tr>
 <tr><td>dino</td><td class="" data-sort="9806">9,806.0</td><td class="" data-sort="8763">8,763.0</td><td class="" data-sort="109">109.0</td><td class="better" data-sort="89.9633027523">89.96&times;</td><td class="" data-sort="8770">8,770.0</td><td class="better" data-sort="1.1181299886">1.12&times;</td><td class="" data-sort="2">2</td></tr>
 <tr><td>matched_filter</td><td class="" data-sort="11672">11,672.0</td><td class="" data-sort="10336">10,336.0</td><td class="" data-sort="92">92.0</td><td class="better" data-sort="126.869565217">126.87&times;</td><td class="" data-sort="10667">10,667.0</td><td class="noise" data-sort="1.09421580576">1.09&times;</td><td class="" data-sort="2">2</td></tr>
@@ -42,7 +241,7 @@ dt{font-weight:bold;margin-top:.4rem}
 <td class="miss">-</td>
 </tr></tfoot></table>
 <h2>Simulation compile — LLVM</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit rewritten sim units</small></th></tr></thead><tbody>
 <tr><td>cva6</td><td class="" data-sort="96199">96,199.0</td><td class="" data-sort="96498">96,498.0</td><td class="" data-sort="894">894.0</td><td class="better" data-sort="107.605145414">107.61&times;</td><td class="" data-sort="93717">93,717.0</td><td class="noise" data-sort="1.02648398903">1.03&times;</td><td class="" data-sort="430">430</td></tr>
 <tr><td>dino</td><td class="" data-sort="9797">9,797.0</td><td class="" data-sort="8997">8,997.0</td><td class="" data-sort="144">144.0</td><td class="better" data-sort="68.0347222222">68.03&times;</td><td class="" data-sort="10357">10,357.0</td><td class="worse" data-sort="0.945930288694">0.95&times;</td><td class="" data-sort="5">5</td></tr>
 <tr><td>matched_filter</td><td class="" data-sort="18633">18,633.0</td><td class="" data-sort="14930">14,930.0</td><td class="" data-sort="188">188.0</td><td class="better" data-sort="99.1117021277">99.11&times;</td><td class="" data-sort="13855">13,855.0</td><td class="better" data-sort="1.34485745218">1.34&times;</td><td class="" data-sort="236">236</td></tr>
@@ -58,7 +257,7 @@ dt{font-weight:bold;margin-top:.4rem}
 <td class="miss">-</td>
 </tr></tfoot></table>
 <h2>Compile only</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
 <tr><td>cva6</td><td class="" data-sort="14791">14,791.0</td><td class="" data-sort="15536">15,536.0</td><td class="" data-sort="111">111.0</td><td class="better" data-sort="133.252252252">133.25&times;</td><td class="" data-sort="16395">16,395.0</td><td class="worse" data-sort="0.902165294297">0.90&times;</td></tr>
 <tr><td>dino</td><td class="" data-sort="125">125.0</td><td class="" data-sort="169">169.0</td><td class="" data-sort="61">61.0</td><td class="better" data-sort="2.04918032787">2.05&times;</td><td class="" data-sort="219">219.0</td><td class="worse" data-sort="0.570776255708">0.57&times;</td></tr>
 <tr><td>matched_filter</td><td class="" data-sort="102">102.0</td><td class="" data-sort="121">121.0</td><td class="" data-sort="46">46.0</td><td class="better" data-sort="2.21739130435">2.22&times;</td><td class="" data-sort="1630">1,630.0</td><td class="worse" data-sort="0.0625766871166">0.06&times;</td></tr>
@@ -73,7 +272,7 @@ dt{font-weight:bold;margin-top:.4rem}
 <td class="worse" data-sort="0.71621288862">0.72&times; <small>(n=7)</small></td>
 </tr></tfoot></table>
 <h2>Synthesis − STA</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit ABC misses</small></th></tr></thead><tbody>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th><th>colors changed<br><small>one-file edit ABC misses</small></th></tr></thead><tbody>
 <tr><td>cva6</td><td class="worse">FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
 <tr><td>dino</td><td class="" data-sort="8757">8,757.0</td><td class="" data-sort="8875">8,875.0</td><td class="" data-sort="3261">3,261.0</td><td class="better" data-sort="2.6853725851">2.69&times;</td><td class="" data-sort="3395">3,395.0</td><td class="better" data-sort="2.5793814433">2.58&times;</td><td class="" data-sort="2">2</td></tr>
 <tr><td>matched_filter</td><td class="" data-sort="1287">1,287.0</td><td class="" data-sort="1358">1,358.0</td><td class="" data-sort="178">178.0</td><td class="better" data-sort="7.23033707865">7.23&times;</td><td class="" data-sort="776">776.0</td><td class="better" data-sort="1.65850515464">1.66&times;</td><td class="" data-sort="1">1</td></tr>
@@ -89,7 +288,7 @@ dt{font-weight:bold;margin-top:.4rem}
 <td class="miss">-</td>
 </tr></tfoot></table>
 <h2>Synthesis</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
 <tr><td>cva6</td><td class="worse">2,041,170.0 FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
 <tr><td>dino</td><td class="" data-sort="12350">12,350.0</td><td class="" data-sort="12646">12,646.0</td><td class="" data-sort="7648">7,648.0</td><td class="better" data-sort="1.61480125523">1.61&times;</td><td class="" data-sort="7644">7,644.0</td><td class="better" data-sort="1.6156462585">1.62&times;</td></tr>
 <tr><td>matched_filter</td><td class="" data-sort="2070">2,070.0</td><td class="" data-sort="2201">2,201.0</td><td class="" data-sort="273">273.0</td><td class="better" data-sort="7.58241758242">7.58&times;</td><td class="" data-sort="1694">1,694.0</td><td class="better" data-sort="1.22195985832">1.22&times;</td></tr>
@@ -104,7 +303,7 @@ dt{font-weight:bold;margin-top:.4rem}
 <td class="better" data-sort="1.54644973989">1.55&times; <small>(n=5)</small></td>
 </tr></tfoot></table>
 <h2>LEC</h2>
-<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
+<table class="sortable-table"><thead><tr><th>design</th><th>full<br><small>caches off (ms)</small></th><th>cold incremental<br><small>fresh cache (ms)</small></th><th>no-change incremental<br><small>unchanged / comment edit (ms)</small></th><th>no-change speedup<br><small>full / no-change</small></th><th>one-file edit<br><small>warm cache (ms)</small></th><th>edit speedup<br><small>full / edit</small></th></tr></thead><tbody>
 <tr><td>dino</td><td class="" data-sort="594">594.0</td><td class="" data-sort="612">612.0</td><td class="" data-sort="52">52.0</td><td class="better" data-sort="11.4230769231">11.42&times;</td><td class="" data-sort="296">296.0</td><td class="better" data-sort="2.00675675676">2.01&times;</td></tr>
 <tr><td>matched_filter</td><td class="" data-sort="7918">7,918.0</td><td class="" data-sort="7918">7,918.0</td><td class="" data-sort="59">59.0</td><td class="better" data-sort="134.203389831">134.20&times;</td><td class="" data-sort="53">53.0</td><td class="better" data-sort="149.396226415">149.40&times;</td></tr>
 <tr><td>minion</td><td class="worse">1,144,822.0 FAILED</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
@@ -131,7 +330,7 @@ work as <code>full</code> <b>plus the cost of populating the caches</b>. The
 difference is the price of admission for incrementality, charged on every clean
 build.</dd>
 <dt>no-change incremental</dt><dd>&mdash; The <b>identical command again</b> over that
-workdir, after a comment-only touch to the source. Nothing semantic changed, so
+workdir, with identical source or after a comment-only touch. Nothing semantic changed, so
 every content-keyed cache must hit. This is the number the loop exists to
 move.</dd>
 <dt>one-file edit</dt><dd>&mdash; One small semantic edit, built over the same

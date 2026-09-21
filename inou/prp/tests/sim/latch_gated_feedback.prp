@@ -1,0 +1,100 @@
+/*
+:name: latch_gated_feedback
+:type: simulation
+*/
+
+// Reduced from Minion's resettable opposite-phase accumulator pairs. A closed
+// ICG leaves the low latch open: clock level is not a compile-time constant,
+// but the low/high data windows can never be open together. Reset is expressed
+// as data/control muxes, as in the imported core.
+pub mod gated_feedback(clk:bool, run:bool, clear:bool, d:u8) -> (low:u8@[], high:u8@[], sampled:u8@[1], observed:u8@[]) {
+  reg gate:bool:[latch=true] = nil
+  reg lo:u8:[latch=true] = nil
+  reg hi:u8:[latch=true] = nil
+  reg sample:u8:[clock_pin=ref clk] = 0
+  reg observer:u8:[clock_pin=ref clk, posclk=false] = 0
+  const shared_next = (hi + 1) & 255
+  if not clk {
+    gate = run
+  }
+  const local_clock = clk and gate
+  if clear {
+    lo = 0
+  } elif not local_clock {
+    lo = shared_next
+  }
+  if clear {
+    hi = 0
+  } elif local_clock {
+    hi = lo
+  }
+  sample = d
+  observer = shared_next
+  low = lo
+  high = hi
+  sampled = sample
+  observed = observer
+}
+
+test gated_feedback.reset_and_pause {
+  mut acc = gated_feedback
+  mut expected:u8 = 0
+  tick 14 {
+    const clearing = (clock < 2) or (clock == 8)
+    const running = (clock < 5) or (clock >= 10)
+    acc.clear = clearing
+    acc.run = running
+    acc.d = 11 + clock
+    if clearing {
+      expected = 0
+    } elif running {
+      expected += 1
+    }
+    step
+    assert(acc.sampled == 11 + clock, "reference-clock flop remains active")
+    assert(acc.high == expected, "high latch advances only with an enabled clock")
+    assert(acc.observed == expected + 1, "shared arithmetic sees settled high Q before the falling edge")
+    if clearing {
+      assert(acc.low == 0, "reset reaches both latch phases, including while gated off")
+    } else {
+      assert(acc.low == expected + 1, "open low latch sees the settled high value")
+    }
+  }
+}
+
+// The alternating edge/settle sequence: each low latch sees the newly
+// committed negedge flop, and each high latch sees the newly committed
+// posedge flop. A posedge reader samples the preceding low window.
+pub mod alternating_phases(clk:bool, d:u8) -> (fall_q:u8@[], low_q:u8@[], rise_q:u8@[], high_q:u8@[]) {
+  reg falling:u8:[clock_pin=ref clk, posclk=false] = 0
+  reg low_latch:u8:[latch=true] = 0
+  reg rising:u8:[clock_pin=ref clk] = 0
+  reg high_latch:u8:[latch=true] = 0
+  falling = d
+  if not clk {
+    low_latch = falling
+  }
+  rising = low_latch
+  if clk {
+    high_latch = rising
+  }
+  fall_q = falling
+  low_q = low_latch
+  rise_q = rising
+  high_q = high_latch
+}
+
+test alternating_phases.edge_then_settle {
+  mut acc = alternating_phases
+  mut previous:u8 = 0
+  tick 6 {
+    const next_value = 11 + (17 * clock)
+    acc.d = next_value
+    step
+    assert(acc.fall_q == next_value, "falling-edge flop commits")
+    assert(acc.low_q == next_value, "low latch settles after the falling-edge commit")
+    assert(acc.rise_q == previous, "rising-edge flop reads the preceding low window")
+    assert(acc.high_q == previous, "high latch settles after the rising-edge commit")
+    previous = next_value
+  }
+}

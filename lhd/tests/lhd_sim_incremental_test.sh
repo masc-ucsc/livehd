@@ -232,5 +232,49 @@ case "$plan" in
 *) fail "an interface change did not rebuild the PARENT's object — the depfile dependency on the leaf header is not being tracked: $plan" ;;
 esac
 
-echo "PASS (steps 1-7; warm rebuild is a no-op, interface changes reach dependents,"
+# A default generic specialization shares its template's name. A partial
+# graph restore must retain both lowered trees, then regenerate and execute
+# the root using a freshly changed sibling. This is Minion's one-module edit
+# shape, reduced to an observable arithmetic result.
+IW="$W/identity"
+mkdir -p "$IW"
+cat > "$IW/g.prp" <<'EOF'
+pub mod madd<W=8>(a:u8, b:u8) -> (r:u8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
+EOF
+cat > "$IW/leaf.prp" <<'EOF'
+pub comb bump(a:u8) -> (r:u8) { wrap r = a + 1 }
+EOF
+cat > "$IW/tb.prp" <<'EOF'
+const madd = import("g.madd")
+const leaf = import("leaf")
+pub mod top(x:u8) -> (y:u8@[0]) {
+  y = madd(a=leaf.bump(a=x), b=x)
+}
+test top.identity(expected:u8=3) {
+  mut dut = top
+  tick 2 {
+    dut.x = 1
+    step
+    assert(dut.y == expected, "default specialization must use the edited sibling")
+  }
+}
+EOF
+identity_run() {
+  local tag=$1 wd=$2 expected=$3
+  shift 3
+  "$LHD" sim "$IW/tb.prp" --workdir "$wd" --arg "expected=$expected" \
+    --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
+    || { cat "$IW/$tag.log" >&2; fail "default-specialization simulation failed ($tag)"; }
+}
+identity_run cold "$IW/w" 3
+sed 's/a + 1/a + 2/' "$IW/leaf.prp" > "$IW/leaf.new" && mv "$IW/leaf.new" "$IW/leaf.prp"
+identity_run edit "$IW/w" 2
+python3 - "$IW/edit.json" <<'PY' || fail "default-specialization edit did not exercise partial graph reuse"
+import json, sys
+cache = json.load(open(sys.argv[1]))['incremental']['compile']
+assert cache['hits'] > 0 and cache['misses'] > 0 and cache['refused'] == 0, cache
+PY
+identity_run oracle "$IW/oracle" 2 --set lhd.incremental=false
+
+echo "PASS (steps 1-8; warm rebuild is a no-op, interface changes reach dependents,"
 echo "      the occurrence root is cached with a hierarchical key and a complete artifact set)"

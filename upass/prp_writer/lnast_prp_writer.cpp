@@ -4,9 +4,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
-#include <charconv>
 #include <format>
 #include <limits>
 #include <map>
@@ -1516,8 +1516,7 @@ void Lnast_prp_writer::write_module() {
       }
     }
 
-    // 1-D declared array sizes (`x:[N]T`, any mode) — write_store expands a
-    // whole array-to-array copy (`d = q`) into per-element stores.  Records the
+    // 1-D declared array sizes (`x:[N]T`, any mode). Records the
     // ref/type child pair of one `declare`; the nested-declare scan below feeds
     // it too, so an array the reader declared inside an `if` (and that the
     // prologue hoists to the function top) is registered like a top-level one.
@@ -1558,9 +1557,9 @@ void Lnast_prp_writer::write_module() {
             auto dmax = Dlop::from_pyrope(std::string(lnast->get_name(mx)));
             auto dmin = Dlop::from_pyrope(std::string(lnast->get_name(mn)));
             if (dmax && dmin && dmax->is_integer() && dmin->is_integer() && !dmax->has_unknowns() && !dmin->has_unknowns()) {
-              const bool    sgn  = dmin->is_negative();
-              const int64_t bits = sgn ? std::max<int64_t>(dmax->get_signed_bits(), dmin->get_signed_bits())
-                                       : dmax->get_payload_bits();
+              const bool    sgn = dmin->is_negative();
+              const int64_t bits
+                  = sgn ? std::max<int64_t>(dmax->get_signed_bits(), dmin->get_signed_bits()) : dmax->get_payload_bits();
               if (bits > 0) {
                 array_decl_elem_[nm] = Array_elem{bits, sgn};
               }
@@ -4579,29 +4578,9 @@ void Lnast_prp_writer::write_store() {
     }
     cur = first;  // restore for the normal path
   }
-  // Whole ARRAY-to-ARRAY copy (`d = q`, both declared `[N]T`): the recompile
-  // has no lowering for a multi-element (tuple) store between memories —
-  // expand into per-element copies, which lower as ordinary element ports.
-  {
-    auto val = lnast->get_sibling_next(first);
-    if (!val.is_invalid() && lnast->is_last_child(val) && Lnast_ntype::is_ref(lnast->get_type(val))) {
-      auto rhs  = std::string(strip_prefix(lnast->get_name(val)));
-      auto dit  = array_decl_size_.find(lhs);
-      auto sit2 = array_decl_size_.find(rhs);
-      if (dit != array_decl_size_.end() && sit2 != array_decl_size_.end() && dit->second == sit2->second && dit->second > 0
-          && dit->second <= 256) {
-        for (int64_t k = 0; k < dit->second; ++k) {
-          if (k != 0) {
-            os << "\n";
-            print_indent();
-          }
-          os << lhs << "[" << k << "] = " << rhs << "[" << k << "]";
-        }
-        move_to_parent();
-        return;
-      }
-    }
-  }
+  // Keep whole-array copies intact. tolg supports their bulk value bus;
+  // expanding a copy into indexed stores loses the destination initializer
+  // (e.g. a combinational next-state array copied from a register array).
   // A store to a stage-declared variable re-attaches the pipeline depth that the
   // suppressed `declare` carried: `stage[N] x = v`.  Only the first store
   // declares the stage (later writes are plain assignments).
@@ -6274,6 +6253,37 @@ void Lnast_prp_writer::analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_ni
     auto v = lnast->get_sibling_next(c0);
     return (!v.is_invalid() && lnast->is_last_child(v)) ? v : Lnast_nid{};
   };
+  // A boolean mux may be used inside a temp that analyze_folding already
+  // moved further down the body. Its immediate use index therefore does not
+  // bound the eventual read. Only inline a condition whose leaf values are
+  // immutable; otherwise retain the mux assignment as the snapshot.
+  auto immutable_condition = [&](Lnast_nid condition) {
+    absl::flat_hash_set<int32_t> seen;
+    std::vector<Lnast_nid>       pending{condition};
+    while (!pending.empty()) {
+      const auto node = pending.back();
+      pending.pop_back();
+      if (!Lnast_ntype::is_ref(lnast->get_type(node))) {
+        continue;
+      }
+      const auto id = lnast->get_name_id(node);
+      if (!seen.insert(id).second) {
+        continue;
+      }
+      if (auto it = write_idx_id_.find(id); it != write_idx_id_.end() && it->second.size() > 1) {
+        return false;
+      }
+      if (auto it = fold_info_id_.find(id); it != fold_info_id_.end() && !it->second->def_node.is_invalid()) {
+        auto child = lnast->get_child(it->second->def_node);
+        if (!child.is_invalid()) {
+          for (child = lnast->get_sibling_next(child); !child.is_invalid(); child = lnast->get_sibling_next(child)) {
+            pending.push_back(child);
+          }
+        }
+      }
+    }
+    return true;
+  };
   // `_b2i_N` → unsigned(cond). Mux temporaries deliberately keep their own
   // conditional-expression assignment. Looking for a later consumer used to
   // scan every store once per mux, making generated RTL quadratic to emit.
@@ -6292,7 +6302,7 @@ void Lnast_prp_writer::analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_ni
         return !v.is_invalid() && lnast->get_type(v) == Lnast_ntype::Lnast_ntype_const
                && std::string_view(lnast->get_name(v)) == want;
       };
-      if (is_const_val(mi.arms[0].def, "1") && is_const_val(mi.else_def, "0")) {
+      if (is_const_val(mi.arms[0].def, "1") && is_const_val(mi.else_def, "0") && immutable_condition(mi.arms[0].cond)) {
         bool_inline_.emplace(lhs, mi.arms[0].cond);
         folded_node_.insert(key);
         continue;
