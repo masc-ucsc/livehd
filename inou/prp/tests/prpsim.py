@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# prpsim — the `:type: simulation` test owner.
-#
-# Split out of prplib.py so all `lhd sim` regression logic lives in one place:
-# lower a design's DUT(s) to Slop<N> C++ (`lhd sim --setup-only`), build each
-# generated `test`-block driver HERMETICALLY with the host C++ compiler, and run
-# it (a non-zero exit == an assert fired). `prplib.PrpRunner.run` dispatches the
-# `simulation` mode here (lazy import, so only the `prp-sim-*` targets need this
-# module in their runfiles).
-#
-# `:args: k=v k=v` (a TEST-HARNESS-ONLY header tag — `lhd sim` itself never reads
-# the .prp header) binds each `test name(params)` parameter: every parameter is a
-# runtime `--<name>` flag on the generated driver, supplied here when the driver
-# runs (NOT baked in at setup), so a parameter with no default that is never
-# given makes the driver print its usage and fail.
-
+# prpsim: fixture-driven simulation through the same lhd host build as the CLI.
+import itertools
 import json
 import os
 import re
@@ -37,8 +24,7 @@ def _sim_include_dirs(tmp_dir):
     # Locate the hlop + iassert header dirs. Under `bazel test` the
     # `cc_direct_headers` data dep stages slop.hpp/blop.hpp (hlop) and
     # iassert.hpp (iassert) into the test runfiles; find them by name and
-    # return their directories. Returns [] when not found (manual run with no
-    # runfiles) so the caller can fall back to the nested-bazel build.
+    # return their directories. Missing required runfiles are a setup failure.
     roots = []
     for env in ('TEST_SRCDIR', 'RUNFILES_DIR'):
         v = os.environ.get(env)
@@ -77,219 +63,41 @@ def _parse_args(test):
 
 
 def run_simulation(runner, tmp_dir, test):
-    # `:type: simulation`: lower the design's DUT(s) to Slop<N> C++ and generate
-    # the single `drv.cpp` driver holding every `test` block (`lhd sim
-    # --setup-only`), then build it HERMETICALLY with the host C++ compiler and
-    # run it. The Slop/Blop runtime is header-only (blop.cpp is empty) and with
-    # -DNDEBUG the iassert checks compile out, so the driver has NO link
-    # dependencies — no nested bazel, no abseil, no network. The binary runs every
-    # test (filtering each test's `--<param>` flags itself), prints `PASS <name>`
-    # / `FAIL <name>` per test, and exits non-zero if any test's `assert` fired.
-    # (When the header runfiles are absent — a manual harness run outside bazel —
-    # fall back to `lhd sim`'s own host-compile of the design, which finds the
-    # sibling ../hlop / ../iassert headers, so the manual flow still works.)
-    name    = test.params['name']
-    prp     = test.params['files'][0]
-    simroot = runner._scratch(test, 'simulation')
-    simdir  = os.path.join(simroot, 'sim')
-
-    sim_args = _parse_args(test)
-
-    # `:set:` must reach the SIM lowering too. run_simulation builds its command
-    # from scratch rather than composing on lhd_upass, so without this a fixture
-    # that sets e.g. the default (`compile.unroll=false`) would assert a rolled graph elsewhere and
-    # still SIMULATE the default (unrolled) lowering.
-    #
-    # sim.tune.profile=off FIRST, so a fixture's own `:set:` can still override
-    # it (the last `--set` of a key wins). The fixtures assert the DEFAULT `?`
-    # policy (unknown_bits_random: the draws must be random), but under the
-    # `auto` default an `lhd sim --workdir` run PROFILES, and a profiling run
-    # zero-fills `?` and takes no checkpoints (sim_profile.md ruling 3). The
-    # hermetic path below runs drv.bin directly and never profiles; the pin
-    # keeps the `--run-only` fallback and the generated code on the same policy.
-    extra = ['--set', 'sim.tune.profile=off'] + runner._extra_sets(test)
-
-    setup = [runner.lhd, 'sim', prp, '--setup-only', '--workdir', simroot, '-q'] + extra
-    proc  = subprocess.Popen(setup, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        log, _ = proc.communicate()
-        rc = proc.returncode
-    except Exception:
-        proc.kill()
-        rc, log = 1, b''
-    if rc != 0:
-        print('{} - simulation - FAILED: `lhd sim --setup-only` rc={}'.format(name, rc))
-        print(log.decode('utf-8', 'ignore'))
-        return 1
-
-    abs_simdir = simdir if os.path.isabs(simdir) else os.path.join(tmp_dir, simdir)
-    drv = os.path.join(abs_simdir, 'drv.cpp')
-    if not os.path.exists(drv):
-        print('{} - simulation - FAILED: no `drv.cpp` driver generated in {}'.format(name, abs_simdir))
-        print(log.decode('utf-8', 'ignore'))
-        return 1
-
-    incs = _sim_include_dirs(tmp_dir)
-    if not incs:
-        # No header runfiles (manual run): let `lhd sim` host-compile the existing
-        # setup itself (it finds the sibling ../hlop / ../iassert headers).
-        print('{} - simulation - (no header runfiles; lhd sim host-compile fallback)'.format(name))
-        cmd  = [runner.lhd, 'sim', prp, '--run-only', '--workdir', simroot] + extra
-        for k, v in sim_args:
-            cmd += ['--arg', '{}={}'.format(k, v)]
-        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            log, _ = proc.communicate()
-            rc = proc.returncode
-        except Exception:
-            proc.kill()
-            rc, log = 1, b''
-        if rc == 0:
-            print('{} - simulation - success (lhd sim host-compile)'.format(name))
-        else:
-            print('{} - simulation - FAILED (lhd sim host-compile rc={})'.format(name, rc))
-            print(log.decode('utf-8', 'ignore'))
-        return 0 if rc == 0 else 1
-
-    cxx    = _sim_compiler()
-    cflags = ['-std=c++23', '-DNDEBUG', '-O1', '-pthread', '-I' + abs_simdir]
-    for d in incs:
-        cflags.append('-I' + d)
-
-    # The driver `#include`s the DUT header(s) every test drives; a DUT header in
-    # turn `#include`s its sub-module headers (hierarchical designs). Walk the
-    # include graph transitively (within simdir) and compile every reachable DUT
-    # body -- NOT every emitted unit (a `test` block also lowers to a Slop unit
-    # that pulls in formal-only headers it never uses).
-    with open(drv) as f:
-        drv_src = f.read()
-    incs_h  = set()
-    pending = list(re.findall(r'#include\s+"([^"]+\.hpp)"', drv_src))
-    while pending:
-        h = pending.pop()
-        if h in incs_h:
-            continue
-        hp = os.path.join(abs_simdir, h)
-        if not os.path.exists(hp):
-            continue  # a runtime/header (slop.hpp, vcd_writer.hpp, ...) on the -I path
-        incs_h.add(h)
-        with open(hp) as hf:
-            pending += re.findall(r'#include\s+"([^"]+\.hpp)"', hf.read())
-    bodies = [os.path.join(abs_simdir, h[:-4] + '.cpp') for h in sorted(incs_h)
-              if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
-    kernel_prefixes = tuple(h[:-4] + '.color-kernel-' for h in incs_h
-                            if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp')))
-    if kernel_prefixes:
-        bodies += [os.path.join(abs_simdir, fn) for fn in sorted(os.listdir(abs_simdir))
-                   if fn.endswith('.cpp') and fn.startswith(kernel_prefixes)]
-    # A color root's sim.tune TUs. `<stem>.tune.cpp` defines the root's
-    # `__tune_support()` / `__tune_sources()`, which the driver's profiler
-    # references, so it is one more body. `<stem>.tune-id.cpp` is NOT: it holds
-    # the strong `__lhd_tune_*_<mod>()` identity functions whose WEAK defaults
-    # drv.cpp itself defines, and a translation unit cannot hold both, so it
-    # links beside the unity TU as its own (include-free, tiny) TU.
-    stems = [h[:-4] for h in sorted(incs_h) if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
-    bodies += [p for p in (os.path.join(abs_simdir, s + '.tune.cpp') for s in stems) if os.path.exists(p)]
-    tune_ids = [p for p in (os.path.join(abs_simdir, s + '.tune-id.cpp') for s in stems) if os.path.exists(p)]
-    exe = os.path.join(abs_simdir, 'drv.bin')
-
-    # UNITY BUILD: one `#include`-ing translation unit instead of one clang++ TU
-    # per generated body. These fixtures are tiny designs (a few hundred lines
-    # each) but every TU re-parses slop.hpp and re-runs the whole frontend, so
-    # the per-TU fixed cost -- not the design -- is what this build pays for.
-    # Measured 2026-08-15 across all 79 `tests/sim/*.prp` fixtures (arm64,
-    # clang -O1): 264s of compile CPU as separate TUs, 148s as unity (1.8x), and
-    # every unity binary produced byte-identical output to its multi-TU twin.
-    # That CPU is the real lever: `bazel test` runs these targets concurrently,
-    # so a `prp-sim-*` target that costs 5s of CPU solo shows up as 20-30s of
-    # wall clock in a loaded regression. Compiling the TUs in PARALLEL instead
-    # would cut the solo wall time just as well but leave the CPU total
-    # untouched (and oversubscribe, since bazel budgets one core per test), so
-    # it does nothing for the regression. Unity cuts both.
-    #
-    # -O1 stays. -O2 is slower to compile with no payoff at these sizes, and -O0
-    # does not link: the generated bodies reference `Dlop::free_storage`, which
-    # only disappears once the optimizer drops the dead dynamic-width path.
-    # Pulling hlop's dlop.cpp/dcontext.cpp in to satisfy it costs more than -O0
-    # saves (3.9s vs 2.4s on cgen_cones).
-    #
-    # A unity TU can only break where separate TUs would not: two generated
-    # files colliding at file scope. No fixture does today; if the emitter ever
-    # introduces one, fall back to separate TUs rather than turning an emitter
-    # hygiene problem into a wall of unrelated red sim failures -- the fallback
-    # says so on stdout (captured in the bazel test log) so the lost speed is
-    # not silent.
-    # NOT inside abs_simdir: `lhd sim --run-only` and the `build.ninja` it writes
-    # both take EVERY `*.cpp` in the sim dir except `drv.cpp` as a DUT body, so a
-    # unity TU parked there would be compiled as one more body and duplicate every
-    # symbol in it -- silently breaking the documented `ninja -C <simdir>` escape
-    # hatch on any workdir a `prp-sim-*` target had touched. It only needs to see
-    # the generated sources, and it includes them by absolute path.
-    # Living in the PARENT means the name is SHARED, so it must carry the identity
-    # of the writer -- not of the path, which every writer into that parent has in
-    # common. Anything derived from `abs_simdir` is a constant here (`simdir` is
-    # always `<simroot>/sim`, and `lhd_kernel_sim.cpp` hardcodes the same), so the
-    # only real collision vector -- two harness processes sharing a cwd -- is keyed
-    # off the PID. The `finally` below then deletes it, so a passing run leaves no
-    # stale TU in a user's workdir. A compile FAILURE keeps it on purpose: the
-    # `cmd:` printed below names it, and that line has to stay re-runnable.
-    uni = os.path.join(os.path.dirname(abs_simdir.rstrip(os.sep)) or os.curdir,
-                       '__prpsim_unity_{}.cpp'.format(os.getpid()))
-    keep_uni = False
-    try:
-        # Inside the `try`: a write that dies part-way (ENOSPC) still gets cleaned.
-        with open(uni, 'w') as f:
-            f.write('// Generated by prpsim.py -- unity TU over the driver + every reachable DUT body.\n')
-            for b in bodies:
-                f.write('#include "{}"\n'.format(b))
-            f.write('#include "{}"\n'.format(drv))
-
-        cc = [cxx] + cflags + [uni] + tune_ids + ['-o', exe]
-        cp = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        if cp.returncode != 0 and bodies:
-            print('{} - simulation - NOTE: unity build failed (generated files collide at file '
-                  'scope?); falling back to one TU per body, which is slower'.format(name))
-            print(cp.stdout.decode('utf-8', 'ignore'))
-            cc = [cxx] + cflags + bodies + tune_ids + [drv, '-o', exe]
-            cp = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        if cp.returncode != 0:
-            print('{} - simulation - FAILED: driver did not compile'.format(name))
-            print('  cmd: {}'.format(' '.join(cc)))
-            print(cp.stdout.decode('utf-8', 'ignore'))
-            # `cc` still names `uni` when there are no bodies to fall back to.
-            keep_uni = uni in cc
+    """Run each optional :sim_sweep: k=v1,v2 vector using the declared lhd runtime."""
+    name = test.params['name']
+    choices = []
+    for spec in test.multi.get('sim_sweep', []):
+        key, sep, values = spec.strip().partition('=')
+        if not sep or not key or not values or any(not v for v in values.split(',')):
+            print('{} - simulation - FAILED: invalid :sim_sweep: {}'.format(name, spec))
             return 1
-
-        # Run the one binary over every test. The `:args:` are passed verbatim as
-        # `--<key> <value>`; the binary applies each per test (warning about a flag no
-        # test uses) and exits non-zero if any test's `assert` fired.
-        run_args = []
-        for k, v in sim_args:
-            run_args += ['--' + k, v]
-        rp  = subprocess.run([exe] + run_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        out = rp.stdout.decode('utf-8', 'ignore')
-        if rp.returncode != 0:
-            print('{} - simulation - FAILED (assert):'.format(name))
-            print(out)
+        choices.append([key + '=' + v for v in values.split(',')])
+    vectors = list(itertools.product(*choices)) if choices else [()]
+    base = runner._scratch(test, 'simulation')
+    for i, vector in enumerate(vectors):
+        work = os.path.join(base, 'v' + str(i))
+        cmd = [runner.lhd, 'sim', test.params['files'][0], '--workdir', work,
+               '--set', 'sim.tune.profile=off', '-q'] + runner._extra_sets(test)
+        for setting in vector:
+            cmd += ['--set', setting]
+        for key, value in _parse_args(test):
+            cmd += ['--arg', key + '=' + value]
+        run = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if run.returncode:
+            print('{} - simulation - FAILED {}: rc={}'.format(name, vector, run.returncode))
+            print(run.stdout.decode('utf-8', 'replace'))
             return 1
-        # rc == 0 means every test passed. Report the count from the binary's own
-        # registry (`--list-tests` JSON) rather than scanning stdout for "PASS " lines
-        # (a test's own `puts("PASS ...")` would otherwise miscount).
-        n_tests = 0
+        report = os.path.join(tmp_dir, work, 'sim', 'sim_tests.json')
         try:
-            lt = subprocess.run([exe, '--list-tests'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            n_tests = len(json.loads(lt.stdout.decode('utf-8', 'ignore')).get('tests', []))
-        except Exception:
-            n_tests = out.count('\nPASS ') + (1 if out.startswith('PASS ') else 0)
-        print('{} - simulation - success ({} test(s))'.format(name, n_tests))
-        return 0
-    finally:
-        # The unity compiler errors are printed inside the `try` above, so they are
-        # already out. The one diagnostic that OUTLIVES this scope is the `cmd:`
-        # line on a compile failure with no fallback -- `keep_uni` leaves the TU in
-        # place for it.
-        if not keep_uni:
-            try:
-                os.remove(uni)
-            except OSError:
-                pass
+            with open(report) as stream:
+                tests = json.load(stream)
+            if not tests or any(t.get('status') != 'pass' for t in tests):
+                raise ValueError('missing tests or unsuccessful test status')
+            names = [t['test'] for t in tests]
+            if len(names) != len(set(names)):
+                raise ValueError('duplicate test results')
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print('{} - simulation - FAILED: {}'.format(name, exc))
+            return 1
+        print('{} - simulation - success ({} test(s), {})'.format(name, len(tests), vector or 'default'))
+    return 0

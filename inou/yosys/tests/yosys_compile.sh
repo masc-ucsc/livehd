@@ -4,7 +4,9 @@
 # Verilog round-trip via the lhd kernel: each test compiles
 # verilog -> LGraph (yosys-verilog reader) -> cprop/bitwidth -> cgen verilog,
 # then checks the generated netlist against the original with both lgcheck
-# and native Slang/default lhd lec. Both must pass. One `lhd compile` replaces the old
+# and native Slang/default lhd lec. The native sanity check accepts only an
+# explicit internal timeout (5s); its outer watchdog (10s) must not expire.
+# lgcheck must pass. One `lhd compile` replaces the old
 # tolg|>lgraph.save + lgraph.match|>cprop|>cgen lgshell pipelines; the
 # stderr-grep heuristics are gone because lhd checks the diag sink after
 # every step and reflects it in the exit code.
@@ -122,15 +124,23 @@ do
     inou/yosys/lgcheck --implementation tmp_yosys_mix/all_${base}.v --reference "${full_input}" \
       --top "${base}" >tmp_yosys/${input}.lgcheck.log 2>&1
     lgcheck_rc=$?
-    ${LHD} lec --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
+    # No --sanity: this is a PROOF gate, not a best-effort sanity check. The
+    # generated netlist must prove equivalent to the source; an UNKNOWN that hit
+    # the solver budget is a failure here (measured 2026-09-21: 97/97 fixtures
+    # report `proven`, so requiring it costs nothing and restores the claim the
+    # pre-consolidation gate made with `lhd lec`'s own exit code).
+    python3 inou/prp/tests/lec.py --timeout 5 -- \
+      ${LHD} lec --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
       --top ${base} --workdir tmp_yosys/${base}_check -q \
-      --result-json tmp_yosys/${input}.check.json >/dev/null 2>&1
+      --result-json tmp_yosys/${input}.check.json >tmp_yosys/${input}.lec.log 2>&1
     lec_rc=$?
     if [ "$lec_rc" -eq 0 ] && [ "$lgcheck_rc" -eq 0 ]; then
+      tail -1 tmp_yosys/${input}.lec.log
       echo "Successfully matched generated verilog with original verilog (${full_input})"
     else
       echo "FAIL: ${full_input}: lgcheck rc=$lgcheck_rc, native lhd lec rc=$lec_rc"
       cat tmp_yosys/${input}.lgcheck.log
+      cat tmp_yosys/${input}.lec.log
       cat tmp_yosys/${input}.check.json 2>/dev/null
       ((fail++))
       fail_list+=" "$base
@@ -152,7 +162,7 @@ do
   wait $job || let "FAIL+=1"
 done
 
-if [ $FAIL -eq 0 ]; then
+if [ $FAIL -eq 0 ] && [ $pass -gt 0 ]; then
   echo "SUCCESS: pass:${pass} tests without errors"
   exit 0
 else

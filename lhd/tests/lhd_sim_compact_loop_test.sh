@@ -80,16 +80,7 @@ LARGE_BYTES=$(( $(wc -c < "$H") + $(wc -c < "$C") ))
 DELTA=$(( LARGE_BYTES > SMALL_BYTES ? LARGE_BYTES - SMALL_BYTES : SMALL_BYTES - LARGE_BYTES ))
 [ "$DELTA" -le 512 ] || fail "generated module source grew with trip count: small=$SMALL_BYTES large=$LARGE_BYTES"
 
-# Opportunistic host-compile/run checks need the sibling runtime headers.
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: compact loop sim (source size + digest)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 write_design 4
 "$LHD" sim "$W/compact.prp" --workdir "$W/run" --set sim.vcd=true \

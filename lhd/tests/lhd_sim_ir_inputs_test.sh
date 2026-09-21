@@ -27,9 +27,8 @@
 #     function '<child>'") — which made ln: useless as a sim input for any
 #     hierarchical Verilog design.
 #
-# The structural checks are hermetic (`--setup-only`, no compiler). When the
-# sibling ../hlop + ../iassert headers are present the lg: and ln: paths are also
-# host-compiled and RUN, and must agree with the plain two-source baseline.
+# Both lg: and ln: inputs are host-compiled and run using declared runtime
+# dependencies; their results must agree with the plain two-source baseline.
 
 set -u
 
@@ -163,16 +162,7 @@ grep -q '"name":"hier_top"' "$W/HN/manifest.json" || fail "ln: forest misses hie
 grep -qE '^module leaf\('     "$W/hier.v" || fail "relinked Verilog misses module leaf: $(cat "$W/hier.v")"
 grep -qE '^module hier_top\(' "$W/hier.v" || fail "relinked Verilog misses module hier_top"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) ------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim ln:/lg: IR inputs (structure)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # The baseline (two .prp positionals) and both IR forms must all pass the same
 # assert — an IR input must not change what is simulated.

@@ -1,0 +1,6 @@
+{
+  "source": "../equiv/comb_array_const_index_read.v",
+  "top": "comb_array_const_index_read",
+  "synth_set": "pass.abc.memory=true",
+  "ref_top": "array_reference"
+}

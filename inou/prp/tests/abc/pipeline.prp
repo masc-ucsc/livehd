@@ -1,0 +1,10 @@
+/*
+:libs: test test_qn
+*/
+pipe mul(a:u4, b:u4) -> (c:u8) { c = a * b }
+pipe add(a:u8, b:u8) -> (c:u9) { c = a + b }
+pub mod pipeline(in1:u4, in2:u4) -> (out:u9@[4]) {
+  stage[3] tmp = mul(a=in1, b=in2)
+  stage[3] in1_d = in1
+  stage[1] out@[4] = add(a=tmp@[3], b=in1_d@[3])
+}

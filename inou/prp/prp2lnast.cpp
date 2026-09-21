@@ -2824,7 +2824,9 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
       return;
     }
     if (has_pub) {
-      lnast->add_pub(trim(get_text(id)), "value", mint_src(id));
+      // Canonical spelling, as the lambda pub site does: uPass_constprop looks
+      // the export up by the declaration's canonical name.
+      lnast->add_pub(canonical_escaped_ident(trim(get_text(id))), "value", mint_src(id));
     }
     // 2f-type_bound — emit any non-foldable integer type bound's statements
     // FIRST. They must precede the `declare` that consumes them, and
@@ -3096,7 +3098,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // records each item — decl_node propagates through the recursion.
     if (has_pub) {
       check_pub_value_decl(decl_node, kind_sv);
-      lnast->add_pub(trim(get_text(id)), "value", mint_src(id));
+      lnast->add_pub(canonical_escaped_ident(trim(get_text(id))), "value", mint_src(id));
     }
 
     // Track compile-time-resolvable integer bindings so a later
@@ -3156,9 +3158,10 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
 
     // General declaration-point closure values (integer timing constants use
     // the specialized map above). Writes inside a lambda/conditional do not
-    // mutate the enclosing capture environment.
+    // mutate the enclosing capture environment. Capture keys must use the same
+    // canonical spelling as declarations and calls, including keyword escapes.
     if (conditional_depth_ == 0) {
-      const std::string nm(trim(get_text(id)));
+      const std::string nm(canonical_escaped_ident(trim(get_text(id))));
       auto              clear_capture = [&]() {
         capture_const_bindings_.erase(nm);
         capture_import_bindings_.erase(nm);
@@ -3744,7 +3747,10 @@ void Prp2lnast::process_assignment(TSNode n) {
       // can be a LATER top-level statement, after this construct's arena is reset.
       prpparse::Ast* kept = clone_prp_subtree(retained_arena_, rv.a);
       prpparse::link_parents(kept);
-      const std::string const_name(trim(get_text(lv)));
+      // Same canonical spelling as the capture_const_bindings_ key above: the
+      // streamed-lambda prologue replays this name as a ref, and pass.lnastfmt
+      // rejects a backtick-escaped pure-alnum ref as malformed.
+      const std::string const_name(canonical_escaped_ident(trim(get_text(lv))));
       if (const_rvalue_nodes_.insert_or_assign(const_name, TSNode{kept, prp_buf.get()}).second) {
         // Source declaration order — the streamed-lambda capture prologue
         // replays consts and enums in this order so a const tuple that reads
@@ -4874,7 +4880,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
     // Normalize the fluid kind text ("fluid …" variants) to the bare kind.
     std::string_view pub_kind = kind.size() >= 5 && kind.substr(0, 5) == "fluid" ? "fluid" : kind;
-    lnast->add_pub(trim(get_text(name_node)), pub_kind, mint_src(name_node), lg_value);
+    lnast->add_pub(canonical_escaped_ident(trim(get_text(name_node))), pub_kind, mint_src(name_node), lg_value);
   }
   // The `lg` rename is pub-only: a non-pub (file-local) unit has no stable
   // export name to pin. Diagnose here rather than silently dropping it.
@@ -6620,7 +6626,7 @@ void Prp2lnast::process_import_statement(TSNode n) {
   Lnast_node tmp = builder.mint_tmp_ref();
   emit_import_call(tmp, *text, n);
 
-  Lnast_node ref = Lnast_node::create_ref(get_text(alias));
+  Lnast_node ref = Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(alias))));
   {
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());
     lnast->add_child(idx, ref);
@@ -7157,20 +7163,10 @@ Lnast_node Prp2lnast::constant_text_to_node(std::string_view text) {
 // identifier_to_node (reads) and the param/port declaration sites (emit_arg_assign
 // / typed_field) so both ends canonicalize identically.
 [[nodiscard]] static std::string_view canonical_escaped_ident(std::string_view name) {
-  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
-    auto inner = name.substr(1, name.size() - 2);
-    bool ok    = !inner.empty();
-    for (char ch : inner) {
-      if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
-      return inner;  // substring view of `name` (same backing buffer)
-    }
-  }
-  return name;
+  // One definition, in core/str_tools.hpp: the consumers that look names up
+  // (the symbol table, call_resolver's import-member match) must apply the
+  // identical rule, so it cannot live here as a private copy.
+  return str_tools::canonical_escaped_ident(name);
 }
 
 Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
@@ -10232,7 +10228,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   } else if (std::string_view(ts_node_type(func)) == "dot_expression" && ts_node_named_child_count(func) >= 2) {
     uint32_t fnc         = ts_node_named_child_count(func);
     TSNode   method_node = ts_node_named_child(func, fnc - 1);
-    func_ref             = Lnast_node::create_ref(trim(get_text(method_node)));
+    func_ref             = Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(method_node))));
     if (fnc == 2) {
       // Single-level receiver: lower it as an expression and pass as arg0.
       receiver_ref = expr_to_node(ts_node_named_child(func, 0));
@@ -10245,13 +10241,13 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
       lnast->add_child(tg_idx, expr_to_node(ts_node_named_child(func, 0)));
       for (uint32_t i = 1; i < fnc - 1; i++) {
         TSNode f = ts_node_named_child(func, i);
-        lnast->add_child(tg_idx, Lnast_node::create_const(trim(get_text(f))));
+        lnast->add_child(tg_idx, Lnast_node::create_const(canonical_escaped_ident(trim(get_text(f)))));
       }
       receiver_ref = tg_ref;
     }
     has_receiver = true;
   } else {
-    func_ref = Lnast_node::create_ref(trim(get_text(func)));
+    func_ref = Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(func))));
   }
 
   // `import("unit")` is a comptime builtin with its own canonical

@@ -1,0 +1,16 @@
+/*
+:name: named_hierarchy_csdut
+:type: equiv
+:pyrope_top: csdut
+:verilog_top: csdut
+:set: compile.formal.mode=none
+*/
+mod stage(d:u8) -> (q:u8@[1]) {
+  reg m:u8:[name="reg_mem_writedata"] = 0
+  q = m
+  m = d
+}
+mod csdut(da:u8, db:u8) -> (qa:u8@[], qb:u8@[]) {
+  qa = stage::[name=pipeA_ex_mem](da)
+  qb = stage::[name=pipeB_ex_mem](db)
+}

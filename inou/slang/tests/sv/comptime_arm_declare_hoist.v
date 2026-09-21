@@ -1,3 +1,4 @@
+// :test: roundtrip
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // A plain packed local whose FIRST lowered write sits inside a comptime-decided

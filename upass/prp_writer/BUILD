@@ -1,7 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # buildifier: disable=load
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -16,44 +15,6 @@ cc_library(
         # The emitter's reserved-word escape set IS the parser's keyword table
         # (prpparse/prp_keywords.def) — see is_pyrope_reserved_ident.
         "@prpparse//:prp_keywords",
-    ],
-)
-
-# Slang->Pyrope emit regression for submodule output-port inlining (no LEC, so
-# it sidesteps the pre-existing multi-module library-read gaps).
-sh_test(
-    name = "inst_out_inline_test",
-    srcs = ["tests/inst_out_inline_test.py"],
-    args = ["-i", "$(location tests/inst_out_inline.v)"],
-    data = [
-        "tests/inst_out_inline.v",
-        "//lhd",
-    ],
-)
-
-# A stateless multi-output `comb` instance must keep its hierarchical name
-# through the destructure emit + re-compile (parser must accept the named
-# destructure `(t = C.o, …) = C::[name=i](…)`).
-sh_test(
-    name = "comb_inst_name_test",
-    srcs = ["tests/comb_inst_name_test.py"],
-    args = ["-i", "$(location tests/comb_inst_name.v)"],
-    data = [
-        "tests/comb_inst_name.v",
-        "//lhd",
-    ],
-)
-
-# A Verilog signal named for a Pyrope reserved word (`stage`, `tick`, `formal`,
-# …) must be backtick-escaped on emit, or the writer's own output stops
-# re-parsing. Verilog -> Pyrope -> re-compile.
-sh_test(
-    name = "keyword_ident_test",
-    srcs = ["tests/keyword_ident_test.py"],
-    args = ["-i", "$(location tests/keyword_ident.v)"],
-    data = [
-        "tests/keyword_ident.v",
-        "//lhd",
     ],
 )
 

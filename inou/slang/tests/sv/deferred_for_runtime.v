@@ -1,3 +1,5 @@
+// :test: error
+// :error: non-comptime.*for
 module deferred_for_runtime (
   input  logic [3:0] n_i,
   input  logic [7:0] x_i,

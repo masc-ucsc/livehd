@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 
+from lec import run_lec, verdict as lec_verdict
+
 class PrpTest:
     """
     Pyrope Test Object
@@ -521,19 +523,12 @@ class PrpRunner:
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
                    '--impl-top', pyrope_top, '--ref-top', verilog_top,
                    '--workdir', os.path.join(odir, 'w_lec')] + self._extra_sets(test) + self.equiv_set_args()
-        lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            llog, _ = lec.communicate()
-            lrc = lec.returncode
-        except Exception:
-            lec.kill()
-            lrc, llog = 1, b''
-        ltxt = llog.decode('utf-8', 'ignore')
+        lec = run_lec(lec_cmd, cwd=tmp_dir, timeout=20)
+        ltxt = lec.stdout.decode('utf-8', 'ignore')
         # Hierarchical LEC may retain an intermediate collapsed-box UNKNOWN in
         # the successful flat retry's detail. Judge the final top-level line;
         # PASS(n) is a real bounded pass, not an inconclusive result.
-        lec_ok = lrc == 0 and re.search(
-            r"(?m)^lec: .* (?:PROVEN|PASS\(\d+\)) equivalent", ltxt)
+        lec_ok = lec_verdict(lec) == 'proven'
         if not lec_ok:
             print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
                   'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
@@ -614,18 +609,12 @@ class PrpRunner:
         verilog_top = flat(verilog_top)
         pyrope_top  = flat(pyrope_top)
 
-        check = subprocess.Popen(
+        check = run_lec(
             [self.lhd, 'lec', '--ref', ref, '--impl', impl,
              '--ref-top', pyrope_top, '--impl-top', verilog_top,
-             '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.equiv_set_args(),
-            cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            clog, _ = check.communicate()
-            crc = check.returncode
-        except Exception:
-            check.kill()
-            crc, clog = 1, b''
-        if crc == 0:
+             '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.equiv_set_args(), cwd=tmp_dir, timeout=20)
+        crc, clog = check.returncode, check.stdout
+        if lec_verdict(check) == "proven":
             print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             return 0
         print('{} - equiv_slang - FAILED: lhd lec did not prove equivalence (verilog_top:{} pyrope_top:{})'.format(
@@ -760,11 +749,21 @@ class PrpRunner:
             except:
                 rproc.kill()
                 rlog_b, rrc = b'', -1
-            if replay == 'fired' and rrc == 0:
-                problems.append('the counterexample replay did not re-fire the assert')
+            fired = False
+            passed = False
+            try:
+                with open(os.path.join(tmp_dir, wd + '_sim', 'sim', 'sim_tests.json')) as stream:
+                    replay_tests = json.load(stream)
+                fired = rrc == 11 and any(t.get('status') == 'fail' and t.get('failing_assert')
+                                         for t in replay_tests)
+                passed = rrc == 0 and bool(replay_tests) and all(t.get('status') == 'pass' for t in replay_tests)
+            except (OSError, ValueError, TypeError):
+                pass
+            if replay == 'fired' and not fired:
+                problems.append('the counterexample replay did not report a runtime assertion failure')
                 log += '\n---- replay ----\n' + rlog_b.decode('utf-8', 'ignore')
-            if replay == 'no-refire' and rrc != 0:
-                problems.append('the free-initial-state witness unexpectedly reproduced (rc={})'.format(rrc))
+            if replay == 'no-refire' and not passed:
+                problems.append('the free-initial-state replay did not complete with passing tests (rc={})'.format(rrc))
                 log += '\n---- replay ----\n' + rlog_b.decode('utf-8', 'ignore')
 
         if problems:

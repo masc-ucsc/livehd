@@ -51,7 +51,13 @@ SLANG_LADDER = {
     "latch_sr": "lec",
     "fixme_nocheck_implicit_en": "lnast",  # byte-enable mem write (mem[a][chunk]<=…) now lowers (wensize); tolg comb-loops on the en?d:self self-read idiom
     "fixme_noloop": "lec",
-    "fixme_paramods": "error",  # instance arrays / paramod shapes not lowered yet
+    # PROMOTED error -> verilog (2026-09-21): the paramod shapes DO lower now, so the
+    # `error` tier failed the acceptance gate ("expected a clean compile error, got exit 0").
+    # It is capped at `verilog`, not `lec`, because `lhd lec` reads the ORIGINAL .v with
+    # slang too, and slang rejects this file's `pm_test3` defparam block:
+    #   "module member '' (kind DefParam) is not supported by --reader slang".
+    # Promote to `lec` once slang lowers DefParam.
+    "fixme_paramods": "verilog",
     "fixme_sha256": "verilog",  # compiles to verilog (1-bit-cond + bool-net fixes); LEC gap on the wide reduction
     "fn_ret_bool": "lec",  # logic-returning fn whose body returns a bool, then compared to a literal
     "fixme_with_tuples": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800

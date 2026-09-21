@@ -1,0 +1,16 @@
+/*
+:name: reg_hold_regfile
+:type: equiv
+:pyrope_top: regfile
+:verilog_top: regfile
+:set: compile.formal.mode=none
+*/
+mod regfile(we_a:bool, we_b:bool, adata:u8, bdata:u8) -> (q:u8@[0]) {
+  reg r:u8 = 0
+  if we_b {
+    r = bdata
+  } elif we_a {
+    r = adata
+  }
+  q = r
+}

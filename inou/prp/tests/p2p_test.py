@@ -13,7 +13,7 @@ unimplemented construct (rather than silently emitting a /* TODO */ stub), so a
 construct gap surfaces here as a hard failure, not a false pass.
 
 `lhd lec` (default solver) is the equivalence gate:
-equivalent => pass, not-equivalent => fail, TIMEOUT => inconclusive (exit 0).
+The fixture must prove equivalent; timeouts and refusals fail.
 
   python3 inou/prp/tests/p2p_test.py -i inou/prp/tests/equiv/mod_call_pipe.prp
 """
@@ -26,7 +26,9 @@ import shutil
 import subprocess
 import sys
 
-CHECK_TIMEOUT = 20  # seconds; a timeout is inconclusive, not a failure
+from lec import run_lec, verdict
+
+CHECK_TIMEOUT = 20  # internal seconds; the external watchdog allows twice this
 
 
 def _v_top(vpath):
@@ -87,22 +89,14 @@ def main():
         return 1
 
     # 2. Recompile the emitted Pyrope and LEC it against the golden .v.
-    try:
-        # Per-side tops: the golden .v carries the historical dotted module name
-        # (`pipe1_pass.passthru`), but the Pyrope side now emits the FLAT Verilog
-        # module name (`passthru`) — internal graph names stay hierarchical while
-        # Verilog flattens. Pass each side its own module name.
-        ref_top  = top
-        impl_top = top.rsplit(".", 1)[-1]
-        chk = subprocess.run(
-            [lhd, "lec", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
-             "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        print("{} - p2p - inconclusive (lhd lec timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
-        return 0
+    ref_top = top
+    impl_top = top.rsplit(".", 1)[-1]
+    chk = run_lec(
+        [lhd, "lec", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
+         "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
+        timeout=CHECK_TIMEOUT)
 
-    if chk.returncode == 0:
+    if verdict(chk) == "proven":
         print("{} - p2p - success (top:{})".format(name, top))
         return 0
     print("{} - p2p - FAILED: not equivalent (top:{})".format(name, top))

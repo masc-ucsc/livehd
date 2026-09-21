@@ -1,0 +1,16 @@
+/*
+:name: reg_hold_selreg
+:type: equiv
+:pyrope_top: selreg
+:verilog_top: selreg
+:set: compile.formal.mode=none
+*/
+mod selreg(sel:u2, a:u8, b:u8) -> (q:u8@[0]) {
+  reg r:u8 = 0
+  unique if sel == 0 {
+    r = a
+  } elif sel == 1 {
+    r = b
+  }
+  q = r
+}

@@ -6,8 +6,7 @@
 # VCD window around the failing cycle (reusing the Stage C restart + windowed-VCD
 # machinery), producing `<test>.vcd` of the failure region. The re-run's stdout is
 # suppressed (the located assert prints once), and the verdict is unchanged.
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers.
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -48,16 +47,7 @@ grep -q '/dev/null'          "$DRV" || fail "the on-fail re-run does not suppres
 grep -q '"--vcd-on-fail"'    "$DRV" || fail "driver does not accept --vcd-on-fail"
 grep -q '__vcd_path'         "$DRV" || fail "VCD machinery not emitted under --vcd-on-fail"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim --vcd-on-fail (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # sim.tune.profile=off: a profiling run (the `auto` default with a fresh
 # --workdir) takes no checkpoints, and the on-fail re-run restarts from one.
@@ -65,7 +55,7 @@ fi
   --set sim.tune.profile=off --workdir "$W/run" \
   --diag-fmt pretty > "$W/run.out" 2>&1
 RC=$?
-[ "$RC" = "1" ] || fail "expected exit 1 (assert fired), got $RC: $(cat "$W/run.out")"
+[ "$RC" = "11" ] || fail "expected exit 11 (assert fired), got $RC: $(cat "$W/run.out")"
 
 # the verdict is unchanged + located once; the on-fail re-run reports the VCD
 grep -q 'failed at clock 7 -> wrote failure VCD (cycles 4..7)' "$W/run.out" \

@@ -1,3 +1,4 @@
+// :test: lec_no_x
 module generated_sibling_forward_read (
     input  logic [3:0] grant,
     input  logic [3:0][3:0] state_reg,

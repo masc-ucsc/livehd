@@ -9,9 +9,8 @@
 #     with the registry + embedded `--list-tests` JSON + `--test`/`--seed` flags;
 #   * with `--set sim.vcd=true` the driver resets the VCD timeline per test
 #     (vcd::global_timestamp) so two VCD tests in one process don't collide.
-# The structural checks run hermetically (`--setup-only` / `--list-tests`, no
-# compiler). When the sibling ../hlop + ../iassert headers are present (a dev /
-# repo-root run), it ALSO host-compiles + runs the single binary to check that the
+# Structural checks use `--setup-only` / `--list-tests`. The runtime checks
+# host-compile and run using declared dependencies, and verify that the
 # built binary's `--list-tests` matches `lhd sim --list-tests`, that `--test`
 # selects one test, and that a two-test VCD run produces both .vcd files without
 # crashing.
@@ -100,19 +99,7 @@ VDRV="$W/v/sim/drv.cpp"
 grep -q '#include "vcd_writer.hpp"' "$VDRV" || fail "VCD driver does not include the VCD writer header"
 grep -q 'vcd::global_timestamp = 0' "$VDRV" || fail "VCD driver does not reset the per-test VCD timeline"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-# Locate slop.hpp / iassert.hpp the way the kernel does (dev layout: ../hlop,
-# ../iassert). If absent (e.g. a sandboxed `bazel test`), skip the run checks --
-# the prp-sim-* targets cover the end-to-end run there.
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim --list-tests + single-driver structure"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # the built binary's --list-tests must match `lhd sim --list-tests` byte-for-byte
 "$LHD" sim "$W/two.prp" --set sim.vcd=true --workdir "$W/run" --diag-fmt pretty > "$W/run.out" 2>&1 \

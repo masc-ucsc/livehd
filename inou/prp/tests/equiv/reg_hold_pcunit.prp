@@ -1,0 +1,18 @@
+/*
+:name: reg_hold_pcunit
+:type: equiv
+:pyrope_top: pcunit
+:verilog_top: pcunit
+:set: compile.formal.mode=none
+*/
+mod pcunit(taken:bool, stall:bool, tgt:u8, nx:u8) -> (pc:u8@[0]) {
+  reg pcr:u8 = 0
+  if taken {
+    pcr = tgt
+  } elif stall {
+    // hold
+  } else {
+    pcr = nx
+  }
+  pc = pcr
+}

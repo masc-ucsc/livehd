@@ -1,0 +1,6 @@
+{
+  "source": "../equiv/mem_pending_reset_restore.prp",
+  "top": "restore",
+  "synth_set": "pass.abc.memory=true",
+  "lec_set": "formal.bound=2"
+}

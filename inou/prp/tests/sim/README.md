@@ -4,6 +4,22 @@ Example designs that drive a DUT from a Pyrope `test` block and check the
 result with an `assert` **at the end of simulation**. These exercise the
 `simulation` mode of the test runner (`prplib.py`, the `run()` dispatch).
 
+## Shared runner
+
+Every top-level `.prp` fixture is discovered by Bazel as `prp-sim-<stem>`.
+The harness runs `lhd sim` with its declared runtime dependencies, checks the
+process status, and requires a nonempty `sim_tests.json` containing only passing,
+uniquely named tests. A failed host build or missing runtime cannot pass.
+The `prp-simeq-*` differential fixtures use the same runner.
+
+Use repeatable `:set: key=value` headers for a fixed configuration. For a small
+configuration comparison, use `:sim_sweep: sim.tune.backend=slop,llvm` (or another
+option with comma-separated values). Every combination runs in a fresh workdir
+and must satisfy the fixture's assertions. Profiling defaults off to keep the
+ordinary regression small; profiling and same-workdir cache behavior have
+separate workflow tests. Keep configuration sweeps small enough for the test
+runtime budget.
+
 ## Pattern
 
 Each file pairs a synthesizable design with one or more `test` blocks:

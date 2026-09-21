@@ -1,3 +1,4 @@
+// :test: roundtrip
 typedef struct packed {
   logic [7:0] sat;
   logic [7:0] ordinary;

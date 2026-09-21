@@ -1,0 +1,10 @@
+/*
+:name: sext_sign_cmp
+:type: lec
+:lec_top: cmp
+:set: compile.formal.mode=none
+*/
+// Sign extension must agree with explicit fill or native signed arithmetic.
+comb cmp(x:s32, y:s32) -> (r:bool) {
+  r = x < y
+}

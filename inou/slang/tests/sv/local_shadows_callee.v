@@ -1,3 +1,4 @@
+// :test: roundtrip
 // A local signal that carries the SAME name as a module the unit instantiates.
 // Legal Verilog (module and net namespaces are distinct); in the emitted
 // Pyrope the file-scope `const leaf = import("leaf.leaf")` and the body's

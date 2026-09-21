@@ -107,6 +107,24 @@ Key invariants the lowering maintains:
   / `tuple_get(d,mem,idx)` memory vocabulary with `fwd=0` (Verilog
   nonblocking reads see old contents).
 
+## Fixture discovery
+
+A new ordinary regression is a `.v` or `.sv` file in `tests/sv/`; Bazel creates
+`slang_<stem>` automatically. Name the top module after the file, or select it with `// :top: entity`. The shared
+`tests/slang_compile.sh auto FILE` runner compiles it through native Slang and
+compares the emitted Verilog with the source using default `lhd lec`.
+
+Optional leading comments select additional expectations:
+
+- `// :test: roundtrip` also emits Pyrope, recompiles it, and compares that result.
+- `// :test: lec_no_x` also rejects introduced X/Z literals.
+- `// :test: error` requires a clean compiler error with a structured diagnostic;
+  optional `// :error: REGEX` matches the diagnostic message.
+
+These tests share the five-second internal LEC budget and ten-second watchdog
+below. Dedicated tests remain for warning details, generated storage complexity,
+file lists, determinism, and other behavior a value comparison cannot check.
+
 ## The coverage ladder (todo/ 2s subtask E)
 
 `slang_ladder.bzl` pins EVERY `inou/yosys/tests/*.v` source to its
@@ -117,9 +135,9 @@ ladder is promoted). Tiers:
 - `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd lec`, default solver) against
   the source. The strongest tier. Slang tests leave the solver at its default;
   `lgyosys` is reserved for explicit cross-checks of the native LEC engine.
-  The ladder uses `formal.timeout=20` (a solver budget, not a total test wall
-  limit). An explicit LEC timeout passes with a `LEC TIMEOUT` message and
-  equivalence remains unproven; refutations and other errors fail.
+  The ladder uses `formal.timeout=5` with a ten-second outer watchdog. An explicit internal
+  timeout reports `LEC check: inconclusive`; equivalence remains unproven.
+  Refutations, unsupported encodings, setup errors and watchdog overruns fail.
 - `verilog` — compiles to Verilog; a known LEC gap is tracked in the ladder
   comment next to the entry.
 - `lnast` — LNAST + `ln:` save/reload round-trip only.
@@ -139,14 +157,14 @@ genuine gaps: four big-memory / wide-arith tests (`long_mem`, `long_mem3`,
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
 `mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.
-`long_nocheck_iwls_square` now attempts LEC with the 20-second budget and
+`long_nocheck_iwls_square` now attempts LEC with the five-second budget and
 accepts an explicit timeout as described above.
 Correct mixed signed/unsigned arithmetic and narrow (1- and 2-bit) signed
 port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
 operand in an unsigned expression zero-extends, and `materialize_conversion`
 plus `int_min_str`/`int_max_str` carry the 1800 §11.8.2 sign rules.
 
-The `tests/verilog/` sky130 cell samples run at the `lnast` tier through the
+The `tests/verilog/` sky130 cell samples run at the `error` tier through the
 legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).
 
 ## Which Verilog constructs to support (triage rule)
@@ -222,3 +240,17 @@ header's `:type:` selects how the readers are exercised:
 The `:pyrope_top:`/`:verilog_top:` header tags pin the (differently-named) top on
 each side. Pick `equiv` when both readers can read the `.v`; `equiv_slang` when
 only the native slang reader can.
+
+Run the automatically discovered SV corpus with
+`bazel test -c opt //inou/slang:integration`. Each fixture remains an individual
+Bazel test, so failures identify the source and runtimes stay bounded.
+
+`// :test: roundtrip_sim` emits and recompiles Pyrope, then runs a mandatory
+sibling `<stem>_tb.v` with Icarus against the generated Verilog. This profile
+covers behavior the formal encoder cannot represent, such as flop-driven
+clocks; it does not claim a proof or accept an unsupported LEC verdict. The
+bench must call `$fatal` on mismatch. Ordinary roundtrips still use LEC.
+
+The discovered integration cases reserve four Bazel CPUs each so concurrent
+frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
+contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.

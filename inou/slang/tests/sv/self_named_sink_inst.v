@@ -1,3 +1,4 @@
+// :test: roundtrip
 // An instance named after its own module, of a module with NO OUTPUTS.
 //
 // `br_flow_checks_valid_data_impl br_flow_checks_valid_data_impl (...)` is legal

@@ -9,8 +9,7 @@
 #   * `lhd sim --set sim.checkpoint_every=N --set sim.checkpoint_max=M` writes
 #     `<workdir>/ckpt/<test>/ckp<cycle>/` dirs, pruned to M and evenly spaced;
 #   * `--set sim.checkpoint=false` disables it (no dirs).
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers (a dev / repo-root run).
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -106,16 +105,7 @@ EO="$("$LHD" sim "$W/ck.prp" --set sim.checkpoint_bogus=1 --setup-only --workdir
   && fail "unknown sim flag was not rejected"
 echo "$EO" | grep -q "unknown sim flag 'sim.checkpoint_bogus'" || fail "wrong message for unknown sim flag: $EO"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim checkpoint creation (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # checkpoint every 2 cycles, keep at most 3 -> evenly-spaced subset of {2,4,..,10}
 # sim.tune.profile=off: a profiling run (the `auto` default with a fresh

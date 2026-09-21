@@ -161,8 +161,8 @@ def main():
     tmp = os.environ.get('TEST_TMPDIR') or tempfile.mkdtemp(prefix='sim_tune_drv_')
     incs = prpsim._sim_include_dirs(tmp)
     if not incs:
-        print('SKIP: hlop/iassert headers not found (no runfiles)')
-        return 0
+        print('FAIL: required simulator header runfiles not found')
+        return 1
 
     # ---- `set` is a reserved test-parameter name ----
     bad = os.path.join(tmp, 'set_param.prp')

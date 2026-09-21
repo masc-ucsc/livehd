@@ -205,4 +205,32 @@ namespace str_tools {
   return std::string(entity);
 }
 
+// Canonical spelling of a Pyrope escaped identifier: `` `name` `` -> `name`
+// when the inner text is a plain alnum/underscore word that does not start with
+// a digit; anything else (a name that genuinely needs the quotes, e.g.
+// `` `a.b` ``) is returned untouched. The result is a subview of `name`.
+//
+// This is the ONE definition. It is shared because producer and consumer must
+// agree exactly: prp2lnast stamps declarations, refs and `pub` entries with the
+// canonical spelling, so every lookup keyed by a source-spelled name -- the
+// symbol table (uPass_constprop::harvest_pub_values), and the `import("unit.member")`
+// member match in upass/core/call_resolver -- has to canonicalize too, or an
+// escaped pure-alnum name silently fails to resolve.
+[[nodiscard]] inline std::string_view canonical_escaped_ident(std::string_view name) {
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    auto inner = name.substr(1, name.size() - 2);
+    bool ok    = !inner.empty();
+    for (char ch : inner) {
+      if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
+      return inner;  // substring view of `name` (same backing buffer)
+    }
+  }
+  return name;
+}
+
 }  // namespace str_tools

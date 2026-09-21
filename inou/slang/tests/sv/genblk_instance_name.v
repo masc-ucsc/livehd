@@ -1,3 +1,4 @@
+// :test: roundtrip
 // Two instances of the SAME module created by a genvar loop. SystemVerilog
 // tells them apart only by the generate-block index -- `gen_lp[0].u_dl` and
 // `gen_lp[1].u_dl` -- so an instance name that drops the generate prefix mints

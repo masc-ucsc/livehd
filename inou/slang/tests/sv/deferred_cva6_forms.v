@@ -1,3 +1,8 @@
+// :lec_timeout: 20
+// Measured 2026-09-21: this design's LEC needs ~11s wall (compile 1.5s, then a
+// bmc PASS(6) solve) on a mid-range machine. The shared 5s budget gives a 10s
+// outer watchdog, which kills the run before the solver can even report a
+// timeout -- so the test failed by machine speed rather than by a regression.
 typedef struct packed {
   int unsigned nr_rules;
 } deferred_cfg_t;

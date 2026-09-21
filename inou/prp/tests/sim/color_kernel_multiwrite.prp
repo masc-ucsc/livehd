@@ -1,6 +1,7 @@
 /*
 :name: color_kernel_multiwrite
 :type: simulation
+:sim_sweep: sim.tune.backend=slop,llvm
 */
 // Two occurrences of one connected, two-output combinational definition. The
 // occurrence-wide schedule must emit one canonical kernel and bind it twice.

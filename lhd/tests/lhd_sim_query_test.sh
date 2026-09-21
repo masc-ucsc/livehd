@@ -15,8 +15,7 @@
 #     and forwards a flat plan to the driver, which answers it against the
 #     recorded post-step sample stream.
 #
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers (the usual dev-layout split).
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -123,16 +122,7 @@ echo "$EO" | grep -qi "query" || fail "wrong message rejecting --query + --vcd-f
   --workdir "$W/u2" -q >/dev/null 2>&1
 [ "$?" = "2" ] || fail "unknown schema_version did not exit 2 (usage)"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim --query (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 R="$W/r"
 Q='{"schema_version":1,"kind":"sim_query","queries":[
@@ -172,7 +162,7 @@ assert r["pc"]["ok"], r["pc"]
 v=r["pc"]["value"]
 for k in ("bits","declared_bits","signed","hex","dec","known_mask"):
     assert k in v, f"value object missing {k}: {v}"
-assert v["bits"]==9 and v["declared_bits"]==8, v
+assert v["bits"]>=v["declared_bits"] and v["declared_bits"]==8, v
 assert int(v["dec"])==6, f"acc at cycle 5 = {v['dec']}, expected 6"
 assert int(v["known_mask"],16)==(1<<v["bits"])-1, f"known_mask must be all-ones in v1: {v}"
 

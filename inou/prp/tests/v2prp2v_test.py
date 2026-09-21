@@ -14,10 +14,12 @@ import shutil
 import subprocess
 import sys
 
-NATIVE_CHECK_TIMEOUT = 60
+from lec import run_lec, verdict
+
+NATIVE_CHECK_TIMEOUT = 20
 # Budget for comparing emitted Verilog with its source using default LEC.
 # A fixture can override it with :verilog_check_timeout:; timeouts fail.
-VERILOG_CHECK_TIMEOUT = 240
+VERILOG_CHECK_TIMEOUT = 20
 
 
 def _header(prp_path, key):
@@ -43,6 +45,7 @@ def _modules(vpath):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="golden .v file")
+    ap.add_argument("--native-only", action="store_true", help="check the emitted Pyrope against its handwritten twin")
     args = ap.parse_args()
 
     lhd = "./bazel-bin/lhd/lhd" if os.path.exists("./bazel-bin/lhd/lhd") else "./lhd/lhd"
@@ -111,50 +114,18 @@ def main():
     # 1b. Check the emitted Pyrope against the hand-written Pyrope twin. This
     # is the unique assertion formerly made by every prp-v2prp-* target.
     impl_arg = "pyrope:" + prpdir + "/" if len(prps) > 1 else "pyrope:" + emitted
-    native_failed = False
-    try:
-        # Tell the engine the budget it ACTUALLY has. Left at its 120s default it
-        # schedules against a wall twice the one this harness kills it at, and the
-        # ABC cone pre-pass takes 25% of that (pass/lec/query.cpp cone_deadline_ms)
-        # -- 30s that a datapath cone such as reduce_wide's 129-bit popcount burns
-        # in full before cvc5, which proves it in 0.1s, is asked anything.
-        native = subprocess.run(
-            [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
-             "--impl-top", vtop, "--ref-top", ptop,
-             "--set", "formal.timeout=%d" % NATIVE_CHECK_TIMEOUT,
-             "--workdir", os.path.join(work, "w_native_check")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            timeout=NATIVE_CHECK_TIMEOUT)
-    # The default engine must decide both legs; a bounded pass retains its depth.
-    except subprocess.TimeoutExpired:
-        print("{} - v2prp2v - FAILED: lhd lec TIMED OUT >{}s on our own corpus "
-              "(our engine must decide these)".format(name, NATIVE_CHECK_TIMEOUT))
-        native_failed = True
+    native = run_lec(
+        [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
+         "--impl-top", vtop, "--ref-top", ptop,
+         "--workdir", os.path.join(work, "w_native_check")], timeout=NATIVE_CHECK_TIMEOUT)
+    native_failed = verdict(native) != "proven"
+    if native_failed:
+        print("{} - v2prp2v - FAILED: native Pyrope proof".format(name))
+        print(native.stdout.decode("utf-8", "replace"))
     else:
-        native_out = native.stdout.decode("utf-8", "ignore")
-        # Hierarchical LEC may report an intermediate collapsed-box UNKNOWN and
-        # then prove the required flat retry.  Judge the final top-level verdict,
-        # not diagnostic words retained in that successful retry's detail.
-        native_proven = native.returncode == 0 and re.search(
-            r"(?m)^lec: .* (?:PROVEN|PASS\(\d+\)) equivalent", native_out)
-        if native_proven:
-            print("{} - v2prp2v - native Pyrope check success "
-                  "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
-        elif native.returncode == 0:
-            print("{} - v2prp2v - FAILED: lhd lec did not PROVE (inconclusive on our own "
-                  "corpus; impl-top:{} ref-top:{})".format(name, vtop, ptop))
-            print(native_out)
-            native_failed = True
-        elif "REFUSAL, not a timeout" in native_out:
-            print("{} - v2prp2v - FAILED: lhd lec REFUSED to encode (unmodelled cell; "
-                  "impl-top:{} ref-top:{})".format(name, vtop, ptop))
-            print(native_out)
-            native_failed = True
-        else:
-            native_failed = True
-            print("{} - v2prp2v - FAILED: emitted Pyrope not equivalent to reference "
-                  "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
-            print(native_out)
+        print("{} - v2prp2v - native Pyrope proof passed".format(name))
+    if args.native_only:
+        return int(native_failed)
 
     # 1c. PYROPE -> LGraph -> Verilog. Emitting every unit at once is the normal
     # case; a design whose units import each other rejects the duplicates, so
@@ -203,15 +174,10 @@ def main():
     cmd = [lhd, "lec", "--ref", v, "--impl", impl,
            "--ref-top", vtop, "--impl-top", impl_top,
            "--workdir", os.path.join(work, "w_verilog_check")]
-    try:
-        chk = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             timeout=verilog_timeout)
-    except subprocess.TimeoutExpired:
-        print("{} - v2prp2v - FAILED: Verilog LEC timeout >{}s".format(name, verilog_timeout))
-        return 1
+    chk = run_lec(cmd, timeout=verilog_timeout)
 
     out = chk.stdout.decode("utf-8", "ignore")
-    if chk.returncode == 0:
+    if verdict(chk) == "proven":
         print("{} - v2prp2v - original Verilog check success "
               "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
         return 1 if native_failed else 0

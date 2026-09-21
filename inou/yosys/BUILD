@@ -55,8 +55,11 @@ cc_binary(
     srcs = [],
     copts = COPTS + ["-Wno-shadow"],
     features = ["-use_header_modules"],
+    linkopts = [
+        "-lz",
+        "-rdynamic",
+    ],
     visibility = ["//visibility:public"],
-    linkopts = ["-lz", "-rdynamic"],
     deps = [
         ":lgyosys",
         "@at_clifford_yosys2//:driver",
@@ -83,10 +86,14 @@ filegroup(
 )
 
 _YOSYS_TEST_PREFIX = "tests/"
+
 _YOSYS_TEST_SUFFIX = ".v"
 
 YOSYS_COMPILE_TESTS = [
-    (t[len(_YOSYS_TEST_PREFIX):-len(_YOSYS_TEST_SUFFIX)], t)
+    (
+        t[len(_YOSYS_TEST_PREFIX):-len(_YOSYS_TEST_SUFFIX)],
+        t,
+    )
     for t in VERILOG_TESTS
 ]
 
@@ -96,6 +103,7 @@ YOSYS_COMPILE_TESTS = [
     args = ["$(location %s)" % t[1]],
     data = [
         t[1],
+        "//inou/prp:tests/lec.py",
         "//lhd",
     ],
     tags = [
@@ -109,7 +117,10 @@ exports_files(ALL_VERILOG_TESTS)
 
 filegroup(
     name = "memory_import_srcs",
-    srcs = ["lgyosys_tolg.cpp", "inou_yosys_api.cpp"],
+    srcs = [
+        "inou_yosys_api.cpp",
+        "lgyosys_tolg.cpp",
+    ],
     visibility = ["//visibility:public"],
 )
 

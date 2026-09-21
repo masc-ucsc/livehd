@@ -1,6 +1,7 @@
 /*
 :name: color_kernel_unsigned_msb
 :type: simulation
+:set: sim.tune.live_words=1
 */
 // Two occurrences of one gated pass-through share a canonical color kernel.
 // The kernel reads an unsigned boundary slot at its own width (x:u3). Binding

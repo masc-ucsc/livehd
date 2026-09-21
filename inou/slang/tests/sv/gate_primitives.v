@@ -1,3 +1,4 @@
+// :test: lec_no_x
 module gate_primitives(input [3:0] a, b, input c, output [10:0] y);
   wire [3:0] n;
   wire first;

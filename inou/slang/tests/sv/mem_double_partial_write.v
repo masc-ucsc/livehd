@@ -1,3 +1,4 @@
+// :test: error
 // TWO same-cycle sub-word writes into ONE word of a clocked memory, at a
 // granularity the per-chunk write-enable model cannot express (3 bits do not
 // divide the 8-bit word).

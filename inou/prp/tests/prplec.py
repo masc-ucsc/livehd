@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# prplec — the `:type: lec` test owner: PYROPE-vs-PYROPE equivalence.
+# prplec — numbered Pyrope or Verilog equivalence/soundness groups.
 #
 # `tests/equiv/foo.prp` + `foo.v` is the Pyrope-vs-Verilog axis (prplib.run_equiv).
-# This module is the OTHER axis: two Pyrope spellings of one design, proven
-# equivalent by `lhd lec`. There is no per-test script and no per-test BUILD
+# This module compares same-language variants of a design (Pyrope or Verilog)
+# using `lhd lec`. There is no per-test script and no per-test BUILD
 # rule — the group is discovered from the FILE NAME:
 #
 #     foo.prp      the reference
@@ -19,6 +19,7 @@
 #
 # Header tags (all optional; `:lec_*:` tags may repeat where noted):
 #
+#   :lec_collapse: module names to force into abstraction boxes (space separated)
 #   :lec_top:      top entity on BOTH sides (default `top`)
 #   :set: k=v …    COMPILE flags for that side. A variant with no `:set:` of its
 #                  own inherits the base's, so the two sides differ only when a
@@ -48,6 +49,8 @@ import shutil
 import subprocess
 import sys
 
+from lec import final_verdict, run_lec
+
 # `<base>_<N>.prp`. Greedy stem so `a_b_2` groups under `a_b`, matching the
 # BUILD-side `rsplit("_", 1)`.
 _VARIANT_RE = re.compile(r'^(.+)_(\d+)$')
@@ -64,12 +67,13 @@ def variant_of(prp_file):
     Purely lexical — the caller decides whether the base actually exists.
     """
     head, tail = os.path.split(prp_file)
-    if not tail.endswith('.prp'):
+    if not tail.endswith(('.prp', '.v', '.sv')):
         return None
-    m = _VARIANT_RE.match(tail[:-len('.prp')])
+    stem, extension = os.path.splitext(tail)
+    m = _VARIANT_RE.match(stem)
     if not m:
         return None
-    return os.path.join(head, m.group(1) + '.prp'), int(m.group(2))
+    return os.path.join(head, m.group(1) + extension), int(m.group(2))
 
 
 def group_of(prp_file, root=''):
@@ -85,8 +89,9 @@ def group_of(prp_file, root=''):
     if v and os.path.exists(join(v[0])):
         return v[0], [prp_file]
 
-    stem, found = prp_file[:-len('.prp')], []
-    for hit in globmod.glob(join(stem) + '_*.prp'):
+    stem, extension = os.path.splitext(prp_file)
+    found = []
+    for hit in globmod.glob(join(stem) + '_*' + extension):
         cand = os.path.join(os.path.dirname(prp_file), os.path.basename(hit))
         vv = variant_of(cand)
         if vv and vv[0] == prp_file:
@@ -155,7 +160,7 @@ class _Side:
         self.label = label
         self.src   = src
         self.sets  = sets
-        self.arg   = 'pyrope:' + src   # replaced by `lg:<dir>` when pre-compiled
+        self.arg   = ('pyrope:' if src.endswith('.prp') else 'verilog:') + src   # replaced by `lg:<dir>` when pre-compiled
 
 
 def _precompile(runner, tmp_dir, side, top, odir):
@@ -201,11 +206,12 @@ def _sweeps(base_test, var_test):
 
 def _check(out, rc, expect, base_test, var_test):
     """The verdict + `:lec_grep:` contract for one run. Returns a reason or None."""
+    final = final_verdict(out)
     if expect == 'refuted':
-        if rc == 0 or not _REFUTED_RE.search(out):
+        if rc != 10 or not _REFUTED_RE.search(final):
             return 'expected REFUTED, got rc={} (a passing lec means the two sides agree)'.format(rc)
     elif expect == 'proven':
-        if rc != 0 or not _PROVEN_RE.search(out):
+        if rc != 0 or not _PROVEN_RE.search(final):
             return 'expected PROVEN, got rc={}'.format(rc)
     else:
         return ':lec_expect: {} is not one of proven|refuted'.format(expect)
@@ -280,7 +286,10 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
         wd   = os.path.join(scratch, 'w_' + (re.sub(r'\W+', '_', '_'.join(combo)) or 'default'))
         cmd = [runner.lhd, 'lec', '--ref', ref.arg, '--impl', impl.arg,
                '--ref-top', top, '--impl-top', top, '--workdir', wd] + _set_args(sets)
-        rc, out = _run(cmd, tmp_dir)
+        for module in (var_test.params.get('lec_collapse') or base_test.params.get('lec_collapse') or '').split():
+            cmd += ['--collapse', module]
+        result = run_lec(cmd, cwd=tmp_dir, timeout=20)
+        rc, out = result.returncode, result.stdout.decode("utf-8", "replace")
         if verbose:
             print(out)
 
@@ -317,8 +326,9 @@ def run_prplec(runner, tmp_dir, test, verbose=False):
             print('{} - lec - FAILED: names a `_<N>` variant, but its base {} is not beside '
                   'it'.format(shown, os.path.basename(orphan[0])))
         else:
-            print('{} - lec - FAILED: no `{}_<N>.prp` beside it (a Pyrope-vs-Pyrope group is a '
-                  'base plus at least one numbered sibling)'.format(shown, shown[:-len('.prp')]))
+            stem, extension = os.path.splitext(shown)
+            print('{} - lec - FAILED: no `{}_<N>{}` beside it (a group needs a base '
+                  'and at least one numbered sibling)'.format(shown, stem, extension))
         return 1
 
     # The base fixture carries the group-wide defaults; when the target names the
@@ -341,7 +351,7 @@ if __name__ == '__main__':
     from prplib import PrpRunner, PrpTest
 
     ap = argparse.ArgumentParser(
-        description='LEC a Pyrope fixture against its `_<N>` variants (run from the repo root)')
+        description='LEC a Pyrope or Verilog fixture against its `_<N>` variants (run from the repo root)')
     ap.add_argument('fixtures', nargs='+', help='tests/equiv/foo.prp (all variants) or tests/equiv/foo_1.prp')
     ap.add_argument('-v', '--verbose', action='store_true', help='print the full `lhd lec` output')
     opts = ap.parse_args()

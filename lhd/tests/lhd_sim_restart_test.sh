@@ -9,8 +9,7 @@
 #   * a target with no checkpoint <= it replays from cycle 0 (a clear note);
 #   * `--vcd-from Y --vcd-to Z` traces a VCD over just [Y, Z] (restarts near Y),
 #     timestamps aligned to the absolute cycle.
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers.
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -70,16 +69,7 @@ grep -q '_ckpt.restart_at'         "$DRV" || fail "driver lacks --restart-at han
 grep -q '"--restart-at"'           "$DRV" || fail "driver does not accept --restart-at"
 grep -q '"--vcd-from"'             "$DRV" || fail "driver does not accept --vcd-from"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim restart + windowed VCD (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 final_total() { grep -oE 'FINAL total [0-9]+' "$1" | grep -oE '[0-9]+'; }
 

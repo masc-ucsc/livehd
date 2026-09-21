@@ -73,10 +73,6 @@ run_sim() {
 }
 
 if ! run_sim; then
-  if grep -q 'could not locate the sim runtime headers\|host C++ compiler' "$W/run.log"; then
-    echo "PASS (no host sim toolchain here: $(tail -1 "$W/run.log"))"
-    exit 0
-  fi
   cat "$W/run.log" >&2
   fail "lhd sim failed"
 fi
@@ -95,8 +91,7 @@ objects=$(grep -c '^build .*\.o: cc ' "$S/build.ninja")
 grep -q 'unity chain: got=206' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result from the batched build"; }
 
 if ! command -v ninja >/dev/null 2>&1; then
-  echo "PASS (steps 1-2; no ninja on PATH, skipped the rebuild checks)"
-  exit 0
+  fail "Ninja is required for the rebuild checks"
 fi
 
 # ---- 3. a warm rebuild has no work --------------------------------------------

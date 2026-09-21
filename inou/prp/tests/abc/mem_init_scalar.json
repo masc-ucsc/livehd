@@ -1,0 +1,6 @@
+{
+  "source": "../equiv/mem_init_scalar.v",
+  "top": "mem_init_scalar.regi",
+  "synth_set": "pass.abc.memory=true",
+  "lec_set": "formal.bound=2"
+}

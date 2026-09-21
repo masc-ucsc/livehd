@@ -1,0 +1,10 @@
+/*
+:name: sext_sign_sra
+:type: lec
+:lec_top: sra
+:set: compile.formal.mode=none
+*/
+// Sign extension must agree with explicit fill or native signed arithmetic.
+comb sra(x:s32) -> (r:s32) {
+  r = x >> 4
+}

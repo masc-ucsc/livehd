@@ -13,8 +13,8 @@
 #     pokes) change exactly AT the edge;
 #   * sim.vcd_fake_delay=false: plain edge-aligned updates -- no X, no +3 offset.
 # Structural checks drive `lhd sim --setup-only` (hermetic, no host compiler);
-# when the sibling ../hlop + ../iassert headers are present the default-mode run
-# also produces a real VCD and the nested-scope/X assertions run against it.
+# the default-mode runtime check uses declared dependencies to produce a real
+# VCD and checks its nested scopes and X values.
 
 set -u
 
@@ -115,15 +115,7 @@ lhd_sim "$W/h.prp" --setup-only --set sim.vcd_fake_delay=bogus --workdir "$W/bad
   && fail "--set sim.vcd_fake_delay=bogus must be rejected"
 
 # ---- runtime: real VCD with nested scopes + X settle window -------------------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim hierarchical VCD + sim.vcd_fake_delay (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 lhd_sim "$W/h.prp" --set sim.vcd=true --workdir "$W/run" -q >/dev/null 2>&1 \
   || fail "default-mode run failed"
@@ -137,7 +129,7 @@ grep -q 'count\[' "$VCD" || fail "sub-module flop state not traced"
 awk '/^\$scope/{d++; if(d>m)m=d} /^\$upscope/{d--} /^\$enddefinitions/{exit (m>=3 && d==0)?0:1}' "$VCD" \
   || fail "scopes are not NESTED 3 deep with a balanced header"
 # a scope with both vars and children stays OPEN around its children (no
-# close+reopen duplicate -- needs the sibling hlop write_header subtree fix)
+# close+reopen duplicate)
 [ "$(grep -c '^\$scope module u_mid_a_value_0' "$VCD")" = 1 ] \
   || fail "intermediate scope declared twice (closed and reopened around its child)"
 # the FIRST dumped period must show the real poked inputs (reset=1 on cycle 0),
@@ -160,7 +152,7 @@ grep -qE '^(x.|bx )' "$VCD2" && fail "vcdfakedelay=false VCD must not contain X"
 # edge-aligned: every timestamp is a clock edge (multiple of 5); +3 offsets are absent
 grep -E '^#[0-9]+' "$VCD2" | grep -qvE '^#[0-9]*[05]$' && fail "traditional VCD has off-edge timestamps"
 # ...and POSITIVE evidence it still traces: the counters actually count
-grep -q '^b000000001 ' "$VCD2" || fail "traditional VCD carries no data changes (vacuous trace)"
+grep -Eq '^b0*1 ' "$VCD2" || fail "traditional VCD carries no data changes (vacuous trace)"
 awk '/^\$scope module/{s++} /^\$var/{v++} END{exit (s>=3 && v>=10)?0:1}' "$VCD2" \
   || fail "traditional VCD lost the hierarchy vars"
 

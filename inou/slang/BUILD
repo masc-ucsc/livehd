@@ -2,8 +2,8 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//tools:copt_default.bzl", "COPTS")
 load("//inou/slang:slang_ladder.bzl", "SLANG_LADDER")
+load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "inou_slang",
@@ -109,6 +109,7 @@ sh_test(
         "$(location //inou/yosys:tests/%s.v)" % t,
     ],
     data = [
+        "//inou/prp:tests/lec.py",
         "//inou/yosys:tests/%s.v" % t,
         "//lhd",
     ],
@@ -130,447 +131,60 @@ sh_test(
     ],
 )
 
-# Named structured assignment patterns are resolved by field, with explicit
-# member setters overriding `default:`. This syntax is a slang-reader contract;
-# the legacy Yosys parser used by the other compile suite does not accept it.
-#
-# tests/sv/ is the home for slang-only POSITIVE fixtures, because neither sweep
-# directory can hold one: tests/verilog/ is swept at the `error` tier (a file
-# that compiles is a FAILURE there), and //inou/yosys:tests/*.v is globbed into
-# yosys_compile-* targets that this syntax would break. Pin new positive
-# slang-reader fixtures here, one explicit target each.
-sh_test(
-    name = "slang_struct_pattern_named_default",
-    size = "large",
+_SV_SOURCES = glob(
+    [
+        "tests/sv/*.v",
+        "tests/sv/*.sv",
+    ],
+    allow_empty = True,
+    exclude = [
+        # These retain checks that a source/round-trip comparison cannot express.
+        "tests/sv/scalar_initial_no_reset.v",
+        "tests/sv/mem_struct_slice_write.v",
+        "tests/sv/packed_array_loop_reg_sroa.v",
+        "tests/sv/*_tb.v",
+        "tests/sv/*_helper.v",
+        "tests/sv/*_helper.sv",
+    ],
+)
+
+# A new ordinary SV regression is one source file: no per-case BUILD or script.
+# Optional // :test: roundtrip|error|lec_no_x headers select shared checks.
+[sh_test(
+    name = "slang_%s" % src.split("/")[-1].rsplit(".", 1)[0],
     srcs = ["tests/slang_compile.sh"],
     args = [
-        "lec",
-        "$(location tests/sv/struct_pattern_named_default.v)",
+        "auto",
+        "$(location %s)" % src,
     ],
     data = [
-        "tests/sv/struct_pattern_named_default.v",
+        src,
+        "//inou/prp:tests/lec.py",
         "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
+    ] + glob(
+        [src.rsplit(".", 1)[0] + "_tb.v"],
+        allow_empty = True,
+    ),
+    env_inherit = ["PATH"],
+    # Keep bounded formal checks from oversubscribing frontend/solver capacity.
+    tags = ["cpu:4"],
+) for src in _SV_SOURCES]
 
-# An inlined SystemVerilog function can return from a conditional and continue
-# with a fallback return. The fallback must not overwrite a previously selected
-# result (Minion's get_way_from_scp_dest uses this exact shape).
-sh_test(
-    name = "slang_function_early_return",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/function_early_return.v)",
-    ],
-    data = [
-        "tests/sv/function_early_return.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# Component-wise escaping of a Pyrope keyword inside a nested output bundle
-# must remain a field assignment, not become an illegal tuple-path declaration.
-sh_test(
-    name = "slang_nested_keyword_output",
-    size = "large",
-    srcs = ["tests/nested_keyword_output_roundtrip.sh"],
-    data = [
-        "tests/sv/nested_keyword_output.v",
-        "//lhd",
-    ],
-)
-
-# CVA6 forms whose constants become visible only after function/config binding:
-# preserve `2 ** cfg.field` as a shift and a canonical cfg-bounded loop as an
-# LNAST range loop. Also pins zero-fill assignment patterns and whole-array
-# copies on unpacked arrays of packed structs, including a two-dimensional
-# split-memory next-state copy and a full unpacked-array slice.
-sh_test(
-    name = "slang_deferred_cva6_forms",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/deferred_cva6_forms.v)",
-    ],
-    data = [
-        "tests/sv/deferred_cva6_forms.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# A bound that remains runtime after uPass must fail at the comptime-loop
-# boundary, not in inou.slang and not by silently dropping the loop body.
-sh_test(
-    name = "slang_deferred_for_runtime",
-    size = "large",
-    srcs = ["tests/deferred_for_runtime_smoke.sh"],
-    args = ["$(location tests/sv/deferred_for_runtime.v)"],
-    data = [
-        "tests/sv/deferred_for_runtime.v",
-        "//lhd",
-    ],
-)
-
-# Storage-aware scalar replacement of a packed scalar-element array. Constant
-# element accesses route directly to leaves, a dynamic read preserves the
-# SystemVerilog selector semantics, and whole-value use reassembles only at the
-# output boundary.
-sh_test(
-    name = "slang_packed_array_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# Generated partial writes to consecutive packed-array elements form an RMW
-# chain. The final output must observe the last generated stage, even when its
-# source-level assignment appears before the generate loop.
-sh_test(
-    name = "slang_generated_packed_stage_chain",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/generated_packed_stage_chain.v)",
-    ],
-    data = [
-        "tests/sv/generated_packed_stage_chain.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# A generated continuous assignment may read a packed lane driven by a sibling
-# assignment later in the same generate instance. Continuous assignments are
-# concurrent: the read must see that lane, not the previous iteration's partial
-# accumulator (which leaves a silent X in the emitted circuit).
-sh_test(
-    name = "slang_generated_sibling_forward_read",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec_no_x",
-        "$(location tests/sv/generated_sibling_forward_read.v)",
-    ],
-    data = [
-        "tests/sv/generated_sibling_forward_read.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# A nested reset/enable write to one packed bit must not make ABC select the
-# entire carrier once per condition. cprop factors the Mux through Set_mask so
-# only the one-bit lane is Boolean logic; the default LEC solver checks the
-# emitted result against the source.
-sh_test(
-    name = "slang_conditional_packed_lane_update",
-    size = "large",
-    srcs = ["tests/conditional_packed_lane_update_smoke.sh"],
-    data = [
-        "tests/sv/conditional_packed_lane_update.v",
-        "//lhd",
-    ],
-)
-
-# Two DISJOINT sub-word writes of DIFFERENT widths into one word of a packed 2-D
-# reg (minion's `ex_reg_data`). A memory carries one `wensize`, so it can hold
-# neither a mixed-width per-chunk enable nor two read-modify-write splices into a
-# clocked word -- the reader keeps such an array a flat flop bus instead, and
-# the default LEC solver checks the result against the source.
-sh_test(
-    name = "slang_packed2d_mixed_partial_write",
-    size = "large",
-    srcs = ["tests/packed2d_mixed_partial_write_smoke.sh"],
-    data = [
-        "tests/sv/packed2d_mixed_partial_write.v",
-        "//lhd",
-    ],
-)
-
-# A scalar register with a Verilog declaration / initial-block value but no
-# explicit reset is modeled as reset-bearing state using that value. This is a
-# deliberate two-state synthesis choice and carries a warning because source
-# LEC can distinguish it from truly reset-less hardware.
 sh_test(
     name = "slang_scalar_initial_no_reset",
     size = "large",
     srcs = ["tests/scalar_initial_no_reset_test.sh"],
     data = [
         "tests/sv/scalar_initial_no_reset.v",
+        "//inou/prp:tests/lec.py",
         "//lhd",
     ],
 )
 
-sh_test(
-    name = "slang_packed_vector_port_sroa",
-    size = "large",
-    srcs = ["tests/packed_vector_port_sroa_test.sh"],
-    data = [
-        "tests/sv/packed_vector_port_sroa.v",
-        "//lhd",
-    ],
-)
-
-# `{{N{v[msb]}}, v}` is a sign extension, not a broadcast + shift + or. Pins
-# both halves: the shapes that MUST fold to `sext`, and the look-alikes that
-# must not.
-sh_test(
-    name = "slang_concat_sext",
-    size = "large",
-    srcs = ["tests/concat_sext_test.sh"],
-    data = [
-        "tests/sv/concat_sext.v",
-        "//lhd",
-    ],
-)
-
-# An instance inside a generate block must carry the generate prefix in its name
-# exactly as a net inside one does. Two genvar-loop instances of the same module
-# otherwise share a name, and after flattening so do their registers — which
-# pass/abc's register read-back then disambiguates on the IMPL side only,
-# refuting the post-synthesis LEC.
-sh_test(
-    name = "slang_genblk_instance_name",
-    size = "large",
-    srcs = ["tests/genblk_instance_name_test.sh"],
-    data = [
-        "tests/sv/genblk_instance_name.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",  # lgcheck + yosys2 for the LEC leg
-    ],
-)
-
-# An instance named after its own module, of a module with NO OUTPUTS
-# (bedrock-rtl's spelling for every assertion-only observer). Both refs of the
-# emitted `fcall` carry the same name, which made prp_writer read the CALLEE
-# reference as a read of the call's own result and refuse the whole module.
-sh_test(
-    name = "slang_self_named_sink_inst",
-    size = "large",
-    srcs = ["tests/self_named_sink_inst_test.sh"],
-    data = [
-        "tests/sv/self_named_sink_inst.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",  # lgcheck + yosys2 for the LEC leg
-    ],
-)
-
-# A plain packed local whose first lowered write sits inside a comptime-decided
-# `if` arm used to lose its declaration entirely (the arm, and the declare with
-# it, is dead-code-eliminated), so the emitted Pyrope did not recompile. Round
-# trip, because the first leg emits fine.
-sh_test(
-    name = "slang_comptime_arm_declare_hoist",
-    srcs = ["tests/comptime_arm_declare_hoist_test.sh"],
-    data = [
-        "tests/sv/comptime_arm_declare_hoist.v",
-        "//lhd",
-    ],
-)
-
-# The writer renders a chain of N single-use temps as ONE expression nested N
-# deep (render_def_rhs recurses per level) on a worker thread. A 1000-deep
-# shl/or chain -- the shape CVA6's perf_counters packed-array writes lower to --
-# used to die at the worker's 512 KiB stack guard page (`Bus error: 10`) on
-# every non-opt build. Round trip: the emit AND the recompile of the emitted,
-# equally deep, expression. The input is generated by the script.
 sh_test(
     name = "slang_deep_fold_chain",
     srcs = ["tests/deep_fold_chain_test.sh"],
     data = [
-        "//lhd",
-    ],
-)
-
-# A local net named like a module the unit instantiates (`logic popcount` +
-# `popcount #(...) i_popcount`, CVA6's instr_queue). Verilog keeps the two in
-# separate namespaces; the emitted Pyrope does not, so the file-scope import
-# alias must step aside or the instantiation re-reads as a call to the local's
-# value (`call to undefined function '0'`). Round trip.
-sh_test(
-    name = "slang_local_shadows_callee",
-    srcs = ["tests/local_shadows_callee_test.sh"],
-    data = [
-        "tests/sv/local_shadows_callee.v",
-        "//lhd",
-    ],
-)
-
-# Packed 2-D array eligibility, both directions: a net-initialized lane table
-# read at a runtime index must SPLIT (barrel shift -> lane mux), and an array
-# written through a whole-array range select must stay FLAT (the split
-# representations drop the write).
-sh_test(
-    name = "slang_packed_array_net_init_mux",
-    size = "large",
-    srcs = ["tests/packed_array_net_init_mux_test.sh"],
-    data = [
-        "tests/sv/packed_array_net_init_mux.v",
-        "//lhd",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_reg_array_emit",
-    size = "large",
-    srcs = ["tests/packed_array_reg_array_emit_test.sh"],
-    data = [
-        "tests/sv/packed_array_reg_array_emit.v",
-        "//lhd",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_wire_init_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_wire_init_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_wire_init_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_reg_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_reg_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_reg_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# An instance output read ONLY as the index of an array element whose field is
-# accessed (`data_i[bin].tag`) must still count as a READ of that net, or the
-# net keeps its poison initializer and the instance binding is dropped as dead.
-sh_test(
-    name = "slang_instance_output_as_member_index",
-    size = "large",
-    srcs = ["tests/instance_output_member_index_test.sh"],
-    args = ["$(location tests/sv/instance_output_as_member_index.v)"],
-    data = [
-        "tests/sv/instance_output_as_member_index.v",
-        "//lhd",
-    ],
-)
-
-# Disjoint generated always_ff blocks over one flattened packed register must
-# combine their slice resets into one asynchronous reset. Losing that metadata
-# turns reset assertion without a clock edge into a stale-state mismatch.
-sh_test(
-    name = "slang_async_reset_slices",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/async_reset_slices.v)",
-    ],
-    data = [
-        "tests/sv/async_reset_slices.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# State omitted from an async reset arm still holds while reset is asserted.
-# Peeling the reset into attributes must retain that process-level write gate.
-sh_test(
-    name = "slang_async_reset_unreset_state",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/async_reset_unreset_state.v)",
-    ],
-    data = [
-        "tests/sv/async_reset_unreset_state.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# A submodule may feed a pure flop/latch output back into one of its own
-# inputs. The input must bind the resolved output net, not the output port's
-# temporary X initializer created before the instance output is assigned.
-sh_test(
-    name = "slang_registered_instance_output_feedback",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/registered_instance_output_feedback.v)",
-    ],
-    data = [
-        "tests/sv/registered_instance_output_feedback.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# Unpacked module ports flatten in declaration order: the rightmost array
-# element occupies the packed boundary bus LSB. Pin both range directions and
-# both reads and writes, including a dynamic element select.
-sh_test(
-    name = "slang_unpacked_array_port_order",
-    size = "large",
-    srcs = ["tests/unpacked_array_port_order_test.sh"],
-    args = [
-        "$(location //lhd)",
-        "$(location tests/sv/unpacked_array_port_order.v)",
-    ],
-    data = [
-        "tests/sv/unpacked_array_port_order.v",
         "//lhd",
     ],
 )
@@ -586,167 +200,12 @@ sh_test(
     ],
 )
 
-# Ascending packed indices deliberately reverse source index versus physical
-# lane ordinal. Dynamic access includes out-of-range values and whole-value
-# packing must keep the declared [0:3] ordering.
-sh_test(
-    name = "slang_packed_array_ascending_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_ascending_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_ascending_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_signed_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_signed_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_signed_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_port_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_port_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_port_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_struct_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_struct_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_struct_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "slang_packed_array_struct_reg_sroa",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/packed_array_struct_reg_sroa.v)",
-    ],
-    data = [
-        "tests/sv/packed_array_struct_reg_sroa.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# Sub-word writes into a MULTI-DIMENSIONAL unpacked array — the bedrock-rtl
-# `br_ram_flops` tiling idiom `tile_wr_data[r][c][wport] = …`, which used to die
-# on "nested non-variable assignment targets are not supported yet" because both
-# memory-element write paths hard-coded a SINGLE selector. The combinational
-# fixture also pins the packed-bus poison seed a linearized comb array needs
-# before its first element store, and the memory fixture pins that same-cycle
-# disjoint chunk writes still take the write-enable model (a read-modify-write
-# would clobber one of them).
-sh_test(
-    name = "slang_array2d_partial_write",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/array2d_partial_write.v)",
-    ],
-    data = [
-        "tests/sv/array2d_partial_write.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "slang_array2d_mem_partial_write",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "lec",
-        "$(location tests/sv/array2d_mem_partial_write.v)",
-    ],
-    data = [
-        "tests/sv/array2d_mem_partial_write.v",
-        "//lhd",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-# A slice write into one entry of a STRUCT-ELEMENT (tuple) memory: decomposed
-# across the per-field memories detuple splits out, instead of a store on the
-# aggregate name that no longer exists (a silently DROPPED write). Emission
-# check, not LEC — see the header of the test script for why a LEC verdict says
-# nothing about a split tuple memory.
 sh_test(
     name = "slang_mem_struct_slice_write",
     size = "large",
     srcs = ["tests/mem_struct_slice_write_test.sh"],
     data = [
         "tests/sv/mem_struct_slice_write.v",
-        "//lhd",
-    ],
-)
-
-# Two same-cycle sub-word writes to ONE clocked-memory word at a granularity the
-# chunk-enable model cannot express: they cannot be merged (both read-modify-write
-# the committed word), so the reader must DIAGNOSE the second site rather than
-# emit hardware that silently loses a write. Pinned at the `error` tier — a
-# promotion here means the merge became expressible and this ladder entry should
-# move with it.
-sh_test(
-    name = "slang_mem_double_partial_write",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = [
-        "error",
-        "$(location tests/sv/mem_double_partial_write.v)",
-    ],
-    data = [
-        "tests/sv/mem_double_partial_write.v",
         "//lhd",
     ],
 )
@@ -758,34 +217,7 @@ sh_test(
     data = ["//lhd"],
 )
 
-# Built-in gate primitives, including a gate output consumed before its
-# producer in source order and an arrayed `not inv[3:0](n, a)`. Both are
-# tests/sv/ fixtures rather than //inou/yosys:tests/*.v because yosys's own
-# read_verilog refuses the cell array ("Cell arrays of primitives are
-# currently not supported"), so the yosys_compile-* sweep could never run it.
-sh_test(
-    name = "slang_gate_primitives",
-    srcs = ["tests/slang_compile.sh"],
-    args = ["lec_no_x", "$(location tests/sv/gate_primitives.v)"],
-    data = [
-        "tests/sv/gate_primitives.v",
-        "//lhd",
-    ],
-    deps = ["//inou/yosys:scripts"],
-)
-
-# A case whose arms cover the whole selector domain is exhaustive (no latch);
-# a duplicate arm does NOT complete it, so the always_latch must hold. Also a
-# tests/sv/ fixture: `proc -ifx` infers a latch on the always_comb half and
-# hard-errors, so yosys_compile-* cannot be its oracle.
-sh_test(
-    name = "slang_case_exhaustive",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    args = ["lec", "$(location tests/sv/case_exhaustive.v)"],
-    data = [
-        "tests/sv/case_exhaustive.v",
-        "//lhd",
-    ],
-    deps = ["//inou/yosys:scripts"],
+test_suite(
+    name = "integration",
+    tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES],
 )

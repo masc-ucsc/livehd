@@ -1877,9 +1877,9 @@ private:
            || t == "binary_step_op";
   }
 
-  // A Pyrope integer literal -> a Slop of its measured width (+ a sign bit), via
-  // the constexpr pyrope codec, so it folds at compile time and is exact at any
-  // width. An unmeasurable spelling falls back to the raw text on the long plane.
+  // A Pyrope integer literal -> a Slop of its measured width (+ a sign bit),
+  // folded at compile time or parsed once at runtime for wide/unknown values.
+  // An unmeasurable spelling falls back to the raw text on the long plane.
   Val literal_val(const std::string& raw) {
     std::string lit = strip_sep(raw);
     // sim.unknown_zero: concretize `?` here, so the literal takes one of the
@@ -1898,9 +1898,9 @@ private:
     // dino simulation, the same lesson cgen_sim's operand() learned at
     // 27.8%). So: create_integer (always folded) for every spelling
     // int_literal_value decodes to a non-negative int64 — plain decimal, 0x
-    // hex, 0ub binary; anything wider, or a `0sb…` whose value can be
-    // negative, goes through a constexpr local, which FORCES the fold; and a
-    // `?`-carrying literal goes through the once-per-program helper the DUT
+    // hex, 0ub binary. Other single-word known values go through a constexpr
+    // local, which FORCES the fold; wide and `?`-carrying literals go through
+    // the once-per-program helper the DUT
     // uses (sim_tune_rt.hpp's __lhd_unknown_literal): drawn on FIRST USE, so
     // it is one constant per run -- a bare `from_pyrope("..?..")` here used to
     // draw a FRESH value at every evaluation, i.e. every cycle, and an assert's
@@ -1920,11 +1920,19 @@ private:
       v         = slop_val("Slop<" + std::to_string(w) + ">::create_integer(" + std::to_string(n) + ")", w);
       v.has_lit = true;
       v.lit     = n;  // measured to fit: a shift amount
-    } else if (lit.find('?') == std::string::npos) {
+    } else if (w <= 64 && lit.find('?') == std::string::npos) {
       v = slop_val("([]{ constexpr auto _k = Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\"); return _k; }())", w);
     } else {
       const uint64_t key = livehd::hash_util::fnv1a64(lit, livehd::hash_util::fnv1a64("tb:"));
-      tb_unknown_keys_.insert({w, key});
+      // `Slop::from_pyrope` IS constexpr at any width (cgen_sim folds up to
+      // kMaxConstexprBits = 2048 on the DUT plane). The testbench plane stops
+      // at one word on purpose: its literals are re-evaluated per vector and a
+      // multiword fold burns constexpr step budget in a TU that already carries
+      // the whole stimulus, so a 65+-bit literal is parsed once at runtime via
+      // the shared helper instead. Values are identical either way.
+      if (lit.find('?') != std::string::npos) {
+        tb_unknown_keys_.insert({w, key});
+      }
       v = slop_val("__lhd_unknown_literal<" + std::to_string(w) + ", " + std::to_string(key) + "ull>(\"" + lit + "\")", w);
     }
     return v;
@@ -2829,7 +2837,7 @@ private:
   // Emit the periodic-checkpoint block at the top of a tick body: when the
   // cadence is due (or every N cycles, `--checkpoint-every`), fork a child that
   // writes ckp<cycle>/{regs.json, <mem>.hex, tb.json, meta.json}; the parent
-  // creates the dir first (so prune sees this cycle) and prunes to max after.
+  // prunes completed checkpoints after each fork and again after the final drain.
   void emit_checkpoint_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
     if (!runtime_support_on_ || inst_of_var.empty()) {
       return;
@@ -2865,6 +2873,7 @@ private:
     o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/meta.json\", _meta);\n";
     o << ind << "    hlop::ckpt::mark_complete(_cdir);  // LAST: makes the checkpoint visible to prune/restart\n";
     o << ind << "  });\n";
+    o << ind << "  _ckpt_written.insert(_ckpt_base);\n";
     o << ind << "  hlop::ckpt::prune_checkpoints(_ckpt_base, _ckpt.max);\n";
     o << ind << "  _cad.taken(std::chrono::duration<double>(std::chrono::steady_clock::now() - _t0).count());\n";
     o << ind << "  _tp.ckpt();  // ckpt_taken: a forked checkpoint's copy-on-write faults land on this run's counters\n";
@@ -3525,6 +3534,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "long every = 0; std::string dir; long restart_at = -1; long vcd_from = -1; long vcd_to = -1; "
        "bool vcd_on_fail = false; long vcd_fail_window = 20; bool window_only = false; };\n";
   o << "static _CkptCfg _ckpt;\n";
+  // Checkpoint bases THIS run actually forked into. The end-of-run prune below
+  // must not clamp a directory this run never wrote: a later invocation with a
+  // smaller `max` would otherwise delete checkpoints an earlier long run saved.
+  o << "static std::set<std::string> _ckpt_written;\n";
   o << "static bool _init_zero = false;\n";
   o << "static unsigned long long _seed_used = " << kDefaultSeed << ";\n";
 
@@ -3920,11 +3933,11 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
 
   // Registry + the canonical `--list-tests` JSON (identical to what
   // `lhd sim --list-tests` prints, since both render tests_to_json()).
-  o << "\nstruct _Test { const char* name; long (*run)(const std::map<std::string, std::string>&, "
+  o << "\nstruct _Test { const char* name; const char* checkpoint_name; long (*run)(const std::map<std::string, std::string>&, "
        "std::set<std::string>&, std::string&, _Fail&); };\n";
   o << "static const _Test _tests[] = {\n";
   for (size_t i = 0; i < fn_ids.size(); ++i) {
-    o << "  {\"" << cpp_str_lit(tests[i].name) << "\", &" << fn_ids[i] << "},\n";
+    o << "  {\"" << cpp_str_lit(tests[i].name) << "\", \"" << sanitize(tests[i].name) << "\", &" << fn_ids[i] << "},\n";
   }
   o << "};\n";
   // Every test parameter declared in this binary (union over all tests). The
@@ -4407,6 +4420,12 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    _tp.write_raw(argv[0], _seed, _args, _sel);\n"
        "  }\n";
   o << "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
+       "  if (_ckpt.enabled && !_ckpt.dir.empty()) {\n"
+       "    for (const auto* _t : _torun) {\n"
+       "      std::string _cb = _ckpt.dir + \"/\" + _t->checkpoint_name;\n"
+       "      if (_ckpt_written.count(_cb)) hlop::ckpt::prune_checkpoints(_cb, _ckpt.max);\n"
+       "    }\n"
+       "  }\n"
        "  return _fail_tests ? 1 : 0;\n}\n";
 
   // File_output, not a raw ofstream: it skips the write when the bytes are

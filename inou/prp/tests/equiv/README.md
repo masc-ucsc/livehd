@@ -17,6 +17,21 @@ Imported helpers may live in a same-stem directory, for example
 equivalence, state-matching, and Verilog round-trip targets stage those helpers;
 only top-level `.prp` files are discovered as fixtures.
 
+## Proof budgets
+
+These small equivalence fixtures require their expected definitive verdict;
+timeouts and unsupported encodings fail. The shared `../lec.py` runner sets
+`formal.timeout` (20 seconds by default for proof gates) and enforces an outer
+watchdog at twice that budget, including setup and loading. A `:set:
+formal.timeout=N` override controls both budgets where the harness accepts
+`:set:` flags. The Verilog round-trip runner uses `:verilog_check_timeout: N`
+for its original-Verilog leg.
+
+Ordinary Slang/Yosys integration uses the same runner with a five-second
+internal budget and ten-second watchdog. Those sanity checks may report an
+explicit internal timeout as **inconclusive**, but a mismatch, refusal, failed
+setup, or watchdog overrun fails. They do not claim proof on timeout.
+
 ## Bitfuzz coverage
 
 Each `prp-equiv-*` and `prp-lec-*` target also has a `-bitfuzz` companion.
@@ -47,7 +62,7 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:compile_top:` | optional source top to materialize explicitly during Pyrope compilation, including a defaulted generic among multiple public templates |
 | `:set: k=v …` | extra `--set` flags, applied to every mode |
 | `:reset_style: async` | elaborate implicit resets as async, so the golden can spell an async `always` |
-| `:verilog_check_timeout: N` | v2prp2v only: seconds for the original-Verilog LEC leg (default 240); a timeout fails the test |
+| `:verilog_check_timeout: N` | v2prp2v only: seconds for the original-Verilog LEC leg (default 20); a timeout fails the test |
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |
 
@@ -110,7 +125,7 @@ spelling is load-bearing: hierarchical LEC pairs boxes by name, VCD diffs and
 checkpoints are name-keyed, and a structural pairing degrades to `Unknown` the
 moment two flops look alike to the matcher.
 
-So every equiv pair also has a `prp-statematch-<name>` target, which runs:
+So every STATE-BEARING equiv pair has a `prp-statematch-<name>` target, which runs:
 
 ```
 lhd compile --emit-dir lg:lg1 foo.prp     # ref  — the Pyrope design
@@ -121,7 +136,10 @@ lhd pass semdiff --stats --ref lg:lg1 --impl lg:lg2
 Every ref-side register and memory in `semdiff[stats]` must find a counterpart,
 **BY NAME** unless the fixture sets `:name_match_only: false` to accept a
 structural pair. A design with no registers and no memories has nothing to
-correspond and passes silently. A side `lhd compile` will not lower is a
+correspond, so it is EXCLUDED from the axis by `_STATEMATCH_COMB` in
+`inou/prp/BUILD` rather than run as a silent pass (measured 2026-09-21: 190 of
+319 pairs were vacuous this way). A pair whose claim IS that no state appears
+stays out of that exclude list so it keeps running. A side `lhd compile` will not lower is a
 FAILURE, not a skip — the equivalence proof goes through yosys/lgcheck and can
 stay green while `lhd compile` refuses the very same file, which is exactly the
 hole this check exists to expose. (A refusal that is the WHOLE point of a
@@ -169,3 +187,8 @@ In rough order of how much they are worth fixing:
 4. **Different representation.** `stage[3]` is ONE depth-3 flop against the
    golden's three regs; a ROM written as a `case` has no memory cell at all
    (`mem_rom`, `pipe3_mul`, `mem_whole_*`).
+
+The `lec/` subdirectory extends the numbered-variant convention to standalone
+Verilog soundness cases, including expected refutations. `roundtrip/` contains
+Pyrope writer fixtures checked against their source. Both, together with the
+synthesis corpus in `../abc/`, join `//inou/prp:integration` automatically.

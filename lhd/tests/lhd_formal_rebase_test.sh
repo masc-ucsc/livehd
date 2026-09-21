@@ -15,7 +15,7 @@
 set -u
 LHD="$(pwd)/lhd/lhd"
 [ -x "$LHD" ] || LHD="$(pwd)/bazel-bin/lhd/lhd"
-[ -x "$LHD" ] || { echo "SKIP: lhd binary not found"; exit 0; }
+[ -x "$LHD" ] || { echo "FAIL: required lhd binary not found" >&2; exit 1; }
 
 W="${TEST_TMPDIR:-/tmp/lhd_formal_rebase_$$}"
 mkdir -p "$W"

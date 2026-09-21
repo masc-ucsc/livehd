@@ -208,10 +208,13 @@ def main():
                          "memory library, so this normally needs <livehd>/ware/rtl (repeatable)")
     args = ap.parse_args()
 
+    if args.cycles <= 0:
+        ap.error('--cycles must be positive')
+
     vbin = os.environ.get('VERILATOR') or shutil.which('verilator')
     if not vbin:
         print('SKIP: verilator not installed (brew/apt install verilator, or export VERILATOR=<path>)')
-        return 0
+        return 77
 
     if not args.gen_incdir:
         default_rtl = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'ware', 'rtl')
@@ -297,7 +300,10 @@ def main():
         exe = os.path.join(mdir, 'V' + args.top)
         out = os.path.join(args.work, tag + '.trace')
         with open(out, 'w') as f:
-            subprocess.run([exe], stdout=f, stderr=subprocess.STDOUT)
+            run = subprocess.run([exe], stdout=f, stderr=subprocess.STDOUT)
+        if run.returncode:
+            print('FAIL: {} simulator exited {}'.format(tag, run.returncode))
+            return 1
         runs[tag] = out
         unopt = 'UNOPTFLAT' in open(log).read()
         print('{}: {} cycles traced{}'.format(tag, args.cycles, '  (UNOPTFLAT: verilator sees a settle loop)' if unopt else ''))
@@ -318,6 +324,9 @@ def main():
         a = f.read().splitlines()
     with open(runs['gen']) as f:
         b = f.read().splitlines()
+    if len(a) != args.cycles or len(b) != args.cycles:
+        print('FAIL: expected {} trace cycles, got {} and {}'.format(args.cycles, len(a), len(b)))
+        return 1
     for i, (x, y) in enumerate(zip(a, b)):
         if x != y:
             print('\nMISMATCH at cycle {}:'.format(i))

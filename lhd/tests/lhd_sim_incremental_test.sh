@@ -188,15 +188,12 @@ setup
 
 # ---- 6. compile-only stops at drv.bin; a second build compiles nothing -------
 if ! command -v ninja >/dev/null 2>&1; then
-  echo "PASS (steps 1-5; no ninja on PATH, skipped the end-to-end build check)"
-  exit 0
+  fail "Ninja is required for the end-to-end rebuild check"
 fi
 if ! "$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
   --diag-fmt pretty --workdir "$W/wd" >"$W/build1.log" 2>&1; then
-  # No host compiler / no sim runtime headers in this environment: the
-  # incremental properties above are still proven, so do not fail on it.
-  echo "PASS (steps 1-5; the host build did not run here: $(tail -1 "$W/build1.log"))"
-  exit 0
+  cat "$W/build1.log" >&2
+  fail "generated simulator host build failed"
 fi
 [ -x "$W/wd/sim/drv.bin" ] || fail "compile-only did not produce drv.bin"
 grep -qa "hello world" "$W/build1.log" && fail "compile-only executed the testbench"
