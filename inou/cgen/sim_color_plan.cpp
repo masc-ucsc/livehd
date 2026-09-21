@@ -2044,11 +2044,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           if (drivers.size() != 1) {
             return false;
           }
-          const auto active = phase_boolean(*drivers.begin(), high);
-          if (!active) {
+          const auto active_phase = phase_boolean(*drivers.begin(), high);
+          if (!active_phase) {
             return false;
           }
-          if (*active) {
+          if (*active_phase) {
             return port != sink.get_port_id() + 1;
           }
           if (port == sink.get_port_id() + 1) {
