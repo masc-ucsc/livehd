@@ -246,6 +246,49 @@ def PEnv.Scoped (depth : Nat) : PEnv → Prop
   | []      => True
   | v :: vs => PVal.Scoped depth v ∧ PEnv.Scoped depth vs
 
+/-! #### Scope helpers
+
+The three facts everything downstream needs: shifting moves the bound, reifying
+a scoped result gives a scoped term, and wrapping bindings closes a body that was
+scoped under them. -/
+
+theorem PVal.Scoped_shift : ∀ {pv : PVal} {d : Nat} (k : Nat),
+    PVal.Scoped d pv → PVal.Scoped (d + k) (PVal.shift k pv)
+  | .stat _,   _, _, _ => trivial
+  | .dyn _,    _, k, h => by simp only [PVal.Scoped, PVal.shift] at *; omega
+  | .cons a b, _, k, h => ⟨PVal.Scoped_shift k h.1, PVal.Scoped_shift k h.2⟩
+
+theorem Term.Scoped_wrapLets : ∀ (bs : List Term) (d : Nat) (body : Term),
+    ScopedLets d bs → Term.Scoped (d + bs.length) body → Term.Scoped d (wrapLets bs body)
+  | [],      d, body, _,  hb => by simpa [wrapLets] using hb
+  | t :: ts, d, body, hs, hb => by
+      refine ⟨hs.1, Term.Scoped_wrapLets ts (d + 1) body hs.2 ?_⟩
+      have : d + 1 + ts.length = d + (t :: ts).length := by simp; omega
+      rw [this]; exact hb
+
+theorem PRes.Scoped_toCode : ∀ {r : PRes} {d : Nat},
+    PRes.Scoped d r → Term.Scoped d r.toCode
+  | .stat _,    _, _ => trivial
+  | .code _,    _, h => h
+  | .cons _ _,  _, h => ⟨PRes.Scoped_toCode h.1, PRes.Scoped_toCode h.2, trivial⟩
+  | .lets bs r, d, h =>
+      Term.Scoped_wrapLets bs d (PRes.toCode r) h.1 (PRes.Scoped_toCode h.2)
+
+/-! #### Prepared arguments -/
+
+def Prepared.Scoped (d : Nat) (p : Prepared) : Prop :=
+  ScopedLets d p.binds ∧ p.value.Scoped (d + p.binds.length)
+
+theorem PVal.Scoped_toPRes : ∀ {pv : PVal} {d : Nat},
+    PVal.Scoped d pv → PRes.Scoped d pv.toPRes
+  | .stat _,   _, _ => trivial
+  | .dyn _,    _, h => h
+  | .cons _ _, _, h => ⟨PVal.Scoped_toPRes h.1, PVal.Scoped_toPRes h.2⟩
+
+theorem Prepared.Scoped_toPRes {p : Prepared} {d : Nat} (h : Prepared.Scoped d p) :
+    PRes.Scoped d p.toPRes :=
+  ⟨h.1, PVal.Scoped_toPRes h.2⟩
+
 /-- The bridge that makes the invariant free where it is already established:
 a partial value that DENOTES something names indices that exist, because
 `ρr[k]? = some v` already says `k < ρr.length`. -/
@@ -727,6 +770,16 @@ theorem PResOK_toPRes {Pr ρr} : ∀ {pv : PVal} {v : Val},
       obtain ⟨x, y, hv, ha, hb⟩ := h
       subst hv
       exact ⟨x, y, rfl, PResOK_toPRes ha, PResOK_toPRes hb⟩
+
+/-- The semantic relation for a prepared argument, parallel to `PResOK`'s
+package case: the bindings run, and the value denotes under the environment they
+extend. -/
+def PreparedOK (P : Program) (ρ : Env) (p : Prepared) (v : Val) : Prop :=
+  ∃ ρ', EvalLets P ρ p.binds ρ' ∧ PValOK ρ' p.value v
+
+theorem PreparedOK_toPRes {P ρ p v} (h : PreparedOK P ρ p v) : PResOK P ρ p.toPRes v := by
+  obtain ⟨ρ', hl, hv⟩ := h
+  exact ⟨ρ', hl, PResOK_toPRes hv⟩
 
 /-! ## Alternatives of a residualized `caseT`
 

@@ -235,6 +235,24 @@ def dynCount : Div → Nat
   | .dyn :: bs  => dynCount bs + 1
   | .stat :: bs => dynCount bs
 
+/-! ## Prepared arguments
+
+The result of getting an argument ready to cross an unfolded call: the bindings
+its code leaves need, plus the partial value whose `dyn` leaves index them.
+
+Returning the two TOGETHER is the point.  `mixUArgs` and `inlineEnv` currently
+each reconstruct the same binding layout independently and agree only because
+their arithmetic matches -- the same shape as the `wrapLets` index bug this
+branch already hit once.  With one package the agreement is structural. -/
+
+structure Prepared where
+  binds : List Term
+  value : PVal
+  deriving Inhabited
+
+/-- The denotation: bindings wrapped around the value's reified code. -/
+def Prepared.toPRes (p : Prepared) : PRes := .lets p.binds p.value.toPRes
+
 /-! ## Structural answers for the list primitives
 
 `hd`/`tl`/`isNil` can often be answered from a spine `mix` already holds,
