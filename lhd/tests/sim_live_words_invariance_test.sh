@@ -272,7 +272,9 @@ PY
 }
 
 # Coverage guard: at live_words=1 the ICG latch's update and the update of the
-# flop whose commit guard reads the latch's `_din` must be in different colors.
+# flop it gates must be in different colors. Clock-window latches have a direct
+# update edge; a phase-settled latch (the conditional fixture) reaches the flop
+# through its clock-gate data cone instead.
 split_guard() {  # split_guard <fixture> <root module> <tag>
   local plan
   plan="$(ls "$work/$1/$3"/sim/*"$2".color-plan.txt 2>/dev/null | head -1)"
@@ -281,8 +283,8 @@ split_guard() {  # split_guard <fixture> <root module> <tag>
 import sys
 
 latches, flops = set(), set()
-update_color = {}
-edges = []
+versions = {}
+successors = {}
 with open(sys.argv[1], encoding="utf-8") as stream:
     for line in stream:
         words = line.split()
@@ -290,20 +292,33 @@ with open(sys.argv[1], encoding="utf-8") as stream:
             continue
         if words[0] == "site" and "kind=state" in words:
             (latches if "op=latch" in words else flops if "op=flop" in words else set()).add(words[1])
-        elif words[0] == "version-site" and "role=state-update" in words:
+        elif words[0] == "version-site":
             fields = dict(w.split("=", 1) for w in words[2:] if "=" in w)
-            update_color[words[1]] = (fields["base"], fields["color"])
+            versions[words[1]] = fields
         elif words[0] == "version-edge":
-            edges.append((words[1], words[3]))
-split = [
-    (producer, consumer)
-    for producer, consumer in edges
-    if producer in update_color and consumer in update_color
-    and update_color[producer][0] in latches and update_color[consumer][0] in flops
-    and update_color[producer][1] != update_color[consumer][1]
-]
+            successors.setdefault(words[1], []).append(words[3])
+split = []
+for producer, latch in versions.items():
+    if latch["role"] != "state-update" or latch["base"] not in latches:
+        continue
+    pending = list(successors.get(producer, []))
+    seen = set()
+    while pending:
+        consumer = pending.pop()
+        if consumer in seen:
+            continue
+        seen.add(consumer)
+        node = versions[consumer]
+        if node["version"] != latch["version"]:
+            continue
+        if node["role"] == "state-update" and node["base"] in flops:
+            if latch["color"] != node["color"]:
+                split.append((producer, consumer))
+        elif node["role"] == "data":
+            # Follow only combinational logic, never another state element.
+            pending.extend(successors.get(consumer, []))
 if not split:
-    raise SystemExit("no latch-update -> flop-update edge crosses a color boundary")
+    raise SystemExit("no latch-update -> flop-update path crosses a color boundary")
 PY
 }
 
