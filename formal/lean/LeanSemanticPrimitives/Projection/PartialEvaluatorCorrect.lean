@@ -274,6 +274,164 @@ theorem PRes.Scoped_toCode : ∀ {r : PRes} {d : Nat},
   | .lets bs r, d, h =>
       Term.Scoped_wrapLets bs d (PRes.toCode r) h.1 (PRes.Scoped_toCode h.2)
 
+/-! #### Scope, structurally
+
+The small facts the fuel induction uses repeatedly.  Proved first and built
+first, so that binder arithmetic fails here rather than inside the induction. -/
+
+theorem PEnv.Scoped_lookup {d : Nat} : ∀ {env : PEnv} {i : Nat} {pv : PVal},
+    PEnv.Scoped d env → env[i]? = some pv → PVal.Scoped d pv
+  | [],      _, _,  _, hv => by simp at hv
+  | _ :: _,  i, _,  h, hv => by
+      cases i with
+      | zero   => simp only [List.getElem?_cons_zero, Option.some.injEq] at hv
+                  subst hv; exact h.1
+      | succ k => exact PEnv.Scoped_lookup h.2 (by simpa using hv)
+
+theorem PEnv.Scoped_shift {d : Nat} (k : Nat) : ∀ {env : PEnv},
+    PEnv.Scoped d env → PEnv.Scoped (d + k) (PEnv.shiftBy k env)
+  | [],     _ => trivial
+  | _ :: _, h => ⟨PVal.Scoped_shift k h.1, PEnv.Scoped_shift k h.2⟩
+
+theorem PEnv.Scoped_append {d : Nat} : ∀ {a b : PEnv},
+    PEnv.Scoped d a → PEnv.Scoped d b → PEnv.Scoped d (a ++ b)
+  | [],     _, _,  hb => hb
+  | _ :: _, _, ha, hb => ⟨ha.1, PEnv.Scoped_append ha.2 hb⟩
+
+theorem freshDyns_scoped (d n : Nat) : PEnv.Scoped (d + n) (freshDyns n) := by
+  have : ∀ (l : List Nat), (∀ i ∈ l, i < d + n) → PEnv.Scoped (d + n) (l.map PVal.dyn) := by
+    intro l
+    induction l with
+    | nil => intro _; trivial
+    | cons a as ih =>
+        intro hb
+        exact ⟨hb a (by simp), ih (fun i hi => hb i (by simp [hi]))⟩
+  exact this (List.range n) (fun i hi => by simp at hi; omega)
+
+def PRes.ScopedList (d : Nat) : List PRes → Prop
+  | []      => True
+  | r :: rs => PRes.Scoped d r ∧ PRes.ScopedList d rs
+
+theorem PRes.ScopedList_toCode {d : Nat} : ∀ {rs : List PRes},
+    PRes.ScopedList d rs → Term.ScopedList d (rs.map PRes.toCode)
+  | [],     _ => trivial
+  | _ :: _, h => ⟨PRes.Scoped_toCode h.1, PRes.ScopedList_toCode h.2⟩
+
+theorem splitArgs_scoped {d : Nat} : ∀ (ps : Div) (rs : List PRes)
+    (svs : List Val) (dts : List Term),
+    PRes.ScopedList d rs → splitArgs ps rs = .ok (svs, dts) → Term.ScopedList d dts := by
+  intro ps
+  induction ps with
+  | nil =>
+      intro rs svs dts _ hsp
+      cases rs with
+      | nil      => simp only [splitArgs, Except.ok.injEq, Prod.mk.injEq] at hsp
+                    rw [← hsp.2]; trivial
+      | cons _ _ => simp [splitArgs] at hsp
+  | cons b bs ih =>
+      intro rs svs dts h hsp
+      cases rs with
+      | nil => cases b <;> simp [splitArgs] at hsp
+      | cons r rs' =>
+          cases b with
+          | stat =>
+              cases r with
+              | stat _ =>
+                  simp only [splitArgs] at hsp
+                  cases hres : splitArgs bs rs' with
+                  | error _ => rw [hres] at hsp; simp at hsp
+                  | ok pr =>
+                      obtain ⟨vs, ts⟩ := pr
+                      rw [hres] at hsp
+                      simp only [Except.ok.injEq, Prod.mk.injEq] at hsp
+                      rw [← hsp.2]
+                      exact ih rs' vs ts h.2 hres
+              | code _   => simp [splitArgs] at hsp
+              | cons _ _ => simp [splitArgs] at hsp
+              | lets _ _ => simp [splitArgs] at hsp
+          | dyn =>
+              simp only [splitArgs] at hsp
+              cases hres : splitArgs bs rs' with
+              | error _ => rw [hres] at hsp; simp at hsp
+              | ok pr =>
+                  obtain ⟨vs, ts⟩ := pr
+                  rw [hres] at hsp
+                  simp only [Except.ok.injEq, Prod.mk.injEq] at hsp
+                  rw [← hsp.2]
+                  exact ⟨PRes.Scoped_toCode h.1, ih rs' vs ts h.2 hres⟩
+
+/-- The unwired structural rules preserve scope, which makes the switch's
+primitive branch mechanical when it lands.  Each peel either returns a
+sub-result at the same depth or re-wraps a package, so the depth bookkeeping is
+exactly `PRes.Scoped`'s own. -/
+theorem peelHd_scoped : ∀ {r r' : PRes} {d : Nat},
+    peelHd r = some r' → PRes.Scoped d r → PRes.Scoped d r' := by
+  intro r
+  induction r with
+  | stat v => intro r' d hp h
+              cases v <;> simp only [peelHd] at hp <;> try cases hp
+              all_goals trivial
+  | code _ => intro r' d hp _; simp [peelHd] at hp
+  | cons a b _ _ =>
+      intro r' d hp h
+      simp only [peelHd] at hp
+      split at hp <;> try contradiction
+      cases hp; exact h.1
+  | lets bs r ih =>
+      intro r' d hp h
+      simp only [peelHd, Option.map_eq_some_iff] at hp
+      obtain ⟨r'', hr'', rfl⟩ := hp
+      exact ⟨h.1, ih hr'' h.2⟩
+
+theorem peelTl_scoped : ∀ {r r' : PRes} {d : Nat},
+    peelTl r = some r' → PRes.Scoped d r → PRes.Scoped d r' := by
+  intro r
+  induction r with
+  | stat v => intro r' d hp h
+              cases v <;> simp only [peelTl] at hp <;> try cases hp
+              all_goals trivial
+  | code _ => intro r' d hp _; simp [peelTl] at hp
+  | cons a b _ _ =>
+      intro r' d hp h
+      simp only [peelTl] at hp
+      split at hp <;> try contradiction
+      cases hp; exact h.2
+  | lets bs r ih =>
+      intro r' d hp h
+      simp only [peelTl, Option.map_eq_some_iff] at hp
+      obtain ⟨r'', hr'', rfl⟩ := hp
+      exact ⟨h.1, ih hr'' h.2⟩
+
+theorem peelIsNil_scoped : ∀ {r r' : PRes} {d : Nat},
+    peelIsNil r = some r' → PRes.Scoped d r → PRes.Scoped d r' := by
+  intro r
+  induction r with
+  | stat v => intro r' d hp h
+              cases v <;> simp only [peelIsNil] at hp <;> try cases hp
+              all_goals trivial
+  | code _ => intro r' d hp _; simp [peelIsNil] at hp
+  | cons a b _ _ =>
+      intro r' d hp h
+      simp only [peelIsNil] at hp
+      split at hp <;> try contradiction
+      cases hp; trivial
+  | lets bs r ih =>
+      intro r' d hp h
+      simp only [peelIsNil, Option.map_eq_some_iff] at hp
+      obtain ⟨r'', hr'', rfl⟩ := hp
+      exact ⟨h.1, ih hr'' h.2⟩
+
+theorem primStruct_scoped {d : Nat} {p : Prim} {rs : List PRes} {r : PRes}
+    (hp : primStruct p rs = some r) (h : PRes.ScopedList d rs) : PRes.Scoped d r := by
+  unfold primStruct at hp
+  split at hp
+  · cases hp; trivial
+  · cases hp; exact ⟨h.1, h.2.1⟩
+  · exact peelHd_scoped hp h.1
+  · exact peelTl_scoped hp h.1
+  · exact peelIsNil_scoped hp h.1
+  · simp at hp
+
 /-! #### Prepared arguments -/
 
 def Prepared.Scoped (d : Nat) (p : Prepared) : Prop :=
