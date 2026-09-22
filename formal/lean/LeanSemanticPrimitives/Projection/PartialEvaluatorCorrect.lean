@@ -627,6 +627,166 @@ theorem Prepared.Scoped_toPRes {p : Prepared} {d : Nat} (h : Prepared.Scoped d p
     PRes.Scoped d p.toPRes :=
   ⟨h.1, PVal.Scoped_toPRes h.2⟩
 
+theorem PEnv.Scoped_stat_map (d : Nat) : ∀ vs : List Val, PEnv.Scoped d (vs.map PVal.stat)
+  | []      => trivial
+  | _ :: vs => ⟨trivial, PEnv.Scoped_stat_map d vs⟩
+
+/-! #### Layer 3: the fuel induction
+
+Every list recursion and every binder-layout computation was discharged in
+layers 1 and 2, so each branch here is a one-liner over them.  In particular NO
+`dynCount` reasoning appears: the unfolded-call branch receives `ScopedLets` and
+the extended environment ready-made. -/
+theorem mixTerm_scoped : ∀ n, ScopeOK n := by
+  intro n
+  induction n with
+  | zero =>
+      intro A idx Δ env t r rq d _ hm
+      simp [mixTerm] at hm
+  | succ n ih =>
+      intro A idx Δ env t r rq d henv hm
+      cases t with
+      | lit v => simp only [mixTerm] at hm; cases hm; trivial
+      | var i =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          · rename_i _ _ _; cases hm; trivial
+          · rename_i k _ hv; cases hm; exact PEnv.Scoped_lookup henv hv
+          · rename_i a b _ hv; cases hm
+            exact PVal.Scoped_toPRes (PEnv.Scoped_lookup henv hv)
+      | lift e =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i _ _ _; cases hm; trivial
+      | letIn b e body =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i re rq₁ he
+          split at hm <;> try contradiction
+          · rename_i v _
+            split at hm <;> try contradiction
+            rename_i rb rq₂ hb
+            cases hm
+            have henv2 : PEnv.Scoped d (PVal.stat v :: env) := ⟨trivial, henv⟩
+            exact ih A idx _ _ body _ _ d henv2 hb
+          · rename_i _
+            split at hm <;> try contradiction
+            rename_i rb rq₂ _hne hb
+            cases hm
+            have hre := ih A idx Δ env e _ _ d henv he
+            have hbodyEnv : PEnv.Scoped (d + 1) (PVal.dyn 0 :: PEnv.shiftBy 1 env) :=
+              ⟨by simp [PVal.Scoped], PEnv.Scoped_shift 1 henv⟩
+            exact ⟨⟨PRes.Scoped_toCode hre, trivial⟩,
+                   by simpa using ih A idx _ _ body _ _ (d + 1) hbodyEnv hb⟩
+      | ite b c a e =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i rc rq₁ hc
+          split at hm <;> try contradiction
+          · rename_i _
+            split at hm <;> try contradiction
+            rename_i ra rq₂ ha
+            cases hm
+            exact ih A idx Δ env a _ _ d henv ha
+          · rename_i _
+            split at hm <;> try contradiction
+            rename_i re' rq₂ he'
+            cases hm
+            exact ih A idx Δ env e _ _ d henv he'
+          · rename_i _
+            split at hm <;> try contradiction
+            rename_i ra rq₂ re' rq₃ ha he'
+            cases hm
+            exact ⟨PRes.Scoped_toCode (ih A idx Δ env c _ _ d henv hc),
+                   PRes.Scoped_toCode (ih A idx Δ env a _ _ d henv ha),
+                   PRes.Scoped_toCode (ih A idx Δ env e _ _ d henv he')⟩
+      | prim b p ts =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i rs rq' hts
+          have hall := mixTerms_scoped ih A idx Δ env ts rs rq' d henv hts
+          split at hm
+          · split at hm <;> try contradiction
+            split at hm <;> try contradiction
+            rename_i _ _ _ _; cases hm; trivial
+          · cases hm; exact PRes.ScopedList_toCode hall
+      | ctorT b k ts =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i rs rq' hts
+          have hall := mixTerms_scoped ih A idx Δ env ts rs rq' d henv hts
+          split at hm
+          · split at hm <;> try contradiction
+            rename_i _ _; cases hm; trivial
+          · cases hm; exact PRes.ScopedList_toCode hall
+      | caseT b sc alts =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i rsc rq₁ hsc
+          split at hm <;> try contradiction
+          · rename_i tag vs _
+            split at hm <;> try contradiction
+            rename_i a _
+            split at hm <;> try contradiction
+            split at hm <;> try contradiction
+            rename_i rb rq₂ hb
+            cases hm
+            exact ih A idx _ _ a.body _ _ d
+              (PEnv.Scoped_append (PEnv.Scoped_stat_map d vs) henv) hb
+          · rename_i _
+            split at hm <;> try contradiction
+            rename_i alts' rq₂ has
+            cases hm
+            exact ⟨PRes.Scoped_toCode (ih A idx Δ env sc _ _ d henv hsc),
+                   mixAlts_scoped ih A idx Δ env alts alts' rq₂ d henv has⟩
+      | call b f ts =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i rs rq₁ hts
+          split at hm <;> try contradiction
+          rename_i fd _
+          split at hm
+          · split at hm <;> try contradiction
+            split at hm <;> try contradiction
+            split at hm <;> try contradiction
+            rename_i vs _
+            split at hm <;> try contradiction
+            rename_i rb rq₂ hb
+            cases hm
+            exact ih A idx _ _ fd.body _ _ d (PEnv.Scoped_stat_map d vs) hb
+          · split at hm <;> try contradiction
+            rename_i svs dts hsp
+            split at hm <;> try contradiction
+            rename_i k _
+            cases hm
+            exact splitArgs_scoped fd.params rs svs dts
+              (mixTerms_scoped ih A idx Δ env ts rs rq₁ d henv hts) hsp
+      | ucall b f ts =>
+          simp only [mixTerm] at hm
+          split at hm <;> try contradiction
+          rename_i fd _
+          split at hm
+          · split at hm <;> try contradiction
+            rename_i rs rq₁ hts
+            split at hm <;> try contradiction
+            split at hm <;> try contradiction
+            split at hm <;> try contradiction
+            rename_i vs _
+            split at hm <;> try contradiction
+            rename_i rb rq₂ hb
+            cases hm
+            exact ih A idx _ _ fd.body _ _ d (PEnv.Scoped_stat_map d vs) hb
+          · split at hm <;> try contradiction
+            rename_i rs' dts rq₂ hu
+            split at hm <;> try contradiction
+            rename_i env' hie
+            split at hm <;> try contradiction
+            rename_i rb rq₃ _hne hb
+            cases hm
+            obtain ⟨hbinds, henv'⟩ :=
+              mixUArgs_inlineEnv_scoped ih A idx Δ fd.params ts env d rs' dts rq₂ env' henv hu hie
+            exact ⟨hbinds, ih A idx _ _ fd.body _ rq₃ _ henv' hb⟩
+
 /-- The bridge that makes the invariant free where it is already established:
 a partial value that DENOTES something names indices that exist, because
 `ρr[k]? = some v` already says `k < ρr.length`. -/

@@ -100,4 +100,12 @@ namespace Projection
 #print axioms evalOp_And_two
 #print axioms srcFlopNext_eq
 
+-- scope preservation: successful specialization emits no dangling references
+#print axioms PValOK_Scoped
+#print axioms Compat_Scoped
+#print axioms mixTerms_scoped
+#print axioms mixAlts_scoped
+#print axioms mixUArgs_inlineEnv_scoped
+#print axioms mixTerm_scoped
+
 end Projection
