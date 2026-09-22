@@ -432,6 +432,186 @@ theorem primStruct_scoped {d : Nat} {p : Prim} {rs : List PRes} {r : PRes}
   · exact peelIsNil_scoped hp h.1
   · simp at hp
 
+/-! #### Layer 2: the same-fuel companions
+
+`mixTerm` recurses by REDUCING fuel, while `mixTerms`, `mixUArgs` and `mixAlts`
+call it at the SAME fuel.  So the architecture is a fuel induction with these
+three as companions derived from its hypothesis -- an induction on `ATerm` would
+leave them nothing to appeal to.  This mirrors the existing `TOK` organization
+with every semantic parameter removed: nothing here mentions `Compat`,
+evaluation, or well-annotatedness. -/
+
+def ScopeOK (n : Nat) : Prop :=
+  ∀ (A : AProgram) (idx : SpecRequest → Option Nat)
+    (Δ : Div) (env : PEnv) (t : ATerm)
+    (r : PRes) (rq : List SpecRequest) (d : Nat),
+    PEnv.Scoped d env →
+    mixTerm n A idx Δ env t = .ok (r, rq) →
+    PRes.Scoped d r
+
+/-- Every operand is specialized in the SAME environment, so all of them land at
+the same depth. -/
+theorem mixTerms_scoped {n : Nat} (h : ScopeOK n) :
+    ∀ A idx Δ env ts rs rq d,
+      PEnv.Scoped d env →
+      mixTerms n A idx Δ env ts = .ok (rs, rq) →
+      PRes.ScopedList d rs := by
+  intro A idx Δ env ts
+  induction ts with
+  | nil =>
+      intro rs rq d _ hm
+      simp only [mixTerms] at hm
+      cases hm
+      trivial
+  | cons t ts ih =>
+      intro rs rq d henv hm
+      simp only [mixTerms] at hm
+      cases ht : mixTerm n A idx Δ env t with
+      | error e => rw [ht] at hm; simp at hm
+      | ok x =>
+          obtain ⟨r, rq₁⟩ := x
+          rw [ht] at hm
+          cases hts : mixTerms n A idx Δ env ts with
+          | error e => rw [hts] at hm; simp at hm
+          | ok y =>
+              obtain ⟨rs', rq₂⟩ := y
+              rw [hts] at hm
+              cases hm
+              exact ⟨h A idx Δ env t r rq₁ d henv ht, ih rs' rq₂ d henv hts⟩
+
+/-- Each alternative's body is scoped under its own fields, which is why the
+result is `Term.ScopedAlts` rather than a flat list property. -/
+theorem mixAlts_scoped {n : Nat} (h : ScopeOK n) :
+    ∀ A idx Δ env alts alts' rq d,
+      PEnv.Scoped d env →
+      mixAlts n A idx Δ env alts = .ok (alts', rq) →
+      Term.ScopedAlts d alts' := by
+  intro A idx Δ env alts
+  induction alts with
+  | nil =>
+      intro alts' rq d _ hm
+      simp only [mixAlts] at hm
+      cases hm
+      trivial
+  | cons a as ih =>
+      intro alts' rq d henv hm
+      simp only [mixAlts] at hm
+      cases ht : mixTerm n A idx (List.replicate a.arity .dyn ++ Δ)
+                   (freshDyns a.arity ++ PEnv.shiftBy a.arity env) a.body with
+      | error e => rw [ht] at hm; simp at hm
+      | ok x =>
+          obtain ⟨r, rq₁⟩ := x
+          rw [ht] at hm
+          cases has : mixAlts n A idx Δ env as with
+          | error e => rw [has] at hm; simp at hm
+          | ok y =>
+              obtain ⟨as', rq₂⟩ := y
+              rw [has] at hm
+              cases hm
+              have hext : PEnv.Scoped (d + a.arity)
+                  (freshDyns a.arity ++ PEnv.shiftBy a.arity env) :=
+                PEnv.Scoped_append (freshDyns_scoped d a.arity) (PEnv.Scoped_shift a.arity henv)
+              exact ⟨PRes.Scoped_toCode (h A idx _ _ a.body r rq₁ (d + a.arity) hext ht),
+                     ih as' rq₂ d henv has⟩
+
+/-- `mixUArgs` and `inlineEnv` together, because they have to agree about the
+binding layout and proving them apart would state that agreement twice.
+
+The length equality is PRIVATE and disposable: `bs.length = dynCount ps` holds
+for today's implementation, in which each dynamic parameter contributes exactly
+one binding, and becomes FALSE as soon as preparation can emit zero or several
+leaf bindings for one argument.  It is an internal step, never part of the
+interface. -/
+private theorem mixUArgs_inlineEnv_scoped_current {n : Nat} (h : ScopeOK n) :
+    ∀ A idx Δ ps ts env d rs bs rq env',
+      PEnv.Scoped d env →
+      mixUArgs n A idx Δ env ps ts = .ok (rs, bs, rq) →
+      inlineEnv ps rs = .ok env' →
+      ScopedLets d bs ∧ PEnv.Scoped (d + bs.length) env' ∧ bs.length = dynCount ps := by
+  intro A idx Δ ps
+  induction ps with
+  | nil =>
+      intro ts env d rs bs rq env' _ hm hi
+      cases ts with
+      | nil =>
+          simp only [mixUArgs] at hm
+          cases hm
+          simp only [inlineEnv] at hi
+          cases hi
+          exact ⟨trivial, trivial, rfl⟩
+      | cons _ _ => simp [mixUArgs] at hm
+  | cons b ps' ih =>
+      intro ts env d rs bs rq env' henv hm hi
+      cases ts with
+      | nil => cases b <;> simp [mixUArgs] at hm
+      | cons t ts' =>
+          cases b with
+          | stat =>
+              simp only [mixUArgs] at hm
+              cases ht : mixTerm n A idx Δ env t with
+              | error e => rw [ht] at hm; simp at hm
+              | ok x =>
+                  obtain ⟨r, rq₁⟩ := x
+                  rw [ht] at hm
+                  cases hu : mixUArgs n A idx Δ env ps' ts' with
+                  | error e => rw [hu] at hm; simp at hm
+                  | ok y =>
+                      obtain ⟨rs', dts, rq₂⟩ := y
+                      rw [hu] at hm
+                      cases hm
+                      cases r with
+                      | stat v =>
+                          simp only [inlineEnv] at hi
+                          cases hie : inlineEnv ps' rs' with
+                          | error _ => rw [hie] at hi; simp at hi
+                          | ok rest =>
+                              rw [hie] at hi
+                              cases hi
+                              obtain ⟨h1, h2, h3⟩ := ih ts' env d rs' _ rq₂ rest henv hu hie
+                              exact ⟨h1, ⟨trivial, h2⟩, by simpa [dynCount] using h3⟩
+                      | code _   => simp [inlineEnv] at hi
+                      | cons _ _ => simp [inlineEnv] at hi
+                      | lets _ _ => simp [inlineEnv] at hi
+          | dyn =>
+              simp only [mixUArgs] at hm
+              cases ht : mixTerm n A idx Δ env t with
+              | error e => rw [ht] at hm; simp at hm
+              | ok x =>
+                  obtain ⟨r, rq₁⟩ := x
+                  rw [ht] at hm
+                  cases hu : mixUArgs n A idx Δ (PEnv.shiftBy 1 env) ps' ts' with
+                  | error e => rw [hu] at hm; simp at hm
+                  | ok y =>
+                      obtain ⟨rs', dts, rq₂⟩ := y
+                      rw [hu] at hm
+                      cases hm
+                      simp only [inlineEnv] at hi
+                      cases hie : inlineEnv ps' rs' with
+                      | error _ => rw [hie] at hi; simp at hi
+                      | ok rest =>
+                          rw [hie] at hi
+                          cases hi
+                          have hr : PRes.Scoped d r := h A idx Δ env t r rq₁ d henv ht
+                          obtain ⟨h1, h2, h3⟩ :=
+                            ih ts' (PEnv.shiftBy 1 env) (d + 1) rs' _ rq₂ rest
+                               (PEnv.Scoped_shift 1 henv) hu hie
+                          refine ⟨⟨PRes.Scoped_toCode hr, h1⟩, ⟨?_, ?_⟩, by simp [dynCount, h3]⟩
+                          · simp only [PVal.Scoped, List.length_cons]; omega
+                          · simpa [List.length_cons, Nat.add_right_comm, Nat.add_assoc] using h2
+
+/-- The public interface, with the implementation-specific length equality
+discarded.  After the `Prepared` restructuring this statement is unchanged. -/
+theorem mixUArgs_inlineEnv_scoped {n : Nat} (h : ScopeOK n) :
+    ∀ A idx Δ ps ts env d rs bs rq env',
+      PEnv.Scoped d env →
+      mixUArgs n A idx Δ env ps ts = .ok (rs, bs, rq) →
+      inlineEnv ps rs = .ok env' →
+      ScopedLets d bs ∧ PEnv.Scoped (d + bs.length) env' := by
+  intro A idx Δ ps ts env d rs bs rq env' he hm hi
+  obtain ⟨hbs, henv', _⟩ :=
+    mixUArgs_inlineEnv_scoped_current h A idx Δ ps ts env d rs bs rq env' he hm hi
+  exact ⟨hbs, henv'⟩
+
 /-! #### Prepared arguments -/
 
 def Prepared.Scoped (d : Nat) (p : Prepared) : Prop :=
