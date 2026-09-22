@@ -1,0 +1,17 @@
+/*
+:name: ready_signal_chain
+:type: equiv
+:verilog_top: ready_signal_chain
+:pyrope_top: ready_signal_chain
+*/
+// Independent acyclic equations; the SV has concurrent generated bit drivers.
+pub comb ready_signal_chain(down:u1, valid:u4, sel:u2) -> (ready:u5, selected:u1, mirrored:u5) {
+  const r4:u1 = down
+  const r3:u1 = r4 | ((valid#[3]) ^ 1)
+  const r2:u1 = r3 | ((valid#[2]) ^ 1)
+  const r1:u1 = r2 | ((valid#[1]) ^ 1)
+  const r0:u1 = r1 | ((valid#[0]) ^ 1)
+  ready = r0 | (r1 << 1) | (r2 << 2) | (r3 << 3) | (r4 << 4)
+  selected = ready#[sel]
+  mirrored = ready
+}

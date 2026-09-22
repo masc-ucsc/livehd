@@ -6,6 +6,10 @@ load("//tools:cc_headers.bzl", "cc_direct_headers")
 load("//tools:copt_default.bzl", "COPTS")
 
 exports_files([
+    "tests/equiv/ready_signal_chain.v",
+    "tests/equiv/ready_signal_chain_1.v",
+    "tests/equiv/ready_signal_slices.v",
+    "tests/equiv/ready_signal_masked.v",
     "tests/lec.py",
     "tests/pyrope/proc_lambda.prp",
     "tests/pyrope/simple.prp",
@@ -878,6 +882,10 @@ _STATEMATCH_COMB = [
     "packed_variable_modifiers",
     "partsel_oob_ascending",
     "range_step_value",
+    "ready_signal_chain",
+    "ready_signal_chain_1",
+    "ready_signal_masked",
+    "ready_signal_slices",
     "reduce_and",
     "reduce_array",
     "reduce_or",

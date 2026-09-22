@@ -123,6 +123,15 @@ and output ports. Their writes currently require constant nonblocking
 destinations. Dynamic clock selectors, blocking writes to the split vectors,
 and overlapping writes from different clocks are diagnosed.
 
+Concurrent constant packed-bit/slice assignments and instance outputs lower to
+one single-assignment wire per bit. Constant reads use those wires directly;
+whole-vector and runtime-indexed reads use one assembled vector wire. This
+preserves generated ready chains regardless of source order, including ascending
+ranges and mixed slice/instance drivers. Overlapping static drivers warn and keep
+the legacy source-ordered lowering (an arrayed instantiation broadcasting one
+output onto one net bit is that shape); procedural, state, and dynamic
+destinations retain their existing lowering too.
+
 Counted `while` scans support runtime early exit when an adjacent constant
 initializer, a conjunctive `counter < constant` bound, and a unique unconditional
 unit increment prove termination without overflow. They lower to guarded

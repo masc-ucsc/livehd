@@ -400,6 +400,14 @@ std::string Slang_context::unique_suffixed(std::string_view base, std::string_vi
   return name;
 }
 
+std::string Slang_context::suffixed_ref_of(std::string_view lname, std::string_view suffix) {
+  std::string_view stem = lname;
+  if (!stem.empty() && stem.front() == '`') {
+    stem = stem.substr(1, stem.size() - 2);
+  }
+  return ref_name_of_raw(unique_suffixed(stem, suffix));
+}
+
 std::string Slang_context::to_int_value(const std::string& v) {
   if (!is_bool_value(v)) {
     return v;

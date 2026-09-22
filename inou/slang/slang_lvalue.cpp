@@ -456,7 +456,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       if (rhs == name && wname == name) {
         return;  // full-width self-assign (`q <= q;` hold idiom): an unwritten reg already holds
       }
-      if (bit_regs_.contains(&sym)) {
+      if (bit_regs_.contains(&sym) || packed_wire_bits_.contains(&sym)) {
         Packed_lv lv;
         if (resolve_packed_lvalue(lhs, lv)) {
           emit_packed_rmw(lv, rhs, lhs.sourceRange);
@@ -1860,7 +1860,7 @@ const slang::ast::ValueSymbol* Slang_context::resolve_base_symbol(const slang::a
   return nullptr;
 }
 
-bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out) {
+bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out, bool static_only) {
   using slang::ast::RangeSelectionKind;
 
   switch (lhs.kind) {
@@ -1871,7 +1871,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       if (!ct.isIntegral() || !ct.hasFixedRange()) {
         return false;  // unpacked / non-packed root: not a packed slice
       }
-      if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
+      if (!static_only && !declared_.contains(&sym) && !input_syms_.contains(&sym)) {
         declare_value_symbol(sym, /*force_reg=*/false);
       }
       auto ti       = tinfo(sym.getType());
@@ -1885,14 +1885,14 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
 
     case ExpressionKind::Conversion:
       // a same-bitstream-width bitcast passes through to the inner target
-      return resolve_packed_lvalue(lhs.as<slang::ast::ConversionExpression>().operand(), out);
+      return resolve_packed_lvalue(lhs.as<slang::ast::ConversionExpression>().operand(), out, static_only);
 
     case ExpressionKind::MemberAccess: {
       const auto& ma = lhs.as<slang::ast::MemberAccessExpression>();
       if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
         return false;
       }
-      if (!resolve_packed_lvalue(ma.value(), out)) {
+      if (!resolve_packed_lvalue(ma.value(), out, static_only)) {
         return false;
       }
       const auto& field  = ma.member.as<slang::ast::FieldSymbol>();
@@ -1915,6 +1915,9 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       // it directly to the bus root plus the element bit-offset. A `.field` /
       // `[slice]` wrapper above then folds in via the MemberAccess/packed cases.
       if (lhs.kind == ExpressionKind::ElementSelect && base_ty.isUnpackedArray()) {
+        if (static_only) {
+          return false;
+        }
         const auto* fsym = resolve_base_symbol(base);
         if (fsym != nullptr && flat_port_syms_.contains(fsym)) {
           const auto& mi = mem_info_.at(fsym);
@@ -1944,7 +1947,19 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
         return false;  // unpacked array element / non-packed base
       }
-      if (!resolve_packed_lvalue(base, out)) {
+      if (static_only) {
+        if (lhs.kind == ExpressionKind::ElementSelect) {
+          if (!try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
+            return false;
+          }
+        } else {
+          const auto& rs = lhs.as<slang::ast::RangeSelectExpression>();
+          if (!try_eval_int(rs.left()) || !try_eval_int(rs.right())) {
+            return false;
+          }
+        }
+      }
+      if (!resolve_packed_lvalue(base, out, static_only)) {
         return false;
       }
 
@@ -2011,6 +2026,16 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
 }
 
 void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  if (auto it = packed_wire_bits_.find(lv.base); it != packed_wire_bits_.end()) {
+    if (!lv.dyn_off.empty() || lv.const_off < 0 || lv.const_off + lv.width > static_cast<int64_t>(it->second.size())) {
+      emit_unsupported(sr, "unsupported-packed-wire-write", "concurrent packed wires require constant in-range destinations");
+      return;
+    }
+    for (int64_t bit = 0; bit < lv.width; ++bit) {
+      builder_.create_assign_stmts(it->second[lv.const_off + bit], extract_field(rhs, bit, 1));
+    }
+    return;
+  }
   if (auto it = bit_regs_.find(lv.base); it != bit_regs_.end()) {
     if (!current_assign_nonblocking_ || proc_kind_ != Proc_kind::seq || !lv.dyn_off.empty() || lv.const_off < 0
         || lv.const_off + lv.width > static_cast<int64_t>(it->second.size())) {

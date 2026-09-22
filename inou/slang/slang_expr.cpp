@@ -363,6 +363,36 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
     }
   }
 
+  // Static packed reads bind directly to their single-assignment bit wires.
+  // Whole/dynamic reads use the one assembled vector, never an RMW snapshot.
+  // A `.field` of a packed-ARRAY-of-struct net is such a static read too
+  // (is_plain_scalar_net only rules out a struct ROOT), and it must not fall
+  // back to the assembled vector: reassembling every bit is exactly the
+  // whole-net self-dependency this representation exists to break.
+  //
+  // The pointer-spine test comes first on purpose: resolve_packed_lvalue
+  // constant-EVALUATES every selector, and in a module that has one packed net
+  // nearly every other select in the body would pay for that and then miss.
+  if (!packed_wire_bits_.empty()
+      && (expr.kind == ExpressionKind::ElementSelect || expr.kind == ExpressionKind::RangeSelect
+          || expr.kind == ExpressionKind::MemberAccess)) {
+    const auto* base = lhs_base_symbol(expr);
+    auto        it   = base == nullptr ? packed_wire_bits_.end() : packed_wire_bits_.find(base);
+    Packed_lv   lv;
+    // `dyn_off` cannot survive a static_only resolve today; assert it by
+    // falling back rather than silently binding the wrong constant bits if
+    // some future selector shape ever does reach here with one.
+    if (it != packed_wire_bits_.end() && resolve_packed_lvalue(expr, lv, true) && lv.base == base && lv.dyn_off.empty()
+        && lv.width > 0 && lv.const_off >= 0 && lv.const_off + lv.width <= static_cast<int64_t>(it->second.size())) {
+      std::vector<Lnast_builder::Concat_lane> lanes;
+      for (int64_t bit = lv.width; bit-- > 0;) {
+        lanes.push_back({it->second[lv.const_off + bit], 1});
+      }
+      auto value = lanes.size() == 1 ? lanes[0].value : builder_.create_concat_stmts(lanes);
+      return fit_wrap(value, static_cast<int>(lv.width), lv.is_signed);
+    }
+  }
+
   switch (expr.kind) {
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {

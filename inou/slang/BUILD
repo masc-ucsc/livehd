@@ -120,6 +120,24 @@ sh_test(
     ] + (["long1"] if t == "long_nocheck_iwls_square" else []),
 ) for t in SLANG_LADDER.keys()]
 
+# Fully defined ready chains must not pass LEC by turning a forward read into X.
+[sh_test(
+    name = "slang_%s_no_x" % name,
+    srcs = ["tests/slang_compile.sh"],
+    args = ["lec_no_x", "$(location //inou/prp:tests/equiv/%s.v)" % name],
+    data = [
+        "//inou/prp:tests/equiv/%s.v" % name,
+        "//inou/prp:tests/lec.py",
+        "//lhd",
+    ],
+    # `lec_no_x` runs a full LEC: reserve solver capacity like every other
+    # formal-bearing slang case, and join the `slang_compile` sweep.
+    tags = [
+        "cpu:4",
+        "slang_compile",
+    ],
+) for name in ["ready_signal_chain", "ready_signal_chain_1", "ready_signal_slices", "ready_signal_masked"]]
+
 # Legacy no-argument mode: the sky130 cell-instance set (unknown-module policy).
 sh_test(
     name = "slang_compile_sky130",

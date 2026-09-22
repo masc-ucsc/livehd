@@ -1,24 +1,34 @@
 // Behavioral oracle for the unknown bits of an asynchronous reset constant.
-// The defined bits must reset EXACTLY; the unknown ones must carry no defined
-// value at all. `^x` is the x/z-agnostic test: inou.cgen.verilog spells an
-// unknown constant `?`, which iverilog reads as z, so 4'bxxxx and 4'bzzzz must
-// both pass while any folded constant (4'b0000 included) must fail.
+// The defined bits must reset EXACTLY; every unknown one must carry no defined
+// value at all. The check is PER BIT on purpose: a reduction over a group
+// (`^a[3:2]`) stays x when only one of the two bits folds, so it would pass the
+// very bug this fixture exists for. inou.cgen.verilog spells an unknown
+// constant `?`, which iverilog reads as z, so the test must accept x and z
+// alike -- hence "is not 0 and not 1" rather than a compare against 'x.
 module tb;
   reg clk = 0, rst = 0;
   reg [7:0] d = 8'h00;
   wire [3:0] a, b;
   async_reset_unknown_slices dut(.*);
 
-  task check_reset(input [8*24:1] where);
+  task unknown_bit(input [8*40:1] where, input [8*8:1] who, input bit_val);
+    if (bit_val === 1'b0 || bit_val === 1'b1)
+      $fatal(1, "%0s: %0s was folded to a defined value (%b): a=%b b=%b", where, who, bit_val, a, b);
+  endtask
+
+  task check_reset(input [8*40:1] where);
     begin
+      // The slice-accumulator register: a[3:2] unknown, a[1:0] = 2'b11.
       if (a[1:0] !== 2'b11)
         $fatal(1, "%0s: defined reset slice changed: a=%b", where, a);
-      if ((^a[3:2]) !== 1'bx)
-        $fatal(1, "%0s: unknown reset slice was folded to a defined value: a=%b", where, a);
+      unknown_bit(where, "a[3]", a[3]);
+      unknown_bit(where, "a[2]", a[2]);
+      // The whole-register control: b = 4'bx0x1, which never used the
+      // accumulator and already kept its unknowns.
       if (b[2] !== 1'b0 || b[0] !== 1'b1)
         $fatal(1, "%0s: defined reset bits changed: b=%b", where, b);
-      if ((^{b[3], b[1]}) !== 1'bx)
-        $fatal(1, "%0s: unknown whole-register reset bits were folded: b=%b", where, b);
+      unknown_bit(where, "b[3]", b[3]);
+      unknown_bit(where, "b[1]", b[1]);
     end
   endtask
 

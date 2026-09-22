@@ -30,6 +30,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/expressions/SelectExpressions.h"
@@ -47,6 +48,27 @@
 
 #include "lnast_builder.hpp"
 // clang-format on
+
+// Walk an assignment-target spine (`.field` / `[idx]` / `[hi:lo]` / bitcast)
+// down to the base symbol it selects part of. Returns nullptr for a
+// concatenation (the caller iterates its operands itself) and for any other
+// shape. Pointer walk only: nothing is evaluated, declared, or emitted, so it
+// is also the cheap pre-test before a full `resolve_packed_lvalue`.
+inline const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expression& lhs) {
+  const auto* e = &lhs;
+  while (true) {
+    switch (e->kind) {
+      case slang::ast::ExpressionKind::NamedValue       :
+      case slang::ast::ExpressionKind::HierarchicalValue: return &e->as<slang::ast::ValueExpressionBase>().symbol;
+      case slang::ast::ExpressionKind::ElementSelect    : e = &e->as<slang::ast::ElementSelectExpression>().value(); break;
+      case slang::ast::ExpressionKind::RangeSelect      : e = &e->as<slang::ast::RangeSelectExpression>().value(); break;
+      case slang::ast::ExpressionKind::MemberAccess     : e = &e->as<slang::ast::MemberAccessExpression>().value(); break;
+      case slang::ast::ExpressionKind::Conversion       : e = &e->as<slang::ast::ConversionExpression>().operand(); break;
+      case slang::ast::ExpressionKind::Concatenation    : return nullptr;  // caller iterates operands itself
+      default                                           : return nullptr;
+    }
+  }
+}
 
 // ── per-module lowering state ─────────────────────────────────────────────
 // Everything that describes ONE module body while it lowers: the Lnast under
@@ -76,7 +98,7 @@ struct Slang_module_state {
   absl::flat_hash_set<const slang::ast::Symbol*>              output_info_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;  // clocked state vars
   // for-header counters with no observable use outside their owning loops.
-  absl::flat_hash_set<const slang::ast::Symbol*> elaboration_counters_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              elaboration_counters_;
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> blocking_values_;
   // Bulk commit of a blocking array snapshot requires a single writer process.
   absl::flat_hash_map<const slang::ast::Symbol*, unsigned>    array_writer_count_;
@@ -95,7 +117,9 @@ struct Slang_module_state {
   // sole driver. Maps the net symbol → its mut-accumulator lname. During pass-4
   // emission, a driver that WRITES the net has sym_lname_ swapped to the tmp (so
   // its writes AND its own RMW reads hit the mut); other drivers read the wire.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::string> wire_split_tmp_;
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string>              wire_split_tmp_;
+  // Concurrent packed drivers: one single-assignment wire per physical bit.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> packed_wire_bits_;
   // Subset of wire_split_tmp_ keys that are FLATTENED-AGGREGATE splits: a
   // wire-classified local whose representation is a single flattened MUT bus
   // (a comb struct/const-indexed array packed by declare_unpacked's flatten
@@ -106,7 +130,7 @@ struct Slang_module_state {
   // writers reads the bus's INITIAL value instead of the resolved net
   // (minion_dcache_miss_handler_unit's `writeback_req_o |= mh_wb_req[i]`
   // read mh_wb_req before the child instances wrote it — LEC-refuted).
-  absl::flat_hash_set<const slang::ast::Symbol*>              wire_split_flat_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           wire_split_flat_;
   absl::flat_hash_set<const slang::ast::Symbol*> latch_syms_;  // level-sensitive latch state vars (subset of reg_syms_)
   // PARTIALLY-REGISTERED vars: some bits driven by a continuous `assign`, the
   // rest nonblocking-written by an edge process. IEEE 1800 allows that (the two
@@ -174,9 +198,9 @@ struct Slang_module_state {
 
     // false when the slice overlaps one already collected: last-wins ordering
     // is not modelled here.
-    bool add(int64_t lo, int64_t width, const slang::SVInt& value);
+    bool         add(int64_t lo, int64_t width, const slang::SVInt& value);
     // The slices cover [0, bits) exactly once.
-    bool complete() const;
+    bool         complete() const;
     // The folded whole-register value, `bits` wide and unsigned. Only valid
     // once complete().
     slang::SVInt assemble() const;
@@ -845,6 +869,13 @@ private:
   // `<base><suffix>`, made unique against used_names_ (`<base><suffix>0`,
   // `<base><suffix>1`, … on collision) and reserved there.
   std::string unique_suffixed(std::string_view base, std::string_view suffix);
+  // A fresh LNAST ref derived from an EXISTING lname (`__wtmp`, `__wnet`,
+  // `__sub_<bit>`, …). The escape introducer is stripped first and the uniquing
+  // runs on the RAW spelling: `used_names_` holds pre-quote names (lname_of
+  // inserts before quote_if_needed), so uniquing on the quoted form would
+  // neither see a real collision nor be visible to a later lname_of. Only the
+  // name that actually goes out as a ref is quoted.
+  std::string suffixed_ref_of(std::string_view lname, std::string_view suffix);
 
   // In-flight assignment target value for compound assigns (`a += b` lowers
   // the RHS with LValueReference reading this) - CIRCT's lvalue stack, depth 1.
@@ -891,7 +922,8 @@ private:
   };
   // Returns false when the path touches an unpacked array or a non-resolvable
   // base (caller then falls back to the unpacked/memory path or a diagnostic).
-  bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out);
+  // static_only performs a side-effect-free query (no declarations or IR).
+  bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out, bool static_only = false);
   void emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
   void emit_dynamic_slice_write(const std::string& base, const std::string& lo, int width, const std::string& value);
   // Partial (bit-slice) write whose resolved root is a BUNDLE port: const

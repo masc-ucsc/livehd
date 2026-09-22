@@ -138,22 +138,9 @@ bool field_forces_flat_bus(const slang::ast::Type& type) {
   return false;  // plain bits
 }
 
-// Walk an assignment LHS spine down to the written base symbol.
-const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expression& lhs) {
-  const auto* e = &lhs;
-  while (true) {
-    switch (e->kind) {
-      case ExpressionKind::NamedValue       :
-      case ExpressionKind::HierarchicalValue: return &e->as<slang::ast::ValueExpressionBase>().symbol;
-      case ExpressionKind::ElementSelect    : e = &e->as<slang::ast::ElementSelectExpression>().value(); break;
-      case ExpressionKind::RangeSelect      : e = &e->as<slang::ast::RangeSelectExpression>().value(); break;
-      case ExpressionKind::MemberAccess     : e = &e->as<slang::ast::MemberAccessExpression>().value(); break;
-      case ExpressionKind::Conversion       : e = &e->as<slang::ast::ConversionExpression>().operand(); break;
-      case ExpressionKind::Concatenation    : return nullptr;  // caller iterates operands itself
-      default                               : return nullptr;
-    }
-  }
-}
+// (`lhs_base_symbol` — the assignment-target spine walk — lives in
+// slang_context.hpp: slang_expr.cpp needs it too, as the cheap pre-test in
+// front of `resolve_packed_lvalue`.)
 
 // The real expression of an unknown-module (UninstantiatedDef) port
 // connection. slang binds these against the ERROR type (there is no port to
@@ -2927,8 +2914,8 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   declared_.insert(&sym);
 
   if (auto it = bit_regs_.find(&sym); it != bit_regs_.end()) {
-    const auto name = lname_of(sym);
-    const auto ti   = tinfo(sym.getType());
+    const auto name           = lname_of(sym);
+    const auto ti             = tinfo(sym.getType());
     auto       initial        = reg_init_vals_.find(&sym);
     auto       packed_initial = initial == reg_init_vals_.end() ? Dlop::create_integer(0) : Dlop::from_pyrope(initial->second);
     // Same guard the struct-leaf reset split uses: from_pyrope/get_mask_op_opt
@@ -4384,6 +4371,129 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       writers_of[w].push_back(i);
     }
   }
+  // Concurrent packed destinations are connections, not ordered RMW stores.
+  // Resolve all writers before choosing this representation: a procedural or
+  // dynamic writer keeps the existing path, and overlapping static drivers
+  // must never acquire last-write-wins semantics through vector assembly.
+  struct Packed_range {
+    int64_t            lo    = 0;
+    int64_t            width = 0;
+    slang::SourceRange sr{};  // the driver that claims [lo, lo+width), for the overlap diagnostic
+  };
+  struct Packed_drivers {
+    std::vector<Packed_range> ranges;
+    bool                      partial = false;
+  };
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Packed_drivers> packed_drivers;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                 packed_ineligible;
+  std::function<void(const slang::ast::Expression&)> collect_packed_target = [&](const slang::ast::Expression& expr) {
+    if (expr.kind == ExpressionKind::Assignment) {
+      collect_packed_target(expr.as<slang::ast::AssignmentExpression>().left());
+      return;
+    }
+    if (expr.kind == ExpressionKind::Conversion) {
+      collect_packed_target(expr.as<slang::ast::ConversionExpression>().operand());
+      return;
+    }
+    if (expr.kind == ExpressionKind::Concatenation) {
+      for (const auto* op : expr.as<slang::ast::ConcatenationExpression>().operands()) {
+        collect_packed_target(*op);
+      }
+      return;
+    }
+    const auto* sym = lhs_base_symbol(expr);
+    if (sym == nullptr) {
+      Dep_collector dc;
+      dc.note_lhs(expr);
+      packed_ineligible.insert(dc.writes.begin(), dc.writes.end());
+      return;
+    }
+    if (reg_syms_.contains(sym) || input_syms_.contains(sym) || !is_plain_scalar_net(*sym) || bundle_port_of(*sym) != nullptr
+        || sym->getType().getBitWidth() <= 1) {
+      packed_ineligible.insert(sym);
+      return;
+    }
+    Packed_lv  lv;
+    const auto width = static_cast<int64_t>(sym->getType().getBitWidth());
+    if (!resolve_packed_lvalue(expr, lv, true) || lv.base != sym || lv.const_off < 0 || lv.width <= 0
+        || lv.const_off + lv.width > width) {
+      packed_ineligible.insert(sym);
+      return;
+    }
+    auto& info    = packed_drivers[sym];
+    info.partial |= lv.width != width;
+    info.ranges.push_back({lv.const_off, lv.width, expr.sourceRange});
+  };
+  for (const auto& d : drivers) {
+    if (d.member->kind == SymbolKind::ContinuousAssign) {
+      collect_packed_target(d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment());
+    } else if (d.member->kind == SymbolKind::Instance) {
+      for (const auto* conn : d.member->as<slang::ast::InstanceSymbol>().getPortConnections()) {
+        if (conn->port.kind != SymbolKind::Port || conn->getExpression() == nullptr) {
+          continue;
+        }
+        auto direction = conn->port.as<slang::ast::PortSymbol>().direction;
+        if (direction == slang::ast::ArgumentDirection::Out) {
+          collect_packed_target(*conn->getExpression());
+        } else if (direction != slang::ast::ArgumentDirection::In) {
+          Dep_collector dc;
+          dc.note_lhs(*conn->getExpression());
+          packed_ineligible.insert(dc.writes.begin(), dc.writes.end());
+        }
+      }
+    } else {
+      packed_ineligible.insert(d.writes.begin(), d.writes.end());
+    }
+  }
+  for (const auto* sym : emit_ordered(packed_drivers)) {
+    const auto& info = packed_drivers.at(sym);
+    if (!info.partial || packed_ineligible.contains(sym)) {
+      continue;
+    }
+    const auto                        ti = tinfo(sym->getType());
+    std::vector<unsigned>             counts(ti.bits, 0);
+    std::optional<slang::SourceRange> clash;  // the FIRST driver to land on a claimed bit
+    for (const auto& r : info.ranges) {
+      for (int64_t bit = r.lo; bit < r.lo + r.width; ++bit) {
+        if (++counts[bit] > 1 && !clash) {
+          clash = r.sr;
+        }
+      }
+    }
+    if (clash) {
+      // Overlapping concurrent drivers cannot take this representation: one
+      // wire per bit is single-assignment by construction. They are NOT
+      // refused, though — an ARRAYED instantiation broadcasting one output
+      // onto one net bit (`leaf_grid lg[32:0](.y(testo[0]))`, grid_hier_test;
+      // `w_3_to_5` in fixme_hier_test) is an established lec-tier shape that
+      // the legacy source-ordered lowering already handles, and turning it
+      // into a hard error demotes two `lec` ladder entries. Warn, and keep the
+      // existing path exactly as a procedural or dynamic writer does.
+      emit_warning(*clash,
+                   "overlapping-packed-drivers",
+                   "unsupported",
+                   std::string("concurrent packed drivers overlap bits of '") + std::string(sym->name)
+                       + "' — keeping the source-ordered (last-write-wins) lowering",
+                   "give every packed bit exactly one driver to get a single-assignment net per bit");
+      continue;
+    }
+    auto&      bits = packed_wire_bits_[sym];
+    const auto name = lname_of(*sym);
+    set_pending_loc(sym->location);
+    for (size_t bit = 0; bit < counts.size(); ++bit) {
+      auto leaf = suffixed_ref_of(name, absl::StrCat("__sub_", bit));
+      builder_.create_declare_stmts(leaf, "wire", "1", "0");
+      if (counts[bit] == 0) {
+        builder_.create_assign_stmts(leaf, "0ub?");
+      }
+      bits.push_back(std::move(leaf));
+    }
+    builder_.create_declare_stmts(name, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+    declared_.insert(sym);
+    wire_syms_.insert(sym);
+    clear_pending_loc();
+  }
+
   // Refine generated co-writers by constant element whenever every writer
   // selects exactly one distinct element. This admits root-first trees as
   // well as forward pipelines without giving their synthetic RMW reads an
@@ -4435,7 +4545,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   std::vector<absl::flat_hash_set<size_t>> deps(drivers.size());
   for (size_t i = 0; i < drivers.size(); ++i) {
     for (const auto* r : drivers[i].reads) {
-      if (reg_syms_.contains(r) || input_syms_.contains(r) || seq_out_nets.contains(r)) {
+      if (reg_syms_.contains(r) || input_syms_.contains(r) || seq_out_nets.contains(r) || packed_wire_bits_.contains(r)) {
         continue;
       }
       auto it = writers_of.find(r);
@@ -4951,7 +5061,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     // names — the order decides `lname_of`'s `_sN` numbering.
     for (const auto* wsym : emit_ordered(wire_syms_)) {
       const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
-      if (vs == nullptr) {
+      if (vs == nullptr || packed_wire_bits_.contains(vs)) {
         continue;
       }
       // The split is a PLAIN-SCALAR device (a `mut` accumulator with a scalar
@@ -4977,16 +5087,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         continue;  // one non-procedural driver, one WHOLE store: a plain wire is fine
       }
       // Readable, unique accumulator name derived from the wire's lname.
-      std::string stem = lname_of(*vs);
-      if (!stem.empty() && stem.front() == '`') {
-        stem = stem.substr(1, stem.size() - 2);
-      }
-      // Unique against the RAW spelling: `used_names_` holds pre-quote names
-      // (lname_of inserts before quote_if_needed), so uniquing on the quoted
-      // form would neither see a real collision nor be visible to a later
-      // lname_of. Quote only the name that actually goes out as an LNAST ref.
-      std::string raw       = unique_suffixed(stem, "__wtmp");
-      wire_split_tmp_[wsym] = ref_name_of_raw(raw);
+      wire_split_tmp_[wsym] = suffixed_ref_of(lname_of(*vs), "__wtmp");
     }
     // FLATTENED-AGGREGATE split: a wire-classified local whose representation
     // is a single flattened MUT bus (declare_unpacked's flatten branch:
@@ -5011,17 +5112,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           || output_syms_.contains(vs)) {
         continue;  // only local flattened buses (ports/memories keep their paths)
       }
-      std::string orig = lname_of(*vs);
-      std::string stem = orig;
-      if (!stem.empty() && stem.front() == '`') {
-        stem = stem.substr(1, stem.size() - 2);
-      }
-      // Unique against the RAW spelling (see the __wtmp note above): quoting
-      // before the collision check hides real collisions from lname_of.
-      std::string wnet      = unique_suffixed(stem, "__wnet");
+      std::string orig      = lname_of(*vs);
+      std::string wnet      = suffixed_ref_of(orig, "__wnet");
       wire_split_tmp_[wsym] = std::move(orig);  // accumulator = the pre-declared mut
       wire_split_flat_.insert(wsym);
-      sym_lname_[wsym] = ref_name_of_raw(wnet);  // readers resolve through the wire
+      sym_lname_[wsym] = std::move(wnet);  // readers resolve through the wire
     }
   }
 
@@ -5188,7 +5283,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   {
     std::vector<const slang::ast::Symbol*> wouts;
     for (const auto* sym : output_syms_) {
-      if (!wire_syms_.contains(sym) || reg_syms_.contains(sym) || !sym_lname_.contains(sym)) {
+      if (!wire_syms_.contains(sym) || reg_syms_.contains(sym) || !sym_lname_.contains(sym) || packed_wire_bits_.contains(sym)) {
         continue;
       }
       const auto* vs = sym->as_if<slang::ast::ValueSymbol>();
@@ -5543,6 +5638,22 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   }
   for (size_t i : cyclic) {
     emit_driver(i);
+  }
+
+  // Assemble each vector once. All early whole/dynamic reads bind to this
+  // wire; constant bit/slice reads bind directly to the scalar wires above.
+  for (const auto* sym : emit_ordered(packed_wire_bits_)) {
+    const auto&                             bits = packed_wire_bits_.at(sym);
+    std::vector<Lnast_builder::Concat_lane> lanes;
+    for (auto it = bits.rbegin(); it != bits.rend(); ++it) {
+      lanes.push_back({*it, 1});
+    }
+    const auto& vs = sym->as<slang::ast::ValueSymbol>();
+    const auto  ti = tinfo(vs.getType());
+    set_pending_loc(vs.location);
+    auto packed = builder_.create_concat_stmts(lanes);
+    builder_.create_assign_stmts(lname_of(vs), fit_wrap(packed, ti.bits, ti.is_signed));
+    clear_pending_loc();
   }
 
   // Split-wire bridges: the single driver of each split wire, `<net> =
@@ -6348,6 +6459,14 @@ slang::SVInt Slang_module_state::Reset_slices::assemble() const {
     ops.push_back(sl->value);
   }
   auto out = slang::SVInt::concat(std::span<slang::SVInt const>(ops.data(), ops.size()));
+  // Spell the fold UNSIGNED even for a signed register. It reads oddly next
+  // to the whole-register store path (`reg q:s8:[initial=240]` where that path
+  // prints `-16`), but a NEGATIVE value here is a silent miscompile past 62
+  // bits: inou/cgen's const_to_verilog only re-emits a negative as two's
+  // complement while `is_just_i64()` holds (get_signed_bits() <= 62), and past
+  // that `Dlop::to_verilog()` DROPS THE SIGN and prints the bare magnitude, so
+  // a signed reg wider than that resets to the negation of the right value
+  // (LEC-refuted on a 96-bit reg). The unsigned magnitude always round-trips.
   out.setSigned(false);
   return out;
 }
@@ -6569,9 +6688,7 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
       } else {
         auto lane_val = packed->get_mask_op_opt(lane, lane + 1);
         if (!lane_val) {
-          emit_unsupported(sym.location,
-                           "unsupported-bit-clock-reset",
-                           "could not split the reset value across the register bits");
+          emit_unsupported(sym.location, "unsupported-bit-clock-reset", "could not split the reset value across the register bits");
           return;
         }
         value = std::string(lane_val->to_pyrope());
