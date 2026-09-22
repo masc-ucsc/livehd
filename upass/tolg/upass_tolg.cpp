@@ -1339,6 +1339,21 @@ private:
       info.hier_prefix = std::string(val);
     } else if ((key == "type") || (key == "comptime")) {
       // storage-class markers — already consumed by the declare
+    } else if ((key == "__store_clock_pin") || (key == "__store_posclk")) {
+      // Memory-only markers: inou.slang emits them for the STORES of an
+      // unpacked array, and only lower_mem_update_store / lower_mem_store read
+      // them. Landing on a Flop means the array was lowered as a scalar
+      // register instead, and the generic warning below would let the clock
+      // evaporate -- finalize_regs then binds the flop to the lazily-minted
+      // implicit `clock` input, on the WRONG edge. That is the vpu_trans
+      // `id_trans_scoreboard_o` / intpipe_csr_msgs failure; a dropped clock is
+      // not a warning.
+      error_at(tgt,
+               {"store-attr-on-flop", "unsupported"},
+               "reg '{}' carries the memory-only marker '{}': its clock would "
+               "be silently dropped",
+               lnast_->get_name(tgt),
+               key);
     } else {
       warn_at(tgt,
               {"reg-attr-not-lowered", "unsupported"},

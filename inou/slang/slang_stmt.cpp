@@ -72,7 +72,10 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       const auto& list = stmt.as<slang::ast::StatementList>().list;
       size_t      arms = 0;
       for (size_t i = 0; i < list.size(); ++i) {
-        lower_statement(*list[i]);
+        if (!(i > 0 && list[i]->kind == StatementKind::WhileLoop
+              && lower_bounded_while(list[i]->as<slang::ast::WhileLoopStatement>(), *list[i - 1]))) {
+          lower_statement(*list[i]);
+        }
         const auto* flag = own_brk_flag();
         if (flag != nullptr && i + 1 < list.size() && subtree_has_break(*list[i])) {
           auto guard = builder_.create_eq_stmts(*flag, "0");
@@ -1197,6 +1200,177 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
   for (const auto* lv : locals) {
     eval_ctx_->deleteLocal(lv);
   }
+}
+
+// Recognize a counted scan with a runtime early-stop predicate. The adjacent
+// initializer and the unconditional, unique counter update prove a finite bound;
+// arbitrary runtime while loops still diagnose rather than silently truncating.
+bool Slang_context::lower_bounded_while(const slang::ast::WhileLoopStatement& stmt, const slang::ast::Statement& initializer) {
+  using slang::ast::BinaryOperator;
+  using slang::ast::ExpressionKind;
+  using slang::ast::UnaryOperator;
+  const slang::ast::ValueSymbol* counter = nullptr;
+  const slang::ast::Expression*  initial = nullptr;
+  if (initializer.kind == StatementKind::ExpressionStatement) {
+    const auto& expr = initializer.as<slang::ast::ExpressionStatement>().expr;
+    if (expr.kind != ExpressionKind::Assignment) {
+      return false;
+    }
+    const auto& a = expr.as<slang::ast::AssignmentExpression>();
+    if (a.isNonBlocking() || a.isCompound() || a.left().kind != ExpressionKind::NamedValue) {
+      return false;
+    }
+    counter = &a.left().as<slang::ast::NamedValueExpression>().symbol;
+    initial = &a.right();
+  } else if (initializer.kind == StatementKind::VariableDeclaration) {
+    counter = &initializer.as<slang::ast::VariableDeclStatement>().symbol;
+    initial = counter->getInitializer();
+  }
+  if (!counter || !initial) {
+    return false;
+  }
+  auto first = try_eval_int(*initial);
+  if (!first || *first < 0) {
+    return false;
+  }
+  auto preserving_expr = [&](const slang::ast::Expression& e) {
+    const auto* p = &e;
+    while (p->kind == ExpressionKind::Conversion) {
+      if (!p->type->isIntegral() || p->type->getBitWidth() < counter->getType().getBitWidth()) {
+        return p;
+      }
+      p = &p->as<slang::ast::ConversionExpression>().operand();
+    }
+    return p;
+  };
+  auto is_counter = [&](const slang::ast::Expression& e) {
+    const auto* p = preserving_expr(e);
+    return p->kind == ExpressionKind::NamedValue && &p->as<slang::ast::NamedValueExpression>().symbol == counter;
+  };
+
+  // Only conjunctions imply that every executed iteration satisfies the bound.
+  // Bitwise AND qualifies when both operands are single-bit predicates (Wally).
+  std::optional<int64_t>                             bound;
+  std::function<void(const slang::ast::Expression&)> find_bound = [&](const auto& raw) {
+    const auto* e = peel_loop_expr(raw);
+    if (e->kind != ExpressionKind::BinaryOp) {
+      return;
+    }
+    const auto& b = e->template as<slang::ast::BinaryExpression>();
+    if (b.op == BinaryOperator::LogicalAnd
+        || (b.op == BinaryOperator::BinaryAnd && b.left().type->getBitWidth() == 1 && b.right().type->getBitWidth() == 1)) {
+      find_bound(b.left());
+      find_bound(b.right());
+    } else if (b.op == BinaryOperator::LessThan && is_counter(b.left())) {
+      if (auto limit = try_eval_int(b.right()); limit && *limit >= 0) {
+        bound = bound ? std::min(*bound, *limit) : *limit;
+      }
+    }
+  };
+  find_bound(stmt.cond);
+  if (!bound) {
+    return false;
+  }
+
+  const auto* tail = &stmt.body;
+  while (true) {
+    if (tail->kind == StatementKind::Block) {
+      tail = &tail->as<slang::ast::BlockStatement>().body;
+    } else if (tail->kind == StatementKind::List && !tail->as<slang::ast::StatementList>().list.empty()) {
+      tail = tail->as<slang::ast::StatementList>().list.back();
+    } else {
+      break;
+    }
+  }
+  if (tail->kind != StatementKind::ExpressionStatement) {
+    return false;
+  }
+  const auto& step      = tail->as<slang::ast::ExpressionStatement>().expr;
+  bool        unit_step = false;
+  if (step.kind == ExpressionKind::Assignment) {
+    const auto& a   = step.as<slang::ast::AssignmentExpression>();
+    const auto* rhs = preserving_expr(a.right());
+    if (!a.isNonBlocking() && !a.isCompound() && is_counter(a.left()) && rhs->kind == ExpressionKind::BinaryOp) {
+      const auto& sum = rhs->as<slang::ast::BinaryExpression>();
+      unit_step       = sum.op == BinaryOperator::Add && is_counter(sum.left()) && try_eval_int(sum.right()) == 1;
+    }
+  } else if (step.kind == ExpressionKind::UnaryOp) {
+    const auto& u = step.as<slang::ast::UnaryExpression>();
+    unit_step     = (u.op == UnaryOperator::Preincrement || u.op == UnaryOperator::Postincrement) && is_counter(u.operand());
+  }
+  if (!unit_step) {
+    return false;
+  }
+
+  int  writes = 0;
+  bool unsafe = false;
+  auto scan   = slang::ast::makeVisitor(
+      [&](auto& visitor, const slang::ast::AssignmentExpression& a) {
+        if (is_counter(a.left())) {
+          ++writes;
+        } else {
+          Fullcase_write_collector wc;
+          wc.note(a.left());
+          if (wc.seen.contains(counter)) {
+            unsafe = true;
+          }
+        }
+        visitor.visitDefault(a);
+      },
+      [&](auto& visitor, const slang::ast::UnaryExpression& u) {
+        if (u.op == UnaryOperator::Preincrement || u.op == UnaryOperator::Postincrement || u.op == UnaryOperator::Predecrement
+            || u.op == UnaryOperator::Postdecrement) {
+          if (is_counter(u.operand())) {
+            ++writes;
+          } else {
+            unsafe = true;
+          }
+        }
+        visitor.visitDefault(u);
+      },
+      [&](auto&, const slang::ast::CallExpression&) { unsafe = true; },
+      [&](auto&, const slang::ast::BreakStatement&) { unsafe = true; },
+      [&](auto&, const slang::ast::ContinueStatement&) { unsafe = true; },
+      [&](auto&, const slang::ast::ReturnStatement&) { unsafe = true; });
+  stmt.cond.visit(scan);
+  if (writes != 0 || unsafe) {
+    return false;
+  }
+  stmt.body.visit(scan);
+  if (writes != 1 || unsafe) {
+    return false;
+  }
+  const auto ti        = tinfo(counter->getType());
+  const int  magnitude = ti.bits - (ti.is_signed ? 1 : 0);
+  if (magnitude <= 0 || (magnitude < 63 && *bound >= (int64_t{1} << magnitude))) {
+    return false;
+  }
+
+  const int64_t trips = std::max(int64_t{0}, *bound - *first);
+  if (trips >= unroll_budget_) {
+    emit_error(stmt.sourceRange, "unroll-limit", "comptime", "bounded while loop exceeds the remaining unroll budget");
+    return true;
+  }
+  Unflagged_loop_scope loop_scope(this);
+  // Nest each successor in the preceding iteration's taken arm. A false
+  // condition exits the entire scan, and the intermediate counter values stay
+  // constant within those arms (avoiding a dynamic selector / phi per trip).
+  int64_t              arms = 0;
+  for (int64_t k = 0; k < trips; ++k) {
+    if (!unroll_tick(stmt)) {
+      break;
+    }
+    auto condition = booleanize(lower_rvalue(stmt.cond));
+    auto arm       = builder_.create_if_stmt(false);
+    builder_.add_if_cond(arm, condition);
+    builder_.push_stmts(builder_.add_if_stmts(arm));
+    ++arms;
+    lower_statement(stmt.body);
+  }
+  while (arms-- > 0) {
+    builder_.pop_stmts();
+  }
+  return true;
 }
 
 void Slang_context::lower_while_loop(const slang::ast::Statement& stmt) {

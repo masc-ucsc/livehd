@@ -566,7 +566,7 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     // rightmost element is the LSB). Parameter elements are compile-time
     // constants, including signed and unknown bits; runtime selection then
     // follows exactly the same path as any other flattened array read.
-    if (cv.isUnpacked() && flat_port_syms_.contains(&sym)) {
+    if (cv.isUnpacked()) {
       std::vector<Lnast_builder::Concat_lane>          lanes;
       std::function<bool(const slang::ConstantValue&)> append = [&](const auto& value) {
         if (value.isInteger()) {
@@ -735,8 +735,9 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       auto        cur      = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
       // post-inc/dec returns the OLD value, but the write below re-versions the
       // operand, so snapshot it into a fresh temp first (cprop folds the +0).
-      std::string old_snap = is_pre ? std::string{} : builder_.create_plus_stmts(cur, "0");
-      auto        nv = trunc_to(is_inc ? builder_.create_plus_stmts(cur, "1") : builder_.create_minus_stmts(cur, "1"), oi.bits);
+      std::string old_snap = is_pre ? std::string{} : builder_.create_plus_stmts(fit_wrap(cur, oi.bits, oi.is_signed), "0");
+      auto        nv
+          = fit_wrap(is_inc ? builder_.create_plus_stmts(cur, "1") : builder_.create_minus_stmts(cur, "1"), oi.bits, oi.is_signed);
       // `x++`/`x--` is a BLOCKING write (LRM); set the flag so note_write does
       // not inherit a stale nonblocking style from a preceding `<=` and then
       // false-flag the variable as mixing assignment styles.

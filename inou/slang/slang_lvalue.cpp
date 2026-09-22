@@ -231,7 +231,7 @@ bool Slang_context::lower_unpacked_zero_fill(const slang::ast::Expression& raw_l
   // A full zero fill is therefore exactly one store, preserving the aggregate
   // identity instead of manufacturing one set_mask per element.
   if (flat_port_syms_.contains(base_sym) && whole) {
-    builder_.create_assign_stmts(lname_of(*base_sym), "0");
+    builder_.create_assign_stmts(write_target_of(*base_sym), "0");
     return true;
   }
   if (flat_port_syms_.contains(base_sym)) {
@@ -264,7 +264,7 @@ bool Slang_context::lower_unpacked_zero_fill(const slang::ast::Expression& raw_l
     }
   }
 
-  const auto name = lname_of(*base_sym);
+  const auto name = write_target_of(*base_sym);
   auto&      ln   = *builder_.lnast;
   for (int64_t off = 0; off < suffix_count; ++off) {
     std::string idx = base_index;
@@ -362,7 +362,7 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   }
 
   note_write(lsym, current_assign_nonblocking_, lhs->sourceRange.start());
-  const auto lname = lname_of(lsym);
+  const auto lname = write_target_of(lsym);
   const auto rname = lname_of(rsym);
 
   // A plain array may be represented either as a Memory (entry zero in the
@@ -455,6 +455,19 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       auto wname = write_target_of(sym);
       if (rhs == name && wname == name) {
         return;  // full-width self-assign (`q <= q;` hold idiom): an unwritten reg already holds
+      }
+      if (bit_regs_.contains(&sym)) {
+        Packed_lv lv;
+        if (resolve_packed_lvalue(lhs, lv)) {
+          emit_packed_rmw(lv, rhs, lhs.sourceRange);
+        } else {
+          // Never fall through to the flat store: that would drive the READ-ONLY
+          // packed view and silently lose the write to every bit flop.
+          emit_unsupported(lhs.sourceRange,
+                           "unsupported-bit-clock-write",
+                           "independently clocked vector bits require a packed destination");
+        }
+        return;
       }
       // A bundle-declared struct var has NO flat net — every read resolves
       // through its leaves, so a flat store would be dead (undriven leaves,
@@ -704,7 +717,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
             if (const auto* f = find_tuple_field(mi, field.name)) {
               auto idx = build_unpacked_index(mi, sels);
               note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
-              emit_field_store(lname_of(*base_sym), idx, f->name, to_pattern(to_int_value(rhs), f->bits, f->is_signed));
+              emit_field_store(write_target_of(*base_sym), idx, f->name, to_pattern(to_int_value(rhs), f->bits, f->is_signed));
               return;
             }
           }
@@ -1157,7 +1170,13 @@ const slang::ast::Expression* Slang_context::peel_unpacked_chain(const slang::as
 // accumulate `acc = acc*width_k + (sel_k - lower_k)`, folding while every term
 // is a compile-time constant. A Mem_info without dims (memory-ized packed reg)
 // is a single dim {lower, size}.
-std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels) {
+std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels,
+                                                std::string* in_range) {
+  auto check = [&](const std::string& condition) {
+    if (in_range) {
+      *in_range = in_range->empty() ? condition : builder_.create_log_and_stmts(*in_range, condition);
+    }
+  };
   std::optional<int64_t> cacc = 0;  // constant accumulator while it stays foldable
   std::string            dacc;      // otherwise the accumulated expression
   for (size_t k = 0; k < sels.size(); ++k) {
@@ -1170,6 +1189,9 @@ std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::v
       }
     }
     if (auto ci = try_eval_int(*sels[k])) {
+      if (*ci < d.lower || *ci - d.lower >= d.width) {
+        check("false");
+      }
       if (cacc) {
         *cacc += *ci - d.lower;
       } else if (*ci != d.lower) {
@@ -1177,6 +1199,10 @@ std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::v
       }
     } else {
       auto v = to_int_value(lower_rvalue(*sels[k]));
+      if (in_range != nullptr) {  // `check` is a no-op without it; skip the compare nodes too
+        check(builder_.create_ge_stmts(v, std::to_string(d.lower)));
+        check(builder_.create_lt_stmts(v, std::to_string(d.lower + d.width)));
+      }
       if (d.lower != 0) {
         v = builder_.create_minus_stmts(v, std::to_string(d.lower));
       }
@@ -1210,47 +1236,82 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
     return flat_port_read(expr.as<slang::ast::ElementSelectExpression>(), mem_info_.at(base_sym));
   }
   auto mit = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
-  if (mit == mem_info_.end() || sels.size() != mit->second.rank()) {
+  if (mit == mem_info_.end() || sels.size() > mit->second.rank()) {
     emit_unsupported(expr.sourceRange, "unsupported-array-read", "unpacked array read on an unsupported base");
     return "0";
   }
-  const auto& mi = mit->second;
-
-  auto idx = build_unpacked_index(mi, sels);
-
-  // Struct-element memory: reconstruct the packed element bus from per-field
-  // reads (the inverse of the whole-element write decomposition). The index is
-  // computed once and reused across the field reads.
-  if (mi.is_tuple) {
-    std::string acc;
-    auto        mem_name = lname_of(*base_sym);
-    for (const auto& f : mi.fields) {
-      auto fv     = emit_field_read_chain(mem_name, idx, f.name);  // unsigned f.bits temp
-      auto placed = to_pattern(fv, mi.elem_bits, false);
-      if (f.off != 0) {
-        placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+  const auto  mi = mit->second;
+  std::string in_range;
+  auto        idx          = build_unpacked_index(mi, sels, sels.size() < mi.rank() ? &in_range : nullptr);
+  const auto  mem_name     = write_target_of(*base_sym);
+  auto        read_element = [&](const std::string& index) {
+    if (mi.is_tuple) {
+      std::string acc;
+      for (const auto& f : mi.fields) {
+        auto fv     = emit_field_read_chain(mem_name, index, f.name);
+        auto placed = to_pattern(fv, mi.elem_bits, false);
+        if (f.off != 0) {
+          placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+        }
+        acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
       }
-      acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
+      return acc.empty() ? std::string("0") : acc;
     }
-    return acc.empty() ? "0" : acc;
+    auto& ln  = *builder_.lnast;
+    auto  tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
+    auto  tmp = builder_.create_lnast_tmp();
+    ln.add_child(tg, Lnast_node::create_ref(tmp));
+    ln.add_child(tg, Lnast_node::create_ref(mem_name));
+    builder_.add_value_child_pub(tg, index);
+    builder_.note_unsigned_bits(tmp, mi.elem_bits);
+    return tmp;
+  };
+  if (sels.size() == mi.rank()) {
+    auto value = read_element(idx);
+    return mi.elem_signed ? builder_.create_sext_stmts(value, std::to_string(mi.elem_bits - 1)) : value;
   }
 
-  auto& ln  = *builder_.lnast;
-  auto  tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
-  auto  tmp = builder_.create_lnast_tmp();
-  ln.add_child(tg, Lnast_node::create_ref(tmp));
-  ln.add_child(tg, Lnast_node::create_ref(lname_of(*base_sym)));
-  builder_.add_value_child_pub(tg, idx);
-
-  if (mi.elem_signed) {
-    return builder_.create_sext_stmts(tmp, std::to_string(mi.elem_bits - 1));
+  // A partial selector denotes a value array, not one memory element. Gather
+  // its leaves in declaration order for the flat function / instance port ABI.
+  // Native memory indices instead count upward from each numeric lower bound;
+  // walk the remaining type ranges to bridge both ascending and descending axes.
+  int64_t count = 1;
+  for (size_t d = sels.size(); d < mi.rank(); ++d) {
+    count *= mi.dims[d].width;
   }
-  // An element read is exactly elem_bits wide and unsigned. Say so, or every
-  // whole-element use re-masks it to its own width — `tbl[0]#[0..=11]` on a
-  // `[4]u12` (10,089 such no-op masks across the xiangshan Backend once packed
-  // register banks started emitting as arrays).
-  builder_.note_unsigned_bits(tmp, mi.elem_bits);
-  return tmp;
+  if (count > 65536 / mi.elem_bits) {
+    emit_unsupported(expr.sourceRange, "array-value-too-wide", "unpacked array value exceeds 65536 bits");
+    return "0";
+  }
+  idx = builder_.create_mult_stmts(idx, std::to_string(count));
+  std::vector<Lnast_builder::Concat_lane>                        lanes;
+  std::function<void(const slang::ast::Type&, int64_t, int64_t)> gather = [&](const auto& type, int64_t offset, int64_t stride) {
+    const auto& ct = type.getCanonicalType();
+    if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+      const auto& arr  = ct.template as<slang::ast::FixedSizeUnpackedArrayType>();
+      stride          /= arr.range.width();
+      for (int64_t k = 0; k < arr.range.width(); ++k) {
+        auto lane = arr.range.isDescending() ? arr.range.width() - 1 - k : k;
+        gather(arr.elementType, offset + lane * stride, stride);
+      }
+    } else {
+      auto index = offset == 0 ? idx : builder_.create_plus_stmts(idx, std::to_string(offset));
+      lanes.push_back({read_element(index), mi.elem_bits});
+    }
+  };
+  gather(*expr.type, 0, count);
+  auto value = builder_.create_concat_stmts(lanes);
+  if (in_range.empty()) {
+    return value;
+  }
+  auto result = fresh_local("array_value");
+  builder_.create_declare_stmts(result, "mut", mask_text(static_cast<int>(count * mi.elem_bits)), "0", "0sb?");
+  auto guard = builder_.create_if_stmt(false);
+  builder_.add_if_cond(guard, in_range);
+  builder_.push_stmts(builder_.add_if_stmts(guard));
+  builder_.create_assign_stmts(result, value);
+  builder_.pop_stmts();
+  return result;
 }
 
 void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, const std::string& rhs) {
@@ -1283,7 +1344,7 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
   if (mi.is_tuple) {
     note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
     auto p        = to_pattern(to_int_value(rhs), mi.elem_bits, false);
-    auto mem_name = lname_of(*base_sym);
+    auto mem_name = write_target_of(*base_sym);
     for (const auto& f : mi.fields) {
       emit_field_store(mem_name, idx, f.name, extract_field(p, f.off, f.bits));
     }
@@ -1296,7 +1357,7 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
 
   auto& ln = *builder_.lnast;
   auto  st = builder_.add_child(Lnast_ntype::create_store());
-  ln.add_child(st, Lnast_node::create_ref(lname_of(*base_sym)));
+  ln.add_child(st, Lnast_node::create_ref(write_target_of(*base_sym)));
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, val);
 }
@@ -1436,7 +1497,7 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
     mem_wensize_emitted_.insert(mem_sym);
     auto& ln   = *builder_.lnast;
     auto  aidx = builder_.add_child(Lnast_ntype::create_attr_set());
-    ln.add_child(aidx, Lnast_node::create_ref(lname_of(*mem_sym)));
+    ln.add_child(aidx, Lnast_node::create_ref(write_target_of(*mem_sym)));
     ln.add_child(aidx, Lnast_node::create_const("wensize"));
     ln.add_child(aidx, Lnast_node::create_const(std::to_string(wensize)));
   }
@@ -1447,7 +1508,7 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
   auto& ln = *builder_.lnast;
   auto  st = builder_.add_child(Lnast_ntype::create_store());
-  ln.add_child(st, Lnast_node::create_ref(lname_of(*mem_sym)));
+  ln.add_child(st, Lnast_node::create_ref(write_target_of(*mem_sym)));
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, din);
   if (wensize > 1) {
@@ -1589,7 +1650,7 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
   auto  idx      = build_unpacked_index(mi, sels);
   auto  val      = to_pattern(rhs, width, ti.is_signed);
   auto& ln       = *builder_.lnast;
-  auto  mem_name = lname_of(*mem_sym);
+  auto  mem_name = write_target_of(*mem_sym);
 
   // set_mask(%new, src, mask, value) — the copy-temp shape (dst != src) tolg
   // lowers without rebinding `src`, which here is a read temp, not a variable.
@@ -1609,7 +1670,7 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
   // second site rather than emit hardware that loses a write. A combinational
   // array is exempt: tolg keeps it as a packed bus, so successive splices
   // chain in program order.
-  const bool clocked   = reg_syms_.contains(mem_sym);
+  const bool clocked   = reg_syms_.contains(mem_sym) && !blocking_values_.contains(mem_sym);
   auto       claim_rmw = [&](std::string_view leaf) {
     if (!clocked || mem_rmw_leaf_written_[mem_sym].insert(std::string(leaf)).second) {
       return true;
@@ -1737,7 +1798,7 @@ std::string Slang_context::flat_port_read(const slang::ast::ElementSelectExpress
 void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& es, const Mem_info& mi, const std::string& rhs) {
   const auto* base_sym  = resolve_base_symbol(es.value());
   const int   flat_bits = mi.elem_bits * static_cast<int>(mi.size);
-  auto        base_name = lname_of(*base_sym);
+  auto        base_name = write_target_of(*base_sym);
   auto        val       = to_pattern(to_int_value(rhs), mi.elem_bits, mi.elem_signed);
 
   if (auto ci = try_eval_int(es.selector())) {
@@ -1950,6 +2011,22 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
 }
 
 void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  if (auto it = bit_regs_.find(lv.base); it != bit_regs_.end()) {
+    if (!current_assign_nonblocking_ || proc_kind_ != Proc_kind::seq || !lv.dyn_off.empty() || lv.const_off < 0
+        || lv.const_off + lv.width > static_cast<int64_t>(it->second.size())) {
+      emit_unsupported(sr,
+                       "unsupported-bit-clock-write",
+                       "independently clocked vector bits require constant nonblocking destinations");
+      return;
+    }
+    note_write(*lv.base, true, sr.start());
+    for (int64_t bit = 0; bit < lv.width; ++bit) {
+      const auto& target = it->second[lv.const_off + bit];
+      builder_.create_assign_stmts(target, extract_field(rhs, bit, 1));
+      proc_bit_reg_writes_.insert(target);
+    }
+    return;
+  }
   // M7: a partial write whose resolved root is a BUNDLE port has no flat net
   // to set_mask — split/splice on the field leaves instead. Every packed
   // lvalue chain on a bundle port (`resp.f = v`, `resp.f[3:0] = v`,

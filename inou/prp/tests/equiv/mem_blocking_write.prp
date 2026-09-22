@@ -1,0 +1,25 @@
+/*
+:name: mem_blocking_write
+:type: equiv
+:verilog_top: mem_blocking_write
+:pyrope_top: mem_blocking_write
+*/
+// Persistent memory with explicit same-process bypass, including two writes
+// to the same address. The separate read output observes committed state.
+pub mod mem_blocking_write(clk:u1, we:u1, we2:u1, wa:u2, wd:u2, wa2:u2, wd2:u2, ra:u2)
+    -> (prior:u2@[], forwarded:u2@[], committed:u2@[0]) {
+  reg prior:u2 = nil
+  reg forwarded:u2 = nil
+  reg mem:[4]u2:[ordering="old"]
+  prior = mem[ra]
+  forwarded = mem[ra]
+  committed = mem[ra]
+  if we != 0 {
+    mem[wa] = wd
+    if wa == ra { forwarded = wd }
+  }
+  if we2 != 0 {
+    mem[wa2] = wd2
+    if wa2 == ra { forwarded = wd2 }
+  }
+}

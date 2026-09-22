@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -212,6 +213,17 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
     visitDefault(s);
   }
 
+  void handle(const slang::ast::UnaryExpression& expr) {
+    using slang::ast::UnaryOperator;
+    if (expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement || expr.op == UnaryOperator::Predecrement
+        || expr.op == UnaryOperator::Postdecrement) {
+      if (const auto* sym = lhs_base_symbol(expr.operand())) {
+        blocking.insert(sym);
+      }
+    }
+    visitDefault(expr);
+  }
+
   void handle(const slang::ast::AssignmentExpression& expr) {
     auto& set = expr.isNonBlocking() ? nonblocking : blocking;
 
@@ -228,6 +240,89 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
     };
     note(expr.left());
 
+    visitDefault(expr);
+  }
+};
+
+// A module-scope integer used exclusively inside the for loops that bind it
+// is an elaboration control, even when those loops sit under a runtime enable.
+// Record outside uses before/after each loop (including uses in other processes)
+// and body writes, so an observable retained counter still gets state analysis.
+struct Loop_control_usage : public slang::ast::ASTVisitor<Loop_control_usage, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>           counters;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>           observed;
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, unsigned> active;
+  bool                                                          in_header = false;
+
+  void handle(const slang::ast::ForLoopStatement& loop) {
+    std::vector<const slang::ast::ValueSymbol*> bound;
+    for (const auto* var : loop.loopVars) {
+      bound.push_back(var);
+    }
+    for (const auto* init : loop.initializers) {
+      if (init->kind != ExpressionKind::Assignment) {
+        continue;
+      }
+      const auto& lhs = init->as<slang::ast::AssignmentExpression>().left();
+      if (lhs.kind == ExpressionKind::NamedValue) {
+        bound.push_back(&lhs.as<slang::ast::NamedValueExpression>().symbol);
+      }
+    }
+    for (const auto* var : bound) {
+      counters.insert(var);
+      if (active[var]++ != 0) {
+        observed.insert(var);  // nested reuse is not a private control
+      }
+    }
+    const bool saved_header = in_header;
+    in_header               = true;
+    for (const auto* var : loop.loopVars) {
+      if (const auto* init = var->getInitializer()) {
+        init->visit(*this);
+      }
+    }
+    for (const auto* init : loop.initializers) {
+      init->visit(*this);
+    }
+    if (loop.stopExpr) {
+      loop.stopExpr->visit(*this);
+    }
+    for (const auto* step : loop.steps) {
+      step->visit(*this);
+    }
+    in_header = false;
+    loop.body.visit(*this);
+    in_header = saved_header;
+    for (const auto* var : bound) {
+      --active[var];
+    }
+  }
+
+  void handle(const slang::ast::ValueExpressionBase& expr) {
+    if (auto it = active.find(&expr.symbol); it == active.end() || it->second == 0) {
+      observed.insert(&expr.symbol);
+    }
+  }
+
+  void handle(const slang::ast::AssignmentExpression& expr) {
+    if (!in_header) {
+      Write_collector writes;
+      expr.visit(writes);
+      observed.insert(writes.blocking.begin(), writes.blocking.end());
+      observed.insert(writes.nonblocking.begin(), writes.nonblocking.end());
+    }
+    visitDefault(expr);
+  }
+
+  void handle(const slang::ast::UnaryExpression& expr) {
+    using slang::ast::UnaryOperator;
+    if (!in_header
+        && (expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement
+            || expr.op == UnaryOperator::Predecrement || expr.op == UnaryOperator::Postdecrement)) {
+      if (const auto* sym = lhs_base_symbol(expr.operand())) {
+        observed.insert(sym);
+      }
+    }
     visitDefault(expr);
   }
 };
@@ -1629,8 +1724,51 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     wc.decided            = [this](const slang::ast::ConditionalStatement& s) { return const_cond_value(s); };
     pbs.getBody().visit(wc);
     if (is_edge) {
+      auto written = wc.nonblocking;
+      written.insert(wc.blocking.begin(), wc.blocking.end());
+      // Elaborated generate indices are constants, but each replica still
+      // owns a different clock. Classify before any register is declared.
+      // A RESET rung may also be spelled as a bit-select (`@(posedge clk or
+      // negedge rst_n_vec[i])`); that says nothing about the clock domain, so
+      // skip reset-named triggers — the same token test the async-reset peel
+      // and the demotion gate use. Counting them would bit-blast every
+      // register of an ordinary single-clock process.
+      std::function<bool(const slang::ast::TimingControl&)> has_selected_edge = [&](const slang::ast::TimingControl& tc) {
+        if (tc.kind == slang::ast::TimingControlKind::EventList) {
+          for (const auto* event : tc.as<slang::ast::EventListControl>().events) {
+            if (has_selected_edge(*event)) {
+              return true;
+            }
+          }
+        } else if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
+          const auto* expr = &tc.as<slang::ast::SignalEventControl>().expr;
+          while (expr->kind == ExpressionKind::Conversion) {
+            expr = &expr->as<slang::ast::ConversionExpression>().operand();
+          }
+          if (expr->kind != ExpressionKind::ElementSelect) {
+            return false;
+          }
+          const auto& sel = expr->as<slang::ast::ElementSelectExpression>().value();
+          return sel.kind != ExpressionKind::NamedValue
+                 || !str_tools::is_reset_like_name(sel.as<slang::ast::NamedValueExpression>().symbol.name);
+        }
+        return false;
+      };
+      if (has_selected_edge(pbs.getBody().as<slang::ast::TimedStatement>().timing)) {
+        for (const auto* sym : written) {
+          const auto& type = sym->getType().getCanonicalType();
+          if (type.isIntegral() && !type.isStruct() && !type.isUnion() && type.getBitWidth() > 1) {
+            bit_regs_.try_emplace(sym);
+          }
+        }
+      }
+      for (const auto* sym : written) {
+        if (sym->getType().getCanonicalType().isUnpackedArray()) {
+          ++array_writer_count_[sym];
+        }
+      }
       for (const auto* sym : wc.blocking) {
-        if (sym->getType().getCanonicalType().isIntegral()) {
+        if (sym->getType().getCanonicalType().isIntegral() || sym->getType().getCanonicalType().isUnpackedArray()) {
           reg_syms_.insert(sym);
         }
       }
@@ -1657,8 +1795,8 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> definite;
       definite_blocking_writes(pbs.getBody(), definite, [this](const auto& c) { return case_is_exhaustive(c); });
       for (const auto* sym : wc.blocking) {
-        if (definite.contains(sym)) {
-          continue;  // assigned on every path: ordinary combinational logic
+        if (definite.contains(sym) || elaboration_counters_.contains(sym)) {
+          continue;  // definite write, or a counter consumed only during unrolling
         }
         reg_syms_.insert(sym);
         latch_syms_.insert(sym);
@@ -1756,6 +1894,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   emit_module_io(symbol, in_tup, out_tup);
   // Every classification pre-scan runs BEFORE the first expression lowers:
   // is_scalar_struct_var memoizes over the port/reg sets and struct_use_.
+  Loop_control_usage loop_usage;
+  body->visit(loop_usage);
+  for (const auto* counter : loop_usage.counters) {
+    if (!loop_usage.observed.contains(counter) && !output_syms_.contains(counter) && !input_syms_.contains(counter)) {
+      elaboration_counters_.insert(counter);
+    }
+  }
   collect_state_vars(*body);
   collect_struct_pattern_assigns(*body);
   {
@@ -2169,7 +2314,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         continue;  // mixed sub-word write shapes: see Sub_word_write_collector
       }
       if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && !array_range_written.contains(sym)
-          && !array_pattern_loaded.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
+          && !array_pattern_loaded.contains(sym) && !bit_regs_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
         packed_mem_regs_.insert(sym);
       }
     }
@@ -2183,6 +2328,12 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       continue;
     }
     const auto& vs = sym->as<slang::ast::ValueSymbol>();
+    if (bit_regs_.contains(sym)) {
+      emit_unsupported(vs.location,
+                       "mixed-bit-clock-drivers",
+                       "a vector with bit-selected clocks cannot also have continuous drivers");
+      continue;
+    }
     // Scope: FLAT integral state only. A struct var, a bundle port, an
     // unpacked array and a latch each carry their own leaf/shadow lowering
     // whose interaction with a second driver is a separate question. A plain
@@ -2774,6 +2925,41 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   }
   reg_declared_.insert(&sym);
   declared_.insert(&sym);
+
+  if (auto it = bit_regs_.find(&sym); it != bit_regs_.end()) {
+    const auto name = lname_of(sym);
+    const auto ti   = tinfo(sym.getType());
+    auto       initial        = reg_init_vals_.find(&sym);
+    auto       packed_initial = initial == reg_init_vals_.end() ? Dlop::create_integer(0) : Dlop::from_pyrope(initial->second);
+    // Same guard the struct-leaf reset split uses: from_pyrope/get_mask_op_opt
+    // both answer a NULL spool_ptr on text they cannot parse or slice, and
+    // dereferencing that is a crash, not a diagnostic.
+    const bool splittable     = packed_initial && !packed_initial->is_invalid();
+    if (initial != reg_init_vals_.end() && !splittable) {
+      emit_unsupported(sym.location, "unsupported-bit-clock-init", "could not split the power-on value across the register bits");
+    }
+    std::vector<Lnast_builder::Concat_lane> lanes;
+    for (int bit = 0; bit < ti.bits; ++bit) {
+      auto leaf = unique_suffixed(name, absl::StrCat("__bit", bit));
+      it->second.push_back(leaf);
+      auto lane_val = splittable ? packed_initial->get_mask_op_opt(bit, bit + 1) : decltype(packed_initial){};
+      auto value    = initial == reg_init_vals_.end() || !lane_val ? std::string("nil") : std::string(lane_val->to_pyrope());
+      builder_.create_declare_stmts(leaf, "reg", "1", "0", value);
+      lanes.push_back({leaf, 1});
+    }
+    if (initial != reg_init_vals_.end() && splittable) {
+      reg_init_applied_.insert(&sym);
+    }
+    // One read-only packed view preserves whole reads and output interfaces.
+    // Writes go directly to the leaves and never rebind this view.
+    if (!output_syms_.contains(&sym)) {
+      builder_.create_declare_stmts(name, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+    }
+    std::reverse(lanes.begin(), lanes.end());
+    auto packed = builder_.create_concat_stmts(lanes);
+    builder_.create_assign_stmts(name, fit_wrap(packed, ti.bits, ti.is_signed));
+    return;
+  }
 
   // M7: a REG-driven bundle output port keeps its TUPLE io interface, but the
   // body's flop is a flat SHADOW reg (`<port>_q`): every body access of the
@@ -3546,6 +3732,15 @@ struct Store_counter : public slang::ast::ASTVisitor<Store_counter, slang::ast::
     }
   }
 
+  void handle(const slang::ast::UnaryExpression& expr) {
+    using slang::ast::UnaryOperator;
+    if (expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement || expr.op == UnaryOperator::Predecrement
+        || expr.op == UnaryOperator::Postdecrement) {
+      note(expr.operand());
+    }
+    visitDefault(expr);
+  }
+
   void handle(const slang::ast::AssignmentExpression& expr) {
     const auto& lhs = expr.left();
     if (lhs.kind == ExpressionKind::Concatenation) {
@@ -3645,6 +3840,15 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
           reads.insert(sym);
         }
     }
+  }
+
+  void handle(const slang::ast::UnaryExpression& expr) {
+    using slang::ast::UnaryOperator;
+    if (expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement || expr.op == UnaryOperator::Predecrement
+        || expr.op == UnaryOperator::Postdecrement) {
+      note_lhs(expr.operand());
+    }
+    visitDefault(expr);
   }
 
   void handle(const slang::ast::AssignmentExpression& expr) {
@@ -5394,6 +5598,7 @@ void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSy
   proc_kind_ = Proc_kind::none;
   proc_assign_style_.clear();
   proc_blocking_written_.clear();
+  proc_bit_reg_writes_.clear();
 
   if (ca.getDelay() != nullptr) {
     emit_warning(slang::SourceRange(ca.location, ca.location),
@@ -5429,6 +5634,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
 
   proc_assign_style_.clear();
   proc_blocking_written_.clear();
+  proc_bit_reg_writes_.clear();
   unroll_budget_ = options_.unroll_limit;
 
   switch (pbs.procedureKind) {
@@ -5859,7 +6065,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     // owns.
     if (harvested) {
       for (const auto& [sym, p] : partials) {
-        if (p.mask != p.full && cont_assign_syms_.contains(sym)) {
+        if (!p.complete() && cont_assign_syms_.contains(sym)) {
           harvested = false;
           break;
         }
@@ -5871,24 +6077,27 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       // module has lowered; finalize_pending_async_resets requires exact whole-
       // register coverage under one reset control.
       for (const auto& [sym, p] : partials) {
-        if (p.mask == p.full) {
-          reset_stores.emplace_back(sym, std::to_string(p.value));
+        if (p.complete()) {
+          reset_stores.emplace_back(sym, const_text(p.assemble()));
           continue;
         }
         auto [it, inserted] = pending_async_resets_.try_emplace(sym);
         auto& pending       = it->second;
         if (inserted) {
-          pending.full      = p.full;
-          pending.reset_ref = reset_ref_name;
-          pending.edge_pos  = edge_pos;
-          pending.loc       = cond_stmt.ifTrue.sourceRange.start();
+          pending.parts.bits = p.bits;
+          pending.reset_ref  = reset_ref_name;
+          pending.edge_pos   = edge_pos;
+          pending.loc        = cond_stmt.ifTrue.sourceRange.start();
         }
-        if (pending.full != p.full || pending.reset_ref != reset_ref_name || pending.edge_pos != edge_pos
-            || (pending.mask & p.mask) != 0) {
+        if (pending.parts.bits != p.bits || pending.reset_ref != reset_ref_name || pending.edge_pos != edge_pos) {
           pending.invalid = true;
-        } else {
-          pending.mask  |= p.mask;
-          pending.value |= p.value;
+          continue;
+        }
+        for (const auto& sl : p.slices) {
+          if (!pending.parts.add(sl.lo, sl.width, sl.value)) {
+            pending.invalid = true;  // two processes reset the same bit
+            break;
+          }
         }
       }
     }
@@ -5900,6 +6109,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
                        "unsupported-async-load",
                        "the async-reset arm requires whole-register nonblocking loads or constant reset slices");
       return;
+    }
+    for (const auto& store : arm.bit_stores) {
+      emit_reg_reset_attrs(*store.sym, store.value, reset_ref_name, edge_pos, false, true, store.bit);
     }
     for (const auto& [sym, init_text] : reset_stores) {
       emit_reg_reset_attrs(*sym, init_text, reset_ref_name, edge_pos);
@@ -6031,17 +6243,17 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       const bool  visible = rst_sym != nullptr && (input_syms_.contains(rst_sym) || is_module_level(*rst_sym));
       if (visible && rst_sym->getType().getBitWidth() == 1 && is_reset_like_name(rst_sym->name)) {
         Reset_arm arm;
-        bool      ok = harvest_reset_arm(cs->ifTrue, arm, /*allow_loads=*/false) && arm.loads.empty();
+        bool      ok = harvest_reset_arm(cs->ifTrue, arm, /*allow_loads=*/false) && arm.loads.empty() && arm.bit_stores.empty();
         // Fold the constant slices; unlike the async twin there is no
         // cross-process queue here, so an incompletely covered register simply
         // declines the peel (the uncovered bits would have to HOLD, which one
         // reset value cannot express).
         for (const auto& [sym, p] : arm.partials) {
-          if (p.mask != p.full) {
+          if (!p.complete()) {
             ok = false;
             break;
           }
-          arm.stores.emplace_back(sym, std::to_string(p.value));
+          arm.stores.emplace_back(sym, const_text(p.assemble()));
         }
         for (const auto& [sym, value] : arm.stores) {
           (void)value;
@@ -6087,6 +6299,59 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
 // under a clocked `if` is ordinary data with no `initial` to ride on.
 // Validate-and-collect: the caller emits nothing until the whole arm harvests,
 // so a partial walk leaves no stray reset attrs behind.
+bool Slang_module_state::Reset_slices::add(int64_t lo, int64_t width, const slang::SVInt& value) {
+  if (width <= 0 || lo < 0 || static_cast<uint64_t>(lo + width) > bits) {
+    return false;
+  }
+  for (const auto& sl : slices) {
+    if (lo < sl.lo + sl.width && sl.lo < lo + width) {
+      return false;  // overlapping writes: last-wins ordering is not modelled here
+    }
+  }
+  // `resize` truncates or (sign-)extends exactly as the verilog assignment
+  // context does, and keeps the x/z bits `SVInt::set` needs below.
+  slices.push_back({lo, width, value.resize(static_cast<slang::bitwidth_t>(width))});
+  return true;
+}
+
+bool Slang_module_state::Reset_slices::complete() const {
+  if (bits == 0 || slices.empty()) {
+    return false;
+  }
+  uint64_t covered = 0;
+  for (const auto& sl : slices) {
+    covered += static_cast<uint64_t>(sl.width);
+  }
+  // add() already refused overlaps and out-of-range slices, so a full bit
+  // count is exact coverage of [0, bits).
+  return covered == bits;
+}
+
+slang::SVInt Slang_module_state::Reset_slices::assemble() const {
+  // SVInt::concat is the only unknown-EXACT way to join the slices in this
+  // slang: it copies the unknown half verbatim (x stays x, z stays z), while
+  // `SVInt::set` on a known accumulator hits a `memcpy(dst, src,
+  // getNumWords())` that passes a WORD count as a BYTE count
+  // (source/numeric/SVInt.cpp:1516) and wipes everything past bit 8, and
+  // `operator|` normalizes z to x. The first operand supplies the MSB, so
+  // walk the slices high-to-low. complete() has already proved they tile
+  // [0, bits) exactly, which makes the result exactly `bits` wide.
+  std::vector<const Slice*> ordered;
+  ordered.reserve(slices.size());
+  for (const auto& sl : slices) {
+    ordered.push_back(&sl);
+  }
+  std::sort(ordered.begin(), ordered.end(), [](const Slice* a, const Slice* b) { return a->lo > b->lo; });
+  std::vector<slang::SVInt> ops;
+  ops.reserve(ordered.size());
+  for (const auto* sl : ordered) {
+    ops.push_back(sl->value);
+  }
+  auto out = slang::SVInt::concat(std::span<slang::SVInt const>(ops.data(), ops.size()));
+  out.setSigned(false);
+  return out;
+}
+
 bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads) {
   using slang::ast::ExpressionKind;
   using slang::ast::StatementKind;
@@ -6098,14 +6363,79 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
   // slices per reg and fold them into one `initial=` value once every bit of
   // the reg is covered; anything short of full coverage still demotes, because
   // the uncovered bits would have to HOLD, which a reset value cannot express.
-  auto partial_of = [&](const slang::ast::ValueSymbol* sym) -> Reset_arm::Partial* {
+  auto partial_of = [&](const slang::ast::ValueSymbol* sym) -> Reset_slices* {
     for (auto& [s, p] : out.partials) {
       if (s == sym) {
         return &p;
       }
     }
-    out.partials.emplace_back(sym, Reset_arm::Partial{});
+    out.partials.emplace_back(sym, Reset_slices{});
     return &out.partials.back().second;
+  };
+  std::function<bool(const slang::ast::Expression&, const slang::SVInt&)> harvest_constant
+      = [&](const slang::ast::Expression& lhs, const slang::SVInt& value) -> bool {
+    if (lhs.kind == ExpressionKind::Concatenation) {
+      // Match assign_to: the rightmost destination receives the low bits.
+      // Keep SVInt slices (rather than a host integer) so wide constants and
+      // nested concatenations retain every bit and each leaf's signedness.
+      const auto bits = lhs.type->getBitWidth();
+      if (bits == 0) {
+        return false;
+      }
+      const auto packed = value.resize(bits);
+      auto       ops    = lhs.as<slang::ast::ConcatenationExpression>().operands();
+      int32_t    offset = 0;
+      for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
+        const auto& dest  = **it;
+        const auto  width = dest.type->getBitWidth();
+        if (width == 0) {
+          return false;
+        }
+        auto part = packed.slice(offset + width - 1, offset);
+        part.setSigned(dest.type->isSigned());
+        if (!harvest_constant(dest, part)) {
+          return false;
+        }
+        offset += width;
+      }
+      return true;
+    }
+    const auto* sym = lhs_base_symbol(lhs);
+    if (sym == nullptr || !reg_syms_.contains(sym)) {
+      return false;
+    }
+    if (bit_regs_.contains(sym)) {
+      Packed_lv lv;
+      if (!resolve_packed_lvalue(lhs, lv) || !lv.dyn_off.empty() || lv.const_off < 0
+          || lv.const_off + lv.width > static_cast<int64_t>(sym->getType().getBitWidth())) {
+        return false;
+      }
+      const auto packed = value.resize(lv.width);
+      for (int64_t bit = 0; bit < lv.width; ++bit) {
+        out.bit_stores.push_back({sym, lv.const_off + bit, const_text(packed.slice(bit, bit))});
+      }
+      return true;
+    }
+    if (lhs.kind == ExpressionKind::NamedValue) {
+      out.stores.emplace_back(sym, const_text(value));
+      return true;
+    }
+    // Resolve packed slices exactly as ordinary writes, including the
+    // flattened offsets of multi-dimensional packed arrays.
+    if (lhs.kind != ExpressionKind::ElementSelect && lhs.kind != ExpressionKind::RangeSelect) {
+      return false;
+    }
+    Packed_lv lv;
+    if (!resolve_packed_lvalue(lhs, lv) || lv.base != sym || !lv.dyn_off.empty()) {
+      return false;
+    }
+    const uint64_t reg_bits = sym->getType().getBitWidth();
+    if (reg_bits == 0) {
+      return false;
+    }
+    auto* p = partial_of(sym);
+    p->bits = reg_bits;
+    return p->add(lv.const_off, lv.width, value);
   };
   std::function<bool(const slang::ast::Statement&)> harvest = [&](const slang::ast::Statement& s) -> bool {
     switch (s.kind) {
@@ -6141,17 +6471,17 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
         if (e.kind != ExpressionKind::Assignment) {
           return false;
         }
-        const auto& as  = e.as<slang::ast::AssignmentExpression>();
-        const auto* sym = lhs_base_symbol(as.left());
-        if (sym == nullptr || !reg_syms_.contains(sym)) {
-          return false;
-        }
+        const auto& as = e.as<slang::ast::AssignmentExpression>();
         // NOTE (provenance, deferred): a bare `q <= PKG_PARAM` reset load
         // still FOLDS here — carrying the name through the `initial` attr as
         // a ref mis-resolves on recompile (LEC-refuted), so it needs the
         // attr-resolution work first (see provenance.md M6).
-        auto cv = try_eval_const_net(as.right());
+        auto        cv = try_eval_const_net(as.right());
         if (!cv || !cv->isInteger()) {
+          const auto* sym = lhs_base_symbol(as.left());
+          if (sym == nullptr || !reg_syms_.contains(sym)) {
+            return false;
+          }
           if (as.isNonBlocking() && as.left().kind == ExpressionKind::NamedValue && !sym->getType().isUnpackedArray()
               && !packed_mem_regs_.contains(sym)) {
             if (!allow_loads) {
@@ -6162,39 +6492,7 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
           }
           return false;
         }
-        if (as.left().kind == ExpressionKind::NamedValue) {
-          out.stores.emplace_back(sym, const_text(cv->integer()));
-          return true;
-        }
-        // A constant SLICE of the reg: use the normal packed-lvalue resolver
-        // so multi-dimensional packed arrays get the same flattened offset
-        // as their ordinary writes (`q[1]` in `[1:0][3:0] q` starts at bit
-        // four, not bit one).
-        const auto& lhs_e = as.left();
-        if (lhs_e.kind != ExpressionKind::ElementSelect && lhs_e.kind != ExpressionKind::RangeSelect) {
-          return false;
-        }
-        Packed_lv lv;
-        if (!resolve_packed_lvalue(lhs_e, lv) || lv.base != sym || !lv.dyn_off.empty()) {
-          return false;
-        }
-        const uint64_t reg_bits = sym->getType().getBitWidth();
-        const int64_t  slice_w  = lv.width;
-        const int64_t  lo       = lv.const_off;
-        if (reg_bits == 0 || reg_bits > 63 || slice_w <= 0 || lo < 0 || static_cast<uint64_t>(lo + slice_w) > reg_bits) {
-          return false;  // >63 bits does not fit the uint64 accumulator
-        }
-        const uint64_t slice_mask = slice_w >= 64 ? ~uint64_t{0} : ((uint64_t{1} << slice_w) - 1);
-        const uint64_t slice_val  = cv->integer().as<uint64_t>().value_or(0) & slice_mask;
-        auto*          p          = partial_of(sym);
-        p->full                   = (uint64_t{1} << reg_bits) - 1;
-        const uint64_t placed     = slice_mask << static_cast<uint64_t>(lo);
-        if ((p->mask & placed) != 0) {
-          return false;  // overlapping writes: last-wins ordering is not modelled here
-        }
-        p->mask  |= placed;
-        p->value |= slice_val << static_cast<uint64_t>(lo);
-        return true;
+        return harvest_constant(as.left(), cv->integer());
       }
       default: return false;
     }
@@ -6203,7 +6501,7 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
 }
 
 void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
-                                         bool edge_pos, bool initial_is_ref, bool async) {
+                                         bool edge_pos, bool initial_is_ref, bool async, int64_t bit) {
   declare_reg(sym);  // ensure declared (hoisting normally did)
   // A declaration initializer and an explicit reset value both ride the ONE
   // `initial` pin -- power-on value IS the reset value, the same contract
@@ -6221,7 +6519,10 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
     // clashes by construction; two constants clash only when they differ.
     bool agrees = false;
     if (!initial_is_ref) {
-      auto decl_val  = Dlop::from_pyrope(it->second);
+      auto decl_val = Dlop::from_pyrope(it->second);
+      if (bit >= 0 && decl_val && !decl_val->is_invalid()) {
+        decl_val = decl_val->get_mask_op_opt(bit, bit + 1);
+      }
       auto reset_val = Dlop::from_pyrope(initial);
       agrees         = decl_val && reset_val && !decl_val->is_invalid() && !reset_val->is_invalid()
                        && decl_val->eq_op(*reset_val)->is_known_true();
@@ -6248,7 +6549,37 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
     bool        is_signed;
   };
   std::vector<Reset_target> targets;
-  if (auto sit = struct_var_info_.find(&sym); sit != struct_var_info_.end() && reg_syms_.contains(&sym)) {
+  if (auto it = bit_regs_.find(&sym); it != bit_regs_.end()) {
+    auto packed = initial_is_ref ? Dlop::create_integer(0) : Dlop::from_pyrope(initial);
+    // A whole-register constant reset must be SLICEABLE per bit; bit >= 0 is
+    // already a single-bit value and never touches `packed`.
+    if (bit < 0 && !initial_is_ref && (!packed || packed->is_invalid())) {
+      emit_unsupported(sym.location, "unsupported-bit-clock-reset", "could not split the reset value across the register bits");
+      return;
+    }
+    for (int64_t lane = 0; lane < static_cast<int64_t>(it->second.size()); ++lane) {
+      if (bit >= 0 && bit != lane) {
+        continue;
+      }
+      std::string value;
+      if (bit >= 0) {
+        value = std::string(initial);
+      } else if (initial_is_ref) {
+        value = extract_field(std::string(initial), lane, 1);
+      } else {
+        auto lane_val = packed->get_mask_op_opt(lane, lane + 1);
+        if (!lane_val) {
+          emit_unsupported(sym.location,
+                           "unsupported-bit-clock-reset",
+                           "could not split the reset value across the register bits");
+          return;
+        }
+        value = std::string(lane_val->to_pyrope());
+      }
+      targets.push_back({it->second[lane], value, 1, false});
+      proc_bit_reg_writes_.insert(it->second[lane]);
+    }
+  } else if (auto sit = struct_var_info_.find(&sym); sit != struct_var_info_.end() && reg_syms_.contains(&sym)) {
     // The source reset value is the packed aggregate. Slice it by each leaf's
     // recorded packed offset so every expanded flop gets exactly its bits.
     auto packed = initial_is_ref ? Dlop::create_integer(0) : Dlop::from_pyrope(initial);
@@ -6373,7 +6704,7 @@ std::string Slang_context::past_ref(const slang::ast::ValueSymbol& sym, int n, s
 void Slang_context::finalize_pending_async_resets() {
   for (const auto* sym : emit_ordered(pending_async_resets_)) {
     const auto& pending = pending_async_resets_.at(sym);
-    if (pending.invalid || pending.mask != pending.full) {
+    if (pending.invalid || !pending.parts.complete()) {
       emit_unsupported(pending.loc,
                        "unsupported-partial-async-reset",
                        std::string("asynchronous reset slices of '") + std::string(sym->name)
@@ -6381,7 +6712,7 @@ void Slang_context::finalize_pending_async_resets() {
                        "combine the slices under one reset, or use --reader yosys-slang");
       continue;
     }
-    emit_reg_reset_attrs(*sym, std::to_string(pending.value), pending.reset_ref, pending.edge_pos);
+    emit_reg_reset_attrs(*sym, const_text(pending.parts.assemble()), pending.reset_ref, pending.edge_pos);
   }
 }
 
@@ -6402,21 +6733,66 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
   // input named `clock` and silently disconnects the local driver.
   // Other signals/edges ride per-reg attrs after the body (clock_pin / posclk),
   // keyed on the regs this process writes.
+  const slang::ast::Expression* clock_expr = &clock.expr;
+  while (clock_expr->kind == ExpressionKind::Conversion) {
+    clock_expr = &clock_expr->as<slang::ast::ConversionExpression>().operand();
+  }
   const slang::ast::ValueSymbol* clk_sym = nullptr;
-  if (clock.expr.kind == ExpressionKind::NamedValue) {
-    clk_sym = &clock.expr.as<slang::ast::NamedValueExpression>().symbol;
+  std::string                    clock_ref;
+  bool                           selected_clock = false;
+  if (clock_expr->kind == ExpressionKind::NamedValue) {
+    clk_sym   = &clock_expr->as<slang::ast::NamedValueExpression>().symbol;
+    clock_ref = lname_of(*clk_sym);
+  } else if (clock_expr->kind == ExpressionKind::ElementSelect && clock_expr->type->getBitWidth() == 1) {
+    const auto& select = clock_expr->as<slang::ast::ElementSelectExpression>();
+    // Refuse dynamic event selectors rather than guessing a clock domain.
+    if (select.value().kind == ExpressionKind::NamedValue && try_eval_int(select.selector())) {
+      Packed_lv lv;
+      if (resolve_packed_lvalue(*clock_expr, lv) && lv.dyn_off.empty() && lv.const_off >= 0
+          && lv.const_off < static_cast<int64_t>(lv.base->getType().getBitWidth())) {
+        clk_sym        = lv.base;
+        selected_clock = true;
+        auto& refs     = clock_bits_[clk_sym];
+        auto  it       = refs.find(lv.const_off);
+        if (it == refs.end()) {
+          auto name = unique_suffixed(lname_of(*clk_sym), absl::StrCat("__clock_bit", lv.const_off));
+          builder_.create_declare_stmts(name, "wire", "1", "0");
+          builder_.create_assign_stmts(name, lower_rvalue(*clock_expr));
+          it = refs.emplace(lv.const_off, std::move(name)).first;
+        }
+        clock_ref = it->second;
+      }
+    }
   }
   if (clk_sym == nullptr) {
-    emit_unsupported(clock.sourceRange, "unsupported-clock", "the clock must be a plain signal");
+    emit_unsupported(clock.sourceRange, "unsupported-clock", "the clock must be a plain signal or a constant packed bit-select");
     proc_kind_ = Proc_kind::none;
     return;
   }
-  const bool negedge      = clock.edge == slang::ast::EdgeKind::NegEdge;
-  const bool implicit_clk = !negedge && input_syms_.contains(clk_sym) && (clk_sym->name == "clk" || clk_sym->name == "clock");
+  const bool negedge = clock.edge == slang::ast::EdgeKind::NegEdge;
+  const bool implicit_clk
+      = !selected_clock && !negedge && input_syms_.contains(clk_sym) && (clk_sym->name == "clk" || clk_sym->name == "clock");
 
   Write_collector wc;
   wc.skip_loop_controls = true;
   body.visit(wc);
+
+  // Every symbol this process writes, either style. Built once: the bit-clock
+  // screen, the memory clock markers and the per-reg clock attrs all need it.
+  wc.nonblocking.insert(wc.blocking.begin(), wc.blocking.end());
+
+  if (selected_clock) {
+    for (const auto* sym : wc.nonblocking) {
+      const auto& type = sym->getType().getCanonicalType();
+      if (type.isStruct() || type.isUnion() || flat_port_syms_.contains(sym)) {
+        emit_unsupported(sym->location,
+                         "unsupported-bit-clock-aggregate",
+                         "bit-selected clocks on aggregate state require scalar destinations");
+        proc_kind_ = Proc_kind::none;
+        return;
+      }
+    }
+  }
 
   // A memory can be written by several processes. Preserve the process
   // clock at each group of stores; a global array attribute cannot express it.
@@ -6443,7 +6819,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
       auto attr = builder_.add_child(Lnast_ntype::create_attr_set());
       ln.add_child(attr, Lnast_node::create_ref(target));
       ln.add_child(attr, Lnast_node::create_const("__store_clock_pin"));
-      ln.add_child(attr, Lnast_node::create_ref(lname_of(*clk_sym)));
+      ln.add_child(attr, Lnast_node::create_ref(clock_ref));
       attr = builder_.add_child(Lnast_ntype::create_attr_set());
       ln.add_child(attr, Lnast_node::create_ref(target));
       ln.add_child(attr, Lnast_node::create_const("__store_posclk"));
@@ -6451,26 +6827,58 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     }
   }
 
+  for (const auto* sym : wc.blocking) {
+    if (bit_regs_.contains(sym)) {
+      emit_unsupported(sym->location,
+                       "blocking-bit-clock-register",
+                       "independently clocked vector bits require nonblocking assignments");
+      proc_kind_ = Proc_kind::none;
+      return;
+    }
+  }
+
   // Blocking writes update a process-local current value immediately. Commit
   // it to the register only after the process, so other processes still see Q.
   for (const auto* sym : emit_ordered(wc.blocking)) {
     const auto& sct = sym->getType().getCanonicalType();
-    // The ARRAY refusal must be screened BEFORE reg_syms_: collect_state_vars
-    // admits only INTEGRAL blocking writes to reg_syms_, so asking reg_syms_
-    // first makes this diagnostic unreachable for exactly the shape it exists
-    // for. A blocking-written unpacked array is then declared `mut` and its
-    // storage silently destroyed -- `always_ff begin if (we) mem[wa] = wd; q <=
-    // mem[ra]; end` lowers to `q = (we && wa==ra) ? wd : 0`, which lgcheck
-    // REFUTES (inou/prp/tests/fixme/mem_blocking_write.v).
-    if (sct.isUnpackedArray()) {
-      emit_unsupported(sym->location, "blocking-ff-array", "blocking memory writes require a port-local forwarding model");
-      continue;
-    }
     if (!reg_syms_.contains(sym)) {
       continue;
     }
-    if (!sct.isIntegral()) {
-      emit_unsupported(sym->location, "blocking-ff-array", "blocking memory writes require a port-local forwarding model");
+    if (sct.isUnpackedArray() && !flat_port_syms_.contains(sym)) {
+      // declare_unpacked REFUSES an array it cannot linearize (a non-integral
+      // element, a queue/dynamic/associative array) and leaves no Mem_info
+      // behind, so `.at()` here would throw instead of diagnosing.
+      const auto mit = mem_info_.find(sym);
+      if (mit == mem_info_.end()) {
+        emit_unsupported(sym->location, "blocking-ff-array", "blocking writes require a linearizable array");
+        continue;
+      }
+      const auto mi = mit->second;
+      if (array_writer_count_[sym] > 1) {
+        emit_unsupported(sym->location, "blocking-array-multiple-writers", "a blocking array must have a single writer process");
+        continue;
+      }
+      if (mi.is_tuple) {
+        emit_unsupported(sym->location, "blocking-ff-array", "blocking struct-array writes require per-field forwarding");
+        continue;
+      }
+      // Keep the persistent array's identity and old-value read semantics.
+      // A combinational array snapshot supplies statement-ordered forwarding
+      // ONLY within this process. Commit its final value once after the body.
+      auto  value = fresh_local("array_current");
+      auto& ln    = *builder_.lnast;
+      auto  decl  = builder_.add_child(Lnast_ntype::create_declare());
+      ln.add_child(decl, Lnast_node::create_ref(value));
+      auto type = ln.add_child(decl, Lnast_ntype::create_comp_type_array());
+      emit_prim_type_int(type, mi.elem_bits, mi.elem_signed);
+      ln.add_child(type, Lnast_node::create_const(absl::StrCat("[", mi.size, "]")));
+      ln.add_child(decl, Lnast_node::create_const("mut"));
+      builder_.create_assign_stmts(value, reg_net_of(*sym));
+      blocking_values_.emplace(sym, value);
+      continue;
+    }
+    if (!sct.isIntegral() && !flat_port_syms_.contains(sym)) {
+      emit_unsupported(sym->location, "blocking-ff-array", "blocking state must have integral elements");
       continue;
     }
     auto value = builder_.create_lnast_tmp();
@@ -6501,7 +6909,28 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     }
   }
   blocking_values_.clear();
-  wc.nonblocking.insert(wc.blocking.begin(), wc.blocking.end());
+  // Only bits actually written by THIS process get its clock. Sorting keeps
+  // the emitted LNAST independent of hash iteration order.
+  std::vector<std::string> written_bits(proc_bit_reg_writes_.begin(), proc_bit_reg_writes_.end());
+  std::sort(written_bits.begin(), written_bits.end());
+  for (const auto& target : written_bits) {
+    auto [it, inserted] = bit_reg_clocks_.try_emplace(target, clock_ref, negedge);
+    if (!inserted) {
+      if (it->second != std::make_pair(clock_ref, negedge)) {
+        emit_unsupported(clock.sourceRange, "overlapping-bit-clocks", "the same register bit is written from different clocks");
+      }
+      continue;  // the bit already carries this exact clock: do not re-emit the attrs
+    }
+    auto& ln   = *builder_.lnast;
+    auto  attr = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(attr, Lnast_node::create_ref(target));
+    ln.add_child(attr, Lnast_node::create_const("clock_pin"));
+    ln.add_child(attr, Lnast_node::create_ref(clock_ref));
+    attr = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(attr, Lnast_node::create_ref(target));
+    ln.add_child(attr, Lnast_node::create_const("posclk"));
+    ln.add_child(attr, Lnast_node::create_const(negedge ? "false" : "true"));
+  }
   if (!implicit_clk) {
     auto& ln = *builder_.lnast;
     // Emit the clock_pin / posclk attr_set nodes in a stable source order:
@@ -6517,7 +6946,8 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
       // minion's vpu_trans `id_trans_scoreboard_o:u96`, which reached
       // pass.opentimer as 96 bit-blasted flops with an unconnected CLK and
       // failed synthesis after ~4 hours.
-      if (!reg_syms_.contains(sym) || (sym->getType().getCanonicalType().isUnpackedArray() && !flat_port_syms_.contains(sym))) {
+      if (bit_regs_.contains(sym) || !reg_syms_.contains(sym)
+          || (sym->getType().getCanonicalType().isUnpackedArray() && !flat_port_syms_.contains(sym))) {
         continue;
       }
       auto                     name = reg_net_of(*sym);
@@ -6543,7 +6973,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
         auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
         ln.add_child(idx, Lnast_node::create_ref(tgt));
         ln.add_child(idx, Lnast_node::create_const("clock_pin"));
-        ln.add_child(idx, Lnast_node::create_ref(lname_of(*clk_sym)));
+        ln.add_child(idx, Lnast_node::create_ref(clock_ref));
         if (negedge) {
           auto neg_idx = builder_.add_child(Lnast_ntype::create_attr_set());
           ln.add_child(neg_idx, Lnast_node::create_ref(tgt));

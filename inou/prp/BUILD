@@ -215,6 +215,23 @@ sh_test(
     tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+# Independently toggle the derived bit clocks, including between root-clock
+# edges. This timing assertion complements the equivalence/state-match pairs.
+sh_test(
+    name = "prp-bit-selected-clocks",
+    srcs = ["tests/bit_selected_clocks_test.py"],
+    data = [
+        "tests/bit_selected_clocks_tb.v",
+        "tests/bit_selected_clocks_vector.v",
+        "tests/equiv/bit_selected_clocks.prp",
+        "tests/equiv/bit_selected_clocks.v",
+        "tests/equiv/bit_selected_clocks_1.v",
+        "//lhd",
+    ],
+    env_inherit = ["PATH"],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 # Fast R5 regression: the ordinary pyrope glob above catches the pre-fix tolg
 # failure; this companion checks that accepting the clock tuple did not merely
 # collapse it to one shared clock in emitted Verilog.
@@ -579,6 +596,15 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
 # golden with default lhd lec and native Slang. Distinct `prp-equiv-` prefix: equiv/trivial_if
 # would otherwise collide with the comptime/trivial_if target name.
+#
+# This tier — and ONLY this tier — then asks a SECOND engine the same question:
+# `inou/yosys/lgcheck` (yosys equiv) on the two Verilog TEXTS, which is what the
+# `//inou/yosys:scripts` dep below stages (lgcheck + yosys2 + ware/rtl). It
+# catches the one failure mode no native-side test can: a native LEC that
+# reports PROVEN while checking nothing. A yosys REFUTATION fails the target;
+# an inconclusive or spent-budget result is tolerated (yosys' SAT does not
+# scale past small combinational logic). See tests/equiv/README.md,
+# "Two engines, one pair", and `:yosys_lec:` / `:yosys_lec_timeout:`.
 [
     sh_test(
         name = "prp-equiv-%s%s" % (
@@ -705,6 +731,25 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
     ]
 ]
 
+# The guard on that guard: the yosys oracle TOLERATES every verdict but a
+# counterexample, so a refactor that quietly unhooks it would leave every pair
+# above green forever. This drives run_yosys_lec directly over two hand-written
+# .v files (no lhd compile, no Pyrope) and requires that it still PROVES an
+# equivalent pair, REFUTES an off-by-one one, and honors `:yosys_lec: false`.
+sh_test(
+    name = "prp-yosys-lec-oracle",
+    srcs = ["tests/yosys_lec_oracle_test.py"],
+    data = [
+        "//inou/prp:tests/lec.py",
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/yosys_lec_oracle_test.py",
+        # PrpRunner resolves the lhd binary in its constructor, even though this
+        # test only exercises the lgcheck subprocess.
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+)
+
 # The two M6 compact-loop LEC regressions that used to live here as hand-written
 # sh_tests (`prp-equiv-loop_lec_index_mismatch`, `prp-equiv-loop_lec_mixed_semdiff`)
 # are now ORDINARY fixtures of the `prp-lec-*` tier above: loop_lec_index{,_1,_2}
@@ -736,6 +781,7 @@ _STATEMATCH_COMB = [
     "arr_comb_mux_const",
     "arr_comb_tmp",
     "array_bitview_runtime",
+    "array_dynamic_overwrite",
     "array_selfref",
     "array_selfref_netinit",
     "array_store_stale_rhs",
@@ -751,6 +797,8 @@ _STATEMATCH_COMB = [
     "bitset_imm",
     "bitset_mut",
     "bitset_nil",
+    "bounded_while",
+    "bounded_while_guard",
     "clz_nest",
     "codeblock_expr",
     "comb_print",
@@ -761,6 +809,7 @@ _STATEMATCH_COMB = [
     "condout_const_arms",
     "condout_mixed_arms",
     "condout_seed_uncertain",
+    "const_array_arg",
     "const_bit_select",
     "const_nil_cond_bind",
     "disabled_loop",
@@ -882,6 +931,8 @@ _STATEMATCH_COMB = [
     "struct_field_chain_own_lane",
     "struct_init_whole_read",
     "struct_selfref_pattern",
+    "subarray_port",
+    "subarray_port_1",
     "tolg_field_read_zero",
     "trivial_if",
     "tup_in_match",

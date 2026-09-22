@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -534,10 +535,135 @@ class PrpRunner:
                   'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             print(ltxt)
 
-        if lec_ok:
-            print('{} - equiv - success (lhd lec; verilog_top:{} pyrope_top:{})'.format(
-                name, verilog_top, pyrope_top))
-        return 0 if lec_ok else 1
+        if not lec_ok:
+            return 1
+
+        # The SECOND, independent opinion on the same pair (`:yosys_lec: false`
+        # opts a pair out). See run_yosys_lec.
+        if self.run_yosys_lec(test, impl, pyrope_top, gold_abs, verilog_top, odir):
+            return 1
+
+        print('{} - equiv - success (lhd lec; verilog_top:{} pyrope_top:{})'.format(
+            name, verilog_top, pyrope_top))
+        return 0
+
+    # ── the yosys/lgcheck cross-oracle (`lgyosys`) ───────────────────────────
+    #
+    # `lhd lec` above and `inou/yosys/lgcheck` here answer the SAME question
+    # with no shared code: cvc5 over the LGraph the front end built, versus
+    # yosys `equiv_simple`/`equiv_induct` + a bounded miter over the two Verilog
+    # TEXTS. That independence is the whole point — a native path that ever
+    # degenerates into proving nothing (an obligation quietly dropped, a vacuous
+    # miter, a top that resolves to an empty def) keeps reporting PROVEN over
+    # this entire corpus, and only a second engine can notice.
+    #
+    # yosys' SAT does not scale past small combinational logic (it is the
+    # backend LiveHD is replacing, not a gate), so the oracle is deliberately
+    # ONE-SIDED: exit 1 — a real counterexample — is the only verdict that fails
+    # a pair. An inconclusive result, a spent budget, or a read the yosys
+    # front end cannot do is reported and tolerated; it never claims a proof.
+    @staticmethod
+    def _lgcheck_tools():
+        """(lgcheck, yosys2) absolute paths, or (None, None) if unavailable.
+
+        One relative spelling covers both cwds this harness runs in: the repo
+        root and a bazel sh_test's runfiles root (`//inou/yosys:scripts` is a
+        `deps` of every prp-equiv-* target, so both files are staged there).
+        lgcheck resolves its own yosys and ware/rtl include RELATIVE TO CWD, and
+        it is run from the pair's scratch dir, so pass the binary explicitly.
+        """
+        lgcheck = os.environ.get('LHD_LGCHECK') or 'inou/yosys/lgcheck'
+        if not os.access(lgcheck, os.X_OK):
+            return None, None
+        for cand in ('inou/yosys/yosys2', 'bazel-bin/inou/yosys/yosys2'):
+            if os.access(cand, os.X_OK):
+                return os.path.abspath(lgcheck), os.path.abspath(cand)
+        return os.path.abspath(lgcheck), None
+
+    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir):
+        """yosys `equiv` on (generated verilog, golden verilog). 1 only on REFUTED."""
+        name = test.params['name']
+        if str(test.params.get('yosys_lec', 'true')).strip().lower() in ('false', 'off', '0', 'no'):
+            # An opted-out pair states WHY in its header (X-semantics the yosys
+            # miter reads differently, a construct read_verilog rejects, ...).
+            print('{} - lgyosys - skipped (:yosys_lec: false)'.format(name))
+            return 0
+
+        lgcheck, yosys = self._lgcheck_tools()
+        if lgcheck is None:
+            # Not a silent pass: say it, so a missing oracle is visible in the
+            # log of every pair rather than looking like a clean cross-check.
+            print('{} - lgyosys - unavailable (no inou/yosys/lgcheck; cross-check NOT run)'.format(name))
+            return 0
+
+        # `:yosys_lec_timeout: N` — yosys' own shared equivalence budget. Small
+        # by default: a pair this oracle cannot decide quickly it will not decide
+        # at all, and the native proof above is the gate that must hold.
+        try:
+            budget = max(1, int(str(test.params.get('yosys_lec_timeout', 10)).strip()))
+        except ValueError:
+            print('{} - lgyosys - FAILED: :yosys_lec_timeout: must be an integer'.format(name))
+            return 1
+
+        rundir = os.path.join(odir, 'w_lgyosys')
+        shutil.rmtree(rundir, ignore_errors=True)
+        os.makedirs(rundir, exist_ok=True)
+        cmd = [lgcheck, '--implementation', os.path.abspath(impl), '--reference', os.path.abspath(gold),
+               '--implementation_top', impl_top, '--reference_top', gold_top]
+        if yosys:
+            cmd += ['--yosys', yosys]
+        env = dict(os.environ, LGCHECK_EQUIV_TIMEOUT=str(budget))
+        # lgcheck's own budget covers the yosys strategies only (reading the two
+        # sources is outside it, and its portable watchdog adds a 30s kill
+        # grace), so keep an outer wall too. Own the process GROUP: the killed
+        # lgcheck otherwise leaves its yosys child running.
+        proc = subprocess.Popen(cmd, cwd=rundir, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            out, _ = proc.communicate(timeout=3 * budget)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            out, _ = proc.communicate()
+            rc = 124
+        text = out.decode('utf-8', 'ignore')
+
+        # lgcheck's exit classes: 0 equivalent, 1 REAL counterexample (its
+        # comment: "exit 1 is reserved for a real CEX"), 2 inconclusive (a
+        # strategy ran out of budget or the bounded miter found nothing),
+        # 5 setup failure (a side yosys could not read, no yosys, ...), 124 a
+        # killed run. Only 1 is a disproof.
+        if rc == 1:
+            print('{} - lgyosys - FAILED: yosys REFUTED the pair the native lec PROVED '
+                  '(impl_top:{} ref_top:{}); one of the two engines is wrong'.format(name, impl_top, gold_top))
+            print(text)
+            # The counterexample itself is in lgcheck's own bounded-miter log.
+            bmc = os.path.join(rundir, 'lgcheck_bmc.log')
+            if os.path.exists(bmc):
+                print('--- {} (tail) ---'.format(bmc))
+                with open(bmc) as f:
+                    print(''.join(f.readlines()[-40:]))
+            return 1
+
+        if rc == 0:
+            print('{} - lgyosys - proven (yosys equiv agrees)'.format(name))
+            return 0
+
+        # Tolerated, never a proof. `bounded-clean` is the useful middle: the
+        # miter WAS built and solved, just only to LGCHECK_BMC_STEPS depth.
+        verdict = {2: 'inconclusive', 5: 'setup-failed', 124: 'timeout'}.get(rc, 'exit {}'.format(rc))
+        if rc == 2 and 'BMC: found no counterexample' in text:
+            verdict = 'inconclusive (bounded-clean)'
+        print('{} - lgyosys - {} - TOLERATED: yosys did not decide, and a non-decision is '
+              'not a refutation (budget {}s)'.format(name, verdict, budget))
+        # Why it did not decide, without the whole yosys transcript.
+        for line in text.splitlines():
+            if re.match(r'^(WARN|ERROR|FAIL|INCONCLUSIVE|BMC|error|lgcheck):', line):
+                print('  ' + line)
+        return 0
 
     def _emit_combined_verilog(self, tmp_dir, cmd, odir, safe_name, side):
         # Run a compile cmd that emits per-module Verilog into odir, then

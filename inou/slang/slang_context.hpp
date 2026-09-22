@@ -41,6 +41,7 @@
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
+#include "slang/numeric/SVInt.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/text/SourceManager.h"
 
@@ -74,7 +75,11 @@ struct Slang_module_state {
   // the width-taking `0sb?` wildcard, so no width/signedness is kept here.
   absl::flat_hash_set<const slang::ast::Symbol*>              output_info_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;  // clocked state vars
+  // for-header counters with no observable use outside their owning loops.
+  absl::flat_hash_set<const slang::ast::Symbol*> elaboration_counters_;
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> blocking_values_;
+  // Bulk commit of a blocking array snapshot requires a single writer process.
+  absl::flat_hash_map<const slang::ast::Symbol*, unsigned>    array_writer_count_;
   // Symbols that ALSO have a continuous-assign driver. A packed array whose
   // element 0 is `assign`ed while [1..N] are flops (the cvfpu pipeline idiom,
   // `assign q[0] = in; FFL(q[i+1], q[i], …)`) is only PARTLY register, so its
@@ -144,6 +149,38 @@ struct Slang_module_state {
   // loop-unroll budget shared across the nested loops of one process/ctx
   int                                                  unroll_budget_ = 0;
 
+  // Vectors touched by bit-selected edge processes need independent scalar
+  // state: clock/reset attributes belong to each bit, never the packed view.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>>       bit_regs_;
+  absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, std::string>> clock_bits_;
+  absl::flat_hash_set<std::string>                                               proc_bit_reg_writes_;
+  absl::flat_hash_map<std::string, std::pair<std::string, bool>>                 bit_reg_clocks_;
+
+  // One constant reset value assembled from DISJOINT slices of one register.
+  // The slices stay SVInt rather than folding into a uint64 accumulator:
+  // `SVInt::as<uint64_t>()` returns nullopt both for an x/z-bearing constant
+  // and for anything wider than 64 bits, so a `value_or(0)` fold silently
+  // reset those bits to ZERO (`if (rst) {a[3:0], b} <= 8'bxxxx_0011;` reset
+  // `a` to 0 instead of x), and the >63-bit guard the accumulator needed
+  // demoted wide registers to a synchronous reset.
+  struct Reset_slices {
+    struct Slice {
+      int64_t      lo;
+      int64_t      width;
+      slang::SVInt value;
+    };
+    std::vector<Slice> slices;
+    uint64_t           bits = 0;  // the register's declared width
+
+    // false when the slice overlaps one already collected: last-wins ordering
+    // is not modelled here.
+    bool add(int64_t lo, int64_t width, const slang::SVInt& value);
+    // The slices cover [0, bits) exactly once.
+    bool complete() const;
+    // The folded whole-register value, `bits` wide and unsigned. Only valid
+    // once complete().
+    slang::SVInt assemble() const;
+  };
   // An elaborated generate commonly spells one packed register as several
   // always_ff processes, each asynchronously resetting a disjoint constant
   // slice. LGraph has one Flop for the flattened packed value, so collect those
@@ -151,9 +188,7 @@ struct Slang_module_state {
   // process has lowered. Incomplete/overlapping/mixed-control collections are
   // rejected rather than silently demoted to synchronous data-path muxes.
   struct Pending_async_reset {
-    uint64_t              value = 0;
-    uint64_t              mask  = 0;
-    uint64_t              full  = 0;
+    Reset_slices          parts;
     std::string           reset_ref;
     bool                  edge_pos = true;
     bool                  invalid  = false;
@@ -497,20 +532,22 @@ private:
   // whole-register writes, `partials` accumulate constant SLICES of one
   // register, and `loads` are runtime values an ASYNC arm may drive.
   struct Reset_arm {
-    struct Partial {
-      uint64_t value = 0;
-      uint64_t mask  = 0;  // bits written so far
-      uint64_t full  = 0;  // all bits of the reg
+    struct Bit_store {
+      const slang::ast::ValueSymbol* sym;
+      int64_t                        bit;
+      std::string                    value;
     };
+
     std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>>                   stores;
     std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> loads;
-    std::vector<std::pair<const slang::ast::ValueSymbol*, Partial>>                       partials;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, Reset_slices>>                  partials;
+    std::vector<Bit_store>                                                                bit_stores;
   };
   bool harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads);
   // `async` picks the reset FLAVOUR: an edge-triggered rung (the default) emits
   // `sync=false`, a recognized synchronous `if (rst)` guard emits `sync=true`.
   void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref, bool edge_pos,
-                            bool initial_is_ref = false, bool async = true);
+                            bool initial_is_ref = false, bool async = true, int64_t bit = -1);
   void finalize_pending_async_resets();
   void lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
@@ -687,6 +724,7 @@ private:
   bool        lower_deferred_for(const slang::ast::ForLoopStatement& stmt);
   // A bare loop-control marker (`break` / `continue`) inside a rolled loop.
   void        emit_loop_marker(Lnast_ntype::Lnast_ntype_int head);
+  bool        lower_bounded_while(const slang::ast::WhileLoopStatement& stmt, const slang::ast::Statement& initializer);
   void        lower_while_loop(const slang::ast::Statement& stmt);  // While/DoWhile/Repeat
   void        lower_foreach(const slang::ast::ForeachLoopStatement& stmt);
   bool        unroll_tick(const slang::ast::Statement& stmt);  // false = budget exhausted (diag emitted)
@@ -835,10 +873,10 @@ private:
   // packed 2-D reg base (single select on a packed base).
   static const slang::ast::Expression* peel_unpacked_chain(const slang::ast::Expression&               expr,
                                                            std::vector<const slang::ast::Expression*>& sels);
-  // Linear 0-based element index for a FULL-depth selector chain (row-major,
-  // innermost dim contiguous), folding constant selectors. sels.size() must
-  // equal mi.rank().
-  std::string build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels);
+  // Linear 0-based index for a selector prefix (row-major), folding constants.
+  // Optionally return a predicate for all supplied dimensions being in range.
+  std::string build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels,
+                                   std::string* in_range = nullptr);
   bool        current_assign_nonblocking_ = false;
 
   // A packed assignment target resolved to a single contiguous bit-slice of a
@@ -882,6 +920,9 @@ private:
   // Only a memory can carry a per-chunk write enable; only a packed bus composes
   // a read-modify-write in program order.
   bool lowers_as_memory(const slang::ast::ValueSymbol& sym) const {
+    if (blocking_values_.contains(&sym)) {
+      return false;  // process-local combinational snapshot
+    }
     if (reg_syms_.contains(&sym)) {
       return true;
     }

@@ -8,7 +8,9 @@ Two axes live here, and a design can sit on both:
 | Pyrope ↔ **Pyrope** | `foo.prp` + `foo_1.prp`, `foo_2.prp`, … | `prp-lec-foo_1`, … |
 
 For the Verilog axis, `prp-equiv-foo` lowers the Pyrope to Verilog and proves the
-two equivalent with the default `lhd lec` solver and native Slang reader. The golden is written by hand
+two equivalent with the default `lhd lec` solver and native Slang reader, then
+asks a SECOND, independent engine the same question (see [Two engines, one
+pair](#two-engines-one-pair)). The golden is written by hand
 from the same specification, never generated, so it is an independent statement
 of what the design must compute.
 
@@ -31,6 +33,53 @@ Ordinary Slang/Yosys integration uses the same runner with a five-second
 internal budget and ten-second watchdog. Those sanity checks may report an
 explicit internal timeout as **inconclusive**, but a mismatch, refusal, failed
 setup, or watchdog overrun fails. They do not claim proof on timeout.
+
+## Two engines, one pair
+
+Only `prp-equiv-*` — the Pyrope-generated Verilog against the hand-written
+golden — is checked TWICE, by two engines that share no code:
+
+| engine | how it is invoked | reads | verdict |
+| --- | --- | --- | --- |
+| native (default) | `lhd lec` (`formal.solver=cvc5`) | both sides through Slang into LGraph | must PROVE, or the pair fails |
+| `lgyosys` oracle | `inou/yosys/lgcheck` directly | both sides as Verilog TEXT, through `read_verilog -sv` | only a REFUTATION fails the pair |
+
+The oracle exists because a proof engine can fail by *succeeding*: an
+obligation quietly dropped, a vacuous miter, a top that resolves to an empty
+def, and every pair in this directory still reports PROVEN while checking
+nothing. No amount of native-side testing can see that — a second engine can.
+So every pair is also handed to yosys `equiv_simple` / `equiv_induct` plus a
+bounded miter (`inou/yosys/lgcheck`, called as a subprocess by `prplib.py`'s
+`run_yosys_lec`, not through `lhd lec --set formal.solver=lgyosys`: that path
+re-runs the native proof and forces the Slang reader, which cannot select an
+escaped dotted golden top such as `\trivial_if.fun3`).
+
+The oracle is deliberately ONE-SIDED, because yosys' SAT is the backend LiveHD
+is replacing and does not scale past small combinational logic. lgcheck exit 1
+— a real counterexample — is the only verdict that fails a pair; an
+`inconclusive`, a spent budget, or a read yosys cannot do is printed and
+tolerated. It never turns into a claim of proof, and it never substitutes for
+the native proof above.
+
+Every other LEC in this repository stays on `lhd lec` with the default cvc5
+solver — the Pyrope↔Pyrope groups, `equiv_slang`, the Verilog round trip,
+state matching — because it is far faster and it is the engine under test.
+
+Measured over the whole corpus (2026-09-21, 326 pairs, 10s budget): **287
+proven by yosys, 29 inconclusive, 1 setup-failed, 0 refuted** — and the
+`-bitfuzz` companions land on exactly the same three buckets, which is the
+stronger half of the result: there the native check reads BOTH sides through
+the fuzzed path, while yosys reads the two Verilog texts and cannot be fooled
+symmetrically. A pair yosys cannot decide is usually a memory or a rolled loop;
+the one setup failure is `unused_generic`, whose golden spells the clock `clk`
+while cgen emits `clock`, so `equiv_make` finds no matching port (the native
+engine pairs clocks semantically). Adding the oracle costs about 2s on a pair it
+proves and the full budget on one it cannot.
+
+Because a one-sided check is exactly the kind of thing that silently becomes a
+no-op, `//inou/prp:prp-yosys-lec-oracle` is the guard on the guard: it drives
+`run_yosys_lec` over two hand-written `.v` files and requires that it still
+proves an equivalent pair, REFUTES an off-by-one one, and honors the opt-out.
 
 ## Bitfuzz coverage
 
@@ -65,6 +114,8 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:verilog_check_timeout: N` | v2prp2v only: seconds for the original-Verilog LEC leg (default 20); a timeout fails the test |
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |
+| `:yosys_lec: false` | drop the `lgyosys` oracle for this pair; say WHY in the header prose |
+| `:yosys_lec_timeout: N` | the oracle's `LGCHECK_EQUIV_TIMEOUT` in seconds (default 10; the outer wall is 3N) |
 
 ## Pyrope ↔ Pyrope variants (`prp-lec-*`)
 

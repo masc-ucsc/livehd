@@ -1,0 +1,18 @@
+/*
+:name: clocked_array_flags
+:type: equiv
+:verilog_top: clocked_array_flags
+:pyrope_top: clocked_array_flags
+*/
+// LPDDR5-style temporary flags reduce to explicit bypass predicates.
+pub mod clocked_array_flags(clk:u1, reset:u1, push:u1, pop:u1, addr:u1) -> (counts:u4@[0]) {
+  reg state:[2]u2:[ordering="old"] = nil
+  if reset != 0 {
+    state[0] = 0
+    state[1] = 0
+  } else {
+    if addr == 0 { state[0] = (state[0] + push - pop) & 3 }
+    else { state[1] = (state[1] + push - pop) & 3 }
+  }
+  counts = state
+}

@@ -1,0 +1,14 @@
+/*
+:name: subarray_port_1
+:type: equiv
+:verilog_top: subarray_port
+:pyrope_top: subarray_port
+*/
+// Select a row, then XOR its first nibble with a rotation of its second.
+pub comb subarray_port(data:u16, row:u1) -> (result:u4) {
+  mut pair:u8 = data#[0..=7]
+  if row != 0 { pair = data#[8..=15] }
+  const a:u4 = pair#[0..=3]
+  const b:u4 = pair#[4..=7]
+  result = a ^ ((b#[0..=2] << 1) | b#[3])
+}

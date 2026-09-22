@@ -1,0 +1,19 @@
+/*
+:name: bit_selected_clocks
+:type: equiv
+:verilog_top: bit_selected_clocks
+:pyrope_top: bit_selected_clocks
+*/
+// Scalar reference for independently clocked bits of a packed register.
+pub mod bit_selected_clocks(clk:u1, gate0:u1, gate1:u1, gate2:u1, gate:u1, clr_:u1, data:u3, enable:u3) -> (q:u3@[]) {
+  wire c0:u1 = (clk & gate0) & gate
+  wire c1:u1 = (clk & gate1) & gate
+  wire c2:u1 = (clk & gate2) & gate
+  reg q__bit0:u1:[clock_pin=ref c0, reset_pin=ref clr_, async=true, negreset=true] = 0
+  reg q__bit1:u1:[clock_pin=ref c1, posclk=false, reset_pin=ref clr_, async=true, negreset=true] = 1
+  reg q__bit2:u1:[clock_pin=ref c2, reset_pin=ref clr_, async=true, negreset=true] = 0
+  if (enable & 1) != 0 { q__bit0 = data & 1 }
+  if (enable & 2) != 0 { q__bit1 = (data >> 1) & 1 }
+  if (enable & 4) != 0 { q__bit2 = (data >> 2) & 1 }
+  q = q__bit0 | (q__bit1 << 1) | (q__bit2 << 2)
+}

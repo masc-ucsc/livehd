@@ -10,9 +10,16 @@ an explicit `lhd compile --reader yosys ... --emit-dir lg:comparison/`
 for importer debugging. Compare those graphs against a native Slang `lhd lec`
 run; Yosys is an additional cross-check, not a substitute for native coverage.
 
-Clocked scalar blocking assignments keep a process-local current value: later
+Clocked blocking assignments keep a process-local current value: later
 statements see earlier writes, and the process commits the final value to its
-registers. Loop counters remain elaboration controls. Memory write ports retain
+registers. Integral-element unpacked arrays use a current array snapshot while
+their persistent storage retains its identity and old-value reads in other
+processes. Blocking arrays require a single writer; struct-element arrays still
+diagnose. Loop counters used only inside canonical `for` loops remain mutable
+elaboration controls, including module-scope integers beneath runtime enables.
+The unroller writes back their terminal value; counters observed outside their
+loops retain normal state analysis. Actual conditional data writes still infer
+latches. Memory write ports retain
 the clock of their owning process. Mixed write-edge polarities are represented
 with the Memory IR's mixed-edge marker and diagnosed; formal refuses that
 unsupported schedule by name rather than silently collapsing its edges.
@@ -99,13 +106,32 @@ Key invariants the lowering maintains:
 - registers are `declare(…,'reg')` hoisted to module start (an `output reg`'s
   q pin IS the output); non-`clk/clock` or negedge clocks ride per-reg
   `clock_pin`/`posclk` attrs; extracted async-reset rungs become
-  `initial`/`reset_pin`/`sync`/`negreset` attrs. A constant scalar declaration
+  `initial`/`reset_pin`/`sync`/`negreset` attrs. Constant reset assignments to
+  concatenations split recursively by destination width and signedness;
+  packed slices use the same offsets as ordinary writes. A constant scalar declaration
   initializer or simple `initial q = CONST` on a register without such a reset
   becomes the implicit-module-reset value and emits `initial-without-reset`,
   because formal equivalence can differ from reset-less hardware;
 - unpacked arrays lower to the `comp_type_array` declare + `store(mem,idx,v)`
   / `tuple_get(d,mem,idx)` memory vocabulary with `fwd=0` (Verilog
   nonblocking reads see old contents).
+
+Constant packed bit-selected clocks become named one-bit clock wires. Packed
+vectors written by these processes lower to scalar register bits, each with
+its own clock edge and reset attributes; a packed view preserves whole reads
+and output ports. Their writes currently require constant nonblocking
+destinations. Dynamic clock selectors, blocking writes to the split vectors,
+and overlapping writes from different clocks are diagnosed.
+
+Counted `while` scans support runtime early exit when an adjacent constant
+initializer, a conjunctive `counter < constant` bound, and a unique unconditional
+unit increment prove termination without overflow. They lower to guarded
+iterations within the normal unroll budget; arbitrary runtime loops still
+diagnose. The counter's terminal value and all body side effects are preserved.
+
+Constant unpacked parameter arrays can be passed to runtime functions. Partial
+multidimensional array selects can supply subarray ports: remaining elements
+are packed in declaration order, independently of native memory index order.
 
 ## Fixture discovery
 

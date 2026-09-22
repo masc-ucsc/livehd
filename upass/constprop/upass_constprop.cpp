@@ -4788,6 +4788,26 @@ void uPass_constprop::process_tuple_set() {
         // renders an int trivial as its decimal text — exactly the field-name
         // shape we want for `tuple[ref] = …`.
         elem = st().get_trivial(elem).to_field();
+      } else {
+        // A runtime selector can overwrite ANY leaf. Treating its ref name as
+        // a named field leaves stale positional constants behind: after
+        // `a[0]=0; a[index]=value`, a later `a[0]` must not fold to zero.
+        // Invalidate values, retaining the declared shape and type attributes;
+        // Symbol_table::set also records conditional writes and performs COW
+        // so snapshots aliased before this store retain their old contents.
+        std::vector<std::string> leaves;
+        if (auto root = st().get_bundle(tuple_var)) {
+          for (const auto& [leaf, entry] : root->non_attr_entries()) {
+            (void)entry;
+            leaves.emplace_back(leaf);
+          }
+        }
+        for (const auto& leaf : leaves) {
+          st().set(tuple_var + "." + leaf, Symbol_table::invalid_lconst);
+        }
+        st().tuple_slot_ref.erase(tuple_var);
+        move_to_parent();
+        return;
       }
     } else {
       // const field selector: the LNAST const text is the pyrope-syntactic

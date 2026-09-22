@@ -13,6 +13,12 @@ its distinct counterexample exit class. Bounded successes disclose their depth;
 cache hits preserve that scope and reject legacy records without it.
 The explicit debug setting `formal.solver=lgyosys` also runs default native
 LEC and requires agreement with lgcheck; it cannot replace the native proof.
+One regression tier additionally calls `inou/yosys/lgcheck` DIRECTLY as a second
+opinion: `//inou/prp:prp-equiv-*` (Pyrope-generated Verilog vs its hand-written
+golden), so a native LEC that ever proved nothing cannot go unnoticed across
+that corpus. There a yosys refutation fails the test while an inconclusive or
+timed-out yosys is tolerated — see `inou/prp/tests/equiv/README.md`. Every other
+LEC in the repository stays on the default cvc5 solver.
 
 The Yosys importer regressions explicitly compile through Yosys and require
 both `lgcheck` and native `lhd lec` on each checked round trip. The `nocheck_`

@@ -1,0 +1,15 @@
+/*
+:name: blocking_array_slices
+:type: equiv
+:verilog_top: blocking_array_slices
+:pyrope_top: blocking_array_slices
+*/
+pub mod blocking_array_slices(clk:u1, en:u1, addr:u1, din:u4, ra:u1) -> (q:u4@[]) {
+  reg mem:[2]u4:[ordering="old"] = nil
+  reg q:u4 = nil
+  q = mem[ra]
+  if en != 0 {
+    mem[addr] = din
+    if addr == ra { q = din }
+  }
+}
