@@ -181,22 +181,6 @@ std::string join_capped(std::vector<std::string> toks, size_t cap = 24) {
   return out;
 }
 
-// A register/memory that exists on only one side is not itself part of the
-// module's observable interface. It is safe to omit that cut only when every
-// COMMON output/state obligation is nevertheless proved for arbitrary values
-// of the one-sided state: then the state is unobservable by construction. This
-// must stay narrower than generic incomplete correspondence; a missing primary
-// output or black-box obligation is never excused by this rule.
-template <typename Ref_range, typename Impl_range>
-bool internal_state_only(const Ref_range& unmatched_ref, const Impl_range& unmatched_impl) {
-  if (unmatched_ref.empty() && unmatched_impl.empty()) {
-    return false;
-  }
-  auto is_state = [](const std::string& name) { return name.starts_with("nxt:") || name.starts_with("mem:"); };
-  return std::all_of(unmatched_ref.begin(), unmatched_ref.end(), is_state)
-         && std::all_of(unmatched_impl.begin(), unmatched_impl.end(), is_state);
-}
-
 // When blackbox-input cut points (bbin:) dominate the impl-only set, the impl
 // instantiates library cells the encoder has no definition for — a
 // technology-mapped netlist checked without its cell models. Surface the

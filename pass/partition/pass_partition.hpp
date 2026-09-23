@@ -58,8 +58,10 @@ struct Region_body {
   // lives in `pre_lib` (a throwaway library the partitioner owns for the
   // duration of the synchronous hook call) under name `pre_name`. All null/empty
   // unless the partitioner was asked to build it (build_decomposition
-  // want_pre_bodies) AND this is a per-def region (never the flatten as-top
-  // region). Do NOT stash past the hook's return.
+  // want_pre_bodies) AND this region is eligible for reuse. Virtual-flat colors
+  // are reusable even when only one color remains; explicit whole-design
+  // flattening skips the potentially huge pre-body unless it is a ware.
+  // Do NOT stash past the hook's return.
   hhds::Graph*                      pre_body = nullptr;
   hhds::GraphLibrary*               pre_lib  = nullptr;
   std::string                       pre_name;
@@ -143,9 +145,14 @@ public:
   // Region_body::pre_body -- the abc cache's stable structural-compare artifact.
   // Off by default (the per-region edge tables it needs are dead weight on the
   // classic/flatten paths); the flatten as-top region never gets one.
+  // `prepare_src` rewrites each graph the Partitioner is about to cut (the flat
+  // source, or every def) right before it is cut, with its final colors: the
+  // one place a color-aware LGraph rewrite (satopt's mux facts) sees exactly
+  // the regions every mapper will map.
   static bool build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                   std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
                                   livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off,
                                   bool want_pre_bodies = false, const livehd::partition::Body_batch_builder& batch_hook = {},
-                                  size_t batch_size = 64, const std::unordered_set<hhds::Gid>& preserved_defs = {});
+                                  size_t batch_size = 64, const std::unordered_set<hhds::Gid>& preserved_defs = {},
+                                  const std::function<void(hhds::Graph*)>& prepare_src = {});
 };

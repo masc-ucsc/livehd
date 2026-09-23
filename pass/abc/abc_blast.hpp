@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <climits>
 #include <format>
+#include <optional>
 #include <print>
 #include <vector>
 
@@ -123,7 +124,7 @@ public:
 template <class Ops, class ReadBit, class Slots, class Refuse, class RefuseShift>
 void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit, const Map_options& opts_,
                 const livehd::partition::Region_body& rb, const absl::flat_hash_set<hhds::Node_class>& region, const Refuse& refuse,
-                const RefuseShift& refuse_shift_amount, const std::vector<Mux_fact>* facts = nullptr) {
+                const RefuseShift& refuse_shift_amount) {
   namespace gu             = livehd::graph_util;
   using Bit                = decltype(ops.zero());
   const auto op            = gu::type_op_of(n);
@@ -139,43 +140,6 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
   const auto real_width = [](const hhds::Pin_class& p) { return std::max(1, gu::real_width(p)); };
   const auto eff_width  = [&](const hhds::Pin_class& p) {
     return p.is_const() ? std::max(1, static_cast<int>(gu::const_of(p).get_signed_bits())) : real_width(p);
-  };
-  const auto arm_bit = [&](int arm, int bit, const hhds::Pin_class& original) {
-    if (facts != nullptr) {
-      for (const auto& f : *facts) {
-        if (f.arm != arm || f.bit != bit) {
-          continue;
-        }
-        if (f.kind == Mux_fact::Kind::zero) {
-          return ops.zero();
-        }
-        if (f.kind == Mux_fact::Kind::one) {
-          return ops.one();
-        }
-        hhds::Pin_class other;
-        if (op == Ntype_op::Hotmux) {
-          const auto inputs = gu::hotmux_inputs(n);
-          if (f.other >= 0 && f.other < static_cast<int>(inputs.arms.size())) {
-            other = inputs.arms[f.other].second;
-          } else if (f.other == static_cast<int>(inputs.arms.size())) {
-            other = inputs.fallback;
-          }
-        } else {
-          for (const auto& in_pin : n.inp_sorted_pins()) {
-            const auto in_drv = in_pin.get_driver_pin();
-            if (static_cast<int>(in_pin.get_port_id()) == f.other + 1) {
-              other = in_drv;
-              break;
-            }
-          }
-        }
-        if (!other.is_invalid()) {
-          auto value = abc_bit(other, bit);
-          return f.kind == Mux_fact::Kind::complement ? ops.inv(value) : value;
-        }
-      }
-    }
-    return abc_bit(original, bit);
   };
   const auto abc_eff_bit = [&](const hhds::Pin_class& p, int i) {
     if (p.is_const() || i < eff_width(p)) {
@@ -310,11 +274,11 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       std::vector<Bit> products;
       for (size_t i = 0; i < inputs.arms.size(); ++i) {
         if (controls[i] != abc_const0()) {
-          products.push_back(abc_bin(controls[i], arm_bit(static_cast<int>(i), b, inputs.arms[i].second), '&'));
+          products.push_back(abc_bin(controls[i], abc_bit(inputs.arms[i].second, b), '&'));
         }
       }
       if (!inputs.fallback.is_invalid() && none != abc_const0()) {
-        products.push_back(abc_bin(none, arm_bit(static_cast<int>(inputs.arms.size()), b, inputs.fallback), '&'));
+        products.push_back(abc_bin(none, abc_bit(inputs.fallback, b), '&'));
       }
       while (products.size() > 1) {
         std::vector<Bit> next;
@@ -346,7 +310,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // A two-arm Mux is a condition, as in cgen's `if (sel)`: a wide
     // predicate such as `a & 0x80` selects the true arm when ANY bit is set.
     // Comparing that selector to the integer 1 drops both arms for 0x80.
-    Bit condition = nullptr;
+    std::optional<Bit> condition;
     if (op == Ntype_op::Mux && data.size() == 2 && data.contains(0) && data.contains(1)) {
       if (sel.is_const() && !gu::const_of(sel).has_unknowns()) {
         condition = abc_const_bit(!gu::const_of(sel).is_known_zero());
@@ -366,22 +330,22 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       }
     }
     for (int b = 0; b < out_bits; ++b) {
-      if (condition != nullptr) {
+      if (condition) {
         // Do not demand an unreachable arm: it may be a syntactic self-hold.
-        slots[b] = condition == abc_const0()   ? arm_bit(0, b, data.at(0))
-                   : condition == abc_const1() ? arm_bit(1, b, data.at(1))
-                                               : abc_mux(condition, arm_bit(1, b, data.at(1)), arm_bit(0, b, data.at(0)));
+        slots[b] = *condition == abc_const0()   ? abc_bit(data.at(0), b)
+                   : *condition == abc_const1() ? abc_bit(data.at(1), b)
+                                                : abc_mux(*condition, abc_bit(data.at(1), b), abc_bit(data.at(0), b));
         continue;
       }
       std::vector<Bit> products;
       products.reserve(data.size());
       for (const auto& [v, drv] : data) {
-        Bit              hit = nullptr;  // selector matches value v
+        Bit              hit{};  // selector matches value v
         std::vector<Bit> literals;
         literals.reserve(sel_bits);
         for (int sb = 0; sb < sel_bits; ++sb) {
-          auto* sbit = abc_bit(sel, sb);
-          auto* lit  = ((v >> sb) & 1) ? sbit : abc_not(sbit);
+          Bit sbit = abc_bit(sel, sb);
+          Bit lit  = ((v >> sb) & 1) ? sbit : abc_not(sbit);
           literals.push_back(lit);
         }
         while (literals.size() > 1) {
@@ -399,8 +363,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         if (hit == abc_const0()) {
           continue;
         }
-        Bit   term = abc_bit(drv, b);  // data_v[b]
-        auto* prod = abc_bin(term, hit, '&');
+        Bit term = abc_bit(drv, b);  // data_v[b]
+        Bit prod = abc_bin(term, hit, '&');
         products.push_back(prod);
       }
       // Like n-ary logic above, keep the mux cover logarithmic. A serial
@@ -776,7 +740,14 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         return true;
       };
       auto amount_node = b_d.get_master_node();
-      if (sliced_demand && region.contains(amount_node) && gu::type_op_of(amount_node) == Ntype_op::Sum) {
+      // The affine form needs a NARROW demand, not specifically a sliced one: a
+      // shift whose own result is already narrower than its operand (a ware
+      // module narrows its output port to the demanded width, so its consumer
+      // is a module port, never an in-region Get_mask) is the same word select.
+      // affine_fits below keeps the two lowerings bit-identical and the cost
+      // check keeps the choice a pure performance decision.
+      const bool narrow_demand = sliced_demand || demand_w < cw;
+      if (narrow_demand && region.contains(amount_node) && gu::type_op_of(amount_node) == Ntype_op::Sum) {
         hhds::Pin_class term;
         bool            valid = true;
         for (const auto& in_pin : amount_node.inp_sorted_pins()) {
@@ -791,8 +762,24 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
             valid = false;
           }
         }
-        if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node())
-            && gu::type_op_of(term.get_master_node()) == Ntype_op::Mult) {
+        const auto term_op = term.is_invalid() ? Ntype_op::Invalid : gu::type_op_of(term.get_master_node());
+        if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node()) && term_op == Ntype_op::SHL) {
+          // index << s is index * 2^s -- how a front end spells the stride of
+          // `v[index]` over an unpacked array (`(select << 5) + 32` for 32-bit
+          // words), and the shape the Mult arm below never matched.
+          const auto shl_a = gu::get_driver_of_sink_name(term.get_master_node(), "a");
+          const auto shl_b = gu::get_driver_of_sink_name(term.get_master_node(), "b");
+          int64_t    shift = 0;
+          // The identity only holds when the SHL keeps every shifted bit and the
+          // index reads as the non-negative value the affine builder assumes.
+          if (!shl_a.is_invalid() && !shl_a.is_const() && gu::is_unsign(shl_a) && positive_const(shl_b, shift) && shift < 62
+              && gu::bits_of(term) >= eff_width(shl_a) + shift) {
+            index  = shl_a;
+            scale  = int64_t{1} << shift;
+            affine = true;
+          }
+        } else if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node())
+                   && term_op == Ntype_op::Mult) {
           scale = 1;
           for (const auto& in_pin : term.get_master_node().inp_sorted_pins()) {
             const auto in_drv = in_pin.get_driver_pin();

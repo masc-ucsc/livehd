@@ -42,10 +42,18 @@ The body-builder hook replaces each region with an ABC-mapped netlist.
 
 ## SAT simplification
 
-ABC enables `--set pass.abc.satopt=true` by default. It proves combinational
-facts across color boundaries, then simplifies mux bits while translating the
-region and memory ports on the private synthesis copy. Inputs, flop Q and
-memory read data are free symbols. Unproved facts leave the original logic.
+ABC enables `--set pass.abc.satopt=true` by default. It proves per-bit mux
+facts across color boundaries (an arm bit is 0, 1, or equal / complement to
+another arm's bit whenever that arm is selected) and applies them to the
+private synthesis copy as an LGraph rewrite before partitioning, so either
+mapper (`synth.mapper=abc|synth`) sees the simplified mux. Only the rewritten
+bits change: an arm whose every bit is rewritten reads the new driver, and a
+partial arm becomes a Concat of runs (Get_mask slices of the original arm, the
+other arm, an Xor with ones for a complement, or a constant). A fact whose
+mux sits wholly inside one region is not applied: it does not change that
+region's function. Inputs, flop Q and memory read data are free symbols.
+Unproved facts leave the original logic. The per-bit facts are proven with
+ABC `&fraig`.
 
 Before partitioning, it also proves selectors constant in every region: a
 two-arm Mux select, each Hotmux control and a one-bit Flop enable (e.g.
@@ -63,10 +71,11 @@ ones and the fallback (first-wins, the reference semantics on an overlap).
 Compile-time preparation is separately opt-in: `--set pass.satopt=true`
 (default false), or `lhd pass satopt lg:DIR --workdir W`. A later ABC invocation
 reuses unchanged definitions under the same workdir. `W/satopt_cache` follows
-`lhd.incremental`; each mapped cache row also records the precise cross-region
-facts it consumed. Region QoR reports expose their count as `satopt_facts`.
-Use whole-design LEC for mapped designs that consume these facts: a region
-alone lacks the upstream relation that justified the simplification.
+`lhd.incremental`. The rewrite is logged as `[pass.satopt] <top>: rewrote N
+arm(s) of M mux(es), K bit(s)`; a mapped region is reused when its rewritten
+body is unchanged. Use whole-design LEC for mapped designs that consume these
+facts: a region alone lacks the upstream relation that justified the
+simplification.
 
 See [satopt.md](../../satopt.md) for memory compatibility rules, proof budgets,
 and validation. Set `pass.abc.satopt=false` to compare mapping without this pass.
@@ -123,8 +132,12 @@ lhd pass liberty gensim file.lib        --emit-dir lg:models    # cell behavior
 
 Per region (`Region_body` from the partition seam):
 
-1. **to ABC** — bit-blast each comb cell into a 1-bit AIG netlist
-   (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`). Multi-bit module IO becomes per-bit ABC
+1. **to ABC** — bit-blast each comb cell onto the region's blast tape
+   (`blast_tape.hpp`: 1-bit AND/OR/XOR/INV gates, PIs, latches and POs in
+   creation order), then replay the tape into a 1-bit AIG netlist
+   (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`), object for object. The tape is also
+   what `pass.synth` (`synth.mapper=synth`) decomposes directly, with no ABC
+   logic synthesis in between. Multi-bit module IO becomes per-bit ABC
    PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not/ror`,
    `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
    `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), `mult` (a simple
@@ -560,8 +573,8 @@ slack came from the SCL timer, so a miss after the remap is repaired with step
 2. `&undo` reverses exactly ONE step, which is why there is no second undo.
 
 **The area candidate.** A region that met its budget is then mapped a second
-time from the same pre-flow logic network (`Abc_NtkDup` before the frame took
-it) with `area_flow` — the former baseline + `buffer -N; upsize -D; dnsize -D`
+time from a duplicate of the same pre-flow logic network with `area_flow` —
+the former baseline + `buffer -N; upsize -D; dnsize -D`
 (size to the budget before recovering area) — timed by the same SCL
 timer, and the netlist with the smaller SCL area **among those that meet the
 budget** is kept; the delay flow wins a tie and every region where the
@@ -572,6 +585,16 @@ between them; the QN encoding's `~f` and the identity-buffer bypass work
 unchanged — flop counts and LEC verified), so the read-back does not care
 which one won. The QoR row records the decision (`budget`, `candidate`,
 `delay_flow`/`area_flow` SCL pairs).
+
+`abc_flow.cpp` executes this complete sequence in one entered ABC frame, retaining
+the live GIA undo state and owning the temporary candidate networks. The mapper
+checks its region time and memory limits before and after command groups and
+timing, and before starting the area candidate. Refusal stops subsequent phases
+and prevents readback/publication. These checkpoints are cooperative: a running
+ABC command or SCL timing call cannot be interrupted in the ordinary in-process
+path. `pass.synth` installs an isolated complete-flow executor when its region
+time budget is positive; that worker can be stopped inside an ABC call. See
+[`pass/synth`](../synth/README.md) for the transport and accounting limits.
 
 Historical measurements below are from the previous timing/amap objective,
 not the new flow2/baseline defaults. Measured over 15 ../lhdtrack designs plus `br_amba_axi_demux` (geomean vs
@@ -732,8 +755,11 @@ region whose pre-ABC logic is unchanged (the one shared switch is
 of record**: a miss only costs an ABC run, and every reuse is gated by an *exact*
 structural compare (not a digest whose collision would miscompile). Regions
 correspond by **module name**, and are stitched into the fresh wrapper by
-**declared port name** (the partitioner emits content-stable, nid-free names), so a
-hit needs no port matching.
+**declared port name** (the partitioner emits content-stable, nid-free names).
+Installing a cached body copies its numeric pin table, so same-name reuse also
+requires identical name-to-port-ID bindings. If an edit reorders those IDs, the
+entry misses and remaps; named structural equality alone cannot authorize the
+copy. Cross-name discovery uses exact comparison with numeric IO identities.
 
 ```
 Algorithm INCREMENTAL-ABC(design D, cell library L, persistent cache C)
@@ -820,9 +846,20 @@ implemented: per-region `flow` overrides (2opt-freq C). See
 
 Synthesis partitions come from `pass.color synth`, whose default mode is
 `cones`: one backward cone per register `din`/`enable`, merged under a 30,000
-predicted-AIG-gate threshold (`color.max_gate`). `--set color.synth_alg=synth`
-(or `pipe`) instead propagates one id forward and reshapes with the 500–5,000
-GE size window (`color.min_ge`/`color.max_ge`), which `cones` ignores. These
+predicted-AIG-gate threshold (`pass.color.synth.max_gate`). `--set
+pass.color.synth.mode=synth` (or `pipe`) instead propagates one id forward and
+reshapes with the 500–5,000 GE size window
+(`pass.color.synth.min_ge`/`pass.color.synth.max_ge`), which `cones` ignores.
+Under `lhd synth` the default `mapper=abc` color profile also cuts at every
+`pass.color.synth.stop_*` operator (mux/arith/cmp/shift), keeping ABC regions
+small; `synth.mapper=synth` turns those cuts off. `max_gate` is a soft target:
+a color under `pass.color.synth.min_color_nodes` (default 12) nodes that is also
+light (at most `max_gate`/64 predicted) joins the color it overlaps most, past
+`max_gate` if need be. Dead combinational logic -- typically a Hotmux nobody
+reads, which compile keeps for its `unique if` obligation -- shapes no color
+and is deleted from pass.abc's private copy before satopt and mapping (on
+minion: 32k dead nodes, 17,540 colors down to about 1,400, and the select proof
+went from 3.7M candidates to 8k). These
 smaller regions target incremental mapping within the 16 GiB per-color budget. Indivisible nodes and estimation
 errors can exceed the partition target. The process memory budget is capped
 at physical RAM minus max(2 GiB, 25%); an environment override can lower this

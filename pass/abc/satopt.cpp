@@ -20,6 +20,7 @@
 
 #include "abc_blast.hpp"
 #include "abc_salt.hpp"
+#include "attr_carry.hpp"
 #include "absl/container/node_hash_map.h"
 #include "hhds/attrs/name.hpp"
 #include "json_util.hpp"
@@ -877,6 +878,19 @@ struct Select_rewrite {
     gu::drop_drivers(sink);
     gu::create_const(g, *Dlop::create_integer(value)).connect_sink(sink);
   }
+  // Rewire one sink to an equivalent replacement (an arm rebuilt from proven
+  // per-bit facts). The replaced driver is released for the sweep.
+  void replace(const Node& n, hhds::Port_id pid, const Pin& replacement) {
+    const auto sink = n.create_sink_pin(pid);
+    for (const auto& d : sink.get_driver_pins()) {
+      if (d == replacement) {
+        return;
+      }
+      released.push_back(d);
+    }
+    gu::drop_drivers(sink);
+    replacement.connect_sink(sink);
+  }
   // Only logic that lost its last consumer HERE is deleted: a cell that was
   // already dangling is not this pass's business.
   void sweep() {
@@ -905,6 +919,235 @@ struct Select_rewrite {
     }
   }
 };
+// A per-bit arm fact holds only while its arm is selected, so it may rewrite
+// that arm's INPUT and nothing else: never the arm's driver (it has other
+// consumers) and never the mux output. equal/complement read the OTHER arm's
+// ORIGINAL driver, captured before any sink of this mux is rewired.
+//
+// Each arm is rebuilt from maximal runs of bits with the same choice
+// (unchanged, 0, 1, = other arm, ~other arm). One run over the whole width is
+// a single pin (a constant, the other arm's driver, or its complement); mixed
+// runs become a Concat of slices, most significant lane first.
+struct Arm_builder {
+  hhds::Graph& g;
+  Node         mux;
+  Node         node(Ntype_op op) {
+    auto n = gu::create_typed_node(g, op);
+    if (gu::has_color(mux)) {
+      gu::set_color(n, gu::color_of(mux));
+    }
+    gu::carry_srcid(mux, n);
+    return n;
+  }
+  Pin output(Node n, int width) {
+    auto p = n.create_driver_pin(0);
+    gu::set_ubits(p, width);
+    return p;
+  }
+  Pin ones(int width) { return gu::create_const(g, *Dlop::get_mask_value(width)); }
+  Pin slice(const Pin& value, int lo, int hi) {
+    auto n = gu::create_get_mask(g, value, lo, hi);
+    if (gu::has_color(mux)) {
+      gu::set_color(n, gu::color_of(mux));
+    }
+    gu::carry_srcid(mux, n);
+    return output(n, hi - lo);
+  }
+  Pin complement(const Pin& value, int lo, int hi) {
+    auto n = node(Ntype_op::Xor);
+    slice(value, lo, hi).connect_sink(gu::setup_sink_pid(n, 0));  // a banked op: each call appends an operand
+    ones(hi - lo).connect_sink(gu::setup_sink_pid(n, 0));
+    return output(n, hi - lo);
+  }
+  // lanes are least significant first: (value, width).
+  Pin concat(const std::vector<std::pair<Pin, int>>& lanes, int width) {
+    auto n = node(Ntype_op::Concat);
+    for (size_t i = 0; i < lanes.size(); ++i) {
+      const auto& [value, w] = lanes[lanes.size() - 1 - i];
+      value.connect_sink(gu::setup_sink_pid(n, static_cast<hhds::Port_id>(2 * i)));
+      gu::create_const(g, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_pid(n, static_cast<hhds::Port_id>(2 * i + 1)));
+    }
+    return output(n, width);
+  }
+};
+
+// What bit `bit` of `pin` reads inside the mux's own region, through the
+// wiring a rewrite builds (Get_mask windows, Concat lanes, Xor with a
+// constant, Not, constants): a constant, or a (driver, bit, complemented)
+// triple. A fact whose arm bit already reads its target this way was applied
+// before. The proof cone sees across regions, so a relation that is
+// structural there (an arm computed as ~x in another region) is still new to
+// the mux's region, which sees two unrelated inputs.
+struct Local_bit {
+  Pin                 pin;
+  int                 bit      = 0;
+  bool                inverted = false;
+  std::optional<bool> value;
+};
+Local_bit local_bit(Pin pin, int bit, const Node& mux) {
+  bool inverted = false;
+  for (int guard = 0; guard < 256 && !pin.is_invalid(); ++guard) {
+    if (pin.is_const()) {
+      const auto& v = gu::const_of(pin);
+      if (v.has_unknowns()) {
+        break;
+      }
+      return {.value = v.bit_test(bit) != inverted};
+    }
+    const int w = gu::bits_of(pin);
+    const auto n = pin.get_master_node();
+    if ((w > 0 && bit >= w) || !gu::has_color(mux) || !gu::has_color(n) || gu::color_of(n) != gu::color_of(mux)) {
+      break;
+    }
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::Get_mask) {
+      const auto mask   = gu::get_driver_of_sink_name(n, "mask");
+      const auto window = mask.is_const() ? gu::mask_window_of(gu::const_of(mask)) : std::nullopt;
+      if (!window) {
+        break;
+      }
+      pin = gu::get_driver_of_sink_name(n, "a");
+      bit += window->first;
+      continue;
+    }
+    if (op == Ntype_op::Concat) {
+      const auto lanes = gu::concat_lanes(n);
+      const auto lane  = std::ranges::find_if(lanes, [&](const auto& l) { return bit >= l.offset && bit < l.offset + l.width; });
+      if (lane == lanes.end()) {
+        break;
+      }
+      pin = lane->value;
+      bit -= lane->offset;
+      continue;
+    }
+    std::vector<Pin> ins;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      ins.push_back(sink.get_driver_pin());
+    }
+    if (op == Ntype_op::Not && ins.size() == 1) {
+      pin      = ins.front();
+      inverted = !inverted;
+      continue;
+    }
+    if (op == Ntype_op::Xor && ins.size() == 2 && ins[0].is_const() != ins[1].is_const()) {
+      const auto& k = gu::const_of(ins[0].is_const() ? ins[0] : ins[1]);
+      if (k.has_unknowns()) {
+        break;
+      }
+      inverted ^= k.bit_test(bit);
+      pin = ins[0].is_const() ? ins[1] : ins[0];
+      continue;
+    }
+    break;
+  }
+  return {pin, bit, inverted, std::nullopt};
+}
+
+// True when arm `f.arm` bit `f.bit` already reads what the fact states.
+bool applied(const Mux_fact& f, const Arms& arms, const Node& mux) {
+  const auto self = local_bit(arms.values[f.arm], f.bit, mux);
+  if (f.other < 0) {
+    return self.value && *self.value == (f.kind == Mux_fact::Kind::one);
+  }
+  const auto other      = local_bit(arms.values[f.other], f.bit, mux);
+  const bool complement = f.kind == Mux_fact::Kind::complement;
+  if (self.value || other.value) {
+    return self.value && other.value && (*self.value != *other.value) == complement;
+  }
+  return self.pin == other.pin && self.bit == other.bit && (self.inverted != other.inverted) == complement;
+}
+
+void apply_mux_facts(Select_rewrite& rw, const Node& n, const std::vector<Mux_fact>& facts, Mux_satopt& stats) {
+  const auto arms  = arms_of(n);
+  const int  count = static_cast<int>(arms.values.size());
+  const int  width = gu::bits_of(n.create_driver_pin(0));
+  if (count == 0 || width <= 0) {
+    return;  // an unstamped output has no bit range to rewrite
+  }
+  // First fact per (arm, bit) wins, as the blaster applied them.
+  std::vector<std::vector<int>> choice(count, std::vector<int>(width, -1));
+  for (size_t i = 0; i < facts.size(); ++i) {
+    const auto& f = facts[i];
+    if (f.arm < 0 || f.arm >= count || f.bit < 0 || f.bit >= width || f.other >= count) {
+      continue;
+    }
+    if (choice[f.arm][f.bit] < 0 && applied(f, arms, n)) {
+      choice[f.arm][f.bit] = -2;  // already read that way: nothing to rewrite
+    }
+    if (choice[f.arm][f.bit] == -1) {
+      choice[f.arm][f.bit] = static_cast<int>(i);
+    }
+  }
+  // An arm bit may read another arm's bit only while that bit stays as is:
+  // the rewrite reads the ORIGINAL arm drivers, so reading a bit that is
+  // itself rewritten would no longer match the two arms. Scanning in arm
+  // order drops the lower arm of a mutually equal pair (the higher arm then
+  // reads the lower) and any read of a bit proven constant.
+  for (int a = 0; a < count; ++a) {
+    for (int b = 0; b < width; ++b) {
+      const int c = choice[a][b];
+      if (c >= 0 && facts[c].other >= 0 && choice[facts[c].other][b] >= 0) {
+        choice[a][b] = -1;
+      }
+    }
+  }
+  const int explicit_arms = arms.hot && !arms.controls.empty() && arms.controls.back().is_invalid() ? count - 1 : count;
+  Arm_builder build{rw.g, n};
+  bool        changed = false;
+  for (int a = 0; a < count; ++a) {
+    // A constant arm is rewritten too: reading the other arm's bit makes that
+    // mux bit independent of the select.
+    // Maximal runs of the same (kind, other); kind -1 = unchanged.
+    struct Run {
+      int lo, hi, kind, other;
+    };
+    std::vector<Run> runs;
+    int              rewritten = 0;
+    for (int b = 0; b < width; ++b) {
+      const int c     = choice[a][b];
+      const int kind  = c < 0 ? -1 : static_cast<int>(facts[c].kind);
+      const int other = c < 0 ? -1 : facts[c].other;
+      rewritten += c >= 0;
+      if (!runs.empty() && runs.back().kind == kind && runs.back().other == other && runs.back().hi == b) {
+        runs.back().hi = b + 1;
+      } else {
+        runs.push_back({b, b + 1, kind, other});
+      }
+    }
+    if (rewritten == 0) {
+      continue;
+    }
+    const auto run_pin = [&](const Run& r) -> Pin {
+      switch (static_cast<Mux_fact::Kind>(r.kind)) {
+        case Mux_fact::Kind::zero: return gu::create_const(rw.g, *Dlop::create_integer(0));
+        case Mux_fact::Kind::one: return build.ones(r.hi - r.lo);
+        case Mux_fact::Kind::equal:
+          return r.lo == 0 && r.hi == width ? arms.values[r.other] : build.slice(arms.values[r.other], r.lo, r.hi);
+        case Mux_fact::Kind::complement: return build.complement(arms.values[r.other], r.lo, r.hi);
+      }
+      return {};
+    };
+    Pin replacement;
+    if (runs.size() == 1) {
+      replacement = run_pin(runs.front());
+    } else {
+      std::vector<std::pair<Pin, int>> lanes;
+      for (const auto& r : runs) {
+        lanes.emplace_back(r.kind < 0 ? build.slice(arms.values[a], r.lo, r.hi) : run_pin(r), r.hi - r.lo);
+      }
+      replacement = build.concat(lanes, width);
+    }
+    const auto pid = !arms.hot ? static_cast<hhds::Port_id>(a + 1)
+                     : a < explicit_arms ? static_cast<hhds::Port_id>(2 * a + 1)
+                                         : static_cast<hhds::Port_id>(2 * explicit_arms);
+    rw.replace(n, pid, replacement);
+    ++stats.arms;
+    stats.bits += static_cast<uint64_t>(rewritten);
+    changed = true;
+  }
+  stats.muxes += changed;
+}
+
 void apply_selects(Select_rewrite& rw, const Node& n, const std::map<int, bool>& known, Select_satopt& stats) {
   const auto op = gu::type_op_of(n);
   if (op == Ntype_op::Flop) {
@@ -1185,77 +1428,65 @@ Select_satopt optimize_selects(const std::vector<std::shared_ptr<hhds::Graph>>& 
       stats.enables);
   return stats;
 }
-bool                                    satopt_crosses(const Node& node) { return crosses(node, arms_of(node)); }
-std::optional<std::vector<std::string>> satopt_region_facts(const Satopt_result& facts, const partition::Region_body& rb) {
-  // Name each fact's subject by its expression over content-stable region port
-  // names. Node IDs would attach the same cached fact to a different mux after
-  // a harmless node renumbering, even when the region compare succeeds.
-  absl::flat_hash_map<Pin, std::string> names;
-  for (const auto& input : rb.inputs) {
-    names[input.src_driver] = std::format("port{}:{}", input.name.size(), input.name);
+uint64_t drop_dead_logic(hhds::Graph* graph) {
+  if (graph == nullptr) {
+    return 0;
   }
-  absl::flat_hash_set<Pin>               visiting;
-  std::function<std::string(const Pin&)> expression = [&](const Pin& p) -> std::string {
-    if (auto it = names.find(p); it != names.end()) {
-      return it->second;
-    }
-    if (p.is_const()) {
-      return "const:" + satopt_constant_key(gu::const_of(p));
-    }
-    const auto  n   = p.get_master_node();
-    std::string key = std::format("{}:{}:{}:{}", static_cast<int>(gu::type_op_of(n)), p.get_port_id(), width(p), gu::is_unsign(p));
-    if (cut(p)) {
-      const auto name = n.attr(hhds::attrs::name);
-      if (!name.has() || name.get().empty()) {
-        throw Unsupported{};
-      }
-      // Name-anchored state and opaque sources have the same identity gate as
-      // the region structural comparison.
-      key += std::format(":cut{}:{}", name.has() ? name.get().size() : 0, name.has() ? name.get() : "");
-    } else {
-      if (visiting.size() > 4096 || !visiting.insert(p).second) {
-        throw Unsupported{};
-      }
-      std::vector<std::string> inputs;
-      for (const auto& in_pin : n.inp_sorted_pins()) {
-        const auto in_drv = in_pin.get_driver_pin();
-        inputs.push_back(std::format("{}={}", in_pin.get_port_id(), expression(in_drv)));
-      }
-      // These subjects identify proven facts, so retain exact expression
-      // equality rather than accepting a hash collision as a matching subject.
-      std::sort(inputs.begin(), inputs.end());
-      for (const auto& input : inputs) {
-        if (key.size() + input.size() > 1048576) {
-          throw Unsupported{};
-        }
-        key += std::format("|{}:{}", input.size(), input);
-      }
-      visiting.erase(p);
-    }
-    names[p] = key;
-    return key;
-  };
-  std::vector<std::string> rows;
-  for (const auto& n : rb.nodes) {
-    auto it = facts.mux.find(static_cast<uint64_t>(n.get_debug_nid()));
-    if (it == facts.mux.end() || !satopt_crosses(n)) {
-      continue;
-    }
-    std::string subject;
-    try {
-      subject = expression(n.create_driver_pin(0));
-    } catch (const Unsupported&) {
-      return std::nullopt;
-    }
-    std::set<std::pair<int, int>> selected;
-    for (const auto& f : it->second) {
-      if (!selected.emplace(f.arm, f.bit).second) {
-        continue;
-      }
-      rows.push_back(std::format("{}:{}:{}:{}:{}:{}", subject.size(), subject, f.arm, f.bit, static_cast<int>(f.kind), f.other));
+  Select_rewrite rw{*graph, {}};
+  uint64_t       before = 0;
+  for (const auto n : graph->body().nodes()) {
+    ++before;
+    const auto op = gu::type_op_of(n);
+    if (Ntype::is_comb(op) && op != Ntype_op::Clock_cell && !n.has_out_edges()) {
+      rw.released.push_back(n.create_driver_pin(0));
     }
   }
-  std::sort(rows.begin(), rows.end());
-  return rows;
+  if (rw.released.empty()) {
+    return 0;
+  }
+  rw.sweep();
+  uint64_t after = 0;
+  for (const auto n : graph->body().nodes()) {
+    (void)n;
+    ++after;
+  }
+  return before - after;
+}
+
+Mux_satopt optimize_muxes(hhds::Graph* graph, std::string_view cache_dir, bool all_regions) {
+  Mux_satopt stats;
+  const auto result = satopt(graph, cache_dir, all_regions);
+  stats.candidates  = result->candidates;
+  stats.survivors   = result->survivors;
+  stats.proven      = result->proven;
+  stats.reused      = result->reused;
+  if (result->mux.empty()) {
+    return stats;
+  }
+  // Resolve every subject before mutating: the rewrite adds nodes. Facts are
+  // keyed by node id in a std::map, so the application order (and the ids of
+  // the new nodes) is deterministic.
+  // A reused all-regions proof (explicit pass.satopt) still applies only to
+  // the muxes this call analyzes: inside one region a fact does not change
+  // the region's function, so it is left to the mapper.
+  absl::flat_hash_map<uint64_t, Node> subjects;
+  for (const auto n : graph->body().nodes()) {
+    if (result->mux.contains(static_cast<uint64_t>(n.get_debug_nid())) && (all_regions || crosses(n, arms_of(n)))) {
+      subjects.emplace(static_cast<uint64_t>(n.get_debug_nid()), n);
+    }
+  }
+  Select_rewrite rw{*graph, {}};
+  for (const auto& [nid, facts] : result->mux) {
+    if (auto it = subjects.find(nid); it != subjects.end()) {
+      apply_mux_facts(rw, it->second, facts, stats);
+    }
+  }
+  rw.sweep();
+  std::print("[pass.satopt] {}: rewrote {} arm(s) of {} mux(es), {} bit(s) from proven mux facts\n",
+             graph->get_name(),
+             stats.arms,
+             stats.muxes,
+             stats.bits);
+  return stats;
 }
 }  // namespace livehd::abc

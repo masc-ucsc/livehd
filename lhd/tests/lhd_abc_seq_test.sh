@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# End-to-end test for the sequential `lhd pass abc` knobs (task 2a-abc subtask 5):
+# End-to-end test for the sequential `lhd pass <mapper>` knobs (task 2a-abc subtask 5):
 # technology-map a colored SEQUENTIAL design to a standard-cell netlist and prove
 # it LEC-equivalent to the original logic, exercising both register-mapping modes
 # and both memory-mapping modes.
@@ -27,7 +27,7 @@
 #
 #   prp -> lg
 #   pass color synth                       (the abc driver coloring)
-#   pass abc --set pass.abc.seq=true        (partition + ABC seq tech-map)
+#   pass <mapper> --set pass.<mapper>.seq=true        (partition + ABC seq tech-map)
 #   pass partition                          (same module structure, original logic)
 #   pass liberty gensim test.lib            (behavioral model per comb cell)
 #   cgen net + models -> impl.v ; cgen re -> ref.v
@@ -48,6 +48,19 @@
 # Hermetic: small vendored Liberty (inou/prp/tests/abc/test.lib), not the PDK.
 
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
 
 LHD="${LHD:-lhd/lhd}"
 LIB=inou/prp/tests/abc/test.lib
@@ -83,7 +96,7 @@ prepare_fixture() {
   local source="$1" top="$2" tag="$3" alg="$4"
   local base="$W/base_$tag"
   local algset=()
-  [ "$alg" = cones ] || algset=(--set "color.synth_alg=$alg")
+  [ "$alg" = cones ] || algset=(--set "color.synth.mode=$alg")
   if [ ! -d "$base/re" ]; then
     "$LHD" compile "$source" --top "$top" --emit-dir lg:"$base/lg" --workdir "$base/compile" -q \
       || fail "compile $source"
@@ -116,17 +129,17 @@ run_abc_lec() {
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
   local regset=() regmaxset=()
-  [ "$reg" = true ] || regset=(--set "pass.abc.register=$reg")
-  [ "$reg_max" = 0 ] || regmaxset=(--set "pass.abc.register_max_bits=$reg_max")
+  [ "$reg" = true ] || regset=(--set "pass.$MAPPER.register=$reg")
+  [ "$reg_max" = 0 ] || regmaxset=(--set "pass.$MAPPER.register_max_bits=$reg_max")
   local memset=()
-  [ "$mem" = "default" ] || [ "$mem" = auto ] || memset=(--set "pass.abc.memory=$mem")
+  [ "$mem" = "default" ] || [ "$mem" = auto ] || memset=(--set "pass.$MAPPER.memory=$mem")
 
   [ -f "$prp" ] || fail "missing fixture $prp"
   prepare_models "$LIB" plain
   prepare_fixture "$prp" "$top" "$fix" cones
   cp -R "$W/base_$fix/lg" "$d/lg"
   ABCDIAG="$d/diag.jsonl"
-  run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
+  run pass "$MAPPER" --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
       --set synth.liberty="$LIB" \
       ${regset[@]+"${regset[@]}"} ${regmaxset[@]+"${regmaxset[@]}"} \
       ${memset[@]+"${memset[@]}"} "$@" --emit diagnostics:"$ABCDIAG" --workdir "$d/w3"
@@ -234,7 +247,7 @@ if selected registers; then
     --emit-dir lg:"$RSD/lg" --workdir "$RSD/w1"
   rsrun pass color synth --top abc_resetless_sync lg:"$RSD/lg" --workdir "$RSD/w2"
   rsrun pass partition --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/re" --workdir "$RSD/w3"
-  rsrun pass abc --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --set synth.liberty="$LIB" \
+  rsrun pass "$MAPPER" --top abc_resetless_sync lg:"$RSD/lg" --emit-dir lg:"$RSD/net" --set synth.liberty="$LIB" \
     --workdir "$RSD/w4"
   prepare_models "$LIB" plain
   rsrun lec --impl lg:"$RSD/net" --ref lg:"$RSD/re" --lib lg:"$W/models_plain" --top abc_resetless_sync \
@@ -275,7 +288,7 @@ run_qn() {
   mkdir -p "$d"
   local r="$d/r.json"
   qrun() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
-  # synth_alg=synth, not the shipped `cones` default: the DFF drive ladder sizes
+  # mode=synth, not the shipped `cones` default: the DFF drive ladder sizes
   # a register from the fanout of its Q net INSIDE the region ABC mapped, so a
   # coloring that cuts between the register and its loads (cones puts the flop's
   # own cone in one region and the 20 XORs it feeds in another) always sees
@@ -286,7 +299,7 @@ run_qn() {
   prepare_models "$QLIB" qn
   prepare_fixture "lhd/tests/${fix}.prp" "$top" "qn_$fix" synth
   cp -R "$W/base_qn_$fix/lg" "$d/lg"
-  qrun pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
+  qrun pass "$MAPPER" --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
     --set synth.liberty="$QLIB" --set abc.qor="$d/abc.json" "$@" --workdir "$d/w4"
   qrun lec --impl lg:"$d/net" --ref lg:"$W/base_qn_$fix/re" --lib lg:"$W/models_qn" --top "$top" \
     --workdir "$d/wlec"
@@ -318,13 +331,13 @@ if selected qn; then
   # and the read-back absorbs the inversion: the toy library has no OR2 twin for
   # a NOR2 root, so some registers get a `__dinv` inverter on D -- never more
   # than one per cell -- and the netlist still proves.
-  run_qn user abc_resetless_sync abc_resetless_sync --set 'pass.abc.flow=strash; dc2; map'
+  run_qn user abc_resetless_sync abc_resetless_sync --set "pass.$MAPPER.flow=strash; dc2; map"
   has "$QNV" "DFFNx1 " || fail "qn user flow: DFFNx1 not mapped"
   has "$QNV" "\.QN(" || fail "qn user flow: DFFNx1's QN pin is not wired"
   [ "$(count "$QNV" "^INVx1 [a-z_0-9]*__dinv(")" -le 4 ] \
     || fail "qn user flow: more read-back inverters than DFFNx1 cells: $(count "$QNV" "__dinv(")"
   echo "PASS: QN-only DFF cell under a user flow absorbs the inversion on read-back, LEC proven"
-  run_qn timing abc_resetless_sync abc_resetless_sync --set pass.abc.delay=1000
+  run_qn timing abc_resetless_sync abc_resetless_sync --set pass.$MAPPER.delay=1000
   has "$QNV" "DFFNx1 " || fail "qn timing flow: DFFNx1 not mapped"
   echo "PASS: timing flow preserves QN register semantics, LEC proven"
 
@@ -333,12 +346,15 @@ if selected qn; then
   # Both netlists: one AND2x1 into the DFFNx1, no NAND2x1, no inverter at all.
   for qflow in builtin user; do
     extra=()
-    [ "$qflow" = user ] && extra=(--set 'pass.abc.flow=strash; dc2; map')
+    [ "$qflow" = user ] && extra=(--set "pass.$MAPPER.flow=strash; dc2; map")
     run_qn "twin_$qflow" abc_qn_twin abc_qn_twin ${extra[@]+"${extra[@]}"}
+    [ "$(count "$QNV" "^DFFNx1 ")" = 1 ] || fail "qn twin ($qflow): expected one DFFNx1"
+    # Which cell absorbs the inversion is an ABC-mapping fact; the unate mapper
+    # builds the complement from its own rails (the LEC above still proves it).
+    [ "$MAPPER" = abc ] || continue
     [ "$(count "$QNV" "^AND2x1 ")" = 1 ] || fail "qn twin ($qflow): expected one AND2x1, got $(count "$QNV" "^AND2x1 ")"
     ! has "$QNV" "NAND2x1 " || fail "qn twin ($qflow): NAND2 root survived next to a QN cell"
     ! has "$QNV" "INVx1 " || fail "qn twin ($qflow): an inverter was minted where the AND2x1 twin absorbs the inversion"
-    [ "$(count "$QNV" "^DFFNx1 ")" = 1 ] || fail "qn twin ($qflow): expected one DFFNx1"
   done
   echo "PASS: QN inversion absorbed into the D-cone root (mapper under the built-in flow, twin swap under a user flow)"
 
@@ -347,7 +363,7 @@ if selected qn; then
   run_qn fanout abc_qn_fanout abc_qn_fanout
   has "$QNV" "DFFNx2 " || fail "qn fanout: fanout-20 register did not move to the DFFNx2 rung"
   ! has "$QNV" "DFFNx1 " || fail "qn fanout: the fanout-20 register stayed on DFFNx1"
-  [ "$(count "$QNV" "^INVx1 ")" = 1 ] || fail "qn fanout: expected exactly one INVx1 (the port-fed D), got $(count "$QNV" "^INVx1 ")"
+  [ "$MAPPER" != abc ] || [ "$(count "$QNV" "^INVx1 ")" = 1 ] || fail "qn fanout: expected exactly one INVx1 (the port-fed D), got $(count "$QNV" "^INVx1 ")"
   echo "PASS: DFF drive ladder picks the stronger rung for a high-fanout Q net"
 
 fi
@@ -370,7 +386,7 @@ if selected registers; then
     --emit-dir lg:"$ARD/lg" --workdir "$ARD/w1"
   arrun pass color synth --top abc_async_reset lg:"$ARD/lg" --workdir "$ARD/w2"
   arrun pass partition --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/re" --workdir "$ARD/w3"
-  arrun pass abc --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/net" --set synth.liberty="$LIB" \
+  arrun pass "$MAPPER" --top abc_async_reset lg:"$ARD/lg" --emit-dir lg:"$ARD/net" --set synth.liberty="$LIB" \
     --workdir "$ARD/w4"
   prepare_models "$LIB" plain
   arrun compile lg:"$ARD/net" --top abc_async_reset --emit-dir verilog:"$ARD/netv" --workdir "$ARD/w6"
@@ -408,7 +424,7 @@ if selected qn; then
   has "$QNV" "or posedge rst" || fail "qn sync reset (builtin): asynchronous-reset register did not stay native"
   ! has "$QNV" "__dinv" || fail "qn sync reset (builtin): built-in flow minted a read-back inverter"
   ! has "$QNV" "DFFNx1 async_state" || fail "qn sync reset (builtin): asynchronous-reset register mapped to a cell"
-  run_qn sreset_user abc_async_reset abc_async_reset --set 'pass.abc.flow=strash; dc2; map'
+  run_qn sreset_user abc_async_reset abc_async_reset --set "pass.$MAPPER.flow=strash; dc2; map"
   [ "$(count "$QNV" "^DFFNx1 sync_state_[0-3](")" = 4 ] \
     || fail "qn sync reset (user): expected 4 DFFNx1 cells named sync_state_<bit>, got $(grep -h '^DFFNx1 ' "$QNV"/*.v)"
   has "$QNV" "or posedge rst" || fail "qn sync reset (user): asynchronous-reset register did not stay native"
@@ -462,7 +478,7 @@ if selected memory; then
 
   # ...and `auto` keeps the SAME memory native once it is over memory_max_bits,
   # with the one-line note naming it. memory=true ignores the threshold entirely.
-  run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.abc.memory_max_bits=63
+  run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.$MAPPER.memory_max_bits=63
   # Native = the shipped wrapper (`include cgen_memory_*.v) for a reset-less
   # memory, or the boundary module a memory with a whole-array reset is enclosed in
   # (the wrappers have no reset port). That boundary module is the macro-instance
@@ -476,7 +492,7 @@ if selected memory; then
     || fail "abc_mem auto/max_bits=63: no memory-max-bits note: $(cat "$ABCDIAG")"
   echo "PASS: auto keeps an over-memory_max_bits memory native with a note (abc_mem)"
 
-  run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.abc.memory_max_bits=63
+  run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.$MAPPER.memory_max_bits=63
   has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem memory=true: memory_max_bits was consulted"
   echo "PASS: memory=true folds regardless of memory_max_bits (abc_mem)"
 

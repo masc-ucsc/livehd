@@ -6,8 +6,14 @@ Every number quoted below was read out of the source or measured on this box;
 none is a target.
 
 **2026-09-09 update:** the defaults quoted here describe the August audit.
-The current cones defaults are `synth_alg=cones`, `ctrl_cones=true`,
+The current cones defaults are `mode=cones`, `ctrl_cones=true`,
 `forward=all`, `max_gate=30000`, `stop_mux=true`, and `stop_arith=true`.
+**2026-09-22:** synth-only color knobs are spelled `pass.color.synth.<flag>`
+(`synth_alg` is now `pass.color.synth.mode`), and the stop_* defaults come from
+a mapper profile: `pass.color.synth.mapper=abc` (the default) cuts at every
+`stop_*` operator; `=synth` (set by `lhd synth --set synth.mapper=synth`)
+turns every `stop_*` off so a color runs register to register. An explicit
+`stop_*` setting overrides either profile.
 Primary-input sharing now counts as cone overlap. See the
 [lhdtrack cones QoR task](../todo/livehd/2d-cones-qor.html) for the measurements
 and the selected per-PDK benchmark profiles, including `stop_mux=false` for Sky130.
@@ -344,11 +350,13 @@ today, for the record:
 | `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
 | `pass.abc.memory` | `auto` (fold a memory within `memory_max_bits`, or over 3 ports whatever the size) | `pass_abc.cpp` (`memory`) |
 | `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |
-| `pass.color.synth_alg` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`synth_alg`) |
-| `pass.color.min_ge` | `500` GE (`synth`/`pipe` only; `cones` does not honour it) | `pass_color.cpp` (`min_ge`) |
-| `pass.color.max_ge` | `5000` synthesis GE (`synth_alg=synth` \| `pipe` only) | `pass_color.cpp` (`max_ge`) |
-| `pass.color.max_gate` | `30000` PREDICTED AIG (`synth_alg=cones` -- the shipped default) | `pass_color.cpp` (`max_gate`) |
-| `pass.color.name_weight` | `4` | `pass_color.cpp` (`name_weight`) |
+| `pass.color.synth.mode` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`mode`) |
+| `pass.color.synth.mapper` | `abc` (`lhd synth` sets it from `synth.mapper`); picks the `stop_*` default profile | `pass_color.cpp` (`mapper`) |
+| `pass.color.synth.stop_{mux,arith,cmp,shift}` | `true` under `mapper=abc`, `false` under `mapper=synth`; an explicit value wins | `pass_color.cpp` (`stop_*`) |
+| `pass.color.synth.min_ge` | `500` GE (`synth`/`pipe` only; `cones` does not honour it) | `pass_color.cpp` (`min_ge`) |
+| `pass.color.synth.max_ge` | `5000` synthesis GE (`mode=synth` \| `pipe` only) | `pass_color.cpp` (`max_ge`) |
+| `pass.color.synth.max_gate` | `30000` PREDICTED AIG (`mode=cones` -- the shipped default) | `pass_color.cpp` (`max_gate`) |
+| `pass.color.synth.name_weight` | `4` | `pass_color.cpp` (`name_weight`) |
 
 Known starting point (minion, 3-pass incremental, pre-PDK-change):
 
@@ -433,7 +441,7 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
   colour the flat view now, so crossing a module boundary is the default rather
   than a size-triggered rewrite, and `min_ge` no longer doubles as an inline
   threshold.)
-- **W1.4 `synth_alg=pipe` vs `synth` vs `cones`.** Measure; it is a one-flag
+- **W1.4 `mode=pipe` vs `synth` vs `cones`.** Measure; it is a one-flag
   experiment. `cones` (todo/livehd/2c-color-synthcones.html) decides region SIZE
   while it decides region SHAPE: one backward cone per register `din` and per
   register `enable`, ranked and merged by how much logic the cones share, capped
@@ -444,7 +452,7 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
   Every `pass.abc` run now records both estimates per region (`input_ge` and
   `pred_aig` in `qor.json`, next to the mapped `gates`), so the predictor can be
   recalibrated from any production run. All three algorithms are kept; `cones`
-  is now the shipped default, so the A/B leg to run is `synth_alg=synth`.
+  is now the shipped default, so the A/B leg to run is `mode=synth`.
 
   A/B recipe (from `../lhdsuite`, same sitting, same `-c opt` build; the
   `_incremental` targets are the ones that carry both a cold `full` leg and the

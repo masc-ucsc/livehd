@@ -332,7 +332,7 @@ echo "$ft_total" | grep -q '"gates":1,' || fail "feed-through design must map to
 # CI -> PO). `out3`/`out4` sharing one XOR is NOT a ninth: the shipped `cones`
 # coloring puts that gate in a region of its own with a single output, so the
 # second consumer is a parent-level wire fan-out rather than an in-region CO
-# (`synth_alg=synth` maps the whole def as one region and reports 9).
+# (`mode=synth` maps the whole def as one region and reports 9).
 echo "$ft_total" | grep -q '"bypassed":8' || fail "expected 8 bypassed identity buffers (the register region's 4 D + 4 Q feed-throughs): $ft_total"
 run compile lg:"$FT/net" --top abc_feedthrough.abc_feedthrough --emit-dir verilog:"$FT/netv" --workdir "$FT/w5"
 ! grep -hq "^BUFx1 " "$FT/netv/"*.v || fail "a feed-through wire became a BUFx1 buffer cell"
@@ -345,7 +345,7 @@ grep -hq "^DFFx1 " "$FT/netv/"*.v || fail "the resetless register did not map to
 # The register cone is its own region under the shipped `cones` coloring, so the
 # concatenation of the four DFF Q pins lands on that region's OUTPUT port
 # (`state_o = ({state_3_o3,...})`) and the top wires the port straight to `out2`
-# -- under `synth_alg=synth` the single region assigns `out2` itself. Accept
+# -- under `mode=synth` the single region assigns `out2` itself. Accept
 # either spelling; the "no cell in between" half is the BUFx1/ft_cells check.
 cat "$FT/netv/"*.v | grep -q "= ({state_3\|= {state_3" \
   || fail "flop Q -> output is not a direct wire in the netlist"

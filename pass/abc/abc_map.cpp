@@ -241,39 +241,115 @@ std::string subst(std::string s, std::string_view tok, std::string_view val) {
   return s;
 }
 
-// Adapter exposing the per-region ABC gate constructors as the arith::Ops
-// bit-algebra (Bit = Abc_Obj_t*), so the templated adder/comparator builders in
-// abc_arith.hpp drive ABC without any ABC dependency of their own (2i-abc_arith).
-struct Abc_bit_ops {
-  std::function<Abc_Obj_t*(bool)>                   konst;
-  std::function<Abc_Obj_t*(Abc_Obj_t*)>             not_;
-  std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> and_fn;
-  std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> or_fn;
-  std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> xor_fn;
-  Abc_Obj_t*                                        zero() { return konst(false); }
-  Abc_Obj_t*                                        one() { return konst(true); }
-  Abc_Obj_t*                                        inv(Abc_Obj_t* a) { return not_(a); }
-  Abc_Obj_t*                                        and_(Abc_Obj_t* a, Abc_Obj_t* b) { return and_fn(a, b); }
-  Abc_Obj_t*                                        or_(Abc_Obj_t* a, Abc_Obj_t* b) { return or_fn(a, b); }
-  Abc_Obj_t*                                        xor_(Abc_Obj_t* a, Abc_Obj_t* b) { return xor_fn(a, b); }
+// Adapter exposing the per-region gate constructors as the arith::Ops
+// bit-algebra (Bit = a Blast_tape node), so the templated adder/comparator
+// builders in abc_arith.hpp record logic without any backend dependency.
+struct Tape_bit_ops {
+  using Bit = uint32_t;
+  std::function<Bit(bool)>     konst;
+  std::function<Bit(Bit)>      not_;
+  std::function<Bit(Bit, Bit)> and_fn;
+  std::function<Bit(Bit, Bit)> or_fn;
+  std::function<Bit(Bit, Bit)> xor_fn;
+  Bit                          zero() { return konst(false); }
+  Bit                          one() { return konst(true); }
+  Bit                          inv(Bit a) { return not_(a); }
+  Bit                          and_(Bit a, Bit b) { return and_fn(a, b); }
+  Bit                          or_(Bit a, Bit b) { return or_fn(a, b); }
+  Bit                          xor_(Bit a, Bit b) { return xor_fn(a, b); }
 };
 
-}  // namespace
-
-// The slack floor. Below it a remap cannot buy back anything ABC would not
-// already have taken, and it would still cost a second mapping pass.
-static constexpr double kMinRelaxPct = 25.0;
-
-int area_relax_percent(float target, float achieved, uint32_t cap) {
-  if (cap == 0 || target <= 0.0f || achieved <= 0.0f || achieved > target) {
-    return 0;
+// pass.abc's ABC netlist, rebuilt from the region's tape object for object in
+// the order the blaster recorded them: the same ids and names as building the
+// netlist while blasting. Every latch input is connected at the end.
+Abc_Ntk_t* replay_tape(const Blast_tape& tape, const std::string& name) {
+  using Op      = Blast_tape::Op;
+  auto* ntk     = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
+  ntk->pName    = Extra_UtilStrsav(const_cast<char*>(name.c_str()));
+  auto*   man   = static_cast<Hop_Man_t*>(ntk->pManFunc);
+  auto    nets  = std::vector<Abc_Obj_t*>(tape.nodes.size(), nullptr);
+  auto    bis   = std::vector<Abc_Obj_t*>(tape.latches.size(), nullptr);
+  auto    named = [](Abc_Obj_t* obj, const std::string& nm) { Abc_ObjAssignName(obj, const_cast<char*>(nm.c_str()), nullptr); };
+  auto    net   = [&](Abc_Obj_t* node) {
+    auto* out = Abc_NtkCreateNet(ntk);
+    Abc_ObjAddFanin(out, node);
+    return out;
+  };
+  for (size_t i = 0; i < tape.nodes.size(); ++i) {
+    const auto& e = tape.nodes[i];
+    switch (e.op) {
+      case Op::const0:
+      case Op::const1: {
+        auto* node  = Abc_NtkCreateNode(ntk);
+        node->pData = e.op == Op::const1 ? Hop_ManConst1(man) : Hop_Not(Hop_ManConst1(man));
+        nets[i]     = net(node);
+        break;
+      }
+      case Op::inv: {
+        auto* node  = Abc_NtkCreateNode(ntk);
+        node->pData = Hop_Not(Hop_IthVar(man, 0));
+        Abc_ObjAddFanin(node, nets[e.a]);
+        nets[i] = net(node);
+        break;
+      }
+      case Op::and2:
+      case Op::or2:
+      case Op::xor2: {
+        auto* node  = Abc_NtkCreateNode(ntk);
+        node->pData = e.op == Op::and2 ? Hop_CreateAnd(man, 2) : e.op == Op::or2 ? Hop_CreateOr(man, 2) : Hop_CreateExor(man, 2);
+        Abc_ObjAddFanin(node, nets[e.a]);
+        Abc_ObjAddFanin(node, nets[e.b]);
+        nets[i] = net(node);
+        break;
+      }
+      case Op::pi: {
+        auto* obj = Abc_NtkCreatePi(ntk);
+        auto* out = Abc_NtkCreateNet(ntk);
+        if (!tape.pis[e.a].name.empty()) {
+          named(out, tape.pis[e.a].name);
+        }
+        Abc_ObjAddFanin(out, obj);
+        nets[i] = out;
+        break;
+      }
+      case Op::latch: {
+        const auto& l     = tape.latches[e.a];
+        auto*       bo    = Abc_NtkCreateBo(ntk);
+        auto*       latch = Abc_NtkCreateLatch(ntk);
+        auto*       bi    = Abc_NtkCreateBi(ntk);
+        Abc_ObjAddFanin(bo, latch);
+        Abc_ObjAddFanin(latch, bi);
+        if (l.init == '0') {
+          Abc_LatchSetInit0(latch);
+        } else if (l.init == '1') {
+          Abc_LatchSetInit1(latch);
+        } else {
+          Abc_LatchSetInitDc(latch);
+        }
+        nets[i] = net(bo);
+        named(nets[i], l.name);
+        bis[e.a] = bi;
+        break;
+      }
+      case Op::po: {
+        // A uniquely named NET alias of the observed driver (see the region
+        // outputs in map_region), then the PO.
+        auto* onet = Abc_NtkCreateNet(ntk);
+        named(onet, tape.pos[e.b].name);
+        Abc_ObjAddFanin(onet, Abc_ObjFanin0(nets[e.a]));
+        auto* obj = Abc_NtkCreatePo(ntk);
+        Abc_ObjAddFanin(obj, onet);
+        break;
+      }
+    }
   }
-  const double slack_pct = (static_cast<double>(target) / achieved - 1.0) * 100.0;
-  if (slack_pct < kMinRelaxPct) {
-    return 0;
+  for (size_t k = 0; k < tape.latches.size(); ++k) {
+    Abc_ObjAddFanin(bis[k], nets[tape.latches[k].d]);
   }
-  return static_cast<int>(std::min(slack_pct, static_cast<double>(cap)));
+  return ntk;
 }
+
+}  // namespace
 
 // {D}/{L} expand to the full FLAG (`-D <val>` / `-L <val>`) when the option is
 // set and to nothing otherwise — `&nf {D}` needs `&nf -D 4`, and a bare value
@@ -470,7 +546,7 @@ std::string Mapper::resolve_recipe() const {
   // flop-less region still reads as a different recipe).
   return std::format(
       "native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}|nldm={}|arelax={}|genlib=unit|area={}|margin={}|"
-      "objective=budget|barrel={}",
+      "objective=budget|barrel={}|alternative={}",
       comb_flow(),
       seq_flow(),
       static_cast<int>(opts_.adder),
@@ -480,7 +556,8 @@ std::string Mapper::resolve_recipe() const {
       opts_.area_relax_pct,
       opts_.area_flow == "none" ? std::string{"none"} : area_flow(),
       reg_margin_ps(),
-      opts_.reverse_barrel);
+      opts_.reverse_barrel,
+      opts_.alternative_recipe);
 }
 
 void Mapper::ensure_dff_cells() {
@@ -1089,7 +1166,7 @@ void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Regi
 //   projected_translation = rss_before + growth_so_far * total / blasted
 // The projection can reject a clearly hopeless translation early, while the
 // repeated exact samples and process backstop police later ABC network forms.
-bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total) {
+bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total, uint64_t pending_bytes) {
   const uint64_t budget = cost::budget_bytes(opts_.memory_budget_mb);
   if (budget == 0 || blasted == 0) {
     return false;  // unknown host and no explicit budget: unenforceable, do not gate
@@ -1101,10 +1178,11 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // allocator returns them. Subtract the color-entry baseline so a long run is
   // not refused merely because completed mapped modules remain in its output
   // library; this is still conservative within one color.
-  const uint64_t rss = cost::process_footprint_bytes();
-  if (rss == 0) {
+  const uint64_t sampled = cost::process_footprint_bytes();
+  if (sampled == 0) {
     return false;
   }
+  const uint64_t rss = sampled + pending_bytes;
 
   // RSS at the first sample moves in large allocator/startup steps. Multiplying
   // that extrapolation by a guessed post-translation ABC factor produced severe
@@ -1181,19 +1259,20 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                                    mib(cost::physical_ram_bytes()),
                                                    mib(cost::reserve_bytes()));
   // Once earlier colors exist to blame, say so: their retained memory is the
-  // cost, and the caller's stock `color.max_gate=<smaller>` hint is then the
+  // cost, and the caller's stock `pass.color.synth.max_gate=<smaller>` hint is then the
   // wrong advice.
   const std::string cause = (coordinator_ || over_growth || qor_.empty())
                                 ? std::string{}
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
-      "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
+      "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB{} "
       "(was {} MiB, {} added {} MiB){}, {}{}",
       region,
       blasted,
       total,
       100.0 * fraction,
       mib(rss),
+      pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes)) : std::string{},
       mib(rss_before),
       coordinator_ ? "process" : "color",
       mib(grown),
@@ -1838,25 +1917,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // graph_lock, so the appends stay serialized) with ITS region's options.
     (coordinator_ ? *coordinator_ : *this).remember_ware(rb, opts_);
   }
-  std::shared_ptr<const Satopt_result> satopt_facts;
-  if (opts_.satopt && rb.src != nullptr) {
-    auto& results    = coordinator_ ? coordinator_->satopt_results_ : satopt_results_;
-    auto [it, fresh] = results.try_emplace(rb.src);
-    if (fresh) {
-      it->second = satopt(rb.src, incr_ ? incr_->dir() + "/../satopt_cache" : "");
-    }
-    satopt_facts = it->second;
-  }
-  std::string              recipe = resolve_recipe();
-  std::vector<std::string> fact_keys;
-  if (satopt_facts) {
-    auto keys = satopt_region_facts(*satopt_facts, rb);
-    if (keys) {
-      fact_keys = std::move(*keys);
-    } else {
-      satopt_facts.reset();
-    }  // no stable subject identity: map without facts
-  }
+  // satopt's per-bit mux facts are already applied to rb.src as an LGraph
+  // rewrite (optimize_muxes, before partitioning), so the region body itself
+  // carries them: nothing fact-specific reaches the blaster or the cache key.
+  std::string recipe = resolve_recipe();
 
   recipe += rb.ctrl ? "|ctrl=1" : "|ctrl=0";
   // The frame's driving cell (resolve_boundary_defaults) makes `buffer` tree
@@ -1874,14 +1938,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (incr_ != nullptr && std::getenv("ABC_INCR_COMPARE_ONLY") != nullptr) {
     bool hit = false;
     if (pre_g != nullptr) {
-      hit = incr_->lookup_compare(rb, pre_g, recipe, fact_keys).hit;
-      incr_->store_pre(rb, *rb.pre_lib, rb.pre_name, recipe, fact_keys);
+      hit = incr_->lookup_compare(rb, pre_g, recipe).hit;
+      incr_->store_pre(rb, *rb.pre_lib, rb.pre_name, recipe);
     }
     std::print("COMPARE {} {}\n",
                rb.module_name,
                !rb.reuse_eligible ? "INELIGIBLE" : (pre_g == nullptr ? "REBUILD-FAIL" : (hit ? "HIT" : "MISS")));
     Region_qor q;
-    q.satopt_facts = fact_keys.size();
     q.module       = rb.module_name;
     q.color        = rb.color;
     q.ctrl         = rb.ctrl;
@@ -1896,10 +1959,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   if (incr_ != nullptr && rb.reuse_eligible) {
     if (pre_g != nullptr) {
-      auto res = incr_->lookup_compare(rb, pre_g, recipe, fact_keys);
+      auto                               res = incr_->lookup_compare(rb, pre_g, recipe);
+      std::shared_ptr<const std::string> evidence;
+      if (res.hit && opts_.alternative_evidence_valid) {
+        evidence = incr_->read_evidence(*res.row);
+        res.hit  = evidence && opts_.alternative_evidence_valid(res.row->module, *evidence);
+      }
       if (res.hit && incr_->reuse_hit(rb, res, outlib_)) {
+        if (opts_.alternative_replay && evidence) {
+          opts_.alternative_replay(rb.module_name, res.row->module, *evidence);
+        }
         Region_qor q;
-        q.satopt_facts = fact_keys.size();
         q.module       = rb.module_name;
         q.color        = rb.color;
         q.ctrl         = rb.ctrl;
@@ -1951,9 +2021,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return;  // diagnostic already emitted
   }
 
-  auto* manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
-  manNtk->pName = Extra_UtilStrsav(const_cast<char*>(rb.module_name.c_str()));
-  auto* manFunc = static_cast<Hop_Man_t*>(manNtk->pManFunc);
+  // The region's logic is recorded on a backend-neutral tape; the ABC
+  // netlist is replayed from it once translation succeeds.
+  using Tbit = uint32_t;
+  using Op   = Blast_tape::Op;
+  Blast_tape tape;
 
   // bit i of an original driver pin -> the ABC net carrying it. The OUTER map is
   // a node_hash_map (pointer-stable values): several sites bind `auto& slots =
@@ -1963,52 +2035,44 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // a use-after-free once an uncolored design folds the whole graph into one
   // large region. node_hash_map keeps each inner map's address fixed across
   // outer rehashes, so every held `slots` reference stays valid.
-  absl::node_hash_map<hhds::Pin_class, absl::flat_hash_map<int, Abc_Obj_t*>> bitnet;
+  absl::node_hash_map<hhds::Pin_class, absl::flat_hash_map<int, Tbit>> bitnet;
   // Region node membership (handles into rb.src).
   absl::flat_hash_set<hhds::Node_class>                                      region;
   for (const auto& n : rb.nodes) {
     region.insert(n);
   }
 
-  // --- ABC gate constructors (each returns the new gate's output net) ---
-  auto new_net = [&](Abc_Obj_t* node) {
-    auto* net = Abc_NtkCreateNet(manNtk);
-    Abc_ObjAddFanin(net, node);
-    return net;
+  // --- gate constructors (each records a tape node and returns its bit) ---
+  auto record = [&](Op op, Tbit a = 0, Tbit b = 0) {
+    tape.nodes.push_back({op, a, b});
+    return static_cast<Tbit>(tape.nodes.size() - 1);
   };
-  Abc_Obj_t* const1     = nullptr;
-  Abc_Obj_t* const0     = nullptr;
-  auto       abc_const1 = [&]() {
-    if (const1 == nullptr) {
-      auto* node  = Abc_NtkCreateNode(manNtk);
-      node->pData = Hop_ManConst1(manFunc);
-      const1      = new_net(node);
+  Tbit const1     = Blast_tape::kNone;
+  Tbit const0     = Blast_tape::kNone;
+  auto abc_const1 = [&]() {
+    if (const1 == Blast_tape::kNone) {
+      const1 = record(Op::const1);
     }
     return const1;
   };
   auto abc_const0 = [&]() {
-    if (const0 == nullptr) {
-      auto* node  = Abc_NtkCreateNode(manNtk);
-      node->pData = Hop_Not(Hop_ManConst1(manFunc));
-      const0      = new_net(node);
+    if (const0 == Blast_tape::kNone) {
+      const0 = record(Op::const0);
     }
     return const0;
   };
-  auto abc_not = [&](Abc_Obj_t* a) {
+  auto abc_not = [&](Tbit a) {
     if (a == abc_const1()) {
       return abc_const0();
     }
     if (a == abc_const0()) {
       return abc_const1();
     }
-    auto* node  = Abc_NtkCreateNode(manNtk);
-    node->pData = Hop_Not(Hop_IthVar(manFunc, 0));
-    Abc_ObjAddFanin(node, a);
-    return new_net(node);
+    return record(Op::inv, a);
   };
-  auto abc_bin = [&](Abc_Obj_t* a, Abc_Obj_t* b, char kind) {
-    auto* zero = abc_const0();
-    auto* one  = abc_const1();
+  auto abc_bin = [&](Tbit a, Tbit b, char kind) {
+    const auto zero = abc_const0();
+    const auto one  = abc_const1();
     if (kind == '&') {
       if (a == zero || b == zero) {
         return zero;
@@ -2040,15 +2104,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         return zero;
       }
     }
-    auto* node  = Abc_NtkCreateNode(manNtk);
-    node->pData = kind == '&' ? Hop_CreateAnd(manFunc, 2) : kind == '|' ? Hop_CreateOr(manFunc, 2) : Hop_CreateExor(manFunc, 2);
-    Abc_ObjAddFanin(node, a);
-    Abc_ObjAddFanin(node, b);
-    return new_net(node);
+    return record(kind == '&' ? Op::and2 : kind == '|' ? Op::or2 : Op::xor2, a, b);
   };
   auto abc_const_bit = [&](bool v) { return v ? abc_const1() : abc_const0(); };
-  // 2:1 mux on ABC nets: sel ? t : f  ==  (sel & t) | (~sel & f).
-  auto abc_mux       = [&](Abc_Obj_t* sel, Abc_Obj_t* t, Abc_Obj_t* f) {
+  // 2:1 mux: sel ? t : f  ==  (sel & t) | (~sel & f).
+  auto abc_mux       = [&](Tbit sel, Tbit t, Tbit f) {
     return abc_bin(abc_bin(sel, t, '&'), abc_bin(abc_not(sel), f, '&'), '|');
   };
 
@@ -2127,7 +2187,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                  "shift amount defined here");
         };
 
-  Wiring_blaster<Abc_Obj_t*> wiring_blaster;
+  Wiring_blaster<Tbit> wiring_blaster;
 
   // Region inputs are bit-demanded, not eagerly exploded. Wide packed-state
   // ports often expose tens of thousands of bits while this region reads only
@@ -2156,7 +2216,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
 
   // --- bit i of an original driver pin, with sign/zero extension past width ---
-  std::function<Abc_Obj_t*(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Abc_Obj_t* {
+  std::function<Tbit(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Tbit {
     if (drv.is_invalid()) {
       return abc_const_bit(false);
     }
@@ -2175,34 +2235,30 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     if (drv.is_const()) {
       const auto& val = gu::const_of(drv);
-      auto*       net = abc_const_bit(val.bit_test(eff));
+      const auto  net = abc_const_bit(val.bit_test(eff));
       slots[eff]      = net;
       return net;
     }
     if (auto it = region_input_index.find(drv); it != region_input_index.end()) {
-      const size_t pi  = it->second;
-      auto*        obj = Abc_NtkCreatePi(manNtk);
-      auto*        net = Abc_NtkCreateNet(manNtk);
-      auto         nm  = std::format("{}_b{}", rb.inputs[pi].name, eff);
-      Abc_ObjAssignName(net, const_cast<char*>(nm.c_str()), nullptr);
-      Abc_ObjAddFanin(net, obj);
-      slots[eff] = net;
+      const size_t pi = it->second;
+      tape.pis.push_back({std::format("{}_b{}", rb.inputs[pi].name, eff)});
+      const auto net = record(Op::pi, static_cast<Tbit>(tape.pis.size() - 1));
+      slots[eff]     = net;
       all_pi_order.push_back({Pi_kind::region_input, pi_order.size()});
       pi_order.emplace_back(pi, eff);
       return net;
     }
     if (auto it = bbox_output_index.find(drv); it != bbox_output_index.end()) {
-      auto* obj = Abc_NtkCreatePi(manNtk);
-      auto* net = Abc_NtkCreateNet(manNtk);
-      Abc_ObjAddFanin(net, obj);
-      slots[eff] = net;
+      tape.pis.emplace_back();  // unnamed
+      const auto net = record(Op::pi, static_cast<Tbit>(tape.pis.size() - 1));
+      slots[eff]     = net;
       all_pi_order.push_back({Pi_kind::bbox_output, bbox_pi.size()});
       bbox_pi.emplace_back(it->second.first, it->second.second, eff);
       return net;
     }
     auto master = drv.get_master_node();
     if (gu::type_op_of(master) == Ntype_op::Set_mask || gu::type_op_of(master) == Ntype_op::Concat) {
-      auto* net  = wiring_blaster.bit(drv, eff, abc_bit, abc_const0, [&](std::string_view why) {
+      const auto net = wiring_blaster.bit(drv, eff, abc_bit, abc_const0, [&](std::string_view why) {
         if (!unsupported) {
           refuse(master, "unsupported-cell", "unsupported", why);
         }
@@ -2223,20 +2279,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
              std::format("bit {} of this driver could not be materialized", eff),
              "the colored region contains a combinational cycle or an invalid boundary; refusing to emit a wrong netlist");
     }
-    auto* net  = abc_const_bit(false);
-    slots[eff] = net;
+    const auto net = abc_const_bit(false);
+    slots[eff]     = net;
     return net;
   };
 
   auto real_width = [&](const hhds::Pin_class& p) -> int { return std::max(1, gu::real_width(p)); };
 
   // arith::Ops view over the gate constructors, for the Sum/comparator builders.
-  Abc_bit_ops ops;
+  Tape_bit_ops ops;
   ops.konst  = abc_const_bit;
   ops.not_   = abc_not;
-  ops.and_fn = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '&'); };
-  ops.or_fn  = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '|'); };
-  ops.xor_fn = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '^'); };
+  ops.and_fn = [&](Tbit x, Tbit y) { return abc_bin(x, y, '&'); };
+  ops.or_fn  = [&](Tbit x, Tbit y) { return abc_bin(x, y, '|'); };
+  ops.xor_fn = [&](Tbit x, Tbit y) { return abc_bin(x, y, '^'); };
 
   // --- sequential: each region Flop -> N 1-bit ABC latches (seq=true only) ---
   // The latch output (Q) seeds bitnet so the combinational cells read it as a
@@ -2280,9 +2336,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // BO' = ~F(BO, x)), hence the flow gate; every other latch keeps the honest
     // next state and takes the read-back path.
     bool                    d_inverted = false;
-    std::vector<Abc_Obj_t*> bi;        // per-bit latch BI (data-in terminal)
-    std::vector<Abc_Obj_t*> qbits;     // this stage, including hidden pipeline stages
-    std::vector<Abc_Obj_t*> previous;  // preceding stage; empty for the din stage
+    std::vector<uint32_t>   latch;     // per-bit Blast_tape latch index
+    std::vector<uint32_t>   qbits;     // this stage, including hidden pipeline stages
+    std::vector<uint32_t>   previous;  // preceding stage; empty for the din stage
   };
   // Region-input driver -> port name. Used twice: to reconnect a flop
   // boundary's control pins natively (see the boundary scan below), and to
@@ -2328,7 +2384,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         out.connect_sink(rb.body->get_output_pin(port.name));
       }
       Region_qor q;
-      q.satopt_facts = fact_keys.size();
       q.module       = rb.module_name;
       q.color        = rb.color;
       q.ctrl         = rb.ctrl;
@@ -2342,7 +2397,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       q.resynth      = true;
       q.ms           = since();
       qor_.push_back(std::move(q));
-      Abc_NtkDelete(manNtk);
       report_completion(qor_.back());
       return;
     }
@@ -2477,7 +2531,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // Cross every stage into ABC and expose only the final Q to graph users.
       const int               depth     = pipeline_depth(n);
       const auto              prototype = f;
-      std::vector<Abc_Obj_t*> previous;
+      std::vector<Tbit>       previous;
       for (int stage = 0; stage < depth; ++stage) {
         f = prototype;
         if (stage + 1 < depth) {
@@ -2489,11 +2543,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
         f.previous = previous;
         for (int b = 0; b < f.bits; ++b) {
-          auto* bo    = Abc_NtkCreateBo(manNtk);
-          auto* latch = Abc_NtkCreateLatch(manNtk);
-          auto* bi    = Abc_NtkCreateBi(manNtk);
-          Abc_ObjAddFanin(bo, latch);
-          Abc_ObjAddFanin(latch, bi);
+          Blast_tape::Latch latch;
           // Only a power-on init is told to ABC. A reset-backed register powers
           // on X exactly like the DFF cell it maps to (the reset value arrives
           // through D on the first asserted edge); declaring its reset value as
@@ -2501,23 +2551,21 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           // assume a start state the cell never provides. The built-in flows
           // contain no sequential optimization, so this is about honesty, not QoR.
           if (power_on_init && !rval.unknown_bit_test(b)) {
-            rval.bit_test(b) ? Abc_LatchSetInit1(latch) : Abc_LatchSetInit0(latch);
-          } else {
-            Abc_LatchSetInitDc(latch);
+            latch.init = rval.bit_test(b) ? '1' : '0';
           }
-          auto* qnet = Abc_NtkCreateNet(manNtk);
-          Abc_ObjAddFanin(qnet, bo);
           // Source signal names need not be unique (a generated reset counter
           // can share a spelling with a user register). ABC's netlist converter
           // merges CI nets by name, so distinguish every crossed register.
           // Readback recovers source identities from the ordered snapshot.
-          auto nm = std::format("{}_%r{}_{}", f.root, flops.size(), b);
-          Abc_ObjAssignName(qnet, const_cast<char*>(nm.c_str()), nullptr);
+          latch.name = std::format("{}_%r{}_{}", f.root, flops.size(), b);
+          f.latch.push_back(static_cast<uint32_t>(tape.latches.size()));
+          tape.latches.push_back(std::move(latch));
+          const auto qnet            = record(Op::latch, f.latch.back());
+          tape.latches.back().q      = qnet;
           f.qbits.push_back(qnet);  // stage-local Q
           if (stage + 1 == depth) {
             bitnet[f.q_pin][b] = qnet;
           }
-          f.bi.push_back(bi);
         }
         previous = f.qbits;
         flops.push_back(std::move(f));
@@ -3215,9 +3263,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       std::fflush(stdout);
     }
     if (!opts_.allow_oversize && ++blasted % sample_step == 0 && blasted >= blast_total / 20) {
-      if (over_budget(rb.module_name, rss_before, blasted, blast_total)) {
-        Abc_NtkDelete(manNtk);  // emit no partial result; work() raises refusal_ after stop()
-        return;
+      // The tape is small; the ABC netlist replayed from it is what costs
+      // memory, so count it as already allocated (measured 250-300 bytes per
+      // tape node: a node, a net, their fanin/fanout arrays and id slots).
+      constexpr uint64_t kAbcBytesPerTapeNode = 288;
+      if (over_budget(rb.module_name, rss_before, blasted, blast_total, tape.nodes.size() * kAbcBytesPerTapeNode)) {
+        return;  // emit no partial result; work() raises refusal_ after stop()
       }
     }
     auto op       = gu::type_op_of(n);
@@ -3241,14 +3292,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     auto& slots = bitnet[out_pin];
 
-    const std::vector<Mux_fact>* node_facts = nullptr;
-    if (satopt_facts) {
-      const auto found = satopt_facts->mux.find(static_cast<uint64_t>(n.get_debug_nid()));
-      if (found != satopt_facts->mux.end() && satopt_crosses(n)) {
-        node_facts = &found->second;
-      }
-    }
-    blast_comb(n, out_bits, slots, ops, abc_bit, opts_, rb, region, refuse, refuse_shift_amount, node_facts);
+    blast_comb(n, out_bits, slots, ops, abc_bit, opts_, rb, region, refuse, refuse_shift_amount);
     if (op == Ntype_op::Sum) {
       absl::flat_hash_set<hhds::Pin_class> outputs;
       for (const auto& op_pin : n.out_sorted_pins()) {  // the node's driver pins, once each
@@ -3274,7 +3318,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                kMaxRefusals)
           .emit();
     }
-    Abc_NtkDelete(manNtk);
     return;
   }
   trace_stage("blast-complete");
@@ -3293,34 +3336,37 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // enable/reset are single control signals: an N-bit pin asserts on (pin != 0),
   // i.e. the OR-reduction of its bits (matches cgen/yosys reg semantics and the
   // LEC's `rst != 0`). Reduce once per flop, not per data bit.
-  auto reduce_or = [&](const hhds::Pin_class& p) -> Abc_Obj_t* {
+  auto reduce_or = [&](const hhds::Pin_class& p) -> Tbit {
     int w = gu::bits_of(p);
     if (w <= 0) {
       w = 1;
     }
-    Abc_Obj_t* acc = abc_bit(p, 0);
+    Tbit acc = abc_bit(p, 0);
     for (int k = 1; k < w; ++k) {
       acc = abc_bin(acc, abc_bit(p, k), '|');
     }
     return acc;
   };
   for (auto& f : flops) {
-    Abc_Obj_t* en_active  = f.en_drv.is_invalid() ? nullptr : reduce_or(f.en_drv);
-    Abc_Obj_t* rst_active = nullptr;
+    std::optional<Tbit> en_active;
+    std::optional<Tbit> rst_active;
+    if (!f.en_drv.is_invalid()) {
+      en_active = reduce_or(f.en_drv);
+    }
     if (!f.rst_drv.is_invalid()) {
       rst_active = reduce_or(f.rst_drv);
       if (f.neg_reset) {
-        rst_active = abc_not(rst_active);
+        rst_active = abc_not(*rst_active);
       }
     }
     for (int b = 0; b < f.bits; ++b) {
-      Abc_Obj_t* d = f.previous.empty() ? abc_bit(f.din_drv, b) : f.previous[b];
-      if (en_active != nullptr) {
-        d = abc_mux(en_active, d, f.qbits[b]);  // (en != 0)? din : Q
+      Tbit d = f.previous.empty() ? abc_bit(f.din_drv, b) : f.previous[b];
+      if (en_active) {
+        d = abc_mux(*en_active, d, f.qbits[b]);  // (en != 0)? din : Q
       }
-      if (rst_active != nullptr) {
-        Abc_Obj_t* rval = f.rval_drv.is_invalid() ? abc_const_bit(false) : abc_bit(f.rval_drv, b);
-        d               = abc_mux(rst_active, rval, d);  // reset? rval : (en? din : Q)
+      if (rst_active) {
+        const Tbit rval = f.rval_drv.is_invalid() ? abc_const_bit(false) : abc_bit(f.rval_drv, b);
+        d               = abc_mux(*rst_active, rval, d);  // reset? rval : (en? din : Q)
       }
       // QN cell under the built-in flow: the latch stores ~next_state (abc_not
       // folds constants; strash turns it into a complemented edge), so `&nf`
@@ -3330,7 +3376,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // um^2 -> 244 / 17.96, br_credit_sender 67.0 -> 60.2 -- but the aggregate
       // is far cheaper than the read-back absorption (Seq_flop::d_inverted),
       // which the other latches take.
-      Abc_ObjAddFanin(f.bi[b], f.d_inverted ? abc_not(d) : d);
+      tape.latches[f.latch[b]].d = f.d_inverted ? abc_not(d) : d;
     }
   }
 
@@ -3354,12 +3400,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     int w = port.bits == 0 ? 1 : port.bits;
     for (int b = 0; b < w; ++b) {
-      auto* value = abc_bit(port.src_driver, b);
-      auto  nm    = std::format("__po{}_{}_b{}", po, port.name, b);
-      auto* onet  = Abc_NtkCreateNet(manNtk);
-      Abc_ObjAssignName(onet, const_cast<char*>(nm.c_str()), nullptr);
-      Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
-      auto* obj = Abc_NtkCreatePo(manNtk);
+      const auto value = abc_bit(port.src_driver, b);
+      tape.pos.push_back({std::format("__po{}_{}_b{}", po, port.name, b), value});
+      record(Op::po, value, static_cast<Tbit>(tape.pos.size() - 1));
       // A PO is already a connectivity boundary, so the source node gets a
       // uniquely named NET alias rather than an explicit identity node (ABC's
       // netlist checker requires unique CO net names; an explicit node would
@@ -3372,7 +3415,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // read-back (is_identity_gate / only_co_fanouts, pass 1b), which aliases
       // the buffer's output net to its input net and mints no Sub. Read-back
       // pairs POs by creation order.
-      Abc_ObjAddFanin(obj, onet);
       po_order.emplace_back(po, b);
     }
   }
@@ -3400,13 +3442,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       for (int b = 0; b < in.bits; ++b) {
         if (index[b] < 0) {
-          auto* value = abc_bit(in.drv, b);
-          auto  nm    = std::format("__bb{}_i{}_b{}", bi, ii, b);
-          auto* onet  = Abc_NtkCreateNet(manNtk);
-          Abc_ObjAssignName(onet, const_cast<char*>(nm.c_str()), nullptr);
-          Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
-          auto* obj = Abc_NtkCreatePo(manNtk);
-          Abc_ObjAddFanin(obj, onet);
+          const auto value = abc_bit(in.drv, b);
+          tape.pos.push_back({std::format("__bb{}_i{}_b{}", bi, ii, b), value});
+          record(Op::po, value, static_cast<Tbit>(tape.pos.size() - 1));
           index[b] = static_cast<int32_t>(bbox_po.size());
           bbox_po.emplace_back();
         }
@@ -3420,17 +3458,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // outputs. ABC's dch implementation crashes on that empty network; retain a
   // single unobserved constant PO as a mapper sentinel. Readback intentionally
   // ignores it because it is absent from both po_order and bbox_po.
-  if (Abc_NtkPoNum(manNtk) == 0) {
-    has_dummy_po = true;
-    auto* value  = abc_const_bit(false);
-    auto* onet   = Abc_NtkCreateNet(manNtk);
-    char  name[] = "__livehd_dummy_po";
-    Abc_ObjAssignName(onet, name, nullptr);
-    Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
-    auto* obj = Abc_NtkCreatePo(manNtk);
-    Abc_ObjAddFanin(obj, onet);
+  if (tape.pos.empty()) {
+    has_dummy_po     = true;
+    const auto value = abc_const_bit(false);
+    tape.pos.push_back({"__livehd_dummy_po", value});
+    record(Op::po, value, static_cast<Tbit>(tape.pos.size() - 1));
   }
 
+  // The ABC objects are allocated here, not while blasting (the loop above
+  // only estimated them), so this is where their footprint first shows.
+  auto* manNtk = replay_tape(tape, rb.module_name);
+  if (!opts_.allow_oversize && over_budget(rb.module_name, rss_before, blast_total, blast_total)) {
+    Abc_NtkDelete(manNtk);
+    return;  // emit no partial result; work() raises refusal_ after stop()
+  }
   Abc_NtkFinalizeRead(manNtk);
   if (!Abc_NtkCheck(manNtk)) {
     livehd::diag::err("pass.abc", "abc-check", "internal").msg("ABC netlist check failed for region '{}'", rb.module_name).fatal();
@@ -3510,14 +3551,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const std::string area_cmd  = area_flow();
   const bool        candidate_on
       = ladder_on && builtin_flow && !area_cmd.empty() && !has_dummy_po && (opts_.large_ge == 0 || input_ge <= opts_.large_ge);
-  // The area candidate re-maps from the SAME pre-flow logic network, so keep a
-  // copy of it before the frame takes ownership of `pLogic`: every
-  // Abc_FrameReplaceCurrentNetwork below DELETES the network it replaces. The
-  // copy lives until the decision is made (or an early return), so at that
-  // point two networks are alive at once -- the mapped result and this logic
-  // dup -- which the RSS admission check after the flow sees as part of the
-  // region's footprint.
-  Abc_Ntk_t* pre = candidate_on ? Abc_NtkDup(pLogic) : nullptr;
   struct Pre_guard {
     Abc_Ntk_t** ntk;
     ~Pre_guard() {
@@ -3526,7 +3559,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         *ntk = nullptr;
       }
     }
-  } pre_guard{&pre};
+  };
+  Abc_Ntk_t* alternative_source = opts_.alternative ? Abc_NtkDup(pLogic) : nullptr;
+  Pre_guard  alternative_guard{&alternative_source};
   // Regions are independent synthesis jobs, not interactive ABC undo steps.
   // SetCurrentNetwork links the previous (potentially enormous) region as a
   // backup; carrying that network into every later job caused tiny regions to
@@ -3588,162 +3623,87 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const std::string put_step   = std::string{"; "} + std::string{kPutCmd};
   const std::string remap_post = put_step + (tail_on ? flow_tail : "");
   const bool        remappable = tool_owned_flow && flow.ends_with(map_step + remap_post);
-  if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
-    livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
-    return;
-  }
-
-  // A delay is a BUDGET, in both directions -- and the budget is the target
-  // minus the register margin (see `budget` above). The SCL timer sees one
-  // region's combinational cone; OpenSTA's period check also pays the launch
-  // flop's clk->Q and the capture flop's setup (69 ps of a 400 ps ASAP7 period
-  // on br_arb_rr), so a region timed to the full target misses by exactly that.
-  //
-  // The ladder, cheapest step first, each only when the previous still misses:
-  //
-  //   1. the flow's own `buffer -N; dnsize -D <budget>` (already run);
-  //   2. `upsize -D <budget>; dnsize -D <budget>`: `upsize -D` stops as soon as
-  //      the SCL delay is inside the budget (sclUpsize.c) and the down-size
-  //      recovers around it -- the bounded speed-grade step;
-  //   3. `upsize; dnsize`, the UNBOUNDED sweep: `upsize` without a target
-  //      chases the fastest cell assignment and `dnsize` then preserves that
-  //      newly tightened delay instead of the budget. Only for a real miss.
-  //
-  // SLACK: `&nf -D` is silently IGNORED by ABC's mapper -- giaNf.c consults only
-  // `Jf_Par_t::MapDelayTarget`, which the `-D` switch never writes (it sets the
-  // unread `DelayTarget`), so the sole knob that relaxes required times is `-R`,
-  // a PERCENTAGE of the mapper's own achieved delay (logic DEPTH on the
-  // unit-delay GENLIB). Under a tight ASAP7 target the margin is nil; under a
-  // relaxed sky130 one a region beats its clock by 6-380x. Re-map with the
-  // measured slack handed back as `-R`, bounded by `area_relax`.
-  //
-  // Only `&nf` is repeated, not the whole flow: `&undo` restores the GIA the
-  // mapper consumed (ABC keeps exactly one, in `pGia2`), so `&fraig`/`dc2`/`&dch`
-  // -- the expensive part -- run once. It restores only ONE step, which is why
-  // there is no second undo back to the minimum-delay netlist; the relaxation is
-  // capped by the slack that was actually measured, and a miss is repaired with
-  // the same budget-directed sizing step 2 uses.
-  //
-  // Then the AREA CANDIDATE (kAreaFlow): a region that met its budget is
-  // re-mapped from the pre-flow copy with the former baseline + `buffer; upsize -D;
-  // dnsize -D`, timed by the same SCL timer, and the netlist with the smaller
-  // SCL area AMONG THOSE THAT MEET THE BUDGET is kept (the delay flow wins a
-  // tie). Both networks are complete mapped logic networks, so the read-back
-  // below is indifferent to which one won. Both use &put -o's decoupling
-  // buffers and preserve the latches, including the QN encoding's ~f.
-  //
-  // Custom flows remain fully caller-owned: none of this touches them.
-  const auto scl_qor = [&](Abc_Ntk_t* mapped) -> std::optional<std::pair<float, double>> {
-    if (mapped == nullptr || !Abc_NtkIsMappedLogic(mapped)) {
-      return std::nullopt;
+  Flow_plan         plan;
+  plan.flow                 = flow;
+  plan.size_to_budget       = std::format("upsize {0}; dnsize {0}", budget_flag_);
+  plan.map_step             = map_step;
+  plan.remap_post           = remap_post;
+  plan.area_flow            = area_cmd;
+  plan.ladder               = ladder_on;
+  plan.remappable           = remappable;
+  plan.area_candidate       = candidate_on;
+  plan.budget               = budget;
+  plan.area_relax_pct       = opts_.area_relax_pct;
+  const auto flow_admission = [&](std::string_view stage) {
+    const auto elapsed = since();
+    if (opts_.time_budget_ms != 0 && elapsed > static_cast<double>(opts_.time_budget_ms)) {
+      time_refusal_ = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms), stopped at {}",
+                                  rb.module_name,
+                                  elapsed,
+                                  opts_.time_budget_ms,
+                                  stage);
+      return false;
     }
-    // Matching ABC's `stime` (Abc_SclTimePerform): it first REFUSES a network
-    // that is not in topo order or has dangling nodes -- the SCL timer
-    // propagates in object-id order, so without that gate a bad network yields
-    // a silently wrong number instead of no number.
-    auto*                                   timing_ntk = mapped->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(mapped) : mapped;
-    std::optional<std::pair<float, double>> out;
-    if (Abc_SclCheckNtk(timing_ntk, 0)) {
-      auto* timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_ntk, 0, 1, 0.0f, 0);
-      out          = std::pair{timing->MaxDelay0, static_cast<double>(timing->SumArea0)};
-      Abc_SclManFree(timing);
-    }
-    if (timing_ntk != mapped) {
-      Abc_NtkDelete(timing_ntk);
-    }
-    return out;
+    return opts_.allow_oversize || !over_budget(rb.module_name, rss_before, blast_total, blast_total);
   };
-  // What the objective decided, for the QoR row (filled below).
-  std::string                             candidate;
-  std::optional<std::pair<float, double>> delay_flow_qor;
-  std::optional<std::pair<float, double>> area_flow_qor;
-  if (ladder_on) {
-    const std::string size_to_budget = std::format("upsize {0}; dnsize {0}", budget_flag_);
-    auto              d1             = scl_qor(Abc_FrameReadNtk(frame));
-    if (d1 && d1->first > budget) {
-      if (Cmd_CommandExecute(frame, size_to_budget.c_str()) != 0) {
-        livehd::diag::err("pass.abc", "abc-flow", "internal")
-            .msg("ABC budget sizing failed for region '{}' after missing delay budget {} ps: {}",
-                 rb.module_name,
-                 budget,
-                 size_to_budget)
-            .fatal();
-        return;
-      }
-      d1 = scl_qor(Abc_FrameReadNtk(frame));
-    }
-    if (d1 && d1->first > budget) {
-      if (Cmd_CommandExecute(frame, "upsize; dnsize") != 0) {
-        livehd::diag::err("pass.abc", "abc-flow", "internal")
-            .msg("ABC conditional sizing failed for region '{}' after missing delay budget {} ps", rb.module_name, budget)
-            .fatal();
-        return;
-      }
-      d1 = scl_qor(Abc_FrameReadNtk(frame));
-    } else if (d1 && remappable) {
-      const int relax = area_relax_percent(budget, d1->first, opts_.area_relax_pct);
-      if (relax > 0) {
-        const std::string remap = std::format("&undo; {} -R {}{}", map_step, relax, remap_post);
-        if (Cmd_CommandExecute(frame, remap.c_str()) != 0) {
+  // The alternative mapper (pass.synth) maps the region INSTEAD of the flow: it
+  // leaves a MAPPED network in the frame, or the unmapped logic for the ABC
+  // flow to take over. Its result only gets the fanout/sizing tail (buffering
+  // and gate sizing, never restructuring), like every built-in flow.
+  std::shared_ptr<const std::string> alternative_evidence;
+  bool                               alternative_mapped = false;
+  if (opts_.alternative) {
+    alternative_evidence = std::make_shared<const std::string>(
+        opts_.alternative(frame, alternative_source, tape, rb.module_name, opts_, budget, {since(), rss_entry}));
+    auto* current      = Abc_FrameReadNtk(frame);
+    alternative_mapped = current != nullptr && Abc_NtkIsMappedLogic(current);
+    if (alternative_mapped && tail_on) {
+      std::string_view rest = flow_tail;
+      while (!rest.empty()) {
+        const auto end     = rest.find(';');
+        auto       command = rest.substr(0, end);
+        rest.remove_prefix(end == std::string_view::npos ? rest.size() : end + 1);
+        while (!command.empty() && command.front() == ' ') {
+          command.remove_prefix(1);
+        }
+        if (!command.empty() && Cmd_CommandExecute(frame, std::string{command}.c_str()) != 0) {
           livehd::diag::err("pass.abc", "abc-flow", "internal")
-              .msg("ABC area-recovery remap failed for region '{}': {}", rb.module_name, remap)
+              .msg("ABC '{}' failed on the alternative mapping of region '{}'", command, rb.module_name)
               .fatal();
           return;
         }
-        // The relaxation was derived from the SCL timer while `-R` relaxes the
-        // mapper's own depth model, so the two can disagree. Repair with the
-        // same budget-directed sizing step 2 uses rather than trusting the
-        // request.
-        d1 = scl_qor(Abc_FrameReadNtk(frame));
-        if (d1 && d1->first > budget) {
-          if (Cmd_CommandExecute(frame, size_to_budget.c_str()) != 0) {
-            livehd::diag::err("pass.abc", "abc-flow", "internal")
-                .msg("ABC sizing repair failed for region '{}' after area recovery", rb.module_name)
-                .fatal();
-            return;
-          }
-          d1 = scl_qor(Abc_FrameReadNtk(frame));
-        }
-      }
-    }
-    delay_flow_qor = d1;
-    if (pre != nullptr && d1 && d1->first <= budget) {
-      // Keep the delay flow's result aside (Abc_NtkDup copies the Mio gate
-      // pointers of a mapped network, abcObj.c Abc_NtkDupObj) and hand the
-      // pre-flow copy to the frame -- which deletes the delay result the frame
-      // held -- for the second mapping.
-      Abc_Ntk_t* delay_ntk = Abc_NtkDup(Abc_FrameReadNtk(frame));
-      Abc_FrameReplaceCurrentNetwork(frame, pre);
-      pre = nullptr;  // owned by the frame now
-      if (Cmd_CommandExecute(frame, area_cmd.c_str()) != 0) {
-        Abc_NtkDelete(delay_ntk);
-        livehd::diag::err("pass.abc", "abc-flow", "internal")
-            .msg("ABC area-candidate flow failed for region '{}': {}", rb.module_name, area_cmd)
-            .fatal();
-        return;
-      }
-      area_flow_qor = scl_qor(Abc_FrameReadNtk(frame));
-      if (area_flow_qor && area_flow_qor->first <= budget && area_flow_qor->second < d1->second) {
-        Abc_NtkDelete(delay_ntk);
-        candidate = "area";
-      } else {
-        Abc_FrameReplaceCurrentNetwork(frame, delay_ntk);  // deletes the area result
-        candidate = "delay";
-      }
-      if (opts_.verbose) {
-        std::print("[pass.abc] region '{}': budget {} ps: delay flow {:.1f} ps / {:.2f}, area flow {} -> kept {}\n",
-                   rb.module_name,
-                   budget,
-                   d1->first,
-                   d1->second,
-                   area_flow_qor ? std::format("{:.1f} ps / {:.2f}", area_flow_qor->first, area_flow_qor->second) : "untimed",
-                   candidate);
       }
     }
   }
-  if (pre != nullptr) {
-    Abc_NtkDelete(pre);  // the candidate did not run (budget missed, or untimed)
-    pre = nullptr;
+  Flow_result flow_result;
+  if (!alternative_mapped) {
+    flow_result = execute_flow(frame, plan, flow_admission);
+  }
+  if (flow_result.status == Flow_status::refused) {
+    if (flow_result.refusal == Flow_refusal::time) {
+      time_refusal_ = std::format("region '{}': {}", rb.module_name, flow_result.command);
+    } else if (flow_result.refusal == Flow_refusal::memory) {
+      refusal_ = std::format("region '{}': {}", rb.module_name, flow_result.command);
+    }
+    return;  // work() reports the recorded time/memory refusal, without publication.
+  }
+  if (flow_result.status == Flow_status::failed) {
+    livehd::diag::err("pass.abc", "abc-flow", "internal")
+        .msg("ABC {} failed for region '{}': {}", flow_result.stage, rb.module_name, flow_result.command)
+        .fatal();
+    return;
+  }
+  const auto& candidate      = flow_result.candidate;
+  const auto& delay_flow_qor = flow_result.delay_qor;
+  const auto& area_flow_qor  = flow_result.area_qor;
+  if (opts_.verbose && !candidate.empty()) {
+    std::print("[pass.abc] region '{}': budget {} ps: delay flow {:.1f} ps / {:.2f}, area flow {} -> kept {}\n",
+               rb.module_name,
+               budget,
+               delay_flow_qor->first,
+               delay_flow_qor->second,
+               area_flow_qor ? std::format("{:.1f} ps / {:.2f}", area_flow_qor->first, area_flow_qor->second) : "untimed",
+               candidate);
   }
   trace_stage("flow-complete");
 
@@ -3764,7 +3724,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // blackbox boundary are pass.opentimer's job, not scored here.
   {
     Region_qor q;
-    q.satopt_facts = fact_keys.size();
     q.module       = rb.module_name;
     q.color        = rb.color;
     q.ctrl         = rb.ctrl;
@@ -3776,9 +3735,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         ++q.div_blackbox;  // unmapped cone: the region score is partial
       }
     }
-    q.budget        = budget;
-    q.candidate     = candidate;
-    q.boundary_bits = boundary_bits;
+    q.budget          = budget;
+    q.candidate       = candidate;
+    q.baseline_worker = flow_result.observation_json;
+    q.boundary_bits   = boundary_bits;
     if (delay_flow_qor) {
       q.delay_flow_delay = delay_flow_qor->first;
       q.delay_flow_area  = delay_flow_qor->second;
@@ -3797,7 +3757,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         // sizing steps have selected concrete drive strengths, time the
         // resulting network with those cells' actual NLDM surfaces, matching
         // ABC's `stime` (the same timer the budget ladder judged by).
-        if (const auto phys = scl_qor(pMappedLogic)) {
+        if (const auto phys = physical_flow_qor(pMappedLogic)) {
           q.delay = phys->first;
           q.area  = phys->second;
         }
@@ -5200,8 +5160,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // body built above) into the cache so the next run's identical region is a
   // whole-module copy, not an ABC run. A region whose pre-body could not be
   // rebuilt (pre_g == nullptr) is uncacheable and simply re-maps next time.
+  qor_.back().alternative_evidence = std::move(alternative_evidence);
   if (incr_ != nullptr && pre_g != nullptr) {
-    incr_->store(rb, *rb.pre_lib, rb.pre_name, qor_.back(), recipe, outlib_, fact_keys);
+    incr_->store(rb, *rb.pre_lib, rb.pre_name, qor_.back(), recipe, outlib_);
   }
   qor_.back().cache             = "miss";
   qor_.back().ms                = since();

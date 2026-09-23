@@ -47,8 +47,8 @@ struct Set_pass {
   enum class List : uint8_t {
     all,       // canonical namespace: list every label
     none,      // accepted alias (legacy spelling): list nothing
-    common,    // list only the pass.lec labels in kFormalCommonFlags
-    specific,  // list every label except pass.lec's kFormalCommonFlags
+    common,    // list only the labels set_flag_is_common() places here
+    specific,  // list every label set_flag_is_common() does not
   } list = List::all;
 };
 
@@ -82,6 +82,54 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "timeout",
     "witness",
 };
+
+// pass.color labels that ONLY the `synth` algorithm reads (color_synth*.cpp):
+// canonical spelling `pass.color.synth.<flag>`. Every other pass.color label --
+// the algorithm choice, generic post-processing, the ware_* policy that
+// pass.abc honors under ANY coloring, and the other algorithms' own knobs --
+// stays `pass.color.<flag>`.
+inline constexpr std::string_view kColorSynthFlags[] = {
+    "ctrl_cones",
+    "ctrl_max_gate",
+    "ctrl_min_gate",
+    "flop_to_flop",
+    "forward",
+    "mapper",
+    "max_gate",
+    "max_ge",
+    "min_color_nodes",
+    "min_ge",
+    "mode",
+    "name_weight",
+    "stop_arith",
+    "stop_cmp",
+    "stop_mux",
+    "stop_shift",
+};
+
+// The common/specific split of a method shared by two namespaces (Set_pass
+// List::common / List::specific): true when `flag` belongs to the COMMON one.
+// pass.lec: `formal.<flag>` for kFormalCommonFlags, `formal.lec.<flag>` for the
+// pairing machinery. pass.color: `pass.color.<flag>` except kColorSynthFlags,
+// which are `pass.color.synth.<flag>`. Keyed on (method, flag), so a label that
+// merely SHARES a name with one of these on another method is unaffected.
+inline bool set_flag_is_common(std::string_view method, std::string_view flag) {
+  const auto in = [flag](const auto& table) {
+    for (const auto& f : table) {
+      if (f == flag) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (method == "pass.lec") {
+    return in(kFormalCommonFlags);
+  }
+  if (method == "pass.color") {
+    return !in(kColorSynthFlags);
+  }
+  return false;
+}
 
 // REMOVED namespaces/flags (no back-compat): using one
 // errors with a directed "use X instead" hint. `formal_split` = the lec split
@@ -131,7 +179,7 @@ inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] =
      "--set formal.rlimit=N for the old budget_mode=rlimit behavior"                                                 },
     {     "absorb",
      "the synth algorithms colour the flat view now, so crossing a module boundary is the default, not a size-triggered "
-     "inline; min_ge no longer doubles as the absorb threshold (pass.color.max_gate bounds a `cones` region instead)"},
+     "inline; min_ge no longer doubles as the absorb threshold (pass.color.synth.max_gate bounds a `cones` region instead)"},
 };
 
 // Retired public settings, including pass labels still used by the kernel.
@@ -160,7 +208,7 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {       "inou.slang",                   "defines",                                                                            "Pass -D NAME=VALUE after -- to the slang reader."},
     {       "inou.slang",                  "includes",                                                                                   "Pass -I DIR after -- to the slang reader."},
     {       "inou.slang",                 "undefines",                                                                                  "Pass -U NAME after -- to the slang reader."},
-    {         "pass.abc",                   "threads",                                      "Use --set synth.threads=N for the shared ABC worker limit (0 = automatic, up to 8)."},
+    {         "pass.abc",                   "threads",                                         "Use --set synth.threads=N for the shared ABC worker limit (0 = automatic, up to 8)."},
     {         "pass.abc",                "small_flow",                                                                  "This unused optional policy was removed; drop the setting."},
     {         "pass.abc",                  "small_ge",                                                                  "This unused optional policy was removed; drop the setting."},
     {         "pass.abc",              "small_min_ge",                                                                  "This unused optional policy was removed; drop the setting."},
@@ -187,12 +235,26 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {         "pass.lec",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",
      "strict", "An UNKNOWN verdict always fails now (exit 7): an inconclusive run proved nothing, so it can never exit 0. Drop the setting."                                        },
+    {       "pass.synth",
+     "recipes", "pass.synth runs ONE recipe now: --set pass.synth.support=6, pass.synth.literals=16, pass.synth.series=4 and pass.synth.max_depth=0 (0 = unbounded depth)."},
+    {       "pass.synth",
+     "proof_seconds", "pass.synth no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
+    {       "pass.synth",
+     "proof_nodes", "pass.synth no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
+    {       "pass.synth",
+     "delay_tolerance", "pass.synth no longer compares its result against an ABC baseline. Drop the setting."},
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
-  for (const auto& option : kRetiredSetOptions) {
-    if (option.method == method && option.flag == flag) {
-      return option.hint;
+  for (int pass = 0; pass < 2; ++pass) {
+    for (const auto& option : kRetiredSetOptions) {
+      if (option.method == method && option.flag == flag) {
+        return option.hint;
+      }
     }
+    if (method != "pass.synth") {
+      break;
+    }
+    method = "pass.abc";  // shared mapping labels have the same kernel-owned slots
   }
   return {};
 }
@@ -210,10 +272,12 @@ inline constexpr Set_pass kSetPasses[] = {
     {   "formal.isabelle",     "pass.isabelle",      Set_pass::List::all},
     {       "formal.lean",         "pass.lean",      Set_pass::List::all},
     {"compile.prp_writer",   "pass.prp_writer",      Set_pass::List::all},
-    {        "pass.color",        "pass.color",      Set_pass::List::all},
+    {        "pass.color",        "pass.color",   Set_pass::List::common},
+    {  "pass.color.synth",        "pass.color", Set_pass::List::specific},
     {    "pass.partition",    "pass.partition",      Set_pass::List::all},
     {  "pass.single_edge",  "pass.single_edge",      Set_pass::List::all},
     {          "pass.abc",          "pass.abc",      Set_pass::List::all},
+    {        "pass.synth",        "pass.synth",      Set_pass::List::all},
     {      "pass.liberty",      "pass.liberty",      Set_pass::List::all},
     {    "pass.opentimer",    "pass.opentimer",      Set_pass::List::all},
     {            "formal",          "pass.lec",   Set_pass::List::common},
@@ -300,12 +364,22 @@ void              mirror_log_to_stderr(const std::string& log_path);
 std::string       map_diag_category(std::string_view category);
 void              setup_diag(const Options& opts, std::string_view step);
 void              run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict& labels, Options& opts, Result& res);
+std::string       synth_invocation_context(const Options& opts, const Result& res, const Eprp_var::Eprp_dict& labels);
 // Park "which step, which log" where the SIGSEGV handler can read it without
 // allocating (see install_crash_reporter). Empty strings clear the slot.
 void              set_crash_context(std::string_view step, std::string_view log);
 std::string_view  set_pass_method(std::string_view set_name);
 bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);
+// merge_sets for a MAPPER method (`pass.abc` / `pass.synth`). pass.synth
+// registers ABC's mapping labels (Pass_abc::add_mapping_labels), so `abc.*`
+// tuning applies to both mappers; an explicit `pass.synth.*` wins. Both the
+// fused `lhd synth` and the standalone `lhd pass <mapper>` go through here so
+// the precedence rule cannot drift between the two entry points.
+void              merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels);
+// merge_sets for pass.color: its generic options (`pass.color.*`) and the synth
+// coloring's own (`pass.color.synth.*`) both feed the one pass.color method.
+void              merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
 // The `synth.*` command namespace, readable from any command: `synth.liberty`
 // is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass

@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# End-to-end test for INCREMENTAL `lhd pass abc` (todo/livehd/2opt-incr A+C):
+# End-to-end test for INCREMENTAL `lhd pass <mapper>` (todo/livehd/2opt-incr A+C):
 # a persistent region cache (under --workdir, lhd.incremental) content-addressed by a
 # canonical region digest. The properties under test, in order of importance:
 #
@@ -17,6 +17,19 @@
 #
 # Hermetic: the vendored Liberty (inou/prp/tests/abc/test.lib), no PDK.
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -72,8 +85,8 @@ compile_and_color() {  # $1 = lg dir tag
 
 abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
-  # (<workdir>/abc_cache), on by default (lhd.incremental).
-  run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
+  # (<workdir>/<mapper>_cache), on by default (lhd.incremental).
+  run pass "$MAPPER" --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
       --workdir "$W/wabc" --stats
 }
 
@@ -109,7 +122,8 @@ N=$(region_count)
 expect_incr 0 "$N" "cold run"
 expect_resynth "$N" "$N" "cold run"
 [ "$(incr_field abc_started)" = 1 ] || fail "cold run did not start ABC"
-[ -f "$W/wabc/abc_cache/abc_cache.json" ] || fail "cache metadata not persisted under <workdir>/abc_cache"
+[ -f "$W/wabc/${MAPPER}_cache/abc_cache.json" ] \
+  || fail "cache metadata not persisted under <workdir>/${MAPPER}_cache"
 lec_gate net0 lg0 "cold mapping"
 
 # --- 2. NoChange: same design, fresh out dir => all hits, zero ABC ----------
@@ -123,7 +137,7 @@ echo "PASS: NoChange run is all hits and byte-identical Verilog"
 
 # Pretty rendering is one physical line per color and carries the same
 # resynthesis decision as the JSON rows. This additional all-hit run is cheap.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
+"$LHD" pass "$MAPPER" --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
     --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
     || fail "pretty stats run failed"
 [ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = "$N" ] \
@@ -152,15 +166,15 @@ expect_resynth "$N" 0 "NoChange after the edit"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
 # lhd.incremental=false: no cache is touched and the envelope carries no counters.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
     --set lhd.incremental=false --workdir "$W/wabc" --stats
 [ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
 expect_resynth "$N" "$N" "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true.
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --stats
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set synth.liberty="$LIB" --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
 expect_resynth "$N" "$N" "no-workdir full run"
 echo "PASS: lhd.incremental=false and no-workdir both disable cleanly"
 
-echo "PASS: all incremental pass.abc flows"
+echo "PASS: all incremental pass.$MAPPER flows"

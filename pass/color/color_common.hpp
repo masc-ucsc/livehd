@@ -179,6 +179,11 @@ struct Color_opts {
   // and no merge at all. The shipped policy (30000) lives on the pass.color
   // label so a direct caller or unit test still gets what it asked for.
   uint64_t max_gate      = 0;
+  // cones mode: every cone walks to the register boundary and every pair of
+  // overlapping cones merges, whatever max_gate says, so each combinational
+  // path lies inside one color (flop-to-flop colors, the synth/domino mapper's
+  // contract). max_gate then only bounds the forward merge across registers.
+  bool     flop_to_flop  = false;
   // Raw callers keep the base coloring; the CLI enables shared mux/enable groups.
   bool     ctrl_cones    = false;
   // Select/enable logic remains control; optionally let mux data paths merge.
@@ -197,6 +202,12 @@ struct Color_opts {
   // A nonzero bound further limits control merging; otherwise use max_gate.
   uint64_t ctrl_max_gate = 0;
   uint64_t ctrl_min_gate = 0;
+  // cones mode: no emitted color below this many nodes. A smaller control group
+  // is left to the data walks; a smaller data color is folded into the data
+  // color it overlaps most, even past max_gate (a soft target). 0, the raw API
+  // default, keeps every color; the pass.color CLI label `min_color_nodes`
+  // defaults to 12.
+  uint32_t min_nodes     = 0;
 
   // cones mode's PHASE-2 forward merge across the register: "", "pair" or
   // "all". Empty (the raw API default, INERT like max_gate) leaves the backward

@@ -67,6 +67,7 @@ cc_library(
     ],
 ) for test_name in [
     "attr_carry_test",
+    "graph_library_singleton_test",
     "inline_sub_test",
     "cell_test",
     "loop_split_test",

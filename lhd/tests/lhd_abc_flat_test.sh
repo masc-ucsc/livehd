@@ -9,15 +9,28 @@
 #
 #   prp -> lg                            hier_seq: 3-level pipeline
 #   pass color flat                           (one color across the hierarchy)
-#   pass abc                                  (flatten=auto fires on the flat coloring)
+#   pass <mapper>                                  (flatten=auto fires on the flat coloring)
 #   pass partition                            (flatten=auto twin: original logic, flat)
 #   pass liberty gensim test.lib              (behavioral model per comb cell)
 #   lec netlist+models vs twin                (sequential equivalence, default LEC)
-#   pass abc --set pass.abc.flatten=false     (escape hatch: classic per-def shape)
+#   pass <mapper> --set pass.<mapper>.flatten=false     (escape hatch: classic per-def shape)
 #
 # Hermetic: small vendored Liberty (inou/prp/tests/abc/test.lib), not the PDK.
 
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -51,7 +64,7 @@ run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --se
 
 # Ware preservation is disabled above to request a truly single-module netlist.
 # pass.abc: flatten=auto must fire on the flat coloring -> one netlist module.
-run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --workdir "$D/w3"
+run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --workdir "$D/w3"
 NET_DEFS=$(live_defs "$D/net")
 [ "$NET_DEFS" = "$TOP" ] || fail "flat abc netlist must hold exactly '$TOP', got: $(echo $NET_DEFS)"
 echo "PASS: pass.abc + flat coloring emits a single flat netlist module"
@@ -104,7 +117,7 @@ D2="$W/flatnames"
 mkdir -p "$D2"
 run compile "$FIX2" --top "$TOP2" --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
 run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
-run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --workdir "$D2/w3"
+run pass "$MAPPER" --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --workdir "$D2/w3"
 run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
 run compile lg:"$D2/net" --top "$TOP2" --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
 run compile lg:"$D2/re" --top "$TOP2" --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
@@ -166,7 +179,7 @@ D3="$W/flatconst"
 mkdir -p "$D3"
 run compile "$FIX3" --top "$TOP3" --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
 run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
-run pass abc --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --workdir "$D3/w3"
+run pass "$MAPPER" --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --workdir "$D3/w3"
 run pass partition --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
 run compile lg:"$D3/net" --top "$TOP3" --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
 run compile lg:"$D3/re" --top "$TOP3" --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
@@ -179,8 +192,8 @@ echo "PASS: a constant instance-port actual survives the whole-design flatten (L
 # Escape hatch: flatten=false keeps the per-def hierarchy instead of collapsing
 # it into one flat module. Each def is one region here, so it is emitted under
 # its own name (delayer, stage_unit, top) -- no pointless __c wrapper.
-run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set synth.liberty="$LIB" \
-    --set pass.abc.flatten=false --workdir "$D/w9"
+run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set synth.liberty="$LIB" \
+    --set pass.$MAPPER.flatten=false --workdir "$D/w9"
 HIER_DEFS=$(live_defs "$D/net_hier")
 echo "$HIER_DEFS" | grep -q "stage_unit" || fail "flatten=false must keep the per-def hierarchy (child defs), got: $(echo $HIER_DEFS)"
 N_HIER=$(echo "$HIER_DEFS" | wc -l | tr -d ' ')

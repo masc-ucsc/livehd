@@ -70,6 +70,103 @@ TEST(Satopt, CrossRegionConditionalZerosAndExactReuse) {
   EXPECT_FALSE(changed->reused);
   EXPECT_FALSE(has(*changed, f.mux, 0, 7, livehd::abc::Mux_fact::Kind::zero));
 }
+// The facts become an LGraph rewrite of the ARM INPUT: arm 0 (selected when
+// |x == 0) is all zero, so the mux reads a constant there. A second pass finds
+// nothing left to rewrite (the arm now reads the fact structurally).
+TEST(Satopt, MuxFactsRewriteTheArmInput) {
+  Fixture    f("satopt_rewrite_whole");
+  const auto dir   = std::string(std::getenv("TEST_TMPDIR")) + "/satopt_rewrite";
+  const auto stats = livehd::abc::optimize_muxes(f.g.get(), dir);
+  EXPECT_EQ(stats.muxes, 1);
+  EXPECT_EQ(stats.arms, 1);
+  EXPECT_EQ(stats.bits, 8);
+  const auto arm0 = f.mux.create_sink_pin(1).get_driver_pin();
+  ASSERT_TRUE(arm0.is_const());
+  EXPECT_TRUE(gu::const_of(arm0).is_known_zero());
+  const auto arm1 = f.mux.create_sink_pin(2).get_driver_pin();
+  ASSERT_TRUE(arm1.is_const());
+  EXPECT_TRUE(gu::const_of(arm1).is_known_eq(*Dlop::create_integer(255)));
+  EXPECT_EQ(f.mux.create_sink_pin(0).get_driver_pin(), f.s);  // the select is untouched
+  const auto again = livehd::abc::optimize_muxes(f.g.get(), dir);
+  EXPECT_EQ(again.arms, 0);
+}
+
+// Only bit 7 of arm 0 is proven (the select IS x[7]): the arm becomes a Concat
+// of a constant-zero lane over bit 7 and a slice of the original arm below it.
+TEST(Satopt, MixedArmFactsBecomeAConcatOfRuns) {
+  Fixture f("satopt_rewrite_runs");
+  gu::drop_drivers(f.mux.create_sink_pin(0));
+  auto top = gu::create_get_mask(*f.g, f.x, 7, 8);
+  gu::set_color(top, 1);
+  auto s7 = top.create_driver_pin(0);
+  gu::set_ubits(s7, 1);
+  s7.connect_sink(f.mux.create_sink_pin(0));
+  const auto stats = livehd::abc::optimize_muxes(f.g.get());
+  EXPECT_EQ(stats.arms, 1);
+  EXPECT_EQ(stats.bits, 1);
+  const auto arm0 = f.mux.create_sink_pin(1).get_driver_pin();
+  ASSERT_FALSE(arm0.is_const());
+  const auto cat = arm0.get_master_node();
+  ASSERT_EQ(gu::type_op_of(cat), Ntype_op::Concat);
+  EXPECT_EQ(gu::bits_of(arm0), 8);
+  EXPECT_EQ(gu::color_of(cat), 2);  // new logic stays in the mux's region
+  // Lane 0 (most significant) is the proven-zero bit 7, lane 1 the slice x[6:0].
+  const auto msb = cat.create_sink_pin(0).get_driver_pin();
+  ASSERT_TRUE(msb.is_const());
+  EXPECT_TRUE(gu::const_of(msb).is_known_zero());
+  EXPECT_TRUE(gu::const_of(cat.create_sink_pin(1).get_driver_pin()).is_known_eq(*Dlop::create_integer(1)));
+  const auto low = cat.create_sink_pin(2).get_driver_pin();
+  EXPECT_EQ(gu::type_op_of(low.get_master_node()), Ntype_op::Get_mask);
+  EXPECT_EQ(gu::bits_of(low), 7);
+  EXPECT_TRUE(gu::const_of(cat.create_sink_pin(3).get_driver_pin()).is_known_eq(*Dlop::create_integer(7)));
+}
+
+// The select is x[7]: bit 7 of either arm is 0 when selected, and arm 1 is
+// ~x. Arm 1 becomes a Concat of that zero bit and Xor(x[6:0], ones); arm 0's
+// own complement facts read arm 1's rewritten bits and are dropped. A second
+// pass blasts the Xor to the very complement it was proven against, so it
+// finds nothing new.
+TEST(Satopt, ComplementRewriteIsIdempotent) {
+  Fixture f("satopt_rewrite_complement");
+  gu::drop_drivers(f.mux.create_sink_pin(0));
+  auto top = gu::create_get_mask(*f.g, f.x, 7, 8);
+  gu::set_color(top, 1);
+  auto s7 = top.create_driver_pin(0);
+  gu::set_ubits(s7, 1);
+  s7.connect_sink(f.mux.create_sink_pin(0));
+  auto inv = gu::create_typed_node(*f.g, Ntype_op::Not);
+  f.x.connect_sink(inv.create_sink_pin(0));
+  auto value = inv.create_driver_pin(0);
+  gu::set_ubits(value, 8);
+  gu::set_color(inv, 1);
+  gu::drop_drivers(f.mux.create_sink_pin(2));
+  value.connect_sink(f.mux.create_sink_pin(2));
+  const auto out    = f.mux.create_driver_pin(0);
+  const auto before = livehd::abc::Satopt_seeds{}.sample(out);
+  ASSERT_TRUE(before.has_value());
+  const auto dir   = std::string(std::getenv("TEST_TMPDIR")) + "/satopt_rewrite_complement";
+  const auto first = livehd::abc::optimize_muxes(f.g.get(), dir);
+  EXPECT_EQ(first.arms, 2);
+  EXPECT_EQ(first.bits, 9);
+  const auto arm1 = f.mux.create_sink_pin(2).get_driver_pin();
+  ASSERT_EQ(gu::type_op_of(arm1.get_master_node()), Ntype_op::Concat);
+  const auto xor_node = arm1.get_master_node().create_sink_pin(2).get_driver_pin().get_master_node();
+  ASSERT_EQ(gu::type_op_of(xor_node), Ntype_op::Xor);
+  int operands = 0;
+  for (const auto& sink : xor_node.inp_sorted_pins()) {
+    EXPECT_EQ(sink.get_driver_pins().size(), 1u);  // one driver per sink pin
+    ++operands;
+  }
+  EXPECT_EQ(operands, 2);
+  // The same seed vectors give the same mux output after the rewrite.
+  const auto after = livehd::abc::Satopt_seeds{}.sample(out);
+  ASSERT_TRUE(after.has_value());
+  for (size_t i = 0; i < before->size(); ++i) {
+    EXPECT_TRUE((*before)[i].is_known_eq((*after)[i])) << i;
+  }
+  EXPECT_EQ(livehd::abc::optimize_muxes(f.g.get(), dir).arms, 0);
+}
+
 TEST(Satopt, InRegionFactsAreNotCandidates) {
   Fixture f("satopt_one_region");
   gu::set_color(f.s.get_master_node(), 2);
@@ -444,4 +541,27 @@ TEST(SatoptSelect, ProofsAreReusedAcrossRuns) {
   EXPECT_EQ(warm.reused, 1);
   EXPECT_EQ(warm.survivors, 0);
   EXPECT_TRUE(is_const(m, 0, 0));
+}
+
+// Synthesis deletes a Hotmux nobody reads (compile keeps it for its `unique
+// if` obligation) together with the cone that fed only it; live logic stays.
+TEST(Satopt, DropDeadLogicRemovesAnUnreadHotmuxCone) {
+  Fixture f("satopt_drop_dead");
+  auto    control = gu::create_typed_node(*f.g, Ntype_op::And);
+  f.x.connect_sink(gu::setup_sink_pid(control, 0));
+  f.x.connect_sink(gu::setup_sink_pid(control, 0));
+  gu::set_ubits(control.create_driver_pin(0), 8);
+  auto dead = gu::create_typed_node(*f.g, Ntype_op::Hotmux);
+  control.create_driver_pin(0).connect_sink(dead.create_sink_pin(0));
+  f.x.connect_sink(dead.create_sink_pin(1));
+  f.x.connect_sink(dead.create_sink_pin(2));
+  EXPECT_EQ(livehd::abc::drop_dead_logic(f.g.get()), 2u);
+  size_t hotmuxes = 0, muxes = 0;
+  for (const auto n : f.g->body().nodes()) {
+    hotmuxes += gu::type_op_of(n) == Ntype_op::Hotmux;
+    muxes += gu::type_op_of(n) == Ntype_op::Mux;
+  }
+  EXPECT_EQ(hotmuxes, 0u);
+  EXPECT_EQ(muxes, 1u);  // the live mux driving y
+  EXPECT_EQ(livehd::abc::drop_dead_logic(f.g.get()), 0u);
 }

@@ -40,8 +40,9 @@ enum class Diag_fmt { jsonl, pretty };
 Diag_fmt default_diag_fmt();
 
 struct Options {
-  std::string command;   // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
-  std::string language;  // verilog|pyrope ("" for the IR/meta commands)
+  std::vector<std::string> invocation_argv;  // exact CLI tokens, before normalization/config expansion
+  std::string              command;          // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
+  std::string              language;         // verilog|pyrope ("" for the IR/meta commands)
 
   std::vector<std::string> files;  // positional: source files / list pattern / describe name
 
@@ -258,6 +259,16 @@ struct Result {
   // more than once in a pipeline (the array is ordered; the consumer sums).
   // Never part of run_id — a wall-clock value in a content hash breaks caching.
   std::vector<std::pair<std::string, double>> phase_ms;
+
+  // Synthesis CLI envelope observation, including handled failures. The wall
+  // interval starts at main entry and ends just before final result emission;
+  // it encloses all command phases and publication. RSS is this process only,
+  // never a claim about simultaneous memory across its child processes.
+  struct Synthesis_invocation {
+    bool     present               = false;
+    double   wall_ms               = 0;
+    uint64_t parent_peak_rss_bytes = 0;  // zero means unavailable
+  } synthesis_invocation;
 
   // `lhd compile` incremental front-end accounting (docs/opt_loop_incr.md L8).
   // Present for a Pyrope source compile with a user-named --workdir, including
@@ -630,7 +641,7 @@ static_assert(sim_tune_registry_ok(), "sim.tune.* holds only speed knobs (with a
 // `lhd synth --help` options block. Pass-level tuning still rides the pass
 // namespaces (`--set abc.adder=cla`, `--set color.hier=false`, ...).
 struct Synth_set_option {
-  enum class Kind { boolean, file, integer };
+  enum class Kind { boolean, file, integer, mapper };
   std::string_view name;
   std::string_view default_value;
   Kind             kind;
@@ -643,26 +654,30 @@ struct Synth_set_option {
 inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
+    {   "mapper",
+     "abc",  Synth_set_option::Kind::mapper,
+     "abc|synth: existing ABC synthesis or bounded shared unate optimization with ABC technology mapping and fallback"          },
     {  "threads",
      "0", Synth_set_option::Kind::integer,
      "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
-     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"            },
+     "IGNORED by synth.mapper=synth, which pins one synthesis tree at a time (its per-function workers are separate). "
+     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"                },
     {  "liberty",
      "",    Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
      "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
-     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                       },
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                           },
     {"opentimer",
      "true", Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"                                                                               },
+     "report). false stops after the ABC map"                                                                                   },
     {   "reduce",
      "false", Synth_set_option::Kind::boolean,
      "experimental: can reduce synthesis time but degrade QoR (area and depth). Extract repeated one- and two-node "
-     "combinational cones into shared definitions before coloring; disabled by default"                                     },
-    {      "sdc", "",    Synth_set_option::Kind::file,   "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
-    {     "spef", "",    Synth_set_option::Kind::file,          "PATH -- optional .spef parasitics handed to pass.opentimer"},
+     "combinational cones into shared definitions before coloring; disabled by default"                                         },
+    {      "sdc", "",    Synth_set_option::Kind::file,       "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {     "spef", "",    Synth_set_option::Kind::file,              "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).
@@ -670,7 +685,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 // the unknown-subcommand hints, the general help and the machine records --
 // so the lists can never disagree again.
 inline constexpr std::string_view kPassSubcommands
-    = "color <alg> | partition | single_edge | satopt | abc | opentimer | formal | liberty gensim | semdiff | analyze";
+    = "color <alg> | partition | single_edge | satopt | abc | synth | opentimer | formal | liberty gensim | semdiff | analyze";
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
 // the method that consumes it. Enumerated from the live registry, so

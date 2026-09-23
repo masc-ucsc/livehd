@@ -321,6 +321,9 @@ void load_config(Options& opts) {
 
 Options parse_args(int argc, char** argv) {
   Options opts;
+  for (int i = 0; i < argc; ++i) {
+    opts.invocation_argv.emplace_back(argv[i]);
+  }
 
   // --version anywhere before `--`.
   for (int j = 1; j < argc; ++j) {

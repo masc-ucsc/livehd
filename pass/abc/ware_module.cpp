@@ -9,6 +9,7 @@
 #include <climits>
 #include <format>
 #include <map>
+#include <optional>
 #include <string>
 #include <tuple>
 
@@ -43,6 +44,96 @@ namespace {
 void shape(const hhds::Pin_class& from, const hhds::Pin_class& to) {
   gu::set_bits(to, std::max(gu::bits_of(from), 1));
   gu::is_unsign(from) ? gu::set_unsign(to) : gu::set_sign(to);
+}
+
+// A dynamic word select `v[index]` (an unpacked-array read, `v[index*W +: W]`)
+// lowers to a shift whose amount is `index*stride + bias` -- e.g.
+// `(select << 5) + 32` for 32-bit words. Enclosed on its own, that amount would
+// be an opaque module input: the stride's constant-zero low bits, which retire
+// most of the barrel, would be invisible to ABC, and the blaster's affine
+// word-select lowering could never match. So the amount is kept INSIDE the
+// module instead: the port carries only the narrow index and the body rebuilds
+// `index*stride + bias` in front of the shift.
+struct Affine_amount {
+  hhds::Port_id    sink_pid = 0;  // the shift's amount sink
+  hhds::Pin_class  index;         // the one variable operand (a module port)
+  hhds::Node_class term;          // SHL(index, const) or Mult(index, const...)
+  hhds::Pin_class  term_out;      // term's driver pin feeding the Sum
+  hhds::Node_class sum;           // amount = term + constants
+  hhds::Pin_class  amount;        // the Sum's driver pin feeding the shift
+};
+
+std::optional<Affine_amount> affine_amount(const hhds::Node_class& shift) {
+  const auto amount = gu::get_driver_of_sink_name(shift, "b");
+  if (amount.is_invalid() || amount.is_const() || gu::is_graph_input_pin(amount)) {
+    return std::nullopt;
+  }
+  const auto sum = amount.get_master_node();
+  if (gu::type_op_of(sum) != Ntype_op::Sum) {
+    return std::nullopt;
+  }
+  hhds::Pin_class term_out;
+  for (const auto& in : sum.inp_sorted_pins()) {
+    const auto drv = in.get_driver_pin();
+    if (drv.is_const()) {
+      const auto& c = gu::const_of(drv);
+      if (c.has_unknowns() || !c.is_just_i64()) {
+        return std::nullopt;
+      }
+      continue;
+    }
+    // One added (bank 0) variable term; a subtracted one is not a stride.
+    if (!term_out.is_invalid() || Ntype::sink_bank(Ntype_op::Sum, in.get_port_id()) != 0 || gu::is_graph_input_pin(drv)) {
+      return std::nullopt;
+    }
+    term_out = drv;
+  }
+  if (term_out.is_invalid()) {
+    return std::nullopt;
+  }
+  const auto      term = term_out.get_master_node();
+  hhds::Pin_class index;
+  if (gu::type_op_of(term) == Ntype_op::SHL) {
+    const auto a = gu::get_driver_of_sink_name(term, "a");
+    const auto b = gu::get_driver_of_sink_name(term, "b");
+    if (a.is_invalid() || a.is_const() || b.is_invalid() || !b.is_const()) {
+      return std::nullopt;
+    }
+    index = a;
+  } else if (gu::type_op_of(term) == Ntype_op::Mult) {
+    for (const auto& in : term.inp_sorted_pins()) {
+      const auto drv = in.get_driver_pin();
+      if (drv.is_const()) {
+        continue;
+      }
+      if (!index.is_invalid()) {
+        return std::nullopt;  // two variable factors: not a stride
+      }
+      index = drv;
+    }
+  } else {
+    return std::nullopt;
+  }
+  // Worth it only when the index is genuinely narrower than the amount it
+  // replaces (the blaster's affine form is bounded to a 16-bit index).
+  if (index.is_invalid() || gu::bits_of(index) <= 0 || gu::bits_of(index) > 16 || gu::bits_of(index) >= gu::bits_of(amount)) {
+    return std::nullopt;
+  }
+  return Affine_amount{Ntype::get_sink_pid(gu::type_op_of(shift), "b"), index, term, term_out, sum, amount};
+}
+
+// Everything that shapes the rebuilt amount, so two modules share a body only
+// when their amounts are the same function of the index.
+std::string describe_affine(const Affine_amount& a) {
+  std::string d = std::format("affine:idx{}:{}", gu::bits_of(a.index), gu::is_unsign(a.index));
+  for (const auto& [node, out] : {std::pair{a.term, a.term_out}, std::pair{a.sum, a.amount}}) {
+    d += std::format("|op{}:{}:{}", static_cast<int>(gu::type_op_of(node)), gu::bits_of(out), gu::is_unsign(out));
+    for (const auto& in : node.inp_sorted_pins()) {
+      const auto drv = in.get_driver_pin();
+      d += std::format(",p{}={}", in.get_port_id(), drv.is_const() ? gu::const_of(drv).to_pyrope() : std::string{"v"});
+    }
+  }
+  return d;
 }
 
 std::string family(const hhds::Node_class& node, const Ware_policy& policy) {
@@ -115,7 +206,9 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   // is GONE: it imposed a deterministic order on the SEVERAL DRIVERS OF ONE SINK
   // PIN, and under ONE DRIVER PER SINK PIN (graph/cell.hpp) every run it sorted
   // has length one. Nothing is left to order.
-  auto                                     edges = node.inp_pins_snapshot();
+  auto                                     edges  = node.inp_pins_snapshot();
+  const auto                               affine = (kind == "shl" || kind == "sra") ? affine_amount(node) : std::nullopt;
+  const auto is_affine_edge = [&](const hhds::Pin_class& e) { return affine && e.get_port_id() == affine->sink_pid; };
   std::map<hhds::Port_id, hhds::Pin_class> outputs;
   for (auto out_pin : node.out_sorted_pins()) {  // the node's driver pins, once each
     outputs.emplace(out_pin.get_port_id(), out_pin);
@@ -138,6 +231,10 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   // accidentally share an implementation selected in a different context.
   std::string descriptor = kind;
   for (auto e : edges) {
+    if (is_affine_edge(e)) {
+      descriptor += std::format("/i{}:{}", e.get_port_id(), describe_affine(*affine));
+      continue;
+    }
     descriptor += std::format("/i{}:{}:{}", e.get_port_id(), gu::bits_of(e.get_driver_pin()), gu::is_unsign(e.get_driver_pin()));
     if (e.get_driver_pin().is_const()) {
       descriptor += ":" + gu::const_of(e.get_driver_pin()).to_pyrope();
@@ -180,6 +277,42 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     for (size_t i = 0; i < edges.size(); ++i) {
       const auto&     e = edges[i];
       hhds::Pin_class driver;
+      if (is_affine_edge(e)) {
+        auto pname = std::format("i{}", i);
+        io->add_input(pname, next++);
+        io->set_bits(pname, std::max(gu::bits_of(affine->index), 1));
+        io->set_unsign(pname, gu::is_unsign(affine->index));
+        const auto index = body->get_input_pin(pname);
+        shape(affine->index, index);
+        // Clone one node of the amount cone: constants are copied, the one
+        // variable operand is `variable`.
+        auto clone = [&](const hhds::Node_class& src, const hhds::Pin_class& src_out, const hhds::Pin_class& variable) {
+          auto dst = gu::create_typed_node(*body, gu::type_op_of(src));
+          gu::carry_node_attrs(src, dst);
+          gu::set_color(dst, color);
+          for (const auto& in : src.inp_sorted_pins()) {
+            const auto      drv = in.get_driver_pin();
+            hhds::Pin_class from;
+            if (drv.is_const()) {
+              from = gu::create_const(*body, gu::const_of(drv));
+              gu::carry_pin_attrs(drv, from);
+            } else {
+              from = variable;
+            }
+            auto sink = dst.create_sink_pin(in.get_port_id());
+            gu::carry_pin_attrs(in, sink);
+            from.connect_sink(sink);
+          }
+          auto out = dst.create_driver_pin(src_out.get_port_id());
+          shape(src_out, out);
+          return out;
+        };
+        driver = clone(affine->sum, affine->amount, clone(affine->term, affine->term_out, index));
+        auto sink = inner.create_sink_pin(e.get_port_id());
+        gu::carry_pin_attrs(e, sink);
+        driver.connect_sink(sink);
+        continue;
+      }
       if (e.get_driver_pin().is_const()) {
         driver = gu::create_const(*body, gu::const_of(e.get_driver_pin()));
       } else {
@@ -217,7 +350,8 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   gu::carry_srcid(node, inst);
   for (size_t i = 0; i < edges.size(); ++i) {
     if (const auto drv = edges[i].get_driver_pin(); !drv.is_const()) {
-      drv.connect_sink(inst.create_sink_pin(io->get_input_port_id(std::format("i{}", i))));
+      const auto src = is_affine_edge(edges[i]) ? affine->index : drv;
+      src.connect_sink(inst.create_sink_pin(io->get_input_port_id(std::format("i{}", i))));
     }
   }
   for (auto [pid, pin] : outputs) {

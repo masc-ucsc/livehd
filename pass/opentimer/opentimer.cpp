@@ -634,6 +634,9 @@ void Pass_opentimer::read_sdc_spef() {
     read_sdc(f);
   }
   for (const auto& f : spef_file_list) {
+    // The reader currently cannot certify annotation coverage on a remapped
+    // netlist. Keep reporting timing, but do not certify a complete QoR gate.
+    constraints_complete_ = false;
     timer.read_spef(f);
   }
 }
@@ -651,6 +654,18 @@ void Pass_opentimer::set_input_delays(const std::string& pname) {
 }
 
 void Pass_opentimer::set_output_delays(const std::string& pname) {
+  if (io_load_ff_ >= 0) {
+    if (auto unit = timer.capacitance_unit(); unit) {
+      const float load = static_cast<float>(io_load_ff_ * 1e-15 / unit->value());
+      for (auto split : {ot::MIN, ot::MAX}) {
+        for (auto tran : {ot::FALL, ot::RISE}) {
+          timer.set_load(pname, split, tran, load);
+        }
+      }
+    } else {
+      constraints_complete_ = false;
+    }
+  }
   timer.set_rat(pname, ot::MIN, ot::FALL, 0.0);
   timer.set_rat(pname, ot::MIN, ot::RISE, 0.0);
   timer.set_rat(pname, ot::MAX, ot::FALL, 0.0);
@@ -1036,27 +1051,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         timer.insert_primary_output(bus_bit_name);
         timer.insert_net(bus_bit_name);
       }
-      // Multiple outputs sharing the same driver dpin is legal — last one wins
-      // (mirrors the original code's behaviour). driver_dpin is a resolved edge
-      // driver (its master carries the hier chain), so net_of is the right key.
-      // A feed-through (output driven straight by a graph INPUT — the flatten
-      // as-top shape) must NOT overwrite: it would rename the input's net onto
-      // the PO net, silently un-timing every gate cone fed by that input (the
-      // PI arrival lands on the original net). The feed-through PO itself has
-      // no combinational content to time. Consts likewise never carry a net.
-      // A native combinational boundary (pass.abc's preserved SCC remainder) is
-      // the same case: STA cuts the path at that node's OWN output net, where
-      // make_opaque_logic_boundary puts the zero-arrival PI — and OpenTimer
-      // cannot put a PI on the PO's pin name (insert_primary_input asserts the
-      // name is unused). Renaming its net onto the PO would point every
-      // consumer at a net nothing drives (a PO pin is not an rct root), leaving
-      // the cut PI dangling and the whole cone behind it unscored. As with a
-      // flop that drives a PO, the PO itself simply carries no arrival.
-      const bool driver_is_boundary = !driver_dpin.is_const() && !driver_dpin.get_master_node().is_invalid()
-                                      && driver_dpin.get_master_node().attr(livehd::attrs::native_comb_boundary).has();
-      if (!is_graph_input_pin(driver_dpin) && !driver_dpin.is_const() && !driver_is_boundary) {
-        set_overwrite(net_of(driver_dpin, hier_mode_), driver_dpin, driver_name);
-      }
+      // Keep each driver on its canonical physical net. Outputs are attached
+      // after pin tracking resolves wiring nodes, so aliases contribute separate
+      // loads without renaming the producer or disconnecting other readers.
     }
   }
 
@@ -1594,6 +1591,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory && op != Ntype_op::Div && op != Ntype_op::Rem) {
       continue;
     }
+    ++native_state_nodes_;
     // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops, latches,
     // memories, and unsupported Div/Rem operators native — the Liberty stays
     // combinational. Each consumed output becomes a virtual primary input
@@ -1803,12 +1801,37 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       std::string pname{d.name};
-      int32_t     bits = 0;
-      if (const auto drv = pin.get_driver_pin(); !drv.is_invalid()) {  // one driver per sink pin
-        bits = bits_of(drv);
+      int32_t     bits   = 0;
+      const auto  driver = pin.get_driver_pin();  // one driver per sink pin
+      if (driver.is_invalid()) {
+        continue;
       }
+      const auto drv = g->occurrences().lift(driver);
+      bits           = bits_of(drv);
       if (bits == 0) {
         bits = static_cast<int32_t>(d.bits);
+      }
+      // A wiring node can redirect its driver after phase 2 named the output
+      // net. Attach the PO to the resolved physical net, just like a gate
+      // input. Each alias remains a separate load on their common producer.
+      const auto& values = pin_tracker.get_pin_vector(trk_id(drv));
+      for (int32_t bit = 0; bit < std::max(bits, 1); ++bit) {
+        std::string wire{kZeroNet};
+        if (!is_resolved_const(drv)) {
+          if (bits <= 1) {
+            wire = get_driver_net_name(drv);
+          } else if (static_cast<size_t>(bit) < values.size() && values[bit].pos >= 0) {
+            wire = values[bit].pos == 0 ? values[bit].id() : std::format("{}.{}", values[bit].id(), values[bit].pos);
+          } else if (values.empty()) {
+            const auto base = get_driver_net_name(drv);
+            wire            = bit == 0 ? base : std::format("{}.{}", base, bit);
+          }
+        }
+        const auto output_pin = bit == 0 ? pname : std::format("{}.{}", pname, bit);
+        if (wire != output_pin) {
+          timer.disconnect_pin(output_pin);
+          timer.connect_pin(output_pin, wire);
+        }
       }
       set_output_delays(pname);
       for (auto i = 1; i < bits; ++i) {
@@ -1816,6 +1839,47 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
   }
+}
+
+// Certify one ideal virtual clock only when every real PI/PO transition and
+// both early/late corners have explicit clock-relative delays. No state or
+// physical clock model is inferred from an unclocked arrival graph.
+std::string Pass_opentimer::clock_qor_json() {
+  if (virtual_clock_period_ <= 0) {
+    return {};
+  }
+  bool complete = sdc_clocks_ == 1 && native_state_nodes_ == 0 && opaque_logic_nodes_ == 0;
+  for (const auto& [name, input] : timer.primary_inputs()) {
+    (void)input;
+    complete &= clock_inputs_[name] == 15;
+  }
+  float setup = std::numeric_limits<float>::infinity();
+  float hold  = std::numeric_limits<float>::infinity();
+  for (const auto& [name, output] : timer.primary_outputs()) {
+    (void)output;
+    complete &= clock_outputs_[name] == 15;
+    for (const auto transition : {ot::RISE, ot::FALL}) {
+      const auto late  = timer.report_slack(name, ot::MAX, transition);
+      const auto early = timer.report_slack(name, ot::MIN, transition);
+      if (!late || !early || !std::isfinite(*late) || !std::isfinite(*early)) {
+        complete = false;
+      } else {
+        setup = std::min(setup, *late);
+        hold  = std::min(hold, *early);
+      }
+    }
+  }
+  complete              &= std::isfinite(setup) && std::isfinite(hold);
+  constraints_complete_ &= complete;
+  std::string result
+      = std::format(",\"clock_constraints\":{{\"model\":\"single_virtual_clock\",\"name\":\"{}\",\"period\":{:.9g},\"complete\":{}",
+                    jesc(virtual_clock_name_),
+                    virtual_clock_period_,
+                    constraints_complete_);
+  if (std::isfinite(setup) && std::isfinite(hold)) {
+    result += std::format(",\"setup_slack\":{:.9g},\"hold_slack\":{:.9g}", setup, hold);
+  }
+  return result + "}";
 }
 
 void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
@@ -2045,6 +2109,66 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   constexpr size_t kMaxEndpoints = 10;
 
   std::string j = std::format("{{\"module\":\"{}\"", jesc(report_module_.empty() ? std::string{g->get_name()} : report_module_));
+  bool        timing_cells_complete = true;
+  bool        area_cells_complete   = true;
+  for (const auto corner : {ot::MIN, ot::MAX}) {
+    const auto& celllib = timer.celllib(corner);
+    for (const auto& [name, gate] : timer.gates()) {
+      (void)name;
+      const auto* cell = celllib ? celllib->cell(gate.cell_name()) : nullptr;
+      if (!cell) {
+        timing_cells_complete = false;
+        area_cells_complete   = false;
+        continue;
+      }
+      if (!cell->area || !std::isfinite(*cell->area) || *cell->area < 0) {
+        area_cells_complete = false;
+      }
+      const bool has_inputs = std::any_of(cell->cellpins.begin(), cell->cellpins.end(), [](const auto& entry) {
+        return entry.second.direction == ot::CellpinDirection::INPUT;
+      });
+      if (!has_inputs) {
+        continue;  // a constant cell has no data arc
+      }
+      for (const auto& [pin_name, pin] : cell->cellpins) {
+        (void)pin_name;
+        if (virtual_clock_period_ > 0) {
+          if (pin.is_clock.value_or(false)) {
+            constraints_complete_ = false;
+          }
+          for (const auto& arc : pin.timings) {
+            const auto type = arc.type.value_or(ot::TimingType::COMBINATIONAL);
+            if (type != ot::TimingType::COMBINATIONAL && type != ot::TimingType::COMBINATIONAL_RISE
+                && type != ot::TimingType::COMBINATIONAL_FALL) {
+              constraints_complete_ = false;
+            }
+          }
+        }
+        if (pin.direction != ot::CellpinDirection::OUTPUT) {
+          continue;
+        }
+        if (std::none_of(pin.timings.begin(), pin.timings.end(), [](const auto& arc) { return !arc.is_constraint(); })) {
+          timing_cells_complete = false;
+        }
+        for (const auto& arc : pin.timings) {
+          if (!arc.is_constraint() && (!arc.cell_rise || !arc.cell_fall || !arc.rise_transition || !arc.fall_transition)) {
+            timing_cells_complete = false;
+          }
+        }
+      }
+    }
+  }
+  j += clock_qor_json();
+  if (const auto area = timer.report_area(); area_cells_complete && area && std::isfinite(*area) && *area >= 0) {
+    j += std::format(",\"area\":{:.9g}", *area);
+  }
+  j += std::format(
+      ",\"cells\":{},\"opaque_logic_nodes\":{},\"native_state_nodes\":{},\"constraints_complete\":{},\"timing_cells_complete\":{}",
+      timer.num_gates(),
+      opaque_logic_nodes_,
+      native_state_nodes_,
+      constraints_complete_,
+      timing_cells_complete);
   if (!max_pin.empty()) {
     j += std::format(",\"max_delay\":{:.6g},\"critical_pin\":\"{}\"", max_delay, jesc(max_pin));
     if (auto src = src_of_node(g, max_node); !src.empty()) {
@@ -2166,7 +2290,7 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     return {};
   }
   const uint64_t env = livehd::opentimer::Sta_cache::env_hash(timing_file_list, top_filter, hier_setting_, margin, stats_);
-  return std::format("{:016x}{:016x}{:016x}", d.h0, d.h1, env);
+  return std::format("{:016x}{:016x}{:016x}:load={:.9g}", d.h0, d.h1, env, io_load_ff_);
 }
 
 void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {

@@ -23,6 +23,11 @@ selects one. No default flip in this task — after both have been iterated on, 
 ruling decides whether to delete one, alternate, or keep both.</p>
 
 <h2>Status — LANDED and measured (2026-08-26)</h2>
+<p><strong>Spelling update 2026-09-22:</strong> the synth-only knobs below are now
+<code>pass.color.synth.&lt;flag&gt;</code> (<code>max_gate</code>, <code>forward</code>,
+<code>ctrl_cones</code>, <code>stop_*</code>, …) and <code>synth_alg</code> is
+<code>pass.color.synth.mode</code>; the old spellings error with the new one. The
+history below keeps the names it was written with, except the runnable commands.</p>
 <p>P0–P5 are done. <code>pass.color synth --set synth_alg=cones</code> ships next to
 <code>synth</code>/<code>pipe</code>; <strong>no default flip</strong> (ruling 8). What landed:
 <code>graph/predict_abc_size.hpp</code> + <code>shift_mux_count</code> factored out of
@@ -434,10 +439,10 @@ to it.</li>
 </ol>
 <p>End-to-end <code>lhd/tests/lhd_color_cones_test.sh</code> (sh_test, <code>_FLOW_DATA +
 //inou/prp:hier_tests</code>, template <code>lhd_color_absorb_test.sh</code>): <code>hier_seq.prp</code> and
-<code>hier_comb.prp</code> → <code>pass color synth --set pass.color.synth_alg=cones --set
-pass.color.max_gate=&lt;small&gt; --stats</code> → <code>pass partition --emit-dir</code> asserting one
+<code>hier_comb.prp</code> → <code>pass color synth --set pass.color.synth.mode=cones --set
+pass.color.synth.max_gate=&lt;small&gt; --stats</code> → <code>pass partition --emit-dir</code> asserting one
 <code>&lt;def&gt;__c&lt;id&gt;</code> module per id → <code>pass abc</code> → <code>lec</code> PASS; plus one
-<code>lhd synth … --set color.synth_alg=cones --set synth.opentimer=false</code> smoke asserting
+<code>lhd synth … --set color.synth.mode=cones --set synth.opentimer=false</code> smoke asserting
 <code>qor.abc.total.regions &gt; 0</code>. <code>lhd_color_test.sh</code>'s alg loop gains a cones line.
 The negative control in <code>lhd_synth_test.sh</code> (<code>color.alg=flat</code> refused) stays
 valid.</p>
@@ -513,7 +518,7 @@ dependent. The pre-ABC design passes <code>cgen_verilog</code>'s identical
 ABC itself completes: minion's cones QoR above is real, only the whole-design STA is missing.
 Reproducer (one <code>-c opt</code> pair):
 <pre>lhd synth ../lhdsuite/minion/pyrope/minion_top.prp --top minion_top --workdir W \
-  --set synth.liberty=$LIB --set color.synth_alg=cones --set color.max_gate=30000 \
+  --set synth.liberty=$LIB --set color.synth.mode=cones --set color.synth.max_gate=30000 \
   --set synth.opentimer=false --emit-dir lg:net
 lhd pass opentimer --top minion_top.minion_top lg:net $LIB --workdir OT</pre>
 Unrelated and also pre-existing: a <code>-c dbg</code> build aborts inside ABC

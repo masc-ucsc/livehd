@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -14,30 +15,21 @@
 
 #include "abc_arith.hpp"     // arith::Adder_kind
 #include "abc_boundary.hpp"  // Boundary_table
+#include "abc_flow.hpp"
 #include "abc_parallel.hpp"
+#include "blast_tape.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 #include "liberty_dff.hpp"     // livehd::liberty::Dff_cell
 #include "memory_module.hpp"   // livehd::abc::Memory_fold
 #include "pass_partition.hpp"  // livehd::partition::Region_body
-#include "satopt.hpp"
 #include "ware_module.hpp"
 
 namespace livehd::abc {
 
 class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
 
-// How much of a met delay budget to hand back to ABC's mapper as area, in
-// percent, for `&nf -R`. `achieved` and `target` are in the same (Liberty) unit;
-// `cap` is Map_options::area_relax_pct. Returns 0 when there is nothing to trade
-// -- the budget was missed, the slack is too small to pay for a second mapping
-// pass, or recovery is switched off -- which is exactly the "leave the
-// minimum-delay mapping alone" answer.
-//
-// Free and pure so the policy is testable without a Liberty: the QoR it produces
-// depends on the cell library, but the DECISION does not.
-int area_relax_percent(float target, float achieved, uint32_t cap);
 // Area without a target; Liberty delay (then area) with a target. Endpoint
 // delays are sorted worst first, so improving a tied critical path counts.
 struct Ware_qor {
@@ -48,6 +40,34 @@ bool  ware_qor_better(const Ware_qor& baseline, const Ware_qor& candidate, bool 
 float ware_delay_target(std::string_view value);
 
 struct Map_options {
+  // Optional alternative mapper (pass.synth), run INSTEAD of the ABC flow. It
+  // receives this worker's ABC frame (current network: the region's unmapped
+  // logic), an untouched copy of that logic network (the PI/PO/latch skeleton
+  // a mapped result is stitched into), the region's blast tape (the same
+  // logic as the blaster produced it, never touched by ABC), and the region
+  // name. It maps the region by replacing the frame's current network with a
+  // MAPPED one; leaving it unmapped falls back to the ABC flow for that region.
+  // Returns opaque decision evidence to store with that region's cache row.
+  // Kept as a callback so pass.abc does not depend on pass.synth.
+  struct Alternative_resources {
+    double   elapsed_ms;
+    uint64_t entry_footprint_bytes;
+  };
+  using Alternative = std::function<std::string(void*, void*, const Blast_tape&, std::string_view, const Map_options&, float,
+                                                Alternative_resources)>;
+  Alternative                                                               alternative;
+  std::string                                                               alternative_recipe;
+  // Opaque evidence follows the exact structurally compared cache row. Validate
+  // before copying a cached body; replay only after the copy succeeds.
+  // validate(cached_region, evidence); replay(current_region, cached_region, evidence).
+  std::function<bool(std::string_view, std::string_view)>                   alternative_evidence_valid;
+  std::function<void(std::string_view, std::string_view, std::string_view)> alternative_replay;
+
+  // Re-map each arithmetic/shifter ware region under the alternative adder,
+  // multiplier and barrel lowerings and keep the best stitched result. Off for
+  // pass.synth: a trial re-runs the whole region (and would re-decide it).
+  bool ware_trials = true;
+
   bool              satopt = true;
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
@@ -56,7 +76,7 @@ struct Map_options {
   // Nets driven by native (unblasted) nodes are outside ABC and keep their
   // fanout regardless. Default 16.
   uint32_t          max_fanout = 16;
-  // Indivisible wide operations can exceed color.max_gate by orders of
+  // Indivisible wide operations can exceed pass.color.synth.max_gate by orders of
   // magnitude. The default large tier skips ABC's unbounded structural-choice
   // synthesis and maps the already bit-blasted AIG directly. Empty or
   // large_ge==0 disables the tier; an explicit global/per-region flow wins.
@@ -207,28 +227,28 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 // crossing region/blackbox boundaries are invisible here (pass.opentimer is
 // the whole-design scorer).
 struct Region_qor {
-  uint64_t    satopt_facts = 0;
-  std::string module;  // region module name (<top>__c<color>)
-  int         color       = 0;
-  bool        ctrl        = false;
-  int         ware_trials = 0;
-  std::string ware_selected;
-  uint64_t    input_nodes = 0;  // source-region nodes before bit blasting
-  uint64_t    input_ge    = 0;  // graph_util synthesis-GE estimate before ABC
+  std::shared_ptr<const std::string> alternative_evidence;
+  std::string                        module;  // region module name (<top>__c<color>)
+  int                                color       = 0;
+  bool                               ctrl        = false;
+  int                                ware_trials = 0;
+  std::string                        ware_selected;
+  uint64_t                           input_nodes = 0;  // source-region nodes before bit blasting
+  uint64_t                           input_ge    = 0;  // graph_util synthesis-GE estimate before ABC
   // Predicted generic-AIG size of the same cone (graph/predict_abc_size.hpp),
-  // the unit `pass.color synth --set synth_alg=cones` thresholds on. Reported
+  // the unit `pass.color synth --set pass.color.synth.mode=cones` thresholds on. Reported
   // NEXT TO input_ge, never instead of it: the two are different estimates of
   // the same input, and the only ground truth for either is `gates` below --
   // there is no per-op post-ABC attribution, so a region sum is the whole
   // measurement. Every production run therefore validates both predictors.
-  uint64_t    pred_aig    = 0;
-  int         gates       = 0;    // mapped standard cells actually minted (bypassed buffers excluded)
-  double      area        = 0.0;  // sum of their Liberty cell areas
+  uint64_t                           pred_aig    = 0;
+  int                                gates       = 0;    // mapped standard cells actually minted (bypassed buffers excluded)
+  double                             area        = 0.0;  // sum of their Liberty cell areas
   // Identity buffers ABC minted to decouple a CI->CO / gate->many-CO edge that
   // the read-back aliased away (pass 1b): not in `gates`/`area`, not in the
   // netlist. Diagnostic only -- a cache hit reports 0 (the row is not
   // persisted with it; its gates/area are already net of the bypass).
-  int         bypassed    = 0;
+  int                                bypassed    = 0;
   int         logic_depth = -1;     // mapped ABC gate levels between region/state boundaries, before read-back buffer bypass
   float       delay       = -1.0f;  // critical arrival (unit-delay depth, or ps with an NLDM GENLIB); <0 => unavailable
   std::string crit_output;          // region output port with the worst arrival
@@ -244,6 +264,7 @@ struct Region_qor {
   // for each candidate at decision time (<0 = not run).
   float       budget = -1.0f;
   std::string candidate;
+  std::string baseline_worker;  // current invocation only; cache hits leave this empty
   float       delay_flow_delay   = -1.0f;
   double      delay_flow_area    = -1.0;
   float       area_flow_delay    = -1.0f;
@@ -357,7 +378,6 @@ public:
   [[nodiscard]] const std::string* time_refusal() const { return time_refusal_.empty() ? nullptr : &time_refusal_; }
 
 private:
-  absl::flat_hash_map<hhds::Graph*, std::shared_ptr<const Satopt_result>> satopt_results_;
   Parallel_stats                                                          parallel_stats_;
   std::mutex                                                              graph_mutex_;
   Mapper*                                                                 coordinator_ = nullptr;
@@ -387,7 +407,9 @@ private:
   // True (and fills refusal_) when the process has grown past the memory budget
   // while translating `region`. `blasted`/`total` describe how far the
   // translation got, so the diagnostic can project the finished size.
-  bool over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total);
+  // pending_bytes: memory the region will allocate but has not yet (the ABC
+  // netlist still to be replayed from the blast tape), counted as if resident.
+  bool over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total, uint64_t pending_bytes = 0);
 
   // Startup uses the run-level options, not a region's temporary overrides
   // (notably register_max_bits can turn register mapping off for one region).

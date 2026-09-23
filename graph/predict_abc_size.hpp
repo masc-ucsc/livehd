@@ -2,7 +2,7 @@
 #pragma once
 
 // Predicted GENERIC-AIG size of one LGraph node -- the unit `pass.color synth
-// --set synth_alg=cones` budgets its cone walk in, ranks cone overlaps in, and
+// --set pass.color.synth.mode=cones` budgets its cone walk in, ranks cone overlaps in, and
 // merges colors under (todo/livehd/2c-color-synthcones.html section B).
 //
 // WHY a second unit next to synthesis_ge_weight. Measured over 1930 regions

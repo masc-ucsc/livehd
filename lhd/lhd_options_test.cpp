@@ -9,6 +9,15 @@
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
 
+TEST(LhdOptions, SynthCommandAndPassKeepSeparateNamespaces) {
+  EXPECT_EQ(lhd::canonical_set_key("synth.potato", "synth"), "synth.potato");
+  EXPECT_EQ(lhd::canonical_set_key("synth.mapper", "pass.synth"), "synth.mapper");
+  EXPECT_EQ(lhd::canonical_set_key("recipes", "pass.synth"), "pass.synth.recipes");
+  EXPECT_EQ(lhd::canonical_set_key("pass.synth.recipes", "synth"), "pass.synth.recipes");
+  EXPECT_FALSE(lhd::retired_set_hint("pass.synth", "out").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.synth", "threads").empty());
+}
+
 // Keep the full retired-option matrix in one process. The CLI integration
 // test separately checks the result envelope and --config plumbing.
 TEST(LhdOptions, RetiredLabelsAreHiddenAndRejected) {

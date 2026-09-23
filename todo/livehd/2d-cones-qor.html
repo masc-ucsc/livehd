@@ -31,11 +31,20 @@ The requested report is <code>../lhdtrack/target/results-masca1.html</code>;
 its actual host identity remains <code>mascm1</code>.</p>
 
 <h2>Algorithm and defaults</h2>
-<p>CLI defaults are <code>pass.color.synth_alg=cones</code>,
-<code>pass.color.ctrl_cones=true</code>, <code>pass.color.forward=all</code>,
-<code>pass.color.max_gate=30000</code>, <code>pass.color.stop_mux=true</code>
-and <code>pass.color.stop_arith=true</code>. The benchmark profiles explicitly
+<p>CLI defaults are <code>pass.color.synth.mode=cones</code>,
+<code>pass.color.synth.ctrl_cones=true</code>, <code>pass.color.synth.forward=all</code>,
+<code>pass.color.synth.max_gate=30000</code>, <code>pass.color.synth.stop_mux=true</code>
+and <code>pass.color.synth.stop_arith=true</code>. The benchmark profiles explicitly
 record these settings, with <code>stop_mux=false</code> for Sky130.</p>
+<p><strong>2026-09-22:</strong> the stop_* defaults above are the
+<code>pass.color.synth.mapper=abc</code> profile. <code>lhd synth --set
+synth.mapper=synth</code> selects the <code>synth</code> profile, which turns every
+<code>stop_*</code> cut off so a color runs register to register (domino needs
+clock-to-clock cones); the overlap clustering is identical. An explicit
+<code>stop_*</code> setting overrides either profile. The synth-only knobs moved
+from <code>pass.color.&lt;flag&gt;</code> to <code>pass.color.synth.&lt;flag&gt;</code>
+(<code>synth_alg</code> is now <code>mode</code>); the old spellings error with the
+new one.</p>
 <p>Mux/select and register/memory-enable cones share control colors whenever
 they overlap; overlapping data cones merge separately. Shared zero-cost wiring
 and primary-input pins count as overlap without acquiring an artificial cost.

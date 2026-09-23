@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <print>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -110,9 +111,11 @@ bool has_body_logic(const hhds::GraphIO& cio) {
 
 Incr_cache::Incr_cache(std::string dir, uint64_t salt, bool scoped_libraries)
     : dir_(std::move(dir)), pre_dir_(dir_ + "_pre"), salt_(salt), scoped_libraries_(scoped_libraries) {
-  std::error_code ec;
-  std::filesystem::create_directories(dir_, ec);
-  std::filesystem::create_directories(pre_dir_, ec);
+  if (!scoped_libraries_) {
+    std::error_code ec;
+    std::filesystem::create_directories(dir_, ec);
+    std::filesystem::create_directories(pre_dir_, ec);
+  }
 
   std::ifstream in(dir_ + "/abc_cache.json", std::ios::binary);
   if (!in) {
@@ -156,12 +159,18 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt, bool scoped_libraries)
         }
       }
     };
-    row.module = gets("module");
-    row.pre    = gets("pre");
-    row.recipe = gets("recipe");
+    row.module        = gets("module");
+    row.pre           = gets("pre");
+    row.recipe        = gets("recipe");
+    row.evidence_file = gets("evidence_file");
+    if (auto m = v.FindMember("evidence_bytes"); m != v.MemberEnd() && m->value.IsUint64()) {
+      row.evidence_bytes = m->value.GetUint64();
+    }
+    if (!parse_hex64(gets("evidence_hash"), row.evidence_hash)) {
+      row.evidence_file.clear();
+    }
     arr("in", row.in);
     arr("out", row.out);
-    arr("satopt_facts", row.satopt_facts);
     if (auto m = v.FindMember("gates"); m != v.MemberEnd() && m->value.IsInt()) {
       row.gates = m->value.GetInt();
     }
@@ -215,7 +224,7 @@ hhds::GraphLibrary& Incr_cache::cached_pre_lib() {
 }
 
 Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
-                                                      std::string_view recipe, std::span<const std::string> facts) {
+                                                      std::string_view recipe) {
   Compare_result res;
   auto           dbg = [&](const char* why) {
     if (incr_debug()) {
@@ -250,13 +259,13 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
   }
   if (candidates.empty()) {
     dbg("no same-name or same-digest cached row");
-    return res;
+    return loaded_snapshot_ ? loaded_snapshot_->lookup_compare(rb, pre_body, recipe) : res;
   }
 
   for (const Row* candidate : candidates) {
     const Row& row        = *candidate;
     const bool cross_name = row.module != rb.module_name;
-    if (row.recipe != recipe || !std::equal(row.satopt_facts.begin(), row.satopt_facts.end(), facts.begin(), facts.end())) {
+    if (row.recipe != recipe) {
       continue;
     }
     // Same-name reuse predates the digest and remains governed by the exact
@@ -272,6 +281,35 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
     auto cached_pre = pio->get_graph();
     if (!cached_pre) {
       continue;
+    }
+    if (!cross_name) {
+      // Exact comparison below matches named IO, while replace_body_from
+      // installs the pin table by numeric port id. Equal names/logic alone
+      // do not authorize that copy when partitioning reorders the boundary.
+      // Refuse this candidate until reuse can explicitly transport a port
+      // permutation (including IO attributes and direct feedthroughs).
+      auto fresh_io    = pre_body->get_io();
+      auto same_layout = [](const auto& cached, const auto& fresh) {
+        if (cached.size() != fresh.size()) {
+          return false;
+        }
+        absl::flat_hash_map<std::string_view, hhds::Port_id> ports;
+        for (const auto& port : cached) {
+          ports.emplace(port.name, port.port_id);
+        }
+        for (const auto& port : fresh) {
+          auto it = ports.find(port.name);
+          if (it == ports.end() || it->second != port.port_id) {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (!fresh_io || !same_layout(pio->get_input_pin_decls(), fresh_io->get_input_pin_decls())
+          || !same_layout(pio->get_output_pin_decls(), fresh_io->get_output_pin_decls())) {
+        dbg("same-name boundary changed numeric port layout");
+        continue;
+      }
     }
     // The structural compare: name-blind on internal temporaries, name-anchored
     // on IO + state. The digest only found this candidate; this exact proof is
@@ -359,7 +397,7 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
     return res;
   }
   dbg("cached candidates failed exact comparison");
-  return res;
+  return loaded_snapshot_ ? loaded_snapshot_->lookup_compare(rb, pre_body, recipe) : res;
 }
 
 // Copy the pre-body's body-less Sub child DECLS into the cache library alongside
@@ -429,8 +467,7 @@ void Incr_cache::copy_mapped_children(std::string_view module_name, hhds::GraphL
 }
 
 bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                       const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib,
-                       std::span<const std::string> facts) {
+                       const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib) {
   // The pre-abc body (in pre_lib under pre_name) is copied NOW, into the
   // SEPARATE pre-body library: `pre_lib` is a per-region throwaway the
   // partitioner destroys the moment this callback returns. The two cache
@@ -444,6 +481,15 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   if (outlib == nullptr || outlib->find_io(rb.module_name) == nullptr) {
     return false;  // nothing to defer: keep store()'s false-on-failure contract
   }
+  if (saved_generation_readable_ && !loaded_snapshot_) {
+    auto previous = rows_.find(rb.module_name);
+    if (previous != rows_.end() && !previous->second.in_outlib) {
+      // The on-disk generation is still unchanged until save/freeze. Its
+      // private pre library avoids the mutable cached_pre_lib() that store
+      // overwrites below. Bodies stay lazy; do not duplicate every netlist.
+      loaded_snapshot_ = std::make_unique<Incr_cache>(dir_, salt_, true);
+    }
+  }
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
@@ -454,7 +500,6 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.module = rb.module_name;
   row.pre    = std::string{pre_name};
   row.recipe = std::string{recipe};
-  row.satopt_facts.assign(facts.begin(), facts.end());
   row.in.reserve(rb.inputs.size());
   row.out.reserve(rb.outputs.size());
   for (const auto& p : rb.inputs) {
@@ -470,6 +515,9 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.crit_output  = q.crit_output;
   row.crit_src     = q.crit_src;
   row.div_blackbox = q.div_blackbox;
+  if (q.alternative_evidence && q.alternative_evidence->size() <= max_evidence_bytes) {
+    row.evidence = q.alternative_evidence;
+  }
   const auto digest
       = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
   row.digest0      = digest.h0;
@@ -487,7 +535,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
 }
 
 bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                           std::string_view recipe, std::span<const std::string> facts) {
+                           std::string_view recipe) {
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
@@ -496,7 +544,6 @@ bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Graph
   row.module = rb.module_name;
   row.pre    = std::string{pre_name};
   row.recipe = std::string{recipe};
-  row.satopt_facts.assign(facts.begin(), facts.end());
   const auto digest
       = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
   row.digest0      = digest.h0;
@@ -535,6 +582,12 @@ bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compa
   auto mapped = mio->get_graph();
   if (!mapped) {
     return false;
+  }
+  if (incr_debug()) {
+    std::print("[abc-incr] HIT {} <- {} ({})\n",
+               rb.module_name,
+               res.row->module,
+               res.row->in_outlib ? "current output" : "saved cache");
   }
   // Re-declare the reused body's leaf-cell Sub defs (liberty cells, DFF cells)
   // into `outlib` FIRST. On an all-HIT recompile no region maps, so abc_map's
@@ -582,7 +635,11 @@ void Incr_cache::refresh_qor(std::string_view module, const Region_qor& q) {
   dirty_           = true;
 }
 
-void Incr_cache::save() {
+void Incr_cache::freeze_pending() {
+  // After freezing, lib() may contain the new owner of an old name. A previous
+  // row must no longer direct reuse_hit to that name in the changed library.
+  loaded_snapshot_.reset();
+  saved_generation_readable_ = false;
   if (!dirty_) {
     return;
   }
@@ -608,7 +665,55 @@ void Incr_cache::save() {
       rows_.erase(name);
     }
   }
+}
 
+void Incr_cache::save() { save_to(dir_, false); }
+
+bool Incr_cache::stage_snapshot(const std::string& directory) {
+  if (!dirty_) {
+    return false;
+  }
+  // Materialize old lazy bodies before saving elsewhere. This avoids relying
+  // on the library's best-effort pending-body directory copy for a transaction.
+  for (auto* library : {&lib(), &cached_pre_lib()}) {
+    for (auto gid : library->all_gids()) {
+      [[maybe_unused]] auto graph = library->get_graph(gid);
+    }
+  }
+  save_to(directory, true);
+  return true;
+}
+
+std::shared_ptr<const std::string> Incr_cache::read_evidence(const Row& row) const {
+  if (row.evidence) {
+    return row.evidence->size() <= max_evidence_bytes ? row.evidence : nullptr;
+  }
+  const std::filesystem::path relative(row.evidence_file);
+  // Only our generated two-component paths are admitted, never traversal or
+  // absolute paths from a damaged manifest.
+  if (relative.empty() || relative.is_absolute() || relative.parent_path().parent_path() != ""
+      || !relative.parent_path().string().starts_with("evidence-") || relative.filename().extension() != ".json"
+      || row.evidence_bytes == 0 || row.evidence_bytes > max_evidence_bytes) {
+    return nullptr;
+  }
+  std::ifstream input(std::filesystem::path(dir_) / relative, std::ios::binary | std::ios::ate);
+  if (!input || input.tellg() != static_cast<std::streamoff>(row.evidence_bytes)) {
+    return nullptr;
+  }
+  input.seekg(0);
+  auto data = std::make_shared<std::string>(row.evidence_bytes, '\0');
+  input.read(data->data(), static_cast<std::streamsize>(data->size()));
+  if (!input || input.peek() != std::char_traits<char>::eof() || fnv1a64(*data) != row.evidence_hash) {
+    return nullptr;
+  }
+  return data;
+}
+
+void Incr_cache::save_to(const std::string& directory, bool strict) {
+  if (!dirty_) {
+    return;
+  }
+  freeze_pending();
   std::vector<const std::string*> keys;
   keys.reserve(rows_.size());
   for (const auto& [k, v] : rows_) {
@@ -617,10 +722,32 @@ void Incr_cache::save() {
   }
   std::sort(keys.begin(), keys.end(), [](const auto* a, const auto* b) { return *a < *b; });
 
+  std::filesystem::create_directories(directory);
+  std::string evidence_directory;
+  size_t      evidence_index = 0;
+
   std::string out   = std::format("{{\"schema\":4,\"salt\":\"{:016x}\",\"regions\":{{", salt_);
   bool        first = true;
   for (const auto* k : keys) {
     const auto& r = rows_.at(*k);
+    std::string evidence_file;
+    auto        evidence = read_evidence(r);
+    if (evidence && !evidence->empty()) {
+      if (evidence_directory.empty()) {
+        evidence_directory = directory + "/evidence-XXXXXX";
+        if (mkdtemp(evidence_directory.data()) == nullptr) {
+          throw std::runtime_error("cannot stage synthesis cache evidence directory");
+        }
+      }
+      evidence_file
+          = (std::filesystem::path(evidence_directory).filename() / (std::to_string(evidence_index++) + ".json")).string();
+      std::ofstream file(std::filesystem::path(directory) / evidence_file, std::ios::binary | std::ios::trunc);
+      file.write(evidence->data(), static_cast<std::streamsize>(evidence->size()));
+      file.close();
+      if (!file) {
+        throw std::runtime_error("cannot stage synthesis cache evidence");
+      }
+    }
     if (!first) {
       out += ",";
     }
@@ -633,10 +760,6 @@ void Incr_cache::save() {
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.in[i]));
     }
-    out += "],\"satopt_facts\":[";
-    for (size_t i = 0; i < r.satopt_facts.size(); ++i) {
-      out += std::format("{}\"{}\"", i ? "," : "", json_util::escape(r.satopt_facts[i]));
-    }
     out += "],\"out\":[";
     for (size_t i = 0; i < r.out.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.out[i]));
@@ -644,7 +767,7 @@ void Incr_cache::save() {
     out += std::format(
         "],\"gates\":{},\"area\":{},\"delay\":{},\"logic_depth\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{},"
         "\"digest\":\"{:"
-        "016x}{:016x}\"}}",
+        "016x}{:016x}\",\"evidence_file\":\"{}\",\"evidence_bytes\":{},\"evidence_hash\":\"{:016x}\"}}",
         r.gates,
         r.area,
         r.delay,
@@ -653,24 +776,36 @@ void Incr_cache::save() {
         json_util::escape(r.crit_src),
         r.div_blackbox,
         r.digest0,
-        r.digest1);
+        r.digest1,
+        json_util::escape(evidence_file),
+        evidence ? evidence->size() : 0,
+        evidence ? fnv1a64(*evidence) : 0);
   }
   out += "}}";
 
-  const std::string path = dir_ + "/abc_cache.json";
+  const std::string path = directory + "/abc_cache.json";
   const std::string tmp  = path + ".tmp";
   {
     std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
     if (!f) {
+      if (strict) {
+        throw std::runtime_error("cannot create staged synthesis cache metadata");
+      }
       return;
     }
     f << out;
+    f.close();
+    if (strict && !f) {
+      throw std::runtime_error("cannot serialize staged synthesis cache metadata");
+    }
   }
-  std::rename(tmp.c_str(), path.c_str());
+  if (std::rename(tmp.c_str(), path.c_str()) != 0 && strict) {
+    throw std::runtime_error("cannot install staged synthesis cache metadata");
+  }
 
-  if (scoped_libraries_) {
-    lib().save(dir_);
-    cached_pre_lib().save(pre_dir_);
+  if (scoped_libraries_ || strict) {
+    lib().save(directory);
+    cached_pre_lib().save(directory + "_pre");
   } else {
     livehd::Hhds_graph_library::save(dir_);      // mapped bodies
     livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls

@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# 2opt-incr subtask 0: `lhd pass abc` memory admission.
+# 2opt-incr subtask 0: `lhd pass <mapper>` memory admission.
 #
 # A region is bit-blasted into ABC, so a whole-design region costs millions of
 # gates and several network forms at once — a flat XSCore run reached 221 GB on
@@ -23,6 +23,19 @@
 # Hermetic: the small vendored Liberty (inou/prp/tests/abc/test.lib), no PDK.
 
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -46,7 +59,7 @@ run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 # ---------------------------------------------------------------------------
 # 1. an unsatisfiable budget must refuse
 # ---------------------------------------------------------------------------
-if "$LHD" pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
+if "$LHD" pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
     --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 \
     --emit diagnostics:"$W/refused.jsonl" \
     --workdir "$W/w3" -q --result-json "$W/refused.json" 2>"$W/refused.err"; then
@@ -73,7 +86,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. allow_oversize must override the guard (the documented escape hatch)
 # ---------------------------------------------------------------------------
-run pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
+run pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
   --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 --set abc.allow_oversize=true \
   --workdir "$W/w4"
 [ -n "$(ls -A "$W/net_forced" 2>/dev/null)" ] || fail "allow_oversize=true produced no netlist"
@@ -81,14 +94,14 @@ run pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net
 # ---------------------------------------------------------------------------
 # 4. a generous budget must NOT false-positive on a design that plainly fits
 # ---------------------------------------------------------------------------
-run pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
+run pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
   --set synth.liberty="$LIB" --set abc.memory_budget_mb=65536 --workdir "$W/w5"
 [ -n "$(ls -A "$W/net_ok" 2>/dev/null)" ] || fail "a 64 GiB budget produced no netlist"
 
 # ---------------------------------------------------------------------------
 # 5. a malformed budget is an error, not a silent fallback to "unlimited"
 # ---------------------------------------------------------------------------
-if "$LHD" pass abc --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" \
+if "$LHD" pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" \
     --set synth.liberty="$LIB" --set abc.memory_budget_mb=lots \
     --workdir "$W/w6" -q --result-json "$W/bad.json" 2>/dev/null; then
   fail "pass.abc accepted memory_budget_mb=lots"

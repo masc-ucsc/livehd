@@ -8,6 +8,8 @@
 
 #include "abc_incr.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <span>
 #include <string>
@@ -48,7 +50,8 @@ struct Fixture {
 };
 
 Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* name, Ntype_op op = Ntype_op::Xor,
-                    const char* flop_name = "st", int bits = 8, std::string_view port_tag = {}) {
+                    const char* flop_name = "st", int bits = 8, std::string_view port_tag = {}, bool permute_inputs = false,
+                    bool move_output = false) {
   Fixture    f;
   const auto a_name = std::string{"a"} + std::string{port_tag};
   const auto b_name = std::string{"b"} + std::string{port_tag};
@@ -61,9 +64,9 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   f.src_name = name;
   auto sgio  = slib.create_io(name);
   sgio->add_input(a_name, 1);
-  sgio->add_input(b_name, 2);
-  sgio->add_input(c_name, 3);
-  sgio->add_output(y_name, 4);
+  sgio->add_input(b_name, permute_inputs ? 3 : 2);
+  sgio->add_input(c_name, permute_inputs ? 2 : 3);
+  sgio->add_output(y_name, move_output ? 7 : 4);
   auto g  = sgio->create_graph();
   f.src   = g;
   auto ia = g->get_input_pin(a_name);
@@ -104,9 +107,9 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   // --- stand-in "mapped" body in outlib with the same IO ---
   auto mgio = outlib.create_io(name);
   mgio->add_input(a_name, 1);
-  mgio->add_input(b_name, 2);
-  mgio->add_input(c_name, 3);
-  mgio->add_output(y_name, 4);
+  mgio->add_input(b_name, permute_inputs ? 3 : 2);
+  mgio->add_input(c_name, permute_inputs ? 2 : 3);
+  mgio->add_output(y_name, move_output ? 7 : 4);
   auto m   = mgio->create_graph();
   f.mapped = m;
   auto mk  = create_typed_node(*m, Ntype_op::And);  // one marker gate
@@ -196,6 +199,82 @@ TEST(AbcIncr, CrossNameStructuralReuse) {
   EXPECT_TRUE(f2.rb.body->get_io()->has_output("y_right"));
 }
 
+// Structural equality by IO name is insufficient for an in-place body copy:
+// numeric port IDs must still bind those names to the same parent signals.
+TEST(AbcIncr, SameNamesWithChangedInputOrOutputPortIdsDoNotReuse) {
+  hhds::GraphLibrary original_out;
+  auto               original = make_region("lgdb_port_layout_original", original_out, "region");
+  {
+    Incr_cache cache("lgdb_port_layout_cache", 7, true);
+    ASSERT_TRUE(cache.store(original.rb, *original.slib, original.src_name, Region_qor{}, "R", &original_out));
+    cache.save();
+  }
+  for (bool input_permutation : {false, true}) {
+    hhds::GraphLibrary output;
+    auto               changed = make_region(input_permutation ? "lgdb_port_layout_inputs" : "lgdb_port_layout_outputs",
+                                             output,
+                                             "region",
+                                             Ntype_op::Xor,
+                                             "st",
+                                             8,
+                                             {},
+                                             input_permutation,
+                                             !input_permutation);
+    Incr_cache         cache("lgdb_port_layout_cache", 7, true);
+    EXPECT_FALSE(cache.lookup_compare(changed.rb, changed.src.get(), "R").hit);
+    EXPECT_TRUE(cache.lookup_compare(original.rb, original.src.get(), "R").hit);
+  }
+}
+
+TEST(AbcIncr, ChangedNameOwnerDoesNotEvictThePreviousDefinitionBeforeRenamedReuse) {
+  hhds::GraphLibrary original_out;
+  auto               original = make_region("lgdb_name_owner_original", original_out, "lane", Ntype_op::Xor);
+  Region_qor         original_qor;
+  original_qor.area                 = 17;
+  original_qor.alternative_evidence = std::make_shared<const std::string>("original witness");
+  {
+    Incr_cache cache("lgdb_name_owner_cache", 7, true);
+    ASSERT_TRUE(cache.store(original.rb, *original.slib, original.src_name, original_qor, "R", &original_out));
+    cache.save();
+  }
+  hhds::GraphLibrary current_out;
+  auto               changed = make_region("lgdb_name_owner_changed", current_out, "lane", Ntype_op::Or);
+  auto               renamed = make_region("lgdb_name_owner_renamed", current_out, "lane_p1", Ntype_op::Xor);
+  Incr_cache         cache("lgdb_name_owner_cache", 7, true);
+  ASSERT_FALSE(cache.lookup_compare(changed.rb, changed.src.get(), "R").hit);
+  Region_qor changed_qor;
+  changed_qor.area                 = 23;
+  changed_qor.alternative_evidence = std::make_shared<const std::string>("changed witness");
+  ASSERT_TRUE(cache.store(changed.rb, *changed.slib, changed.src_name, changed_qor, "R", &current_out));
+  auto hit = cache.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  ASSERT_TRUE(hit.hit);
+  ASSERT_NE(hit.row, nullptr);
+  EXPECT_EQ(hit.row->area, 17);
+  ASSERT_TRUE(cache.read_evidence(*hit.row));
+  EXPECT_EQ(*cache.read_evidence(*hit.row), "original witness");
+  EXPECT_TRUE(cache.reuse_hit(renamed.rb, hit, &current_out));
+  EXPECT_FALSE(cache.lookup_compare(renamed.rb, renamed.src.get(), "different-recipe").hit);
+  auto current = cache.lookup_compare(changed.rb, changed.src.get(), "R");
+  ASSERT_TRUE(current.hit);
+  EXPECT_EQ(current.row->area, 23);
+  cache.freeze_pending();
+  // Freezing overwrites the mapped library's old owner. A later store must
+  // not resurrect old disk metadata and pair it with that new mapped body.
+  ASSERT_TRUE(cache.store(changed.rb, *changed.slib, changed.src_name, changed_qor, "R", &current_out));
+  EXPECT_FALSE(cache.lookup_compare(renamed.rb, renamed.src.get(), "R").hit);
+  ASSERT_TRUE(cache.store(renamed.rb, *renamed.slib, renamed.src_name, original_qor, "R", &current_out));
+  cache.save();
+  Incr_cache reloaded("lgdb_name_owner_cache", 7, true);
+  auto       old_result = reloaded.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  auto       new_result = reloaded.lookup_compare(changed.rb, changed.src.get(), "R");
+  ASSERT_TRUE(old_result.hit);
+  ASSERT_TRUE(new_result.hit);
+  EXPECT_EQ(old_result.row->module, "lane_p1");
+  EXPECT_EQ(new_result.row->module, "lane");
+  EXPECT_EQ(old_result.row->area, 17);
+  EXPECT_EQ(new_result.row->area, 23);
+}
+
 // A different resolved recipe must never share a cached netlist.
 TEST(AbcIncr, RecipeMismatchMiss) {
   auto& out1 = livehd::Hhds_graph_library::instance("lgdb_p2b_o1");
@@ -280,17 +359,92 @@ TEST(AbcAreaRelax, DisabledAndDegenerateInputs) {
   EXPECT_EQ(livehd::abc::area_relax_percent(20000.0f, 0.0f, 200), 0);   // untimed network
 }
 
-TEST(AbcIncr, CrossRegionFactsGateReuse) {
-  auto&                          out = livehd::Hhds_graph_library::instance("lgdb_satopt_out");
-  auto                           f   = make_region("lgdb_satopt_src", out, "top__c1");
-  Incr_cache                     cache("lgdb_satopt_cache", 17);
-  Region_qor                     q;
-  const std::vector<std::string> first{"port:select != 0 => port:data[0] == 0"};
-  const std::vector<std::string> changed{"port:select != 0 => port:data[0] == 1"};
-  ASSERT_TRUE(cache.store(f.rb, *f.slib, f.src_name, q, "R", &out, first));
+// Publication-gated clients freeze before context-specific final transforms,
+// then commit only after whole-design proof and output replacement succeed.
+TEST(AbcIncr, FrozenPrivateRowsStayUnpublishedUntilSave) {
+  auto&      out = livehd::Hhds_graph_library::instance("lgdb_frozen_out");
+  auto       f   = make_region("lgdb_frozen_src", out, "top__c1");
+  Incr_cache pending("lgdb_frozen_cache", 7, true);
+  ASSERT_TRUE(pending.store(f.rb, *f.slib, f.src_name, Region_qor{}, "R", &out));
+  const auto frozen_nodes = node_count(f.rb.body);
+  pending.freeze_pending();
+  // A later whole-design transform must not contaminate reusable region rows.
+  [[maybe_unused]] auto added = create_typed_node(*f.rb.body, Ntype_op::And);
+  ASSERT_GT(node_count(f.rb.body), frozen_nodes);
+  ASSERT_TRUE(pending.stage_snapshot("lgdb_frozen_staged"));
+  {
+    Incr_cache next("lgdb_frozen_cache", 7, true);
+    EXPECT_FALSE(next.lookup_compare(f.rb, f.src.get(), "R").hit);
+  }
+  {
+    Incr_cache staged("lgdb_frozen_staged", 7, true);
+    EXPECT_TRUE(staged.lookup_compare(f.rb, f.src.get(), "R").hit);
+  }
+  pending.save();
+  Incr_cache committed("lgdb_frozen_cache", 7, true);
+  auto       hit = committed.lookup_compare(f.rb, f.src.get(), "R");
+  ASSERT_TRUE(hit.hit);
+  ASSERT_TRUE(committed.reuse_hit(f.rb, hit, &out));
+  EXPECT_EQ(node_count(f.rb.body), frozen_nodes);
+}
+
+TEST(AbcIncr, EvidenceFollowsExactRowThroughRenameAndPrivateSnapshot) {
+  auto&      out     = livehd::Hhds_graph_library::instance("lgdb_evidence_out");
+  auto       first   = make_region("lgdb_evidence_src", out, "original", Ntype_op::Xor, "st", 8, "_a");
+  auto       renamed = make_region("lgdb_evidence_new", out, "renamed", Ntype_op::Xor, "st", 8, "_b");
+  Incr_cache cache("lgdb_evidence_cache", 19, true);
+  Region_qor q;
+  q.alternative_evidence = std::make_shared<const std::string>("original decision and witnesses");
+  ASSERT_TRUE(cache.store(first.rb, *first.slib, first.src_name, q, "R", &out));
+  auto hit = cache.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  ASSERT_TRUE(hit.hit);
+  ASSERT_EQ(cache.read_evidence(*hit.row), q.alternative_evidence);
+  ASSERT_TRUE(cache.stage_snapshot("lgdb_evidence_stage"));
+  EXPECT_FALSE(std::filesystem::exists("lgdb_evidence_cache/abc_cache.json"));
+  Incr_cache staged("lgdb_evidence_stage", 19, true);
+  hit = staged.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  ASSERT_TRUE(hit.hit);
+  ASSERT_NE(staged.read_evidence(*hit.row), nullptr);
+  EXPECT_EQ(*staged.read_evidence(*hit.row), *q.alternative_evidence);
+  EXPECT_EQ(hit.row->module, "original");
+  const auto path = std::filesystem::path(staged.dir()) / hit.row->evidence_file;
+  // Same-size corruption is detected, independently of the intact graph row.
+  {
+    std::ofstream corrupt(path, std::ios::binary | std::ios::trunc);
+    corrupt << std::string(q.alternative_evidence->size(), 'X');
+  }
+  EXPECT_EQ(staged.read_evidence(*hit.row), nullptr);
+  std::filesystem::remove(path);
+  EXPECT_EQ(staged.read_evidence(*hit.row), nullptr);
+  auto invalid          = *hit.row;
+  invalid.evidence_file = "../outside.json";
+  EXPECT_EQ(staged.read_evidence(invalid), nullptr);
+  // Repeated writes use distinct attachment generations; an earlier manifest
+  // remains readable while a new private snapshot is assembled.
   cache.save();
-  Incr_cache loaded("lgdb_satopt_cache", 17);
-  EXPECT_TRUE(loaded.lookup_compare(f.rb, f.src.get(), "R", first).hit);
-  EXPECT_FALSE(loaded.lookup_compare(f.rb, f.src.get(), "R", changed).hit);
-  EXPECT_FALSE(loaded.lookup_compare(f.rb, f.src.get(), "R").hit);
+  cache.save();
+  Incr_cache committed("lgdb_evidence_cache", 19, true);
+  hit = committed.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  ASSERT_TRUE(hit.hit);
+  ASSERT_NE(committed.read_evidence(*hit.row), nullptr);
+  EXPECT_EQ(*committed.read_evidence(*hit.row), *q.alternative_evidence);
+  auto oversized           = *hit.row;
+  oversized.evidence_bytes = Incr_cache::max_evidence_bytes + 1;
+  EXPECT_EQ(committed.read_evidence(oversized), nullptr);
+  // A mixed snapshot copies a lazy existing attachment and a freshly mapped
+  // row together. Neither may depend on files in the old cache after publish.
+  Region_qor q2;
+  q2.alternative_evidence = std::make_shared<const std::string>("new decision");
+  ASSERT_TRUE(committed.store(renamed.rb, *renamed.slib, renamed.src_name, q2, "R", &out));
+  ASSERT_TRUE(committed.stage_snapshot("lgdb_evidence_mixed"));
+  std::filesystem::remove_all("lgdb_evidence_cache");
+  Incr_cache mixed("lgdb_evidence_mixed", 19, true);
+  auto       old_hit = mixed.lookup_compare(first.rb, first.src.get(), "R");
+  auto       new_hit = mixed.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  ASSERT_TRUE(old_hit.hit);
+  ASSERT_TRUE(new_hit.hit);
+  ASSERT_NE(mixed.read_evidence(*old_hit.row), nullptr);
+  ASSERT_NE(mixed.read_evidence(*new_hit.row), nullptr);
+  EXPECT_EQ(*mixed.read_evidence(*old_hit.row), *q.alternative_evidence);
+  EXPECT_EQ(*mixed.read_evidence(*new_hit.row), *q2.alternative_evidence);
 }

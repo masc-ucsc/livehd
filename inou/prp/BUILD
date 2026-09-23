@@ -73,6 +73,7 @@ filegroup(
 filegroup(
     name = "abc_tests",
     srcs = [
+        "tests/abc/clock_gate_latch.v",  # lhd_unate_smoke pins its full-design proof
         "tests/abc/test.lib",
         "tests/abc/test_qn.lib",
         "tests/abc/timing.lib",
@@ -1813,12 +1814,22 @@ _LEC_SOURCES = [
     tags = ["cpu:4"],
 ) for src in _ROUNDTRIP_SOURCES]
 
+# One fixture list x both technology mappers: `prp-synth-<stem>` maps with ABC
+# and `prp-synth-<stem>-synth` with pass.synth (`--set synth.mapper=synth`).
+# Adding a design still needs no runner or BUILD edit, and a new mapper is one
+# entry in _SYNTH_MAPPERS -- the equivalence claim is the mapper-agnostic part.
+_SYNTH_MAPPERS = [
+    ("", "abc"),
+    ("-synth", "synth"),
+]
+
 [sh_test(
-    name = "prp-synth-%s" % src.split("/")[-1].rsplit(".", 1)[0],
+    name = "prp-synth-%s%s" % (src.split("/")[-1].rsplit(".", 1)[0], suffix),
     srcs = ["tests/integration.py"],
     args = [
         "synth",
         "$(location %s)" % src,
+        mapper,
     ],
     data = [
         "tests/lec.py",
@@ -1827,7 +1838,7 @@ _LEC_SOURCES = [
     ] + glob(["tests/abc/*"]),
     env_inherit = ["PATH"],
     tags = ["exclusive"],  # Serialize synthesis-bearing process trees.
-) for src in _SYNTH_SOURCES]
+) for src in _SYNTH_SOURCES for suffix, mapper in _SYNTH_MAPPERS]
 
 # Verilog/Pyrope LEC soundness cases use the same numbered-variant harness.
 [
@@ -1850,7 +1861,9 @@ _LEC_SOURCES = [
 test_suite(
     name = "integration",
     tests = [":prp-roundtrip-" + src.split("/")[-1][:-4] for src in _ROUNDTRIP_SOURCES] +
-            [":prp-synth-" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SYNTH_SOURCES] +
+            [":prp-synth-" + src.split("/")[-1].rsplit(".", 1)[0] + suffix
+             for src in _SYNTH_SOURCES
+             for suffix, _ in _SYNTH_MAPPERS] +
             [":lec-" + src.split("/")[-1].rsplit(".", 1)[0] for src in _LEC_SOURCES] +
             [":prp-lec-" + variant for variant in _PRPLEC_VARIANTS] + [":lec_harness"],
 )

@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// CONE-SEEDED synthesis coloring -- `pass.color synth --set synth_alg=cones`
+// CONE-SEEDED synthesis coloring -- `pass.color synth --set pass.color.synth.mode=cones`
 // (todo/livehd/2c-color-synthcones.html).
 //
 // The shape, in one paragraph. Seed one BACKWARD cone per register data input
@@ -39,9 +39,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <print>
 #include <queue>
 #include <sstream>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -72,6 +74,7 @@ constexpr uint8_t kLoopBreak    = 8;   // flop / memory / latch / stateful sub
 constexpr uint8_t kArithCut     = 16;  // Mult/Div, Sum wider than 8: its own color
 constexpr uint8_t kConstMaskGet = 32;  // Get_mask with a CONSTANT mask
 constexpr uint8_t kRuntimeSra   = 64;  // SRA with a runtime amount (barrel)
+constexpr uint8_t kDead         = 128;  // combinational, observed by no output/state/instance
 
 // The register / memory sink pids this file decodes, spelled ONCE. Not asked of
 // Ntype::get_sink_pid: that lookup's fast path derives the pid from the leading
@@ -104,6 +107,9 @@ struct Cone_stats {
   uint64_t merges = 0, refused = 0;
   uint64_t max_pred = 0, over_max = 0;
   uint64_t fwd_merges = 0, fwd_refused = 0, fwd_max_chain = 0;
+  uint64_t dead       = 0;               // dead combinational nodes (shape no region)
+  uint64_t ctrl_small = 0;               // control groups under min_nodes left to data
+  uint64_t absorbed = 0, absorb_left = 0, absorb_ctrl = 0;  // small data colors folded / left alone / into control
 };
 
 // One def's cone state. Every array is indexed by idx_of(); every phase after
@@ -111,12 +117,14 @@ struct Cone_stats {
 struct Cones {
   hhds::Graph* g        = nullptr;
   uint64_t     max_gate = 0;
+  bool         flop_to_flop = false;  // walks and the overlap merge ignore max_gate
   Forward_mode forward  = Forward_mode::off;
 
   bool                  ctrl_cones    = false;
   bool                  mux_in_data   = false;
   bool                  stop_arith    = true;
   uint64_t              ctrl_max_gate = 0, ctrl_min_gate = 0;
+  uint32_t              min_nodes = 0;  // no emitted color below this many nodes (0: no floor)
   uint32_t              ctrl_count = 0, ctrl_mux_groups = 0, ctrl_enable_groups = 0;
   uint64_t              ctrl_roots = 0, ctrl_empty = 0, ctrl_nodes = 0;
   uint64_t              ctrl_largest = 0, ctrl_pred = 0;
@@ -125,6 +133,12 @@ struct Cones {
   std::vector<uint32_t> ctrl_member;
 
   bool is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
+  // A color is SMALL when it has fewer than min_nodes nodes AND predicts at
+  // most this much AIG. A few-node color can hold one heavy operation (a wide
+  // multiplier a truncated walk left behind): it is a real region, and folding
+  // several of them together would build a monster.
+  // Raw cones (max_gate=0, no merge at all) keep every color: nothing is small.
+  uint64_t small_limit() const { return max_gate / 64; }
   bool is_mux(uint32_t n) const {
     return n < op.size() && (static_cast<Ntype_op>(op[n]) == Ntype_op::Mux || static_cast<Ntype_op>(op[n]) == Ntype_op::Hotmux);
   }
@@ -203,7 +217,7 @@ struct Cones {
   Cone_stats            st;
 
   [[nodiscard]] bool traversable(uint32_t i) const {
-    return i < flag.size() && (flag[i] & (kPresent | kPart | kSeeded)) == (kPresent | kPart);
+    return i < flag.size() && (flag[i] & (kPresent | kPart | kSeeded | kDead)) == (kPresent | kPart);
   }
 
   // ---- roots -------------------------------------------------------------
@@ -262,7 +276,7 @@ struct Cones {
       }
 
       const auto next = graph_util::sat_add(traversed, pred[n]);
-      if (max_gate != 0 && next > max_gate && traversed != 0) {
+      if (!flop_to_flop && max_gate != 0 && next > max_gate && traversed != 0) {
         // Leave the crossing node for another cone. An indivisible node may
         // exceed the heuristic by itself, but it must not grow an existing
         // color past the limit. Retain known overlap before stopping the walk.
@@ -281,7 +295,7 @@ struct Cones {
       }
 
       traversed = next;
-      if (max_gate != 0 && traversed > max_gate) {
+      if (!flop_to_flop && max_gate != 0 && traversed > max_gate) {
         // The first indivisible node alone exceeds the soft bound.
         ++st.truncated;
         work.clear();
@@ -428,6 +442,9 @@ void collect_control_roots(Cones& cn) {
     }
   };
   for (auto sink : cn.forward_idx) {
+    if (cn.flag[sink] & kDead) {
+      continue;  // a dead mux or register-less cone controls nothing
+    }
     if (!cn.mux_in_data && cn.is_mux(sink) && cn.traversable(sink)) {
       ++cn.ctrl_roots;
       const auto c = static_cast<uint32_t>(parent.size());
@@ -630,13 +647,26 @@ void collect_control_roots(Cones& cn) {
   const auto emitted_size = [&](uint32_t i) { return split(i) ? weights[part(i)] : sizes[member[i]]; };
   std::vector<uint32_t> colors(parent.size() + parts.size(), 0);
   std::vector<uint8_t>  has_mux(colors.size(), 0);
+  std::vector<uint32_t> nodes(colors.size(), 0);
   for (auto i : cn.forward_idx) {
-    if (member[i] && cn.is_mux(i)) {
-      has_mux[component_of(i)] = 1;
+    if (member[i]) {
+      has_mux[component_of(i)] = has_mux[component_of(i)] || cn.is_mux(i);
+      ++nodes[component_of(i)];
     }
   }
+  // A SMALL control group -- under min_nodes AND light (see small_limit) -- is
+  // not worth a region of its own: like one under ctrl_min_gate it stays
+  // unowned, so the data walks claim it.
+  std::vector<uint8_t> dropped(colors.size(), 0);
   for (auto i : cn.forward_idx) {
     if (!member[i] || emitted_size(i) < cn.ctrl_min_gate) {
+      continue;
+    }
+    if (nodes[component_of(i)] < cn.min_nodes && emitted_size(i) <= cn.small_limit()) {
+      if (!dropped[component_of(i)]) {
+        dropped[component_of(i)] = 1;
+        ++cn.st.ctrl_small;
+      }
       continue;
     }
     const auto component = component_of(i);
@@ -1079,7 +1109,7 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
   // phases size their result against `max_gate`, so without it there is nothing
   // to merge under; this is the documented debugging escape hatch (Color_opts),
   // and pass.color warns when `forward` was asked for anyway.
-  if (cn.max_gate == 0 || n_colors == 0) {
+  if ((cn.max_gate == 0 && !cn.flop_to_flop) || n_colors == 0) {
     return;
   }
 
@@ -1124,7 +1154,7 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
     }
     const int a = static_cast<int>(e.a);
     const int b = static_cast<int>(e.b);
-    if (graph_util::sat_add(rg.weight(a), rg.weight(b)) > cn.max_gate) {
+    if (!cn.flop_to_flop && graph_util::sat_add(rg.weight(a), rg.weight(b)) > cn.max_gate) {
       // Discard for good. Sizes only ever grow, so this pair can never fit
       // later; re-pushing it after an unrelated merge would only re-refuse it.
       ++cn.st.refused;
@@ -1163,8 +1193,156 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
   }
 
   // Phase 2: only now, on whatever budget the backward cones left behind.
-  if (cn.forward != Forward_mode::off) {
+  if (cn.forward != Forward_mode::off && cn.max_gate != 0) {
     merge_forward(cn, rg, cuf);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A5b -- no small data color
+// ---------------------------------------------------------------------------
+//
+// max_gate is a soft target. The walk budget and the overlap merge both stop at
+// it, and what they strand is a tail of tiny colors: the leftover of a
+// truncated cone, a register fed by an input or another register, output glue.
+// Each one would be its own region. Fold every data color under min_nodes into
+// the data color it overlaps most -- the shared sub-cone weight first, then the
+// number of connecting edges -- whatever the result's size. Smallest first; a
+// color still under the floor after absorbing goes back in the queue.
+//
+// Arithmetic cuts (and the constant slices that travel with them) are not
+// counted and are no contact: preserve_arith_cuts isolates them afterwards on
+// purpose. Control colors are neither absorbed nor a target -- control logic
+// stays out of data colors, and a control group under the floor was never
+// emitted (collect_control_roots).
+void absorb_small(Cones& cn, Int_union_find& cuf) {
+  const auto n_roots = static_cast<uint32_t>(cn.root_start.size());
+  if (cn.min_nodes == 0 || cn.max_gate == 0 || n_roots == 0) {
+    return;  // raw cones merge nothing, and absorbing is a merge
+  }
+  const auto cut = [&](uint32_t i) {
+    if (cn.flag[i] & kArithCut) {
+      return true;
+    }
+    if ((cn.flag[i] & kConstMaskGet) == 0) {
+      return false;
+    }
+    for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+      if (cn.fin_drv[k] < cn.flag.size() && (cn.flag[cn.fin_drv[k]] & kArithCut)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const auto cls  = [&](uint32_t root) { return static_cast<uint32_t>(cuf.find(static_cast<int>(root))); };
+  const auto data = [&](uint32_t c) { return c > cn.ctrl_count; };
+
+  std::vector<uint32_t> nodes(n_roots + 1, 0);
+  std::vector<uint64_t> pred(n_roots + 1, 0);
+  for (uint32_t i : cn.forward_idx) {
+    if (cn.traversable(i) && cn.owner[i] != 0 && !cut(i)) {
+      const auto c = cls(cn.owner[i]);
+      ++nodes[c];
+      pred[c] = graph_util::sat_add(pred[c], cn.pred[i]);
+    }
+  }
+  const auto small = [&](uint32_t c) { return nodes[c] != 0 && nodes[c] < cn.min_nodes && pred[c] <= cn.small_limit(); };
+  // Contact between classes: (shared sub-cone weight, connecting edges). Keyed
+  // by the class ids of the moment; a later merge is resolved through cuf.
+  struct Contact {
+    uint64_t overlap = 0, edges = 0;
+  };
+  std::vector<absl::flat_hash_map<uint32_t, Contact>> adj(n_roots + 1);
+  for (const auto& [key, ov] : cn.pair_w) {
+    const auto a = cls(static_cast<uint32_t>(key >> 32));
+    const auto b = cls(static_cast<uint32_t>(key & 0xffffffffU));
+    if (a != b && data(a) && data(b)) {
+      adj[a][b].overlap = graph_util::sat_add(adj[a][b].overlap, ov);
+      adj[b][a].overlap = graph_util::sat_add(adj[b][a].overlap, ov);
+    }
+  }
+  for (uint32_t i : cn.forward_idx) {
+    if (!cn.traversable(i) || cn.owner[i] == 0 || cut(i)) {
+      continue;
+    }
+    const auto a = cls(cn.owner[i]);
+    for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+      const auto d = cn.fin_drv[k];
+      if (!cn.traversable(d) || cn.owner[d] == 0 || cut(d)) {
+        continue;
+      }
+      const auto b = cls(cn.owner[d]);
+      if (a != b && (data(a) || data(b))) {  // data-data, and data-control for the fallback
+        ++adj[a][b].edges;
+        ++adj[b][a].edges;
+      }
+    }
+  }
+
+  using Entry = std::pair<uint32_t, uint32_t>;  // (nodes, class): smallest first, then lowest id
+  std::priority_queue<Entry, std::vector<Entry>, std::greater<>> queue;
+  for (uint32_t c = cn.ctrl_count + 1; c <= n_roots; ++c) {
+    if (cls(c) == c && small(c)) {
+      queue.emplace(nodes[c], c);
+    }
+  }
+  absl::flat_hash_map<uint32_t, Contact> merged;
+  while (!queue.empty()) {
+    const auto [count, c] = queue.top();
+    queue.pop();
+    if (cls(c) != c || nodes[c] != count || !small(c)) {
+      continue;  // absorbed, or grown since it was queued
+    }
+    merged.clear();
+    for (const auto& [nb, contact] : adj[c]) {
+      const auto t = cls(nb);
+      if (t != c) {
+        auto& m   = merged[t];
+        m.overlap = graph_util::sat_add(m.overlap, contact.overlap);
+        m.edges   = graph_util::sat_add(m.edges, contact.edges);
+      }
+    }
+    // A data neighbour first; a control color only when there is none (a
+    // register between two control muxes). The absorbed nodes join it as
+    // plain members: their ctrl_member stays 0.
+    const bool any_data = std::ranges::any_of(merged, [&](const auto& kv) { return data(kv.first); });
+    uint32_t   best     = 0;
+    Contact    best_contact;
+    for (const auto& [t, contact] : merged) {
+      if (any_data && !data(t)) {
+        continue;
+      }
+      const auto rank = std::tuple(contact.overlap, contact.edges);
+      const auto held = std::tuple(best_contact.overlap, best_contact.edges);
+      // Ties: the smaller target, then the lower id -- a total order, so the
+      // hash-map iteration cannot pick.
+      if (best == 0 || rank > held || (rank == held && std::pair(nodes[t], t) < std::pair(nodes[best], best))) {
+        best         = t;
+        best_contact = contact;
+      }
+    }
+    if (best == 0) {
+      ++cn.st.absorb_left;
+      continue;
+    }
+    cn.st.absorb_ctrl += !data(best);
+    cuf.merge(static_cast<int>(c), static_cast<int>(best));
+    const auto survivor = cls(c);
+    const auto gone     = survivor == c ? best : c;
+    nodes[survivor]     = nodes[c] + nodes[best];
+    pred[survivor]      = graph_util::sat_add(pred[c], pred[best]);
+    nodes[gone]         = 0;
+    pred[gone]          = 0;
+    for (const auto& [nb, contact] : adj[gone]) {
+      auto& m   = adj[survivor][nb];
+      m.overlap = graph_util::sat_add(m.overlap, contact.overlap);
+      m.edges   = graph_util::sat_add(m.edges, contact.edges);
+    }
+    adj[gone].clear();
+    ++cn.st.absorbed;
+    if (data(survivor) && small(survivor)) {
+      queue.emplace(nodes[survivor], survivor);
+    }
   }
 }
 
@@ -1180,7 +1358,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
   cn.stop_arith    = opts.stop_arith;
   cn.ctrl_max_gate = opts.ctrl_max_gate;
   cn.ctrl_min_gate = opts.ctrl_min_gate;
+  cn.min_nodes     = opts.min_nodes;
   cn.max_gate      = opts.max_gate;
+  cn.flop_to_flop  = opts.flop_to_flop;
   cn.forward       = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
 
   // ---- A1: preparation, one pass over the body ----------------------------
@@ -1276,6 +1456,47 @@ void Color_synth::label_cones(hhds::Graph* g) {
     }
   }
 
+  // ---- A1b: dead logic ---------------------------------------------------
+  // Compile keeps a Hotmux nobody reads (its `unique if` exclusivity is an
+  // obligation sim/formal still check), with the cone feeding it. Synthesis
+  // deletes it (pass.abc drop_dead_logic), so it must not seed or shape a
+  // color here: every such cone used to become its own tiny region. Live means
+  // observed by an output, state, an instance or a Clock_cell, transitively.
+  {
+    std::vector<uint8_t>  live(n, 0);
+    std::vector<uint32_t> work;
+    const auto            mark = [&](uint32_t i) {
+      if (i < n && !live[i]) {
+        live[i] = 1;
+        work.push_back(i);
+      }
+    };
+    for (auto sink : g->get_output_node().inp_sorted_pins()) {  // read-only
+      for (const auto& drv : sink.get_driver_pins()) {
+        mark(idx_of(drv.get_master_node()));
+      }
+    }
+    for (uint32_t i : cn.forward_idx) {
+      const auto op = static_cast<Ntype_op>(cn.op[i]);
+      if ((cn.flag[i] & kPart) == 0 || !Ntype::is_comb(op) || op == Ntype_op::Clock_cell) {
+        mark(i);
+      }
+    }
+    while (!work.empty()) {
+      const auto i = work.back();
+      work.pop_back();
+      for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+        mark(cn.fin_drv[k]);
+      }
+    }
+    for (uint32_t i : cn.forward_idx) {
+      if (!live[i]) {
+        cn.flag[i] |= kDead;
+        ++cn.st.dead;
+      }
+    }
+  }
+
   // ---- A2/A3/A4 -----------------------------------------------------------
   collect_control_roots(cn);
   collect_roots(cn);
@@ -1288,6 +1509,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   // ---- A5: merge ----------------------------------------------------------
   Int_union_find cuf;
   merge_colors(cn, static_cast<uint32_t>(cn.root_start.size()), cuf);
+  absorb_small(cn, cuf);
 
   // ---- A6: finalize -------------------------------------------------------
   // Renumber 1..k in forward first-encounter order: deterministic ids the caller
@@ -1339,6 +1561,39 @@ void Color_synth::label_cones(hhds::Graph* g) {
     const auto i = idx_of(node);
     if (cn.is_ctrl(cn.owner[i])) {
       flat_node2id[node] = final_color[i];
+    }
+  }
+  // Dead nodes ride along with a colored fan-in (forward order, so a dead chain
+  // follows its head) and never add a color; pass.abc deletes them anyway.
+  if (cn.st.dead != 0) {
+    std::vector<hhds::Node_class> by_idx(cn.flag.size());
+    for (auto node : g->body().nodes()) {
+      by_idx[idx_of(node)] = node;
+    }
+    const auto color_of = [&](uint32_t i) {
+      if (i >= by_idx.size() || by_idx[i].is_invalid()) {
+        return 0;
+      }
+      auto it = flat_node2id.find(by_idx[i]);
+      return it == flat_node2id.end() ? 0 : it->second;
+    };
+    int fallback = 0;
+    for (uint32_t i : cn.forward_idx) {
+      if ((fallback = color_of(i)) != 0) {
+        break;
+      }
+    }
+    for (uint32_t i : cn.forward_idx) {
+      if ((cn.flag[i] & (kDead | kPart | kSeeded)) != (kDead | kPart)) {
+        continue;
+      }
+      int c = 0;
+      for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i] && c == 0; ++k) {
+        c = color_of(cn.fin_drv[k]);
+      }
+      if ((c = c != 0 ? c : fallback) != 0) {
+        flat_node2id[by_idx[i]] = c;
+      }
     }
   }
   const int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
@@ -1419,10 +1674,12 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
     }
     std::print(stderr,
-               "[color.cones] {} roots {} (din {}, en {}, mem-port {}, sub {}, cut {}, out {}, sweep {}), truncated {}, "
+               "[color.cones] {} dead {}, roots {} (din {}, en {}, mem-port {}, sub {}, cut {}, out {}, sweep {}), truncated {}, "
                "pairs {}, merges {}, refused {} over cap, fwd {} merges ({} refused, max chain {}), "
+               "min_color_nodes {}: {} small control group(s) left to data, {} small color(s) absorbed ({} into control, {} left), "
                "colors {}, max pred {} ({} over max_gate {})\n",
                g->get_name(),
+               cn.st.dead,
                cn.st.roots,
                cn.st.r_din,
                cn.st.r_en,
@@ -1438,6 +1695,11 @@ void Color_synth::label_cones(hhds::Graph* g) {
                cn.st.fwd_merges,
                cn.st.fwd_refused,
                cn.st.fwd_max_chain,
+               cn.min_nodes,
+               cn.st.ctrl_small,
+               cn.st.absorbed,
+               cn.st.absorb_ctrl,
+               cn.st.absorb_left,
                n_colors,
                cn.st.max_pred,
                cn.st.over_max,

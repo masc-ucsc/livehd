@@ -75,7 +75,7 @@ done
 
 # The single-region optimization: a def that IS one region is emitted directly
 # under its own name -- no `<def>__c<id>` wrapper whose only body is one region
-# instance. `synth_alg=pipe` on the purely combinational fixture is the coloring
+# instance. `mode=pipe` on the purely combinational fixture is the coloring
 # that gives it (pipe cuts at state only, and hier_comb has none), so every def
 # there is exactly one region. `hier=false` keeps it a PER-DEF coloring: it
 # colours the top body alone (one region) and leaves the children uncolored (one
@@ -86,7 +86,7 @@ FD="$W/onecolor"
 mkdir -p "$FD"
 run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
 run compile lg:"$FD/lg" --top hier_comb.top --emit verilog:"$FD/ref.v" --workdir "$FD/w2"
-run pass color synth --top hier_comb.top --set color.hier=false --set color.synth_alg=pipe lg:"$FD/lg" --workdir "$FD/w3"
+run pass color synth --top hier_comb.top --set color.hier=false --set color.synth.mode=pipe lg:"$FD/lg" --workdir "$FD/w3"
 run pass partition --top hier_comb.top lg:"$FD/lg" --emit-dir lg:"$FD/lg2" --workdir "$FD/w4"
 run compile lg:"$FD/lg2" --top hier_comb.top --emit verilog:"$FD/part.v" --workdir "$FD/w5"
 grep -q "^module adder" "$FD/part.v" || fail "pipe: child def 'adder' dropped (hierarchy lost)"

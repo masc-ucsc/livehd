@@ -64,15 +64,23 @@ protected:
   // The `slowest delay:` summary line's pin, and the `native-comb-boundary`
   // warning payload build_circuit computed: both are part of what a cache hit
   // has to replay, so they outlive the function that fills them.
-  std::string              max_pin_;
-  uint64_t                 opaque_logic_nodes_ = 0;
-  uint64_t                 ambiguous_or_nodes_ = 0;
-  std::vector<std::string> opaque_logic_examples_;
-  std::vector<std::string> ambiguous_or_examples_;
-  std::string              time_unit_label_;  // "ns"/"ps"/"us"; "" = library declared none
+  std::string                               max_pin_;
+  uint64_t                                  opaque_logic_nodes_   = 0;
+  uint64_t                                  ambiguous_or_nodes_   = 0;
+  uint64_t                                  native_state_nodes_   = 0;
+  bool                                      constraints_complete_ = true;
+  uint32_t                                  sdc_clocks_           = 0;
+  std::string                               virtual_clock_name_;
+  float                                     virtual_clock_period_ = 0;
+  absl::flat_hash_map<std::string, uint8_t> clock_inputs_, clock_outputs_;
+  std::string                               clock_qor_json();
+  float                                     io_load_ff_ = -1;
+  std::vector<std::string>                  opaque_logic_examples_;
+  std::vector<std::string>                  ambiguous_or_examples_;
+  std::string                               time_unit_label_;  // "ns"/"ps"/"us"; "" = library declared none
   // The rendered design block WITHOUT its `,"colors":[...]` tail -- what the
   // reuse cache stores (see render_colors).
-  std::string              sta_block_;
+  std::string                               sta_block_;
 
   std::string qor_path;    // timing JSON sidecar (2opt-freq D); empty => none
   std::string top_filter;  // analyze only the def with this name; empty => the single def
@@ -104,7 +112,6 @@ protected:
   double       cache_lookup_ms_  = 0.0;
 
   static void liberty_open(Eprp_var& var);
-  static void time_work(Eprp_var& var);
   static void power_work(Eprp_var& var);
 
   void read_files();
@@ -155,6 +162,7 @@ protected:
   void        write_qor() const;  // write the accumulated qor_blocks_ to qor_path
 
 public:
+  static void time_work(Eprp_var& var);
   Pass_opentimer(const Eprp_var& var);
 
   static void setup();

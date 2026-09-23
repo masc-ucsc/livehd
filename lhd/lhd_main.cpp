@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <exception>
 
+#include "abc_tmap.hpp"
 #include "diag.hpp"
 #include "host_mem.hpp"
 #include "iassert.hpp"
@@ -37,6 +38,7 @@ struct Trace_guard {
 }  // namespace
 
 int main(int argc, char** argv) {
+  const auto invocation_started = std::chrono::steady_clock::now();
   I_setup();
   // AFTER I_setup: on platforms where iassert's SIGSEGV handler renders nothing
   // this takes the signal over and reports which pass died and where its log is
@@ -51,10 +53,12 @@ int main(int argc, char** argv) {
   // `lhd`. Silent by default; LIVEHD_MEMORY_DEBUG reports the armed ceiling.
   // This is a backstop, not a clean error -- pass/abc's sampled admission and the
   // node-count gate produce the diagnosable refusal before it fires.
-  if (const uint64_t limit = livehd::cost::install_memory_backstop();
-      limit != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
-    std::fprintf(stderr, "lhd: memory backstop armed (RLIMIT_AS = %llu MiB)\n",
-                 static_cast<unsigned long long>(limit >> 20));
+  if (const uint64_t limit = livehd::cost::install_memory_backstop(); limit != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
+    std::fprintf(stderr, "lhd: memory backstop armed (RLIMIT_AS = %llu MiB)\n", static_cast<unsigned long long>(limit >> 20));
+  }
+
+  if (argc == 4 && std::string_view(argv[1]) == "--internal-synth-tmap") {
+    return livehd::synth::abc_tmap_worker_main(argv[2], argv[3]);
   }
 
   Trace_guard trace_guard;
@@ -185,6 +189,14 @@ int main(int argc, char** argv) {
   }
   res.n_errors   = sink.count(livehd::diag::Severity::error);
   res.n_warnings = sink.count(livehd::diag::Severity::warning);
+
+  if (opts.command == "synth"
+      || (opts.command == "pass" && !opts.files.empty() && (opts.files.front() == "synth" || opts.files.front() == "abc"))) {
+    res.synthesis_invocation.present               = true;
+    res.synthesis_invocation.parent_peak_rss_bytes = livehd::cost::process_peak_rss_bytes();
+    res.synthesis_invocation.wall_ms
+        = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - invocation_started).count();
+  }
 
   lhd::write_result(opts, res);
   return res.exit_code;

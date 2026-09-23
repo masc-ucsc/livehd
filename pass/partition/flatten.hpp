@@ -22,12 +22,17 @@ namespace livehd::partition {
 // cloning a black-box decl into their scratch library.
 std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst);
 
-// Where a flat node came from. Two instances of one def clone that def's body
-// twice, so two distinct flat nodes share one origin -- which is exactly the
-// ambiguity a caller writing per-def data back has to resolve.
+struct Flat_instance_path;
+
+// Where a flat node came from, including its instance path. Paths are shared
+// by every node cloned from one context instead of copied into each origin.
 struct Flat_origin {
-  hhds::Gid        def_gid = 0;
-  hhds::Node_class src_node;
+  hhds::Gid                                 def_gid = 0;
+  hhds::Node_class                          src_node;
+  std::shared_ptr<const Flat_instance_path> instance;
+
+  [[nodiscard]] int32_t color() const;
+  void                  set_color(int32_t color) const;
 };
 using Flat_origin_map = absl::flat_hash_map<hhds::Node_class, Flat_origin>;
 
@@ -37,8 +42,8 @@ using Flat_origin_map = absl::flat_hash_map<hhds::Node_class, Flat_origin>;
 // inlined once per instance, with node/wire names prefixed by the dotted
 // instance path (`pipeA_alu.foo`); body-less defs (liberty cells, tie cells,
 // external IP, fproperty markers) stay as opaque Sub instances whose IO decls
-// are cloned into `lib`. Per-node flat colors, names, luts, srcids and the
-// proven/runtime_check formal markers are carried; driver pins keep
+// are cloned into `lib`. Occurrence colors (falling back to definition colors),
+// names, luts, srcids and proven/runtime_check formal markers are carried; driver pins keep
 // bits/sign/pin_name/pin_offset. The top graph's coloring_info blob (the
 // region_opts block-attribute channel) is copied onto the flat graph.
 // Returns nullptr after a diag on an unresolvable shape (e.g. a combinational

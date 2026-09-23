@@ -164,7 +164,7 @@ TEST(LoopCleanup, SynthColorsWholeBodyDespiteArithmeticCutsAndSizeLimits) {
     Design   d;
     Eprp_var var({
         {       "alg", "synth"},
-        { "synth_alg",    mode},
+        {      "mode",    mode},
         {       "top",   "top"},
         {    "min_ge",     "0"},
         {    "max_ge",     "1"},

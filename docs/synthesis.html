@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cone Partitioning and Region Mapping</title>
+<meta name="description" content="Methodology of LiveHD's synthesis partitioning (pass.color synth, cones mode) and region-based technology mapping (pass.abc).">
+<style>
+:root {
+  --bg: #fdfdfb;
+  --fg: #1d1d1f;
+  --muted: #5c5c63;
+  --rule: #b9b9bf;
+  --soft: #eeeeea;
+  --accent: #1f4e8c;
+  --code-bg: #f1f1ee;
+  --fig-fill: #f3f5f9;
+  --fig-fill-2: #e3eaf5;
+  --fig-fill-3: #f7ecdf;
+  --fig-stroke: #3a3a40;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181b;
+    --fg: #e6e6e3;
+    --muted: #a3a3aa;
+    --rule: #4a4b52;
+    --soft: #24252a;
+    --accent: #8fb4ec;
+    --code-bg: #25262b;
+    --fig-fill: #22252c;
+    --fig-fill-2: #26324a;
+    --fig-fill-3: #3a2f22;
+    --fig-stroke: #c9c9cf;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181b;
+  --fg: #e6e6e3;
+  --muted: #a3a3aa;
+  --rule: #4a4b52;
+  --soft: #24252a;
+  --accent: #8fb4ec;
+  --code-bg: #25262b;
+  --fig-fill: #22252c;
+  --fig-fill-2: #26324a;
+  --fig-fill-3: #3a2f22;
+  --fig-stroke: #c9c9cf;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.58 "Charter", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: 2.5rem 16px 4rem;
+  overflow-x: hidden;
+}
+p, li { hyphens: auto; }
+@media (min-width: 640px) { p { text-align: justify; } }
+h1 {
+  font-size: 1.65rem;
+  line-height: 1.25;
+  text-align: center;
+  margin: 0 0 .4rem;
+  font-weight: 600;
+}
+.subtitle { text-align: center; color: var(--muted); font-style: italic; margin: 0 0 2.2rem; }
+h2 {
+  font: 600 1.02rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 2.6rem 0 .8rem;
+  padding-top: .6rem;
+  border-top: 1px solid var(--rule);
+}
+h3 {
+  font: 600 1rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 1.8rem 0 .5rem;
+}
+h4 { font-size: 1rem; font-style: italic; font-weight: 600; margin: 1.2rem 0 .3rem; }
+.secnum { color: var(--accent); margin-right: .45em; }
+code, .mono {
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: .86em;
+  background: var(--code-bg);
+  padding: .05em .28em;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+var { font-style: italic; }
+.def, .prop {
+  margin: 1rem 0;
+  padding: .1rem 0 .1rem .9rem;
+  border-left: 3px solid var(--accent);
+}
+.def p, .prop p { margin: .35rem 0; }
+.def .lead, .prop .lead { font-weight: 600; font-style: normal; }
+.def em.b, .prop em.b { font-style: italic; }
+.eq {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: .9rem 0;
+  overflow-x: auto;
+}
+.eq-body { flex: 1; text-align: center; white-space: nowrap; font-size: 1.02em; }
+.eq-num { color: var(--muted); }
+.cap { font-size: .9em; color: var(--fg); margin: .5rem 0 0; text-align: left; }
+.cap b { font-variant: small-caps; letter-spacing: .02em; }
+figure { margin: 1.6rem 0; }
+figure svg { width: 100%; height: auto; display: block; }
+.scroll { overflow-x: auto; margin: 1rem 0; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .9em;
+  line-height: 1.4;
+}
+caption {
+  caption-side: top;
+  font-variant: small-caps;
+  letter-spacing: .03em;
+  padding-bottom: .45rem;
+  text-align: center;
+}
+caption .tcap { display: block; font-variant: normal; letter-spacing: 0; font-style: italic; margin-top: .1rem; }
+thead th { border-top: 1.5px solid var(--fg); border-bottom: 1px solid var(--fg); font-weight: 600; }
+tbody tr:last-child td { border-bottom: 1.5px solid var(--fg); }
+th, td { padding: .32rem .55rem; text-align: left; vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.algo {
+  margin: 1.3rem 0;
+  border-top: 1.5px solid var(--fg);
+  border-bottom: 1.5px solid var(--fg);
+  font-size: .92em;
+}
+.algo-title { padding: .35rem 0; border-bottom: 1px solid var(--fg); }
+.algo-title b { margin-right: .4em; }
+.algo-body {
+  margin: 0;
+  padding: .4rem 0 .5rem 2.4rem;
+  counter-reset: line;
+  overflow-x: auto;
+}
+.algo-body li {
+  list-style: none;
+  counter-increment: line;
+  position: relative;
+  white-space: pre-wrap;
+  text-align: left;
+  hyphens: none;
+}
+.algo-body li::before {
+  content: counter(line);
+  position: absolute;
+  left: -2.1rem;
+  width: 1.6rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: .85em;
+}
+.algo-body .in1 { padding-left: 1.4em; }
+.algo-body .in2 { padding-left: 2.8em; }
+.algo-body .in3 { padding-left: 4.2em; }
+.kw { font-weight: 700; }
+.cm { color: var(--muted); font-style: italic; }
+.io { font-size: .92em; padding: .25rem 0; border-bottom: 1px solid var(--rule); }
+ul.tight, ol.tight { margin: .4rem 0; padding-left: 1.4rem; }
+ul.tight li, ol.tight li { margin: .15rem 0; }
+.note { color: var(--muted); font-size: .92em; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Cone-Based Synthesis Partitioning and<br>Region-Based Technology Mapping</h1>
+<p class="subtitle">Methodology of the LiveHD <code>pass.color synth</code> (cones mode) and <code>pass.abc</code> passes</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">1</span>Problem Formulation and Flow</h2>
+
+<p>The input is a hierarchical word-level netlist graph (<em>LGraph</em>) produced by the LiveHD front end. Each definition <var>d</var> is a directed graph <var>G<sub>d</sub></var> = (<var>V</var>, <var>E</var>) whose nodes are typed operations: bitwise and reduction operators, arithmetic (sum, multiply, divide), comparisons, shifts, multiplexers (a two-arm <code>Mux</code>, an n-arm <code>Mux</code>, and a <code>Hotmux</code> of (control, value) pairs), bit-level wiring (mask, concatenation, sign extension), state elements (flops, latches, memories), and instances of other definitions. Edges connect a driver pin to a sink pin and carry a bit width and a signedness.</p>
+
+<div class="def">
+<p><span class="lead">Definition 1 (Coloring, region).</span> Let <var>V<sub>p</sub></var> &sube; <var>V</var> be the <em>partitionable</em> nodes, i.e. all nodes except graph IO and constants. A coloring <var>c</var> : <var>V<sub>p</sub></var> &rarr; &#8469; assigns a color to every partitionable node. The <em>region</em> of color <var>k</var> in definition <var>d</var> is <var>R<sub>k</sub></var> = { <var>v</var> &isin; <var>V<sub>p</sub></var>(<var>d</var>) : <var>c</var>(<var>v</var>) = <var>k</var> }. Every region is emitted as its own module <code>&lt;d&gt;__c&lt;k&gt;</code> and is optimized and technology-mapped independently.</p>
+</div>
+
+<p>The partitioning problem is to find a coloring such that (i) each region can be optimized and mapped within bounded time and memory, (ii) logic that benefits from joint optimization, in particular shared sub-cones, lands in the same region, (iii) region boundaries fall at state elements or where combinational cones share little logic, and (iv) the coloring is deterministic and stable under local design edits, so that mapped regions can be reused incrementally. The mapping problem is then to translate each region into a Liberty-cell netlist with ABC, reassemble the hierarchy, and correct the timing distortions that the partition boundaries introduce.</p>
+
+<p>Fig. 1 shows the flow. The coloring (Section 2) runs on the compiled library. The mapping pass (Sections 3&ndash;4) works on a private copy of the library: it prepares compact loops, removes dead logic, applies SAT-proven simplifications, extracts arithmetic and memory modules, cuts the colored design into regions, maps every region, refines the partition-boundary timing environment, and finally runs post-mapping architecture trials. Table I summarizes the notation.</p>
+
+<figure>
+<svg viewBox="0 0 800 300" role="img" aria-label="Flow: compile, cone coloring, then pass.abc: private copy, loop preparation, dead-logic removal, SAT simplification, ware and memory extraction, partition with per-bit mux facts, per-region blast, ABC flow and read-back, boundary refinement and architecture trials, producing the mapped netlist.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="13" fill="var(--fg)">
+    <!-- row 1 -->
+    <rect x="10" y="20" width="118" height="54" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="69" y="43" text-anchor="middle">Compile</text>
+    <text x="69" y="61" text-anchor="middle" font-size="11" fill="var(--muted)">word-level LGraph</text>
+    <rect x="160" y="20" width="160" height="54" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="240" y="43" text-anchor="middle">Cone coloring (&#167;2)</text>
+    <text x="240" y="61" text-anchor="middle" font-size="11" fill="var(--muted)">regions = colors</text>
+    <rect x="352" y="20" width="200" height="54" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="452" y="43" text-anchor="middle">Private copy, loop prep,</text>
+    <text x="452" y="61" text-anchor="middle">dead logic, SAT (&#167;3.1&ndash;3.3, &#167;3.6)</text>
+    <rect x="584" y="20" width="206" height="54" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="687" y="43" text-anchor="middle">Ware / memory</text>
+    <text x="687" y="61" text-anchor="middle">extraction (&#167;3.4&ndash;3.5)</text>
+    <line x1="128" y1="47" x2="158" y2="47" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="320" y1="47" x2="350" y2="47" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="552" y1="47" x2="582" y2="47" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <!-- down -->
+    <path d="M687,74 L687,100 L140,100 L140,124" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <!-- row 2: partition -->
+    <rect x="30" y="126" width="220" height="54" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="140" y="149" text-anchor="middle">Partition into regions (&#167;3.7)</text>
+    <text x="140" y="167" text-anchor="middle" font-size="11" fill="var(--muted)">+ per-bit mux facts on the cut source</text>
+    <!-- per region box -->
+    <rect x="290" y="112" width="500" height="82" rx="8" fill="none" stroke="var(--fig-stroke)" stroke-dasharray="5 4"/>
+    <text x="300" y="128" font-size="11" fill="var(--muted)">for every region (parallel lanes, incremental reuse &#167;4.8&ndash;4.9)</text>
+    <rect x="304" y="136" width="140" height="46" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="374" y="156" text-anchor="middle">Bit-level blast</text>
+    <text x="374" y="172" text-anchor="middle" font-size="11" fill="var(--muted)">tape, latches (&#167;4.2&ndash;4.4)</text>
+    <rect x="474" y="136" width="140" height="46" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="544" y="156" text-anchor="middle">ABC flow</text>
+    <text x="544" y="172" text-anchor="middle" font-size="11" fill="var(--muted)">budget ladder (&#167;4.5)</text>
+    <rect x="644" y="136" width="136" height="46" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="712" y="156" text-anchor="middle">Read-back</text>
+    <text x="712" y="172" text-anchor="middle" font-size="11" fill="var(--muted)">cells &#8594; LGraph (&#167;4.7)</text>
+    <line x1="250" y1="153" x2="302" y2="153" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="444" y1="159" x2="472" y2="159" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="614" y1="159" x2="642" y2="159" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <!-- down to row 3 -->
+    <path d="M712,194 L712,222 L430,222 L430,238" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <rect x="300" y="240" width="260" height="46" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="430" y="260" text-anchor="middle">Boundary refinement, architecture</text>
+    <text x="430" y="277" text-anchor="middle">trials (&#167;4.6, &#167;4.10)</text>
+    <rect x="600" y="240" width="190" height="46" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="695" y="260" text-anchor="middle">Mapped hierarchical</text>
+    <text x="695" y="277" text-anchor="middle">cell netlist</text>
+    <line x1="560" y1="263" x2="598" y2="263" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 1.</b> Synthesis flow. Coloring decides the regions; the mapping pass transforms a private copy of the design, cuts it into regions, maps every region independently, and then corrects the cross-region timing environment.</figcaption>
+</figure>
+
+<div class="scroll">
+<table>
+<caption>Table I<span class="tcap">Notation</span></caption>
+<thead><tr><th>Symbol</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><var>G</var> = (<var>V</var>, <var>E</var>)</td><td>One definition of the netlist graph; <var>V<sub>p</sub></var> its partitionable nodes</td></tr>
+<tr><td><var>c</var>(<var>v</var>), <var>R<sub>k</sub></var></td><td>Color of node <var>v</var>; region (node set) of color <var>k</var></td></tr>
+<tr><td>&pi;(<var>v</var>), &pi;(<var>S</var>)</td><td>Predicted AIG size of a node; &pi;(<var>S</var>) = &Sigma;<sub><var>v</var>&isin;<var>S</var></sub> &pi;(<var>v</var>), saturating (Section 2.1)</td></tr>
+<tr><td>&Gamma;</td><td>Soft size target of a color in predicted AIG nodes (default 30,000)</td></tr>
+<tr><td><var>N</var><sub>min</sub></td><td>Minimum color size in nodes (default 12)</td></tr>
+<tr><td>own(<var>v</var>)</td><td>The cone (color) that owns node <var>v</var>; ownership is first-wins and disjoint</td></tr>
+<tr><td>&omega;(<var>a</var>, <var>b</var>)</td><td>Overlap between colors <var>a</var> and <var>b</var>: predicted size of logic both cones reach</td></tr>
+<tr><td><var>T</var>, <var>B</var>, <var>m</var></td><td>Delay target, per-region delay budget, register margin (clk&rarr;Q + setup)</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">2</span>Cone-Based Synthesis Partitioning</h2>
+
+<p>A forward partitioning that propagates a region id along combinational fan-out fixes the region shape by connectivity alone and needs a separate size window to split and merge the result afterwards. Two failure modes follow directly: inheriting an id from every fan-in welds a register's data cone to the cone of its enable (stall) signal, and propagating to the fan-out re-merges downstream cones where they reconverge; on a flattened processor either rule placed more than 99% of the nodes in a single region. The cones algorithm instead grows one <em>backward</em> cone per state input, decides size while it decides shape, and merges cones by the amount of logic they share. Region boundaries therefore fall where two register cones share little logic. Algorithm 1 lists the phases.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 1</b> Cone-based coloring of one (flattened) definition</div>
+<div class="io"><b>Input:</b> <var>G</var>, &Gamma;, <var>N</var><sub>min</sub>, boundary policy &sigma; &nbsp; <b>Output:</b> coloring <var>c</var></div>
+<ol class="algo-body">
+<li>Build per-node flags, &pi;(<var>v</var>), fan-in and fan-out arrays in one pass <span class="cm">&#9655; no later phase reads graph edges</span></li>
+<li>Mark dead nodes: <var>V<sub>p</sub></var> minus the backward closure of outputs and state <span class="cm">&#9655; &sect;2.2</span></li>
+<li>Form control groups over select and enable closures; mint colors 1..<var>K</var> <span class="cm">&#9655; &sect;2.3</span></li>
+<li>Collect data roots: arithmetic cuts, register data inputs, memory ports, stateful instances, outputs</li>
+<li><span class="kw">for</span> each data root <var>r</var> <span class="kw">in</span> order <span class="kw">do</span> W<small>ALK</small>(<var>r</var>) <span class="cm">&#9655; Algorithm 2</span></li>
+<li>Place registers into their data-input color; sweep uncolored sinks; totality fallback <span class="cm">&#9655; &sect;2.5</span></li>
+<li><span class="kw">if</span> &Gamma; &gt; 0 <span class="kw">then</span> overlap merge (Algorithm 3), then forward merge across registers <span class="cm">&#9655; &sect;2.6&ndash;2.7</span></li>
+<li><span class="kw">if</span> <var>N</var><sub>min</sub> &gt; 0 <span class="kw">and</span> &Gamma; &gt; 0 <span class="kw">then</span> absorb small colors <span class="cm">&#9655; &sect;2.8</span></li>
+<li>Renumber colors deterministically; isolate every arithmetic boundary operator that no control group claims <span class="cm">&#9655; &sect;2.9</span></li>
+<li>Attach dead nodes to the color of a colored fan-in</li>
+</ol>
+</div>
+
+<h3><span class="secnum">2.1</span>Cost Model: Predicted AIG Size</h3>
+
+<p>Every size decision uses one unit, the predicted number of two-input AIG nodes that the mapping pass's bit-blaster creates for a node, &pi;(<var>v</var>). It is derived from the structure of the blaster (Section 4.2) and calibrated per operator against a reference library. The unit replaces synthesis gate equivalents (GE) for three reasons. First, GE mispredicts the number of mapped cells by a median factor of 1.8 and a 90th percentile of 5.6, in both directions: runtime shifts are over-counted by up to 24&times;, adders are under-counted about 5&times;, and register-file arrays by 8&ndash;11&times;. Second, the predicted AIG size over-counts mapped cells by a stable factor, which is what a single shared threshold needs. Third, ABC runtime tracks the mapped size, not GE.</p>
+
+<div class="scroll">
+<table>
+<caption>Table II<span class="tcap">Predicted AIG size &pi;(<var>v</var>); <var>w</var> = output width, <var>t</var> = operand count, <var>W</var>* = widest operand</span></caption>
+<thead><tr><th>Operation</th><th>&pi;(<var>v</var>)</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td>Concat, Sext, Not, constant mask, constant shift</td><td>0</td><td>Wiring; a Not is a complemented AIG edge</td></tr>
+<tr><td>Memory, instance, clock cell, latch</td><td>0</td><td>Black box or native boundary, not blasted in this region</td></tr>
+<tr><td>And, Or</td><td><var>w</var>(<var>t</var>&minus;1)</td><td>One node per bit per operand pair</td></tr>
+<tr><td>Xor</td><td>3<var>w</var>(<var>t</var>&minus;1)</td><td>Three AIG nodes per XOR</td></tr>
+<tr><td>Mux (<var>n</var> arms)</td><td>3<var>w</var>(<var>n</var>&minus;1)</td><td>A 2:1 mux is 3 nodes; <var>n</var> arms form a chain</td></tr>
+<tr><td>Hotmux (<var>n</var> arms)</td><td>2<var>w</var><var>n</var></td><td>AND per arm plus an OR tree</td></tr>
+<tr><td>Sum</td><td>8<var>w</var>(<var>t</var>&minus;1)</td><td>Ripple-carry full adders</td></tr>
+<tr><td>LT, GT</td><td>5<var>W</var>*</td><td>Subtractor chain, one-bit result</td></tr>
+<tr><td>EQ</td><td>4<var>W</var>*(<var>t</var>&minus;1)</td><td>XNOR per bit and an AND chain</td></tr>
+<tr><td>Mult</td><td>&Sigma;<sub><var>i</var>&ge;2</sub> 9 &middot; <var>acc<sub>i</sub></var> &middot; <var>w<sub>i</sub></var></td><td>Array multiplier over the running product width <var>acc<sub>i</sub></var></td></tr>
+<tr><td>Div</td><td>16<var>W</var>(<var>W</var>+1)</td><td>Restoring division, <var>W</var> = max(output, operands)</td></tr>
+<tr><td>SHL, SRA (runtime amount)</td><td>3 &times; (2:1 muxes of the barrel)</td><td>SHL: demanded result prefix &times; amount bits. SRA: built at the wider of operand and result; a sliced demand narrows only the late stages (backward prefix recurrence)</td></tr>
+<tr><td>Flop</td><td>3<var>b</var>&middot;[enable] + 3<var>b</var>&middot;[reset], <var>b</var> = <var>w</var> &middot; pipeline stages</td><td>Storage is free; the enable and synchronous-reset muxes fold into D. Any connected reset is charged, asynchronous included</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Sums and products saturate at the largest integer; otherwise a 1024-bit multiplier would wrap to a small score and license a monster region. An unknown width counts as one bit, so a live operation is never free.</p>
+
+<h3><span class="secnum">2.2</span>Liveness</h3>
+
+<p>The compiler keeps some logic that no output observes. The typical case is a one-hot multiplexer of a <code>unique if</code> whose value is unused: its exclusivity is an obligation that simulation and formal verification still check. Synthesis may ignore such obligations. Let <var>S</var> be the drivers of primary outputs together with every node that is not combinational, not partitionable, or a clock cell. The live set <var>L</var> is the backward closure of <var>S</var> over the fan-in arrays. Every node in <var>V<sub>p</sub></var> &setminus; <var>L</var> is <em>dead</em>: it is never a root, never walked, and never shapes a color. At the end it takes the color of its first colored fan-in, so it adds no color. The mapping pass deletes it (Section 3.2).</p>
+
+<h3><span class="secnum">2.3</span>Control Cones</h3>
+
+<p>The control pins are the select of a <code>Mux</code>, the controls of a <code>Hotmux</code>, the enable of a flop or latch, and the port enables of a memory. Control logic is kept out of data colors because merging a stage's data cone with the cone that gates it is precisely what collapses a forward partitioning into one region. Two closure families are grown with union-find over components:</p>
+<ul class="tight">
+<li><em>Select closures</em> (when multiplexers act as boundaries): every live multiplexer seeds a component. The walk from a multiplexer follows its control pins and only those data arms that are themselves multiplexers, so multiplexer chains stay together while ordinary data arms remain region inputs. Two multiplexers that read the same select driver pin are joined.</li>
+<li><em>Enable closures</em>: every distinct driver of a control pin seeds a component (the control pins of non-multiplexer sinks when multiplexers are grouped with control; of every sink, multiplexer selects included, when multiplexers belong to data colors), and its walk follows all fan-ins.</li>
+</ul>
+<p>Reaching a node already owned by another component joins the two components, and so does reading the same primary-input pin. Overlapping select and enable closures therefore form one control group, while groups with distinct primary-input selects stay apart. Walls inside a closure are state elements, large arithmetic (multipliers, dividers, adders over 8 bits) when arithmetic boundaries are enabled, and, when multiplexers belong to data colors, the multiplexers themselves. Wide comparisons and runtime shifts are not walls: a closure that reaches one claims it.</p>
+
+<p>Two refinements follow. <em>Wiring admission</em> (only when multiplexers are grouped with control) adds a node to a group when it only rewires, ties or inverts bits (a bitwise operator with a single variable input, or zero-cost wiring), all its variable inputs come from that group, and one of its fan-outs leads back into the same group; this keeps <code>mux(s, x, x|k)</code> from exposing <var>x</var> and <var>x</var>|<var>k</var> as independent region inputs. <em>Budget splitting</em> partitions a component whose size exceeds min(&Gamma;, &Gamma;<sub>ctrl</sub>): its internal edges are sorted by the size of their producer, largest first, and joined Kruskal-style while the union fits. Because weights only grow, one sorted pass leaves no fitting contact between different parts. A group smaller than a floor (fewer than <var>N</var><sub>min</sub> nodes and at most &Gamma;/64 predicted nodes, or below an optional control floor) is not emitted; its nodes are left for the data walks. Emitted groups receive colors 1..<var>K</var> before any data cone is grown, and data walks never enter a control-owned node.</p>
+
+<h3><span class="secnum">2.4</span>Data Cones: Roots and Budgeted Backward Walk</h3>
+
+<p>Roots are collected in one pass and walked in a second, in a deterministic node order. The root kinds are:</p>
+<ul class="tight">
+<li><em>Arithmetic cut</em>: a boundary operator (Section 2.9) that no control group claimed is owned by its own color before any walk, seeds its operands, and starts its budget at its own size.</li>
+<li><em>Register data input</em>: one root per flop or latch, seeded by its <code>din</code> driver. Clock, reset and initial-value pins never seed a root; enables are control closures (a separate enable root is created only when control cones are disabled).</li>
+<li><em>Memory</em>: one anchor color owns the memory node, and one root per port index seeds that port's address, data and enable drivers.</li>
+<li><em>Stateful instance</em>: an anchor color owns the instance and one root seeds all its input drivers.</li>
+<li><em>Primary output</em>: one root per output port, so output-only glue forms cones instead of singletons.</li>
+</ul>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 2</b> W<small>ALK</small>(<var>r</var>): budgeted backward walk of root <var>r</var></div>
+<ol class="algo-body">
+<li><var>t</var> &larr; initial budget of <var>r</var>; <var>Q</var> &larr; seeds of <var>r</var> <span class="cm">&#9655; explicit stack, epoch-stamped visits</span></li>
+<li><span class="kw">while</span> <var>Q</var> &ne; &empty; <span class="kw">do</span></li>
+<li class="in1"><var>n</var> &larr; pop(<var>Q</var>); <span class="kw">skip</span> if dead, seeded, visited, control-owned, or a state element</li>
+<li class="in1"><span class="kw">if</span> <var>n</var> is an arithmetic cut <span class="kw">then</span> &omega;(own(<var>n</var>), <var>r</var>) += &pi;(<var>n</var>); <span class="kw">continue</span> <span class="cm">&#9655; contact, never claimed</span></li>
+<li class="in1"><span class="kw">if</span> <var>t</var> + &pi;(<var>n</var>) &gt; &Gamma; <span class="kw">and</span> <var>t</var> &gt; 0 <span class="kw">then</span> record overlap with own(<var>n</var>); <span class="kw">stop</span> <span class="cm">&#9655; <var>n</var> is left for another cone</span></li>
+<li class="in1"><span class="kw">if</span> own(<var>n</var>) = &perp; <span class="kw">then</span> own(<var>n</var>) &larr; <var>r</var> <span class="kw">else</span> &omega;(own(<var>n</var>), <var>r</var>) += &pi;(<var>n</var>) <span class="cm">&#9655; first wins; walk through</span></li>
+<li class="in1"><var>t</var> &larr; <var>t</var> + &pi;(<var>n</var>); <span class="kw">if</span> <var>t</var> &gt; &Gamma; <span class="kw">then stop</span> <span class="cm">&#9655; a single indivisible node</span></li>
+<li class="in1"><span class="kw">for</span> each fan-in driver <var>d</var> of <var>n</var> <span class="kw">do</span></li>
+<li class="in2"><span class="kw">if</span> <var>d</var> is a primary-input pin <span class="kw">then</span> add zero-weight contacts to the first and last cones that read it</li>
+<li class="in2">push(<var>Q</var>, <var>d</var>)</li>
+</ol>
+</div>
+
+<p>Three properties of the walk matter. <em>Ownership is first-wins and disjoint</em>: a cone that reaches a node owned by an earlier cone keeps walking through it and records the shared size as overlap, so &omega;(<var>a</var>, <var>b</var>) is the predicted size of the logic both cones need. <em>The budget is soft but never grown by a crossing</em>: a walk stops at the first node that would push it over &Gamma; and leaves that node for another cone; only a single indivisible node can exceed &Gamma; by itself. <em>Primary inputs are shared zero-cost leaves</em>: every cone that reads an input pin records a zero-weight contact with the first and with the previous reader (a star plus a chain), which lets cones that share only inputs merge later without materializing a quadratic clique on a high-fan-out input. Zero-cost wiring consumes no budget, since cutting in front of it cannot make it cheaper. When a cone claims a runtime right shift it also claims that shift's constant-mask output slices, so the mapper can demand-narrow the barrel.</p>
+
+<figure>
+<svg viewBox="0 0 800 270" role="img" aria-label="Three backward cones grown from registers r1, r2 and r3; r1 and r2 share a sub-cone whose size is their overlap; a control group feeds the select of a multiplexer; merged colors are outlined.">
+  <defs>
+    <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="7" stroke="var(--fig-stroke)" stroke-width="1.1" opacity=".55"/>
+    </pattern>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="12" fill="var(--fg)">
+    <text x="18" y="22" fill="var(--muted)">inputs / Q of other registers</text>
+    <text x="640" y="22" fill="var(--muted)">registers (roots)</text>
+    <!-- cone r1 -->
+    <polygon points="660,70 330,20 330,150" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <!-- cone r2 -->
+    <polygon points="660,160 300,95 300,235" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <!-- overlap -->
+    <polygon points="440,112 330,95 330,150 440,132" fill="url(#hatch)" stroke="none"/>
+    <text x="352" y="129" font-size="11">&#969;(r1,r2)</text>
+    <!-- registers -->
+    <rect x="662" y="55" width="36" height="30" rx="4" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="680" y="75" text-anchor="middle">r1</text>
+    <rect x="662" y="145" width="36" height="30" rx="4" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="680" y="165" text-anchor="middle">r2</text>
+    <rect x="662" y="210" width="36" height="30" rx="4" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="680" y="230" text-anchor="middle">r3</text>
+    <!-- mux for r3 with control group -->
+    <polygon points="600,212 626,220 626,236 600,244" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <line x1="626" y1="228" x2="660" y2="226" stroke="var(--fig-stroke)" marker-end="url(#ar2)"/>
+    <rect x="470" y="238" width="96" height="24" rx="4" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+    <text x="518" y="254" text-anchor="middle" font-size="11" fill="var(--accent)">control group</text>
+    <line x1="566" y1="250" x2="608" y2="242" stroke="var(--accent)" marker-end="url(#ar2)"/>
+    <!-- labels -->
+    <text x="520" y="72" font-size="11">cone(r1)</text>
+    <text x="500" y="178" font-size="11">cone(r2)</text>
+    <!-- primary input star -->
+    <circle cx="160" cy="130" r="5" fill="var(--fig-stroke)"/>
+    <text x="95" y="120" font-size="11">input pin p</text>
+    <line x1="165" y1="128" x2="328" y2="60" stroke="var(--fig-stroke)" stroke-dasharray="3 3"/>
+    <line x1="165" y1="132" x2="298" y2="200" stroke="var(--fig-stroke)" stroke-dasharray="3 3"/>
+    <text x="96" y="160" font-size="11" fill="var(--muted)">zero-weight contact</text>
+    <!-- merged outline -->
+    <path d="M296,16 L716,16 L716,188 L296,248 Z" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="8 4" opacity=".85"/>
+    <text x="722" y="110" font-size="11" fill="var(--accent)">merged if</text>
+    <text x="722" y="125" font-size="11" fill="var(--accent)">&#960;(r1)+&#960;(r2) &#8804; &#915;</text>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 2.</b> Backward cones. The first cone to reach a node owns it; a later cone walks through and records the shared size as overlap &omega;. Shared input pins add zero-weight contacts. Colors are merged by decreasing overlap while the union fits &Gamma;; control logic forms separate groups.</figcaption>
+</figure>
+
+<h3><span class="secnum">2.5</span>Register Placement and Totality</h3>
+
+<p>A register joins the color of its data-input driver when that driver is owned, is data (not control), and is neither an arithmetic cut nor a state element: a pipeline stage is the logic plus the register it writes. A register fed by a primary input, another register, a memory, a stateful instance or an arithmetic cut stays a one-node color, because joining it would weld two pipeline stages through the very boundary the algorithm places. The join is also budget-checked against &Gamma;. The remaining unowned nodes are then rooted at the <em>sinks</em> of the uncolored subgraph (reset and clock glue, unreached output glue) and walked, which keeps leftovers in cones rather than singletons. A final fallback roots any node of an isolated combinational cycle. After this phase every live partitionable node has exactly one owner.</p>
+
+<h3><span class="secnum">2.6</span>Overlap-Driven Merging</h3>
+
+<p>The colors and their overlaps form a region graph <var>H</var>: a vertex per color with weight &pi;(<var>C</var>), and an edge per recorded pair with weight &omega;. The merge repeatedly unites the pair of largest overlap whose union fits the target:</p>
+
+<div class="eq"><span class="eq-body">(<var>a</var>*, <var>b</var>*) = arg max<sub>(<var>a</var>,<var>b</var>) &isin; <var>E</var>(<var>H</var>)</sub> &omega;(<var>a</var>, <var>b</var>) &nbsp; subject to &nbsp; &pi;(<var>a</var>) + &pi;(<var>b</var>) &le; &Gamma;</span><span class="eq-num">(1)</span></div>
+
+<div class="prop">
+<p><span class="lead">Proposition 1 (Single-pass fixpoint).</span> Because ownership is disjoint, &pi;(<var>A</var> &cup; <var>B</var>) = &pi;(<var>A</var>) + &pi;(<var>B</var>) and &omega;(<var>A</var> &cup; <var>B</var>, <var>C</var>) = &omega;(<var>A</var>, <var>C</var>) + &omega;(<var>B</var>, <var>C</var>). Weights only grow under merging, so a pair refused once can never fit later. One pass over a priority queue with lazy invalidation therefore computes the greedy fixpoint of (1), not an approximation of it.</p>
+</div>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 3</b> Overlap merge with lazy invalidation</div>
+<ol class="algo-body">
+<li>push every recorded pair (&omega;, <var>a</var>, <var>b</var>, version 0) into a max-heap ordered by (&omega;&darr;, <var>a</var>&uarr;, <var>b</var>&uarr;)</li>
+<li><span class="kw">while</span> heap &ne; &empty; <span class="kw">do</span></li>
+<li class="in1">(&omega;, <var>a</var>, <var>b</var>, <var>v</var>) &larr; pop; <span class="kw">skip</span> if <var>a</var> or <var>b</var> is no longer a representative, or <var>v</var> is stale</li>
+<li class="in1"><span class="kw">if</span> &pi;(<var>a</var>) + &pi;(<var>b</var>) &gt; &Gamma; <span class="kw">then</span> discard <span class="cm">&#9655; refused forever (Prop. 1)</span></li>
+<li class="in1"><var>s</var> &larr; merge(<var>a</var>, <var>b</var>) <span class="cm">&#9655; survivor = larger adjacency; fold the smaller map</span></li>
+<li class="in1"><span class="kw">for</span> each neighbor <var>n</var> of the dissolved side <span class="kw">do</span> bump version(<var>s</var>, <var>n</var>); push (&omega;(<var>s</var>, <var>n</var>), <var>s</var>, <var>n</var>)</li>
+</ol>
+</div>
+
+<p>The size test happens at pop time, so a survivor's untouched pairs stay valid although its size grew. Folding the smaller adjacency map into the larger one keeps merges into high-degree hubs, such as a reset cone that touches thousands of colors, from becoming quadratic; the overall cost is <var>O</var>(<var>P</var> log <var>P</var>) for <var>P</var> recorded pairs. The heap order is total, so the result never depends on hash iteration. Zero-weight contacts sort last: shared logic merges before shared wiring or inputs.</p>
+
+<h3><span class="secnum">2.7</span>Forward Merging Across Registers</h3>
+
+<p>The backward merge only unites colors that touch. A register fed by an input or by another register owns no logic and has no recorded pair, and would remain a one-node color. A second phase therefore merges a register's color with the colors that consume its output, using only the budget the backward merge left over: the backward cones are what the mapper optimizes, so they get first claim on &Gamma;. A consumer register qualifies only through its data input; enable, clock, reset and other control pins never qualify, so the phase cannot re-weld data and control cones. Candidates are ordered by the <em>smallest combined size</em>, the dual of the backward phase, and are re-keyed lazily at pop time. In <em>pair</em> mode each (register, consumer color) is one candidate; in <em>all</em> mode (the default) the whole qualifying fan-out is one all-or-nothing candidate. A merged register is re-queued with its new targets, so pipeline chains pack until &Gamma; stops them.</p>
+
+<h3><span class="secnum">2.8</span>Small-Color Absorption</h3>
+
+<p>&Gamma; is a soft target. The walk budget and the merge strand a tail of tiny colors: the remainder of a truncated cone, input-fed registers, output glue. A color is <em>small</em> when</p>
+
+<div class="eq"><span class="eq-body">|<var>C</var>| &lt; <var>N</var><sub>min</sub> &nbsp;&and;&nbsp; &pi;(<var>C</var>) &le; &Gamma; / 64</span><span class="eq-num">(2)</span></div>
+
+<p>The second clause keeps a few-node color that holds one heavy operation, such as a wide multiplier a truncated walk left behind; folding several of those together would build an oversized region. Small data colors are processed smallest first. Each is merged into the neighbor that maximizes the lexicographic pair (overlap, number of connecting edges), regardless of the resulting size; a data neighbor is preferred, and a control color is used only when no data neighbor exists (for example a register between two control multiplexers). A survivor that is still small is re-queued. Arithmetic-cut nodes are neither counted nor used as contacts, since the next phase isolates them anyway.</p>
+
+<h3><span class="secnum">2.9</span>Arithmetic Boundaries and Boundary Profiles</h3>
+
+<p>An operator is an <em>arithmetic boundary</em> when it is a multiplier or divider, an adder wider than 8 bits, a magnitude comparison with an operand wider than 8 bits (it lowers to a subtraction), or a runtime shift wider than 8 bits whose value and amount are both non-constant. Constant shifts are wiring and never cut. Three independent switches (arithmetic, comparisons, shifts) decide which operators are boundaries, and a fourth (multiplexers) decides whether multiplexers are grouped with control through select closures (Section 2.3) or left in data colors. The default profile enables all four, which keeps ABC's regions small. A register-to-register profile disables all four, so colors are no longer cut at combinational operators and run register to register; they remain bounded by &Gamma;, and select and enable logic still forms separate control groups unless control cones are disabled. An explicit setting always overrides the profile. The boundary predicate itself does not depend on the control-cone option, but the multiplexer switch acts only when control cones are enabled, and a comparison or shift that a control group claims is not isolated; with control grouping disabled such operators become isolated boundaries.</p>
+
+<p>After merging, every arithmetic boundary operator that is not a member of a control group is moved into a fresh color of its own, together with its constant-mask output slices so the mapper still sees the demanded width; a wide comparison or runtime shift claimed by a select or enable closure stays in that control color. The merge phases therefore fuse the operator's operand cone with its consumers, and the operator itself becomes a separate region that the mapping pass specializes per width (Section 3.4). Before isolation, control colors keep ids 1..<var>K</var> and data colors are renumbered in first-encounter order along a deterministic topological node order; each isolated boundary operator then receives a fresh id above that range, in node order.</p>
+
+<h3><span class="secnum">2.10</span>Hierarchical Designs</h3>
+
+<p>Coloring each definition separately makes every module boundary a region boundary and hides a leaf module's register fan-out behind its output ports. The hierarchy is therefore colored as a <em>virtual flat</em> view (Algorithm 4). A per-occurrence color store lets two instances of the same definition carry different colors. Compact loop bodies stay opaque instances in the flat view and are colored as a single unit, because one implementation serves every iteration. Source-specified regions (block attributes) are walls: their nodes are never walked or merged, keep their colors, and algorithm colors are numbered above them.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 4</b> Virtual flat coloring</div>
+<ol class="algo-body">
+<li><span class="kw">if</span> the hierarchy is non-recursive <span class="kw">then</span></li>
+<li class="in1"><var>F</var> &larr; flatten(top) into a scratch definition, keeping loop bodies and body-less cells opaque; record an origin (definition, node, instance path) for every cloned node</li>
+<li class="in1">color <var>F</var> with Algorithm 1; build the coloring descriptor from <var>F</var></li>
+<li class="in1">clear old colors; <span class="kw">for</span> each colored node <var>f</var> &isin; <var>F</var>: write <var>c</var>(<var>f</var>) to origin(<var>f</var>) <span class="cm">&#9655; per instance path</span></li>
+<li class="in1">delete <var>F</var></li>
+<li><span class="kw">else</span> color each unique definition separately</li>
+</ol>
+</div>
+
+<p>The descriptor records that the colors were computed on the flat view, so the partitioner flattens again before cutting (Section 3.7) and a color that spans modules becomes one region. Because first-wins ownership can split a later cone into disconnected pieces, the descriptor also states that a color may be disconnected; the partitioner then emits one module per color instead of one per connected component.</p>
+
+<p><em>Complexity.</em> Preparation and liveness are linear in |<var>V</var>| + |<var>E</var>|; control grouping is too, except for the budget split, which sorts the internal edges of oversized components. No per-cone phase (walks, register placement, merges, absorption) reads the graph's edge lists, which would rescan the out-edges of high-fan-out reset and enable drivers from every cone; only the final isolation step reads the pins of arithmetic-boundary operators, once each. A walk costs one step per visit using epoch stamps; zero-cost wiring may be re-walked once per root, which bounds visits by the number of roots times the wiring size rather than by &Gamma;. The merges cost <var>O</var>(<var>P</var> log <var>P</var>).</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">3</span>Region Construction</h2>
+
+<p>The mapping pass never modifies the input library. It copies the full callee closure of the design, including the interface declarations of body-less cells, into a private library and transforms only that copy. Compact loops are prepared first (Section 3.6); then come dead-logic deletion, selector and memory proofs, arithmetic and memory extraction, and finally the per-bit multiplexer facts, which are applied as each source is cut. Each step prepares the next: dead logic disappears before it costs proofs; constant selectors are resolved before memory proofs so those see simplified enables; arithmetic and memory modules are extracted before partitioning so they remain named instances even in a flattened parent; per-bit multiplexer facts are applied on the final colored source right before it is cut, where they are visible to the mapper of every region.</p>
+
+<h3><span class="secnum">3.1</span>Soundness Model</h3>
+
+<p>All SAT-based steps are combinational: primary inputs, flop outputs and memory read data are free symbols. The per-bit multiplexer proof also cuts latch and instance outputs to free symbols; the solver-based proofs (selectors and memories) instead return no fact when a latch sits in the cone, and for instances the selector proofs descend into bodied callees while a body-less instance (or, for memory proofs, any instance) returns no fact. A proven fact therefore holds for every state, reachable or not, which is conservative and makes each fact safe for the whole design. A proof that is unsupported or runs out of budget yields no fact. Candidates are first filtered by simulating eight deterministic word-level input vectors; the filter can only reject a candidate, never prove one.</p>
+
+<h3><span class="secnum">3.2</span>Dead-Logic Deletion</h3>
+
+<p>Every combinational node without consumers (excluding clock cells) seeds a worklist; deleting it releases its drivers, which are deleted in turn once they lose their last consumer. This removes the unread one-hot multiplexers the compiler keeps for their verification obligations (Section 2.2), together with the cones that only fed them, before any proof or partitioning work is spent on them.</p>
+
+<h3><span class="secnum">3.3</span>SAT-Based Simplification</h3>
+
+<h4>Constant selectors.</h4>
+<p>The candidates are the select of every two-arm multiplexer, every explicit control of a one-hot multiplexer, and the enable of every one-bit-enabled flop. A selector fact states</p>
+<div class="eq"><span class="eq-body">&forall;<var>x</var> : ( <var>c</var>(<var>x</var>) &ne; 0 ) = <var>v</var></span><span class="eq-num">(3)</span></div>
+<p>Survivors of the simulation filter are decided by an SMT solver (cvc5) at word level, through the same encoder that whole-design equivalence checking uses, descending into called submodules. The resource limit is 256 steps per driver pin in the cone, and a cone over 50,000 pins is left alone, so the budget is deterministic and machine independent. A proven selector is tied to its constant and a never-selected arm is tied to zero; for a one-hot multiplexer the first control proven always-on wins, and later arms and the fallback are zeroed, which is the reference priority semantics. Both rewrites are exact: a pin is tied to the value it always carries, and an arm is zeroed only when no input selects it. Logic that loses its last consumer is swept.</p>
+
+<h4>Memory port simplification.</h4>
+<p>For memories that match the single-clock model the memory cell can represent, four oracles are proven with the same solver: a dead enable, two exclusive enables, an address relation (always equal, or never colliding, when both ports are enabled), and a constant address bit. The transformations, in order, are:</p>
+<ul class="tight">
+<li>removing an address bit proven constant on every port, which halves the depth and re-packs the initial contents;</li>
+<li>clearing forwarding and undefined-collision entries for read/write pairs that can never collide;</li>
+<li>removing ports with a dead enable;</li>
+<li>merging <em>adjacent</em> write ports that have equal addresses and constant lane enables (on overlapping lanes the later port wins), or that have exclusive enables; only adjacent ports merge, since moving a lower-priority write past an intervening conflicting write would change last-writer-wins;</li>
+<li>merging read ports whose addresses are equal whenever both are enabled, or whose enables are exclusive.</li>
+</ul>
+<p>Pair worklists are capped per phase, so a pathological multi-port memory cannot monopolize synthesis; a budget-out keeps the original behavior.</p>
+
+<h4>Per-bit multiplexer facts.</h4>
+<p>Partitioning hides correlations from a region: when a multiplexer's select logic and its arm logic land in different colors, the region that contains the multiplexer sees them as unrelated inputs. For a multiplexer <var>m</var> with arms <var>a</var><sub>0</sub>, &hellip;, <var>a</var><sub><var>n</var></sub> and selection predicates sel<sub><var>i</var></sub>, a fact states that bit <var>b</var> of arm <var>i</var> is constant or equal to another arm's bit whenever arm <var>i</var> is selected:</p>
+<div class="eq"><span class="eq-body">&forall;<var>x</var> : sel<sub><var>i</var></sub>(<var>x</var>) &rArr; <var>a<sub>i</sub></var>[<var>b</var>](<var>x</var>) = &kappa;(<var>x</var>), &nbsp;&nbsp; &kappa; &isin; { 0, 1, <var>a<sub>j</sub></var>[<var>b</var>], &not;<var>a<sub>j</sub></var>[<var>b</var>] }</span><span class="eq-num">(4)</span></div>
+<p>Candidates are generated only for multiplexers whose arm or control logic comes from another color; inside one region a fact does not change the region's function and is left to the mapper. Survivors of the simulation filter become the outputs of one miter per definition, <var>r</var> = sel<sub><var>i</var></sub> &and; (<var>a<sub>i</sub></var>[<var>b</var>] &oplus; &kappa;), blasted with the mapper's own operator lowering, except that a one-hot multiplexer is modeled with priority semantics (never assuming exclusivity), and swept by bounded SAT sweeping (<code>&amp;fraig</code>); a fact is proven when its output is swept to constant zero. A fact holds only while its arm is selected, so the rewrite changes only that arm's input of <var>m</var>, never the arm's driver (which has other consumers) and never the multiplexer output. Each arm is rebuilt from maximal runs of bits with the same choice: one run is a single pin (a constant, the other arm's driver, or its complement), and mixed runs become a concatenation of slices of the original arms, constants and complements. The first fact per (arm, bit) wins; a bit that reads another arm's bit is dropped if that bit is itself rewritten, since the rewrite reads the original drivers; and a fact that the arm already satisfies structurally inside the multiplexer's region is skipped, which makes re-application idempotent. New nodes take the multiplexer's color.</p>
+
+<p>Proofs are cached per definition under an <em>exact</em> source descriptor, i.e. node identities, operators, colors and edges, not a hash: a harmless renumbering misses rather than attaching a theorem to a different node. Selector caches additionally record every descended callee, since editing a callee can change a caller's facts. Cache files are written atomically.</p>
+
+<h3><span class="secnum">3.4</span>Width-Specialized Arithmetic Modules</h3>
+
+<p>Every operator of an arithmetic-boundary family (the predicate of Section 2.9) is enclosed in its own definition, whether or not the coloring isolated it; extraction is gated by separate per-family permissions (on by default), not by the boundary switches. The definition is keyed by a descriptor of the operator kind, the width and signedness of every port, the constant operands, its color and the options of its source section; constants are specialized into the body and every other input becomes a port, so equal realizations share one definition. Output widths are narrowed to the width actually demanded by consumers. A shift amount of the form index &middot; stride + bias is recognized and only the index crosses the module boundary, with the affine term rebuilt inside, because an opaque amount would hide the constant-zero low bits that retire most of the barrel shifter. The regions that hold these modules are among the units that post-mapping architecture trials re-map (Section 4.10).</p>
+
+<h3><span class="secnum">3.5</span>Memory Folding</h3>
+
+<p>A memory is either kept as a native instance (implemented by a memory macro) or <em>lowered</em> into flops and decode logic. In the default mode a memory is lowered when its storage is at most 1024 bits or when it has more than three ports, since no macro exists for such an array; larger memories stay native. A lowered memory is generated as RTL, flattened and mapped to flops in isolation, so no parent logic enters the operation; per-lane partial flops are folded back into word flops so that equivalence checking can relate the storage banks. In every mode a memory keeps a named instance boundary.</p>
+
+<h3><span class="secnum">3.6</span>Compact Loops</h3>
+
+<p>A compact loop instance stands for several iterations of one body. Before mapping, the data-parallel part of a body (logic that depends on data inputs but not on the carried values) is extracted into its own definition, mapped once and replicated per iteration. Loops without carried state are mapped once and their occurrences materialized after mapping, so the mapper never bit-blasts <var>N</var> copies of the same logic; loops with carried state are expanded. A preserved loop body is a single synthesis unit.</p>
+
+<h3><span class="secnum">3.7</span>Cutting the Design into Regions</h3>
+
+<p>When the colors were computed on the virtual flat view, the design is flattened again into a scratch definition, keeping extracted arithmetic modules, memory modules and loop bodies as instances; those are decomposed separately. Otherwise each definition is cut in post-order. The per-bit multiplexer facts of Section 3.3 are applied to the source immediately before it is cut.</p>
+
+<div class="def">
+<p><span class="lead">Definition 2 (Region formation).</span> In flatten mode, or when colors may be disconnected, there is one region per color, <var>R<sub>k</sub></var> = { <var>v</var> : <var>c</var>(<var>v</var>) = <var>k</var> }. Otherwise a region is a connected component of the subgraph induced by one color.</p>
+</div>
+
+<p>Every driver feeding a sink of region <var>R</var> is classified as a constant, a primary input, an internal edge of <var>R</var>, or a crossing edge, which becomes an output port of the driver's region and an input port of <var>R</var>, deduplicated per driver. Region ports are named reproducibly from structural signatures computed with a Kahn traversal, without recursion or depth cut-offs. The producer signature &sigma;<sub>p</sub> of a pin is anchored at constants, primary inputs and named signals and otherwise mixes the operator shape with the signatures of its operands grouped by operand role, so <code>a+b</code> and <code>b+a</code> agree while no operand changes role. The forward signature &sigma;<sub>f</sub> is the multiset of the pin's uses. An input port is keyed by (&sigma;<sub>p</sub>, &sigma;<sub>f</sub>) and an output port by &sigma;<sub>p</sub>; ports are sorted by key, which fixes the order of ABC's inputs and outputs and makes cold and warm runs produce the same netlist. A region is <em>reuse-eligible</em> only if no port signature is coarse (a cycle) and no two input keys tie: a tie is a genuine automorphism under which a cached body could be stitched onto permuted ports.</p>
+
+<p>A definition with a single region is emitted under its own name and interface. Otherwise it becomes a wrapper holding one unnamed instance per region module <code>&lt;d&gt;__c&lt;k&gt;</code>, so hierarchical names stay transparent to name-based equivalence checking, timing and waveforms. Fig. 3 shows the resulting hierarchy.</p>
+
+<figure>
+<svg viewBox="0 0 800 230" role="img" aria-label="Hierarchy after mapping: the top wrapper instantiates region modules; region modules contain library cells and instances of arithmetic modules, memory modules and loop bodies, which contain library cells.">
+  <defs>
+    <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="12" fill="var(--fg)">
+    <rect x="320" y="12" width="160" height="36" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="400" y="35" text-anchor="middle">top (wrapper)</text>
+    <rect x="40" y="86" width="150" height="36" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="115" y="109" text-anchor="middle">top__c1</text>
+    <rect x="240" y="86" width="150" height="36" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="315" y="109" text-anchor="middle">top__c2</text>
+    <text x="435" y="109" text-anchor="middle">&#8230;</text>
+    <rect x="480" y="86" width="150" height="36" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="555" y="109" text-anchor="middle">top__c<tspan font-style="italic">k</tspan></text>
+    <line x1="380" y1="48" x2="120" y2="84" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="395" y1="48" x2="320" y2="84" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="420" y1="48" x2="550" y2="84" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <rect x="20" y="164" width="170" height="36" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="105" y="187" text-anchor="middle">library cells</text>
+    <rect x="210" y="164" width="190" height="36" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="305" y="187" text-anchor="middle">arithmetic modules</text>
+    <rect x="420" y="164" width="170" height="36" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="505" y="187" text-anchor="middle">memory modules</text>
+    <rect x="610" y="164" width="170" height="36" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="695" y="187" text-anchor="middle">loop bodies</text>
+    <line x1="115" y1="122" x2="105" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="315" y1="122" x2="305" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="555" y1="122" x2="505" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="570" y1="122" x2="690" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <text x="712" y="140" font-size="11" fill="var(--muted)">each mapped the</text>
+    <text x="712" y="153" font-size="11" fill="var(--muted)">same way, to cells</text>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 3.</b> Hierarchy after mapping. Region modules hold library cells and instances of the extracted arithmetic modules, memory modules and loop bodies, which are themselves decomposed and mapped to cells. In flatten mode the first level spans the former design hierarchy.</figcaption>
+</figure>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">4</span>Region Technology Mapping</h2>
+
+<p>Every region is mapped independently (Algorithm 5). The region is translated to a bit-level network whose inputs and outputs are the region ports, the crossing registers and the native boundaries; ABC optimizes and maps that network; the result is read back as a netlist of library-cell instances. All graph accesses happen under one lock; only the ABC phase, which touches private data, runs concurrently across regions.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 5</b> M<small>AP</small>R<small>EGION</small>(<var>R</var>)</div>
+<ol class="algo-body">
+<li>compute GE(<var>R</var>), &pi;(<var>R</var>) and the crossing register bits; pick the flow tier and per-region overrides</li>
+<li><var>B</var> &larr; region budget (Eq. 6); recipe &larr; resolved flow, options and budget as text</li>
+<li><span class="kw">if</span> <var>R</var> is reuse-eligible <span class="kw">and</span> the cache holds a structurally identical body with an identical recipe <span class="kw">then</span> reuse it; <span class="kw">return</span> <span class="cm">&#9655; &sect;4.8</span></li>
+<li>choose crossing registers; demote registers with an asynchronous reset or a derived clock <span class="cm">&#9655; &sect;4.3</span></li>
+<li>detect native boundaries: wide wiring, disjoint shift/OR packs, combinational cycles <span class="cm">&#9655; &sect;4.4</span></li>
+<li>schedule the remaining operators topologically; blast each onto the tape, creating inputs on demand <span class="cm">&#9655; &sect;4.2</span></li>
+<li>fold enable and synchronous reset into each latch's next state; create outputs for region ports and boundary inputs</li>
+<li>replay the tape as an ABC network; install the static boundary environment <span class="cm">&#9655; &sect;4.6</span></li>
+<li>run the flow with the budget ladder and the area candidate <span class="cm">&#9655; &sect;4.5</span></li>
+<li>read the mapped network back into cell instances, registers and native boundaries <span class="cm">&#9655; &sect;4.7</span></li>
+</ol>
+</div>
+
+<h3><span class="secnum">4.2</span>Bit-Level Translation</h3>
+
+<p>The region is recorded on a <em>blast tape</em>, a backend-neutral bit-level representation with the node kinds constant, inverter, two-input AND, OR and XOR, primary input, latch and primary output, where every fan-in precedes its node. The gate constructors fold only locally (constants, <var>x</var>&thinsp;&and;&thinsp;<var>x</var>, <var>x</var>&thinsp;&oplus;&thinsp;<var>x</var>, and so on). The tape is replayed object by object into an ABC netlist in creation order, so the ABC network is identical to one built directly while blasting, and its size is known before any ABC object is allocated.</p>
+
+<p><em>Demand-driven inputs.</em> A bit of a region input port or of a native boundary output becomes an ABC input only when some operator reads it. A region that reads a small slice of a wide packed port therefore does not create tens of thousands of unused inputs. Bit insertion (set-mask) and concatenations are resolved per demanded bit; bit extraction and sign extension are rewiring expanded over their full output width. The creation order of inputs and outputs is recorded and the read-back pairs ABC's inputs and outputs <em>by position</em>, which ABC preserves through its flows. A driver that cannot be materialized refuses the region; it is never read as a silent constant.</p>
+
+<p><em>Scheduling.</em> The region's node list is only mostly topological, so operators are blasted from a dependency queue that visits every dependency once, avoiding repeated fixpoint passes on large regions. An adder is built once at the widest width any of its outputs needs, and left shifts and inversions are trimmed to the width their in-region consumers demand.</p>
+
+<div class="scroll">
+<table>
+<caption>Table III<span class="tcap">Operator lowering onto the tape</span></caption>
+<thead><tr><th>Operator</th><th>Lowering</th></tr></thead>
+<tbody>
+<tr><td>And, Or, Xor (<var>n</var>-ary)</td><td>Per bit, a balanced pairwise tree; a left fold would turn <var>N</var> parallel predicates into an <var>N</var>-deep path</td></tr>
+<tr><td>Reductions</td><td>Balanced OR / XOR trees; population count as a tree of ripple adders</td></tr>
+<tr><td>Mux (2 arms)</td><td>Condition = OR of the select bits; <var>s</var>&thinsp;?&thinsp;<var>t</var>&thinsp;:&thinsp;<var>f</var> = <var>s</var><var>t</var> &or; &not;<var>s</var><var>f</var>; a constant select demands only the chosen arm</td></tr>
+<tr><td>Mux (<var>n</var> arms)</td><td>Per arm value, a balanced minterm of the select bits; a balanced OR of minterm &and; data</td></tr>
+<tr><td>Hotmux</td><td>Sum of products &or;<sub><var>i</var></sub> (<var>c<sub>i</sub></var> &and; <var>v<sub>i</sub></var>) plus the fallback under &and;<sub><var>i</var></sub> &not;<var>c<sub>i</sub></var>; the exclusivity of the controls is assumed</td></tr>
+<tr><td>Mask, concatenation, sign extension</td><td>Wiring. Set-mask and concatenation are resolved per demanded bit; get-mask and sign extension are expanded over their output width</td></tr>
+<tr><td>Sum</td><td>Operands extended and complemented for subtraction; 3:2 compression to two rows, then the selected adder</td></tr>
+<tr><td>LT, GT, EQ</td><td>Subtraction with a guard bit; XNOR/AND for equality, with constants sized from their value</td></tr>
+<tr><td>SHL, SRA</td><td>Constant amount: rewiring. Runtime amount: log shifter; for right shifts only the demanded output prefix is built, or an affine word select when the amount is index &middot; stride + bias and that is cheaper</td></tr>
+<tr><td>Mult, Div</td><td>Array or balanced-tree multiplier; restoring division</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The arithmetic builders are parameterized by an abstract bit algebra and by an architecture: adders are ripple-carry, carry-skip or carry-lookahead (with block size <var>W</var>/4, <var>W</var>/2 or <var>W</var> by default), multipliers are arrays or balanced trees. The chosen architecture only seeds the AIG; ABC is free to restructure it.</p>
+
+<h3><span class="secnum">4.3</span>Sequential Elements</h3>
+
+<p>By default flops cross into ABC as latches so the mapper sees the true next-state function. Three kinds of flops stay native boundaries instead. A flop with an <em>asynchronous reset</em> stays native, because the reset is an event: folding it into the data input would let it act only on a clock edge. A flop with a <em>derived clock</em>, i.e. a clock that, traced through single-bit identities, is not a region input or a constant, stays native, and its clock cone is still mapped and reconnected. Level-sensitive <em>latches</em> never cross, because ABC's latch is an edge-triggered register. For every crossing flop the next state is folded as</p>
+
+<div class="eq"><span class="eq-body"><var>D</var> = rst&prime; ? <var>r</var><sub>val</sub> : ( en&prime; ? <var>d</var><sub>in</sub> : <var>Q</var> ), &nbsp;&nbsp; en&prime; = &or;<sub><var>i</var></sub> en[<var>i</var>], &nbsp; rst&prime; = &or;<sub><var>i</var></sub> rst[<var>i</var>] &oplus; neg</span><span class="eq-num">(5)</span></div>
+
+<p>so a synchronous reset has priority over the enable, matching the generated RTL and the equivalence checker's model, and the result maps to a plain D flip-flop. Multi-stage pipeline registers cross as a chain of latches named like the generated RTL, so equivalence checking can pair the hidden stages. Only a true power-on value (an initial value without a reset) is given to ABC as a latch initial state; a reset-backed register powers on unknown, like the cell it maps to. When the chosen flip-flop cell only provides an inverted output and the bit has no power-on value, the latch stores &not;<var>D</var> under the built-in delay and area flows (not the large-region tier or a user flow), so the mapper absorbs the inversion in its own phase assignment; this encoding is exact only under combinational transformations.</p>
+
+<h3><span class="secnum">4.4</span>Native Boundaries</h3>
+
+<p>Some nodes are cut out of the ABC network and reconnected natively: instances, memories, clock cells, demoted flops, all latches, and <em>native wiring</em>. Native wiring comprises wiring cells of at least 4096 bits (and any concatenation with an over-wide lane), wide disjoint packs of constant shifts combined by OR, exported constant-amount shifts and wide exported packs, and the unpeeled remainder of Kahn peeling over the combinational nodes: every node on a combinational cycle plus all in-region combinational logic downstream of one, up to the next state element or instance. This is a boundary cut rather than an approximation, but that downstream cone is left unmapped. Property markers have no hardware and are dropped. A boundary output enters ABC as inputs only for the bits that an in-region operator reads. A boundary input driven directly by a region input or by a native-wiring node is reconnected natively, which also keeps region-input clocks, resets and enables out of the AIG. Any other boundary input, including one driven by another instance, memory or native register, becomes one ABC output per distinct (driver, bit), shared by every consuming boundary; a pure feed-through buffer is removed on read-back. A region whose outputs are all native receives one unobserved constant output, since ABC cannot process an empty network.</p>
+
+<h3><span class="secnum">4.5</span>Mapping Flows and the Per-Region Objective</h3>
+
+<p>The delay and area flows (Table IV) end in technology mapping with <code>&amp;nf</code> and an output conversion (<code>&amp;put -o</code>) that shares a gate driving several outputs through output-only buffers instead of duplicating it; the read-back removes those buffers again. The large-region flow ends in a plain <code>&amp;put</code> and keeps ABC's duplication. No flow contains retiming, because moving registers would break the register-name correspondence that equivalence checking relies on, lose the attribution of logic to registers, and could change observable latency. Technology mapping uses a unit-delay gate library, so <code>&amp;nf</code> minimizes depth on the smallest cells, and every physical decision is made by gate sizing with the Liberty timing model. A fanout-buffering and down-sizing tail follows every built-in and large-tier flow when fanout buffering is enabled; it is removed when the library has no two-dimensional delay tables, on which the timer cannot run. The timed area candidate ends in a buffering, up-sizing and down-sizing tail instead, and a user-supplied flow gets no tail.</p>
+
+<div class="scroll">
+<table>
+<caption>Table IV<span class="tcap">Built-in ABC flows</span></caption>
+<thead><tr><th>Flow</th><th>Commands</th><th>Used when</th></tr></thead>
+<tbody>
+<tr><td>Area</td><td><code>strash; &amp;get -n; &amp;fraig -x -C 500; &amp;put; dc2; strash; &amp;get -n; &amp;dch -f -C 500; &amp;nf {D}; &amp;put -o</code></td><td>No delay target; also the area candidate</td></tr>
+<tr><td>Delay</td><td>Two rounds of <code>&amp;synch2 -K 6</code>, LUT mapping <code>&amp;if -K 6</code>, <code>&amp;mfs</code>, <code>&amp;dch</code> and <code>&amp;sopb</code> restructuring, then <code>&amp;st; &amp;nf {D}; &amp;put -o</code></td><td>A delay target is set</td></tr>
+<tr><td>Large</td><td><code>strash; &amp;get -n; &amp;nf {D}; &amp;put</code></td><td>Region of at least 200,000 GE (skips structural choices)</td></tr>
+<tr><td>Tail</td><td><code>buffer -N 16; dnsize {B}</code></td><td>After every built-in flow, when the library has delay tables (the timed area candidate adds <code>upsize {B}</code>)</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>With a delay target <var>T</var>, a region that contains registers must also absorb the launch clock-to-output delay and the capture setup time, which ABC's combinational timer does not see. The region budget is</p>
+
+<div class="eq"><span class="eq-body"><var>B</var> = &lfloor; <var>T</var> &minus; <var>m</var> &rfloor; if the region has registers, &nbsp; <var>B</var> = &lfloor; <var>T</var> &rfloor; otherwise, &nbsp;&nbsp; <var>m</var> = <var>t</var><sub>clk&rarr;Q</sub> + <var>t</var><sub>setup</sub></span><span class="eq-num">(6)</span></div>
+
+<p>with <var>m</var> taken from the chosen flip-flop cell (and <var>B</var> &ge; 1). The flow is followed by a budget ladder and an area candidate (Algorithm 6), where <var>d</var>(<var>N</var>) and <var>a</var>(<var>N</var>) are the timer's maximum delay and total area of a mapped network <var>N</var>. The area recovery remap is attempted only with enough slack to repay an extra mapping pass:</p>
+
+<div class="eq"><span class="eq-body"><var>s</var> = 100 &middot; ( <var>B</var> / <var>d</var> &minus; 1 ), &nbsp;&nbsp; <var>r</var> = 0 if <var>s</var> &lt; 25, &nbsp; <var>r</var> = min(<var>s</var>, <var>r</var><sub>cap</sub>) otherwise</span><span class="eq-num">(7)</span></div>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 6</b> Budget ladder and area candidate</div>
+<ol class="algo-body">
+<li><span class="kw">if</span> the area candidate is enabled <span class="kw">then</span> <var>N</var><sub>0</sub> &larr; copy of the unmapped network</li>
+<li><var>N</var> &larr; flow(network); <span class="kw">if</span> no budget <span class="kw">then return</span> <var>N</var></li>
+<li><span class="kw">if</span> <var>d</var>(<var>N</var>) &gt; <var>B</var> <span class="kw">then</span> size up and down within <var>B</var>; <span class="kw">if still</span> <var>d</var>(<var>N</var>) &gt; <var>B</var> <span class="kw">then</span> size without a bound</li>
+<li><span class="kw">else if</span> the flow is remappable <span class="kw">and</span> <var>r</var> &gt; 0 <span class="kw">then</span> undo the mapping; remap with relaxation <var>r</var>; buffer; size down within <var>B</var>; repair with sizing if the budget is missed</li>
+<li><span class="kw">if</span> <var>N</var><sub>0</sub> exists <span class="kw">and</span> <var>d</var>(<var>N</var>) &le; <var>B</var> <span class="kw">then</span></li>
+<li class="in1"><var>N</var><sub>A</sub> &larr; area flow(<var>N</var><sub>0</sub>); keep <var>N</var><sub>A</sub> iff <var>d</var>(<var>N</var><sub>A</sub>) &le; <var>B</var> <span class="kw">and</span> <var>a</var>(<var>N</var><sub>A</sub>) &lt; <var>a</var>(<var>N</var>) <span class="cm">&#9655; ties keep the delay flow</span></li>
+</ol>
+</div>
+
+<p>The area candidate is limited to regions below the large tier, where a second full map does not double the runtime of the largest regions. Admission checks for time and memory run before and after every ABC command. Every flow option (flow, delay, load, adder, block size, multiplier, barrel shifter, architecture trials) can be overridden per color, from source annotations or the command line; an unknown key is an error, so a mistyped hint never silently does nothing.</p>
+
+<h3><span class="secnum">4.6</span>Partition-Boundary Timing Environment</h3>
+
+<p>Inside ABC a region's outputs drive no load, its inputs come from ideal drivers, and fanout buffering never builds trees for input fanout. Mapped in isolation, regions therefore report paths that are far shorter than the paths a whole-design timer later finds. Following hierarchical-flow practice, every region is given a boundary environment: an output load and a virtual downstream delay per output, and a driving cell and an arrival time per input. The environment is established in two phases.</p>
+
+<p><em>Phase A (before mapping)</em> is a pure function of the source graph and the library and does not depend on how other regions were mapped. It is not part of the incremental cache key, so a reused region keeps the netlist mapped under the environment of the run that stored it. With <var>C&#772;</var> the mean input capacitance of the library's small single-output cells, an output port <var>p</var> receives</p>
+
+<div class="eq"><span class="eq-body">load(<var>p</var>) = ext(<var>p</var>) &middot; <var>C&#772;</var> + [ <var>p</var> drives a primary output ] &middot; <var>C</var><sub>io</sub></span><span class="eq-num">(8)</span></div>
+
+<p>where ext(<var>p</var>) counts the sinks outside the region. Every input bit is driven by a stand-in cell: the smallest single-input non-inverting cell whose delay at a load of 4<var>C&#772;</var> is within twice the fastest such cell, which excludes delay cells; the inverter is the fallback. The same cell drives the fanout-tree construction for inputs.</p>
+
+<p><em>Phase B (after all regions are mapped)</em> runs only when a delay target is set, globally or for some region, and the library has delay tables; without a target, which is the default, the Phase A estimates are final. It replaces the estimates with exact values. The mapped regions are imported, and the exact load of every input is computed as the sum of the cell pin capacitances it drives, followed across instance ports and parents; output loads and the real driving cells are resolved the same way. Each region is then re-sized in place under its exact environment within its budget <var>B</var>. With more than one round, output arrivals and input departures are propagated between parent and child regions after every round, since a path through <var>k</var> regions needs <var>k</var> rounds to settle; a single round (the default) makes the loads and drivers exact.</p>
+
+<h3><span class="secnum">4.7</span>Read-Back</h3>
+
+<p>The mapped network is converted back into the region body. Inputs and outputs are paired with the recorded creation order. Every mapped gate becomes an instance of its library cell, and an unreadable gate is a hard error rather than a silent constant. An identity buffer whose output feeds only combinational outputs of the ABC network (region outputs or register data inputs), such as the decoupling buffers the output conversion inserts, is removed by aliasing its output to its input; buffers built for fanout always feed a gate and are kept. For a flip-flop cell with only an inverted output, an inverter at the root of a data input that feeds only that register is dropped, or the root gate is replaced by its cheapest inverting twin (same pins, complemented function) when that costs less than an inverter. Each crossing latch becomes a flip-flop instance whose drive strength is chosen from the register's output fanout, because fanout buffering never buffers a register output; a bit with a power-on value stays a native flop. Register instances carry attributes that let equivalence checking reassemble multi-bit registers. Finally, every mapped gate is attributed to the source location of the first region output whose cone reaches it, in one linear pass.</p>
+
+<h3><span class="secnum">4.8</span>Incremental Region Reuse</h3>
+
+<p>Each region stores its pre-mapping body and its mapped body. A mapped body is reused in place when (i) the new pre-mapping body is <em>structurally identical</em> to the stored one, established by an exact node bijection, and (ii) the resolved recipe, which already contains the substituted per-region budget, is byte-identical. Hashes serve only to discover candidates across renamed regions; the cache is a speedup, never an oracle, so a hash collision cannot become a miscompile. A salt covering the tool sources, the library contents, the register and memory options and the chosen flip-flop cell invalidates all rows when any of them changes. On a hit ABC is not started, and a run in which every region hits also skips the boundary refinement. Stored mapped bodies are written after refinement, so the cache holds the refined netlists.</p>
+
+<h3><span class="secnum">4.9</span>Parallel Mapping and Memory Admission</h3>
+
+<p>Regions are mapped in batches by parallel lanes, each with a private ABC session; results are published in partition order, which keeps the output deterministic. A lane is admitted only if its projected memory fits:</p>
+
+<div class="eq"><span class="eq-body"><var>P</var>(<var>R</var>) = 256 MiB + 8 &middot; |library| + 4 KiB &middot; &pi;(<var>R</var>), &nbsp;&nbsp; admit &hArr; <var>M</var> &lt; <var>L</var> &and; <var>P</var>(<var>R</var>) &lt; <var>L</var> &minus; <var>M</var></span><span class="eq-num">(9)</span></div>
+
+<p>where <var>M</var> is the larger of the measured footprint and the baseline plus all reservations, and <var>L</var> is the smaller of half the physical memory and the configured process budget. A region that cannot be admitted while no lane is running maps serially. Within a region, the footprint growth is sampled during blasting (counting the ABC objects the tape will create), after the replay, and around every flow step; a region whose growth exceeds the budget is refused rather than allowed to exhaust the host.</p>
+
+<h3><span class="secnum">4.10</span>Post-Mapping Architecture Trials</h3>
+
+<p>For regions below the large tier that contain adders or comparisons, multipliers, or shifts (constant-amount shifts included) whose architecture is automatic, alternative lowerings are evaluated after the whole design is mapped: adder in {ripple-carry, carry-lookahead, carry-skip}, multiplier in {array, tree}, and the two stage orders of the barrel shifter, at most eleven trials per region. Each trial restores the pre-mapping body, re-maps it with the candidate, and re-scores the design: area is summed over every instance of every module, and, under a delay target, a temporary network stitched across combinational region boundaries (registers cut the paths) is timed with the library model. Regions are visited in name order. With a target <var>T</var>, a region is tried only if the longest stitched path through it reaches min(<var>T</var>, current worst delay): any region on a path violating <var>T</var>, or, once <var>T</var> is met, the regions on the current critical path; eligibility is re-checked after every kept candidate. A candidate is kept if its descending-sorted endpoint delays are lexicographically better (0.001 ps tolerance), or, when they tie or the region has no target, if its area is smaller and its sorted endpoint-delay vector is not lexicographically worse; otherwise the previous body is restored.</p>
+
+</body>
+</html>

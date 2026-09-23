@@ -15,6 +15,45 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
+# The technology mappers `lhd synth --set synth.mapper=` / `lhd pass <mapper>`
+# select. Every script below asserts mapper-agnostic behavior (equivalence,
+# netlist shape, option handling, incremental reuse), so ONE script covers both
+# through the MAPPER env var; the abc targets keep their historical names and
+# only the `_synth` twins are new. ABC-internal claims (flow strings, GENLIB,
+# abc.rc aliases, the boundary re-refinement count) stay gated inside the
+# scripts -- see the `if [ "$MAPPER" = abc ]` blocks.
+_MAPPERS = [
+    ("", "abc"),
+    ("_synth", "synth"),
+]
+
+
+sh_test(
+    name = "lhd_unate_smoke",
+    srcs = ["lhd_unate_smoke.sh"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker"],
+)
+
+sh_test(
+    name = "lhd_synth_instances_smoke",
+    srcs = ["lhd_synth_instances_smoke.py"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker", "//pass/synth:measure_synth"],
+)
+
+sh_test(
+    name = "lhd_synth_instance_defs_smoke",
+    srcs = ["lhd_synth_instances_smoke.py"],
+    args = ["definitions"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker", "//pass/synth:measure_synth"],
+)
+
+sh_test(
+    name = "lhd_synth_instance_colors_smoke",
+    srcs = ["lhd_synth_instances_smoke.py"],
+    args = ["occurrences"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker", "//pass/synth:measure_synth"],
+)
+
 sh_test(
     name = "lhd_yosys_runfiles_smoke",
     srcs = ["lhd_yosys_runfiles_smoke.sh"],
@@ -1145,10 +1184,10 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
-# 2c-color-synthcones: `pass.color synth --set synth_alg=cones` -- one BACKWARD
+# 2c-color-synthcones: `pass.color synth --set pass.color.synth.mode=cones` -- one BACKWARD
 # cone per register din/enable, merged by shared logic under a predicted-AIG
 # threshold. The gtests pin the walk and the merge; this pins the plumbing they
-# cannot reach: the --set spelling, the recorded coloring_info (synth_alg,
+# cannot reach: the --set spelling, the recorded coloring_info (mode,
 # max_gate, and the unconditional "packed":true a first-wins cone needs), that
 # pass.partition and pass.abc accept the result, and that the partitioned design
 # is still LEC-equivalent.
@@ -1217,15 +1256,16 @@ sh_test(
 # canonical digest: a NoChange run is all hits and zero ABC; editing one module
 # re-synthesizes only the regions it touched; every assembled netlist is
 # LEC-gated against the original logic.
-sh_test(
-    name = "lhd_abc_incr_test",
+[sh_test(
+    name = "lhd_abc_incr_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_incr_test.sh"],
     data = _FLOW_DATA + [
         "//inou/prp:abc_tests",
         "//inou/prp:hier_tests",
     ],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # `lhd synth`: the one-shot compile -> color synth -> abc -> opentimer flow
 # over one in-memory design, plus the ONE shared incremental switch
@@ -1233,15 +1273,16 @@ sh_test(
 # warm re-run hits at both tiers with byte-identical Verilog, an honest cold
 # run, no-workdir scratch mode with --emit-dir lg:/report:, a read-only lg:
 # input, and the negative controls (one Liberty spelling, retired cache flags).
-sh_test(
-    name = "lhd_synth_test",
+[sh_test(
+    name = "lhd_synth_test" + suffix,
     size = "large",
     srcs = ["lhd_synth_test.sh"],
     data = _FLOW_DATA + [
         "//inou/prp:abc_tests",
         "//inou/prp:hier_tests",
     ],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can
 # exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
@@ -1249,12 +1290,13 @@ sh_test(
 # not fit. Pinned with memory_budget_mb so the refusal is deterministic on any
 # host: refuse + emit no partial netlist + allow_oversize override + no false
 # positive on a design that fits.
-sh_test(
-    name = "lhd_abc_memory_test",
+[sh_test(
+    name = "lhd_abc_memory_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_memory_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2opt-incr: design-size gate (node-count memory admission). pass.color warns and
 # pass.abc/lec refuse (with an override) when a flattened design is over the
@@ -1306,32 +1348,35 @@ sh_test(
 # NAND2x2 on the crossing driver), the refined netlist LECs against the
 # partition twin, boundary=false restores the load-free ports, and an all-hit
 # incremental run reuses the refined bodies without starting ABC.
-sh_test(
-    name = "lhd_abc_boundary_test",
+[sh_test(
+    name = "lhd_abc_boundary_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_boundary_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic.
-sh_test(
-    name = "lhd_abc_arith_test",
+[sh_test(
+    name = "lhd_abc_arith_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_arith_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2a-abc follow-on: the multiplier (array) + right-shift (sra) bit-blast and the
 # division blackbox. Maps mult/sra and keeps div native (with a div-blackbox
 # warning), proving every region LEC-equivalent to the original logic over signed
 # and unsigned operands, plus a non-default adder and a no-lib negative control.
-sh_test(
-    name = "lhd_abc_math_test",
+[sh_test(
+    name = "lhd_abc_math_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_math_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2a-abc subtask 5: sequential tech-mapping (seq=true). Flops cross into ABC as
 # latches and return as native flops (name + reset preserved); memories and Sub
@@ -1340,9 +1385,10 @@ sh_test(
 # One script shares the fixtures; each target selects a distinct regression
 # family so debug runs have bounded latency without dropping any mapping mode.
 [sh_test(
-    name = name,
+    name = name + suffix,
     srcs = ["lhd_abc_seq_test.sh"],
     args = [group],
+    env = {"MAPPER": mapper},
     data = _FLOW_DATA + [
         "abc_async_reset.prp",
         "abc_qn_fanout.prp",
@@ -1354,7 +1400,7 @@ sh_test(
     ("lhd_abc_seq_test", "registers"),
     ("lhd_abc_qn_test", "qn"),
     ("lhd_abc_memory_modes_test", "memory"),
-]]
+] for suffix, mapper in _MAPPERS]
 
 # pass.abc memory=true (explicitly enabled) bit-blast, on the shapes the constant-
 # address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
@@ -1396,12 +1442,13 @@ sh_test(
 # Whole-design flatten: `pass.color flat` + pass.abc/pass.partition inline the
 # hierarchy into ONE output module (flatten=auto), LEC-proven vs the original;
 # flatten=false keeps the classic per-def decomposition.
-sh_test(
-    name = "lhd_abc_flat_test",
+[sh_test(
+    name = "lhd_abc_flat_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_flat_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # Wide native wiring boundaries are demand-driven through ABC: a sparse read
 # cannot expand a 4k-bit bus into thousands of PI/readback selector nodes.
@@ -1882,4 +1929,10 @@ sh_test(
     size = "large",
     srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_synth_worker_smoke",
+    srcs = ["lhd_synth_worker_smoke.sh"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker"],
 )

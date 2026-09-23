@@ -47,25 +47,27 @@ struct Region_qor;  // abc_map.hpp
 class Incr_cache {
 public:
   struct Row {
-    std::string              module;  // cache-lib name of the mapped body (== module_name)
-    std::string              pre;     // cache-lib name of the pre-abc body ("p_"+module_name)
-    std::vector<std::string> satopt_facts;
-    std::string              recipe;   // verbatim resolved ABC recipe (the recipe gate)
-    std::vector<std::string> in, out;  // cached module port names (existence-checked on reuse)
-    int                      gates       = 0;
-    double                   area        = 0.0;
-    int                      logic_depth = -1;
-    float                    delay       = -1.0f;
-    std::string              crit_output;  // region output port with the worst arrival (a name)
-    std::string              crit_src;
-    int                      div_blackbox = 0;
-    uint64_t                 digest0      = 0;
-    uint64_t                 digest1      = 0;
-    bool                     digest_valid = false;
+    std::string                        module;  // cache-lib name of the mapped body (== module_name)
+    std::string                        pre;     // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::string                        recipe;   // verbatim resolved ABC recipe (the recipe gate)
+    std::vector<std::string>           in, out;  // cached module port names (existence-checked on reuse)
+    int                                gates       = 0;
+    double                             area        = 0.0;
+    int                                logic_depth = -1;
+    float                              delay       = -1.0f;
+    std::string                        crit_output;  // region output port with the worst arrival (a name)
+    std::string                        crit_src;
+    int                                div_blackbox = 0;
+    uint64_t                           digest0      = 0;
+    uint64_t                           digest1      = 0;
+    bool                               digest_valid = false;
     // Stored by THIS run: the mapped body still lives only in the output
     // library, because the copy into the cache library is deferred to save()
     // (see store()). Never persisted -- a loaded row's body is in lib().
-    bool                     in_outlib    = false;
+    bool                               in_outlib    = false;
+    std::shared_ptr<const std::string> evidence;
+    std::string                        evidence_file;
+    uint64_t                           evidence_bytes = 0, evidence_hash = 0;
   };
 
   struct Compare_result {
@@ -81,9 +83,10 @@ public:
   // Miss (default result) unless ALL hold: rb.reuse_eligible, a row keyed by
   // rb.module_name exists, its recipe matches VERBATIM, the cached pre-abc body
   // is structurally identical to `pre_body` (semdiff::structural_identical,
-  // matching_names), and every cached port name still exists on the fresh region.
+  // matching_names), and named ports retain their numeric IDs for body copying.
+  // Cross-name candidates instead compare using numeric IO identities.
   [[nodiscard]] Compare_result lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
-                                              std::string_view recipe, std::span<const std::string> facts = {});
+                                              std::string_view recipe);
 
   // Snapshot a freshly mapped region: add the metadata row and copy `pre_body`
   // (in `pre_lib`, under `pre_name`) into the cache's pre library -- `pre_lib`
@@ -98,23 +101,33 @@ public:
   // instead, and same-run reuse reads it straight out of `outlib` (see
   // Row::in_outlib). Best-effort; returns false on failure.
   bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name, const Region_qor& q,
-             std::string_view recipe, hhds::GraphLibrary* outlib, std::span<const std::string> facts = {});
+             std::string_view recipe, hhds::GraphLibrary* outlib);
 
   // Diagnostic (ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
   // (no mapped body, no ABC), so a second compare-only run can exercise the
   // rebuild/copy/save/load/compare path without paying for ABC.
   bool store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                 std::string_view recipe, std::span<const std::string> facts = {});
+                 std::string_view recipe);
 
   // Fill rb.body (the freshly-partitioned region shell in `outlib`) IN PLACE from
   // the cached mapped body -- no clone, no port stitch, name-hash gid preserved.
   // Returns false if the cached body is missing.
   [[nodiscard]] bool reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res, hhds::GraphLibrary* outlib);
+  // Lazy, bounded attachment loading. Missing/truncated/corrupt attachments are
+  // unavailable; alternative clients must remap rather than invent provenance.
+  [[nodiscard]] std::shared_ptr<const std::string> read_evidence(const Row& row) const;
+  static constexpr uint64_t                        max_evidence_bytes = 64ULL << 20;
 
   // Copy every deferred mapped body out of the output library, then persist
   // abc_cache.json (atomic tmp+rename) and the cache libraries. No-op when
   // nothing was stored. Must run while the output library is still alive.
   void save();
+  // Capture deferred region bodies in memory without publishing any files.
+  // A whole-design proof can then approve them after contextual ware trials.
+  void freeze_pending();
+  // Write a complete private snapshot plus directory + "_pre". Returns false
+  // if no rows changed. Never writes the live cache; I/O errors propagate.
+  bool stage_snapshot(const std::string& directory);
 
   // The boundary refinement (abc_boundary.cpp) re-sized a region's body in the
   // output library AFTER store() snapshotted its QoR: bring the row's
@@ -140,6 +153,7 @@ public:
                                           uint64_t memory_max_bits, std::string_view dff_desc);
 
 private:
+  void                save_to(const std::string& directory, bool strict);
   std::string         dir_;
   std::string         pre_dir_;  // dir_ + "_pre": the pre-body library (see cached_pre_lib)
   // The output library the deferred mapped bodies live in until save(). Set by
@@ -150,6 +164,12 @@ private:
   int                 hits_ = 0, misses_ = 0;
 
   absl::flat_hash_map<std::string, Row>                      rows_;  // module_name -> row
+  // A semantic edit can give an old name to a new specialization before the
+  // unchanged specialization is visited under a new name. Keep a lazy,
+  // private view of the saved generation for exact cross-name comparison.
+  // It is never written and is discarded before mapped bodies are frozen.
+  std::unique_ptr<Incr_cache>                                loaded_snapshot_;
+  bool                                                       saved_generation_readable_ = true;
   // Canonical digest + recipe -> previously mapped region names. The digest is
   // only a discovery index: every candidate still passes the exact structural
   // comparison before its mapped body can be reused.

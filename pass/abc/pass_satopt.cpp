@@ -31,6 +31,9 @@ public:
     }
     // Same order as pass.abc on its working copy, so the mux facts below are
     // proven on the definition ABC will later look up.
+    for (const auto& g : copies) {
+      livehd::abc::drop_dead_logic(g.get());
+    }
     livehd::abc::optimize_selects(copies, var.get("cache_dir", ""));
     livehd::abc::optimize_memories(copies, var.get("cache_dir", ""));
 

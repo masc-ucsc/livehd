@@ -16,6 +16,9 @@ namespace lhd {
 
 namespace {
 
+constexpr std::string_view kJsonPassSynth
+    = R"json({"schema_version":1,"name":"pass synth","description":"Bounded shared unate optimization with per-function ABC technology mapping, explicit rails, stitched-region proof and ABC baseline fallback. Selection uses proof and whole-design area/timing gates; unavailable or rejected candidates retain ABC. Persistent reuse follows lhd.incremental.","inputs":["lg"],"outputs":["lg","verilog"],"examples":["lhd pass synth lg:design --top top --set synth.liberty=cells.lib --emit-dir lg:net --workdir W","lhd synth design.v --top top --set synth.mapper=synth --set synth.liberty=cells.lib --workdir W"]})json";
+
 constexpr std::string_view kSteps
     = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
 constexpr std::string_view kEmitKinds
@@ -24,7 +27,7 @@ constexpr std::string_view kErrorClasses
     = R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
 
 constexpr std::string_view kJsonSynthCommand
-    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> optional pass.color reduce (synth.reduce=false by default; experimental synthesis-time reduction that can degrade QoR) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on \u2014 other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
+    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> optional pass.color reduce (synth.reduce=false by default; experimental synthesis-time reduction that can degrade QoR) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on \u2014 other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map (or pass.synth when synth.mapper=synth) -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + <mapper>_cache (abc_cache / synth_cache) + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; with synth.mapper=synth it also carries synth:<the pass.synth unate report (per-region decomposition or ABC fallback), also written as <qor>.synth.json>. --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | pass.synth.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v","lhd synth cpu.sv --top cpu --set synth.mapper=synth --set synth.liberty=cells.lib --workdir W"]})json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -174,6 +177,17 @@ int describe_option(const Options& opts, const std::string& name) {
   auto prefix = name.substr(0, name.rfind('.'));
   for (const auto& o : all) {
     if (o.name.size() > prefix.size() && o.name.compare(0, prefix.size(), prefix) == 0 && o.name[prefix.size()] == '.') {
+      // The same flag under the other namespace of the SAME method (e.g.
+      // pass.color.max_gate -> pass.color.synth.max_gate) is a moved option,
+      // not a typo: name its one spelling.
+      const auto leaf = std::string_view{name}.substr(prefix.size() + 1);
+      for (const auto& other : all) {
+        if (other.method == o.method && other.name.size() > leaf.size() && other.name.ends_with(leaf)
+            && other.name[other.name.size() - leaf.size() - 1] == '.') {
+          std::print(stderr, "lhd describe: unknown option '{}' -- it is spelled '{}'\n", name, other.name);
+          return 1;
+        }
+      }
       std::print(stderr,
                  "lhd describe: unknown option '{}' (`lhd list options {}\\..*` shows what {} accepts)\n",
                  name,
@@ -622,8 +636,11 @@ int describe_command(const Options& opts) {
     return 0;
   }
   if (name == "pass") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), satopt (prepare combinational mux/memory proofs for ABC), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), formal (single-design property checks: proven obligations marked in place; `lhd describe \"pass formal\"`), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","opentimer","formal","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+    print_json_line(R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), satopt (prepare combinational mux/memory proofs for ABC), abc (combinational ABC tech-map), synth (shared unate optimization with ABC tmap and fallback), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), formal (single-design property checks: proven obligations marked in place; `lhd describe \"pass formal\"`), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","synth","opentimer","formal","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+    return 0;
+  }
+  if (name == "pass synth") {
+    print_json_line(kJsonPassSynth);
     return 0;
   }
   if (name == "lnast-dump") {
@@ -914,18 +931,29 @@ int help_pass(const std::string& sub) {
         "  cgen     one color per cone-sink signature — each primary output, plus one\n"
         "           shared flop/mem next-state bucket; logic feeding several sinks gets its\n"
         "           own id (the granularity inou.cgen.sim uses to break false comb loops)\n"
-        "  synth    three boundary modes behind --set synth_alg. The DEFAULT, cones, walks\n"
-        "           BACKWARD: one cone per register din and per register enable, cones\n"
-        "           record how much logic they share, and the most-sharing pairs merge\n"
-        "           while the union stays under --set max_gate (a PREDICTED generic-AIG\n"
-        "           size, not the GE size window). --set synth_alg=synth|pipe instead\n"
+        "  synth    three boundary modes behind --set pass.color.synth.mode. The DEFAULT,\n"
+        "           cones, walks BACKWARD: one cone per register din and per register\n"
+        "           enable, cones record how much logic they share, and the most-sharing\n"
+        "           pairs merge while the union stays under pass.color.synth.max_gate (a\n"
+        "           PREDICTED generic-AIG size, not the GE size window). max_gate is soft:\n"
+        "           a color under pass.color.synth.min_color_nodes (default 12) that is\n"
+        "           also light (<= max_gate/64) joins the color it overlaps most, past\n"
+        "           max_gate if need be, and a control group that small stays in data.\n"
+        "           Dead logic (e.g. an unread `unique if` Hotmux compile keeps for its\n"
+        "           obligation) shapes no color; pass.abc deletes it. mode=synth|pipe\n"
         "           propagate one id FORWARD into combinational clusters bounded by CUT\n"
         "           nodes. A cut owns its own region and is a barrier in both directions:\n"
         "           it never inherits a neighbour's id and never propagates its own, so a\n"
         "           register cannot weld its din cone to its enable/stall cone (nor its\n"
         "           fan-out cones to each other). State (flop/mem/latch/stateful sub)\n"
         "           always cuts; `synth` also cuts mult/div and >8-bit adders, `pipe` cuts\n"
-        "           at state only. Both then reshape with the min_ge/max_ge GE window\n"
+        "           at state only. Both then reshape with the min_ge/max_ge GE window.\n"
+        "           Every synth-only knob is spelled pass.color.synth.<flag>. Two default\n"
+        "           profiles, picked by pass.color.synth.mapper (`lhd synth` sets it from\n"
+        "           synth.mapper): abc cuts at every stop_mux/stop_arith/stop_cmp/\n"
+        "           stop_shift operator (smaller ABC regions); synth turns those cuts off\n"
+        "           so a color runs register to register, as domino mapping needs. An\n"
+        "           explicit stop_* setting overrides either profile\n"
         "  path     register-to-register regions: seed every flop/reg/mem and color its\n"
         "           backward+forward cone up to real (non-clk/rst) wire names; --set\n"
         "           instance=a,b instead seeds named nodes forward-only, bounded by the\n"
@@ -956,8 +984,9 @@ int help_pass(const std::string& sub) {
         "examples:\n"
         "  lhd pass color acyclic --top m lg:dir\n"
         "  lhd pass color flat --top m lg:dir      # whole hierarchy -> one color\n"
-        "  lhd pass color synth --top m lg:dir --set color.max_gate=30000 --stats\n"
-        "  lhd pass color synth --top m lg:dir --set pass.color.synth_alg=pipe --stats\n");
+        "  lhd pass color synth --top m lg:dir --set pass.color.synth.max_gate=30000 --stats\n"
+        "  lhd pass color synth --top m lg:dir --set pass.color.synth.mode=pipe --stats\n"
+        "  lhd pass color synth --top m lg:dir --set pass.color.synth.mapper=synth --stats\n");
     return print_options_section({"pass.color."});
   }
   if (sub == "partition") {
@@ -1013,7 +1042,8 @@ int help_pass(const std::string& sub) {
         "lhd pass satopt — prepare combinational proofs for ABC\n\n"
         "usage: lhd pass satopt [--top M] lg:DIR --workdir W\n"
         "Compile-time opt-in: --set pass.satopt=true (default false).\n"
-        "ABC runs this analysis by default: --set pass.abc.satopt=false disables it.\n"
+        "lhd synth runs this analysis by default and rewrites the proven mux bits into its\n"
+        "private copy before either mapper: --set pass.abc.satopt=false disables it.\n"
         "A prior analysis is reused when the definition is unchanged.\n"
         "Proofs live in W/satopt_cache and follow lhd.incremental.\n\n"
         "flags:\n"
@@ -1070,6 +1100,18 @@ int help_pass(const std::string& sub) {
         "  lhd pass analyze --top m lg:dir\n"
         "  lhd pass analyze lg:dir --set pass.analyze.checks=loops --set pass.analyze.strict=true\n");
     return print_options_section({"pass.analyze."});
+  }
+  if (sub == "synth") {
+    std::print(
+        "lhd pass synth — unate decomposition with interchangeable technology mapping\n"
+        "usage: lhd pass synth lg:DIR --top M --set synth.liberty=cells.lib --emit-dir lg:OUT --workdir W\n"
+        "\n"
+        "Every region decomposes into the fewest unate functions over dual-rail inputs (depth unbounded by\n"
+        "default; per-function support/literals/series limits), then ABC technology-maps each function on its\n"
+        "own (tmap only). A region the optimizer cannot handle takes the ordinary ABC flow. State and latency\n"
+        "are preserved; equivalence is checked separately with `lhd lec`.\n"
+        "The fused command selects this pass with --set synth.mapper=synth; abc.* tuning is inherited.\n");
+    return print_options_section({"pass.synth."});
   }
   if (sub == "abc") {
     std::print(
@@ -1378,6 +1420,10 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     }
     if (sub == "satopt") {
       return describe_as("pass satopt");
+    }
+    if (sub == "synth") {
+      print_json_line(kJsonPassSynth);
+      return 0;
     }
     if (sub == "abc") {
       print_json_line(kJsonPassAbc);

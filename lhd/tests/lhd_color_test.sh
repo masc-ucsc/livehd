@@ -41,12 +41,12 @@ echo "PASS: all pass.color algorithms run through the lhd CLI"
 # lhd_color_cones_test.sh, this only keeps the mode in the CLI smoke loop.
 for SALG in pipe synth cones; do
   option_args=()
-  [ "$SALG" = "cones" ] || option_args=(--set "color.synth_alg=$SALG")
+  [ "$SALG" = "cones" ] || option_args=(--set "color.synth.mode=$SALG")
   D="$W/synth_$SALG"
   mkdir -p "$D"
   run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
   run pass color synth --top "$TOP" ${option_args[@]+"${option_args[@]}"} lg:"$D/lg" --workdir "$D/w2"
-  echo "PASS: color synth synth_alg=$SALG ran"
+  echo "PASS: color synth mode=$SALG ran"
 done
 
 # `flat` must yield exactly ONE color across the WHOLE hierarchy (the flatten

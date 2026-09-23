@@ -44,12 +44,9 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   }
   // Same for the `synth.*` command namespace (synth_command, kSynthSetOptions).
   if (key.size() > 6 && key.substr(0, 6) == "synth.") {
-    auto flag = key.substr(6);
-    for (const auto& s : kSynthSetOptions) {
-      if (s.name == flag) {
-        return std::string{key};
-      }
-    }
+    // pass.synth is distinct: an unknown synth.* command option must not be
+    // reinterpreted as a flag of that pass. Use its explicit pass.synth prefix.
+    return std::string{key};
   }
   // A REMOVED namespace (kRenamedSetPasses: `lec.*`, `compile.sim.*`, ...) is
   // kept verbatim so check_known_set_passes raises its directed "was removed"
@@ -114,15 +111,7 @@ std::vector<Set_option> list_set_options() {
   out.push_back(Set_option{"pass.satopt",
                            "pass.satopt",
                            "false",
-                           "Run satopt during compilation, independently of synthesis; ABC consumes the proven facts later"});
-  const auto is_formal_common = [](std::string_view flag) {
-    for (const auto& f : kFormalCommonFlags) {
-      if (f == flag) {
-        return true;
-      }
-    }
-    return false;
-  };
+                           "Run satopt during compilation, independently of synthesis; lhd synth reuses the proofs later"});
   for (const auto& sp : kSetPasses) {
     if (sp.list == Set_pass::List::none) {
       continue;  // legacy alias spelling: accepted by --set, never listed
@@ -145,14 +134,14 @@ std::vector<Set_option> list_set_options() {
       if (attr.help.starts_with("DEPRECATED") || attr.help.starts_with("INTERNAL")) {
         continue;
       }
-      // kFormalCommonFlags is a pass.lec vocabulary: the common/specific split
-      // keys on (method, flag), so a pass.formal label that merely SHARES a
-      // name with a pass.lec one (timeout, reset) is not hidden by collision.
-      const bool is_lec_common = sp.method == "pass.lec" && is_formal_common(flag);
-      if (sp.list == Set_pass::List::common && !is_lec_common) {
+      // The common/specific split keys on (method, flag), so a pass.formal
+      // label that merely SHARES a name with a pass.lec one (timeout, reset)
+      // is not hidden by collision.
+      const bool is_common = set_flag_is_common(sp.method, flag);
+      if (sp.list == Set_pass::List::common && !is_common) {
         continue;
       }
-      if (sp.list == Set_pass::List::specific && is_lec_common) {
+      if (sp.list == Set_pass::List::specific && is_common) {
         continue;
       }
       out.push_back(Set_option{std::format("{}.{}", sp.set_name, flag), std::string{sp.method}, attr.default_value, attr.help});

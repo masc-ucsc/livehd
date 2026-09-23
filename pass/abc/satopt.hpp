@@ -41,6 +41,10 @@ struct Select_fact {
 struct Select_satopt {
   uint64_t candidates = 0, survivors = 0, proven = 0, reused = 0, muxes = 0, hotmux_arms = 0, enables = 0;
 };
+struct Mux_satopt {
+  uint64_t candidates = 0, survivors = 0, proven = 0, muxes = 0, arms = 0, bits = 0;
+  bool     reused = false;
+};
 class Satopt_seeds {
   struct Impl;
   std::unique_ptr<Impl> impl_;
@@ -62,7 +66,17 @@ std::shared_ptr<const Satopt_result>    satopt(hhds::Graph* graph, std::string_v
 // selector (pass/formal's Prover); an Unknown leaves it alone.
 Select_satopt                           optimize_selects(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                                                          std::string_view                                 cache_dir = {});
-bool                                    satopt_crosses(const hhds::Node_class& node);
-std::optional<std::vector<std::string>> satopt_region_facts(const Satopt_result&                  facts,
-                                                            const livehd::partition::Region_body& region);
+// Proves per-bit mux arm facts (satopt) and applies them as an LGraph rewrite:
+// each proven arm bit is replaced by its constant or by the other arm's
+// (complemented) bit, on that arm's input only. Run on the colored source
+// right before partitioning, so every mapper (ABC or pass.synth) sees the
+// simplified arms. `all_regions=false` keeps only muxes whose arm or control
+// logic comes from another color.
+Mux_satopt                              optimize_muxes(hhds::Graph* graph, std::string_view cache_dir = {}, bool all_regions = false);
+// Deletes combinational logic no output, state or instance observes, on a
+// PRIVATE synthesis copy. Compile keeps a dead Hotmux on purpose -- its
+// `unique if` exclusivity is an obligation sim/formal still check -- but
+// synthesis may ignore obligations, and each such cone would otherwise become
+// its own tiny region and a pile of select proofs. Returns the nodes deleted.
+uint64_t                                drop_dead_logic(hhds::Graph* graph);
 }  // namespace livehd::abc

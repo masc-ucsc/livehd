@@ -16,6 +16,46 @@
 
 namespace gu = livehd::graph_util;
 
+namespace livehd::partition {
+
+struct Flat_instance_path {
+  hhds::Gid                         root_gid;
+  std::vector<hhds::Hier_attr_step> steps;
+
+  hhds::AttrRef<attrs::hier_color_t> color_attr(const hhds::Node_class& node) const {
+    auto node_steps = steps;
+    // Hierarchy views put the Sub itself at its call path, even when its body
+    // is opaque. Match that convention for preserved loop/module boundaries.
+    if (gu::type_op_of(node) == Ntype_op::Sub && node.get_subnode_io()) {
+      auto site = node.get_definition_index();
+      node_steps.push_back({site.gid, site.value, std::nullopt});
+    }
+    return {node.get_graph(),
+            hhds::make_node_attr_key(static_cast<uint64_t>(node.get_debug_nid() & ~static_cast<hhds::Nid>(3))),
+            root_gid,
+            std::move(node_steps)};
+  }
+};
+
+int32_t Flat_origin::color() const {
+  if (instance && src_node.get_graph()->has_attr(attrs::hier_color)) {
+    if (auto a = instance->color_attr(src_node); a.has()) {
+      return a.get();
+    }
+  }
+  return gu::node_color_of(src_node);
+}
+
+void Flat_origin::set_color(int32_t color) const {
+  if (instance && !instance->steps.empty()) {
+    instance->color_attr(src_node).set(color);
+  } else {
+    gu::set_color(src_node, color);
+  }
+}
+
+}  // namespace livehd::partition
+
 namespace {
 
 struct Port_shape {
@@ -28,11 +68,12 @@ struct Port_shape {
 // cloned independently (their node/pin maps must not alias — hhds Node/Pin
 // identity is nid-only, shared across instances of one def).
 struct Ictx {
-  hhds::Graph*     src    = nullptr;  // the def body this context clones
-  Ictx*            parent = nullptr;  // enclosing context (nullptr for top)
-  hhds::Node_class inst;              // the Sub node in parent->src (invalid for top)
-  std::string      prefix;            // dotted instance path ("" for top)
-  uint32_t         synth_region_id = 0;
+  hhds::Graph*                                                 src    = nullptr;  // the def body this context clones
+  Ictx*                                                        parent = nullptr;  // enclosing context (nullptr for top)
+  hhds::Node_class                                             inst;              // the Sub node in parent->src (invalid for top)
+  std::string                                                  prefix;            // dotted instance path ("" for top)
+  uint32_t                                                     synth_region_id = 0;
+  std::shared_ptr<const livehd::partition::Flat_instance_path> instance;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;   // src node -> flat node (cloned nodes only)
   absl::flat_hash_map<hhds::Node_class, Ictx*>            child_ctx;  // src design-Sub node -> child context
@@ -98,11 +139,20 @@ private:
 };
 
 Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class& inst, std::string prefix) {
-  auto& c    = arena_.emplace_back();
-  c.src      = src;
-  c.parent   = parent;
-  c.inst     = inst;
-  c.prefix   = std::move(prefix);
+  auto& c        = arena_.emplace_back();
+  c.src          = src;
+  c.parent       = parent;
+  c.inst         = inst;
+  c.prefix       = std::move(prefix);
+  auto path      = std::make_shared<livehd::partition::Flat_instance_path>();
+  path->root_gid = top_->get_gid();
+  if (parent != nullptr) {
+    path->steps = parent->instance->steps;
+    auto site   = inst.get_definition_index();
+    // Compact loops stay opaque; ordinary sites have no loop ordinal.
+    path->steps.push_back({site.gid, site.value, std::nullopt});
+  }
+  c.instance = std::move(path);
   auto input = src->get_input_node();
   if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
     c.synth_region_id = id.get();
@@ -190,11 +240,10 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (auto a = orig.attr(livehd::attrs::native_comb_boundary); a.has()) {
     neo.attr(livehd::attrs::native_comb_boundary).set(a.get());
   }
-  // The flat per-def color is what pass.partition consumes downstream — carry
-  // it verbatim so the flattened def partitions exactly like the hierarchy did
-  // (per-instance hier colors are a different storage; flatten works on the
-  // compact per-def coloring like the Partitioner itself).
-  if (auto c = gu::node_color_of(orig); c != 0) {
+  // Virtual coloring writes occurrence overrides on shared definitions. The
+  // physical flat view must recover that exact membership for partitioning.
+  const livehd::partition::Flat_origin source{.def_gid = ctx->src->get_gid(), .src_node = orig, .instance = ctx->instance};
+  if (auto c = source.color(); c != 0) {
     neo.attr(livehd::attrs::color).set(c);
   }
   // Formal markers ride the node (pass.abc reads `proven` off fproperty Subs to
@@ -316,7 +365,8 @@ void Flattener::create_nodes(Ictx* ctx) {
     }
     ctx->node_map[n] = neo;
     if (origin_ != nullptr) {
-      origin_->emplace(neo, livehd::partition::Flat_origin{.def_gid = ctx->src->get_gid(), .src_node = n});
+      origin_->emplace(neo,
+                       livehd::partition::Flat_origin{.def_gid = ctx->src->get_gid(), .src_node = n, .instance = ctx->instance});
     }
     carry_node_attrs(ctx, n, neo);
   }

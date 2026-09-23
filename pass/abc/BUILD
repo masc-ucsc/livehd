@@ -37,6 +37,7 @@ filegroup(
 
 genrule(
     name = "abc_salt",
+    visibility = ["//pass/synth:__pkg__"],
     srcs = [
         ":mapper_srcs",
         "//graph",  # private occurrence expansion and inlining
@@ -136,6 +137,19 @@ cc_test(
         "//graph",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
+    name = "abc_flow_test",
+    srcs = ["abc_flow_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/prp:abc_tests"],
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "@abc",
+        "@googletest//:gtest_main",
     ],
 )
 

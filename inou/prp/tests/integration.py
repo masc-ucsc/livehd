@@ -57,7 +57,8 @@ def check(lhd, impl, ref, top, work, extra=(), ref_top=None, strict=False):
         raise RuntimeError('LEC failed')
 
 
-def roundtrip(lhd, source, meta, work):
+def roundtrip(lhd, source, meta, work, mapper='abc'):
+    del mapper  # the writer roundtrip never technology-maps
     top = meta.get('top', source.stem)
     out = work / 'pyrope'
     run([lhd, 'compile', source, '--top', top, '--emit-dir', 'pyrope:' + str(out),
@@ -73,7 +74,7 @@ def roundtrip(lhd, source, meta, work):
     check(lhd, 'lg:' + str(work / 'impl'), str(source), top, work / 'lec', strict=True)
 
 
-def synth(lhd, source, meta, work):
+def synth(lhd, source, meta, work, mapper='abc'):
     fixture = source
     source = source.parent / meta['source'] if 'source' in meta else source
     top = meta.get('top', tags(source).get('pyrope_top', source.stem))
@@ -91,7 +92,8 @@ def synth(lhd, source, meta, work):
             lib = Path('inou/prp/tests/abc') / (lib_name + '.lib')
             run([lhd, 'synth', 'lg:' + str(base / 'source'), '--top', top,
                  '--set', 'synth.liberty=' + str(lib), '--set', 'synth.opentimer=false',
-                 '--set', 'synth.threads=1', *settings(meta.get('synth_set', '')),
+                 '--set', 'synth.threads=1', '--set', 'synth.mapper=' + mapper,
+                 *settings(meta.get('synth_set', '')),
                  '--emit-dir', 'lg:' + str(dest / 'mapped'), '--emit', 'verilog:' + str(dest / 'mapped.v'),
                  '--emit', 'diagnostics:' + str(dest / 'diagnostics.jsonl'), '--workdir', dest / 'synth'])
             nonempty(dest / 'mapped.v')
@@ -126,16 +128,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['roundtrip', 'synth'])
     parser.add_argument('source', type=Path)
+    # One fixture list, both technology mappers: `lhd synth --set synth.mapper=`.
+    parser.add_argument('mapper', nargs='?', default='abc', choices=['abc', 'synth'])
     args = parser.parse_args()
     lhd = os.environ.get('LHD') or ('./bazel-bin/lhd/lhd' if Path('bazel-bin/lhd/lhd').exists() else './lhd/lhd')
     root = Path(tempfile.mkdtemp(prefix='integration_', dir=os.environ.get('TEST_TMPDIR')))
     try:
-        globals()[args.mode](lhd, args.source, tags(args.source), root)
+        globals()[args.mode](lhd, args.source, tags(args.source), root, args.mapper)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print('FAIL:', error, '\nArtifacts:', root, file=sys.stderr)
         return 1
     shutil.rmtree(root)
-    print('PASS:', args.mode, args.source)
+    print('PASS:', args.mode, args.source, args.mapper)
     return 0
 
 

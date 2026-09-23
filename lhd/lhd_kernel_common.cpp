@@ -615,7 +615,13 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
     // it in the hint) has to happen with fd 1 already restored, and the
     // redirect only lifts when this scope ends.
     try {
-      Pass::eprp.run_method_now(method, var, labels);
+      if (method == "pass.synth") {
+        auto contextual                  = labels;
+        contextual["invocation_context"] = synth_invocation_context(opts, res, labels);
+        Pass::eprp.run_method_now(method, var, contextual);
+      } else {
+        Pass::eprp.run_method_now(method, var, labels);
+      }
     } catch (...) {
       failure = std::current_exception();
     }
@@ -711,6 +717,22 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
     }
     labels[flag] = value;
   }
+}
+
+void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
+  // Disjoint by construction (check_known_set_passes gives every pass.color
+  // option one spelling), so the order is immaterial.
+  merge_sets(opts, "pass.color", labels);
+  merge_sets(opts, "pass.color.synth", labels);
+}
+
+void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
+  if (method == "pass.synth") {
+    // pass.synth exposes ABC's whole mapping vocabulary, so the ABC namespace is
+    // the shared spelling; the pass's own namespace is merged last and wins.
+    merge_sets(opts, "pass.abc", labels);
+  }
+  merge_sets(opts, method, labels);
 }
 
 // Validate every --set/--config entry against the live registry: a typo'd
@@ -812,17 +834,27 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
-    if (pass == "pass.abc" && flag == "library") {
+    if ((pass == "pass.abc" || pass == "pass.synth") && flag == "library") {
       // ONE Liberty spelling for the whole CLI: `synth.liberty`. Two knobs for
       // the same file is how `lhd pass abc --set synth.liberty=asap7.lib`
       // tech-mapped against the DEFAULT sky130 library and still reported
       // success -- the typed flag named a real option, just not the one
       // pass.abc read. pass.abc now resolves synth.liberty like everyone else.
       throw Lhd_error{"usage",
-                      "--set/--config 'pass.abc.library' was removed",
+                      std::format("--set/--config '{}.library' was removed", pass),
                       std::format("use --set synth.liberty={0} instead (the one Liberty every reader shares: pass.abc, "
-                                  "pass.opentimer and `lhd synth`)",
+                                  "pass.synth, pass.opentimer and `lhd synth`)",
                                   value)};
+    }
+    if (pass == "pass.synth" && (flag == "timing_files" || flag == "invocation_context")) {
+      // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef and the lhd
+      // invocation record). synth_command overwrites them after merge_sets, so a
+      // user --set silently did nothing; refuse it and name the real spelling.
+      throw Lhd_error{"usage",
+                      std::format("--set/--config 'pass.synth.{}' is INTERNAL", flag),
+                      flag == "timing_files"
+                          ? "the timing environment comes from --set synth.liberty / synth.sdc / synth.spef"
+                          : "the invocation record is captured by the lhd kernel, not by a --set"};
     }
     if (pass == "compile.yosys" && flag == "liberty") {
       // The yosys front-end's Liberty tech-map knob was dead code (the label was
@@ -887,6 +919,9 @@ void check_known_set_passes(const Options& opts) {
                         std::format("the synth.* namespace takes: {}; pass tuning rides the pass namespaces (abc.*, color.*, "
                                     "opentimer.*)",
                                     known)};
+      }
+      if (opt->kind == Synth_set_option::Kind::mapper && value != "abc" && value != "synth") {
+        throw Lhd_error{"usage", "synth.mapper expects abc|synth", ""};
       }
       if (opt->kind == Synth_set_option::Kind::integer) {
         unsigned parsed      = 0;
@@ -1039,6 +1074,37 @@ void check_known_set_passes(const Options& opts) {
                       std::format("--set/--config references unknown pass '{}'", pass),
                       near.empty() ? std::format("known passes: {} (`lhd list options`)", known)
                                    : std::format("{}\nknown passes: {}", near, known)};
+    }
+    if (method == "pass.color") {
+      // The synth coloring's own options live under pass.color.synth.* (and
+      // `synth_alg` became `mode`, which that namespace already says). Both
+      // namespaces reach the one pass.color method, so the split is enforced
+      // here: every option has exactly ONE spelling, and any other one answers
+      // with the copy-pasteable replacement instead of silently applying.
+      std::string_view leaf = flag == "synth_alg" ? std::string_view{"mode"} : std::string_view{flag};
+      for (const auto& [oldf, newf] : kRenamedFlags) {
+        if (oldf == leaf) {
+          leaf = newf;  // e.g. `min` -> `min_ge`, now also under pass.color.synth
+          break;
+        }
+      }
+      if (const auto* cm = Pass::eprp.get_method(method); cm != nullptr && cm->has_label(leaf)) {
+        const std::string_view want = set_flag_is_common(method, leaf) ? "pass.color" : "pass.color.synth";
+        if (pass != want || leaf != flag) {
+          throw Lhd_error{"usage",
+                          std::format("--set/--config '{}.{}' is {}spelled '{}.{}'",
+                                      pass,
+                                      flag,
+                                      want == "pass.color" && leaf == flag ? "" : "now ",  // never lived there
+                                      want,
+                                      leaf),
+                          std::format("use --set {}.{}={} instead (options only the synth coloring reads live under "
+                                      "pass.color.synth.*; everything else stays pass.color.*)",
+                                      want,
+                                      leaf,
+                                      value)};
+        }
+      }
     }
     if (is_kernel_label(flag)) {
       throw Lhd_error{"usage",

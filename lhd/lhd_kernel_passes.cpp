@@ -746,7 +746,7 @@ void pass_command(Options& opts, Result& res) {
     labels["alg"]  = alg;
     labels["seed"] = opts.seed;  // the shared `lhd.seed` (mincut RNG); no per-pass seed option
     set_top_label(opts, var, labels, "pass.color");
-    merge_sets(opts, "pass.color", labels);
+    merge_color_sets(opts, labels);
     if (opts.stats) {
       labels["stats"] = "true";  // shared --stats / lhd.stats selection
     }
@@ -813,22 +813,25 @@ void pass_command(Options& opts, Result& res) {
       }
       res.outputs.push_back(lg_out->path);
     }
-  } else if (sub == "abc") {
-    Eprp_var var;
+  } else if (sub == "abc" || sub == "synth") {
+    const auto method = std::string{"pass."} + sub;
+    Eprp_var   var;
     load_lg_into_var(lg_in, var);
     if (var.graphs.empty()) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
     const auto*         lg_out = graph_out ? &*graph_out : nullptr;
     Eprp_var::Eprp_dict labels;
-    set_top_label(opts, var, labels, "pass.abc");
+    set_top_label(opts, var, labels, method);
     if (lg_out != nullptr) {
       if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
-        throw Lhd_error{"usage", "abc --emit-dir lg: must differ from the input lg:", ""};
+        throw Lhd_error{"usage", std::format("{} --emit-dir lg: must differ from the input lg:", sub), ""};
       }
       std::error_code ec;
-      fs::remove_all(lg_out->path, ec);
-      ensure_dir(lg_out->path);
+      if (sub != "synth") {
+        fs::remove_all(lg_out->path, ec);
+        ensure_dir(lg_out->path);
+      }
       labels["out"] = lg_out->path;
     }
     // QoR sidecar (2opt-freq A): default under --workdir. A stats request
@@ -839,13 +842,18 @@ void pass_command(Options& opts, Result& res) {
     if (user_workdir || !ephemeral_qor.empty()) {
       labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "qor.json").string() : ephemeral_qor;
     }
-    merge_sets(opts, "pass.abc", labels);
+    merge_mapper_sets(opts, method, labels);
     // THE Liberty (synth.liberty, else the $HAGENT_TECH_DIR default): the one
     // spelling every Liberty reader shares, so `lhd pass abc` and a later
     // `lhd pass opentimer` on the same netlist can never be handed different
     // cells. Set AFTER merge_sets because `pass.abc.library` is not a user knob
     // (check_known_set_passes refuses it and names synth.liberty).
     labels["library"] = resolve_liberty(opts);
+    if (sub == "synth") {
+      const auto sdc         = synth_set(opts, "sdc", "");
+      const auto spef        = synth_set(opts, "spef", "");
+      labels["timing_files"] = labels["library"] + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
+    }
     labels["threads"] = synth_set(opts, "threads", "0");
     res.inputs.push_back(labels["library"]);
     if (opts.stats) {
@@ -857,9 +865,15 @@ void pass_command(Options& opts, Result& res) {
     // policy, not a user knob (set AFTER merge_sets on purpose); the user
     // switch is the one shared `lhd.incremental` (no per-pass cache flag).
     if (user_workdir && opts.incremental) {
-      labels["cache_dir"] = (fs::path(opts.workdir) / "abc_cache").string();
+      labels["cache_dir"] = (fs::path(opts.workdir) / (sub == "synth" ? "synth_cache" : "abc_cache")).string();
     }
-    run_step("pass.abc", var, labels, opts, res);
+    run_step(method, var, labels, opts, res);
+    if (sub == "synth" && user_workdir && labels.contains("qor")) {
+      const auto provenance = labels["qor"] + ".provenance";
+      if (fs::exists(provenance)) {
+        res.outputs.push_back(provenance);
+      }
+    }
     if (lg_out != nullptr) {
       {
         Phase_timer phase(res, "lg.save");

@@ -11,7 +11,8 @@ run() {
   if [[ "$1" == synth ]]; then
     control_args=()
     [ "$CTRL_CONES" = "true" ] || control_args=(${control_args[@]+"${control_args[@]}"})
-    "$LHD" "$@" --set "pass.color.ctrl_cones=$CTRL_CONES" -q
+    # A tiny fixture: keep its small colors, or no mux would cross a region.
+    "$LHD" "$@" --set "pass.color.synth.ctrl_cones=$CTRL_CONES" --set pass.color.synth.min_color_nodes=0 -q
   else
     "$LHD" "$@" -q
   fi
@@ -47,20 +48,24 @@ done
 run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
   --set synth.threads=1 --workdir "$W/on" --result-json "$W/warm.json"
 python3 - "$W" "$CTRL_CONES" <<'PY'
-import json, pathlib, sys
+import json, pathlib, re, sys
 w = pathlib.Path(sys.argv[1])
 def data(name): return json.loads((w / (name + '.json')).read_text())
+# The proven per-bit mux facts are applied to the design before partitioning
+# (optimize_muxes); pass.abc logs how many arm bits it rewrote.
+# The warm run below appends to the `on` logs, so read the first synth only.
+def rewritten(mode):
+    log = sorted((w / mode / 'logs').glob('*pass_abc*.log'))[0]
+    return sum(int(m.group(1)) for m in re.finditer(r'rewrote \d+ arm\(s\) of \d+ mux\(es\), (\d+) bit\(s\)', log.read_text()))
 assert not any(s.startswith('pass.satopt') for s in data('default')['recipe'])
 assert any(s.startswith('pass.satopt') for s in data('explicit')['recipe'])
 for mode in ('on', 'explicit'):
-    facts = sum(r['satopt_facts'] for r in data(mode)['qor']['abc']['regions'])
     # Without control cones this fixture may have no cross-region support.
     # Explicit preparation and automatic preparation must still agree.
     if sys.argv[2] == 'true':
-        assert facts > 0
-assert sum(r['satopt_facts'] for r in data('on')['qor']['abc']['regions']) == sum(
-    r['satopt_facts'] for r in data('explicit')['qor']['abc']['regions'])
-assert sum(r['satopt_facts'] for r in data('off')['qor']['abc']['regions']) == 0
+        assert rewritten(mode) > 0, mode
+assert rewritten('on') == rewritten('explicit')
+assert rewritten('off') == 0
 assert data('warm')['incremental']['abc']['hits'] > 0
 PY
 "$LHD" help pass satopt > /dev/null

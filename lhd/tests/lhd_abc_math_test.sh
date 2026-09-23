@@ -12,7 +12,7 @@
 #                                            mult/div as region seeds)
 #   pass partition --emit-dir lg:re         (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models
-#   pass abc --emit-dir lg:net              (bit-blast mult/sra/div)
+#   pass <mapper> --emit-dir lg:net              (bit-blast mult/sra/div)
 #   lhd lec --impl lg:net --ref lg:re --lib lg:models   (complete hierarchy)
 #
 # Coverage: unsigned + signed + n-ary multiply (array multiplier), logical +
@@ -23,6 +23,19 @@
 # Hermetic: small vendored Liberty (inou/prp/tests/abc/test.lib), not the PDK.
 
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -47,8 +60,8 @@ REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
 [ -n "$REGIONS" ] || fail "no __cN region modules in the partition twin: $(cat "$W/re/library.txt")"
 
 # Map every arithmetic region, including division.
-"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" \
-  --workdir "$W/w3" --result-json "$W/r.json" 2>"$W/abc.err" || fail "pass abc -> $(cat "$W/r.json" 2>/dev/null)"
+"$LHD" pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set synth.liberty="$LIB" \
+  --workdir "$W/w3" --result-json "$W/r.json" 2>"$W/abc.err" || fail "pass "$MAPPER" -> $(cat "$W/r.json" 2>/dev/null)"
 if grep -q '"code":"div-blackbox"' "$W/abc.err"; then fail "divider was not mapped"; fi
 ls "$W/net"/graph_* >/dev/null 2>&1 || fail "no mapped netlist emitted"
 
@@ -64,7 +77,7 @@ grep -q '"verdict":"proven"' "$W/r.json" \
 # A non-default adder still proves equivalent (the multiplier's partial-product
 # additions use pass.abc.adder).
 rm -rf "$W/net_cska"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
   --workdir "$W/w6"
 run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_cska"
 

@@ -131,12 +131,12 @@ pub mod ot_cross_region(a:s8, b:s8) -> (y:s8@[0]) {
 EOF
 XTOP=ot_cross_region.ot_cross_region
 run compile "$XPRP" --top ot_cross_region --emit-dir lg:"$W/xlg" --workdir "$W/xw1"
-# synth_alg=synth, not the shipped `cones` default: this case needs the design
+# mode=synth, not the shipped `cones` default: this case needs the design
 # SPLIT in two, and the GE size window (max_ge) is what forces that. max_ge does
 # not shape a cones coloring at all -- cones seeds per register cone, and this
 # fixture is purely combinational, so it would stay one region.
-run pass color synth --top "$XTOP" lg:"$W/xlg" --set color.synth_alg=synth \
-    --set color.max_ge=1 --set color.min_ge=0 --workdir "$W/xw2"
+run pass color synth --top "$XTOP" lg:"$W/xlg" --set color.synth.mode=synth \
+    --set color.synth.max_ge=1 --set color.synth.min_ge=0 --workdir "$W/xw2"
 run pass abc --top "$XTOP" lg:"$W/xlg" --emit-dir lg:"$W/xnet" --set synth.liberty="$LIB" --workdir "$W/xw3"
 grep -q '"regions":2' "$W/r.json" || fail "cross-region fixture did not split into two mapped regions"
 "$LHD" pass opentimer --top "$XTOP" lg:"$W/xnet" "$LIB" --workdir "$W/xwt" \
@@ -163,7 +163,7 @@ pub mod ot_const_splitter() -> (y:u300@[0]) {
 EOF
 CSTOP=const_splitter.ot_const_splitter
 run synth "$CSPR" --top ot_const_splitter --workdir "$W/csw" --emit-dir lg:"$W/csnet" \
-    --set synth.liberty="$LIB" --set color.max_ge=1 --set color.min_ge=0
+    --set synth.liberty="$LIB" --set color.synth.max_ge=1 --set color.synth.min_ge=0
 "$LHD" tool tree lg:"$W/csnet" --top "$CSTOP" >"$W/cs.tree" \
     || fail "could not inspect constant-splitter mapped hierarchy"
 grep -q '__livehd_abc_input_bits_300' "$W/cs.tree" || fail "constant-splitter fixture did not instantiate dense input helper"
@@ -209,7 +209,8 @@ grep -q '"kind":"sta"' "$W/cfw/synth/timing.json" || fail "Concat-lane width-bou
 #     instantiates region modules, which are not Liberty cells -- must fail
 #     (never silent garbage). A single-region def is emitted directly with no
 #     wrapper, so force a multi-region split (tiny max_ge) to get one.
-run pass color synth --top "$TOP" --set color.max_ge=1 --set color.min_ge=0 lg:"$W/lg" --workdir "$W/wsplit"
+run pass color synth --top "$TOP" --set color.synth.max_ge=1 --set color.synth.min_ge=0 \
+    --set color.synth.min_color_nodes=0 lg:"$W/lg" --workdir "$W/wsplit"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split" --set synth.liberty="$LIB" --workdir "$W/wa_split"
 
 # 4b. --stats keeps the whole-design critical path above and adds exactly one

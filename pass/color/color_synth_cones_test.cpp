@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// The cone-seeded synthesis coloring, `pass.color synth --set synth_alg=cones`
+// The cone-seeded synthesis coloring, `pass.color synth --set pass.color.synth.mode=cones`
 // (todo/livehd/2c-color-synthcones.html). Every test below pins one of the
 // rulings the algorithm is built on, so a change that breaks one is a change to
 // the design and not to an implementation detail.
@@ -437,6 +437,60 @@ TEST(ColorSynthCones, PassCanDisableArithmeticBoundariesForExperiments) {
   }
 }
 
+// Two default profiles differing ONLY in the stop_* cuts: `abc` cuts at every
+// stop_* operator (smaller ABC regions), `synth` keeps a color register to
+// register so the domino mapper sees whole clock-to-clock cones. An explicit
+// stop_* setting beats either profile.
+TEST(ColorSynthCones, MapperProfileSuppliesStopDefaultsAndExplicitWins) {
+  if (!Pass::eprp.get_method("pass.color")) {
+    Pass_color::setup();
+  }
+  auto& lib = livehd::Hhds_graph_library::instance("lg_mapper_profile");
+  auto  io  = lib.create_io("mapper_profile");
+  io->add_input("a", 8);
+  io->add_input("b", 8);
+  auto g   = io->create_graph();
+  auto sum = create_typed_node(*g, Ntype_op::Sum, 16);
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  auto use = create_typed_node(*g, Ntype_op::Xor, 16);
+  sum.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(use, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(use, 0));
+  make_flop(*g, use.create_driver_pin(0), 16);
+  struct Case {
+    const char* mapper;
+    const char* stop_arith;  // "" = left to the profile
+    bool        merged;
+  };
+  for (const auto& c : {Case{"abc", "", false},
+                        Case{"synth", "", true},
+                        Case{"synth", "true", false},
+                        Case{"abc", "false", true}}) {
+    Eprp_var            var;
+    Eprp_var::Eprp_dict labels{
+        {     "alg",  "synth"},
+        {    "hier",  "false"},
+        {"max_gate", "100000"},
+        {  "mapper", c.mapper}
+    };
+    if (*c.stop_arith != '\0') {
+      labels["stop_arith"] = c.stop_arith;
+    }
+    var.add(g);
+    Pass::eprp.run_method_now("pass.color", var, labels);
+    EXPECT_EQ(node_color_of(sum) == node_color_of(use), c.merged) << c.mapper << " stop_arith='" << c.stop_arith << "'";
+  }
+  Eprp_var bad;
+  bad.add(g);
+  EXPECT_ANY_THROW(Pass::eprp.run_method_now("pass.color",
+                                             bad,
+                                             {
+                                                 {   "alg", "synth"},
+                                                 {  "hier", "false"},
+                                                 {"mapper",  "yosys"}
+  }));
+}
+
 // A graph output is a root like a register: output-only logic gets a cone
 // rather than falling through to the totality fallback as singletons.
 TEST(ColorSynthCones, OutputsAreRoots) {
@@ -829,15 +883,18 @@ TEST(ColorSynthCones, PassDefaultsForwardAllAndAllowsExplicitOff) {
     auto     f = shift_chain(std::string{"lgdb_cones_pass_fwd_"}.append(mode).c_str());
     Eprp_var var;
     var.add(f.g);
+    // The chain is three tiny stages: without the small-color floor, so the
+    // forward merge alone decides whether they fuse.
     Eprp_var::Eprp_dict labels{
-        { "alg", "synth"},
-        {"hier", "false"}
+        {            "alg", "synth"},
+        {           "hier", "false"},
+        {"min_color_nodes",     "0"}
     };
     if (std::string_view{mode} != "default") {
       labels["forward"] = mode;
     }
     Pass::eprp.run_method_now("pass.color", var, labels);
-    EXPECT_EQ(var.get("synth_alg"), "cones");
+    EXPECT_EQ(var.get("mode"), "cones");
     EXPECT_EQ(var.get("ctrl_cones"), "true");
     EXPECT_EQ(var.get("max_gate"), "30000");
     EXPECT_EQ(color_count(f.g.get()), std::string_view{mode} == "false" ? 3u : 1u) << mode;
@@ -856,7 +913,7 @@ TEST(ColorSynthCones, ForwardDefaultDoesNotBreakOtherSynthesisModes) {
                                               var,
                                               {
                                                   {      "alg", "synth"},
-                                                  {"synth_alg",    mode},
+                                                  {     "mode",    mode},
                                                   {     "hier", "false"}
     }));
     EXPECT_EQ(uncolored_count(f.g.get()), 0u);
@@ -1104,6 +1161,9 @@ TEST(ColorSynthCones, SharedControlConesMergeOnlyWithinTheColorBudget) {
     io->add_input(name, 1);
   }
   io->add_input("d", 8);
+  for (auto name : {"y1", "y2"}) {
+    io->add_output(name, 8);  // an unread mux is dead logic and shapes no color
+  }
   auto g      = io->create_graph();
   auto select = create_typed_node(*g, Ntype_op::And, 1);
   g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(select, 0));
@@ -1116,6 +1176,8 @@ TEST(ColorSynthCones, SharedControlConesMergeOnlyWithinTheColorBudget) {
     return m;
   };
   auto m1 = mux(), m2 = mux();
+  m1.create_driver_pin(0).connect_sink(g->get_output_pin("y1"));
+  m2.create_driver_pin(0).connect_sink(g->get_output_pin("y2"));
   auto flop = make_flop(*g, g->get_input_pin("d"), 8);
   select.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(flop, 4));
   const auto single = livehd::graph_util::predict_abc_size(m1);
@@ -1161,6 +1223,7 @@ TEST(ColorSynthCones, MuxPlacementChangesDataBoundaryButKeepsSelectAndArithmetic
     for (auto name : {"a", "b"}) {
       io->add_input(name, 8);
     }
+    io->add_output("y", 16);  // an unread mux chain is dead logic and shapes no color
     auto g      = io->create_graph();
     auto select = create_typed_node(*g, Ntype_op::And, 1);
     g->get_input_pin("s").connect_sink(livehd::graph_util::setup_sink_pid(select, 0));
@@ -1180,6 +1243,7 @@ TEST(ColorSynthCones, MuxPlacementChangesDataBoundaryButKeepsSelectAndArithmetic
     };
     auto m1   = mux(g->get_input_pin("b"));
     auto m2   = mux(m1.create_driver_pin(0));
+    m2.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
     auto flop = make_flop(*g, m2.create_driver_pin(0), 16);
     select.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(flop, 4));
     Eprp_var var;
@@ -1187,12 +1251,15 @@ TEST(ColorSynthCones, MuxPlacementChangesDataBoundaryButKeepsSelectAndArithmetic
     Pass::eprp.run_method_now("pass.color",
                               var,
                               {
-                                  {     "alg",                        "synth"},
-                                  {    "hier",                        "false"},
-                                  {"max_gate",                       "100000"},
-                                  {"stop_mux", mux_in_data ? "false" : "true"}
+                                  {            "alg",                        "synth"},
+                                  {           "hier",                        "false"},
+                                  {       "max_gate",                       "100000"},
+                                  {       "stop_mux", mux_in_data ? "false" : "true"},
+                                  {"min_color_nodes",                            "0"}
     });
-    EXPECT_EQ(var.get("stop_arith"), "true");
+    // stop_arith is left unset: the default `abc` mapper profile cuts at it.
+    EXPECT_EQ(var.get("mapper"), "abc");
+    EXPECT_EQ(var.get("stop_arith"), "");
     EXPECT_EQ(node_color_of(m1), node_color_of(m2));
     EXPECT_NE(node_color_of(select), node_color_of(data));
     EXPECT_NE(node_color_of(sum), node_color_of(data));
@@ -1565,4 +1632,99 @@ TEST(ColorSynthCones, MuxGroupKeepsConstantBitwiseWiring) {
   }
   EXPECT_FALSE(logic.attr(livehd::attrs::ctrl_members).has()) << "two variable operands still form external data logic";
   EXPECT_EQ(uncolored_count(g.get()), 0u);
+}
+
+// A Hotmux nobody reads survives compile for its `unique if` obligation, with
+// the cone feeding only it. It must not seed or shape a color: it joins the
+// color of a colored fan-in (here none, so the first live color) and adds none.
+TEST(ColorSynthCones, DeadLogicShapesNoColor) {
+  auto& lib = livehd::Hhds_graph_library::instance("lg_cones_dead");
+  auto  io  = lib.create_io("cones_dead");
+  io->add_input("a", 8);
+  io->add_input("b", 8);
+  io->add_input("s", 1);
+  io->add_output("y", 8);
+  auto g    = io->create_graph();
+  auto live = create_typed_node(*g, Ntype_op::Xor, 8);
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(live, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(live, 0));
+  live.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+  auto control = create_typed_node(*g, Ntype_op::And, 1);  // feeds only the dead Hotmux
+  g->get_input_pin("s").connect_sink(livehd::graph_util::setup_sink_pid(control, 0));
+  g->get_input_pin("s").connect_sink(livehd::graph_util::setup_sink_pid(control, 0));
+  auto dead = create_typed_node(*g, Ntype_op::Hotmux, 8);
+  control.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(dead, 0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(dead, 1));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(dead, 2));
+  auto opts       = capped_opts(100000);
+  opts.ctrl_cones = true;
+  Color_synth(opts, "cones").label(g.get());
+  EXPECT_EQ(color_count(g.get()), 1u);
+  EXPECT_EQ(node_color_of(dead), node_color_of(live));
+  EXPECT_EQ(node_color_of(control), node_color_of(live));
+  EXPECT_FALSE(dead.attr(livehd::attrs::ctrl_members).has());
+  EXPECT_EQ(uncolored_count(g.get()), 0u);
+}
+
+namespace {
+// Register `ra` behind a 12-node, 64-bit chain; register `rb` behind one node
+// that reads the middle of that chain (the overlap). max_gate is set just above
+// the chain, so the overlap merge refuses the pair and rb's color stays tiny.
+struct Absorb_fixture {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             ra, rb, tail;
+  uint64_t                     chain_pred = 0, tail_pred = 0;
+};
+Absorb_fixture absorb_fixture(const char* dir, int32_t tail_bits) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  io  = lib.create_io("cones_absorb");
+  io->add_input("a", 64);
+  io->add_input("b", 64);
+  io->add_output("ya", 64);
+  io->add_output("yb", tail_bits);
+  Absorb_fixture f;
+  f.g       = io->create_graph();
+  auto data = f.g->get_input_pin("a");
+  hhds::Pin_class middle;
+  for (int i = 0; i < 12; ++i) {
+    auto n = create_typed_node(*f.g, i % 3 == 0 ? Ntype_op::Xor : (i % 3 == 1 ? Ntype_op::And : Ntype_op::Or), 64);
+    data.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    f.g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    f.chain_pred += livehd::graph_util::predict_abc_size(n);
+    data = n.create_driver_pin(0);
+    if (i == 5) {
+      middle = data;
+    }
+  }
+  f.ra = make_flop(*f.g, data, 64);
+  f.ra.create_driver_pin(0).connect_sink(f.g->get_output_pin("ya"));
+  f.tail = create_typed_node(*f.g, Ntype_op::And, tail_bits);
+  middle.connect_sink(livehd::graph_util::setup_sink_pid(f.tail, 0));
+  f.g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(f.tail, 0));
+  f.tail_pred = livehd::graph_util::predict_abc_size(f.tail);
+  f.rb        = make_flop(*f.g, f.tail.create_driver_pin(0), tail_bits);
+  f.rb.create_driver_pin(0).connect_sink(f.g->get_output_pin("yb"));
+  return f;
+}
+}  // namespace
+
+// max_gate is a soft target: a data color under min_nodes joins the color it
+// overlaps most even when the union is over max_gate. A few-node color that is
+// heavy (over max_gate/64 predicted) is a real region and stays.
+TEST(ColorSynthCones, SmallColorJoinsItsMostOverlappingNeighbourPastMaxGate) {
+  for (const int32_t tail_bits : {8, 64}) {
+    for (const uint32_t min_nodes : {0U, 12U}) {
+      auto f = absorb_fixture(std::format("lg_cones_absorb_{}_{}", tail_bits, min_nodes).c_str(), tail_bits);
+      auto opts      = capped_opts(f.chain_pred + 4);
+      opts.min_nodes = min_nodes;
+      ASSERT_GT(f.chain_pred + f.tail_pred, opts.max_gate);
+      Color_synth(opts, "cones").label(f.g.get());
+      const bool light = f.tail_pred <= opts.max_gate / 64;
+      EXPECT_EQ(light, tail_bits == 8) << f.tail_pred << " vs " << opts.max_gate / 64;
+      EXPECT_EQ(node_color_of(f.rb), node_color_of(f.tail));
+      EXPECT_EQ(node_color_of(f.rb) == node_color_of(f.ra), min_nodes != 0 && light)
+          << "tail_bits=" << tail_bits << " min_nodes=" << min_nodes;
+      EXPECT_EQ(uncolored_count(f.g.get()), 0u);
+    }
+  }
 }

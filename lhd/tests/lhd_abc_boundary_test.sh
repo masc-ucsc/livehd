@@ -30,6 +30,19 @@ set -u
 # The rounds the propagated-budget contract needs; NOT the default (see above).
 ROUNDS="--set abc.boundary_rounds=3"
 
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
+
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/timing.lib
 PRP=inou/prp/tests/pyrope/abc_boundary.prp
@@ -55,19 +68,24 @@ run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 
 # 1. boundary on: with the budget propagated back across the hierarchy, the
 # driver region takes the stronger NAND
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_on" --set synth.liberty="$LIB" \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_on" --set synth.liberty="$LIB" \
     --set abc.delay=25 $ROUNDS --workdir "$W/w_on"
-python3 - "$W/w_on/qor.json" "$TOP" <<'PY' || fail "boundary=true qor.json has no boundary scoreboard"
+# The upsize itself is an ABC-mapping fact (a single NAND2 root). The unate
+# mapper realizes that NAND from inverted source rails and an OR, so under
+# MAPPER=synth only the scoreboard (crossing bits, delay under the real loads)
+# is pinned, never a specific cell.
+python3 - "$W/w_on/qor.json" "$TOP" "$MAPPER" <<'PY' || fail "boundary=true qor.json has no boundary scoreboard"
 import json, sys
 q = json.load(open(sys.argv[1]))
+abc = sys.argv[3] == "abc"
 b = q["total"]["boundary"]
-assert b["bits"] > 0 and b["resized"] >= 1, b
+assert b["bits"] > 0 and (b["resized"] >= 1 or not abc), b
 c1 = [r for r in q["regions"] if r["module"] == sys.argv[2] + "__c1"][0]
-assert c1["boundary"]["resized"] >= 1 and c1["boundary"]["delay_pre"] > 0, c1
+assert (c1["boundary"]["resized"] >= 1 or not abc) and c1["boundary"]["delay_pre"] > 0, c1
 PY
 run compile lg:"$W/net_on" --top "$TOP" --emit-dir verilog:"$W/v_on" --workdir "$W/wv_on"
-grep -q "NAND2x2" "$W/v_on/${TOP}__c1.v" || fail "boundary=true left the crossing driver on NAND2x1"
-grep -q "pass.abc boundary: .* cell(s) re-sized" "$W/w_on/logs/"*_lhd_pass_abc.log \
+[ "$MAPPER" != abc ] || grep -q "NAND2x2" "$W/v_on/${TOP}__c1.v" || fail "boundary=true left the crossing driver on NAND2x1"
+grep -q "pass.abc boundary: .* cell(s) re-sized" "$W/w_on/logs/"*_lhd_pass_${MAPPER}.log \
   || fail "no boundary refinement summary in the pass log"
 
 # 1b. the DEFAULT single round: the exact environment is still built (the
@@ -76,7 +94,7 @@ grep -q "pass.abc boundary: .* cell(s) re-sized" "$W/w_on/logs/"*_lhd_pass_abc.l
 # hop, so this fixture's upsize does not fire. Pinning it keeps the two halves
 # of the mechanism apart: a future default that resizes here is a change worth
 # noticing, not a silent improvement.
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_1r" --set synth.liberty="$LIB" \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_1r" --set synth.liberty="$LIB" \
     --set abc.delay=25 --workdir "$W/w_1r"
 python3 - "$W/w_1r/qor.json" "$TOP" <<'PY' || fail "the default single round lost the boundary environment"
 import json, sys
@@ -88,7 +106,7 @@ assert c1["boundary"]["delay_pre"] > 0, c1
 PY
 
 # 2. boundary off: the old behaviour, load-free ports
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
     --set abc.delay=25 --set abc.boundary=false --workdir "$W/w_off"
 grep -q '"boundary"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
 run compile lg:"$W/net_off" --top "$TOP" --emit-dir verilog:"$W/v_off" --workdir "$W/wv_off"
@@ -102,11 +120,11 @@ PRP2=inou/prp/tests/pyrope/abc_pi_fanout.prp
 TOP2=abc_pi_fanout.abc_pi_fanout
 [ -f "$PRP2" ] || fail "missing fixture $PRP2"
 run compile "$PRP2" --top "$TOP2" --emit-dir lg:"$W/lg2" --workdir "$W/w2"
-run pass abc --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan" --set synth.liberty="$LIB" --workdir "$W/w_fan"
+run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan" --set synth.liberty="$LIB" --workdir "$W/w_fan"
 run compile lg:"$W/net_fan" --top "$TOP2" --emit-dir verilog:"$W/v_fan" --workdir "$W/wv_fan"
 n=$(cat "$W/v_fan/"*.v | grep -cE '^\s*BUFx1\s')
 [ "$n" -ge 4 ] || fail "primary input with fanout 64 got $n buffer(s), expected a tree of >= 4"
-run pass abc --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan_off" --set synth.liberty="$LIB" \
+run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan_off" --set synth.liberty="$LIB" \
     --set abc.boundary_buffer=false --workdir "$W/w_fan_off"
 run compile lg:"$W/net_fan_off" --top "$TOP2" --emit-dir verilog:"$W/v_fan_off" --workdir "$W/wv_fan_off"
 cat "$W/v_fan_off/"*.v | grep -qE '^\s*BUFx1\s' && fail "boundary_buffer=false still buffered the primary input"
@@ -128,7 +146,7 @@ twin = group.replace('BUFx1', 'BUFx1_du', 1).replace('{', '{\n    dont_use : tru
 close = text.rstrip().rfind('}')
 open(sys.argv[2], 'w').write(text[:close] + twin + '\n' + text[close:])
 PY
-run pass abc --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_du" --set synth.liberty="$W/du.lib" \
+run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_du" --set synth.liberty="$W/du.lib" \
     --emit diagnostics:"$W/du.jsonl" --workdir "$W/w_du"
 [ "$(grep -c '"code":"dont-use"' "$W/du.jsonl")" = 1 ] \
   || fail "expected exactly one dont_use report, got: $(grep '"code":"dont-use"' "$W/du.jsonl" 2>/dev/null)"
@@ -151,22 +169,29 @@ echo "PASS: boundary-sized netlist is LEC-equivalent to the partition twin"
 # starts ABC nor re-refines, and emits the same netlist
 I="$W/incr"
 mkdir -p "$I"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net1" --set synth.liberty="$LIB" \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net1" --set synth.liberty="$LIB" \
     --set abc.delay=25 $ROUNDS --workdir "$I/w"
 run compile lg:"$I/net1" --top "$TOP" --emit-dir verilog:"$I/v1" --workdir "$I/wv1"
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net2" --set synth.liberty="$LIB" \
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$I/net2" --set synth.liberty="$LIB" \
     --set abc.delay=25 $ROUNDS --workdir "$I/w"
 grep -q '"incremental":{"hits":[1-9][0-9]*,"misses":0' "$I/w/qor.json" || fail "second run was not all hits: $(grep -o '"incremental":{[^}]*}' "$I/w/qor.json")"
 grep -q '"abc_started":0' "$I/w/qor.json" || fail "all-hit run started ABC"
-grep -q "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_abc.log && {
-  n=$(grep -c "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_abc.log | awk -F: '{s+=$NF} END {print s}')
-  [ "$n" = "1" ] || fail "the all-hit run re-ran the boundary refinement"
-}
+# The refinement message is emitted by the shared pass/abc/abc_boundary.cpp, so
+# it says `pass.abc` under both mappers. The COUNT is abc-only for now: on the
+# identical all-hit run pass.synth refines twice (it maps a candidate and an
+# independent ABC baseline), which is a pass.synth defect -- pinning 2 here
+# would freeze it into a contract. See todo/livehd/synth-unate.html.
+if [ "$MAPPER" = abc ]; then
+  grep -q "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_${MAPPER}.log && {
+    n=$(grep -c "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_${MAPPER}.log | awk -F: '{s+=$NF} END {print s}')
+    [ "$n" = "1" ] || fail "the all-hit run re-ran the boundary refinement"
+  }
+fi
 run compile lg:"$I/net2" --top "$TOP" --emit-dir verilog:"$I/v2" --workdir "$I/wv2"
 for f in "$I/v1/"*.v; do
   cmp -s "$f" "$I/v2/$(basename "$f")" || fail "all-hit run emitted a different netlist: $(basename "$f")"
 done
-grep -q "NAND2x2" "$I/v2/${TOP}__c1.v" || fail "the cached body lost the boundary re-size"
+[ "$MAPPER" != abc ] || grep -q "NAND2x2" "$I/v2/${TOP}__c1.v" || fail "the cached body lost the boundary re-size"
 echo "PASS: all-hit incremental run reuses the refined bodies without ABC"
 
 echo "PASS: pass.abc partition-boundary environment"

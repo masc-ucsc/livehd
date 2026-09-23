@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
+
 #include <functional>
 #include <string>
 #include <string_view>
@@ -177,6 +179,26 @@ struct Query_result {
   // shipped. Add a member here => extend BOTH codec halves.
   Cvc5_stats cvc5;
 };
+
+// A register/memory that exists on only one side is not itself part of the
+// module's observable interface. It is safe to omit that cut only when every
+// COMMON output/state obligation is nevertheless proved for arbitrary values
+// of the one-sided state: then the state is unobservable by construction. This
+// must stay narrower than generic incomplete correspondence; a missing primary
+// output or black-box obligation is never excused by this rule.
+//
+// Exported because it is also the acceptance rule for CLIENTS of a Proven
+// verdict (pass.synth's publication gate): a Proven carrying unmatched cut
+// points is sound exactly when this holds, and nowhere else.
+template <typename Ref_range, typename Impl_range>
+bool internal_state_only(const Ref_range& unmatched_ref, const Impl_range& unmatched_impl) {
+  if (unmatched_ref.empty() && unmatched_impl.empty()) {
+    return false;
+  }
+  auto is_state = [](const std::string& name) { return name.starts_with("nxt:") || name.starts_with("mem:"); };
+  return std::all_of(unmatched_ref.begin(), unmatched_ref.end(), is_state)
+         && std::all_of(unmatched_impl.begin(), unmatched_impl.end(), is_state);
+}
 
 struct Monitor;
 

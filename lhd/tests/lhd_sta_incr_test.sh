@@ -144,6 +144,12 @@ sta net "$LIB" --set pass.opentimer.margin=50
 expect_sta 0 1 "changed margin"
 sta net "$LIB"
 expect_sta 1 0 "back to the default margin"
+sta net "$LIB" --set pass.opentimer.io_load=4
+expect_sta 0 1 "changed output load"
+sta net "$LIB" --set pass.opentimer.io_load=4
+expect_sta 1 0 "warm output load"
+sta net "$LIB"
+expect_sta 1 0 "back to the default output load"
 libs=$(lib_parses "$W/wt")
 echo "PASS: an option that changes the analysis is part of the key"
 

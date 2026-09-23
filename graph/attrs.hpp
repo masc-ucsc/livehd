@@ -171,7 +171,8 @@ inline constexpr place_t place{};
 // the flat `color` above (one value per node-in-a-def), this is keyed per
 // instance, so two instances of the same module def can carry different ids.
 // Readers prefer this when present and fall back to the flat color otherwise
-// (graph_util::node_color_of). Written only when pass.color hier_color=1.
+// (graph_util::node_color_of). Virtual-flat synthesis coloring writes these
+// overrides when projecting regions back onto shared module definitions.
 struct hier_color_t {
   using value_type = int32_t;
   using storage    = hhds::hier_storage;

@@ -1,7 +1,13 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <functional>
+
 #include "pass.hpp"
+
+namespace livehd::abc {
+struct Map_options;
+}
 
 // pass.abc — technology-map each colored region to a standard-cell netlist.
 // Reuses pass.partition's decomposition seam: one module per
@@ -16,4 +22,6 @@ public:
 
   static void setup();
   static void work(Eprp_var& var);
+  static void add_mapping_labels(Eprp_method& method);
+  static void work_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure);
 };

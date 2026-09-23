@@ -84,8 +84,9 @@ void validate_emits(const Options& opts) {
     }
   }
   if (opts.command == "pass" && !is_pass_semdiff(opts)) {
-    const std::string sub   = opts.files.empty() ? std::string{} : opts.files.front();
-    const bool graph_output = sub == "color" || sub == "partition" || sub == "abc" || sub == "single_edge" || sub == "liberty";
+    const std::string sub = opts.files.empty() ? std::string{} : opts.files.front();
+    const bool        graph_output
+        = sub == "color" || sub == "partition" || sub == "abc" || sub == "synth" || sub == "single_edge" || sub == "liberty";
     for (const char* k : {"ln", "pyrope", "lnast-dump", "isabelle", "lean", "sim", "lg", "verilog"}) {
       if (graph_output && (std::string_view{k} == "lg" || std::string_view{k} == "verilog")) {
         continue;

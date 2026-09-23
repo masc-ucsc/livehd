@@ -131,11 +131,13 @@ void synth_command(Options& opts, Result& res) {
   // ---- the synth.* knobs --------------------------------------------------
   // (`pass.abc.library` is refused for every command by check_known_set_passes:
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
-  const std::string liberty    = resolve_liberty(opts);
-  const bool        run_sta    = truthy(synth_set(opts, "opentimer", "true"));
-  const bool        run_reduce = truthy(synth_set(opts, "reduce", "false"));
-  const std::string sdc        = synth_set(opts, "sdc", "");
-  const std::string spef       = synth_set(opts, "spef", "");
+  const std::string liberty       = resolve_liberty(opts);
+  const auto        mapper        = synth_set(opts, "mapper", "abc");
+  const auto        mapper_method = std::string{"pass."} + mapper;
+  const bool        run_sta       = truthy(synth_set(opts, "opentimer", "true"));
+  const bool        run_reduce    = truthy(synth_set(opts, "reduce", "false"));
+  const std::string sdc           = synth_set(opts, "sdc", "");
+  const std::string spef          = synth_set(opts, "spef", "");
   {
     std::vector<std::string> extra;
     if (!sdc.empty()) {
@@ -231,7 +233,7 @@ void synth_command(Options& opts, Result& res) {
     labels["max_nodes"] = "2";
     labels["min_count"] = "3";
     labels["min_win"]   = "1";
-    merge_sets(opts, "pass.color", labels);
+    merge_color_sets(opts, labels);
     labels["alg"] = "reduce";  // forced AFTER merge: a user --set color.alg never re-targets this step
     if (opts.stats) {
       labels["stats"] = "true";
@@ -261,10 +263,14 @@ void synth_command(Options& opts, Result& res) {
   }
   {
     Eprp_var::Eprp_dict labels;
-    labels["alg"]  = "synth";
-    labels["seed"] = opts.seed;
-    labels["top"]  = top;
-    merge_sets(opts, "pass.color", labels);
+    labels["alg"]    = "synth";
+    labels["seed"]   = opts.seed;
+    labels["top"]    = top;
+    // The coloring profile follows the mapper: ABC wants the stop_* cuts (small
+    // regions), the unate/domino mapper wants register-to-register colors.
+    // Merged BEFORE the user's sets so an explicit pass.color.synth.* wins.
+    labels["mapper"] = mapper;
+    merge_color_sets(opts, labels);
     if (labels["alg"] != "synth") {
       throw Lhd_error{"usage",
                       std::format("synth always colors with `synth` (got --set color.alg={})", labels["alg"]),
@@ -280,7 +286,7 @@ void synth_command(Options& opts, Result& res) {
   const std::string qor_path = root + "/qor.json";
   {
     std::error_code ec;
-    fs::remove_all(net_dir, ec);  // pass abc's rule: the out library is rebuilt every run
+    fs::remove_all(net_dir, ec);  // a stale netlist must never shadow a region shell the mapper fills
     ensure_dir(net_dir);
     Eprp_var::Eprp_dict labels;
     labels["top"]     = top;
@@ -288,17 +294,23 @@ void synth_command(Options& opts, Result& res) {
     labels["qor"]     = qor_path;
     // synth.threads is the shared ABC worker limit for every command.
     labels["threads"] = synth_set(opts, "threads", "0");
-    merge_sets(opts, "pass.abc", labels);
+    // Both mappers expose ABC's mapping labels: `abc.*` tuning survives a bare
+    // `--set synth.mapper=` switch, and an explicit `pass.synth.*` wins. The
+    // rule lives in merge_mapper_sets so `lhd pass <mapper>` answers the same.
+    merge_mapper_sets(opts, mapper_method, labels);
     labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
+    if (mapper == "synth") {
+      labels["timing_files"] = liberty + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
+    }
     if (opts.stats) {
       labels["stats"] = "true";
     }
     // Incremental region reuse: the same <workdir>/abc_cache the standalone
     // `lhd pass abc` uses, under the same gate (a user workdir + lhd.incremental).
     if (user_workdir && opts.incremental) {
-      labels["cache_dir"] = (fs::path(opts.workdir) / "abc_cache").string();
+      labels["cache_dir"] = (fs::path(opts.workdir) / (mapper == "synth" ? "synth_cache" : "abc_cache")).string();
     }
-    run_step("pass.abc", var, labels, opts, res);
+    run_step(mapper_method, var, labels, opts, res);
     if (user_workdir || lg_emit != nullptr) {
       Phase_timer phase(res, "lg.save");
       livehd::Hhds_graph_library::save(net_dir);
@@ -308,7 +320,15 @@ void synth_command(Options& opts, Result& res) {
       res.outputs.push_back(qor_path);
     }
   }
-  const std::string abc_qor = slurp_json(qor_path);
+  const std::string abc_qor               = slurp_json(qor_path);
+  const std::string unate_path            = qor_path + ".synth.json";
+  const std::string provenance_path       = qor_path + ".provenance";
+  const std::string unate_qor             = mapper == "synth" ? slurp_json(unate_path) : std::string{};
+  if (user_workdir && !unate_qor.empty()) {
+    res.outputs.push_back(unate_path);
+    res.outputs.push_back(qor_path + ".witness.jsonl");
+    res.outputs.push_back(provenance_path);
+  }
 
   // The mapped netlist, as pass.abc left it in the out library (in memory).
   Eprp_var net;
@@ -354,10 +374,11 @@ void synth_command(Options& opts, Result& res) {
   // each sub-report byte-identical to what its pass alone embeds, so a
   // consumer keyed on `qor.abc.total` / `qor.sta.designs` reads the one-shot
   // and the manual steps alike.
-  res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}}})",
+  res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}}})",
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
-                             sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor));
+                             sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor),
+                             unate_qor.empty() ? std::string{} : std::format(R"(,"synth":{})", unate_qor));
   harvest_abc_incremental(res);           // the envelope's `incremental.abc` (one place for every reuse tier)
   harvest_sta_incremental(res, sta_qor);  // ... and `incremental.sta`
   if (report_emit != nullptr) {
@@ -365,7 +386,11 @@ void synth_command(Options& opts, Result& res) {
     // --workdir to keep them in (or a build system that declares outputs).
     ensure_dir(report_emit->path);
     std::error_code ec;
-    for (const auto& src : {qor_path, timing_path}) {
+    const auto      witness_path = qor_path + ".witness.jsonl";
+    for (const auto& src : {qor_path, timing_path, unate_path, witness_path}) {
+      if ((src == unate_path || src == witness_path) && mapper != "synth") {
+        continue;
+      }
       if (!fs::exists(src)) {
         continue;
       }
@@ -375,6 +400,21 @@ void synth_command(Options& opts, Result& res) {
         throw Lhd_error{"config", std::format("could not write {}: {}", dst, ec.message()), "check --emit-dir report: permissions"};
       }
       res.outputs.push_back(dst);
+    }
+    if (mapper == "synth" && fs::exists(provenance_path)) {
+      const auto dst = fs::path(report_emit->path) / fs::path(provenance_path).filename();
+      // Replace the whole archive: leaving older blobs would misrepresent its
+      // bounded content and could conceal missing files in the new capture.
+      if (canon(dst.string()) != canon(provenance_path)) {
+        fs::remove_all(dst, ec);
+        if (!ec) {
+          fs::copy(provenance_path, dst, fs::copy_options::recursive, ec);
+        }
+      }
+      if (ec) {
+        throw Lhd_error{"config", std::format("could not write {}: {}", dst.string(), ec.message()), "check report permissions"};
+      }
+      res.outputs.push_back(dst.string());
     }
   }
 

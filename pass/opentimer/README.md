@@ -128,12 +128,55 @@ cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
 - ABC's builtin tie cells (`_const0_`/`_const1_`) contribute no arrival.
 - Primary inputs arrive at 0 with slew 0 unless an `.sdc` overrides them
   (`create_clock -period`, `set_input_delay/-transition`, `set_output_delay`;
-  `[get_ports X]` targeting only).
+  `[get_ports X]`, `[all_inputs]` and `[all_outputs]` targeting).
+- `pass.opentimer.io_load` sets primary-output load in fF; a negative value
+  preserves the timer default. The load participates in the STA cache key.
+  Outputs attach to resolved driver nets after wiring-node traversal, so output
+  aliases and internal readers all contribute load to their shared producer.
+- Timing JSON includes physical cell area/count, native-state and opaque-logic
+  counts, and cell-timing/constraint coverage flags. Missing Liberty area is
+  omitted rather than counted as zero. These flags support the whole-design
+  `pass.synth` comparison; they do not certify physical signoff. A single ideal
+  virtual clock can certify combinational I/O constraints as described below.
+  Physical/multiple clocks, ignored commands/modifiers, unmatched ports and
+  SPEF coverage remain uncertified.
 - Multi-bit values traverse the netlist glue (`Get_mask`/`Set_mask`/... with
   constant masks) via the pin tracker, which rewires consumers to per-bit
   `port.N` nets. Tracker ids of trackable-node outputs are `n$`-prefixed
   internally so a region boundary port that pass.partition named after a
   source wire (e.g. a port literally called `get_mask_20`) cannot collide.
+
+## Single virtual-clock I/O timing
+
+For a completely mapped combinational design, the reader supports one
+`create_clock -name NAME -period T` with no physical source or custom waveform.
+Every primary input and output must have explicit `set_input_delay -clock NAME`
+and `set_output_delay -clock NAME` values covering both min/max corners and both
+rise/fall transitions. Omitting the selectors applies a value to both corners
+and transitions. Separate values and subsequent per-transition overrides work.
+Input transitions can still be specified independently.
+
+The virtual clock's launch edge is zero. Input delays are arrival times relative
+to it. An output's MAX required arrival is `T - output_max_delay`; its MIN required
+arrival is `-output_min_delay`. A negative minimum output delay therefore creates
+a positive hold requirement. The report's `clock_constraints` object includes
+the period, worst setup/hold slack and a completeness flag. These fields are
+retained on STA cache hits. The existing `max_delay` remains the raw maximum
+internal arrival; it does not include the external output delay.
+
+`pass.synth` uses `period - setup_slack` (clamped at zero) for its clocked delay
+comparison, includes the clock period as a timing target, and respects any
+stricter explicit mapper delay target. It rejects introducing a hold violation
+when the baseline meets hold, or worsening a baseline hold violation. This
+retains the existing policy of preferring an improved delay when neither design
+meets setup; a published improvement is not a claim that timing is met.
+
+This certificate requires both corner libraries' cell timing coverage and no
+native state, physical clock pins, or sequential/non-combinational Liberty arcs.
+Missing corner/transition constraints, unknown references, physical or multiple
+clocks, waveforms, falling-clock modifiers and other unsupported semantics keep
+`constraints_complete=false`. Unclocked output delays retain their legacy raw
+required-arrival interpretation and cannot certify a QoR replacement.
 
 ## Known limitations
 

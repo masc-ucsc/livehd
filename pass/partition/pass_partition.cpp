@@ -445,7 +445,8 @@ class Partitioner {
 public:
   Partitioner(hhds::Graph* g, hhds::GraphLibrary* outlib, std::string top, bool debug_color,
               livehd::partition::Body_builder hook = {}, bool flatten = false, bool fuse_colors = false,
-              bool want_pre_bodies = false, livehd::partition::Body_batch_builder batch_hook = {}, size_t batch_size = 64)
+              bool want_pre_bodies = false, livehd::partition::Body_batch_builder batch_hook = {}, size_t batch_size = 64,
+              bool skip_single_pre = false)
       : g_(g)
       , outlib_(outlib)
       , top_(std::move(top))
@@ -454,6 +455,7 @@ public:
       , flatten_(flatten)
       , fuse_colors_(fuse_colors)
       , build_pre_(want_pre_bodies)
+      , skip_single_pre_(skip_single_pre)
       , batch_hook_(std::move(batch_hook))
       , batch_size_(std::max<size_t>(1, batch_size)) {}
 
@@ -470,17 +472,21 @@ private:
   // Whole-design flatten mode: same-color regions merge even when structurally
   // disconnected (one region per color), and a single-region result is emitted
   // directly under `top_` (no wrapper) — see build_module_as_top.
-  bool                                  flatten_     = false;
+  bool                                  flatten_         = false;
   // The active coloring advertises multi-component color ids ("packed":true --
   // the size window's misc bins of isolated leftovers). One region per COLOR
   // for colored nodes, so the component split cannot silently shred the bins;
   // color 0 keeps the per-component behavior (an uncolored design is not the
   // window's output).
-  bool                                  fuse_colors_ = false;
+  bool                                  fuse_colors_     = false;
   // Incremental synth: build a per-def region's original-logic pre-body (see
   // build_decomposition want_pre_bodies). Gates the collect() edge-table build
-  // on the hook path and the pre-body build in build_module; never for flatten.
-  bool                                  build_pre_   = false;
+  // on the hook path and the pre-body build in build_module.
+  bool                                  build_pre_       = false;
+  // Explicit whole-design flattening avoids copying a potentially huge single
+  // region for cache comparison. Virtual-flat synthesis colors remain reusable
+  // even when the bounded coloring happens to produce just one region.
+  bool                                  skip_single_pre_ = false;
   livehd::partition::Body_batch_builder batch_hook_;
   struct Pending_body {
     std::shared_ptr<hhds::Graph>        body;
@@ -1359,8 +1365,8 @@ void Partitioner::build_module(uint32_t r) {
     // must outlive the synchronous hook_.
     //
     // NOT gated on `flatten_`. The "flattening has nothing to reuse" argument is
-    // about the SINGLE whole-design region, whose edge tables peak at hundreds
-    // of MB -- and that region goes to build_module_as_top, which still skips it.
+    // about EXPLICIT whole-design flattening, whose edge tables can peak at
+    // hundreds of MB; build_module_as_top skips its single comparison body.
     // Reaching HERE means run() found several regions, which is the normal shape
     // under pass.color synth's virtual flattening: many `max_gate`-bounded
     // regions over a flattened hierarchy, every one of them worth caching.
@@ -1460,14 +1466,14 @@ void Partitioner::build_module_as_top(uint32_t r) {
     // Same span-lifetime rule as build_module's hook branch.
     auto rnodes = std::move(region_nodes_[r]);
     rb.nodes    = rnodes;
-    // Incremental pre-body (see build_module). Skipped when flattening, and only
-    // here: this path is taken when the def collapsed to ONE region, so under
-    // `flatten_` that region is the whole design -- nothing to reuse, and its
-    // edge tables are the largest transient in the run. A ware specialization
+    // Incremental pre-body (see build_module). Explicit whole-design flattening
+    // skips the potentially huge comparison copy. A single virtual-flat color
+    // is still an incremental region and must retain its comparison body.
+    // A ware specialization
     // is a reusable primitive even when flattened internally. `pre_lib` must outlive
     // the synchronous hook_.
     hhds::GraphLibrary pre_lib;
-    if (build_pre_ && (!flatten_ || g_->get_input_node().attr(livehd::attrs::ware_module).has()) && rb.reuse_eligible) {
+    if (build_pre_ && (!skip_single_pre_ || g_->get_input_node().attr(livehd::attrs::ware_module).has()) && rb.reuse_eligible) {
       rb.pre_name = "p_" + top_;
       rb.pre_body = build_pre_body_as_top(r, pre_lib, rb.pre_name, rnodes);
       rb.pre_lib  = &pre_lib;
@@ -1987,7 +1993,8 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                          std::string_view top_in, bool debug_color, const livehd::partition::Body_builder& hook,
                                          livehd::partition::Flatten_mode flatten, bool want_pre_bodies,
                                          const livehd::partition::Body_batch_builder& batch_hook, size_t batch_size,
-                                         const std::unordered_set<hhds::Gid>& preserved_defs) {
+                                         const std::unordered_set<hhds::Gid>& preserved_defs,
+                                         const std::function<void(hhds::Graph*)>&  prepare_src) {
   std::string               top{top_in};
   std::vector<hhds::Graph*> order;
   auto*                     g = resolve_order(graphs, top, order);
@@ -2019,7 +2026,8 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                want_pre_bodies,
                                batch_hook,
                                batch_size,
-                               preserved_defs)) {
+                               preserved_defs,
+                               prepare_src)) {
         return false;
       }
       if (auto a = def->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
@@ -2051,6 +2059,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
         }
       }
     }
+    if (prepare_src) {
+      prepare_src(flat_src);
+    }
     Partitioner p(flat_src,
                   outlib,
                   top,
@@ -2060,7 +2071,8 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   /*fuse_colors=*/false,
                   want_pre_bodies,
                   batch_hook,
-                  batch_size);
+                  batch_size,
+                  /*skip_single_pre=*/flatten_single_module(g, flatten));
     bool        ok = p.run();
     if (ok) {
       if (auto a = g->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
@@ -2079,6 +2091,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
 
   const bool fuse_colors = coloring_packed(g);
   for (auto* def : order) {
+    if (prepare_src) {
+      prepare_src(def);
+    }
     Partitioner p(def,
                   outlib,
                   std::string{def->get_name()},

@@ -75,3 +75,10 @@ cc_library(
     ],
     alwayslink = True,
 )
+
+cc_test(
+    name = "pass_opentimer_test",
+    srcs = ["pass_opentimer_test.cpp"],
+    copts = COPTS,
+    deps = [":pass_opentimer", "@googletest//:gtest_main"],
+)

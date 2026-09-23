@@ -54,24 +54,49 @@ void Pass_color::setup() {
   // `seed` label), not a per-pass --set option.
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
+  // Options only the `synth` algorithm reads are spelled pass.color.synth.<flag>
+  // on the lhd CLI (lhd/lhd_kernel_internal.hpp kColorSynthFlags); the EPRP
+  // label is the bare leaf either way.
+  //
+  // TWO DEFAULT PROFILES, selected by `mapper`. They differ ONLY in the stop_*
+  // cuts, which exist to keep ABC's regions small: an abc profile cuts at
+  // muxes, wide compares, large arithmetic and runtime shifters. The unate /
+  // domino mapper must see whole register-to-register (clock-to-clock) cones --
+  // a domino stage cannot start or end at a combinational cut -- so its profile
+  // turns every stop_* off and keeps the same overlap clustering. An explicitly
+  // set option always wins over either profile, which is why the stop_* labels
+  // are registered WITHOUT a default: EPRP pre-fills a non-empty registered
+  // default, and "omitted" must stay distinguishable from "set to true".
+  m.add_label_optional("mapper",
+                       "abc|synth: the mapper whose DEFAULT profile applies. abc cuts colors at every stop_* operator "
+                       "(smaller ABC regions); synth turns the stop_* cuts off so colors run register to register, as "
+                       "the unate/domino mapper needs. Explicit stop_* settings override either profile. `lhd synth` "
+                       "sets this from synth.mapper",
+                       "abc");
   m.add_label_optional("ctrl_cones",
                        "merge overlapping mux/select and enable cones together, separately from data and within max_gate "
                        "(default in cones mode; false disables)",
                        "true");
   m.add_label_optional("stop_mux",
                        "cones: stop data colors at muxes and place muxes with control; false puts muxes in data colors "
-                       "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true",
-                       "true");
-  m.add_label_optional("stop_arith", "stop colors at large adders (>8 bits), multipliers and dividers", "true");
+                       "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true. "
+                       "Default: true under mapper=abc, false under mapper=synth",
+                       "");
+  m.add_label_optional("stop_arith",
+                       "stop colors at large adders (>8 bits), multipliers and dividers. Default: true under "
+                       "mapper=abc, false under mapper=synth",
+                       "");
   m.add_label_optional("stop_cmp",
                        "keep wide comparisons (LT/GT with an operand over 8 bits, which lower to a subtraction) at "
-                       "color boundaries. false merges them into the cone that consumes them",
-                       "true");
+                       "color boundaries. false merges them into the cone that consumes them. Default: true under "
+                       "mapper=abc, false under mapper=synth",
+                       "");
   m.add_label_optional("stop_shift",
                        "keep RUNTIME shifters (SHL/SRA with a non-constant amount and a result over 8 bits -- a "
                        "barrel) at color boundaries. Constant shifts are wiring and are never cut. Independent of "
-                       "`ctrl_cones`: turning control grouping off never arms this on its own",
-                       "true");
+                       "`ctrl_cones`: turning control grouping off never arms this on its own. Default: true under "
+                       "mapper=abc, false under mapper=synth",
+                       "");
   m.add_label_optional("ware_arith",
                        "keep large (>8 bits) adders, multipliers and dividers as separate optimizable ware modules",
                        "true");
@@ -82,8 +107,13 @@ void Pass_color::setup() {
                        "An indivisible node above this explicit bound fails",
                        "0");
   m.add_label_optional("ctrl_min_gate", "leave control cones smaller than this predicted AIG size in data regions", "0");
-  m.add_label_optional("synth_alg",
-                       "synth: cones|synth|pipe boundary mode. cones (default) seeds one BACKWARD cone per register "
+  m.add_label_optional("min_color_nodes",
+                       "cones mode: no color below this many nodes. A smaller control group stays in data regions; a "
+                       "smaller data color joins the data color it overlaps most, even past max_gate (a soft target). "
+                       "Arithmetic cuts (stop_*) stay isolated. 0 keeps every color",
+                       "12");
+  m.add_label_optional("mode",
+                       "cones|synth|pipe boundary mode. cones (default) seeds one BACKWARD cone per register "
                        "din/enable and merges the most-sharing cones under `max_gate`; pipe/synth propagate one id "
                        "forward and cut at state (synth also at large arithmetic), then reshape with the min_ge/max_ge "
                        "GE window",
@@ -106,12 +136,12 @@ void Pass_color::setup() {
   // ordinary lower half, which only `synth`/`pipe` honour and which is still the
   // only thing that merges away their singleton regions.
   m.add_label_optional("min_ge",
-                       "synth/pipe: merge a region below this many gate-equivalents into its best-connected "
+                       "synth/pipe modes: merge a region below this many gate-equivalents into its best-connected "
                        "neighbour (0 => no lower bound). Kills singleton regions. Not honoured by `cones`, which "
                        "uses max_gate instead",
                        "500");
   m.add_label_optional("max_ge",
-                       "synth: split a region above this many synthesis gate-equivalents (0 => no upper bound). "
+                       "synth mode: split a region above this many synthesis gate-equivalents (0 => no upper bound). "
                        "Default 5k synthesis GE, targeting small incremental regions and a 16 GiB per-color budget",
                        "5000");
   // cones mode's clustering threshold. A DIFFERENT unit from max_ge: predicted
@@ -125,23 +155,27 @@ void Pass_color::setup() {
   // only gray2bin and one large FIFO. This is a SOFT granularity heuristic,
   // and pass.abc's own RSS/time guards remain the admission backstop.
   m.add_label_optional("max_gate",
-                       "synth: cones mode -- soft bound on a color's PREDICTED AIG size; merge the most-sharing cones "
+                       "cones mode: soft bound on a color's PREDICTED AIG size; merge the most-sharing cones "
                        "while their union stays under it, and stop a cone's walk past it. 0 = raw cones, no merge. "
                        "Distinct from max_ge, which is the GE size window of the synth/pipe modes",
                        "30000");
-  // Phase 2 of cones' merge. A FLAT leaf, like max_gate: the kernel splits a
-  // --set key at the LAST dot, so `pass.color.forward` is expressible and
-  // `pass.color.synth.forward` is not (it would read as a pass named
-  // `pass.color.synth`).
+  m.add_label_optional("flop_to_flop",
+                       "cones mode: every cone walks to the register boundary and all overlapping cones merge, whatever "
+                       "max_gate says, so each combinational path lies inside one color (max_gate then only bounds the "
+                       "forward merge). Default: true under mapper=synth, false under mapper=abc",
+                       "");
+  // Phase 2 of cones' merge. Spelled pass.color.synth.forward on the CLI; the
+  // kernel splits a --set key at the LAST dot and pass.color.synth is a
+  // registered namespace of this method.
   m.add_label_optional("forward",
-                       "synth: cones mode -- after the backward overlap merge, also merge a register's color FORWARD "
+                       "cones mode: after the backward overlap merge, also merge a register's color FORWARD "
                        "across its Q into the colors it drives (through `din` only, never enable/clock/reset), smallest "
                        "combined size first, while it still fits under max_gate. `pair` takes one consumer color at a "
                        "time; `all` takes the whole qualifying Q fanout as one all-or-nothing candidate. "
                        "all = default in cones mode; false = off",
                        "");
   m.add_label_optional("name_weight",
-                       "synth: in the size window, bind a region N x tighter across an ANONYMOUS crossing (one that "
+                       "in the size window, bind a region N x tighter across an ANONYMOUS crossing (one that "
                        "pass.partition would name `<op>_<nid>` -- a Mult/Div/mask intermediate) so the merge swallows it "
                        "and surviving boundaries land on STABLE names the incremental cache can reuse. 1 = off. QoR-"
                        "neutral at the default",
@@ -217,8 +251,8 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   } else if (alg == "synth") {
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
-    const auto salg  = std::string{var.get("synth_alg", "cones")};
-    s               += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
+    const auto salg  = std::string{var.get("mode", "cones")};
+    s               += std::format(",\"mode\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
                                    salg,
                                    opts.min_ge,
                                    opts.max_ge,
@@ -233,8 +267,11 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
     }
     // `stop_arith` is not a cones knob: is_arith_boundary feeds `synth`'s is_cut
     // and its preserve_arith_cuts too, so recording it only under cones would
-    // leave a `synth_alg=synth --set color.stop_arith=false` partition claiming
+    // leave a `mode=synth --set pass.color.synth.stop_arith=false` partition claiming
     // the default arithmetic policy. `pipe` cuts at state alone and ignores it.
+    // The profile that supplied the stop_* defaults: provenance for a region
+    // shape that differs between `lhd synth` mappers on the same source.
+    s += std::format(",\"mapper\":\"{}\"", var.get("mapper", "abc"));
     if (salg != "pipe") {
       s += std::format(",\"stop_arith\":{},\"stop_cmp\":{},\"stop_shift\":{}", opts.stop_arith, opts.stop_cmp, opts.stop_shift);
     }
@@ -243,7 +280,11 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
                        opts.ctrl_cones,
                        opts.ctrl_max_gate,
                        opts.ctrl_min_gate);
-      s += std::format(",\"max_gate\":{},\"forward\":\"{}\"", opts.max_gate, opts.forward.empty() ? "false" : opts.forward);
+      s += std::format(",\"max_gate\":{},\"flop_to_flop\":{},\"forward\":\"{}\",\"min_color_nodes\":{}",
+                       opts.max_gate,
+                       opts.flop_to_flop,
+                       opts.forward.empty() ? "false" : opts.forward,
+                       opts.min_nodes);
       // Only the control walk reads it; without ctrl_cones there is no mux
       // policy to report, and printing one would claim a decision nothing made.
       if (opts.ctrl_cones) {
@@ -329,7 +370,7 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
     Color_cgen c(opts);
     c.label(g);
   } else if (alg == "synth") {
-    Color_synth c(opts, var.get("synth_alg", "cones"));
+    Color_synth c(opts, var.get("mode", "cones"));
     c.label(g);
   } else if (alg == "path") {
     Color_path c(opts, var.get("instance", ""));
@@ -367,13 +408,13 @@ void Pass_color::color(Eprp_var& var) {
         .fatal();
   }
 
-  // A silent fallback here is a wrong ANSWER, not a wrong flag: `synth_alg=pipe`
-  // and `synth_alg=synth` cut at different boundaries, and a typo used to mean
-  // "synth" -- so it colored, exited 0, and reported nothing.
-  const auto synth_alg = std::string{var.get("synth_alg", "cones")};
-  if (alg == "synth" && synth_alg != "synth" && synth_alg != "pipe" && synth_alg != "cones") {
+  // A silent fallback here is a wrong ANSWER, not a wrong flag: `mode=pipe` and
+  // `mode=synth` cut at different boundaries, and a typo used to mean "synth"
+  // -- so it colored, exited 0, and reported nothing.
+  const auto synth_mode = std::string{var.get("mode", "cones")};
+  if (alg == "synth" && synth_mode != "synth" && synth_mode != "pipe" && synth_mode != "cones") {
     livehd::diag::err("pass.color", "bad-synth-alg", "unsupported")
-        .msg("unknown synth_alg '{}' (expected cones|synth|pipe)", synth_alg)
+        .msg("unknown synth coloring mode '{}' (expected cones|synth|pipe)", synth_mode)
         .hint("cones (default): one backward cone per register din/enable, merged by shared logic under `max_gate`")
         .hint("synth: cut at state AND large arithmetic (Mult/Div, Sum wider than 8)")
         .hint("pipe: cut at state only -- one region per pipeline stage")
@@ -383,20 +424,20 @@ void Pass_color::color(Eprp_var& var) {
   // Resolve the default here because only cones implements forward merging.
   // Leave the registered default empty so an omitted option remains distinct
   // from explicitly requesting a forward merge under synth/pipe.
-  const auto forward    = std::string{var.get("forward", alg == "synth" && synth_alg == "cones" ? "all" : "false")};
+  const auto forward    = std::string{var.get("forward", alg == "synth" && synth_mode == "cones" ? "all" : "false")};
   const bool forward_on = forward == "pair" || forward == "all";
   if (alg == "synth" && !forward_on && forward != "false" && forward != "off" && forward != "0") {
     livehd::diag::err("pass.color", "bad-forward", "unsupported")
         .msg("unknown forward '{}' (expected false|pair|all)", forward)
         .hint("pair: rank one Q-consumer color at a time, smallest combined size first")
         .hint("all: rank the whole qualifying Q fanout as one all-or-nothing candidate")
-        .hint("forward only applies to synth_alg=cones; it runs AFTER the backward overlap merge")
+        .hint("forward only applies to pass.color.synth.mode=cones; it runs AFTER the backward overlap merge")
         .fatal();
   }
-  if (alg == "synth" && forward_on && synth_alg != "cones") {
+  if (alg == "synth" && forward_on && synth_mode != "cones") {
     livehd::diag::err("pass.color", "bad-forward", "unsupported")
-        .msg("forward '{}' needs synth_alg=cones; synth_alg is '{}', which has no forward merge", forward, synth_alg)
-        .hint("add --set color.synth_alg=cones, or drop --set color.forward")
+        .msg("forward '{}' needs mode=cones; mode is '{}', which has no forward merge", forward, synth_mode)
+        .hint("add --set pass.color.synth.mode=cones, or drop --set pass.color.synth.forward")
         .fatal();
   }
 
@@ -411,23 +452,36 @@ void Pass_color::color(Eprp_var& var) {
   opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
   opts.max_gate      = parse_ge_bound(var, "max_gate", "30000");
   opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "true"));
-  opts.mux_in_data   = !parse_bool(var.get("stop_mux", "true"));
-  opts.stop_arith    = parse_bool(var.get("stop_arith", "true"));
-  opts.stop_cmp      = parse_bool(var.get("stop_cmp", "true"));
-  opts.stop_shift    = parse_bool(var.get("stop_shift", "true"));
+  // The mapper profile supplies the stop_* DEFAULTS only (see setup()); an
+  // explicit setting of any one of them always wins.
+  const auto mapper = std::string{var.get("mapper", "abc")};
+  if (mapper != "abc" && mapper != "synth") {
+    livehd::diag::err("pass.color", "bad-mapper", "unsupported")
+        .msg("unknown mapper profile '{}' (expected abc|synth)", mapper)
+        .hint("abc cuts at every stop_* operator; synth keeps colors register to register")
+        .fatal();
+    return;
+  }
+  const char* stop_default = mapper == "synth" ? "false" : "true";
+  opts.mux_in_data         = !parse_bool(var.get("stop_mux", stop_default));
+  opts.stop_arith          = parse_bool(var.get("stop_arith", stop_default));
+  opts.stop_cmp            = parse_bool(var.get("stop_cmp", stop_default));
+  opts.stop_shift          = parse_bool(var.get("stop_shift", stop_default));
+  opts.flop_to_flop        = parse_bool(var.get("flop_to_flop", mapper == "synth" ? "true" : "false"));
   opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
   opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
-  if (opts.ctrl_cones && (alg != "synth" || synth_alg != "cones")) {
+  opts.min_nodes     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));
+  if (opts.ctrl_cones && (alg != "synth" || synth_mode != "cones")) {
     opts.ctrl_cones = false;
   }
   opts.forward = forward_on ? forward : std::string{};
   // `max_gate=0` is RAW cones: no merge at all, so the forward phase never runs
-  // either. Say so rather than let a `--set color.forward=all` sit there doing
+  // either. Say so rather than let a `--set pass.color.synth.forward=all` sit there doing
   // nothing -- the two knobs read as independent and are not.
   if (opts.max_gate == 0 && forward_on && !var.get("forward", "").empty()) {
     livehd::diag::warn("pass.color", "forward-inert", "unsupported")
         .msg("forward '{}' is inert with max_gate=0: raw cones do not merge, in either direction", forward)
-        .hint("set a nonzero color.max_gate to enable the backward overlap merge and the forward merge across registers")
+        .hint("set a nonzero pass.color.synth.max_gate to enable the backward overlap merge and the forward merge across registers")
         .emit();
   }
 
@@ -598,12 +652,9 @@ void Pass_color::color(Eprp_var& var) {
   // descriptor and flatten again (their `flatten=auto`), so a color that spans
   // modules becomes one region.
   //
-  // The one lossy case is a def instantiated MORE THAN ONCE: the flat view holds
-  // one clone per instance and they may land in different colors, but `color` is
-  // per-def storage, so the first clone in flat forward order wins and the other
-  // instances follow it. That is still a valid partition (a region is just a set
-  // of nodes) -- it only means those instances share a region rather than the
-  // ones cones picked. Counted and reported rather than silently absorbed.
+  // Shared definitions retain a separate hier_color for each instance path.
+  // Re-flattening reads those overrides, preserving the chosen size windows
+  // and region membership even when instances of one definition differ.
   // A compact loop shares one implementation across its iterations. Keep that
   // implementation together; ordinary synthesis cuts and size windows must not
   // split the body into independently mapped regions.
@@ -653,11 +704,12 @@ void Pass_color::color(Eprp_var& var) {
       // earlier run, and a stale color is a region membership downstream.
       for (const auto& [gid, def] : gid2graph) {
         (void)gid;
+        def->attr_clear(livehd::attrs::hier_color);
         for (auto n : def->body().nodes()) {
           livehd::graph_util::del_color(n);
         }
       }
-      uint64_t written = 0, conflicts = 0;
+      uint64_t written = 0;
       for (auto fn : flat->body().nodes(hhds::Node_order::forward)) {
         const auto c = livehd::graph_util::node_color_of(fn);
         if (c == NO_COLOR) {
@@ -667,12 +719,7 @@ void Pass_color::color(Eprp_var& var) {
         if (it == origin.end()) {
           continue;  // a node the flattener minted itself (never happens today)
         }
-        auto& src = it->second.src_node;
-        if (livehd::graph_util::has_color(src) && livehd::graph_util::color_of(src) != NO_COLOR) {
-          conflicts += livehd::graph_util::color_of(src) != c ? 1 : 0;
-          continue;  // first clone in flat forward order wins
-        }
-        livehd::graph_util::set_color(src, c);
+        it->second.set_color(c);
         ++written;
       }
       lib->delete_graph(flat);
@@ -683,24 +730,10 @@ void Pass_color::color(Eprp_var& var) {
       }
       if (opts.verbose) {
         std::print(stderr,
-                   "[color.hier] {} colored over the FLAT view of {} def(s): {} node(s) written, {} multi-instance "
-                   "conflict(s) resolved first-wins\n",
+                   "[color.hier] {} colored over the FLAT view of {} def(s): {} occurrence node(s) written\n",
                    top_g->get_name(),
                    gid2graph.size(),
-                   written,
-                   conflicts);
-      }
-      if (conflicts != 0) {
-        livehd::diag::warn("pass.color", "hier-color-conflict", "unsupported")
-            .msg(
-                "{} node(s) of a def instantiated more than once got different colors per instance; the first "
-                "instance's color wins, so every instance joins that one's regions",
-                conflicts)
-            .hint("`color` is per-def storage, so one def cannot carry a different color per instance")
-            .hint(
-                "those regions hold one copy of the def's logic per instance and can exceed `max_gate` by that "
-                "factor; pass.abc's own memory and time guards remain the backstop")
-            .emit();
+                   written);
       }
     }
   }
@@ -772,7 +805,7 @@ void Pass_color::color(Eprp_var& var) {
     // "OVER-MAX regions remain -- pass.abc admission may refuse this design"
     // would claim a bound nothing enforced (the same reason the window is not
     // printed under `acyclic`). max_gate is its threshold and gets its own line.
-    const bool cones = alg == "synth" && synth_alg == "cones";
+    const bool cones = alg == "synth" && synth_mode == "cones";
     stats_acc.report(alg, opts.verbose, cones ? 0 : opts.min_ge, cones ? 0 : opts.max_ge, cones ? opts.max_gate : 0);
   }
 

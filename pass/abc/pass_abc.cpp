@@ -39,6 +39,11 @@ Pass_abc::Pass_abc(const Eprp_var& var) : Pass("pass.abc", var) {}
 
 void Pass_abc::setup() {
   Eprp_method m("pass.abc", "Technology-map each colored region to a standard-cell netlist (ABC)", &Pass_abc::work);
+  add_mapping_labels(m);
+  register_pass(m);
+}
+
+void Pass_abc::add_mapping_labels(Eprp_method& m) {
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
   m.add_label_optional("unroll_carry",
@@ -46,7 +51,10 @@ void Pass_abc::setup() {
                        "bodies separately and stitches the carry connections afterwards, for benchmarking. Independent "
                        "loops always map separately; compile.unroll=true requests general front-end expansion.",
                        "true");
-  m.add_label_optional("satopt", "Prove constant selectors, cross-region mux facts and memory simplifications before ABC mapping", "true");
+  m.add_label_optional("satopt",
+                       "Prove constant selectors, cross-region per-bit mux facts and memory simplifications, and apply them "
+                       "to the design as LGraph rewrites before mapping (so both mappers see them)",
+                       "true");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
@@ -195,14 +203,16 @@ void Pass_abc::setup() {
                        "auto");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
-  m.add_label_optional("threads", "maximum concurrent ABC workers (0 = automatic, up to 8); admission uses half of physical RAM", "1");
+  m.add_label_optional("threads",
+                       "maximum concurrent ABC workers (0 = automatic, up to 8); admission uses half of physical RAM",
+                       "1");
   m.add_label_optional("memory_budget_mb",
                        "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
                        "default 16384 MiB (16 GiB soft target); 0 uses physical RAM minus max(2 GiB, 25%) reserve",
                        "16384");
   m.add_label_optional("time_budget_ms",
                        "soft wall-time limit for one mapped color in milliseconds (0 disables); a completed "
-                       "oversize color fails with its name so color.max_gate can be reduced",
+                       "oversize color fails with its name so pass.color.synth.max_gate can be reduced",
                        "0");
   m.add_label_optional("allow_oversize",
                        "true|false skip memory admission and map the region regardless. It may exhaust "
@@ -235,7 +245,6 @@ void Pass_abc::setup() {
                        "Wins over a \"region_opts\" member embedded in the graph's coloring_info (the block-attribute channel); "
                        "unknown keys or malformed values are hard errors",
                        "");
-  register_pass(m);
 }
 
 namespace {
@@ -558,7 +567,6 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (q.bypassed > 0) {
       j += std::format(",\"bypassed\":{}", q.bypassed);
     }
-    j += std::format(",\"satopt_facts\":{}", q.satopt_facts);
     j += std::format(",\"ware_trials\":{},\"ware_selected\":\"{}\"", q.ware_trials, jesc(q.ware_selected));
     if (q.logic_depth >= 0) {
       j += std::format(",\"logic_depth\":{}", q.logic_depth);
@@ -574,6 +582,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       // timer at decision time (delay ps / area), so lhdtrack can see the
       // objective's choice rather than infer it from the totals.
       j += std::format(",\"candidate\":\"{}\"", q.candidate);
+    }
+    if (!q.baseline_worker.empty()) {
+      j += ",\"baseline_worker\":" + q.baseline_worker;
     }
     if (q.delay_flow_delay >= 0) {
       j += std::format(",\"delay_flow\":{{\"delay\":{:.4f},\"area\":{:.4f}}}", q.delay_flow_delay, q.delay_flow_area);
@@ -612,7 +623,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
 
 }  // namespace
 
-void Pass_abc::work(Eprp_var& var) {
+void Pass_abc::work(Eprp_var& var) { work_with(var, {}); }
+
+void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure) {
   const auto unroll_carry_text = var.get("unroll_carry", "true");
   if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
       && unroll_carry_text != "on" && unroll_carry_text != "off") {
@@ -960,6 +973,9 @@ void Pass_abc::work(Eprp_var& var) {
   opts.threads          = threads;
   opts.time_budget_ms   = time_budget_ms;
   opts.allow_oversize   = allow_oversize;
+  if (configure) {
+    configure(opts);
+  }
   if (allow_oversize) {
     // Loud on purpose: this is the flag that lets a run take the machine down,
     // so it must be visible in the log of whatever ran afterwards.
@@ -1050,10 +1066,20 @@ void Pass_abc::work(Eprp_var& var) {
   // memory implementations into separate modules. Constant selectors go
   // first: their dead cones must vanish before partitioning, and the memory
   // proofs then see the simplified enables.
+  const std::string satopt_cache_dir
+      = var.get("cache_dir", "").empty() ? std::string{} : std::string(var.get("cache_dir")) + "/../satopt_cache";
+  // Dead logic first (a dead `unique if` Hotmux survives compile for its
+  // obligation): it must neither cost select proofs nor become a region.
+  uint64_t dead_nodes = 0;
+  for (const auto& graph : scratch_graphs) {
+    dead_nodes += livehd::abc::drop_dead_logic(graph.get());
+  }
+  if (dead_nodes != 0) {
+    std::print("[pass.abc] dropped {} dead combinational node(s) before mapping\n", dead_nodes);
+  }
   if (opts.satopt) {
-    const auto satopt_cache = var.get("cache_dir", "").empty() ? "" : std::string(var.get("cache_dir")) + "/../satopt_cache";
-    livehd::abc::optimize_selects(scratch_graphs, satopt_cache);
-    livehd::abc::optimize_memories(scratch_graphs, satopt_cache);
+    livehd::abc::optimize_selects(scratch_graphs, satopt_cache_dir);
+    livehd::abc::optimize_memories(scratch_graphs, satopt_cache_dir);
   }
   // Extract before partitioning: a lowered memory remains a named instance,
   // even when its parent is flattened. The child body comes from cgen RTL.
@@ -1083,7 +1109,7 @@ void Pass_abc::work(Eprp_var& var) {
   // region is digested. The out dir is wiped by the kernel every run, so a cache
   // living inside it would self-destruct -- refuse the overlap.
   auto                                     cache_dir = std::string{var.get("cache_dir", "")};
-  std::unique_ptr<livehd::abc::Incr_cache> incr;
+  std::shared_ptr<livehd::abc::Incr_cache> incr;
   // The register cell is resolved HERE, once, rather than in Mapper::start():
   // the cache salt below needs the resolved pick (not the raw, usually empty,
   // `dff_cell` option) before any region is digested, and abc.json reports it
@@ -1123,9 +1149,10 @@ void Pass_abc::work(Eprp_var& var) {
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
     const std::string dff_desc = dff_sel.base.has_value() ? livehd::liberty::dff_descriptor(*dff_sel.base) : opts.dff_cell;
-    incr                       = std::make_unique<livehd::abc::Incr_cache>(
+    incr                       = std::make_shared<livehd::abc::Incr_cache>(
         cache_dir,
-        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc));
+        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc),
+        false);
   }
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one
@@ -1164,7 +1191,14 @@ void Pass_abc::work(Eprp_var& var) {
       threads == 1 ? livehd::partition::Body_batch_builder{}
                    : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
       2 * livehd::abc::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
-      loops.preserved_defs);
+      loops.preserved_defs,
+      // satopt's per-bit mux facts, applied to the colored source right before
+      // it is cut: the rewrite then reaches every mapper (ABC or pass.synth).
+      [&](hhds::Graph* g) {
+        if (opts.satopt) {
+          livehd::abc::optimize_muxes(g, satopt_cache_dir);
+        }
+      });
 
   mapper.finish_parallel();
   if (!partitioned) {
@@ -1204,9 +1238,7 @@ void Pass_abc::work(Eprp_var& var) {
     // refine_boundaries refreshed their rows' area/delay to match.
     incr->save();
   }
-  // Cache the independent baseline, never a context-selected winner: a later
-  // edit elsewhere can change criticality without changing this region's key.
-  if (mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr) {
+  if (opts.ware_trials && mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr) {
     mapper.optimize_ware(outlib, top);
   }
   mapper.stop();  // no-op when neither mapping nor ware trials need ABC
@@ -1239,10 +1271,10 @@ void Pass_abc::work(Eprp_var& var) {
     livehd::diag::err("pass.abc", "memory-oversize", "unsupported")
         .msg("{}", *refusal)
         .hint(std::format("re-color into SMALLER regions with a tighter threshold, then check them first: "
-                          "`lhd pass color synth --top {} lg:... --set color.max_gate=<smaller> --stats` "
+                          "`lhd pass color synth --top {} lg:... --set pass.color.synth.max_gate=<smaller> --stats` "
                           "(lower it until the region fits). max_gate is the knob for the DEFAULT `cones` "
-                          "coloring; under `--set color.synth_alg=synth|pipe` the size window "
-                          "`color.max_ge` is what splits a region instead",
+                          "coloring; under `--set pass.color.synth.mode=synth|pipe` the size window "
+                          "`pass.color.synth.max_ge` is what splits a region instead",
                           top))
         .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
         .hint(
@@ -1260,8 +1292,9 @@ void Pass_abc::work(Eprp_var& var) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)
         .hint(std::format("re-color into more, smaller regions: `lhd pass color synth --top {} lg:... "
-                          "--set color.max_gate=<smaller>` (or `--set color.max_ge=<smaller>` when the coloring used "
-                          "synth_alg=synth|pipe); full/cold may take longer, warm runs should reuse the extra colors",
+                          "--set pass.color.synth.max_gate=<smaller>` (or `--set pass.color.synth.max_ge=<smaller>` "
+                          "when the coloring used mode=synth|pipe); full/cold may take longer, warm runs should reuse "
+                          "the extra colors",
                           top))
         .fatal();
   }

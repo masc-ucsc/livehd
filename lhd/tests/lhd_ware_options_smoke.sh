@@ -26,7 +26,7 @@ def combo(job):
     src=w/f'{macro}.v'
     name=f'{macro}-{ware}-{stop}'
     args=['synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
-          '--set','synth.threads=1','--set',f'color.ware_{kind}={ware}','--set',f'color.stop_{kind}={stop}',
+          '--set','synth.threads=1','--set',f'color.ware_{kind}={ware}','--set',f'color.synth.stop_{kind}={stop}',
           '--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net','--emit',f'verilog:{w}/{name}.v']
     run(*args)
     net=(w/f'{name}.v').read_text()

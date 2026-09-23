@@ -638,7 +638,7 @@ lhd tool cat|grep|diff|tree ...       # inspect ln:/lg: artifacts
   (`--set lhd.incremental=false` = honest cold run, same netlist). Outputs:
   `--emit-dir lg:` / `--emit verilog:` (mapped netlist), `--emit-dir report:`
   (the two JSON reports); `--stats` adds per-color rows; pass knobs ride their
-  pass namespace (`--set abc.adder=cla`, `--set color.max_gate=50000`). The
+  pass namespace (`--set abc.adder=cla`, `--set color.synth.max_gate=50000`). The
   coloring is always `synth` — use the manual `lhd pass color <alg>` + `lhd pass
   abc` steps for anything else.
 * **`lhd sim`** builds a C++ simulation of the `test` blocks. It needs the sim

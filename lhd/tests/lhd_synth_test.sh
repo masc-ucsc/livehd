@@ -21,6 +21,20 @@
 # Hermetic: the vendored Liberty (inou/prp/tests/abc/test.lib), no PDK.
 set -u
 
+# One script, both technology mappers: MAPPER=abc (default) drives pass.abc and
+# MAPPER=synth drives pass.synth through `--set synth.mapper=`. Everything the
+# script asserts -- the workdir layout, the qor envelope, incremental reuse and
+# the negative controls -- is mapper-agnostic; lhd/tests/BUILD generates the
+# `_synth` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | synth) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    exit 1
+    ;;
+esac
+
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
 FIX=inou/prp/tests/pyrope/hier_seq.prp
@@ -52,7 +66,7 @@ tree_sum() { (cd "$1" && find . -type f | LC_ALL=C sort | xargs shasum | shasum 
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 # The def names embed the FILE name (internal naming = file.entity).
 cp "$FIX" "$W/dut.prp"
-SYNTH=(synth "$W/dut.prp" --top top --set synth.liberty="$LIB")
+SYNTH=(synth "$W/dut.prp" --top top --set synth.liberty="$LIB" --set synth.mapper="$MAPPER")
 
 # How many ABC regions the shipped coloring opens on this fixture is a QoR
 # choice that moves whenever the coloring is tuned (it dropped from 8 to 2 when
@@ -65,6 +79,15 @@ REGIONS=""
 
 # --- 1. one-shot with --workdir ---------------------------------------------
 run "${SYNTH[@]}" --workdir "$W/w" --stats --emit verilog:"$W/net0.v"
+python3 - "$W/r.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))
+invocation=r['synthesis_invocation']
+assert invocation['scope']=='main_entry_to_result_emission' and invocation['wall_ms']>0,invocation
+assert invocation['memory_scope']=='parent_process_peak_rss' and invocation['parent_peak_rss_bytes']>0,invocation
+assert invocation['process_tree_peak_bytes'] is None,invocation
+assert sum(p['ms'] for p in r['phases'])<=invocation['wall_ms']+len(r['phases'])*0.0005+1e-6,r
+PY
 for d in lg net; do [ -d "$W/w/synth/$d" ] || fail "missing <workdir>/synth/$d"; done
 for f in qor.json timing.json; do [ -s "$W/w/synth/$f" ] || fail "missing <workdir>/synth/$f"; done
 [ -s "$W/net0.v" ] || fail "--emit verilog: of the mapped netlist missing"
@@ -76,7 +99,7 @@ grep -qE "INVx1|NAND2x1|XOR2x1|DFFx1" "$W/net0.v" || fail "the Verilog is not th
 [ -n "$(jget "$W/r.json" qor.sta.designs)" ] || fail "sta report carries no designs"
 REGIONS=$(jget "$W/r.json" qor.abc.total.regions)
 [ -n "$REGIONS" ] && [ "$REGIONS" -gt 0 ] || fail "qor.abc.total.regions missing or zero, got '$REGIONS'"
-for p in pass.color pass.abc pass.opentimer lg.save; do has_phase "$W/r.json" $p || fail "phase $p missing from the envelope"; done
+for p in pass.color "pass.$MAPPER" pass.opentimer lg.save; do has_phase "$W/r.json" $p || fail "phase $p missing from the envelope"; done
 [ "$(jget "$W/r.json" incremental.compile.enabled)" = true ] || fail "compile tier not enabled under a user --workdir"
 [ "$(jget "$W/r.json" qor.abc.incremental.hits)" = 0 ] || fail "cold run reported abc hits"
 [ "$(jget "$W/r.json" qor.abc.incremental.misses)" = "$REGIONS" ] || fail "cold run: every one of the $REGIONS regions must miss, got '$(jget "$W/r.json" qor.abc.incremental.misses)'"
@@ -85,7 +108,7 @@ grep -q 'pass.color [^"]*alg:reduce' "$W/r.json" && fail "default synthesis must
 [ "$(jget "$W/r.json" incremental.abc.misses)" = "$REGIONS" ] || fail "incremental.abc not mirrored into the envelope: $(head -c 600 "$W/r.json")"
 [ "$(jget "$W/r.json" incremental.abc.regions)" = "$REGIONS" ] || fail "incremental.abc.regions wrong"
 [ "$(jget "$W/r.json" incremental.abc.store_failed)" = 0 ] || fail "incremental.abc.store_failed wrong"
-[ -d "$W/w/abc_cache" ] || fail "abc region cache not created under --workdir"
+[ -d "$W/w/${MAPPER}_cache" ] || fail "$MAPPER region cache not created under --workdir"
 grep -q '"qor":{"schema_version":1,"kind":"synth"' "$W/r.json" || fail "qor member not embedded verbatim"
 # pretty rendering: the abc-map line, the STA critical path, and --stats rows
 "$LHD" "${SYNTH[@]}" --workdir "$W/w" --stats --diag-fmt pretty -q >"$W/pretty.out" || fail "pretty run failed"
@@ -94,7 +117,7 @@ grep -q '^  sta: ' "$W/pretty.out" || fail "pretty report lacks the sta line: $(
 [ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = "$REGIONS" ] || fail "--stats did not print one abc row per region: $(cat "$W/pretty.out")"
 grep -q '^  incremental\[stats\]: compile enabled=true' "$W/pretty.out" || fail "--stats lacks the compile-tier incremental row: $(cat "$W/pretty.out")"
 grep -q "^  incremental\[stats\]: abc enabled=true regions=$REGIONS hits=$REGIONS misses=0" "$W/pretty.out" || fail "--stats lacks the abc-tier incremental row: $(cat "$W/pretty.out")"
-grep -q '^  phases\[stats\]: .*pass.abc=.*total=' "$W/pretty.out" || fail "--stats lacks the phases row: $(cat "$W/pretty.out")"
+grep -q "^  phases\[stats\]: .*pass.$MAPPER=.*total=" "$W/pretty.out" || fail "--stats lacks the phases row: $(cat "$W/pretty.out")"
 echo "PASS: one-shot synth with --workdir (layout, qor member, phases, report)"
 
 # --- 2. warm re-run: both tiers hit, Verilog byte-identical ------------------
@@ -153,7 +176,7 @@ echo "PASS: no --workdir runs in scratch; emits and reports are the only artifac
 # --- 5. an lg: input is read-only --------------------------------------------
 run compile "$W/dut.prp" --top top --emit-dir lg:"$W/lg_in" --workdir "$W/w_c"
 before=$(tree_sum "$W/lg_in")
-run synth lg:"$W/lg_in" --top top --set synth.liberty="$LIB" --emit-dir lg:"$W/net_lg"
+run synth lg:"$W/lg_in" --top top --set synth.liberty="$LIB" --set synth.mapper="$MAPPER" --emit-dir lg:"$W/net_lg"
 [ "$(jget "$W/r.json" qor.abc.total.regions)" = "$REGIONS" ] || fail "lg: input synth: expected $REGIONS regions, got '$(jget "$W/r.json" qor.abc.total.regions)'"
 [ "$(tree_sum "$W/lg_in")" = "$before" ] || fail "synth rewrote its lg: INPUT (the coloring must stay in memory)"
 echo "PASS: an lg: input is never rewritten"

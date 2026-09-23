@@ -690,6 +690,27 @@ void write_result(const Options& opts, const Result& res) {
   w.Key("exit_code");
   w.Int(res.exit_code);
 
+  if (res.synthesis_invocation.present) {
+    const auto& observation = res.synthesis_invocation;
+    w.Key("synthesis_invocation");
+    w.StartObject();
+    w.Key("scope");
+    w.String("main_entry_to_result_emission");
+    w.Key("wall_ms");
+    w.Double(observation.wall_ms);
+    w.Key("parent_peak_rss_bytes");
+    if (observation.parent_peak_rss_bytes) {
+      w.Uint64(observation.parent_peak_rss_bytes);
+    } else {
+      w.Null();
+    }
+    w.Key("memory_scope");
+    w.String("parent_process_peak_rss");
+    w.Key("process_tree_peak_bytes");
+    w.Null();  // Do not add independent parent/child high-water marks.
+    w.EndObject();
+  }
+
   if (auto iso = source_date_epoch_iso(); !iso.empty()) {
     w.Key("started_at");
     w.String(iso.c_str());

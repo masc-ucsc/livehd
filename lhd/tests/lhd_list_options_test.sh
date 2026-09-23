@@ -61,7 +61,7 @@ echo "$out" | grep -q '"name":"pass.opentimer.top"' && fail "pass.opentimer.top 
 echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
 # Incremental partition defaults and the separate per-color memory target.
-for entry in 'pass.color.min_ge:500' 'pass.color.max_ge:5000' 'pass.color.max_gate:30000' 'pass.abc.memory_budget_mb:16384'; do
+for entry in 'pass.color.synth.min_ge:500' 'pass.color.synth.max_ge:5000' 'pass.color.synth.max_gate:30000' 'pass.abc.memory_budget_mb:16384'; do
   flag=${entry%:*}
   expected=${entry##*:}
   description=$("$LHD" describe "$flag") || fail "cannot describe $flag"
@@ -125,6 +125,30 @@ echo "$out" | grep -q '"name":"pass.color.seed"' && fail "per-pass pass.color.se
 echo "$out" | grep -q '"name":"pass.color.top"' && fail "per-pass pass.color.top must be gone (use --top): $out"
 echo "$out" | grep -q '"name":"pass.abc.top"' && fail "per-pass pass.abc.top must be gone (use --top): $out"
 echo "$out" | grep -q '"name":"pass.partition.top"' && fail "per-pass pass.partition.top must be gone (use --top): $out"
+# pass.color: options only the synth coloring reads are pass.color.synth.*; the
+# algorithm choice, generic post-processing and the ware_* policy pass.abc
+# honors under any coloring stay pass.color.*. The stop_* cuts have NO fixed
+# default: the mapper profile supplies it (abc cuts, synth runs reg-to-reg).
+echo "$out" | grep -q '"name":"pass.color.synth.mapper","method":"pass.color","default":"abc"' \
+  || fail "pass.color.synth.mapper default abc missing: $out"
+echo "$out" | grep -q '"name":"pass.color.synth.stop_mux","method":"pass.color","default":""' \
+  || fail "pass.color.synth.stop_mux must take its default from the mapper profile: $out"
+echo "$out" | grep -q '"name":"pass.color.ware_arith","method":"pass.color","default":"true"' \
+  || fail "pass.color.ware_arith must stay a common pass.color option: $out"
+echo "$out" | grep -Eq '"name":"pass.color.(synth_alg|mode|max_gate|stop_mux|ctrl_cones)"' \
+  && fail "synth-only color options must be listed under pass.color.synth.*: $out"
+echo "$out" | grep -Eq '"name":"pass.color.synth.(alg|hier|ware_arith)"' \
+  && fail "common color options must not be listed under pass.color.synth.*: $out"
+for moved in 'color.max_gate:pass.color.synth.max_gate' 'pass.color.synth_alg:pass.color.synth.mode' \
+             'pass.color.synth.hier:pass.color.hier'; do
+  key=${moved%%:*}
+  want=${moved##*:}
+  "$LHD" pass color synth "$PRP" --set "$key=1" --workdir "$W/moved" -q >"$W/moved.json" 2>&1 \
+    && fail "$key must be rejected"
+  grep -q "$want" "$W/moved.json" || fail "$key must name its one spelling $want: $(cat "$W/moved.json")"
+done
+"$LHD" describe pass.color.max_gate 2>&1 | grep -q "pass.color.synth.max_gate" \
+  || fail "describe of a moved color option must name its new spelling"
 
 # 2. The options pattern is advertised.
 "$LHD" list | grep -q '"name":"options"' || fail "bare lhd list must advertise the options pattern"
