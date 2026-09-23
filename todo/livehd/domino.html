@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO domino — domino-logic synthesis (pass.domino)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">domino</strong> Domino-logic synthesis (<code>pass.domino</code>)</h1>
+
+<p>Map the register-to-register combinational cones that fit into domino gates:
+unate series-parallel NMOS networks with fan-in <em>k</em> = 8, series stack
+<em>D</em> = 4, at most <em>B</em> = 16 transistors, two gate levels per cycle
+(one per clock phase), dual rail built only where a reader needs the complement.
+Cones that do not fit stay static and go to <code>pass.abc</code>. The design
+point, the algorithm and the acceptance numbers come from the <em>Domino Design
+Space</em> study (2026-09-20): 35.9 % of outputs pooled over 48 circuits,
+51.7 % on EPFL control, 4 to 6 % of the logic. Full design and primer:
+<code>pass/domino/README.md</code>.</p>
+
+<h2>Depends on</h2>
+<p>None. Reuses <code>pass/partition</code>'s <code>Body_builder</code> seam,
+<code>pass/abc/abc_blast.hpp</code>'s templated bit-blaster and
+<code>pass/liberty</code>'s behavioural-model pattern as they are.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>P2</strong> <code>domino_cone</code>: bit-blast one definition to a 1-bit AIG
+through <code>abc_blast.hpp</code> with an AIG literal as the <code>Bit</code> type; classify
+leaves (flop Q, inputs, constants) and roots (flop <code>din</code>, enables, outputs, memory
+ports); exclude pass-through roots; <code>mode=report</code> prints cone statistics.</li>
+<li><strong>P3</strong> <code>domino_map</code>: priority-cut enumeration to k = 8, two-rail level
+DP with flop leaves at level 0 in both rails, rail modes <code>demand|both|free</code>, cover
+selection; the report reproduces the study's columns. Acceptance: 35.9 ± 1.0 % pooled and
+51.7 % control at the design point on the 48-circuit set (sibling benchmark repo), and
+agreement to 0.01 with an exhaustive mode for k ≤ 6.</li>
+<li><strong>P4</strong> <code>domino_emit</code>: one black-box <code>Sub</code> per gate, a
+behavioural model per distinct network, φ2 as an inverted <code>Clock_cell</code>;
+<code>lhd lec</code> PROVEN on every fixture.</li>
+<li><strong>P5</strong> <code>lhd pass domino</code> and <code>--set synth.domino=true</code> in
+<code>lhd synth</code> (domino first, <code>pass.abc</code> on the remainder).</li>
+<li><strong>P6</strong> Liberty timing for the domino cells so <code>pass.opentimer</code> times a
+mixed netlist; a three-level option; domino-aware restructuring for arithmetic.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>P0</strong> Build and test on the group's machine; findings in the README (the
+<code>lhd</code> binary is a from-source LLVM build; everything up to P3 builds without it).</li>
+<li><strong>P1</strong> <code>pass/domino/domino_gate.{hpp,cpp}</code>: truth tables to 8
+variables, unateness, prime implicants, minimum-transistor series-parallel factoring under a
+stack bound and a transistor budget (exact table to 4 variables, branch-and-bound with kernel
+divisions above), twin (dual) rails, the fit decision. 13 gtests including a brute-force
+exactness check; <code>bazel test //pass/domino/...</code> green in opt and dbg.</li>
+</ul>
+
+<h2>Design notes</h2>
+<ul>
+<li>A domino gate is non-inverting: the cut function must be positive unate in the rails it
+reads. Negative rails are free at flops (<code>Q̄</code>) and cost a twin gate inside a cone.
+The twin implements the <em>dual</em> function over the opposite rails, so its stack is the
+widest prime implicate: an OR8 fits at stack 1, its twin is an 8-deep stack.</li>
+<li>Minimum-transistor factoring is branch-and-bound on the transistor count. Always pass the
+gate budget: unbounded, the symmetric 8-variable functions take minutes; with B = 16 they are
+decided in under 40 ms.</li>
+<li>Domino gates are modelled as combinational for LEC and simulation; φ1/φ2 are structural
+only. The LEC verdict is not a timing proof.</li>
+</ul>
+</main>
+</body>
+</html>
