@@ -102,8 +102,7 @@ void Lnast_prp_writer::scan_dead_init_stores() {
     return;
   }
   absl::flat_hash_map<std::string, Lnast_nid> pending;  // name -> its last un-read const def
-  size_t                                      idx = 0;
-  for (auto c = lnast->get_child(stmts); !c.is_invalid(); c = lnast->get_sibling_next(c), ++idx) {
+  for (auto c = lnast->get_child(stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     const auto t = lnast->get_type(c);
     auto       v = lnast->get_child(c);
 
