@@ -21,7 +21,10 @@ build:macos --xcode_version_config=//tools:command_line_tools
 # module exporting 'cstdint'" -- before any LiveHD target compiles, which is
 # what has kept the macOS CI red since 42773693a (2026-09-17). The check is a
 # dependency-hygiene lint, not a compiler warning option; keep it off on macOS.
+# --features covers the target configuration; tools built "[for tool]" (the
+# exec configuration: LLVM's tblgen and friends) take --host_features.
 build:macos --features=-layering_check
+build:macos --host_features=-layering_check
 
 # Set minimum macOS version to support the C++23 library features used by LiveHD
 # (floating-point std::from_chars requires macOS 26.0+ with current libc++).
