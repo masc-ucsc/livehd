@@ -26,7 +26,7 @@ bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "apple_support", version = "2.9.1", repo_name = "build_bazel_apple_support")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2", repo_name = "llvm_zlib")
-bazel_dep(name = "zstd", version = "1.5.7.bcr.1", repo_name = "llvm_zstd")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.2", repo_name = "llvm_zstd")
 
 # LLVM is linked into lhd for the opt-in direct simulator backend. LLVM's
 # official source archive carries its Bazel overlay under utils/bazel; expose
