@@ -14,6 +14,7 @@ using livehd::satopt::Stage_state;
 TEST(SatoptStages, ParseNamesNoneDefaultAndRejectsTypos) {
   EXPECT_EQ(parse_stages("none", Profile::shared)->text(), "none");
   EXPECT_TRUE(parse_stages("none", Profile::shared)->empty());
+  EXPECT_EQ(parse_stages("simp_ctrl", Profile::shared)->text(), "simp_ctrl");
   EXPECT_EQ(*parse_stages("default", Profile::shared), livehd::satopt::default_stages(Profile::shared));
   EXPECT_EQ(*parse_stages("", Profile::synthesis), livehd::satopt::default_stages(Profile::synthesis));
   // Listing order is not a recipe: execution order is fixed.
@@ -27,12 +28,16 @@ TEST(SatoptStages, ParseNamesNoneDefaultAndRejectsTypos) {
   EXPECT_NE(error.find("twice"), std::string::npos) << error;
 }
 
-TEST(SatoptStages, ExperimentalStagesAreNeverDefault) {
-  for (const auto p : {Profile::shared, Profile::synthesis}) {
-    const auto d = livehd::satopt::default_stages(p);
-    EXPECT_FALSE(d.has(Stage::resub));
-    EXPECT_FALSE(d.has(Stage::odc));
+TEST(SatoptStages, DefaultIsEveryStage) {
+  const auto d = livehd::satopt::default_stages(Profile::shared);
+  EXPECT_EQ(d, livehd::satopt::default_stages(Profile::synthesis));
+  for (const auto s : livehd::satopt::kStageOrder) {
+    EXPECT_TRUE(d.has(s)) << livehd::satopt::stage_name(s);
   }
+  // An explicit list still replaces the default.
+  EXPECT_EQ(*parse_stages("constants", Profile::synthesis), (Stage_set{Stage::constants}));
+  EXPECT_TRUE(parse_stages("none", Profile::synthesis)->empty());
+  EXPECT_EQ(*parse_stages("all", Profile::shared), d);
 }
 
 namespace {

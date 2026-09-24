@@ -34,3 +34,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "cprop_lowlane_test",
+    srcs = ["cprop_lowlane_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_cprop",
+        "//core",
+        "//graph",
+        "@googletest//:gtest_main",
+    ],
+)

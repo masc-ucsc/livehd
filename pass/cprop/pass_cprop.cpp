@@ -14,6 +14,10 @@ static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
 void Pass_cprop::setup() {
   Eprp_method m1("pass.cprop", "in-place copy propagation", &Pass_cprop::optimize);
+  m1.add_label_optional("low_lanes",
+                        "true: narrow operations reading a value with known low bits, Or(Shl(H,k),L), to their H parts "
+                        "(bitwidth runs after cprop in every compile)",
+                        "true");
 
   register_pass(m1);
 }
@@ -22,6 +26,7 @@ Pass_cprop::Pass_cprop(const Eprp_var& var) : Pass("pass.cprop", var) {}
 
 void Pass_cprop::optimize(Eprp_var& var) {
   Pass_cprop pcp(var);
+  const auto low_lanes = var.get("low_lanes", "true") != "false";
 
   // Graph bodies are independently owned; cprop neither reads nor mutates a
   // sibling graph.  Large generated designs contain thousands of modules, so
@@ -34,7 +39,7 @@ void Pass_cprop::optimize(Eprp_var& var) {
   const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
   const size_t        nw = std::min({var.graphs.size(), hw, size_t{16}});
   if (nw <= 1) {
-    Cprop cp;
+    Cprop cp{low_lanes};
     for (const auto& g : var.graphs) {
       cp.do_trans(g);
     }
@@ -51,7 +56,7 @@ void Pass_cprop::optimize(Eprp_var& var) {
   // deep as the design makes them.
   std::atomic<bool>               failed{false};
   livehd::run_workers(nw, [&](size_t) {
-    Cprop cp;
+    Cprop cp{low_lanes};
     while (!failed.load(std::memory_order_relaxed)) {
       const size_t i = next.fetch_add(1, std::memory_order_relaxed);
       if (i >= var.graphs.size()) {

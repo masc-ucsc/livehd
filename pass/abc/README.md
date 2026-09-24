@@ -12,7 +12,7 @@ trials -- is backend-neutral and lives in [`pass/synth`](../synth/README.md).
 
 | File | Role |
 |---|---|
-| `pass_abc.cpp` | the `pass.abc` entry: options, the private copy, satopt, extraction, the driver run |
+| `pass_abc.cpp` | the `pass.abc` entry: options, the private copy, dead-logic drop, extraction, the driver run |
 | `abc_map.hpp` | `Map_options` (the driver's options plus ABC's) and `Mapper` (driver + ABC backend) |
 | `abc_backend.{hpp,cpp}` | `Abc_backend`: the session per lane, flow strings, the budget ladder, `map()` of one region, whole-design refine and score |
 | `abc_flow.{hpp,cpp}` | `execute_flow`: the flow, budget ladder and area candidate in one entered frame; SCL QoR |
@@ -66,24 +66,14 @@ The body-builder hook replaces each region with an ABC-mapped netlist.
 
 ## SAT simplification
 
-Synthesis enables the satopt engine by default (`--set pass.satopt=false`
-disables it)
-([`pass/satopt`](../satopt/README.md)) on the private synthesis copy under its
-synthesis profile: every selected stage but `hotmux` before partitioning, and
-`hotmux` (per-bit mux-arm facts, Hotmux collapse) on each colored source right
-before it is cut, so either mapper (`synth.mapper=abc|usyn`) sees the
-simplified design. `pass.satopt.stages` and the `pass.satopt.<knob>` budget
-apply here too; one budget covers both runs. A mux fact whose mux sits wholly
-inside one region is not applied: it does not change that region's function.
-The per-bit facts are one proof `Lnet` swept by ABC `&fraig`
-(`abc_satopt.cpp`); every other proof is cvc5's. The stage report is the
-`satopt` member of the QoR JSON.
-
-Use whole-design LEC for mapped designs that consume these facts: a region
-alone lacks the upstream relation that justified the simplification. Set
-`pass.satopt=false` to compare mapping without it. Committing the rewrites
-to the compiled design instead is `lhd compile --set pass.satopt=true` or
-`lhd pass satopt` (see pass/satopt).
+pass.abc runs no satopt of its own: the engine
+([`pass/satopt`](../satopt/README.md)) runs in the compile step, and `lhd
+synth` compiling a Pyrope/Verilog source turns it on (`lhd synth foo.prp` is
+`lhd compile --set pass.satopt=true foo.prp` then mapping; `--set
+pass.satopt=false` disables it). An lg: input (`lhd synth lg:...`, `lhd pass
+abc|usyn`) is mapped as compiled. `abc_satopt.cpp` registers the ABC `&fraig`
+mux-fact prover that compile-time satopt uses when ABC is linked. pass.abc
+still drops dead logic from its private copy before partitioning.
 
 ## Parallel synthesis
 

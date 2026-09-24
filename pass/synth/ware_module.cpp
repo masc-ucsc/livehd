@@ -13,6 +13,7 @@
 #include <string>
 #include <tuple>
 
+#include "affine_amount.hpp"
 #include "attr_carry.hpp"
 #include "node_util.hpp"
 #include "synthesis_cost.hpp"
@@ -55,78 +56,30 @@ void shape(const hhds::Pin_class& from, const hhds::Pin_class& to) {
 // module instead: the port carries only the narrow index and the body rebuilds
 // `index*stride + bias` in front of the shift.
 struct Affine_amount {
-  hhds::Port_id    sink_pid = 0;  // the shift's amount sink
-  hhds::Pin_class  index;         // the one variable operand (a module port)
-  hhds::Node_class term;          // SHL(index, const) or Mult(index, const...)
-  hhds::Pin_class  term_out;      // term's driver pin feeding the Sum
-  hhds::Node_class sum;           // amount = term + constants
-  hhds::Pin_class  amount;        // the Sum's driver pin feeding the shift
+  hhds::Port_id sink_pid = 0;  // the shift's amount sink
+  Affine_chain  chain;         // index -> amount (affine_amount.hpp)
 };
 
 std::optional<Affine_amount> affine_amount(const hhds::Node_class& shift) {
   const auto amount = gu::get_driver_of_sink_name(shift, "b");
-  if (amount.is_invalid() || amount.is_const() || gu::is_graph_input_pin(amount)) {
-    return std::nullopt;
-  }
-  const auto sum = amount.get_master_node();
-  if (gu::type_op_of(sum) != Ntype_op::Sum) {
-    return std::nullopt;
-  }
-  hhds::Pin_class term_out;
-  for (const auto& in : sum.inp_sorted_pins()) {
-    const auto drv = in.get_driver_pin();
-    if (drv.is_const()) {
-      const auto& c = gu::const_of(drv);
-      if (c.has_unknowns() || !c.is_just_i64()) {
-        return std::nullopt;
-      }
-      continue;
-    }
-    // One added (bank 0) variable term; a subtracted one is not a stride.
-    if (!term_out.is_invalid() || Ntype::sink_bank(Ntype_op::Sum, in.get_port_id()) != 0 || gu::is_graph_input_pin(drv)) {
-      return std::nullopt;
-    }
-    term_out = drv;
-  }
-  if (term_out.is_invalid()) {
-    return std::nullopt;
-  }
-  const auto      term = term_out.get_master_node();
-  hhds::Pin_class index;
-  if (gu::type_op_of(term) == Ntype_op::SHL) {
-    const auto a = gu::get_driver_of_sink_name(term, "a");
-    const auto b = gu::get_driver_of_sink_name(term, "b");
-    if (a.is_invalid() || a.is_const() || b.is_invalid() || !b.is_const()) {
-      return std::nullopt;
-    }
-    index = a;
-  } else if (gu::type_op_of(term) == Ntype_op::Mult) {
-    for (const auto& in : term.inp_sorted_pins()) {
-      const auto drv = in.get_driver_pin();
-      if (drv.is_const()) {
-        continue;
-      }
-      if (!index.is_invalid()) {
-        return std::nullopt;  // two variable factors: not a stride
-      }
-      index = drv;
-    }
-  } else {
+  auto       chain  = affine_chain(amount);
+  if (!chain) {
     return std::nullopt;
   }
   // Worth it only when the index is genuinely narrower than the amount it
   // replaces (the blaster's affine form is bounded to a 16-bit index).
-  if (index.is_invalid() || gu::bits_of(index) <= 0 || gu::bits_of(index) > 16 || gu::bits_of(index) >= gu::bits_of(amount)) {
+  const auto& index = chain->index;
+  if (gu::bits_of(index) <= 0 || gu::bits_of(index) > 16 || gu::bits_of(index) >= gu::bits_of(amount)) {
     return std::nullopt;
   }
-  return Affine_amount{Ntype::get_sink_pid(gu::type_op_of(shift), "b"), index, term, term_out, sum, amount};
+  return Affine_amount{Ntype::get_sink_pid(gu::type_op_of(shift), "b"), std::move(*chain)};
 }
 
 // Everything that shapes the rebuilt amount, so two modules share a body only
 // when their amounts are the same function of the index.
 std::string describe_affine(const Affine_amount& a) {
-  std::string d = std::format("affine:idx{}:{}", gu::bits_of(a.index), gu::is_unsign(a.index));
-  for (const auto& [node, out] : {std::pair{a.term, a.term_out}, std::pair{a.sum, a.amount}}) {
+  std::string d = std::format("affine:idx{}:{}", gu::bits_of(a.chain.index), gu::is_unsign(a.chain.index));
+  for (const auto& [node, out] : a.chain.links) {
     d += std::format("|op{}:{}:{}", static_cast<int>(gu::type_op_of(node)), gu::bits_of(out), gu::is_unsign(out));
     for (const auto& in : node.inp_sorted_pins()) {
       const auto drv = in.get_driver_pin();
@@ -280,10 +233,10 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       if (is_affine_edge(e)) {
         auto pname = std::format("i{}", i);
         io->add_input(pname, next++);
-        io->set_bits(pname, std::max(gu::bits_of(affine->index), 1));
-        io->set_unsign(pname, gu::is_unsign(affine->index));
+        io->set_bits(pname, std::max(gu::bits_of(affine->chain.index), 1));
+        io->set_unsign(pname, gu::is_unsign(affine->chain.index));
         const auto index = body->get_input_pin(pname);
-        shape(affine->index, index);
+        shape(affine->chain.index, index);
         // Clone one node of the amount cone: constants are copied, the one
         // variable operand is `variable`.
         auto clone = [&](const hhds::Node_class& src, const hhds::Pin_class& src_out, const hhds::Pin_class& variable) {
@@ -307,7 +260,10 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
           shape(src_out, out);
           return out;
         };
-        driver = clone(affine->sum, affine->amount, clone(affine->term, affine->term_out, index));
+        driver = index;
+        for (const auto& [src, src_out] : affine->chain.links) {
+          driver = clone(src, src_out, driver);
+        }
         auto sink = inner.create_sink_pin(e.get_port_id());
         gu::carry_pin_attrs(e, sink);
         driver.connect_sink(sink);
@@ -350,7 +306,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   gu::carry_srcid(node, inst);
   for (size_t i = 0; i < edges.size(); ++i) {
     if (const auto drv = edges[i].get_driver_pin(); !drv.is_const()) {
-      const auto src = is_affine_edge(edges[i]) ? affine->index : drv;
+      const auto src = is_affine_edge(edges[i]) ? affine->chain.index : drv;
       src.connect_sink(inst.create_sink_pin(io->get_input_port_id(std::format("i{}", i))));
     }
   }

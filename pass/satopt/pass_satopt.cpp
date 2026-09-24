@@ -78,7 +78,7 @@ public:
         if (graphs[i]->body_epoch() == before[i]) {
           continue;
         }
-        Cprop cprop;
+        Cprop cprop{true};
         cprop.do_trans(graphs[i]);
         Bitwidth bitwidth(3);
         bitwidth.do_trans(graphs[i]);
@@ -123,8 +123,8 @@ public:
                        &work);
     method.add_label_optional("top", "Optimize this definition and the definitions it reaches (default: every graph)", "");
     method.add_label_optional("stages",
-                              "none, default, or a comma-separated list of: constants, equiv, complement, odc, hotmux, memory, "
-                              "resub (always run in that order)",
+                              "none, default, all, or a comma-separated list of: constants, equiv, complement, odc, hotmux, memory, "
+                              "resub, simp_ctrl (always run in that order)",
                               "");
     method.add_label_optional("cleanup", "true: constant propagation and bitwidth on every changed graph afterwards", "true");
     method.add_label_optional("work",

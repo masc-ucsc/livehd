@@ -1098,6 +1098,31 @@ Query_out Prover::bit_gate(const hhds::Pin_class& t, Ntype_op op, const hhds::Pi
       1);
 }
 
+Query_out Prover::bit_function(const hhds::Pin_class& target, const std::vector<hhds::Pin_class>& inputs, uint8_t truth) {
+  if (inputs.size() > 3) {
+    return {Verdict::Unknown, false, "", {}};
+  }
+  std::vector<hhds::Pin_class> pins{target};
+  pins.insert(pins.end(), inputs.begin(), inputs.end());
+  return masked(
+      pins,
+      [&](const std::vector<Term>& terms) -> std::optional<Term> {
+        std::vector<Term> rows;
+        for (size_t i = 0; i < (size_t{1} << inputs.size()); ++i) {
+          rows.push_back(bv_const(1, (truth >> i) & 1));
+        }
+        for (size_t i = 0; i < inputs.size(); ++i) {
+          const auto cond = tm_.mkTerm(Kind::EQUAL, {terms[i + 1], bv_const(1, 1)});
+          for (size_t j = 0; j < rows.size() / 2; ++j) {
+            rows[j] = tm_.mkTerm(Kind::ITE, {cond, rows[2 * j + 1], rows[2 * j]});
+          }
+          rows.resize(rows.size() / 2);
+        }
+        return tm_.mkTerm(Kind::DISTINCT, {terms[0], rows[0]});
+      },
+      1);
+}
+
 Query_out Prover::unchanged_under(const hhds::Pin_class& target, int width, const Dlop& mask, const Dlop& value,
                                   const std::vector<hhds::Node_class>& window, const std::vector<hhds::Pin_class>& exits) {
   absl::flat_hash_set<Key> seen;

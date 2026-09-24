@@ -212,9 +212,9 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       // fold too; bodies whose inputs remain dynamic still map once for reuse.
       bool specialized;
       do {
-        Cprop{}.do_trans(graph);
+        Cprop{true}.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
-        Cprop{}.do_trans(graph);
+        Cprop{true}.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
         std::vector<hhds::Node_class> constant_patterns;
         for (const auto node : graph->body().nodes()) {

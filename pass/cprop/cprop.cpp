@@ -3392,6 +3392,9 @@ void Cprop::scalar_node(hhds::Node_class& node) {
   }
 
   try_collapse_forward(node, inp_edges_ordered);
+  if (!node.is_invalid()) {
+    low_lane(node);
+  }
 }
 
 void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {

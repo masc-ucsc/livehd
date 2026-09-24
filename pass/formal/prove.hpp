@@ -129,6 +129,10 @@ public:
   // Bit 0 of `t` always equals `op` (And, Or or Xor) over bit 0 of `a` and of
   // `b` (complemented when `invert_b`): a gate proven before it is built.
   Query_out bit_gate(const hhds::Pin_class& t, Ntype_op op, const hhds::Pin_class& a, const hhds::Pin_class& b, bool invert_b);
+  // Bit 0 of target equals a truth table over up to three one-bit inputs.
+  // Input i supplies bit i of the table index. Proves before constructing
+  // replacement cells; unseen simulation rows must still pass this query.
+  Query_out bit_function(const hhds::Pin_class& target, const std::vector<hhds::Pin_class>& inputs, uint8_t truth);
   // Observability: with `target`'s low `width` bits in `mask` replaced by
   // those of `value` (read with target's sign), does every exit keep its
   // value? `window` lists the cells between target and the exits in

@@ -45,7 +45,7 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
 - `pass/synth/`: the shared, ABC-free synthesis pipeline (private copy, ware/memory modules, region driver, `Lnet` translation, region cache, read-back); see `pass/synth/README.md`
-- `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, shared by compile (`--set pass.satopt=true`), `lhd pass satopt` and synthesis; see `pass/satopt/README.md`
+- `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, run only by the compile step (`--set pass.satopt=true`; on by default for `lhd synth`/`lhd lec` compiling a source) and `lhd pass satopt`; see `pass/satopt/README.md`
 - `pass/abc/`: the ABC backend and `pass.abc` — the only synthesis code that includes or calls ABC
 - `pass/usyn/`: unate synthesis (`pass.usyn`, `synth.mapper=usyn`): a domino LUT cover as a region hook, mapped by the ABC backend
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)

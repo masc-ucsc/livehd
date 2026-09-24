@@ -15,6 +15,7 @@
 #include "json_util.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
+#include "cprop.hpp"
 #include "satopt_detail.hpp"
 #include "satopt_salt.hpp"
 
@@ -643,55 +644,76 @@ struct Search {
     }
   }
 
-  // E: an unsigned value whose top bits every column leaves 0, proven with
-  // one masked query (a counterexample drops the bits it falsified and the
-  // rest are tried again); its consumers then read the narrower slice. Other
-  // constant runs are left alone: rebuilding a value from lanes hides the
-  // arithmetic a consumer recognizes (an affine shift amount `(i << 5) + 32`
-  // keeps its word select only while it stays one Sum) -- measured, it grew
-  // a 4:1 word select 4x.
+  // E: constant bit runs at either end of a value, proven with one masked
+  // query (a counterexample drops the bits it falsified and the rest are
+  // tried again):
+  //  * top: an unsigned value whose top bits every column leaves 0 -- its
+  //    consumers read the narrower slice;
+  //  * low: any value whose low k bits are one constant C -- its consumers
+  //    read Or(And(t, -2^k), C), the low-lane form cprop narrows every
+  //    operation through (pass/cprop/cprop_lowlane.cpp).
+  // Constant runs inside a value are left alone: rebuilding a value from
+  // lanes hides the arithmetic a consumer recognizes (an affine word-select
+  // amount grew a 4:1 select 4x); both forms above keep the value one cell.
   void constant_bits(const Pin& p) {
     const int w = gu::bits_of(p);
-    if (w < 2 || !gu::is_unsign(p) || wiring_only(p)) {
+    if (w < 2 || wiring_only(p)) {
       return;
     }
+    const bool unsign = gu::is_unsign(p);
+    // Low bits already structurally known (a shift, a mask, the low-lane
+    // form itself), or no consumer reads them: nothing to prove.
+    const bool low_known = livehd::low_lane_bits(p) > 0;
     for (int attempt = 0; attempt < 3; ++attempt) {
       const auto* v = sim.values(p);
       if (v == nullptr) {
         return;
       }
-      // These samples are already fitted unsigned words. Only the zero top
-      // run is used, so one OR reduction replaces per-sample masks, inversions
-      // and an unused all-ones intersection.
-      Dlop observed = *Dlop::create_integer(0);
+      // Bits some column sets (any) and bits every column sets (all).
+      Dlop any = *Dlop::create_integer(0);
+      Dlop all = *Dlop::create_integer(-1);
       for (const auto& x : *v) {
-        observed = *observed.or_op(x);
+        any = *any.or_op(x);
+        all = *all.and_op(x);
       }
       if (!afford_work(v->size())) {
         return;
       }
-      // Only the zero run at the top.
       int top = w;
-      while (top > 0 && !observed.bit_test(top - 1)) {
+      while (unsign && top > 0 && !any.bit_test(top - 1)) {
         --top;
       }
-      if (top == w || top == 0) {
-        return;  // no zero top, or a whole constant (the word sweep's)
+      int low = 0;
+      while (!low_known && low < top && (!any.bit_test(low) || all.bit_test(low))) {
+        ++low;
       }
-      const auto mask = *Dlop::get_mask_value(w - 1, top);
-      const auto zero = *Dlop::create_integer(0);
+      if (low > 0 && low_unread(p, low)) {
+        low = 0;
+      }
+      if (low >= top || (top == w && low == 0)) {
+        return;  // nothing, or a whole constant (the word sweep's)
+      }
+      Dlop mask = *Dlop::create_integer(0);
+      if (top < w) {
+        mask = *Dlop::get_mask_value(w - 1, top);
+      }
+      Dlop value = *Dlop::create_integer(0);
+      if (low > 0) {
+        mask  = *mask.or_op(*Dlop::get_mask_value(low));
+        value = *all.and_op(*Dlop::get_mask_value(low));
+      }
       ++rep.candidates;
       if (!afford_query()) {
         return;
       }
-      const auto out = solver().masked_const(p, w, mask, zero);
+      const auto out = solver().masked_const(p, w, mask, value);
       charge_solver();
       if (out.verdict == formal::Verdict::Proven) {
         ++rep.proven;
         row.facts.push_back({static_cast<uint64_t>(p.get_master_node().get_debug_nid()),
                              0,
                              0,
-                             satopt_constant_key(zero),
+                             satopt_constant_key(value),
                              satopt_constant_key(mask)});
         return;
       }
@@ -701,6 +723,30 @@ struct Search {
       }
       refuted(out);
     }
+  }
+  // Every consumer of p already drops its low `k` bits (a Sra by at least k,
+  // or the And(p, -2^k') mask a previous run inserted): a low-run fact would
+  // only re-wrap it.
+  static bool low_unread(const Pin& p, int k) {
+    bool any = false;
+    for (const auto& e : p.out_edges()) {
+      if (e.driver != p) {
+        continue;
+      }
+      any           = true;
+      const auto n  = e.sink.get_master_node();
+      const auto op = gu::type_op_of(n);
+      if (op == Ntype_op::SRA && e.sink.get_port_id() == 0) {
+        const auto b = gu::get_driver_of_sink_name(n, "b");
+        if (b.is_const() && gu::const_of(b).is_just_i64() && gu::const_of(b).to_just_i64() >= k) {
+          continue;
+        }
+      } else if (op == Ntype_op::And && livehd::low_lane_bits(n.get_driver_pin(0)) >= k) {
+        continue;
+      }
+      return false;
+    }
+    return any;
   }
 
   // G: contextual constants, one proven rewrite at a time.
@@ -1093,21 +1139,51 @@ uint64_t apply(hhds::Graph& g, Sweep kind, const std::vector<Fact>& facts, bool 
     }
     Pin replacement;
     if (kind == Sweep::constants && !f.mask.empty()) {
-      // E: an unsigned value with a zero top run reads as its narrower slice
-      // (the value itself stays: the slice reads it).
-      const auto runs = runs_of(w, constant_of(f.mask), constant_of(f.value));
-      if (!gu::is_unsign(t) || runs.size() != 2 || runs[0].kind >= 0 || runs[1].kind != 0) {
+      // E: the mask is a low window [0, low) and/or a zero top window
+      // [top, w) of an unsigned value. Consumers read the narrower slice and
+      // the low-lane form Or(And(slice, -2^low), C); the value itself stays.
+      const auto mask  = constant_of(f.mask);
+      const auto value = constant_of(f.value);
+      int        low   = 0;
+      while (low < w && mask.bit_test(low)) {
+        ++low;
+      }
+      int top = w;
+      while (top > low && mask.bit_test(top - 1)) {
+        --top;
+      }
+      bool contiguous = top > low;
+      for (int b = low; contiguous && b < top; ++b) {
+        contiguous = !mask.bit_test(b);
+      }
+      if (!contiguous || (top < w && !gu::is_unsign(t)) || (top < w && value.get_mask_op_opt(top, w)->is_known_zero() == false)) {
         continue;
       }
       Arm_builder build{g, it->second};
-      replacement = build.slice(t, 0, runs[1].lo);
+      replacement = top < w ? build.slice(t, 0, top) : t;
+      if (low > 0) {
+        const bool unsign = top < w || gu::is_unsign(t);
+        const int  width  = top < w ? top : w;
+        auto       masked = build.node(Ntype_op::And);
+        replacement.connect_sink(gu::setup_sink_pid(masked, 0));
+        gu::create_const(g, *Dlop::get_neg_mask_value(low)).connect_sink(gu::setup_sink_pid(masked, 0));
+        replacement    = masked.create_driver_pin(0);
+        const auto set = [&](const Pin& p) { unsign ? gu::set_ubits(p, width) : gu::set_sbits(p, width); };
+        set(replacement);
+        const auto c = *value.get_mask_op_opt(0, low);
+        if (!c.is_known_zero()) {
+          auto joined = build.node(Ntype_op::Or);
+          replacement.connect_sink(gu::setup_sink_pid(joined, 0));
+          gu::create_const(g, c).connect_sink(gu::setup_sink_pid(joined, 0));
+          replacement = joined.create_driver_pin(0);
+          set(replacement);
+        }
+      }
       for (const auto& sink : sinks) {
         gu::drop_drivers(sink);
         replacement.connect_sink(sink);
       }
-      for (const auto& r : runs) {
-        rep.bits += r.kind >= 0 ? static_cast<uint64_t>(r.hi - r.lo) : 0;
-      }
+      rep.bits += static_cast<uint64_t>(low + (w - top));
       ++applied;
       continue;
     }

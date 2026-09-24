@@ -111,9 +111,9 @@ std::vector<Set_option> list_set_options() {
   out.push_back(Set_option{"pass.satopt",
                            "pass.satopt",
                            "false",
-                           "Enable proof-backed logic simplification. Default false for compile/simulation, true for LEC "
-                           "and synthesis; an explicit true/false overrides the command default. Synthesis runs on its "
-                           "private copy. pass.satopt.stages selects the searches."});
+                           "Enable proof-backed logic simplification in the compile step. Default false; on for `lhd synth` "
+                           "and `lhd lec` compiling a Pyrope/Verilog source (an lg:/ln: input is taken as compiled). An "
+                           "explicit true/false always wins. pass.satopt.stages narrows the searches (default: all)."});
   for (const auto& sp : kSetPasses) {
     if (sp.list == Set_pass::List::none) {
       continue;  // legacy alias spelling: accepted by --set, never listed

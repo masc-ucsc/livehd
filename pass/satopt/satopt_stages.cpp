@@ -11,6 +11,7 @@
 #include "node_util.hpp"
 #include "rapidjson/document.h"
 #include "satopt.hpp"
+#include "satopt_ctrl.hpp"
 #include "satopt_memory.hpp"
 #include "satopt_mux.hpp"
 #include "satopt_sweep.hpp"
@@ -66,6 +67,7 @@ std::string_view stage_name(Stage s) {
     case Stage::hotmux: return "hotmux";
     case Stage::memory: return "memory";
     case Stage::resub: return "resub";
+    case Stage::simp_ctrl: return "simp_ctrl";
   }
   return "?";
 }
@@ -158,7 +160,7 @@ Meter::Meter(const Budget& budget) : budget_(budget), start_ns_(now_ns()) {
 void Meter::begin_stage(int waiting) {
   const auto share = [&](uint64_t total, uint64_t used) {
     const uint64_t left = total > used ? total - used : 0;
-    return waiting > 0 ? left / 2 : left;
+    return left / (static_cast<uint64_t>(waiting) + 1);
   };
   stage_work_      = 0;
   stage_queries_   = 0;
@@ -222,11 +224,19 @@ std::string Stage_set::text() const {
   return out.empty() ? std::string{"none"} : out;
 }
 
+Stage_set all_stages() {
+  Stage_set all;
+  for (auto s : kStageOrder) {
+    all.add(s);
+  }
+  return all;
+}
+
 Stage_set default_stages(Profile p) {
-  // The stages whose safety audit (B) is done. Synthesis also simplifies
-  // memory ports; experimental searches are never on by default.
+  // Every stage (user ruling 2026-09-24): `pass.satopt=true` means the whole
+  // engine, whichever flow turned it on; pass.satopt.stages narrows it.
   (void)p;
-  return {Stage::constants, Stage::hotmux, Stage::memory};
+  return all_stages();
 }
 
 std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, std::string* error) {
@@ -245,6 +255,9 @@ std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, st
   }
   if (text.empty() || text == "default") {
     return default_stages(profile);
+  }
+  if (text == "all") {
+    return all_stages();
   }
   Stage_set set;
   while (!text.empty()) {
@@ -266,7 +279,7 @@ std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, st
     }
     if (!found) {
       if (error) {
-        *error = std::format("unknown stage '{}' (expected none, default, or a list of: {})",
+        *error = std::format("unknown stage '{}' (expected none, default, all, or a list of: {})",
                              name,
                              Stage_set{Stage::constants,
                                        Stage::equiv,
@@ -274,7 +287,8 @@ std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, st
                                        Stage::odc,
                                        Stage::hotmux,
                                        Stage::memory,
-                                       Stage::resub}
+                                       Stage::resub,
+                                       Stage::simp_ctrl}
                                  .text());
       }
       return std::nullopt;
@@ -418,6 +432,7 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
       case Stage::resub: return applicable.values;
       case Stage::hotmux    : return applicable.muxes;
       case Stage::memory: return applicable.memory;
+      case Stage::simp_ctrl: return applicable.selects || applicable.memory;
     }
     return false;
   };
@@ -456,6 +471,7 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
       case Stage::complement: sweep_values(graphs, Sweep::complement, opts.profile, opts.cache_dir, r, meter); break;
       case Stage::odc: sweep_values(graphs, Sweep::odc, opts.profile, opts.cache_dir, r, meter); break;
       case Stage::resub: sweep_values(graphs, Sweep::resub, opts.profile, opts.cache_dir, r, meter); break;
+      case Stage::simp_ctrl: simplify_controls(graphs, r, meter); break;
       case Stage::hotmux:
         for (const auto& g : graphs) {
           if (!g) {

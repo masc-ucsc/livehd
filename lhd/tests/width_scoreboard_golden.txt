@@ -10,7 +10,7 @@ arr_comb_tmp 139 9
 array_bitview_runtime 224 14
 bit_sel_sext 55 7
 bitsel_dyn 43 6
-bitset_reg 240 27
+bitset_reg 232 27
 async_reset_enable 45 10
 comb_array_const_index_read 142 27
 assign_pattern 51 27

@@ -735,25 +735,8 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
     merge_sets(opts, "pass.abc", labels);
   }
   merge_sets(opts, method, labels);
-  // The kernel resolves the shared switch; mapper-local labels are internal.
-  if (mapper_of_method(method) == nullptr) {
-    return;
-  }
-  labels["satopt"] = satopt_requested(opts) ? "true" : "false";
-  Eprp_var::Eprp_dict satopt_labels;
-  merge_sets(opts, "pass.satopt", satopt_labels);
-  if (auto it = satopt_labels.find("stages"); it != satopt_labels.end()) {
-    labels["satopt_stages"] = it->second;
-  }
-  std::string budget;
-  for (const auto key : livehd::satopt::kBudgetKeys) {
-    if (auto it = satopt_labels.find(std::string{key}); it != satopt_labels.end()) {
-      budget += std::format("{}{}={}", budget.empty() ? "" : ",", key, it->second);
-    }
-  }
-  if (!budget.empty()) {
-    labels["satopt_budget"] = budget;
-  }
+  // No satopt labels: satopt runs only in the compile graph pipeline, and a
+  // mapper maps what compile produced.
 }
 
 // Validate every --set/--config entry against the live registry: a typo'd
@@ -1231,21 +1214,25 @@ void run_satopt_step(Eprp_var& var, Eprp_var::Eprp_dict labels, Options& opts, R
   res.satopt_json = current->json();
 }
 
-bool satopt_requested(const Options& opts) {
-  bool requested = opts.command == "lec" || opts.command == "synth"
-                   || (opts.command == "pass" && !opts.files.empty() && find_mapper(opts.files.front()) != nullptr);
-  for (const auto& [key, value] : opts.sets) {
+std::optional<bool> satopt_setting(const Options& opts) {
+  std::optional<bool> value;
+  for (const auto& [key, v] : opts.sets) {
     if (key == "pass.satopt") {
-      requested = value == "true" || value == "1" || value == "on";
+      value = v == "true" || v == "1" || v == "on";
     }
   }
-  return requested;
+  return value;
 }
 
-bool satopt_during_compile(const Options& opts) {
-  // Synthesis runs the engine once on its private copy, including colored
-  // mux-arm proofs. Other graph consumers use the shared semantic profile.
-  return opts.command != "synth" && satopt_requested(opts);
+bool satopt_during_compile(const Options& opts, bool from_source) {
+  // satopt is part of the compile graph pipeline only. `lhd synth` and `lhd
+  // lec` compiling a Pyrope/Verilog SOURCE default it on, so `lhd synth
+  // foo.prp` is `lhd compile --set pass.satopt=true foo.prp` then mapping; an
+  // lg:/ln: input is taken as compiled. An explicit setting always wins.
+  if (const auto value = satopt_setting(opts)) {
+    return *value;
+  }
+  return from_source && (opts.command == "synth" || opts.command == "lec");
 }
 
 bool compile_unroll_requested(const Options& opts) {

@@ -248,7 +248,7 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       side_opts.top = selected_top;
     }
     lower_lnasts(side_opts, res, var, lib_path, /*need_graphs=*/true);
-    graph_pipeline_and_emits(opts, res, var, lib_path);
+    graph_pipeline_and_emits(opts, res, var, lib_path, false, /*from_source=*/kind != "ln");
   } else {
     throw Lhd_error{"usage",
                     std::format("lec accepts verilog:, lg:, pyrope:, or ln: inputs, got {}:", kind),
@@ -257,9 +257,9 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
   if (var.graphs.empty()) {
     throw Lhd_error{"config", std::format("lec {} input {} holds no graphs", side, path), ""};
   }
-  if (kind == "lg" && satopt_requested(opts)) {
-    // Source sides ran satopt in graph_pipeline_and_emits. Loaded graphs need
-    // the same optimization, in memory only: never save back to either input.
+  if (kind == "lg" && satopt_setting(opts).value_or(false)) {
+    // A loaded side is taken as compiled; an explicit --set pass.satopt=true
+    // optimizes it too, in memory only: never save back to either input.
     const auto selected = pick_top_graph(var, side == "ref" ? opts.ref_top : opts.impl_top, opts.top, side, "lec", "pass.lec");
     run_satopt_step(var,
                     {

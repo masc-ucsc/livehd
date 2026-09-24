@@ -10,32 +10,39 @@
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
 
+// satopt runs only in the compile graph pipeline: on by default for synth and
+// lec compiling a Pyrope/Verilog SOURCE, off for every lg:/ln: input and every
+// other command; an explicit pass.satopt always wins. Mappers get no satopt
+// labels (they map what compile produced).
 TEST(LhdOptions, SatoptCommandDefaultsAndExplicitOverrides) {
-  for (const auto& [command, subcommand, enabled] : std::vector<std::tuple<std::string, std::string, bool>>{
-           {"compile",       "", false},
-           {    "sim",       "", false},
-           { "formal", "verify", false},
+  for (const auto& [command, subcommand, from_source] : std::vector<std::tuple<std::string, std::string, bool>>{
+           {"compile",       "",  true},
+           {    "sim",       "",  true},
+           { "formal", "verify",  true},
            {    "lec",       "",  true},
+           {    "lec",       "", false},
            {  "synth",       "",  true},
-           {   "pass",    "abc",  true},
-           {   "pass",   "usyn",  true}
+           {  "synth",       "", false},
+           {   "pass",    "abc", false},
+           {   "pass",   "usyn", false}
   }) {
     lhd::Options opts;
     opts.command = command;
     if (!subcommand.empty()) {
       opts.files.push_back(subcommand);
     }
-    SCOPED_TRACE(command + " " + subcommand);
-    EXPECT_EQ(lhd::satopt_requested(opts), enabled);
-    EXPECT_EQ(lhd::satopt_during_compile(opts), enabled && command != "synth");
+    SCOPED_TRACE(command + " " + subcommand + (from_source ? " source" : " ir"));
+    const bool by_default = from_source && (command == "synth" || command == "lec");
+    EXPECT_FALSE(lhd::satopt_setting(opts).has_value());
+    EXPECT_EQ(lhd::satopt_during_compile(opts, from_source), by_default);
     for (const auto value : {"false", "true"}) {
       opts.sets.emplace_back("pass.satopt", value);
-      EXPECT_EQ(lhd::satopt_requested(opts), std::string_view{value} == "true");
-      EXPECT_EQ(lhd::satopt_during_compile(opts), std::string_view{value} == "true" && command != "synth");
+      EXPECT_EQ(lhd::satopt_setting(opts), std::string_view{value} == "true");
+      EXPECT_EQ(lhd::satopt_during_compile(opts, from_source), std::string_view{value} == "true");
       if (command == "synth" || command == "pass") {
         Eprp_var::Eprp_dict labels;
         lhd::merge_mapper_sets(opts, subcommand == "usyn" ? "pass.usyn" : "pass.abc", labels);
-        EXPECT_EQ(labels.at("satopt"), value);
+        EXPECT_FALSE(labels.contains("satopt"));
       }
     }
   }

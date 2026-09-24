@@ -223,6 +223,10 @@ class PrpRunner:
         # upass.reset_style elaboration flag so the implicit-reset flops wire
         # an async reset and the golden can assert the async always-block.
         cmd = self.lhd_upass(test, 'equiv')
+        # The emitted side is never satopt-optimized (the compile default,
+        # pinned): the LEC below runs every satopt stage, so each pair also
+        # checks satopt's rewrites against an unoptimized design.
+        cmd += ['--set', 'pass.satopt=false']
         if test.params.get('reset_style', 'sync') != 'sync':
             cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
         if test.params.get('compile_top'):
@@ -232,6 +236,13 @@ class PrpRunner:
 
     def equiv_set_args(self):
         return [arg for setting in self.equiv_sets for arg in ('--set', setting)]
+
+    @staticmethod
+    def lec_satopt_args():
+        # LEC re-reads both Verilog sides with every satopt stage on (shared
+        # profile): a wrong rewrite on either side refutes the pair. A fixture's
+        # `:set:` comes after and may override it.
+        return ['--set', 'pass.satopt=true', '--set', 'pass.satopt.stages=all']
 
     def gen_lhd_cmd(self, test, mode):
         gen_cmd = {
@@ -523,7 +534,7 @@ class PrpRunner:
         # Every equivalence pair uses native Slang and the default LEC solver.
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
                    '--impl-top', pyrope_top, '--ref-top', verilog_top,
-                   '--workdir', os.path.join(odir, 'w_lec')] + self._extra_sets(test) + self.equiv_set_args()
+                   '--workdir', os.path.join(odir, 'w_lec')] + self.lec_satopt_args() + self._extra_sets(test) + self.equiv_set_args()
         lec = run_lec(lec_cmd, cwd=tmp_dir, timeout=20)
         ltxt = lec.stdout.decode('utf-8', 'ignore')
         # Hierarchical LEC may retain an intermediate collapsed-box UNKNOWN in
@@ -738,7 +749,8 @@ class PrpRunner:
         check = run_lec(
             [self.lhd, 'lec', '--ref', ref, '--impl', impl,
              '--ref-top', pyrope_top, '--impl-top', verilog_top,
-             '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.equiv_set_args(), cwd=tmp_dir, timeout=20)
+             '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.lec_satopt_args() + self.equiv_set_args(),
+            cwd=tmp_dir, timeout=20)
         crc, clog = check.returncode, check.stdout
         if lec_verdict(check) == "proven":
             print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))

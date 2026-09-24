@@ -527,10 +527,34 @@ std::optional<bool> Word_sim::unchanged_under(const Pin& target, const Dlop& mas
   return true;
 }
 
-void Word_sim::invalidate(const std::vector<Pin>& pins) {
+void Word_sim::invalidate(const std::vector<Pin>& pins, bool fanout) {
   absl::flat_hash_set<Key> gone;
   for (const auto& p : pins) {
     gone.insert({0, p});
+  }
+  if (fanout) {
+    // order_ lists operands first, so one pass reaches the whole fanout.
+    const auto reads_gone = [&](const Key& k) {
+      if (const auto c = copies_.find(k); c != copies_.end()) {
+        return gone.contains(c->second);
+      }
+      if (k.second.is_const() || is_leaf(k)) {
+        return false;
+      }
+      for (const auto& in_pin : k.second.get_master_node().inp_sorted_pins()) {
+        for (const auto& d : in_pin.get_driver_pins()) {
+          if (gone.contains(Key{k.first, d})) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    for (const auto& k : order_) {
+      if (!gone.contains(k) && reads_gone(k)) {
+        gone.insert(k);
+      }
+    }
   }
   for (const auto& k : gone) {
     if (auto it = memo_.find(k); it != memo_.end()) {

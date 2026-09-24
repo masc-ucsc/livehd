@@ -10,6 +10,7 @@
 #include <print>
 #include <vector>
 
+#include "affine_amount.hpp"
 #include "arith.hpp"
 #include "absl/container/btree_map.h"
 #include "absl/container/node_hash_map.h"
@@ -742,21 +743,9 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       // dynamic word-select lowering. With a narrow demanded prefix, select
       // directly among source words rather than building a full-width barrel.
       hhds::Pin_class index;
-      int64_t         scale          = 1;
-      int64_t         bias           = 0;
-      bool            affine         = false;
-      auto            positive_const = [](const hhds::Pin_class& pin, int64_t& value) {
-        if (!pin.is_const()) {
-          return false;
-        }
-        const auto& c = gu::const_of(pin);
-        if (!c.is_just_i64() || c.is_negative()) {
-          return false;
-        }
-        value = c.to_just_i64();
-        return true;
-      };
-      auto amount_node = b_d.get_master_node();
+      int64_t         scale  = 1;
+      int64_t         bias   = 0;
+      bool            affine = false;
       // The affine form needs a NARROW demand, not specifically a sliced one: a
       // shift whose own result is already narrower than its operand (a ware
       // module narrows its output port to the demanded width, so its consumer
@@ -764,57 +753,26 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       // affine_fits below keeps the two lowerings bit-identical and the cost
       // check keeps the choice a pure performance decision.
       const bool narrow_demand = sliced_demand || demand_w < cw;
-      if (narrow_demand && region.contains(amount_node) && gu::type_op_of(amount_node) == Ntype_op::Sum) {
-        hhds::Pin_class term;
-        bool            valid = true;
-        for (const auto& in_pin : amount_node.inp_sorted_pins()) {
-          const auto in_drv = in_pin.get_driver_pin();
-          const int  sign   = Ntype::sink_bank(Ntype_op::Sum, in_pin.get_port_id()) == 1 ? -1 : 1;
-          int64_t    value;
-          if (positive_const(in_drv, value)) {
-            bias += sign * value;
-          } else if (term.is_invalid() && sign > 0) {
-            term = in_drv;
-          } else {
-            valid = false;
+      if (narrow_demand) {
+        // index*scale + bias in any spelling (affine_amount.hpp), every link
+        // in this region. The identity only holds when no link drops a bit
+        // of its value and the index reads as the non-negative value the
+        // affine builder assumes.
+        if (const auto chain = affine_chain(b_d); chain && gu::is_unsign(chain->index)) {
+          const int  iw    = eff_width(chain->index);
+          bool       valid = iw > 0 && iw <= 16;
+          for (size_t i = 0; valid && i < chain->links.size(); ++i) {
+            const auto& [node, out] = chain->links[i];
+            const auto [sc, bi]     = chain->link_affine[i];
+            const auto max_value    = static_cast<uint64_t>(sc) * ((uint64_t{1} << iw) - 1) + static_cast<uint64_t>(bi);
+            valid = region.contains(node) && gu::bits_of(out) >= static_cast<int>(std::bit_width(max_value));
           }
-        }
-        const auto term_op = term.is_invalid() ? Ntype_op::Invalid : gu::type_op_of(term.get_master_node());
-        if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node()) && term_op == Ntype_op::SHL) {
-          // index << s is index * 2^s -- how a front end spells the stride of
-          // `v[index]` over an unpacked array (`(select << 5) + 32` for 32-bit
-          // words), and the shape the Mult arm below never matched.
-          const auto shl_a = gu::get_driver_of_sink_name(term.get_master_node(), "a");
-          const auto shl_b = gu::get_driver_of_sink_name(term.get_master_node(), "b");
-          int64_t    shift = 0;
-          // The identity only holds when the SHL keeps every shifted bit and the
-          // index reads as the non-negative value the affine builder assumes.
-          if (!shl_a.is_invalid() && !shl_a.is_const() && gu::is_unsign(shl_a) && positive_const(shl_b, shift) && shift < 62
-              && gu::bits_of(term) >= eff_width(shl_a) + shift) {
-            index  = shl_a;
-            scale  = int64_t{1} << shift;
+          if (valid) {
+            index  = chain->index;
+            scale  = chain->scale;
+            bias   = chain->bias;
             affine = true;
           }
-        } else if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node())
-                   && term_op == Ntype_op::Mult) {
-          scale = 1;
-          for (const auto& in_pin : term.get_master_node().inp_sorted_pins()) {
-            const auto in_drv = in_pin.get_driver_pin();
-            int64_t    value;
-            if (positive_const(in_drv, value)) {
-              if (value == 0 || scale > INT64_MAX / value) {
-                valid = false;
-                break;
-              }
-              scale *= value;
-            } else if (index.is_invalid()) {
-              index = in_drv;
-            } else {
-              valid = false;
-              break;
-            }
-          }
-          affine = valid && !index.is_invalid() && scale > 0;
         }
       }
       const int  index_w     = affine ? eff_width(index) : 0;

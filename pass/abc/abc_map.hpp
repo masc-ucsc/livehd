@@ -8,7 +8,6 @@
 #include <string>
 
 #include "region_driver.hpp"
-#include "satopt_stages.hpp"
 
 namespace livehd::abc {
 
@@ -19,11 +18,6 @@ using synth::Region_qor;
 
 // The region driver's options plus ABC's own.
 struct Map_options : synth::Driver_options {
-  bool        satopt = false;
-  // The satopt stages pass.abc runs on its synthesis copy (pass.satopt.stages;
-  // satopt=false turns every one off).
-  satopt::Stage_set satopt_stages = satopt::default_stages(satopt::Profile::synthesis);
-  satopt::Budget    satopt_budget;  // --set pass.satopt.<knob> (one budget for the whole synthesis copy)
   std::string flow;  // ABC command string (empty => built-in default)
   // Cap on the fanout of any net ABC MAPS, enforced by appending
   // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.

@@ -140,3 +140,16 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "satopt_ctrl_test",
+    srcs = ["satopt_ctrl_test.cpp"],
+    copts = COPTS,
+    linkopts = ["-lz"],
+    deps = [
+        ":satopt",
+        "//graph",
+        "//pass/formal:formal",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -287,7 +287,7 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
   if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
-    return "use --set pass.satopt=true|false (default true for LEC and synthesis, false otherwise)";
+    return "use --set pass.satopt=true|false (satopt runs in the compile step; default on only for synth/lec compiling a source)";
   }
   for (int pass = 0; pass < 2; ++pass) {
     for (const auto& option : kRetiredSetOptions) {
@@ -441,8 +441,10 @@ bool              lnastfmt_enabled(const Options& opts);
 // default only in debug builds (same policy as lnast_fmt).
 bool              verify_frozen_enabled(const Options& opts);
 bool              compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
-bool              satopt_requested(const Options& opts);  // explicit setting overrides the command default
-bool              satopt_during_compile(const Options& opts);
+std::optional<bool> satopt_setting(const Options& opts);  // the explicit pass.satopt, if any
+// satopt in the compile graph pipeline: explicit setting, else on for synth/lec
+// compiling a Pyrope/Verilog source (`from_source`).
+bool              satopt_during_compile(const Options& opts, bool from_source);
 bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);
@@ -518,7 +520,10 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // Shared by compile AND the lec/verify side loaders (a Pyrope side never needs
 // a pre-compile to lg: just to resolve its imports).
 void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files);
-void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final = false);
+// `from_source`: the graphs were just lowered from Pyrope/Verilog (not an lg:/ln:
+// input); it only sets the satopt default (satopt_during_compile).
+void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final = false,
+                              bool from_source = false);
 void compile_sources(Options& opts, Result& res, const Ir_inputs& inputs);
 void compile_command(Options& opts, Result& res);
 void scan_command(Options& opts, Result& res);

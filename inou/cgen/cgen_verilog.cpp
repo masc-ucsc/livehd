@@ -2658,10 +2658,13 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       return {};
     }
 
-    // Mult and EQ are VALUE ops: a mixed-sign expression must stay signed (see
-    // the Sum arm). And/Or/Xor are bitwise and width-preserving, so padding
-    // their operands would only widen the result.
-    const bool mixed_signs = (op == Ntype_op::Mult || op == Ntype_op::EQ) && mixes_operand_signs(node);
+    // A mixed-sign expression must stay signed (see the Sum arm). That holds
+    // for the bitwise And/Or/Xor too: one unsigned operand makes the whole
+    // Verilog expression unsigned, so a signed operand would be ZERO-extended
+    // to the context width -- `(s << 5) | u` into an s64 lost the sign of s.
+    // The unsigned operand's extra `1'b0` only widens the result by a bit the
+    // assignment truncates.
+    const bool mixed_signs = mixes_operand_signs(node);
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto drv = sink.get_driver_pin();
       if (mixed_signs) {

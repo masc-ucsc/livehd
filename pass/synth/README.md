@@ -10,13 +10,11 @@ code.
 
 ## Pipeline
 
-1. **Private copy and simplification.** The design is copied into a private
-   library, dead logic is dropped, and the satopt engine
-   ([`pass/satopt`](../satopt/README.md), synthesis profile) proves and applies
-   its selected stages: constant selectors and values, memory-port relations
-   (cvc5), and per-bit multiplexer facts built as one proof `Lnet` for a
-   backend prover (`Mux_prover`). All proofs are combinational and cached under
-   an exact source key.
+1. **Private copy.** The design is copied into a private library and dead
+   logic is dropped. Proof-backed simplification
+   ([`pass/satopt`](../satopt/README.md)) already ran in the compile step when
+   enabled (`lhd synth` from a source turns it on); the mapper maps what
+   compile produced.
 2. **Modules.** `ware_module.cpp` extracts width-specialized arithmetic
    modules, `memory_module.cpp` lowers small or many-ported memories, and
    `loop_cleanup.cpp` prepares compact loops.

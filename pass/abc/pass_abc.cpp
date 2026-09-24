@@ -31,7 +31,7 @@
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
 #include "abc_satopt.hpp"
-#include "satopt_memory.hpp"
+#include "satopt.hpp"
 #include "ware_module.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
@@ -52,17 +52,6 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "bodies separately and stitches the carry connections afterwards, for benchmarking. Independent "
                        "loops always map separately; compile.unroll=true requests general front-end expansion.",
                        "true");
-  m.add_label_optional("satopt",
-                       "INTERNAL resolved pass.satopt switch, supplied by the kernel (synthesis defaults true)",
-                       "false");
-  m.add_label_optional("satopt_stages",
-                       "INTERNAL the satopt stages this synthesis copy runs, from --set pass.satopt.stages (empty: the "
-                       "synthesis default)",
-                       "");
-  m.add_label_optional("satopt_budget",
-                       "INTERNAL the satopt budget as name=value,..., from the --set pass.satopt.<knob> budget knobs (empty: "
-                       "the defaults)",
-                       "");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
@@ -316,8 +305,7 @@ absl::flat_hash_map<std::string, uint64_t> physical_instances(const Abc_hier& hi
 
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
               const std::string& qor_path, const livehd::synth::Region_cache* incr, bool abc_started, const Abc_hier& hier,
-              const livehd::liberty::Dff_selection& dff_sel, const livehd::synth::Parallel_stats& parallel,
-              std::string_view satopt_json) {
+              const livehd::liberty::Dff_selection& dff_sel, const livehd::synth::Parallel_stats& parallel) {
   // PHYSICAL totals: a region's gates times the number of times its module is
   // instantiated (a replicated loop body N times, a shared `tap` 64 times).
   // The per-module sums are kept beside them as module_gates/module_area —
@@ -541,9 +529,6 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       parallel.peak_abc,
       parallel.memory_limit,
       parallel.memory_waits);
-  if (!satopt_json.empty()) {
-    j += std::format(",\"satopt\":{}", satopt_json);  // the synthesis-profile satopt stages (pass/satopt Report::json)
-  }
   j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
     const auto& q = qor[r];
@@ -963,22 +948,6 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.map_register    = map_register;
   opts.memory_fold     = *memory_fold;
   opts.memory_max_bits = memory_max_bits;
-  opts.satopt = var.get("satopt", "false") != "false" && var.get("satopt", "false") != "0" && var.get("satopt", "false") != "off";
-  {
-    std::string error;
-    const auto  stages = livehd::satopt::parse_stages(var.get("satopt_stages", ""), livehd::satopt::Profile::synthesis, &error);
-    if (!stages) {
-      livehd::diag::err("pass.abc", "bad-satopt-stages", "syntax").msg("pass.satopt.stages: {}", error).fatal();
-      return;
-    }
-    opts.satopt_stages = *stages;
-    const auto budget  = livehd::satopt::parse_budget(var.get("satopt_budget", ""), &error);
-    if (!budget) {
-      livehd::diag::err("pass.abc", "bad-satopt-budget", "syntax").msg("{}", error).fatal();
-      return;
-    }
-    opts.satopt_budget = *budget;
-  }
   opts.register_max_bits = register_max_bits;
   opts.dff_cell          = std::string{var.get("dff_cell", "")};
   opts.delay             = delay;
@@ -1089,38 +1058,16 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   }
   opts.library = library;
 
-  // Prove memory simplifications in the parent context before extracting
-  // memory implementations into separate modules. Constant selectors go
-  // first: their dead cones must vanish before partitioning, and the memory
-  // proofs then see the simplified enables.
-  const std::string satopt_cache_dir
-      = var.get("cache_dir", "").empty() ? std::string{} : std::string(var.get("cache_dir")) + "/../satopt_cache";
   // Dead logic first (a dead `unique if` Hotmux survives compile for its
-  // obligation): it must neither cost select proofs nor become a region.
+  // obligation): it must not become a region. satopt itself is not run here:
+  // it is part of the compile graph pipeline (`lhd synth` from a source turns
+  // it on), and the mapper maps what compile produced.
   uint64_t dead_nodes = 0;
   for (const auto& graph : scratch_graphs) {
     dead_nodes += livehd::satopt::drop_dead_logic(graph.get());
   }
   if (dead_nodes != 0) {
     std::print("[pass.abc] dropped {} dead combinational node(s) before mapping\n", dead_nodes);
-  }
-  // The engine's synthesis profile (pass/satopt): every stage but the mux-arm
-  // facts, which need the colored source (below).
-  // One budget covers both runs.
-  livehd::satopt::Options satopt_opts;
-  satopt_opts.profile     = livehd::satopt::Profile::synthesis;
-  satopt_opts.cache_dir   = satopt_cache_dir;
-  satopt_opts.all_regions = false;
-  satopt_opts.budget      = opts.satopt_budget;
-  livehd::satopt::Meter  satopt_meter(satopt_opts.budget);
-  livehd::satopt::Report satopt_report;
-  if (opts.satopt) {
-    satopt_opts.stages = opts.satopt_stages;
-    satopt_opts.stages.remove(livehd::satopt::Stage::hotmux);
-    // The hotmux runs below charge the same meter: leave them their share.
-    satopt_opts.later_stages = opts.satopt_stages.has(livehd::satopt::Stage::hotmux) ? 1 : 0;
-    satopt_report            = livehd::satopt::run(scratch_graphs, satopt_opts, &satopt_meter);
-    satopt_opts.later_stages = 0;
   }
   // Extract before partitioning: a lowered memory remains a named instance,
   // even when its parent is flattened. The child body comes from cgen RTL.
@@ -1238,15 +1185,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       threads == 1 ? livehd::partition::Body_batch_builder{}
                    : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
       2 * livehd::synth::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
-      loops.preserved_defs,
-      // satopt's per-bit mux facts, applied to the colored source right before
-      // it is cut: the rewrite then reaches every mapper (ABC or pass.usyn).
-      [&](hhds::Graph* g) {
-        if (opts.satopt && opts.satopt_stages.has(livehd::satopt::Stage::hotmux)) {
-          satopt_opts.stages = {livehd::satopt::Stage::hotmux};
-          satopt_report.merge(livehd::satopt::run(g, satopt_opts, &satopt_meter));
-        }
-      });
+      loops.preserved_defs);
 
   mapper.finish_parallel();
   if (!partitioned) {
@@ -1343,8 +1282,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
            mapper.backend_started(),
            hier,
            dff_sel,
-           mapper.parallel_stats(),
-           opts.satopt ? satopt_report.json() : std::string{});
+           mapper.parallel_stats());
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

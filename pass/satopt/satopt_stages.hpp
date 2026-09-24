@@ -29,15 +29,11 @@ enum class Stage : uint8_t {
   hotmux,      // mux-arm facts and Hotmux collapse
   memory,      // memory-port simplification
   resub,       // bounded simulation-guided resubstitution (experimental)
+  simp_ctrl,   // small-support Boolean resynthesis of one-bit controls
 };
-inline constexpr size_t                         kStageCount = 7;
-inline constexpr std::array<Stage, kStageCount> kStageOrder{Stage::constants,
-                                                            Stage::equiv,
-                                                            Stage::complement,
-                                                            Stage::odc,
-                                                            Stage::hotmux,
-                                                            Stage::memory,
-                                                            Stage::resub};
+inline constexpr size_t                         kStageCount = 8;
+inline constexpr std::array<Stage, kStageCount> kStageOrder{
+    Stage::constants, Stage::equiv, Stage::complement, Stage::odc, Stage::hotmux, Stage::memory, Stage::resub, Stage::simp_ctrl};
 [[nodiscard]] std::string_view stage_name(Stage s);
 
 class Stage_set {
@@ -79,11 +75,13 @@ enum class Profile : uint8_t {
   synthesis,
 };
 
+// Every stage.
+[[nodiscard]] Stage_set all_stages();
 // The stages a profile runs when the caller names none.
 [[nodiscard]] Stage_set default_stages(Profile p);
-// "none" (nothing), "default" (the profile's set), or a comma-separated list
-// of stage names. An unknown or duplicate name is an error (nullopt, `error`
-// says which).
+// "none" (nothing), "default" (the profile's set), "all" (every stage), or a
+// comma-separated list of stage names. An unknown or duplicate name is an
+// error (nullopt, `error` says which).
 [[nodiscard]] std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, std::string* error = nullptr);
 
 // Deterministic effort limits (H). Work units count simulation evaluations,
@@ -116,14 +114,16 @@ bool set_budget(Budget& budget, std::string_view key, std::string_view value, st
 // Effort accounting for one run. Every stage charges the work it does and
 // each solver query; a charge past the stage's share or the run's total fails
 // and marks the run exhausted, and the stage then stops searching and keeps
-// what it already proved. A stage may spend at most half of what is left while
-// another applicable stage still waits; the last one gets all of it.
+// what it already proved. A stage may spend at most an equal share of what is
+// left among itself and the applicable stages still waiting (what it leaves
+// unspent flows to them); the last one gets all of it.
 class Meter {
 public:
   Meter() : Meter(Budget::unlimited()) {}
   explicit Meter(const Budget& budget);
 
-  // Opens the next stage's share; `waiting` = applicable stages after it.
+  // Opens the next stage's share, left / (waiting + 1); `waiting` =
+  // applicable stages after it.
   void begin_stage(int waiting);
   // Charge `units` of work done or one solver query about to be asked; false
   // once over a limit. Work always counts; a refused query is not asked and

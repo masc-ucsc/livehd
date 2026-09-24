@@ -29,8 +29,8 @@ run compile "$SRC" --top top --workdir "$W/default" --emit-dir lg:"$W/original" 
 run compile "$SRC" --top top --set pass.satopt=true --workdir "$W/explicit" \
   --emit-dir lg:"$W/compiled" --result-json "$W/compile-on.json"
 lec "$W/original" "$W/compiled" compiled
-# Default LEC optimizes both loaded sides; validation above disables satopt
-# so equivalence of the committed rewrite is also checked independently.
+# LEC takes loaded lg: sides as compiled (no satopt by default); source sides
+# compile with satopt on, like `lhd synth`.
 run lec --ref lg:"$W/original" --impl lg:"$W/compiled" --top instance_out_struct_ident.top \
   --workdir "$W/lec-default" --result-json "$W/lec-default.json"
 run formal lec --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top \
@@ -42,6 +42,10 @@ run pass satopt lg:"$W/original" --workdir "$W/prepared" --top top --emit-dir lg
 run pass satopt lg:"$W/original" --workdir "$W/prepared" --top top --emit-dir lg:"$W/standalone2"
 grep -q 'reused .* proven mux facts' "$W/prepared"/logs/*pass_satopt*.log
 lec "$W/original" "$W/standalone" standalone
+# Explicit control-only selection reaches the standalone stage and reports it.
+run pass satopt lg:"$W/original" --top top --set pass.satopt.stages=simp_ctrl \
+  --emit-dir lg:"$W/ctrl" --workdir "$W/ctrl-work" --result-json "$W/ctrl.json"
+lec "$W/original" "$W/ctrl" ctrl
 # Idempotent: the optimized design has nothing left to rewrite.
 run pass satopt lg:"$W/standalone" --top top --emit-dir lg:"$W/again" --workdir "$W/again-work"
 grep -q 'rewrote 0 arm(s)\|stages [a-z,]*: 1 graph(s), 0 changed' "$W/again-work"/logs/*pass_satopt*.log
@@ -104,35 +108,39 @@ for mode in on off explicit; do
 done
 run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
   --set synth.threads=1 --workdir "$W/on" --result-json "$W/warm.json"
+# Synthesis of an lg: input maps what compile produced: no satopt by default.
+run synth lg:"$W/original" --top instance_out_struct_ident.top --set synth.liberty="$LIB" --set synth.opentimer=false \
+  --set synth.threads=1 --workdir "$W/lgin" --result-json "$W/lgin.json"
 python3 - "$W" "$CTRL_CONES" <<'PY'
 import json, pathlib, re, sys
 w = pathlib.Path(sys.argv[1])
 def data(name): return json.loads((w / (name + '.json')).read_text())
-# pass.abc logs how many arm bits the synthesis profile rewrote; the warm run
-# below appends to the `on` logs, so read the first synth only.
-def rewritten(mode):
-    log = sorted((w / mode / 'logs').glob('*pass_abc*.log'))[0]
-    return sum(int(m.group(1)) for m in re.finditer(r'rewrote \d+ arm\(s\) of \d+ mux\(es\), (\d+) bit\(s\)', log.read_text()))
+def satopt_steps(name): return sum(s.startswith('pass.satopt') for s in data(name)['recipe'])
 assert not any(s.startswith('pass.satopt') for s in data('default')['recipe'])
 recipe = data('compile-on')['recipe']
 # Compile runs satopt after cprop/bitwidth and before pass.formal checks the result.
 satopt = next(i for i, s in enumerate(recipe) if s.startswith('pass.satopt'))
 formal = next(i for i, s in enumerate(recipe) if s.startswith('pass.formal'))
 assert satopt < formal, recipe
-for name in ('compiled', 'standalone', 'starved'):
+for name in ('compiled', 'standalone', 'starved', 'ctrl'):
     assert data('lec-' + name)['lec']['verdict'] == 'proven', name
 # The run's stage report is the result's "satopt" member (H).
 for name in ('compile-on', 'standalone'):
     stages = data(name)['satopt']['stages']
     assert stages['constants']['state'] == 'completed', (name, stages)
     assert stages['hotmux']['state'] == 'completed' and stages['hotmux']['proven'] > 0, (name, stages)
-    assert stages['equiv']['state'] == 'disabled' and stages['memory']['state'] == 'inapplicable', (name, stages)
+    # pass.satopt=true runs every stage unless pass.satopt.stages narrows it.
+    assert not any(s['state'] == 'disabled' for s in stages.values()), (name, stages)
+    assert stages['memory']['state'] == 'inapplicable', (name, stages)
+control_stages = data('ctrl')['satopt']['stages']
+assert control_stages['simp_ctrl']['state'] == 'completed', control_stages
+assert all(s['state'] == 'disabled' for k, s in control_stages.items() if k != 'simp_ctrl'), control_stages
 assert 'satopt' not in data('default')
-for name in ('lec-default', 'lec-source'):
+for name, runs in (('lec-default', 0), ('lec-source', 2)):
     result = data(name)
     assert result['lec']['verdict'] == 'proven', name
-    assert sum(s.startswith('pass.satopt') for s in result['recipe']) == 2, result['recipe']
-    assert 'satopt' in result, name
+    assert satopt_steps(name) == runs, result['recipe']
+    assert ('satopt' in result) == (runs > 0), name
 assert 'satopt' not in data('lec-compiled')
 starved = data('starved')['satopt']['stages']
 assert starved['hotmux']['state'] == 'exhausted' and starved['hotmux']['applied'] == 0, starved
@@ -145,19 +153,18 @@ comment = data('edit-comment').get('satopt')
 assert comment is None or comment['stages']['hotmux']['reused'] == comment['stages']['hotmux']['proven'] > 0, comment
 semantic = data('edit-semantic')['satopt']['stages']['hotmux']
 assert semantic['reused'] == 0 and semantic['proven'] > 0, semantic
-# Synthesis reports its private-copy stages next to the mapping QoR.
-qor = data('on')['qor']
-synth = qor.get('satopt') or qor.get('abc', {}).get('satopt')
-assert synth and synth['stages']['constants']['state'] in ('completed', 'inapplicable'), qor.keys()
-for name in ('on', 'explicit', 'off'):
-    assert not any(s.startswith('pass.satopt') for s in data(name)['recipe']), data(name)['recipe']
-explicit_qor = data('explicit')['qor']
-assert explicit_qor.get('satopt') or explicit_qor.get('abc', {}).get('satopt'), explicit_qor.keys()
-if sys.argv[2] == 'true':
-    assert rewritten('on') > 0
-assert rewritten('off') == 0
-off_qor = data('off')['qor']
-assert 'satopt' not in off_qor and 'satopt' not in off_qor.get('abc', {}), off_qor.keys()
+# `lhd synth foo.prp` is `lhd compile --set pass.satopt=true` then mapping:
+# satopt runs in synth's compile step (every stage) and reports in the
+# result's "satopt" member; the mapper runs no satopt of its own.
+for name in ('on', 'explicit'):
+    assert satopt_steps(name) == 1, data(name)['recipe']
+    stages = data(name)['satopt']['stages']
+    assert not any(s['state'] == 'disabled' for s in stages.values()), stages
+    assert sum(s['applied'] for s in stages.values()) > 0, stages
+    assert 'satopt' not in data(name)['qor'].get('abc', {}), name
+for name in ('off', 'lgin'):
+    assert satopt_steps(name) == 0, data(name)['recipe']
+    assert 'satopt' not in data(name), name
 assert data('warm')['incremental']['abc']['hits'] > 0
 PY
 "$LHD" help pass satopt > /dev/null

@@ -69,7 +69,10 @@ public:
                                       const std::vector<Pin>& exits);
   // Forget these values (graph scope): their cells were rewritten or deleted.
   // A deleted cell's pins must be collected before the delete.
-  void invalidate(const std::vector<Pin>& pins);
+  // With `fanout`, also every computed value that reads one of them (at any
+  // depth): a rewrite that rewires those cells' operands leaves them nothing
+  // to extend with on the next add_model.
+  void invalidate(const std::vector<Pin>& pins, bool fanout = false);
 
 private:
   using Key = std::pair<uint32_t, Pin>;  // (instance scope, pin); scope 0 = the graph

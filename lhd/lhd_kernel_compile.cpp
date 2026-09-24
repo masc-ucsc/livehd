@@ -1674,7 +1674,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // Graph half shared by synth and compile: recipe passes + typed emits.
 // `lib_path` is the library the graphs in `var` live in ("" when there are
 // no graphs, e.g. a pure-LNAST run).
-void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final) {
+void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final,
+                              bool from_source) {
   check_known_set_passes(opts);
   const auto                       redo_begin = std::chrono::steady_clock::now();
   Eprp_var                         fresh;
@@ -1698,14 +1699,14 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       run_step(method, *active, labels, opts, res);
     }
 
-    // pass.satopt (opt-in, todo/livehd/2s-satopt A): proof-backed rewrites
-    // committed to the optimized graphs, BEFORE the latch contract check,
-    // pass.formal and the freeze -- formal then checks (and stamps) exactly the
-    // graph every consumer reads. Every graph is optimized as its own
-    // definition; a restored graph was optimized when it was stored (the
-    // compile cache context names the resolved switch). Synthesis runs on its
-    // private copy instead, avoiding a duplicate compile-time search.
-    if (satopt_during_compile(opts) && !active->graphs.empty()) {
+    // pass.satopt (todo/livehd/2s-satopt A): proof-backed rewrites committed
+    // to the optimized graphs, BEFORE the latch contract check, pass.formal
+    // and the freeze -- formal then checks (and stamps) exactly the graph
+    // every consumer reads. Every graph is optimized as its own definition; a
+    // restored graph was optimized when it was stored (the compile cache
+    // context names the resolved switch). This is the ONLY place satopt runs
+    // in a flow: synthesis maps what compile produced.
+    if (satopt_during_compile(opts, from_source) && !active->graphs.empty()) {
       run_satopt_step(*active, {}, opts, res);
     }
 
@@ -2106,7 +2107,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     if (ln_out != nullptr) {
       publish_source_ln(opts, res, var, n_imports, ln_out->path);
     }
-    graph_pipeline_and_emits(opts, res, var, lib_path, graph_cache_hit);
+    graph_pipeline_and_emits(opts, res, var, lib_path, graph_cache_hit, /*from_source=*/true);
     if (res.compile_cache.enabled && need_graphs && !graph_cache_hit && ir.ln_dirs.empty() && ir.lg_dirs.empty()) {
       compile_cache_store_graphs(opts, res, var, lib_path);
     }
@@ -2146,10 +2147,10 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         units.insert(units.end(), wrappers.begin(), wrappers.end());
         save_ln_dir(opts, res, units, ln_out->path);
       }
-      graph_pipeline_and_emits(opts, res, var, lib_path);
+      graph_pipeline_and_emits(opts, res, var, lib_path, false, /*from_source=*/true);
     } else {
       auto lib_path = verilog_frontend(opts, res, var);
-      graph_pipeline_and_emits(opts, res, var, lib_path);
+      graph_pipeline_and_emits(opts, res, var, lib_path, false, /*from_source=*/true);
     }
   }
   const auto closure = harvest_source_files(res, var.lnasts);

@@ -90,7 +90,9 @@ TEST(SatoptSweep, HiddenConstantOutputBecomesTheConstant) {
   f.out("p", f.op(Ntype_op::Sum, {f.x, f.y}, 9));
   const auto before = f.samples();
   const auto report = f.run(Sweep::constants);
-  EXPECT_EQ(report.proven, 1u);
+  // The output constant, and the Or's low bit (always 1: a low-lane fact
+  // that is never applied -- replacing the output sweeps the Or's cone).
+  EXPECT_EQ(report.proven, 2u);
   EXPECT_EQ(report.applied, 1u);
   const auto o = f.driver("o");
   ASSERT_TRUE(o.is_const());
@@ -229,9 +231,10 @@ TEST(SatoptSweep, UpperZeroRunBecomesANarrowerSlice) {
   EXPECT_EQ(again.applied, 0u);
 }
 
-// E leaves other constant runs alone: x | 1 keeps its reader (rebuilding a
-// value from lanes hides arithmetic a consumer recognizes).
-TEST(SatoptSweep, LowConstantBitIsLeftAlone) {
+// E: a constant low run (x | 1 is always odd) reaches every reader as the
+// low-lane form Or(And(t, -2), 1) cprop narrows through; the value stays one
+// cell, and a second run finds nothing new.
+TEST(SatoptSweep, LowConstantBitBecomesLowLaneForm) {
   for (const bool sign : {false, true}) {
     Fixture    f(sign ? "sweep_low_signed" : "sweep_low", sign);
     const auto odd = f.op(Ntype_op::Or, {f.x, f.konst(1)}, 8, sign);
@@ -239,10 +242,14 @@ TEST(SatoptSweep, LowConstantBitIsLeftAlone) {
     f.out("o", sum);
     f.out("p", f.op(Ntype_op::Xor, {odd, f.y}, 8, sign));
     const auto before = f.samples();
-    EXPECT_EQ(f.run(Sweep::constants).applied, 0u) << sign;
+    EXPECT_EQ(f.run(Sweep::constants).applied, 1u) << sign;
     EXPECT_EQ(f.count(Ntype_op::Concat), 0) << sign;
     EXPECT_EQ(f.driver("o"), sum) << sign;
+    for (const auto& e : odd.out_edges()) {
+      EXPECT_EQ(gu::type_op_of(e.sink.get_master_node()), Ntype_op::And) << sign;
+    }
     expect_same(before, f.samples());
+    EXPECT_EQ(f.run(Sweep::constants).applied, 0u) << sign;
   }
 }
 

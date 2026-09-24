@@ -97,16 +97,28 @@ protected:
   bool merge_concat_slices(hhds::Node_class& node);
   void remember_node(const hhds::Node_class& node);
   bool canonicalize_pack(hhds::Node_class& node);
+  // Low-lane narrowing (cprop_lowlane.cpp): an operation reading a value
+  // spelled Or(Shl(H, k), L) runs on the H parts, k bits narrower, and
+  // re-attaches the low part. true = node replaced.
+  bool low_lane(hhds::Node_class& node);
+  bool low_lanes_ = false;
   void normalize_emitted(hhds::Node_class& node);
   void scalar_node(hhds::Node_class& node);
 
 public:
   Cprop() = default;
+  // `low_lanes`: also narrow operations over known low lanes. It creates cells
+  // with no width stamp, so only callers that run bitwidth afterwards set it.
+  explicit Cprop(bool low_lanes) : low_lanes_(low_lanes) {}
   // Rewrites unlimited-precision values without consulting width/sign hints.
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
 };
 
 namespace livehd {
+// The k of a value spelled as a low-lane form (Or(Shl(H,k),L), Shl(H,k),
+// And(x,-2^k), or a two-lane Concat; cprop_lowlane.cpp): its low k bits are
+// structurally known. 0 for any other value.
+int low_lane_bits(const hhds::Pin_class& pin);
 // Disjoint mux regions: ordinary cprop leaves destination-Q regions intact;
 // enableopt exclusively owns their feedback-to-enable transformation.
 void share_mux_regions(hhds::Graph& graph, bool state_context,
