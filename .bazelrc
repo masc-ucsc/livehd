@@ -15,6 +15,13 @@ build --per_file_copt=external/gmp[+~].*@-O2,-g0
 
 # Use Command Line Tools without auto-selecting a separate Xcode installation.
 build:macos --xcode_version_config=//tools:command_line_tools
+# The Apple toolchain turns on clang's module layering check. With the Command
+# Line Tools SDK on macOS 26 (Apple clang 21) it rejects third-party code that
+# includes standard headers -- abseil, LLVM: "module X does not depend on a
+# module exporting 'cstdint'" -- before any LiveHD target compiles, which is
+# what has kept the macOS CI red since 42773693a (2026-09-17). The check is a
+# dependency-hygiene lint, not a compiler warning option; keep it off on macOS.
+build:macos --features=-layering_check
 
 # Set minimum macOS version to support the C++23 library features used by LiveHD
 # (floating-point std::from_chars requires macOS 26.0+ with current libc++).
