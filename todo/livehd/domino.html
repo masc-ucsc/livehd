@@ -18,38 +18,47 @@ unate series-parallel NMOS networks with fan-in <em>k</em> = 8, series stack
 Cones that do not fit stay static and go to <code>pass.abc</code>. The design
 point, the algorithm and the acceptance numbers come from the <em>Domino Design
 Space</em> study (2026-09-20): 35.9 % of outputs pooled over 48 circuits,
-51.7 % on EPFL control, 4 to 6 % of the logic. Full design and primer:
+51.7 % on EPFL control, 4 to 6 % of the logic. Since 2026-09-24 the cover itself is
+upstream's <code>pass/usyn</code>; this task adds the minimum-transistor gate model, the
+dual-rail-on-demand model and the domino backend. Full design and primer:
 <code>pass/domino/README.md</code>.</p>
 
 <h2>Depends on</h2>
-<p>None. Reuses <code>pass/partition</code>'s <code>Body_builder</code> seam,
-<code>pass/abc/abc_blast.hpp</code>'s templated bit-blaster and
-<code>pass/liberty</code>'s behavioural-model pattern as they are.</p>
+<p><code>pass/synth</code> (the region pipeline, the Lnet, the <code>Region_backend</code>
+seam) and <code>pass/usyn</code> (the cut-based domino cover), both landed 2026-09-23/24.
+This task no longer builds its own cone extraction or cover: it supplies the gate model
+and the rail model to <code>pass/usyn</code>, and the domino backend on the seam.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>P2</strong> <code>domino_cone</code>: bit-blast one definition to a 1-bit AIG
-through <code>abc_blast.hpp</code> with an AIG literal as the <code>Bit</code> type; classify
-leaves (flop Q, inputs, constants) and roots (flop <code>din</code>, enables, outputs, memory
-ports); exclude pass-through roots; <code>mode=report</code> prints cone statistics.</li>
-<li><strong>P3</strong> <code>domino_map</code>: priority-cut enumeration to k = 8, two-rail level
-DP with flop leaves at level 0 in both rails, rail modes <code>demand|both|free</code>, cover
-selection; the report reproduces the study's columns. Acceptance: 35.9 ± 1.0 % pooled and
-51.7 % control at the design point on the 48-circuit set (sibling benchmark repo), and
-agreement to 0.01 with an exhaustive mode for k ≤ 6.</li>
-<li><strong>P4</strong> <code>domino_emit</code>: one black-box <code>Sub</code> per gate, a
-behavioural model per distinct network, φ2 as an inverted <code>Clock_cell</code>;
-<code>lhd lec</code> PROVEN on every fixture.</li>
-<li><strong>P5</strong> <code>lhd pass domino</code> and <code>--set synth.domino=true</code> in
-<code>lhd synth</code> (domino first, <code>pass.abc</code> on the remainder).</li>
-<li><strong>P6</strong> Liberty timing for the domino cells so <code>pass.opentimer</code> times a
-mixed netlist; a three-level option; domino-aware restructuring for arithmetic.</li>
+<li><strong>P3</strong> Gate model: a cube-set path for functions with more than 8 distinct
+literals (1 to 20 % of real LUTs at support 8), the dual trick, the 5-input exact table. Rail
+demand over a cover: twins (<code>fit(leaf, Rail::neg)</code>), the
+dual-stack rule, the study's coverage columns (outputs by domino depth with and without twins,
+twins per fitting output, logic inside fitting cones) in the usyn report; then the twin cost in
+the cover. Acceptance on the 48-circuit set: 35.9 ± 1 % (demand) and 45.6 % (free) pooled at
+k = 8, D = 4, B = 16, two levels.</li>
+<li><strong>P4</strong> Domino backend (<code>Region_backend</code>): one black-box cell per
+distinct series-parallel network, level-1 gates on the clock, level-2 on its inverse
+(<code>Clock_cell</code> invert), twins as cells, static LUTs and non-fitting cones to the ABC
+backend; behavioural models per cell so <code>lhd lec</code> proves the mixed netlist.</li>
+<li><strong>P5</strong> <code>synth.mapper=domino</code> and <code>pass.domino.*</code> (k, D, B,
+levels, rail mode), docs.</li>
+<li><strong>P6</strong> A Liberty for the domino cells so <code>pass.opentimer</code> times a mixed
+netlist; a three-level option; domino-aware restructuring for arithmetic.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
 <ul class="subtasks">
+<li><strong>P2</strong> <code>pass/domino:usyn_ab</code>: pass.usyn's cover on DinoCPU, a BOOM
+FetchTargetQueue chunk and a Kogge-Stone adder, every chosen LUT costed with upstream's
+<code>factor_literals</code> and with <code>Sp_factorer</code>. Mine is never worse, cheaper on
+0.2 % of LUTs, total transistors within 0.1 %, zero admission flips at the 16-literal limit:
+<strong>no factorer swap</strong>. Half of the chosen LUTs are binate under free dual rail, so
+rail demand (P3) is where the study's 35.9 % versus 46 % lives. Numbers in the README.</li>
 <li><strong>P0</strong> Build and test on the group's machine; findings in the README (the
-<code>lhd</code> binary is a from-source LLVM build; everything up to P3 builds without it).</li>
+<code>lhd</code> binary is a from-source LLVM build; on 2026-09-24 the machine's gcc moved to 16
+and Bazel must be pinned to gcc-15 with <code>--repo_env</code>).</li>
 <li><strong>P1</strong> <code>pass/domino/domino_gate.{hpp,cpp}</code>: truth tables to 8
 variables, unateness, prime implicants, minimum-transistor series-parallel factoring under a
 stack bound and a transistor budget (exact table to 4 variables, branch-and-bound with kernel
