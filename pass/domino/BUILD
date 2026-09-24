@@ -28,3 +28,27 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+# A/B tool: pass.usyn's transistor count against Sp_factorer on the LUTs of
+# real covers (usyn_ab.cpp). Not a test: it needs a compiled design and a
+# Liberty.
+cc_binary(
+    name = "usyn_ab",
+    srcs = ["usyn_ab.cpp"],
+    copts = COPTS,
+    deps = [
+        ":domino_gate",
+        "//core",
+        "//graph",
+        "//pass/abc:pass_abc",
+        "//pass/common:pass",
+        "//pass/synth",
+        "//pass/usyn:pass_usyn",
+        # The region pipeline lowers memories through emitted RTL: cgen and the
+        # yosys reader must be registered in the process.
+        "//inou/cgen:inou_cgen",
+        "//inou/yosys:lgyosys",
+    ],
+)

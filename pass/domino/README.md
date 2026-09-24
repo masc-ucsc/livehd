@@ -1,9 +1,17 @@
 # pass/domino — domino-logic synthesis for LiveHD (design + plan)
 
-Status (2026-09-22): **P0 done, P1 done** (`domino_gate.{hpp,cpp}` +
-`domino_gate_test.cpp`, `bazel test //pass/domino/...` green in opt and dbg).
-P2 onwards is still plan. Workspace: this clone (`~/projects/livehd-domino`,
-upstream `masc-ucsc/livehd` master `b340575cb`), branch `domino`.
+Status (2026-09-24): **P0 done, P1 done, plan re-targeted.** Between P1 and
+this revision upstream landed `pass/synth` (a backend-neutral region
+pipeline) and `pass/usyn` (unate synthesis: a cut-based domino-gate cover of
+every region, `lhd synth --set synth.mapper=usyn`). That is most of the P2,
+P3 and P5 of the first plan, so those phases are gone and `pass/domino` now
+has two jobs: **the gate model** (P1, this directory), to be plugged into
+`pass/usyn`'s admission and costing, and **the domino backend** (real
+domino cells, two clock phases, dual rail on demand) on `pass/synth`'s
+`Region_backend` seam, which upstream's todo calls "the later domino
+backend". Sections 3 to 7 describe the re-targeted plan; section 0 to 2 (the
+study and the primer) are unchanged. Workspace: `~/projects/livehd-domino`,
+branch `domino`, rebased on `origin/master` `5f24eecc5`.
 
 ### P0 findings (build and test on the group's machine)
 - `bazel 9.2.0`, gcc 15.2, C++23: `//graph/...` and `//pass/analyze/...` build
@@ -18,6 +26,19 @@ upstream `masc-ucsc/livehd` master `b340575cb`), branch `domino`.
   blocks `bazel test` in the same clone until it finishes.
 - Build with `-c dbg` at least once before committing: `assert`s are compiled
   out under `-c opt` (`-DNDEBUG`).
+- **2026-09-24: the machine's default gcc moved from 15.2 to 16.2** (a Debian
+  package update; `/usr/lib/ccache/gcc` is dated that morning). Bazel's cached
+  toolchain was configured against gcc 15's builtin include directories, so
+  every compile then failed with "absolute path inclusion(s) found"
+  pointing at `/usr/lib/gcc/x86_64-linux-gnu/16/include`. gcc-15 is still
+  installed; pin it until the tree is known to build warning-clean under 16:
+  `bazel build --repo_env=CC=/usr/bin/gcc-15 --repo_env=CXX=/usr/bin/g++-15 ...`
+  (a new toolchain configuration, so the first build after the pin is a
+  full rebuild). Nothing in the repo is changed by this; put the two flags
+  in `~/.bazelrc` to make them stick.
+- Upstream's `//pass/synth:lane_scheduler_test` and `//pass/cost:process_tree`
+  were the first targets to hit that error; they are not broken in
+  themselves.
 
 ### P1 result: the gate model
 - `Truth` (256-bit table, n <= 8), cofactor, dual, unateness, prime
@@ -233,317 +254,202 @@ Given a design whose combinational logic between registers is arbitrary
 
 ---
 
-## 3. Architecture of the pass
+## 3. What upstream already provides (as of `5f24eecc5`, 2026-09-24)
+
+`docs/synthesis.html` and `pass/synth/README.md` describe the pipeline; the
+pieces this plan builds on:
+
+- **Coloring.** `pass.color synth` has a `usyn` profile (`flop_to_flop=true`,
+  no `stop_*` cuts, no control groups, arithmetic inline): every
+  combinational path lies inside one color, register to register. Selected
+  automatically by `--set synth.mapper=usyn` (`lhd/lhd_kernel_synth.cpp:269`).
+- **Region pipeline** (`pass/synth`): private copy, satopt simplification,
+  arithmetic/memory modules, cut into regions (`pass/partition`),
+  translation of a region into a RAW `Lnet` (`region_blast.cpp`, the
+  operator lowering of `blast.hpp` and the adders of `arith.hpp`), region
+  cache, parallel lanes, read-back of a `Cell_netlist` (`region_writer.cpp`).
+- **The Lnet** (`lnet.hpp`): a flat k-LUT network, node 0 the constant, sources
+  (inputs and latch outputs), LUTs of up to 8 fanins with a truth table (no
+  complemented edges). `strash()` gives the hashed 2-input form the cover
+  reads; latches are the crossing registers, so register-to-register cones
+  are explicit.
+- **The backend seam** (`region_backend.hpp`): `Region_backend::map(ctx,
+  blast, rewrite, qor) -> Cell_netlist`; ABC is the only backend today
+  (`pass/abc/abc_backend.cpp`). `Driver_options::region_hook` is called with
+  the RAW Lnet before the backend and may return a `Region_rewrite` (logic
+  over the same boundary, for the flow or for technology mapping only).
+- **Unate synthesis** (`pass/usyn`): the region hook that covers a STRASH Lnet
+  with domino gates. `lut_cover.cpp`: priority cuts (`cover_cuts` = 12),
+  composed truth tables to `support` inputs (default 6), every cut function
+  costed once by `function_cost`; a depth-optimal round with
+  `domino_levels` = 2 required times, then area-flow and exact-area
+  recovery of a transistor proxy. `unate.cpp`: `exact_form` = exact
+  minimum-literal SOP over primes of at most `series` literals (default 4),
+  then `factor_literals` (a recursive kernel factoring) for the pull-down
+  transistor count, checked against `literals` (default 16). Both polarities
+  are tried and the cheaper kept: **inverters are free** ("every signal is
+  available in both polarities"). The cover is handed to ABC as SOP LUTs and
+  mapped onto the static Liberty cells; the report (`<qor>.usyn.json`) has
+  domino gates by input count and series depth, outputs by domino depth,
+  cones by gate count and the transistor proxy totals.
+
+What it does not have, and this plan adds:
+
+1. A minimum-transistor factoring with an exactness argument (P1 here).
+   `factor_literals` is a heuristic without the exact table, kernel
+   intersections or branch-and-bound; its count decides admission at the
+   16-literal limit.
+2. The study's rail model. Free complements are the study's "complement
+   free" upper reference (45.6 % at D = 4); its chosen design is dual rail
+   on demand (35.9 %), where an internal complement costs a twin gate that
+   must itself fit D and B, and only flop outputs give both rails free.
+3. The study's parameters as a profile: k = 8 (upstream defaults to 6),
+   D = 4, B = 16, two levels, and the coverage columns the artifact reports.
+4. A domino backend: real domino cells with φ1/φ2, behavioural models for
+   LEC, a Liberty for timing. Today the cover ends as static cells.
+
+## 4. Re-targeted architecture
 
 ```
-lhd pass domino --top X lg:DIR --emit-dir lg:OUT --emit report:cov.json
-      --set pass.domino.k=8 --set pass.domino.stack=4 --set pass.domino.budget=16
-      --set pass.domino.levels=2 --set pass.domino.rail=demand|both|free
-      --set pass.domino.xor=false --set pass.domino.cuts=16
-      --set pass.domino.mode=report|map
-
 pass/domino/
-  domino_gate.{hpp,cpp}     1. gate model: unateness, SP factoring, cost/depth
-  domino_cone.{hpp,cpp}     2. bit-blast reg→reg logic to a 1-bit AIG, find cones
-  domino_map.{hpp,cpp}      3. cut enumeration + level DP + rail demand + cover
-  domino_emit.{hpp,cpp}     4. write domino cell Subs, models, phase clocks back
-  domino_report.{hpp,cpp}   5. coverage metrics (the study's columns)
-  pass_domino.{hpp,cpp}     6. EPRP registration, options, per-def driver
-  *_test.cpp, tests/        gtests + lhd scripts with LEC
+  domino_gate.{hpp,cpp}   P1  gate model (done): min-transistor SP factoring, rails, fit
+  usyn_ab.cpp             P2  A/B tool (done): pass.usyn's count vs the gate model on real covers
+  domino_rails.{hpp,cpp}  P3  rail-demand accounting over a cover: twins, dual stack, study columns
+  domino_backend.{hpp,cpp} P4 Region_backend: domino cells + phase clocks + models
+  pass_domino.{hpp,cpp}   P5  `lhd pass domino` / `synth.mapper=domino`
 ```
 
-1. **Gate model** (no graph dependency; exhaustively testable). Input: a
-   truth table over n ≤ k variables (256-bit at k = 8). Output: for the
-   positive rail and for the negative rail separately, either *infeasible* or
-   `{formula tree, transistors, series depth, parallel width}`.
-   - Unateness per variable → the required leaf polarity; a binate variable
-     makes the cut infeasible (unless XOR mode).
-   - Flip negative-unate variables so the function is positive unate; its
-     minimal SOP is unique (all prime implicants), so generate primes and
-     factor the SOP algebraically into an SP tree (kernel/co-kernel or
-     recursive divisor extraction, both exact enough at n ≤ 8; SP-minimal cost
-     is NP-hard in general, so this is a heuristic and the coverage stays a
-     lower bound, which matches the study).
-   - Transistors = leaves of the SP tree; series depth = longest AND path;
-     parallel width = widest OR. The **negative rail is the dual tree**
-     (swap AND/OR): same transistor count, but depth and width swap, so a
-     wide-OR gate has a deep-stack twin and can fail D while its positive
-     rail passes. This is why dual rail costs coverage at low D.
-   - Cache by the support-compacted positive-unate truth table (P-canonical
-     form is a later optimisation).
+- **Gate model into usyn (P2/P3).** `function_cost` (`lut_cover.cpp:174`)
+  calls `exact_form(t, literals, series, factored=true)` per polarity and
+  admits a domino gate when `form.factored <= literals`. The plug-in point is
+  that one call: replace the `factored` count by `Sp_factorer::fit(t, n,
+  {k, series, literals}, rail)` (keeping their exact SOP as the side data
+  ABC receives). Admission then uses the minimum network, and the SP
+  formula itself is available for the backend. The A/B tool measures the
+  effect before the swap.
+- **Rail demand (P3).** Over a finished cover, walk the LUTs: a gate reading a
+  leaf in negative polarity demands the leaf's negative rail; a flop leaf or
+  a region input gives it free; an internal leaf needs a twin gate =
+  `fit(leaf function, Rail::neg)`, which may fail on D (the dual-stack rule)
+  or B. Report the study's columns per region and pooled: outputs by domino
+  depth with and without twins, twins per fitting output, logic inside
+  fitting cones. Then feed it back into the cover's cost (a negative internal
+  literal costs the twin's transistors) so the cover minimises the real
+  dual-rail cost. This is where the 35.9 % versus 45.6 % gap lives.
+- **Domino backend (P4).** A `Region_backend` whose `map` takes the cover
+  network (each LUT with its SP formula) and returns a `Cell_netlist` of
+  black-box domino cells: one cell per distinct SP network, pins `i0..`, `o`,
+  `clk`; level-1 gates on the design clock (φ1), level-2 gates on its
+  inverse through a `Clock_cell` with `invert` (φ2); twins as separate
+  cells; static LUTs and non-fitting cones handed to the ABC backend as
+  today (a mixed netlist). Behavioural models per cell as `pass liberty
+  gensim` does, so `lhd lec` proves the mixed netlist; a generated Liberty
+  (delay from stack and fan-in, from the SPICE runs in `~/projects/domino/`)
+  so `pass.opentimer` times it.
+- **CLI (P5).** `synth.mapper=domino` = the usyn cover with the gate model
+  and rail demand, mapped by the domino backend; `pass.domino.*` settings
+  for k, D, B, levels, rail mode (`demand|both|free`) and the report.
 
-2. **Cone extraction.** LiveHD nodes are multi-bit (Sum, Mux, Get_mask,
-   Hotmux…). The domino model is single-bit, so the register-to-register
-   logic of each definition is bit-blasted to an AIG (And + complemented
-   edges), reusing what pass.abc already does to feed ABC (see section 5).
-   Leaves = flop `Q` bits, graph inputs, constants; roots = flop `din` bits,
-   flop enables, graph outputs, memory ports. Pass-through roots (root is a
-   leaf) are excluded, as in the study. Large arithmetic is *not* cut out:
-   the study maps circuits "as they are".
+## 5. Hooks into the current code
 
-3. **Mapper.** Standard priority-cut enumeration over the AIG (k ≤ 8, C cuts
-   per node, truth tables computed per cut), then a level DP with two rails:
+- `pass/usyn/lut_cover.cpp:174 function_cost` and
+  `pass/usyn/unate.hpp` (`exact_form`, `Form::factored`, `Recipe`,
+  `Cover_cost`, `Search_options`): admission and costing.
+- `pass/usyn/lut_cover.hpp`: `Cover_lut {root, leaves, table, fn, level}`,
+  `Cover_result` (counts, `source_literals_pos/neg`, `cone_gates`),
+  `cover_network` (the coarse Lnet handed to the backend).
+- `pass/usyn/usyn_region.cpp rewrite_region`: strash, cover, hand-off,
+  report row; `pass/usyn/pass_usyn.cpp:195-235`: how the hook is installed
+  through `Pass_abc::work_with(var, configure)`.
+- `pass/synth/region_backend.hpp`: `Region_backend`, `Region_rewrite`,
+  `Region_hook`, `Driver_options`; `pass/synth/cell_netlist.hpp`: what a
+  backend returns; `pass/synth/region_writer.cpp`: how cells become `Sub`
+  nodes in the region body.
+- `pass/synth/lnet.hpp`: `Lnet`, `strash`, `combinational_outputs`.
+- `pass/abc/abc_backend.cpp`: the reference backend; `pass/abc/abc_lnet.cpp
+  lnet_into_logic`: how an SOP Lnet becomes ABC logic.
+- `pass/liberty/pass_liberty.cpp:109-188 model_cell`: behavioural model
+  per cell for LEC. `graph/cell.cpp:375-396 Clock_cell` (`clk_ref`, `div`,
+  `en`, `invert`): φ2.
+- `lhd/lhd_kernel_synth.cpp:135 find_mapper`, `lhd/lhd.hpp` (`kSynthSetOptions`,
+  the mapper table): registering `domino` as a mapper.
+- Pass skeleton and wiring as in P1 (`pass/analyze`, `lhd/BUILD`,
+  `kSetPasses`, `pass_command`); `pass/usyn/pass_usyn_test.cpp` shows how to
+  drive a mapper from a test (`Eprp_var` dict, `Scoped_instance`).
+- Build and test conventions unchanged (section "P0 findings").
 
-   ```
-   level[n][+] = level[n][-] = 0 for every leaf (both flop rails free)
-   for n in topological order, for rail r in {+,-}:
-     level[n][r] = min over feasible cuts c of n for rail r of
-                   1 + max over leaves l of c of level[l][pol(c,l,r)]
-   ```
-   where `pol(c,l,r)` is the leaf polarity the gate needs. A root fits iff
-   `level[root][needed rail] ≤ L`. Ties break on transistors, then on the
-   number of internal leaves used in negative polarity (twin demand). The
-   cover is then chosen top-down from each fitting root; a twin is materialised
-   only when a chosen gate reads a negative internal rail (**demand** mode);
-   `both` builds every twin (the study's worst case), `free` treats every
-   complement as available at no cost (the study's upper reference; useful
-   only as a bound and as a self-check). Cut
-   pruning is the same lower-bound caveat as the study; an exhaustive mode for
-   k ≤ 6 is the self-check (the study's verifier matched to 0.01 points).
+### P2 result: the A/B on real covers (2026-09-24)
 
-4. **Emission.** Each chosen gate becomes a `Sub` instance of a generated
-   black-box cell named by its canonical SP formula (e.g.
-   `dom_p4_s2__ab_cd` for `a·b + c·d`), pins `i0..iN-1`, `o`, `clk`. For each
-   distinct cell the pass also emits an LGraph behavioural model (And/Or/Not
-   over the pins, like `pass liberty gensim`), so `lhd lec` of the mapped
-   design against the original is self-contained. Level-1 gates get `clk =
-   phi1`, level-2 `clk = phi2` (new top-level clock inputs). Flops are left
-   native. Cones that do not fit are left untouched for pass.abc.
+`bazel build //pass/domino:usyn_ab`, then `usyn_ab lg:DIR top cells.lib
+support literals series`. It runs pass.usyn's own cover (STRASH + `lut_cover`,
+its CLI defaults) on every region and costs each chosen LUT twice: upstream's
+`exact_form(..., factored=true).factored` (the cheaper polarity) and
+`Sp_factorer` (both rails; a binate function over the distinct literals of
+upstream's minimum SOP). Three designs, literals 16, series 4:
 
-5. **Report** (`report:` slot, JSON + a text table): per definition and
-   pooled: roots, pass-through roots excluded, roots that fit at 1..4 levels,
-   AIG nodes inside fitting cones ("logic in fitting cones"), twins built, rail
-   gates per fitting output, transistors per gate histogram, and the reason
-   the first non-fitting cut failed (binate / stack / budget / fan-in / depth).
-   These are the study's columns, so the pass reproduces the artifact's table.
+| design | support | LUTs costed | both known | transistors theirs / mine | mine cheaper | flips at 16 |
+|---|---|---|---|---|---|---|
+| DinoCPU (17 modules, 53 regions) | 6 | 14,511 | 14,341 | 58,411 / 58,387 | 24 | 0 |
+| DinoCPU | 8 | 12,966 | 12,677 | 55,469 / 55,430 | 35 | 0 (2 at a 12 limit) |
+| BOOM FetchTargetQueue chunk (23 regions) | 6 | 8,862 | 8,801 | 45,604 / 45,604 | 0 | 0 |
+| FetchTargetQueue | 8 | 8,555 | 6,799 | 26,802 / 26,802 | 0 | 0 |
+| Kogge-Stone 64 | 6 and 8 | 640 | 584 | 1,577 / 1,577 | 0 | 0 |
 
----
+Mine was never worse (and never "unknown", i.e. never more than theirs + 8).
+The cheaper cases are all 6- to 8-input functions where the kernel factoring
+misses a shared literal, e.g. `(c+d)(ef(a+b)+ab)+cd` for 10 against 11 and
+`(f(a+c)+d)(g(a+b)+e)` for 8 against 9.
 
-## 4. Algorithm details and decisions
+What this decides:
 
-- **Why cut-based and not tree-based mapping.** Zhao/Sapatnekar map trees
-  optimally after decomposing into 2-input AND/OR, which loses sharing and
-  needs a separate phase-assignment step. Cut enumeration over the AIG with a
-  two-rail DP does phase assignment and mapping together and is exactly the
-  study's model, so its numbers are reproducible.
-- **Why not ABC's `map` with a generated domino library.** A genlib of all
-  SP functions to k = 8 / B = 16 is large but feasible; the blocker is that
-  ABC's mapper requires and freely inserts inverters and has no notion of
-  "negative rail only at leaves or via a twin at the same level" (details in
-  5.5). Keep ABC for the static fallback only.
-- **Depth vs. area.** Depth (levels) is the hard constraint; area (transistor
-  count, twins) is the tie-break and the area-recovery pass runs only among
-  covers that keep every fitting root at ≤ L.
-- **Constants and buffers.** A gate whose function is a single positive
-  literal is a domino buffer (1 transistor): needed when a level-1 signal must
-  cross φ2 to reach a register. Count it and expose it in the report; the
-  study's coverage does not need it but the real pipeline does.
-- **Enables and muxes.** A flop enable is a root of its own cone (as
-  `pass.color` already treats it); the mux it implies is positive unate in
-  the data inputs and binate in the select, so the select is read as both
-  rails from its source. Nothing special: the general machinery handles it.
-- **XOR mode** stays as an option (`xor=true`) mirroring the study's control
-  experiment: a cut whose function is XOR of two leaves is feasible when both
-  leaves offer both rails.
-- **Hierarchy.** Per definition, like pass.color / pass.abc; a callee `Sub`
-  boundary is a cone boundary. Flatten first (`pass/partition/flatten.cpp`)
-  for whole-design numbers.
+1. **No factorer swap.** Upstream's count is already minimal on 99.8 % of the
+   chosen LUTs and the total differs by under 0.1 %; nothing changes
+   admission at 16. The gate model's value is elsewhere: the SP formula the
+   backend will instantiate, the twin/dual-stack rule, and rail demand.
+2. **The transistor histogram of real gates** (answering "how many are 8,
+   16, 24 and more"): DinoCPU 14,287 gates at 8 or fewer, 54 in 9..16, none
+   above 16; FetchTargetQueue (support 6) 7,075 / 1,726 / 0; Kogge-Stone
+   583 / 1 / 0. Under k ≤ 8 and D = 4 no chosen gate needs more than 16.
+3. **Half the cover is binate.** With upstream's free dual rail, 7,117 of
+   DinoCPU's 14,511 costed LUTs and 5,054 of the FetchTargetQueue's 8,862
+   read some input in both polarities (an XOR, a MUX, an enable). Under the
+   study's chosen model every such internal read needs a twin gate. This is
+   the 35.9 % versus 45.6 % gap, and P3's job.
+4. **A gate-model gap.** 170 to 289 DinoCPU LUTs (1 to 2 %) and 1,756
+   FetchTargetQueue LUTs at support 8 (20 %) have more than 8 distinct
+   literals, beyond the 256-bit table. The factorer needs a cube-set
+   (literal) path for those before it can cost every gate: added to P3.
 
----
+## 6. Phased plan (re-targeted)
 
-## 5. Hooks into the existing code (surveyed 2026-09-21 on master b340575cb)
-
-The tree is newer than the group's other clones: `lgraph/` is now `graph/`
-on top of HHDS (`hhds::Graph`, `hhds::Node_class`, `hhds::Pin_class`), the
-`lgshell` REPL and `main/` are gone (2026-06-04), and the only driver is
-`./bazel-bin/lhd/lhd`. Sibling libraries (`hhds`, `hlop`, `iassert`) are
-fetched by bazel from git pins in `MODULE.bazel:76-148`; the copy already in
-`~/.cache/bazel` is an older pin, so build once before trusting its headers.
-
-### 5.1 Pass skeleton: copy `pass/analyze/`
-- Registration: `static Pass_plugin plugin("pass_domino", Pass_domino::setup)`
-  + `Pass("pass.domino", var)` + `Eprp_method m("pass.domino", help,
-  &Pass_domino::work); m.add_label_optional(...); register_pass(m);`
-  (`pass/analyze/pass_analyze.cpp:14-45`). The registry is walked at
-  `lhd/lhd_kernel.cpp:105`; the BUILD target needs `alwayslink = True`.
-- Options: `var.get("k", "8")`, `var.has_label(...)`; input design =
-  `var.graphs` (`pass/common/eprp_var.hpp:104-154`). Bool spelling as in
-  `pass_analyze.cpp:19`. Diagnostics via `livehd::diag::err/warn/info`
-  (`core/diag.hpp`); `Pass::error/warn` are deleted.
-- BUILD: engine `cc_library` (`:domino`, no CLI deps) + plugin `cc_library`
-  (`:pass_domino`, `alwayslink`) + `cc_test` on `@googletest//:gtest_main`,
-  `copts = COPTS` from `tools/copt_default.bzl` (`-Werror`, never `-Wno-*`).
-- Wiring into the binary, three edits: add `//pass/domino:pass_domino` to
-  `lhd_lib` deps (`lhd/BUILD:138-175`); add
-  `{"pass.domino","pass.domino",Set_pass::List::all}` to `kSetPasses`
-  (`lhd/lhd_kernel_internal.hpp:200-222`, otherwise `--set pass.domino.*` is
-  refused at `lhd_kernel_common.cpp:1030`); add a `domino` arm to
-  `pass_command` (`lhd/lhd_kernel_passes.cpp:619+`) and to `kPassSubcommands`
-  (`lhd/lhd.hpp:673`). The `single_edge` arm
-  (`lhd_kernel_passes.cpp:957-987`) is exactly "load lg:, transform, save
-  lg:" and is the one to copy (`load_lg_into_var`, `set_top_label`,
-  `merge_sets`, `run_step`, `Hhds_graph_library::save`).
-- `lhd synth` integration point: `lhd/lhd_kernel_synth.cpp:218-301` runs
-  `pass.color` (alg forced to `synth`) then `pass.abc`; a `synth.domino`
-  option goes in `kSynthSetOptions` (`lhd/lhd.hpp:645-666`) and the domino
-  step runs between coloring and ABC, marking mapped cones so ABC skips them.
-
-### 5.2 Graph API the pass will use
-- Iterate: `for (auto n : g->body().nodes(hhds::Node_order::forward))`.
-- Helpers in `graph/node_util.hpp` (`livehd::graph_util`): `type_op_of`
-  (:340), `create_typed_node` (:1177), `bits_of` (:392), `find_sink_pin`
-  (:936) / `setup_sink_pid` (:1245) / `setup_sink_by_name` (:1262),
-  `get_driver_of_sink_name` (:1107), `inp_sink_drivers` (:128),
-  `create_const` (:303) / `const_of` (:319, aborts on non-const: probe
-  `pin.is_const()` first), `is_type_flop` (:346), `is_type_register` (:352),
-  `is_graph_input_pin` (:431), colors `color_of/set_color` (:423-441),
-  `ge_weight` (:1862).
-- Cell catalog: `graph/cell.hpp:28-138`. Combinational band Sum, Mult, Div,
-  Rem, And, Or, Xor, Ror, Not, Get_mask, Set_mask, Sext, Concat, LT, GT, EQ,
-  SHL, SRA, LUT, Mux, Hotmux, Clock_cell, Rxor, Popcount; state band Memory,
-  Flop, Latch, Fflop, Sub. `Ntype::is_pin_trackable` (`cell.hpp:255`) names
-  the pure-wiring ops (Get_mask/Set_mask/SHL/SRA with const amounts, Concat,
-  Sext, And/Or masks) that cost zero gates and zero levels. Operands of n-ary
-  cells sit in banks by pid parity (even = `as`, odd = `bs`); Mux is `s` at
-  pid 0 then `p1, p2, ...`; Hotmux is (control, value) pairs.
-- Constants are pins of the builtin `CONST_NODE`, not nodes.
-- New per-node attributes (domino level, phase, cell name) go through
-  `graph/attrs.hpp` and must be added to `LIVEHD_FOR_EACH_ATTR_TAG`
-  (`attrs.hpp:431`) so `graph/attr_carry.hpp` copies them across rebuilds.
-
-### 5.3 Registers: leaves and roots of a cone
-`Ntype_op::Flop` sink pids (`graph/cell.cpp:285-307`): 0 `async`, 1
-`initial`, 2 `clock_pin`, 3 `din`, 4 `enable`, 5 `negreset`, 6 `posclk`, 7
-`reset_pin`, 8/9 `pipe_min/max`; output = driver pid 0 (`Y`). `Latch`
-reuses pids 0-7 (its `posclk` is the enable polarity), `Fflop` has `valid`
-(0), `din` (3), `stop` (5). `Memory` ports are 16-pid strides (`addr` 0,
-`din` 3, `enable` 4). Comptime pins must be probed, never assumed
-(`inou/cgen/cgen_verilog.cpp:3463-3525` is the canonical reader).
-`graph/latch_contract.hpp` gives `commit_class_of(node, &Design_clocks)`
-(:380) for "which clock/edge commits this element", which is what decides
-whether a flop is a legal φ2-capture boundary. `pass/color/color_synth_cones.cpp`
-already seeds one backward cone per `din` and per `enable` (kPidDin = 3,
-kPidEnable = 4) with a CSR fan-in cache; reuse that walk for cone
-extraction instead of calling `inp_edges()` per node (quadratic on wide
-reset/enable nets).
-
-### 5.4 Region seam shared with pass.abc
-`pass/partition/pass_partition.hpp:18-77` (`Region_body`, `Body_builder`)
-turns the active coloring into one module per region and is the hook
-`pass.abc` uses to replace a region by a mapped netlist. The domino mapper
-plugs into the same hook: for a region, try domino; if every root fits emit
-domino cells, else hand the region (or the non-fitting cones) to ABC.
-
-### 5.5 Bit-blasting, cell write-back, models, Verilog
-- **Region hook.** `Pass_partition::build_decomposition(graphs, outlib, top,
-  debug_color, Body_builder hook, Flatten_mode, want_pre_bodies, ...)`
-  (`pass/partition/pass_partition.hpp:146`) calls the hook once per colored
-  region with a `Region_body` (fresh `body` with IO materialised, read-only
-  `src`, `inputs/outputs` ports with `src_driver`, `nodes` span). pass.abc is
-  such a hook (`pass/abc/abc_map.cpp:1398 map_regions` → `:1624 map_region`);
-  pass.domino is a second one.
-- **Bit-blasting without ABC.** `pass/abc/abc_blast.hpp` is templated on an
-  opaque `Bit` type plus `Read/Zero/Fail` callbacks: `Wiring_blaster` (:24-120)
-  resolves Set_mask/Get_mask/Concat/Sext windows per demanded bit, `blast_comb`
-  (:124) lowers And/Or/Xor/Not/Ror, Mux/Hotmux, Sum/LT/GT/EQ, Mult, SHL, SRA,
-  Div and constants. `abc_arith_test.cpp` already instantiates the arithmetic
-  half with a pure software bit model, so instantiating it with an AIG literal
-  as `Bit` is a proven pattern. Adder architecture is selectable
-  (`abc_arith.hpp:30 Adder_kind {rca,cska,cla}`), which matters because the
-  study maps arithmetic "as is" and a ripple adder is what fits nothing.
-- **Cells as black boxes.** A mapped gate is a 1-bit `Ntype_op::Sub` whose
-  `GraphIO` declaration lives in the output library: `cell_desc_for`
-  (`abc_map.cpp:1359`) find-or-creates the decl (`outlib_->create_io(name)`,
-  `add_input(pin, pid)`, `add_output(out, pid)`), `create_typed_node(*body,
-  Ntype_op::Sub)` (:4003) instantiates it, `extract_body_bit` (:3881) selects
-  input bits with one-hot `Get_mask` and reassembles outputs with `Set_mask`.
-  `Ntype_op::LUT` + `attrs::lut` exists but nothing produces it; `Sub` is the
-  path opentimer, LEC and cgen are tested against.
-- **Behavioural models for LEC.** `pass/liberty/pass_liberty.cpp:109-188
-  model_cell`: `create_io(cell)`, `add_input/add_output`, `create_graph()`,
-  And/Or/Not nodes from the SOP, `body->commit()`. The domino emitter writes
-  the same kind of model per distinct SP formula, so `lhd lec` needs no PDK.
-- **Verilog.** `inou/cgen/cgen_verilog.cpp:2887 create_subs` emits every
-  `Sub` as a named instantiation; `create_combinational` asserts it never sees
-  a `Sub` (:4105). `inou.yosys.fromlg` is just cgen (`inou_yosys_api.cpp:471`).
-- **Timing.** `pass/opentimer/opentimer.cpp:713 is_liberty_cell` decides
-  whether a `Sub` is timed as a cell; domino cells need a Liberty (phase P6),
-  otherwise they hit the `native-comb-boundary` warning.
-- **Clock phases.** No clock-domain attribute exists; domains are structural:
-  `graph/latch_contract.hpp` `Commit_class`/`Design_clocks`. φ2 is best
-  modelled as `Ntype_op::Clock_cell` with `invert` (`graph/cell.cpp:375-396`,
-  pids 2 `clk_ref`, 3 `div`, 4 `en`, 6 `invert`) driven by the register clock,
-  which is exactly two-phase domino clocking (φ1 gates evaluate on the high
-  half, φ2 gates on the low half). `pass/single_edge`'s phase divider
-  (`slots`) is the reference for finer schedules but is verification-only.
-- **Why not ABC `map` with a generated domino GENLIB.** `Mio_CollectRootsNew`
-  requires a buffer and an inverter gate in the library (`abc_map.cpp:534`) and
-  the mapper inserts inverters freely, so it cannot honour "no inversion
-  inside a cone, negative rails only at registers or via a twin". Keep it as
-  an experiment (`flow=abc-genlib`) for comparing area, not as the mapper.
-- **History.** `pass/mockturtle` (MIG, cut enumeration, LUT write-back) was
-  deleted 2026-05-15 (`9d3c5e3049`) and never built under C++20; there is no
-  mockturtle/kitty dependency to lean on. Truth tables to k = 8 are 256 bits,
-  so the cut enumerator and canonicalisation are written in-tree (P1/P3).
-
-### 5.6 Build and test conventions
-`bazel build -c dbg //pass/domino:all`, `bazel test //pass/domino/...`;
-tests < 20 s at `-c opt`; gtests live next to the source (`foo_test.cpp`
-only when `foo.cpp` exists, otherwise `*_smoke.cpp`); shell integration
-tests as `sh_test(srcs=["tests/x.sh"], data=["//lhd"], tags=["no-sandbox"])`
-(`pass/lec/BUILD:106-250`). Graph-building idiom for a unit test:
-`pass/analyze/analyze_test.cpp:35-48`; flop fixture:
-`pass/abc/satopt_test.cpp:204-213`. End-to-end script shape
-(`lhd/tests/latch_clock_identity_test.sh:132-143`):
-
-```
-lhd compile design.v --reader yosys-verilog --top top --emit-dir lg:L --workdir w1
-lhd pass domino --top top lg:L --emit-dir lg:D --emit report:cov.json --set pass.domino.k=8 --workdir w2
-lhd compile lg:D --top top --emit verilog:out.v --workdir w3
-lhd lec --impl verilog:out.v --ref verilog:design.v --top top
-```
-
-## 6. Phased plan
-
-| phase | deliverable | test / acceptance |
+| phase | deliverable | acceptance |
 |---|---|---|
-| **P0** ✅ | Build the clone, run `//graph/...` and `//pass/analyze/...` tests; note build time and toolchain issues (see "P0 findings" above). | 12/12 green; `//lhd:lhd` is the long LLVM build |
-| **P1** ✅ | `domino_gate`: truth-table type, unateness, prime generation, SP factoring under stack and transistor budget, dual/twin, fit decision. | 13 gtests: brute-force exactness for n ≤ 4, random 6..8-variable functions evaluate, 8-variable thresholds under budget in < 5 s |
-| **P2** | `domino_cone`: bit-blast per def to an AIG (reuse pass.abc's blasting), leaf/root classification, pass-through exclusion; `mode=report` prints cone statistics. | root/leaf counts on `inou/yosys/tests` fixtures equal a Python oracle over the same Verilog |
-| **P3** | `domino_map`: cut enumeration, two-rail level DP, demand/single/both rails, cover selection; `mode=report` emits the study's coverage columns. | on a small in-repo set (a few ISCAS85 + EPFL control circuits < 20 s each) numbers match an independent Python reimplementation; on the 48-circuit set (sibling repo) the pooled 2-level figure at k = 8, D = 4, B = 16, demand rail is **35.9 ± 1.0 %** and the k ≤ 6 exhaustive mode matches within 0.01 |
-| **P4** | `domino_emit`: black-box cells + behavioural models + φ1/φ2 clocks; `mode=map` rewrites fitting cones; non-fitting cones untouched. | `lhd lec` PROVEN between original and mapped on every fixture; cgen Verilog compiles in iverilog |
-| **P5** | Integration: `lhd pass domino` subcommand, `--set pass.domino.*` in the option registry, `lhd synth --set synth.domino=true` = domino first, pass.abc on the remainder, opentimer on the static part; docs (`pass/domino/README.md`, a `todo/livehd/` task page). | `lhd help`/`lhd list options` show the pass; an end-to-end synth run on the DinoCPU fixture produces a mixed netlist + report |
-| **P6** (later) | Domino cell timing: a generated Liberty for the domino cells (delay from stack depth and fan-in, from SPICE in `~/projects/domino/`), so opentimer times the mixed netlist; 3-level variant; domino-aware restructuring for arithmetic. | timing report on mixed netlist; coverage at L = 3 within 2 points of the study's 56 % |
-
-Order of implementation: P1 first because it is graph-independent and
-catches the subtle dual-depth rule early; P2/P3 next to reproduce the study
-before writing a single graph mutation; P4/P5 last.
-
----
+| **P0** ✅ | Build and test; findings above. | green |
+| **P1** ✅ | Gate model (`domino_gate`). | 13 gtests, exact for n ≤ 4 |
+| **P2** ✅ | `usyn_ab`: pass.usyn's cover on real designs, every chosen LUT costed both ways. Outcome: no factorer swap (see "P2 result"). | numbers above |
+| **P3** | Gate model: a cube-set path for functions with more than 8 literals, the dual trick, the 5-input exact table. Rail demand over a cover: twins, dual-stack, the study's columns in the usyn report; then the twin cost in the cover. | on the 48-circuit set, pooled 2-level coverage 35.9 ± 1 % (demand) and 45.6 % (free) at k = 8, D = 4, B = 16 |
+| **P4** | Domino backend: cells, φ1/φ2, models, mixed netlist with ABC. | `lhd lec` PROVEN on every synthesis fixture; iverilog compiles the Verilog |
+| **P5** | `synth.mapper=domino`, `pass.domino.*`, docs, todo page. | end-to-end on DinoCPU |
+| **P6** | Liberty for domino cells and opentimer timing; 3-level option; domino-aware restructuring. | timing report on the mixed netlist |
 
 ## 7. Risks and open questions
 
-- **Benchmarks.** The 48 circuits are not in this repo (AGENTS.md: large
-  benchmarks live in their own repository). P3 needs a sibling
-  `livehd-domino-bench/` with EPFL (github lsils/benchmarks), ISCAS85/89 and
-  IWLS-2005 OpenCores, read through `--reader yosys-verilog`. The pooled
-  figure is dominated by OpenCores (14,176 of 17,101 outputs), so per-class
-  numbers must be checked too.
-- **Reproducing a lower bound.** Cut pruning differences move the k = 8
-  number by up to 0.3 points in the study; an exact match is not required,
-  the k ≤ 6 exhaustive agreement is.
-- **What "register" means in the pipeline.** The study keeps explicit
-  registers. A real two-phase domino pipeline could use the φ2 gate as the
-  storage element; that is a later physical decision and does not change the
-  mapping.
-- **The hard stop of 36 %.** Only 4–6 % of the logic fits at L = 2. The
-  pass is useful as a *hybrid* (domino on small fast control cones, static
-  elsewhere) or with L = 3. Make `levels` a first-class knob from day one.
-- **Semantics of a partially mapped design.** Domino gates are modelled as
-  combinational for LEC/sim; the clocks φ1/φ2 are structural only. State this
-  in the report so nobody reads the LEC verdict as a timing proof.
-
----
+- **Benchmarks.** The 48 circuits are still not in the repo; P3's acceptance
+  needs a sibling benchmark directory (EPFL, ISCAS, IWLS OpenCores) read
+  through `--reader yosys-verilog`.
+- **Exactness above 4 inputs.** The gate model can overestimate; measured
+  evidence: T4(8) = 55 against its dual T5(8) = 57. Cheap fixes in order:
+  take the minimum with the dual formula (series/parallel swapped), extend
+  the exact table to 5 inputs, lift the divisor caps for rejections within
+  two transistors of the budget.
+- **Upstream is moving.** pass/usyn landed in two days and its todo page
+  (`synth-unate`) is linked from the index but not in the tree. Rebase often;
+  keep every change to pass/usyn behind a setting and measured by the A/B.
+- **Only 4 to 6 % of the logic fits at two levels.** The value is a hybrid
+  netlist and the knob `domino_levels`; the backend must coexist with ABC's
+  static cells from day one.
+- **LEC is not a timing proof.** Domino cells are modelled as combinational;
+  φ1/φ2 are structural. Say so in every report.
 
 ## 8. References
 
