@@ -1209,6 +1209,12 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     break;
   }
 
+  // A repeated in-process invocation replaces the previous mapped output.
+  // The source is already held in the private scratch library above.
+  for (const auto gid : outlib.all_io_gids()) {
+    outlib.delete_graphio(outlib.find_io(gid));
+  }
+
   livehd::abc::Mapper mapper(opts);
   mapper.set_outlib(&outlib);
   mapper.set_flat(flat_whole_design);

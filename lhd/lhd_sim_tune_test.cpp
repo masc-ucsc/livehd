@@ -1521,6 +1521,7 @@ TEST(SimTuneStore, CompactionBoundsNonRunHistory) {
     push(trial_record(t));
   };
   const auto verdict_of = [&](std::string result, const std::string& structure, Mode m, bool charged = true) {
+    ASSERT_TRUE(st.trial.has_value());
     push(attempt_record(*st.trial, 1, m));
     for (auto& line :
          close_trial(st, Verdict{.result = std::move(result), .oracle = "none", .structure = structure, .charged = charged}, 1)) {
@@ -1549,6 +1550,7 @@ TEST(SimTuneStore, CompactionBoundsNonRunHistory) {
     push(decision_record(kL1, true, e % 2 ? "no-step" : "busy", 3));  // a flapping reason
     trial_of(kL0);                                                    // a reverse step, never comparable
     verdict_of("abandoned", s, Mode::on);
+    trial_of(kL0);
     verdict_of("abandoned", s, Mode::on, /*charged=*/false);
   }
   // an open attempt at the end

@@ -179,8 +179,8 @@ struct Report {
   std::array<Stage_report, kStageCount> stages{};
   uint64_t                              graphs = 0, changed_graphs = 0;
   double                                ms     = 0;
-  [[nodiscard]] Stage_report&           at(Stage s) { return stages[static_cast<size_t>(s)]; }
-  [[nodiscard]] const Stage_report&     at(Stage s) const { return stages[static_cast<size_t>(s)]; }
+  [[nodiscard]] Stage_report&                at(Stage s) { return stages.at(static_cast<size_t>(s)); }
+  [[nodiscard]] const Stage_report&          at(Stage s) const { return stages.at(static_cast<size_t>(s)); }
   [[nodiscard]] std::string             json() const;
   // The inverse of json(); nullopt for anything json() cannot have written.
   [[nodiscard]] static std::optional<Report> parse(std::string_view text);

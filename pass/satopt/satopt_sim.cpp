@@ -25,7 +25,7 @@ Dlop fit(const Dlop& v, const Pin& p) {
     return v;
   }
   auto low = v.and_op(Dlop::get_mask_value(width(p)));
-  return gu::is_unsign(p) ? *low : *low->sext_op(Dlop::create_integer(width(p)));
+  return gu::is_unsign(p) ? *low : *low->sext_op(Dlop::create_integer(width(p) - 1));
 }
 
 // `w` bits, bit b = bit(b), as an unsigned value.
@@ -277,7 +277,13 @@ std::optional<Dlop> Word_sim::column(const Key& k, uint32_t j) {
       return std::nullopt;
     }
     switch (op) {
-      case Ntype_op::Sext: v = *a->sext_op(*b); break;
+      case Ntype_op::Sext:
+        if (!b->is_just_i64() || b->to_just_i64() < 1) {
+          return std::nullopt;
+        }
+        // LGraph specifies a width; Dlop sign-extends from a bit index.
+        v = *a->sext_op(b->sub_op(Dlop::create_integer(1)));
+        break;
       case Ntype_op::SHL: v = *a->shl_op(*b); break;
       case Ntype_op::SRA: v = *a->sra_op(*b); break;
       case Ntype_op::LT: v = *a->lt_op(*b); break;

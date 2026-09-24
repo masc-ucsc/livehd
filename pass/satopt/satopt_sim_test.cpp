@@ -64,6 +64,24 @@ TEST(WordSim, CornerPatternsLeadEveryLeaf) {
   }
 }
 
+TEST(WordSim, SignedWidthsUseTheTopBit) {
+  Adder f("sim_signed_width");
+  gu::set_sbits(f.a, 8);
+  auto sext = gu::create_typed_node(*f.g, Ntype_op::Sext);
+  f.b.connect_sink(sext.create_sink_pin(0));
+  gu::create_const(*f.g, *Dlop::create_integer(8)).connect_sink(sext.create_sink_pin(1));
+  auto out = sext.create_driver_pin(0);
+  gu::set_sbits(out, 16);
+  Word_sim sim({.samples = 8});
+  for (const auto& pin : {f.a, out}) {
+    const auto* values = sim.values(pin);
+    ASSERT_NE(values, nullptr);
+    EXPECT_EQ((*values)[1].to_just_i64(), -1);
+    EXPECT_EQ((*values)[4].to_just_i64(), -128);
+    EXPECT_EQ((*values)[5].to_just_i64(), 127);
+  }
+}
+
 // A leaf's pattern depends on the leaf, not on what was evaluated first.
 TEST(WordSim, PatternsDoNotDependOnEvaluationOrder) {
   Adder    f("sim_order");

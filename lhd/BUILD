@@ -239,6 +239,8 @@ cc_test(
     ],
     copts = COPTS,
     linkopts = ["-lz"],
+    # The full driver uses static third-party libraries (including Slang).
+    linkstatic = True,
     deps = [
         ":lhd_lib",
         "//pass/common:pass",

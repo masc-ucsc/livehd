@@ -489,7 +489,7 @@ bool apply_odc(hhds::Graph& g, const Node& node, const Fact& f, bool shared, Sta
   if (mask.is_known_eq(*Dlop::get_mask_value(w))) {
     // The whole value: the constant, read with t's sign.
     if (!gu::is_unsign(t)) {
-      v = *v.sext_op(*Dlop::create_integer(w));
+      v = *v.sext_op(*Dlop::create_integer(w - 1));
     }
     replacement = gu::create_const(g, v);
     rw.released.push_back(t);

@@ -155,7 +155,7 @@ struct Table_hash {
 // Costs by support-reduced table (which determines its input count).
 class Store {
 public:
-  Store(const Recipe& recipe, const Cover_cost& cost) : recipe(recipe), cost(cost) {}
+  Store(const Recipe& recipe_arg, const Cover_cost& cost_arg) : recipe(recipe_arg), cost(cost_arg) {}
   const Recipe&                                  recipe;
   const Cover_cost&                              cost;
   Budget                                         budget{std::numeric_limits<uint64_t>::max() / 4};

@@ -201,7 +201,9 @@ TEST(LoopCleanup, SynthColorsWholeBodyDespiteArithmeticCutsAndSizeLimits) {
 TEST(LoopCleanup, MappingThenStitchingPreservesIndependentAndCarriedResults) {
   const auto models_path = std::string(std::getenv("TEST_TMPDIR")) + "/loop-models";
   Eprp_var   model_var;
-  Pass_liberty::setup();
+  if (!Pass::eprp.get_method("pass.liberty")) {
+    Pass_liberty::setup();
+  }
   Pass::eprp.run_method_now("pass.liberty",
                             model_var,
                             {
@@ -385,7 +387,9 @@ TEST(WareModule, NarySumPreservesAllPortsAndSharesEqualRealizations) {
 
   const auto models_path = std::string(std::getenv("TEST_TMPDIR")) + "/ware-models";
   Eprp_var   model_var;
-  Pass_liberty::setup();
+  if (!Pass::eprp.get_method("pass.liberty")) {
+    Pass_liberty::setup();
+  }
   Pass::eprp.run_method_now("pass.liberty",
                             model_var,
                             {

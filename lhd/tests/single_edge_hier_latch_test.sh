@@ -220,7 +220,7 @@ out="$("$LHD" lec --impl "lg:$W/lg_hicgdeep_dm" --ref "lg:$W/lg_hicgdeep" --top 
 # then that the verdict is not a refutation.
 grep -qaiE "PROVEN|UNKNOWN|INCONCLUSIVE" <<<"$out" \
   || { echo "$out" | tail -8; fail "case 5b never reached a lec verdict (build failure / refusal / crash) -- it cannot distinguish 'boxed and inconclusive' from 'never ran'"; }
-grep -qaiE "refut|not equivalent|equiv_fail" <<<"$out" \
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$out" \
   && { echo "$out" | tail -6; fail "trusting the clock-gate cell produced a REFUTATION of two equivalent designs -- a trusted def must stay blackboxed, never be inlined into the compared cone"; }
 echo "ok: a trusted clock-gate cell stays boxed, reached a verdict, and did not refute"
 

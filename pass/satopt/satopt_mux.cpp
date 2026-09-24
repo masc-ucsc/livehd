@@ -351,7 +351,7 @@ bool survives(Word_sim& sim, const Arms& arms, const Mux_fact& f) {
 // structural there (an arm computed as ~x in another region) is still new to
 // the mux's region, which sees two unrelated inputs.
 struct Local_bit {
-  Pin                 pin;
+  Pin                 pin{};
   int                 bit      = 0;
   bool                inverted = false;
   std::optional<bool> value;
@@ -399,7 +399,9 @@ Local_bit local_bit(Pin pin, int bit, const Node& mux, bool uncolored) {
     }
     std::vector<Pin> ins;
     for (const auto& sink : n.inp_sorted_pins()) {
-      ins.push_back(sink.get_driver_pin());
+      for (const auto& driver : sink.get_driver_pins()) {
+        ins.push_back(driver);
+      }
     }
     if (op == Ntype_op::Not && ins.size() == 1) {
       pin      = ins.front();

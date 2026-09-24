@@ -64,13 +64,13 @@ build() { # <name> <src> <top>
 expect_proven() { # <output> <what>
   grep -qa "PROVEN equivalent" <<<"$1" \
     || { tail -8 <<<"$1"; fail "$2: never reached a PROVEN verdict"; }
-  grep -qaiE "refut|not equivalent|equiv_fail" <<<"$1" \
+  grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$1" \
     && { tail -8 <<<"$1"; fail "$2: REFUTED two equivalent designs"; }
   return 0
 }
 
 expect_refuted() { # <output> <what>
-  grep -qaiE "refut|not equivalent|equiv_fail" <<<"$1" \
+  grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$1" \
     || { tail -8 <<<"$1"; fail "$2: expected a REFUTATION and did not get one -- the gate was dropped, or the miter is vacuous"; }
   return 0
 }

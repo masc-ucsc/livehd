@@ -32,7 +32,7 @@ grep -q 'PROVEN equivalent' "$W/lec.log" || { tail -40 "$W/lec.log"; fail "nativ
 "$LHD" lec --set formal.timeout=30 --impl verilog:"$impl" --ref verilog:"$SRC" --top "$TOP" \
   --workdir "$W/w_verilog" -q >"$W/verilog.log" 2>&1 \
   || { tail -40 "$W/verilog.log"; fail "default LEC endpoint LEC or generated-wrapper parse"; }
-if grep -qia 'REFUTED\|not equivalent\|SETUP FAILED' "$W/verilog.log"; then
+if grep -qiaE '"verdict"[[:space:]]*:[[:space:]]*"refuted"|SETUP FAILED' "$W/verilog.log"; then
   tail -40 "$W/verilog.log"
   fail "default LEC rejected the generated memory wrapper round trip"
 fi
@@ -66,7 +66,7 @@ grep -q 'PROVEN equivalent' "$W/whole_lec.log" \
 "$LHD" lec --set formal.timeout=30 --impl verilog:"$whole_impl" --ref verilog:"$WHOLE_SV" --top "$WHOLE_TOP" \
   --workdir "$W/w_whole_verilog" -q >"$W/whole_verilog.log" 2>&1 \
   || { tail -40 "$W/whole_verilog.log"; fail "whole-array default LEC endpoint LEC or parse"; }
-if grep -qia 'REFUTED\|not equivalent\|SETUP FAILED' "$W/whole_verilog.log"; then
+if grep -qiaE '"verdict"[[:space:]]*:[[:space:]]*"refuted"|SETUP FAILED' "$W/whole_verilog.log"; then
   tail -40 "$W/whole_verilog.log"
   fail "default LEC rejected the inline whole-array state round trip"
 fi

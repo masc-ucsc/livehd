@@ -99,6 +99,20 @@ TEST(SatoptSweep, HiddenConstantOutputBecomesTheConstant) {
   expect_same(before, f.samples());
 }
 
+// A signed one-bit result with bit 0 set is -1, including for wider readers.
+TEST(SatoptSweep, SignedConstantPreservesExtension) {
+  Fixture    f("sweep_signed_constant");
+  const auto one = f.op(Ntype_op::And, {f.op(Ntype_op::Or, {f.x, f.konst(1)}, 8), f.konst(1)}, 1, true);
+  f.out("o", f.op(Ntype_op::And, {one, f.konst(255)}, 8));
+  f.out("p", one);
+  const auto report = f.run(Sweep::constants);
+  EXPECT_GE(report.applied, 1u);
+  ASSERT_TRUE(f.driver("p").is_const());
+  EXPECT_TRUE(gu::const_of(f.driver("p")).is_known_eq(*Dlop::create_integer(-1)));
+  ASSERT_TRUE(f.driver("o").is_const());
+  EXPECT_TRUE(gu::const_of(f.driver("o")).is_known_eq(*Dlop::create_integer(255)));
+}
+
 // y + x recomputes x + y: its consumer reads the earlier value.
 TEST(SatoptSweep, DuplicateValueReadsTheEarlierOne) {
   Fixture f("sweep_equal");
