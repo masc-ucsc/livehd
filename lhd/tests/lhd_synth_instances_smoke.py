@@ -10,7 +10,7 @@ import tempfile
 
 root = Path(tempfile.mkdtemp(prefix="synth-instances-", dir=os.environ.get("TEST_TMPDIR")))
 lhd = str(Path("lhd/lhd").resolve())
-monitor = str(Path("pass/synth/measure_synth").resolve())
+monitor = str(Path("pass/usyn/measure_synth").resolve())
 source = root / "instances.v"
 reference = root / "reference.v"
 library = "inou/prp/tests/abc/test.lib"
@@ -64,22 +64,21 @@ def run(label, args):
 
 run("models", ["pass", "liberty", "gensim", library, "--emit-dir", "lg:" + str(root / "models")])
 base = ["synth", str(source), "--top", "top", "--set", "compile.upass.inline=false",
-        "--set", "synth.mapper=synth", "--set", "synth.liberty=" + library, "--set", "synth.opentimer=false"]
+        "--set", "synth.mapper=usyn", "--set", "synth.liberty=" + library, "--set", "synth.opentimer=false"]
 if per_definition:
     base += ["--set", "pass.color.hier=false"]
 if per_occurrence:
-    base += ["--set", "pass.color.synth.min_ge=0", "--set", "pass.color.synth.max_gate=2"]
+    # The synth profile colors flop to flop, which ignores max_gate: opt out.
+    base += ["--set", "pass.color.synth.min_ge=0", "--set", "pass.color.synth.max_gate=2",
+             "--set", "pass.color.synth.flop_to_flop=false"]
 
 
 def synth(label, directory):
     value = run(label, base + ["--workdir", str(directory), "--emit", "verilog:" + str(root / (label + ".v"))])
-    report = value["qor"]["synth"]
+    report = value["qor"]["usyn"]
     # Synthesis proves nothing itself: prove() below is the separate `lhd lec`.
     rows = report["regions_searched"] + [row["decision"] for row in report["regions_reused"]]
-    assert rows and all(row["status"] == "unate" for row in rows), (label, report)
-    subprocess.run(["python3", "pass/synth/summarize.py", str(directory / "synth/qor.json.synth.json"),
-                    str(directory / "synth/qor.json.witness.jsonl"), "--invocation-result", str(root / (label + ".result.json"))],
-                   check=True, stdout=subprocess.DEVNULL, timeout=10)
+    assert rows and all(row["status"] == "abc_opt" for row in rows), (label, report)
     return value, report
 
 

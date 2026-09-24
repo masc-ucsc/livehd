@@ -3,19 +3,57 @@
 #include <algorithm>
 #include <regex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
 
+TEST(LhdOptions, SatoptCommandDefaultsAndExplicitOverrides) {
+  for (const auto& [command, subcommand, enabled] : std::vector<std::tuple<std::string, std::string, bool>>{
+           {"compile",       "", false},
+           {    "sim",       "", false},
+           { "formal", "verify", false},
+           {    "lec",       "",  true},
+           {  "synth",       "",  true},
+           {   "pass",    "abc",  true},
+           {   "pass",   "usyn",  true}
+  }) {
+    lhd::Options opts;
+    opts.command = command;
+    if (!subcommand.empty()) {
+      opts.files.push_back(subcommand);
+    }
+    SCOPED_TRACE(command + " " + subcommand);
+    EXPECT_EQ(lhd::satopt_requested(opts), enabled);
+    EXPECT_EQ(lhd::satopt_during_compile(opts), enabled && command != "synth");
+    for (const auto value : {"false", "true"}) {
+      opts.sets.emplace_back("pass.satopt", value);
+      EXPECT_EQ(lhd::satopt_requested(opts), std::string_view{value} == "true");
+      EXPECT_EQ(lhd::satopt_during_compile(opts), std::string_view{value} == "true" && command != "synth");
+      if (command == "synth" || command == "pass") {
+        Eprp_var::Eprp_dict labels;
+        lhd::merge_mapper_sets(opts, subcommand == "usyn" ? "pass.usyn" : "pass.abc", labels);
+        EXPECT_EQ(labels.at("satopt"), value);
+      }
+    }
+  }
+  const auto listed = lhd::list_set_options();
+  const auto option = std::find_if(listed.begin(), listed.end(), [](const auto& o) { return o.name == "pass.satopt"; });
+  ASSERT_NE(option, listed.end());
+  EXPECT_EQ(option->default_value, "false");
+}
+
 TEST(LhdOptions, SynthCommandAndPassKeepSeparateNamespaces) {
   EXPECT_EQ(lhd::canonical_set_key("synth.potato", "synth"), "synth.potato");
-  EXPECT_EQ(lhd::canonical_set_key("synth.mapper", "pass.synth"), "synth.mapper");
-  EXPECT_EQ(lhd::canonical_set_key("recipes", "pass.synth"), "pass.synth.recipes");
-  EXPECT_EQ(lhd::canonical_set_key("pass.synth.recipes", "synth"), "pass.synth.recipes");
-  EXPECT_FALSE(lhd::retired_set_hint("pass.synth", "out").empty());
-  EXPECT_FALSE(lhd::retired_set_hint("pass.synth", "threads").empty());
+  EXPECT_EQ(lhd::canonical_set_key("synth.mapper", "pass.usyn"), "synth.mapper");
+  EXPECT_EQ(lhd::canonical_set_key("recipes", "pass.usyn"), "pass.usyn.recipes");
+  EXPECT_EQ(lhd::canonical_set_key("pass.usyn.recipes", "synth"), "pass.usyn.recipes");
+  // The renamed namespace stays verbatim so it reaches its directed error.
+  EXPECT_EQ(lhd::canonical_set_key("pass.synth.support", "synth"), "pass.synth.support");
+  EXPECT_FALSE(lhd::retired_set_hint("pass.usyn", "out").empty());
+  EXPECT_FALSE(lhd::retired_set_hint("pass.usyn", "threads").empty());
 }
 
 // Keep the full retired-option matrix in one process. The CLI integration
@@ -34,6 +72,8 @@ TEST(LhdOptions, RetiredLabelsAreHiddenAndRejected) {
            "sim.flatten",
            "compile.formal.enabled",
            "pass.abc.out",
+           "pass.abc.satopt",
+           "pass.usyn.satopt",
            "pass.partition.out",
            "pass.liberty.out",
            "pass.single_edge.out",

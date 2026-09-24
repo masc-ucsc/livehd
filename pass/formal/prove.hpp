@@ -3,15 +3,20 @@
 
 #include <cvc5/cvc5.h>
 
+#include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "cell.hpp"
 #include "encode.hpp"  // livehd::lec::Val + exported helpers (fit_to/flop_state_key)
 #include "hhds/graph.hpp"
+#include "hlop/dlop.hpp"
 #include "query.hpp"  // livehd::lec::Verdict
 
 namespace livehd::formal {
@@ -48,6 +53,10 @@ struct Prove_options {
   // machine-/wall-clock-independent internal counter, so the same config yields
   // the same verdict everywhere. 0 disables the limit.
   int  budget_k                 = 256;
+  // Floor of that rlimit. A tiny cone's budget_k * pins can be too small for
+  // the solver's fixed start-up cost, so the verdict would depend on what an
+  // earlier query already cached. 0 = no floor.
+  long long min_rlimit          = 0;
   // Pre-solve gate: a cone larger than this skips the solver entirely -> Unknown.
   int  cone_max                 = 50000;
   // Wall-clock cap for ONE checkSat, in ms (cvc5 `tlimit-per`). 0 = none, and
@@ -63,12 +72,32 @@ struct Prove_options {
   bool reject_unknown_constants = false;
   // Encode through Sub instances (virtual flat) instead of stopping at them.
   bool descend_subs             = false;
+  // A driver pin with no stamped width (bits 0) makes its cone Unknown instead
+  // of being read as one bit: a rewrite proven about a guessed width would be
+  // proven about a different circuit (satopt).
+  bool reject_unstamped         = false;
+  // Fill Query_out::model on a Refuted query (satopt feeds it back into its
+  // simulation). Off by default: reading every leaf's value costs a solver
+  // call each.
+  bool produce_model            = false;
 };
+
+// One free symbol of a refuted query -- a primary input, or a state or memory
+// output cut to a symbol -- in the instance `path` names from the prover's
+// graph (empty = the graph itself), with the value the counterexample gives
+// it: the leaf's bits, read unsigned.
+struct Model_leaf {
+  std::vector<hhds::Node_class> path;
+  hhds::Pin_class               pin;
+  Dlop                          value;
+};
+using Model = std::vector<Model_leaf>;
 
 struct Query_out {
   Verdict     verdict  = Verdict::Unknown;
   bool        stateful = false;  // cone cut a Flop/Memory (a Refuted witness may be unreachable)
   std::string witness;           // input assignment, when Refuted
+  Model       model;             // every leaf of the refuted formula, when Refuted and produce_model
 };
 
 class Prover {
@@ -90,6 +119,24 @@ public:
   Query_out never_collide(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
                           int address_bits = 0);
   Query_out constant_bit(const hhds::Pin_class& pin, int bit, bool value);
+  // Word-level masked facts over the low `width` bits (each value fitted to
+  // `width` by its own signedness); `mask` and `value` are read as unsigned
+  // `width`-bit patterns. masked_const: the masked bits always carry `value`.
+  // masked_relation: the masked bits of `a` always equal those of `b`
+  // (complement: always their complement).
+  Query_out masked_const(const hhds::Pin_class& pin, int width, const Dlop& mask, const Dlop& value);
+  Query_out masked_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, int width, const Dlop& mask, bool complement);
+  // Bit 0 of `t` always equals `op` (And, Or or Xor) over bit 0 of `a` and of
+  // `b` (complemented when `invert_b`): a gate proven before it is built.
+  Query_out bit_gate(const hhds::Pin_class& t, Ntype_op op, const hhds::Pin_class& a, const hhds::Pin_class& b, bool invert_b);
+  // Observability: with `target`'s low `width` bits in `mask` replaced by
+  // those of `value` (read with target's sign), does every exit keep its
+  // value? `window` lists the cells between target and the exits in
+  // topological order; each exit is an output of one of them, and every other
+  // input of a window cell keeps its value (the caller makes every edge that
+  // leaves the window an exit, so reconvergence outside is covered).
+  Query_out unchanged_under(const hhds::Pin_class& target, int width, const Dlop& mask, const Dlop& value,
+                            const std::vector<hhds::Node_class>& window, const std::vector<hhds::Pin_class>& exits);
 
   // Register a hypothesis (an assume condition's driver pin): every later query
   // assumes cond != 0. Returns false if the assume cone is unsupported.
@@ -121,6 +168,10 @@ public:
 
   // Every definition a query so far descended into (descend_subs), once each.
   std::vector<hhds::Graph*> descended() const;
+
+  // Deterministic effort so far: the cone pins every query walked (the same
+  // count its rlimit scales with). A caller holding a work budget charges it.
+  [[nodiscard]] uint64_t work() const { return work_; }
 
 private:
   // A pin inside one instance: scope 0 is g_ itself, every other scope one
@@ -156,6 +207,8 @@ private:
   Query_out  address_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
                               bool equal, int address_bits);
   cvc5::Term bv_const(int width, uint64_t val);
+  Query_out  masked(const std::vector<hhds::Pin_class>& pins, const std::function<std::optional<cvc5::Term>(const std::vector<cvc5::Term>&)>& refute_of, int width);
+  cvc5::Term bv_of(int width, const Dlop& v);  // the low `width` bits of v
   cvc5::Term bv_extract(const cvc5::Term& t, int hi, int lo);
   cvc5::Term pred_to_bv(const cvc5::Term& b);
 
@@ -166,6 +219,7 @@ private:
   cvc5::TermManager tm_;
   hhds::Graph*      g_;
   Prove_options     opts_;
+  uint64_t          work_ = 0;
 
   std::vector<Scope>                                       scopes_;        // [0] = g_
   absl::flat_hash_map<Key, uint32_t>                       child_scopes_;  // (parent scope, Sub) -> scope
@@ -174,6 +228,11 @@ private:
   std::vector<std::pair<cvc5::Term, cvc5::Term>>           side_eqs_;  // memory read ties (asserted every query)
   std::vector<cvc5::Term>                                  assumes_;   // hypotheses (cond != 0)
   std::vector<std::pair<std::string, cvc5::Term>>          inputs_;    // seeded input symbols, for witnesses
+  // Every free symbol that stands for a pin (input, flop Q, memory output):
+  // how a model names its leaves.
+  std::unordered_map<cvc5::Term, std::pair<uint32_t, hhds::Pin_class>> leaves_;
+  void                                                     leaf(const cvc5::Term& t, uint32_t scope, const hhds::Pin_class& pin);
+  Model                                                    model(cvc5::Solver& solver, const cvc5::Term& refute);
 
   bool enc_unsupported_ = false;  // set by val_of when the cone hit an unsupported op
   bool enc_stateful_    = false;  // set by val_of when the cone cut a Flop/Memory

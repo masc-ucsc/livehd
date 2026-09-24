@@ -44,8 +44,8 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   }
   // Same for the `synth.*` command namespace (synth_command, kSynthSetOptions).
   if (key.size() > 6 && key.substr(0, 6) == "synth.") {
-    // pass.synth is distinct: an unknown synth.* command option must not be
-    // reinterpreted as a flag of that pass. Use its explicit pass.synth prefix.
+    // An unknown synth.* command option must not be reinterpreted as a flag
+    // of some pass: pass flags take their explicit pass prefix.
     return std::string{key};
   }
   // A REMOVED namespace (kRenamedSetPasses: `lec.*`, `compile.sim.*`, ...) is
@@ -111,7 +111,9 @@ std::vector<Set_option> list_set_options() {
   out.push_back(Set_option{"pass.satopt",
                            "pass.satopt",
                            "false",
-                           "Run satopt during compilation, independently of synthesis; lhd synth reuses the proofs later"});
+                           "Enable proof-backed logic simplification. Default false for compile/simulation, true for LEC "
+                           "and synthesis; an explicit true/false overrides the command default. Synthesis runs on its "
+                           "private copy. pass.satopt.stages selects the searches."});
   for (const auto& sp : kSetPasses) {
     if (sp.list == Set_pass::List::none) {
       continue;  // legacy alias spelling: accepted by --set, never listed

@@ -19,39 +19,39 @@ load("//tools:lhd.bzl", "lhd_verilog")
 # select. Every script below asserts mapper-agnostic behavior (equivalence,
 # netlist shape, option handling, incremental reuse), so ONE script covers both
 # through the MAPPER env var; the abc targets keep their historical names and
-# only the `_synth` twins are new. ABC-internal claims (flow strings, GENLIB,
+# only the `_usyn` twins are new. ABC-internal claims (flow strings, GENLIB,
 # abc.rc aliases, the boundary re-refinement count) stay gated inside the
 # scripts -- see the `if [ "$MAPPER" = abc ]` blocks.
 _MAPPERS = [
     ("", "abc"),
-    ("_synth", "synth"),
+    ("_usyn", "usyn"),
 ]
 
 
 sh_test(
     name = "lhd_unate_smoke",
     srcs = ["lhd_unate_smoke.sh"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:provenance_checker"],
 )
 
 sh_test(
     name = "lhd_synth_instances_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker", "//pass/synth:measure_synth"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
 )
 
 sh_test(
     name = "lhd_synth_instance_defs_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
     args = ["definitions"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker", "//pass/synth:measure_synth"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
 )
 
 sh_test(
     name = "lhd_synth_instance_colors_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
     args = ["occurrences"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker", "//pass/synth:measure_synth"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
 )
 
 sh_test(
@@ -1931,8 +1931,3 @@ sh_test(
     data = ["//lhd"],
 )
 
-sh_test(
-    name = "lhd_synth_worker_smoke",
-    srcs = ["lhd_synth_worker_smoke.sh"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/synth:witness_checker"],
-)

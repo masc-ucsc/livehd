@@ -7,8 +7,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 
 namespace livehd {
 
@@ -107,6 +109,54 @@ void Hhds_graph_library::save(std::string_view path) {
 size_t Hhds_graph_library::registered_instances() {
   std::lock_guard<std::mutex> guard(registry_mu());
   return registry().size();
+}
+
+bool copy_with_callees(hhds::GraphLibrary& dst, hhds::GraphLibrary& src, std::string_view name) {
+  if (!src.find_io(name)) {
+    return false;
+  }
+  std::vector<std::string>        pending{std::string(name)};
+  absl::flat_hash_set<std::string> seen;
+  while (!pending.empty()) {
+    const auto module = std::move(pending.back());
+    pending.pop_back();
+    if (!seen.insert(module).second) {
+      continue;
+    }
+    const auto io = src.find_io(module);
+    if (!io) {
+      continue;  // a callee src itself lacks: nothing to copy
+    }
+    if (!io->has_graph()) {
+      if (!dst.find_io(module)) {
+        auto decl = dst.create_io(module);
+        for (const auto& d : io->get_input_pin_decls()) {
+          decl->add_input(d.name, d.port_id, d.loop_break);
+          decl->set_bits(d.name, d.bits);
+          decl->set_unsign(d.name, d.unsign);
+        }
+        for (const auto& d : io->get_output_pin_decls()) {
+          decl->add_output(d.name, d.port_id, d.loop_break);
+          decl->set_bits(d.name, d.bits);
+          decl->set_unsign(d.name, d.unsign);
+        }
+      }
+      continue;
+    }
+    if ((module == name || !dst.find_io(module)) && !dst.copy_from(src, module)) {
+      return false;
+    }
+    const auto body = io->get_graph();
+    if (!body) {
+      continue;
+    }
+    for (const auto n : body->body().nodes()) {
+      if (const auto sio = n.get_subnode_io(); sio) {  // a Sub instance
+        pending.emplace_back(sio->get_name());
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace livehd

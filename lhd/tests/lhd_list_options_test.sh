@@ -127,14 +127,15 @@ echo "$out" | grep -q '"name":"pass.abc.top"' && fail "per-pass pass.abc.top mus
 echo "$out" | grep -q '"name":"pass.partition.top"' && fail "per-pass pass.partition.top must be gone (use --top): $out"
 # pass.color: options only the synth coloring reads are pass.color.synth.*; the
 # algorithm choice, generic post-processing and the ware_* policy pass.abc
-# honors under any coloring stay pass.color.*. The stop_* cuts have NO fixed
-# default: the mapper profile supplies it (abc cuts, synth runs reg-to-reg).
+# honors under any coloring stay pass.color.*. The stop_*, ctrl_cones and ware_*
+# settings have NO fixed default: the mapper profile supplies it (abc cuts and
+# keeps wares, usyn runs reg-to-reg with wares inlined).
 echo "$out" | grep -q '"name":"pass.color.synth.mapper","method":"pass.color","default":"abc"' \
   || fail "pass.color.synth.mapper default abc missing: $out"
 echo "$out" | grep -q '"name":"pass.color.synth.stop_mux","method":"pass.color","default":""' \
   || fail "pass.color.synth.stop_mux must take its default from the mapper profile: $out"
-echo "$out" | grep -q '"name":"pass.color.ware_arith","method":"pass.color","default":"true"' \
-  || fail "pass.color.ware_arith must stay a common pass.color option: $out"
+echo "$out" | grep -q '"name":"pass.color.ware_arith","method":"pass.color","default":""' \
+  || fail "pass.color.ware_arith must stay a common pass.color option with a mapper-profile default: $out"
 echo "$out" | grep -Eq '"name":"pass.color.(synth_alg|mode|max_gate|stop_mux|ctrl_cones)"' \
   && fail "synth-only color options must be listed under pass.color.synth.*: $out"
 echo "$out" | grep -Eq '"name":"pass.color.synth.(alg|hier|ware_arith)"' \

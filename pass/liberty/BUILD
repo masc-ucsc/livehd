@@ -3,7 +3,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
-# The DFF-cell picker's sources, hashed into //pass/abc:abc_salt: the pick
+# The DFF-cell picker's sources, hashed into //pass/synth:synth_salt: the pick
 # (cell name, QN-as-Q polarity, drive ladder) is baked into every cached mapped
 # body, so a change here must invalidate the incremental cache like a mapper
 # change does.
@@ -13,7 +13,7 @@ filegroup(
         "liberty_dff.cpp",
         "liberty_dff.hpp",
     ],
-    visibility = ["//pass/abc:__pkg__"],
+    visibility = ["//pass/synth:__pkg__"],
 )
 
 # Liberty DFF-cell scan + model, shared with pass.abc (no Pass_plugin so it can be

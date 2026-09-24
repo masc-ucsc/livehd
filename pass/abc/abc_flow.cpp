@@ -27,6 +27,37 @@ struct Delete_network {
 using Network = std::unique_ptr<Abc_Ntk_t, Delete_network>;
 }  // namespace
 
+// `read_lib` retains scalar timing arcs too, but a physical GENLIB needs actual
+// slew/load surfaces. Its vTempls vector is not a capability flag: the
+// Liberty reader consumes templates while constructing the per-pin surfaces,
+// so a valid NLDM library such as ASAP7 can leave it empty. Inspect the parsed
+// inverter timing surface instead.
+//
+// This is the ONE library-capability predicate for every SCL command the pass
+// drives (the `buffer`/`dnsize` tail and the `stime`-shaped QoR
+// timer). It is deliberately STRICTER than ABC's own `Abc_SclHasDelayInfo`,
+// which is satisfied by a scalar-only arc: the SCL timer walks 2-D surfaces,
+// so a scalar Liberty that happens to declare `lu_table_template` must NOT be
+// accepted (the old vTempls proxy accepted exactly that, and rejected ASAP7).
+// `Abc_SclFindInvertor` cannot be trusted to return NULL when the library has
+// no inverter -- its `Vec_PtrForEachEntry` loop leaves the LAST cell class
+// assigned when nothing matches -- so re-check that the cell really is a
+// one-input inverter before indexing its timing arcs.
+bool lib_has_nldm_timing(const void* opaque) {
+  const auto* lib = static_cast<const SC_Lib*>(opaque);
+  if (lib == nullptr) {
+    return false;
+  }
+  auto* inv = Abc_SclFindInvertor(const_cast<SC_Lib*>(lib), 0);
+  if (inv == nullptr || inv->n_inputs != 1) {
+    return false;
+  }
+  auto* timing = Scl_CellPinTime(inv, 0);
+  return timing != nullptr && Vec_FltSize(&timing->pCellRise.vIndex0) > 1 && Vec_FltSize(&timing->pCellRise.vIndex1) > 1;
+}
+
+bool frame_has_nldm_timing() { return lib_has_nldm_timing(Abc_FrameReadLibScl()); }
+
 int area_relax_percent(float target, float achieved, uint32_t cap) {
   if (cap == 0 || target <= 0.0f || achieved <= 0.0f || achieved > target) {
     return 0;

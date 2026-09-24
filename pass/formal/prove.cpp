@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <format>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "cell.hpp"
@@ -78,7 +79,59 @@ Prover::Prover(hhds::Graph* g, const Prove_options& opts) : g_(g), opts_(opts) {
     Term t                        = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), std::string(d.name));
     memo_[{0, dpin.get_class_index()}] = Val{t, w, sgn};
     inputs_.emplace_back(std::string(d.name), t);
+    leaf(t, 0, dpin);
   }
+}
+
+void Prover::leaf(const Term& t, uint32_t scope, const hhds::Pin_class& pin) {
+  if (opts_.produce_model) {
+    leaves_.emplace(t, std::pair{scope, pin});
+  }
+}
+
+// The value of every leaf the refuted formula (plus the standing assumptions
+// and memory ties) mentions, at most 4096 of them.
+Model Prover::model(cvc5::Solver& solver, const Term& refute) {
+  Model                        out;
+  std::vector<Term>            pending{refute};
+  std::unordered_set<Term>     seen;
+  for (const auto& a : assumes_) {
+    pending.push_back(a);
+  }
+  for (const auto& [l, r] : side_eqs_) {
+    pending.push_back(l);
+    pending.push_back(r);
+  }
+  while (!pending.empty() && out.size() < 4096) {
+    const auto t = pending.back();
+    pending.pop_back();
+    if (!seen.insert(t).second) {
+      continue;
+    }
+    if (t.getKind() == Kind::CONSTANT) {
+      const auto it = leaves_.find(t);
+      if (it == leaves_.end()) {
+        continue;
+      }
+      try {
+        const auto bits = solver.getValue(t).getBitVectorValue(2);
+        Model_leaf l;
+        for (auto s = it->second.first; s != 0; s = scopes_[s].parent) {
+          l.path.push_back(scopes_[s].inst);
+        }
+        std::reverse(l.path.begin(), l.path.end());
+        l.pin   = it->second.second;
+        l.value = *Dlop::from_binary(bits, true);
+        out.push_back(std::move(l));
+      } catch (...) {
+      }
+      continue;
+    }
+    for (size_t i = 0; i < t.getNumChildren(); ++i) {
+      pending.push_back(t[i]);
+    }
+  }
+  return out;
 }
 
 std::optional<uint32_t> Prover::child_scope(uint32_t scope, const hhds::Node_class& inst) {
@@ -167,6 +220,10 @@ void Prover::cone_walk(uint32_t scope, const hhds::Pin_class& pin, absl::flat_ha
   }
   auto node = pin.get_master_node();
   auto op   = gu::type_op_of(node);
+  if (opts_.reject_unstamped && op != Ntype_op::Sub && gu::bits_of(pin) <= 0) {
+    unsupported = true;
+    return;
+  }
   if (op == Ntype_op::Flop) {
     stateful = true;  // cut: free current-state symbol (leaf)
     return;
@@ -198,6 +255,7 @@ int Prover::cone_info(const hhds::Pin_class& pin, bool& stateful, bool& unsuppor
   absl::flat_hash_set<Key> seen;
   int                      n = 0;
   cone_walk(0, pin, seen, n, stateful, unsupported);
+  work_ += static_cast<uint64_t>(n);
   return n;
 }
 
@@ -287,6 +345,7 @@ std::optional<Val> Prover::val_of(uint32_t scope, const hhds::Pin_class& dpin) {
     Val         v{t, w, sgn};
     memo_[ci] = v;
     inputs_.emplace_back(sym, t);
+    leaf(t, scope, dpin);
     return v;
   }
 
@@ -304,6 +363,7 @@ std::optional<Val> Prover::val_of(uint32_t scope, const hhds::Pin_class& dpin) {
     Term        t  = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), nm);
     Val         v{t, w, sgn};
     memo_[ci] = v;
+    leaf(t, scope, dpin);
     return v;
   }
   if (op == Ntype_op::Memory && opts_.memory_as_symbols) {
@@ -313,6 +373,7 @@ std::optional<Val> Prover::val_of(uint32_t scope, const hhds::Pin_class& dpin) {
     Val       value{term, w, !gu::is_unsign(dpin)};
     memo_[ci]     = value;
     enc_stateful_ = true;
+    leaf(term, scope, dpin);
     return value;
   }
   if (op == Ntype_op::Memory) {
@@ -372,16 +433,21 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
     case Ntype_op::Or :
     case Ntype_op::Xor: {
       Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
-      // Verilog sign rule: a bitwise op is signed only if EVERY operand is signed;
-      // one unsigned operand makes the whole op unsigned (zero-extend all). Critical
-      // for one-hot selector packing — a lone signed 1-bit condition must NOT
-      // sign-extend to all-ones, which would spuriously look like >=2 bits set.
-      bool eff_signed = true;
-      for (const auto& v : all) {
-        eff_signed = eff_signed && v.is_signed;
+      // LGraph values are integers: each operand extends by its OWN sign, the
+      // same encoding pass/lec, the synthesis blaster and satopt's simulation
+      // use (an `Or(u8 x, s8 -1)` is -1, not 255). A proof under any other rule
+      // is about a different function -- satopt commits rewrites proven here.
+      // Or keeps lec's widening-pad rule: all-signed operands and no stamped
+      // width read signed (`$signed(N'sb0) | $signed(val)`).
+      if (op == Ntype_op::Or && !all.empty()) {
+        bool every = true;
+        for (const auto& v : all) {
+          every &= v.is_signed;
+        }
+        out_signed |= every && gu::bits_of(dpin) == 0;
       }
       for (const auto& v : all) {
-        Term t = lec::fit_to(tm_, Val{v.term, v.width, eff_signed}, W);
+        Term t = lec::fit_to(tm_, v, W);
         result = result.isNull() ? t : tm_.mkTerm(k, {result, t});
       }
       if (result.isNull()) {
@@ -782,7 +848,7 @@ Query_out Prover::solve(const Term& refute, int cone_nodes, bool stateful) {
   solver.setLogic("QF_BV");
   solver.setOption("bv-solver", "bitblast-internal");  // eager: avoids spurious SAT on arithmetic
   if (opts_.budget_k > 0) {
-    long long rl = static_cast<long long>(opts_.budget_k) * std::max(1, cone_nodes);
+    long long rl = std::max(opts_.min_rlimit, static_cast<long long>(opts_.budget_k) * std::max(1, cone_nodes));
     solver.setOption("rlimit", std::to_string(rl));  // deterministic per-query resource cap
   }
   if (opts_.timeout_ms > 0) {
@@ -830,6 +896,9 @@ Query_out Prover::solve(const Term& refute, int cone_nodes, bool stateful) {
       }
     }
     out.witness = w;
+    if (opts_.produce_model) {
+      out.model = model(solver, refute);
+    }
   } else {
     out.verdict = Verdict::Unknown;
   }
@@ -842,13 +911,13 @@ Query_out Prover::is_true(const hhds::Pin_class& cond) {
   bool st = false, unsup = false;
   int  n = cone_info(cond, st, unsup);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
-    return {Verdict::Unknown, st, ""};
+    return {Verdict::Unknown, st, "", {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto v           = val_of(cond);
   if (!v || enc_unsupported_) {
-    return {Verdict::Unknown, st || enc_stateful_, ""};
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
   }
   int  w      = static_cast<int>(v->term.getSort().getBitVectorSize());
   Term refute = tm_.mkTerm(Kind::EQUAL, {v->term, bv_const(w, 0)});  // cond == 0 falsifies "always true"
@@ -859,13 +928,13 @@ Query_out Prover::is_false(const hhds::Pin_class& cond) {
   bool st = false, unsup = false;
   int  n = cone_info(cond, st, unsup);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
-    return {Verdict::Unknown, st, ""};
+    return {Verdict::Unknown, st, "", {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto v           = val_of(cond);
   if (!v || enc_unsupported_) {
-    return {Verdict::Unknown, st || enc_stateful_, ""};
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
   }
   int  w      = static_cast<int>(v->term.getSort().getBitVectorSize());
   Term refute = tm_.mkTerm(Kind::DISTINCT, {v->term, bv_const(w, 0)});  // cond != 0 falsifies "always false"
@@ -878,15 +947,16 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   bool                                   st = false, unsup = false;
   cone_walk(0, a, seen, n, st, unsup);
   cone_walk(0, b, seen, n, st, unsup);
+  work_ += static_cast<uint64_t>(n);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
-    return {Verdict::Unknown, st, ""};
+    return {Verdict::Unknown, st, "", {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto va          = val_of(a);
   auto vb          = val_of(b);
   if (!va || !vb || enc_unsupported_) {
-    return {Verdict::Unknown, st || enc_stateful_, ""};
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
   }
   int  wa     = static_cast<int>(va->term.getSort().getBitVectorSize());
   int  wb     = static_cast<int>(vb->term.getSort().getBitVectorSize());
@@ -907,14 +977,15 @@ Query_out Prover::address_relation(const hhds::Pin_class& a, const hhds::Pin_cla
   for (const auto& enable : enables) {
     cone_walk(0, enable, seen, nodes, stateful, unsupported);
   }
+  work_ += static_cast<uint64_t>(nodes);
   if (unsupported || (opts_.cone_max > 0 && nodes > opts_.cone_max)) {
-    return {Verdict::Unknown, stateful, {}};
+    return {Verdict::Unknown, stateful, {}, {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto va = val_of(a), vb = val_of(b);
   if (!va || !vb || enc_unsupported_) {
-    return {Verdict::Unknown, stateful, {}};
+    return {Verdict::Unknown, stateful, {}, {}};
   }
   const int w = address_bits > 0 ? address_bits : std::max(va->width, vb->width);
   // Memory indices zero-extend before truncation, regardless of source sign.
@@ -924,7 +995,7 @@ Query_out Prover::address_relation(const hhds::Pin_class& a, const hhds::Pin_cla
   for (const auto& enable : enables) {
     auto v = val_of(enable);
     if (!v || enc_unsupported_) {
-      return {Verdict::Unknown, stateful, {}};
+      return {Verdict::Unknown, stateful, {}, {}};
     }
     refute = tm_.mkTerm(Kind::AND, {refute, tm_.mkTerm(Kind::DISTINCT, {v->term, bv_const(v->width, 0)})});
   }
@@ -942,15 +1013,206 @@ Query_out Prover::constant_bit(const hhds::Pin_class& pin, int bit, bool value) 
   bool stateful = false, unsupported = false;
   int  nodes = cone_info(pin, stateful, unsupported);
   if (bit < 0 || unsupported || (opts_.cone_max > 0 && nodes > opts_.cone_max)) {
-    return {Verdict::Unknown, stateful, {}};
+    return {Verdict::Unknown, stateful, {}, {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto v           = val_of(pin);
   if (!v || enc_unsupported_ || bit >= v->width) {
-    return {Verdict::Unknown, stateful, {}};
+    return {Verdict::Unknown, stateful, {}, {}};
   }
   return solve(tm_.mkTerm(Kind::DISTINCT, {bv_extract(v->term, bit, bit), bv_const(1, value)}), nodes, stateful || enc_stateful_);
+}
+
+Term Prover::bv_of(int width, const Dlop& v) {
+  std::string bits(static_cast<size_t>(width), '0');
+  for (int b = 0; b < width; ++b) {
+    bits[static_cast<size_t>(width - 1 - b)] = v.bit_test(b) ? '1' : '0';
+  }
+  return tm_.mkBitVector(static_cast<uint32_t>(width), bits, 2);
+}
+
+// Encode every pin's cone, fit each to `width`, and solve refute_of(terms).
+Query_out Prover::masked(const std::vector<hhds::Pin_class>& pins,
+                         const std::function<std::optional<Term>(const std::vector<Term>&)>& refute_of, int width) {
+  absl::flat_hash_set<Key> seen;
+  int                      n  = 0;
+  bool                     st = false, unsup = false;
+  for (const auto& p : pins) {
+    cone_walk(0, p, seen, n, st, unsup);
+  }
+  work_ += static_cast<uint64_t>(n);
+  if (width <= 0 || unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
+    return {Verdict::Unknown, st, "", {}};
+  }
+  enc_unsupported_ = false;
+  enc_stateful_    = false;
+  std::vector<Term> terms;
+  for (const auto& p : pins) {
+    auto v = val_of(p);
+    if (!v || enc_unsupported_) {
+      return {Verdict::Unknown, st || enc_stateful_, "", {}};
+    }
+    const int w = static_cast<int>(v->term.getSort().getBitVectorSize());
+    terms.push_back(lec::fit_to(tm_, lec::Val{v->term, w, v->is_signed}, width));
+  }
+  const auto refute = refute_of(terms);
+  if (!refute) {
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
+  }
+  return solve(*refute, n, st || enc_stateful_);
+}
+
+Query_out Prover::masked_const(const hhds::Pin_class& pin, int width, const Dlop& mask, const Dlop& value) {
+  return masked(
+      {pin},
+      [&](const std::vector<Term>& t) -> std::optional<Term> {
+        const auto m = bv_of(width, mask);
+        return tm_.mkTerm(Kind::DISTINCT, {tm_.mkTerm(Kind::BITVECTOR_AND, {t[0], m}), tm_.mkTerm(Kind::BITVECTOR_AND, {bv_of(width, value), m})});
+      },
+      width);
+}
+
+Query_out Prover::masked_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, int width, const Dlop& mask, bool complement) {
+  return masked(
+      {a, b},
+      [&](const std::vector<Term>& t) -> std::optional<Term> {
+        const auto m    = bv_of(width, mask);
+        const auto diff = tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_XOR, {t[0], t[1]}), m});
+        return tm_.mkTerm(Kind::DISTINCT, {diff, complement ? m : bv_const(width, 0)});
+      },
+      width);
+}
+
+Query_out Prover::bit_gate(const hhds::Pin_class& t, Ntype_op op, const hhds::Pin_class& a, const hhds::Pin_class& b, bool invert_b) {
+  if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor) {
+    return {Verdict::Unknown, false, "", {}};
+  }
+  return masked(
+      {t, a, b},
+      [&](const std::vector<Term>& v) -> std::optional<Term> {
+        const auto rhs  = invert_b ? tm_.mkTerm(Kind::BITVECTOR_NOT, {v[2]}) : v[2];
+        const auto kind = op == Ntype_op::And ? Kind::BITVECTOR_AND : op == Ntype_op::Or ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
+        return tm_.mkTerm(Kind::DISTINCT, {v[0], tm_.mkTerm(kind, {v[1], rhs})});
+      },
+      1);
+}
+
+Query_out Prover::unchanged_under(const hhds::Pin_class& target, int width, const Dlop& mask, const Dlop& value,
+                                  const std::vector<hhds::Node_class>& window, const std::vector<hhds::Pin_class>& exits) {
+  absl::flat_hash_set<Key> seen;
+  int                      n  = 0;
+  bool                     st = false, unsup = false;
+  for (const auto& e : exits) {
+    cone_walk(0, e, seen, n, st, unsup);
+  }
+  work_ += static_cast<uint64_t>(n);
+  if (width <= 0 || exits.empty() || unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
+    return {Verdict::Unknown, st, "", {}};
+  }
+  enc_unsupported_ = false;
+  enc_stateful_    = false;
+  // The window's outputs: the only values re-encoded below.
+  absl::flat_hash_set<hhds::Pin_class> inside;
+  std::vector<hhds::Pin_class>         outputs;
+  for (const auto& node : window) {
+    for (const auto& e : node.out_edges()) {
+      if (inside.insert(e.driver).second) {
+        outputs.push_back(e.driver);
+      }
+    }
+  }
+  for (const auto& e : exits) {
+    if (!inside.contains(e)) {
+      return {Verdict::Unknown, st, "", {}};
+    }
+  }
+  // As the design is: the exits, the target, and every other input of the
+  // window (so nothing outside is ever encoded with the replacement).
+  std::vector<Val> before;
+  for (const auto& e : exits) {
+    auto v = val_of(e);
+    if (!v || enc_unsupported_) {
+      return {Verdict::Unknown, st || enc_stateful_, "", {}};
+    }
+    before.push_back(*v);
+  }
+  const auto tv = val_of(target);
+  if (!tv || enc_unsupported_) {
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
+  }
+  for (const auto& node : window) {
+    for (const auto& in_pin : node.inp_sorted_pins()) {
+      for (const auto& d : in_pin.get_driver_pins()) {
+        if (!d.is_const() && d != target && !inside.contains(d) && (!val_of(d) || enc_unsupported_)) {
+          return {Verdict::Unknown, st || enc_stateful_, "", {}};
+        }
+      }
+    }
+  }
+  // Replace, re-encode the window in order, read the exits, restore.
+  const auto key_of = [](const hhds::Pin_class& p) { return Key{0, p.get_class_index()}; };
+  absl::flat_hash_map<Key, std::optional<Val>> saved;
+  const auto                                   save = [&](const hhds::Pin_class& p) {
+    const auto k = key_of(p);
+    if (!saved.contains(k)) {
+      const auto it = memo_.find(k);
+      saved.emplace(k, it == memo_.end() ? std::nullopt : std::optional<Val>{it->second});
+    }
+  };
+  save(target);
+  for (const auto& p : outputs) {
+    save(p);
+  }
+  const auto m        = bv_of(width, mask);
+  const auto t        = lec::fit_to(tm_, lec::Val{tv->term, static_cast<int>(tv->term.getSort().getBitVectorSize()), tv->is_signed}, width);
+  const auto replaced = tm_.mkTerm(Kind::BITVECTOR_OR,
+                                   {tm_.mkTerm(Kind::BITVECTOR_AND, {t, tm_.mkTerm(Kind::BITVECTOR_NOT, {m})}),
+                                    tm_.mkTerm(Kind::BITVECTOR_AND, {bv_of(width, value), m})});
+  memo_[key_of(target)] = Val{replaced, width, tv->is_signed};
+  bool ok               = true;
+  for (const auto& node : window) {
+    for (const auto& e : node.out_edges()) {
+      if (!ok) {
+        break;
+      }
+      const auto k = key_of(e.driver);
+      if (saved.contains(k) && memo_.contains(k) && saved.at(k) && memo_.at(k).term == saved.at(k)->term) {
+        memo_.erase(k);  // re-encode this output once, from the replaced inputs
+      }
+      ok = val_of(e.driver).has_value() && !enc_unsupported_;
+    }
+  }
+  std::vector<Val> after;
+  for (const auto& e : exits) {
+    const auto it = memo_.find(key_of(e));
+    if (it == memo_.end()) {
+      ok = false;
+      break;
+    }
+    after.push_back(it->second);
+  }
+  for (const auto& [k, v] : saved) {
+    if (v) {
+      memo_[k] = *v;
+    } else {
+      memo_.erase(k);
+    }
+  }
+  if (!ok) {
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
+  }
+  std::vector<Term> differ;
+  for (size_t i = 0; i < exits.size(); ++i) {
+    const int wa = static_cast<int>(before[i].term.getSort().getBitVectorSize());
+    const int wb = static_cast<int>(after[i].term.getSort().getBitVectorSize());
+    const int w  = std::max(wa, wb);
+    differ.push_back(tm_.mkTerm(Kind::DISTINCT,
+                                {lec::fit_to(tm_, lec::Val{before[i].term, wa, before[i].is_signed}, w),
+                                 lec::fit_to(tm_, lec::Val{after[i].term, wb, after[i].is_signed}, w)}));
+  }
+  const auto refute = differ.size() == 1 ? differ.front() : tm_.mkTerm(Kind::OR, differ);
+  return solve(refute, n, st || enc_stateful_);
 }
 
 Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {
@@ -960,8 +1222,9 @@ Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {
   for (const auto& control : controls) {
     cone_walk(0, control, seen_pins, n, st, unsup);
   }
+  work_ += static_cast<uint64_t>(n);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
-    return {Verdict::Unknown, st, ""};
+    return {Verdict::Unknown, st, "", {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
@@ -970,7 +1233,7 @@ Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {
   for (const auto& control : controls) {
     auto value = val_of(control);
     if (!value || enc_unsupported_) {
-      return {Verdict::Unknown, st || enc_stateful_, ""};
+      return {Verdict::Unknown, st || enc_stateful_, "", {}};
     }
     auto active = tm_.mkTerm(Kind::DISTINCT, {value->term, bv_const(value->width, 0)});
     overlap     = tm_.mkTerm(Kind::OR, {overlap, tm_.mkTerm(Kind::AND, {seen, active})});
@@ -983,13 +1246,13 @@ Query_out Prover::is_onehot0(const hhds::Pin_class& sel) {
   bool st = false, unsup = false;
   int  n = cone_info(sel, st, unsup);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
-    return {Verdict::Unknown, st, ""};
+    return {Verdict::Unknown, st, "", {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto v           = val_of(sel);
   if (!v || enc_unsupported_) {
-    return {Verdict::Unknown, st || enc_stateful_, ""};
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
   }
   Term s      = v->term;
   int  w      = static_cast<int>(s.getSort().getBitVectorSize());
@@ -1003,13 +1266,13 @@ Query_out Prover::is_onehot(const hhds::Pin_class& sel) {
   bool st = false, unsup = false;
   int  n = cone_info(sel, st, unsup);
   if (unsup || (opts_.cone_max > 0 && n > opts_.cone_max)) {
-    return {Verdict::Unknown, st, ""};
+    return {Verdict::Unknown, st, "", {}};
   }
   enc_unsupported_ = false;
   enc_stateful_    = false;
   auto v           = val_of(sel);
   if (!v || enc_unsupported_) {
-    return {Verdict::Unknown, st || enc_stateful_, ""};
+    return {Verdict::Unknown, st || enc_stateful_, "", {}};
   }
   Term s       = v->term;
   int  w       = static_cast<int>(s.getSort().getBitVectorSize());

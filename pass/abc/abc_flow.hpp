@@ -39,6 +39,13 @@ struct Flow_result {
 Flow_result execute_flow(void* frame, const Flow_plan& plan, const std::function<bool(std::string_view)>& admission = {});
 Flow_qor    physical_flow_qor(void* mapped);
 
+// The one library-capability predicate for every SCL command (the `buffer`/
+// `dnsize` tails, the boundary re-size and the SCL QoR timer): the parsed
+// Liberty (an SC_Lib*) carries 2-D NLDM slew/load surfaces. See abc_flow.cpp.
+bool lib_has_nldm_timing(const void* scl_lib);
+// lib_has_nldm_timing of the entered frame's SCL library.
+bool frame_has_nldm_timing();
+
 // Convert measured slack to ABC's bounded area-recovery percentage.
 int area_relax_percent(float target, float achieved, uint32_t cap);
 }  // namespace livehd::abc

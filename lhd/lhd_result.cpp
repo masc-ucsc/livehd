@@ -509,6 +509,32 @@ void write_pretty(const Options& opts, const Result& res) {
   if (!res.qor_json.empty()) {
     write_pretty_qor(res.qor_json, opts.stats);
   }
+  if (opts.stats && !res.satopt_json.empty()) {
+    // One row per stage that ran: state, cost, proofs and rewrites.
+    rapidjson::Document d;
+    d.Parse(res.satopt_json.data(), res.satopt_json.size());
+    if (!d.HasParseError() && d.IsObject() && d.HasMember("stages") && d["stages"].IsObject()) {
+      std::string row;
+      for (const auto& st : d["stages"].GetObject()) {
+        const auto& v     = st.value;
+        const auto  state = v.HasMember("state") && v["state"].IsString() ? std::string_view{v["state"].GetString()} : "";
+        if (state == "disabled" || state == "inapplicable") {
+          continue;
+        }
+        const auto num = [&](const char* k) { return v.HasMember(k) && v[k].IsNumber() ? v[k].GetDouble() : 0.0; };
+        row += std::format(" {}={}({:.1f}ms work={:.0f} queries={:.0f} proven={:.0f} applied={:.0f} skips={:.0f})",
+                           st.name.GetString(),
+                           state,
+                           num("ms"),
+                           num("work"),
+                           num("queries"),
+                           num("proven"),
+                           num("applied"),
+                           num("budget_skips"));
+      }
+      std::print("  satopt[stats]:{}\n", row.empty() ? " nothing ran" : row);
+    }
+  }
   if (opts.stats) {
     // The reuse tiers and where the time went -- the rows a stats report
     // builder wants, printed in the same `<what>[stats]:` shape as the
@@ -897,6 +923,11 @@ void write_result(const Options& opts, const Result& res) {
   if (!res.qor_json.empty()) {
     w.Key("qor");
     w.RawValue(res.qor_json.data(), res.qor_json.size(), rapidjson::kObjectType);
+  }
+
+  if (!res.satopt_json.empty()) {  // written by satopt::Report::json (run_satopt_step)
+    w.Key("satopt");
+    w.RawValue(res.satopt_json.data(), res.satopt_json.size(), rapidjson::kObjectType);
   }
 
   if (res.status != "pass") {

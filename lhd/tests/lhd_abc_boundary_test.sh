@@ -31,14 +31,14 @@ set -u
 ROUNDS="--set abc.boundary_rounds=3"
 
 # One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
-# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# and MAPPER=usyn runs `lhd pass usyn`. Every claim below is mapper-agnostic
 # (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
-# `_synth` twin from this same file.
+# `_usyn` twin from this same file.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
-  abc | synth) ;;
+  abc | usyn) ;;
   *)
-    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|usyn)" >&2
     exit 1
     ;;
 esac
@@ -72,7 +72,7 @@ run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_on" --set synth
     --set abc.delay=25 $ROUNDS --workdir "$W/w_on"
 # The upsize itself is an ABC-mapping fact (a single NAND2 root). The unate
 # mapper realizes that NAND from inverted source rails and an OR, so under
-# MAPPER=synth only the scoreboard (crossing bits, delay under the real loads)
+# MAPPER=usyn only the scoreboard (crossing bits, delay under the real loads)
 # is pinned, never a specific cell.
 python3 - "$W/w_on/qor.json" "$TOP" "$MAPPER" <<'PY' || fail "boundary=true qor.json has no boundary scoreboard"
 import json, sys
@@ -178,8 +178,8 @@ grep -q '"incremental":{"hits":[1-9][0-9]*,"misses":0' "$I/w/qor.json" || fail "
 grep -q '"abc_started":0' "$I/w/qor.json" || fail "all-hit run started ABC"
 # The refinement message is emitted by the shared pass/abc/abc_boundary.cpp, so
 # it says `pass.abc` under both mappers. The COUNT is abc-only for now: on the
-# identical all-hit run pass.synth refines twice (it maps a candidate and an
-# independent ABC baseline), which is a pass.synth defect -- pinning 2 here
+# identical all-hit run pass.usyn refines twice (it maps a candidate and an
+# independent ABC baseline), which is a pass.usyn defect -- pinning 2 here
 # would freeze it into a contract. See todo/livehd/synth-unate.html.
 if [ "$MAPPER" = abc ]; then
   grep -q "pass.abc boundary:" "$I/w/logs/"*_lhd_pass_${MAPPER}.log && {

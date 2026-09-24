@@ -276,7 +276,12 @@ echo "PASS: memory_max_bits=0 lifts the size limit; malformed memory/memory_max_
 D="$W/eqt"
 map_wait "$D"
 [ "$(cells "$D/netv")" -eq 0 ] || fail "eqt: a compare against a constant wider than its operand mapped to logic: $(cat "$D/netv/"*.v)"
-[ "$(cat "$D/netv/"*.v | grep -c "_const0_ ")" -eq 2 ] || fail "eqt: expected both outputs driven by constant 0: $(cat "$D/netv/"*.v)"
+# Both outputs read constant 0: ABC's constant net, or (when satopt proved
+# the compares constant before mapping) a zero literal.
+for out in y z; do
+  cat "$D/netv/"*.v | grep -qE "(assign +)?$out *= *(_const0_|\('sb0\)|1'b0|'sb0)" \
+    || fail "eqt: expected output $out driven by constant 0: $(cat "$D/netv/"*.v)"
+done
 echo "PASS: x[3:0] == 8'd100 maps to constant 0"
 
 echo "PASS: pass.abc memory bit-blast (constant-address tile, read_all, memory modes + thresholds, const EQ)"

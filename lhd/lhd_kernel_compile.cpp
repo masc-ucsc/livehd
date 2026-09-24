@@ -86,7 +86,8 @@ void validate_emits(const Options& opts) {
   if (opts.command == "pass" && !is_pass_semdiff(opts)) {
     const std::string sub = opts.files.empty() ? std::string{} : opts.files.front();
     const bool        graph_output
-        = sub == "color" || sub == "partition" || sub == "abc" || sub == "synth" || sub == "single_edge" || sub == "liberty";
+        = sub == "color" || sub == "partition" || find_mapper(sub) != nullptr || sub == "single_edge" || sub == "liberty"
+          || sub == "satopt";
     for (const char* k : {"ln", "pyrope", "lnast-dump", "isabelle", "lean", "sim", "lg", "verilog"}) {
       if (graph_output && (std::string_view{k} == "lg" || std::string_view{k} == "verilog")) {
         continue;
@@ -1697,6 +1698,17 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       run_step(method, *active, labels, opts, res);
     }
 
+    // pass.satopt (opt-in, todo/livehd/2s-satopt A): proof-backed rewrites
+    // committed to the optimized graphs, BEFORE the latch contract check,
+    // pass.formal and the freeze -- formal then checks (and stamps) exactly the
+    // graph every consumer reads. Every graph is optimized as its own
+    // definition; a restored graph was optimized when it was stored (the
+    // compile cache context names the resolved switch). Synthesis runs on its
+    // private copy instead, avoiding a duplicate compile-time search.
+    if (satopt_during_compile(opts) && !active->graphs.empty()) {
+      run_satopt_step(*active, {}, opts, res);
+    }
+
     // THE LATCH CONTRACT CHECK (todo/livehd/2f-latch M3). Modelling a latch as a
     // flop-with-enable that commits at its window's closing edge is an
     // abstraction with a PRECONDITION — no time borrowing — and a precondition
@@ -1798,17 +1810,6 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     throw Lhd_error{"config",
                     "the compile cache left the graph library incomplete while overlaying validated clean bodies",
                     "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
-  }
-  for (const auto& [key, value] : opts.sets) {
-    if (key == "pass.satopt" && value != "false" && value != "0" && value != "off") {
-      Eprp_var::Eprp_dict labels;
-      set_top_label(opts, var, labels, "pass.satopt");
-      if (opts.incremental && !opts.workdir.empty() && !opts.workdir_scratch) {
-        labels["cache_dir"] = opts.workdir + "/satopt_cache";
-      }
-      run_step("pass.satopt", var, labels, opts, res);
-      break;
-    }
   }
 
   // Closes the window the compile cache carries (Result::compile_cache_diag_mark).

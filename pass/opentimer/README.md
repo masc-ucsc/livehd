@@ -136,7 +136,7 @@ cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
 - Timing JSON includes physical cell area/count, native-state and opaque-logic
   counts, and cell-timing/constraint coverage flags. Missing Liberty area is
   omitted rather than counted as zero. These flags support the whole-design
-  `pass.synth` comparison; they do not certify physical signoff. A single ideal
+  `pass.usyn` comparison; they do not certify physical signoff. A single ideal
   virtual clock can certify combinational I/O constraints as described below.
   Physical/multiple clocks, ignored commands/modifiers, unmatched ports and
   SPEF coverage remain uncertified.
@@ -164,7 +164,7 @@ the period, worst setup/hold slack and a completeness flag. These fields are
 retained on STA cache hits. The existing `max_delay` remains the raw maximum
 internal arrival; it does not include the external output delay.
 
-`pass.synth` uses `period - setup_slack` (clamped at zero) for its clocked delay
+`pass.usyn` uses `period - setup_slack` (clamped at zero) for its clocked delay
 comparison, includes the clock period as a timing target, and respects any
 stricter explicit mapper delay target. It rejects introducing a hold violation
 when the baseline meets hold, or worsening a baseline hold violation. This

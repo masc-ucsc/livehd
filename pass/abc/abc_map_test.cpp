@@ -83,7 +83,7 @@ TEST(AbcMap, NativeBoundarySchedulesReverseOrderedSliceConsumers) {
 }
 
 TEST(AbcMap, WareUsesTimingOrAreaObjective) {
-  using livehd::abc::ware_qor_better;
+  using livehd::synth::ware_qor_better;
   EXPECT_TRUE(ware_qor_better(
       {
           10,

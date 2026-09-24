@@ -17,8 +17,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "abc_incr.hpp"
+#include "abc_salt.hpp"
 #include "abc_map.hpp"
+#include "region_cache.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "json_util.hpp"
@@ -29,7 +30,7 @@
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
-#include "satopt.hpp"
+#include "abc_satopt.hpp"
 #include "satopt_memory.hpp"
 #include "ware_module.hpp"
 
@@ -52,9 +53,16 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "loops always map separately; compile.unroll=true requests general front-end expansion.",
                        "true");
   m.add_label_optional("satopt",
-                       "Prove constant selectors, cross-region per-bit mux facts and memory simplifications, and apply them "
-                       "to the design as LGraph rewrites before mapping (so both mappers see them)",
-                       "true");
+                       "INTERNAL resolved pass.satopt switch, supplied by the kernel (synthesis defaults true)",
+                       "false");
+  m.add_label_optional("satopt_stages",
+                       "INTERNAL the satopt stages this synthesis copy runs, from --set pass.satopt.stages (empty: the "
+                       "synthesis default)",
+                       "");
+  m.add_label_optional("satopt_budget",
+                       "INTERNAL the satopt budget as name=value,..., from the --set pass.satopt.<knob> budget knobs (empty: "
+                       "the defaults)",
+                       "");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
@@ -307,8 +315,9 @@ absl::flat_hash_map<std::string, uint64_t> physical_instances(const Abc_hier& hi
 }
 
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
-              const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started, const Abc_hier& hier,
-              const livehd::liberty::Dff_selection& dff_sel, const livehd::abc::Parallel_stats& parallel) {
+              const std::string& qor_path, const livehd::synth::Region_cache* incr, bool abc_started, const Abc_hier& hier,
+              const livehd::liberty::Dff_selection& dff_sel, const livehd::synth::Parallel_stats& parallel,
+              std::string_view satopt_json) {
   // PHYSICAL totals: a region's gates times the number of times its module is
   // instantiated (a replicated loop body N times, a shared `tap` 64 times).
   // The per-module sums are kept beside them as module_gates/module_area —
@@ -415,7 +424,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += "\"schema_version\":1,\"kind\":\"abc-map\",";
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
-  j += std::format("\"register\":{},\"memory\":\"{}\",", opts.map_register ? "true" : "false", memory_fold_name(opts.memory_fold));
+  j += std::format("\"register\":{},\"memory\":\"{}\",", opts.map_register ? "true" : "false", livehd::synth::memory_fold_name(opts.memory_fold));
   // The per-region register guard (0 = every flop maps), so a QoR reader can
   // tell "kept native by limit" from "kept native by contract" (an
   // asynchronous reset) without the diagnostics stream.
@@ -532,6 +541,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       parallel.peak_abc,
       parallel.memory_limit,
       parallel.memory_waits);
+  if (!satopt_json.empty()) {
+    j += std::format(",\"satopt\":{}", satopt_json);  // the synthesis-profile satopt stages (pass/satopt Report::json)
+  }
   j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
     const auto& q = qor[r];
@@ -685,8 +697,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       scratch_graphs.push_back(std::move(graph));
     }
   }
-  livehd::abc::Loop_preparation loops;
-  if (!livehd::abc::prepare_loop_bodies(scratch_graphs,
+  livehd::synth::Loop_preparation loops;
+  if (!livehd::synth::prepare_loop_bodies(scratch_graphs,
                                         unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
                                         loops)) {
     return;
@@ -759,12 +771,12 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     region_opts = std::move(parsed.value());
   }
 
-  auto adder = livehd::abc::arith::parse_adder_kind(adder_s == "auto" ? "rca" : adder_s);
+  auto adder = livehd::synth::arith::parse_adder_kind(adder_s == "auto" ? "rca" : adder_s);
   if (!adder.has_value()) {
     livehd::diag::err("pass.abc", "bad-adder", "io").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
     return;
   }
-  auto multiplier = livehd::abc::arith::parse_mult_kind(mult_s == "auto" ? "array" : mult_s);
+  auto multiplier = livehd::synth::arith::parse_mult_kind(mult_s == "auto" ? "array" : mult_s);
   if (!multiplier.has_value()) {
     livehd::diag::err("pass.abc", "bad-multiplier", "io")
         .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree)", mult_s)
@@ -879,7 +891,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       return;
     }
   }
-  const auto memory_fold = livehd::abc::parse_memory_fold(memory_s);
+  const auto memory_fold = livehd::synth::parse_memory_fold(memory_s);
   if (!memory_fold.has_value()) {
     livehd::diag::err("pass.abc", "bad-memory", "io").msg("pass.abc: memory must be true|false|auto, got '{}'", memory_s).fatal();
     return;
@@ -951,7 +963,22 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.map_register    = map_register;
   opts.memory_fold     = *memory_fold;
   opts.memory_max_bits = memory_max_bits;
-  opts.satopt = var.get("satopt", "true") != "false" && var.get("satopt", "true") != "0" && var.get("satopt", "true") != "off";
+  opts.satopt = var.get("satopt", "false") != "false" && var.get("satopt", "false") != "0" && var.get("satopt", "false") != "off";
+  {
+    std::string error;
+    const auto  stages = livehd::satopt::parse_stages(var.get("satopt_stages", ""), livehd::satopt::Profile::synthesis, &error);
+    if (!stages) {
+      livehd::diag::err("pass.abc", "bad-satopt-stages", "syntax").msg("pass.satopt.stages: {}", error).fatal();
+      return;
+    }
+    opts.satopt_stages = *stages;
+    const auto budget  = livehd::satopt::parse_budget(var.get("satopt_budget", ""), &error);
+    if (!budget) {
+      livehd::diag::err("pass.abc", "bad-satopt-budget", "syntax").msg("{}", error).fatal();
+      return;
+    }
+    opts.satopt_budget = *budget;
+  }
   opts.register_max_bits = register_max_bits;
   opts.dff_cell          = std::string{var.get("dff_cell", "")};
   opts.delay             = delay;
@@ -988,7 +1015,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   if (out.empty()) {
     // Stats-only (no --emit-dir): no Liberty needed.
     opts.library = library;
-    livehd::abc::report_stats(occurrence_graphs, top, opts);
+    livehd::synth::report_stats(occurrence_graphs, top, opts);
     return;
   }
 
@@ -1072,30 +1099,44 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   // obligation): it must neither cost select proofs nor become a region.
   uint64_t dead_nodes = 0;
   for (const auto& graph : scratch_graphs) {
-    dead_nodes += livehd::abc::drop_dead_logic(graph.get());
+    dead_nodes += livehd::satopt::drop_dead_logic(graph.get());
   }
   if (dead_nodes != 0) {
     std::print("[pass.abc] dropped {} dead combinational node(s) before mapping\n", dead_nodes);
   }
+  // The engine's synthesis profile (pass/satopt): every stage but the mux-arm
+  // facts, which need the colored source (below).
+  // One budget covers both runs.
+  livehd::satopt::Options satopt_opts;
+  satopt_opts.profile     = livehd::satopt::Profile::synthesis;
+  satopt_opts.cache_dir   = satopt_cache_dir;
+  satopt_opts.all_regions = false;
+  satopt_opts.budget      = opts.satopt_budget;
+  livehd::satopt::Meter  satopt_meter(satopt_opts.budget);
+  livehd::satopt::Report satopt_report;
   if (opts.satopt) {
-    livehd::abc::optimize_selects(scratch_graphs, satopt_cache_dir);
-    livehd::abc::optimize_memories(scratch_graphs, satopt_cache_dir);
+    satopt_opts.stages = opts.satopt_stages;
+    satopt_opts.stages.remove(livehd::satopt::Stage::hotmux);
+    // The hotmux runs below charge the same meter: leave them their share.
+    satopt_opts.later_stages = opts.satopt_stages.has(livehd::satopt::Stage::hotmux) ? 1 : 0;
+    satopt_report            = livehd::satopt::run(scratch_graphs, satopt_opts, &satopt_meter);
+    satopt_opts.later_stages = 0;
   }
   // Extract before partitioning: a lowered memory remains a named instance,
   // even when its parent is flattened. The child body comes from cgen RTL.
-  livehd::abc::Ware_policy ware_policy;
+  livehd::synth::Ware_policy ware_policy;
   for (const auto& graph : scratch_graphs) {
     if (graph && graph->get_name() == top) {
-      ware_policy = livehd::abc::ware_policy(*graph);
+      ware_policy = livehd::synth::ware_policy(*graph);
       break;
     }
   }
   opts.ware_arith   = ware_policy.arith;
   opts.ware_cmp     = ware_policy.cmp;
   opts.ware_shift   = ware_policy.shift;
-  auto ware_modules = livehd::abc::build_ware_modules(scratch_graphs, ware_policy);
+  auto ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy);
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
-  auto memory_modules = livehd::abc::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits);
+  auto memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
@@ -1109,7 +1150,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   // region is digested. The out dir is wiped by the kernel every run, so a cache
   // living inside it would self-destruct -- refuse the overlap.
   auto                                     cache_dir = std::string{var.get("cache_dir", "")};
-  std::shared_ptr<livehd::abc::Incr_cache> incr;
+  std::shared_ptr<livehd::synth::Region_cache> incr;
   // The register cell is resolved HERE, once, rather than in Mapper::start():
   // the cache salt below needs the resolved pick (not the raw, usually empty,
   // `dff_cell` option) before any region is digested, and abc.json reports it
@@ -1149,9 +1190,9 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
     const std::string dff_desc = dff_sel.base.has_value() ? livehd::liberty::dff_descriptor(*dff_sel.base) : opts.dff_cell;
-    incr                       = std::make_shared<livehd::abc::Incr_cache>(
+    incr                       = std::make_shared<livehd::synth::Region_cache>(
         cache_dir,
-        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc),
+        livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt, opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc),
         false);
   }
 
@@ -1190,13 +1231,14 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       /*want_pre_bodies=*/mapper.incremental(),
       threads == 1 ? livehd::partition::Body_batch_builder{}
                    : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
-      2 * livehd::abc::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
+      2 * livehd::synth::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
       loops.preserved_defs,
       // satopt's per-bit mux facts, applied to the colored source right before
-      // it is cut: the rewrite then reaches every mapper (ABC or pass.synth).
+      // it is cut: the rewrite then reaches every mapper (ABC or pass.usyn).
       [&](hhds::Graph* g) {
-        if (opts.satopt) {
-          livehd::abc::optimize_muxes(g, satopt_cache_dir);
+        if (opts.satopt && opts.satopt_stages.has(livehd::satopt::Stage::hotmux)) {
+          satopt_opts.stages = {livehd::satopt::Stage::hotmux};
+          satopt_report.merge(livehd::satopt::run(g, satopt_opts, &satopt_meter));
         }
       });
 
@@ -1287,7 +1329,16 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started(), hier, dff_sel, mapper.parallel_stats());
+  emit_qor(mapper.qor(),
+           top,
+           opts,
+           qor_path,
+           incr.get(),
+           mapper.backend_started(),
+           hier,
+           dff_sel,
+           mapper.parallel_stats(),
+           opts.satopt ? satopt_report.json() : std::string{});
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

@@ -409,6 +409,12 @@ struct Result {
   // embedded verbatim as the result's "qor" member.
   std::string qor_json;
 
+  // pass.satopt's stage report (satopt::Report::json: per-stage state, cost,
+  // candidates, proofs, rewrites and budget skips), embedded verbatim as the
+  // result's "satopt" member when compile or `lhd pass satopt` ran it (one
+  // merged report when a command runs it more than once, e.g. lec's sides).
+  std::string satopt_json;
+
   std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
   std::string error_message;
   std::string error_hint;
@@ -653,14 +659,50 @@ struct Synth_set_option {
 // reader (`lhd synth`, `lhd pass abc`, `lhd pass opentimer`).
 inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
 
+// The technology mappers (abc_cleanup.md section 6): `synth.mapper=<name>` in
+// `lhd synth`, `lhd pass <name>` standalone. Every mapper-specific decision of
+// the kernel reads this table.
+struct Mapper {
+  std::string_view name;           // the synth.mapper value and the `lhd pass` subcommand
+  std::string_view method;         // its EPRP pass
+  std::string_view cache_dir;      // <workdir>/<cache_dir>: its incremental region cache
+  std::string_view color_profile;  // pass.color.synth.mapper: the default coloring it wants
+  bool             inherits_abc;   // also reads the pass.abc.* vocabulary (its own namespace wins)
+  bool             timing_files;   // receives the synth.liberty/sdc/spef timing environment
+  // Its own report: `<qor>.<report>.json` (with a `<qor>.provenance` archive)
+  // and the fused envelope's `qor.<report>` member. Empty: none.
+  std::string_view report;
+};
+inline constexpr Mapper kMappers[] = {
+    { "abc",  "pass.abc",  "abc_cache",  "abc", false, false,     ""},
+    {"usyn", "pass.usyn", "usyn_cache", "usyn",  true,  true, "usyn"},
+};
+[[nodiscard]] constexpr const Mapper* find_mapper(std::string_view name) {
+  for (const auto& m : kMappers) {
+    if (m.name == name) {
+      return &m;
+    }
+  }
+  return nullptr;
+}
+[[nodiscard]] constexpr const Mapper* mapper_of_method(std::string_view method) {
+  for (const auto& m : kMappers) {
+    if (m.method == method) {
+      return &m;
+    }
+  }
+  return nullptr;
+}
+
 inline constexpr Synth_set_option kSynthSetOptions[] = {
     {   "mapper",
      "abc",  Synth_set_option::Kind::mapper,
-     "abc|synth: existing ABC synthesis or bounded shared unate optimization with ABC technology mapping and fallback"          },
+     "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
+     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                             },
     {  "threads",
      "0", Synth_set_option::Kind::integer,
      "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
-     "IGNORED by synth.mapper=synth, which pins one synthesis tree at a time (its per-function workers are separate). "
+     "IGNORED by synth.mapper=usyn, which pins one synthesis tree at a time. "
      "New workers require actual process memory plus outstanding and new projections below half of physical RAM"                },
     {  "liberty",
      "",    Synth_set_option::Kind::file,
@@ -685,7 +727,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 // the unknown-subcommand hints, the general help and the machine records --
 // so the lists can never disagree again.
 inline constexpr std::string_view kPassSubcommands
-    = "color <alg> | partition | single_edge | satopt | abc | synth | opentimer | formal | liberty gensim | semdiff | analyze";
+    = "color <alg> | partition | single_edge | satopt | abc | usyn | opentimer | formal | liberty gensim | semdiff | analyze";
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
 // the method that consumes it. Enumerated from the live registry, so

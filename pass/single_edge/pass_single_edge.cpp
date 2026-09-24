@@ -1272,7 +1272,7 @@ void Pass_single_edge::work(Eprp_var& var) {
     }
     auto& outlib = livehd::Hhds_graph_library::instance(out);
     for (const auto& sp : var.graphs) {
-      if (sp && !outlib.copy_from(*srclib, sp->get_name())) {
+      if (sp && !livehd::copy_with_callees(outlib, *srclib, sp->get_name())) {
         livehd::diag::err("pass.single_edge", "copy-failed", "internal")
             .msg("pass.single_edge: could not copy module '{}' into {}", sp->get_name(), out)
             .fatal();

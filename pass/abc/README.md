@@ -1,5 +1,29 @@
 # pass/abc — ABC technology mapping (task 2a-abc)
 
+## Code organization
+
+`pass/abc` is the **ABC calling interface** and nothing else: every file here
+includes or calls ABC, and no other synthesis code does (abc_cleanup.md). The
+region pipeline it plugs into -- the private design copy, simplification,
+ware/memory modules, the cut into regions, the bit-level translation into an
+`Lnet`, the region cache, the parallel lanes, the read-back and the ware
+trials -- is backend-neutral and lives in [`pass/synth`](../synth/README.md).
+`pass.abc` is that region driver bound to the ABC backend:
+
+| File | Role |
+|---|---|
+| `pass_abc.cpp` | the `pass.abc` entry: options, the private copy, satopt, extraction, the driver run |
+| `abc_map.hpp` | `Map_options` (the driver's options plus ABC's) and `Mapper` (driver + ABC backend) |
+| `abc_backend.{hpp,cpp}` | `Abc_backend`: the session per lane, flow strings, the budget ladder, `map()` of one region, whole-design refine and score |
+| `abc_flow.{hpp,cpp}` | `execute_flow`: the flow, budget ladder and area candidate in one entered frame; SCL QoR |
+| `abc_boundary.{hpp,cpp}` | the partition-boundary environment (static estimate, exact re-size) |
+| `abc_lnet.{hpp,cpp}` | Lnet → ABC: `lnet_to_abc` (object-for-object replay) and `lnet_into_logic` (a hook's cover network as SOP nodes) |
+| `abc_cells.{hpp,cpp}` | ABC mapped network → backend-neutral `Cell_netlist`; the Mio gate library as a `Cell_library` |
+| `abc_satopt.{hpp,cpp}` | `prove_const0`: the satopt mux-fact proof network swept by `&fraig`, registered as satopt's bit prover |
+
+Unate synthesis (`pass.usyn`, [`pass/usyn`](../usyn/README.md)) runs the same
+driver and ABC backend with a region hook.
+
 `lhd pass abc --top <mod> lg:dir --emit-dir lg:netlist` technology-maps a
 design to a standard-cell netlist. `--emit-dir verilog:DIR` or
 `--emit verilog:FILE` emits that mapped netlist directly; an `lg:` output is
@@ -42,43 +66,24 @@ The body-builder hook replaces each region with an ABC-mapped netlist.
 
 ## SAT simplification
 
-ABC enables `--set pass.abc.satopt=true` by default. It proves per-bit mux
-facts across color boundaries (an arm bit is 0, 1, or equal / complement to
-another arm's bit whenever that arm is selected) and applies them to the
-private synthesis copy as an LGraph rewrite before partitioning, so either
-mapper (`synth.mapper=abc|synth`) sees the simplified mux. Only the rewritten
-bits change: an arm whose every bit is rewritten reads the new driver, and a
-partial arm becomes a Concat of runs (Get_mask slices of the original arm, the
-other arm, an Xor with ones for a complement, or a constant). A fact whose
-mux sits wholly inside one region is not applied: it does not change that
-region's function. Inputs, flop Q and memory read data are free symbols.
-Unproved facts leave the original logic. The per-bit facts are proven with
-ABC `&fraig`.
+Synthesis enables the satopt engine by default (`--set pass.satopt=false`
+disables it)
+([`pass/satopt`](../satopt/README.md)) on the private synthesis copy under its
+synthesis profile: every selected stage but `hotmux` before partitioning, and
+`hotmux` (per-bit mux-arm facts, Hotmux collapse) on each colored source right
+before it is cut, so either mapper (`synth.mapper=abc|usyn`) sees the
+simplified design. `pass.satopt.stages` and the `pass.satopt.<knob>` budget
+apply here too; one budget covers both runs. A mux fact whose mux sits wholly
+inside one region is not applied: it does not change that region's function.
+The per-bit facts are one proof `Lnet` swept by ABC `&fraig`
+(`abc_satopt.cpp`); every other proof is cvc5's. The stage report is the
+`satopt` member of the QoR JSON.
 
-Before partitioning, it also proves selectors constant in every region: a
-two-arm Mux select, each Hotmux control and a one-bit Flop enable (e.g.
-`x == x + 1`, which cprop cannot fold). cvc5 decides each selector; ABC
-already maps every region, so this proof is not repeated there, and an Unknown
-(a body-less Sub in the cone, a budget-out) leaves the selector alone. The
-proof sees the design virtually flat: it descends into called submodules, each
-instance with its own state, and a compact loop Sub stays opaque. Its cache
-entry records every descended definition, so editing a callee re-proves the
-caller. Each proven selector is tied to its
-constant, a never-selected arm is zeroed, and logic left without a consumer is
-deleted. An always-on Hotmux control keeps the earlier arms and drops the later
-ones and the fallback (first-wins, the reference semantics on an overlap).
-
-Compile-time preparation is separately opt-in: `--set pass.satopt=true`
-(default false), or `lhd pass satopt lg:DIR --workdir W`. A later ABC invocation
-reuses unchanged definitions under the same workdir. `W/satopt_cache` follows
-`lhd.incremental`. The rewrite is logged as `[pass.satopt] <top>: rewrote N
-arm(s) of M mux(es), K bit(s)`; a mapped region is reused when its rewritten
-body is unchanged. Use whole-design LEC for mapped designs that consume these
-facts: a region alone lacks the upstream relation that justified the
-simplification.
-
-See [satopt.md](../../satopt.md) for memory compatibility rules, proof budgets,
-and validation. Set `pass.abc.satopt=false` to compare mapping without this pass.
+Use whole-design LEC for mapped designs that consume these facts: a region
+alone lacks the upstream relation that justified the simplification. Set
+`pass.satopt=false` to compare mapping without it. Committing the rewrites
+to the compiled design instead is `lhd compile --set pass.satopt=true` or
+`lhd pass satopt` (see pass/satopt).
 
 ## Parallel synthesis
 
@@ -128,15 +133,15 @@ lhd pass liberty gensim file.lib        --emit-dir lg:models    # cell behavior
 # LEC: cgen(netlist)+cgen(models) ≡ cgen(restruct), per module
 ```
 
-## How it maps (`abc_map.cpp`)
+## How it maps (`pass/synth/region_blast.cpp`, `abc_backend.cpp`)
 
 Per region (`Region_body` from the partition seam):
 
-1. **to ABC** — bit-blast each comb cell onto the region's blast tape
-   (`blast_tape.hpp`: 1-bit AND/OR/XOR/INV gates, PIs, latches and POs in
-   creation order), then replay the tape into a 1-bit AIG netlist
-   (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`), object for object. The tape is also
-   what `pass.synth` (`synth.mapper=synth`) decomposes directly, with no ABC
+1. **to ABC** — bit-blast each comb cell into the region's RAW `Lnet`
+   (`pass/synth/lnet.hpp`: 1-bit AND/OR/XOR/INV gates, inputs, latches and
+   outputs in creation order), then replay it into a 1-bit AIG netlist
+   (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`, `abc_lnet.cpp`), object for object. The
+   same Lnet is what `pass.usyn` (`synth.mapper=usyn`) covers, with no ABC
    logic synthesis in between. Multi-bit module IO becomes per-bit ABC
    PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not/ror`,
    `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
@@ -301,7 +306,7 @@ memories instantiate the appropriate `ware/rtl/cgen_memory_*` implementation.
 Whole-array/update forms, whose RTL was previously emitted inline, are enclosed
 in a specialized memory module too.
 
-With `memory=true`, `memory_module.cpp` generates the same memory RTL, elaborates
+With `memory=true`, `pass/synth/memory_module.cpp` generates the same memory RTL, elaborates
 and lowers its storage to flops inside a specialized
 `cgen_memory_<R>rd_<W>wr_lowered_<id>` module, and hands that body's logic to ABC.
 The parent retains the original memory instance name, using cgen's reversible
@@ -591,10 +596,7 @@ the live GIA undo state and owning the temporary candidate networks. The mapper
 checks its region time and memory limits before and after command groups and
 timing, and before starting the area candidate. Refusal stops subsequent phases
 and prevents readback/publication. These checkpoints are cooperative: a running
-ABC command or SCL timing call cannot be interrupted in the ordinary in-process
-path. `pass.synth` installs an isolated complete-flow executor when its region
-time budget is positive; that worker can be stopped inside an ABC call. See
-[`pass/synth`](../synth/README.md) for the transport and accounting limits.
+ABC command or SCL timing call cannot be interrupted.
 
 Historical measurements below are from the previous timing/amap objective,
 not the new flow2/baseline defaults. Measured over 15 ../lhdtrack designs plus `br_amba_axi_demux` (geomean vs
@@ -649,7 +651,7 @@ in the diagnostic while other regions still map.
 > failure that exits without a diagnostic). Set `adder=rca` or `cska`
 > explicitly, or a small `block_size`, for multiplier-heavy designs: the
 > default `auto` trials `cla` at the auto block width on any region holding a
-> `mult` (`abc_ware.cpp:176`).
+> `mult` (the ware trials in `pass/synth/region_driver.cpp`).
 
 ### The `flow` string and abc.rc scripts
 
@@ -662,7 +664,7 @@ commands (`&get`/`&put`, `&dch`, `&fraig`, `&if`, `&nf`, `&deepsyn`, `&resub`,
 LiveHD drives ABC through the library entry (`Abc_Start`), which — unlike the
 `abc` binary — never sources `abc.rc`, so its **named synthesis scripts are not
 present by default**. The pass therefore installs the standard `abc.rc` scripts
-as aliases at startup (`abc_map.cpp`, `kAbcAliases`), so a script name can be
+as aliases at startup (`abc_backend.cpp`, `kAbcAliases`), so a script name can be
 used directly in `flow`:
 
 - short building blocks: `b rw rwz rf rfz rs rsz st f dret`
@@ -745,7 +747,7 @@ emitted netlist therefore points back to the pre-ABC RTL (verify with `cgen --se
 cgen.srcmap=1`). Attribution is per-cone, not per-gate — ABC's optimization is
 lossy, so exact gate lineage is unrecoverable.
 
-## Incremental reuse (2opt-incr, `abc_incr.cpp`)
+## Incremental reuse (2opt-incr, `pass/synth/region_cache.cpp`)
 
 The oracle loop — edit a little RTL, resynthesize, compare QoR — changes a handful
 of regions per iteration; the rest map to the *same* netlist. `--workdir W` turns
@@ -852,7 +854,7 @@ reshapes with the 500–5,000 GE size window
 (`pass.color.synth.min_ge`/`pass.color.synth.max_ge`), which `cones` ignores.
 Under `lhd synth` the default `mapper=abc` color profile also cuts at every
 `pass.color.synth.stop_*` operator (mux/arith/cmp/shift), keeping ABC regions
-small; `synth.mapper=synth` turns those cuts off. `max_gate` is a soft target:
+small; `synth.mapper=usyn` turns those cuts off. `max_gate` is a soft target:
 a color under `pass.color.synth.min_color_nodes` (default 12) nodes that is also
 light (at most `max_gate`/64 predicted) joins the color it overlaps most, past
 `max_gate` if need be. Dead combinational logic -- typically a Hotmux nobody

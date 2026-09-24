@@ -129,7 +129,7 @@ def main():
     parser.add_argument('mode', choices=['roundtrip', 'synth'])
     parser.add_argument('source', type=Path)
     # One fixture list, both technology mappers: `lhd synth --set synth.mapper=`.
-    parser.add_argument('mapper', nargs='?', default='abc', choices=['abc', 'synth'])
+    parser.add_argument('mapper', nargs='?', default='abc', choices=['abc', 'usyn'])
     args = parser.parse_args()
     lhd = os.environ.get('LHD') or ('./bazel-bin/lhd/lhd' if Path('bazel-bin/lhd/lhd').exists() else './lhd/lhd')
     root = Path(tempfile.mkdtemp(prefix='integration_', dir=os.environ.get('TEST_TMPDIR')))

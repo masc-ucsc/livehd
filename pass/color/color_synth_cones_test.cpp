@@ -438,7 +438,7 @@ TEST(ColorSynthCones, PassCanDisableArithmeticBoundariesForExperiments) {
 }
 
 // Two default profiles differing ONLY in the stop_* cuts: `abc` cuts at every
-// stop_* operator (smaller ABC regions), `synth` keeps a color register to
+// stop_* operator (smaller ABC regions), `usyn` keeps a color register to
 // register so the domino mapper sees whole clock-to-clock cones. An explicit
 // stop_* setting beats either profile.
 TEST(ColorSynthCones, MapperProfileSuppliesStopDefaultsAndExplicitWins) {
@@ -463,8 +463,8 @@ TEST(ColorSynthCones, MapperProfileSuppliesStopDefaultsAndExplicitWins) {
     bool        merged;
   };
   for (const auto& c : {Case{"abc", "", false},
-                        Case{"synth", "", true},
-                        Case{"synth", "true", false},
+                        Case{"usyn", "", true},
+                        Case{"usyn", "true", false},
                         Case{"abc", "false", true}}) {
     Eprp_var            var;
     Eprp_var::Eprp_dict labels{
@@ -895,7 +895,7 @@ TEST(ColorSynthCones, PassDefaultsForwardAllAndAllowsExplicitOff) {
     }
     Pass::eprp.run_method_now("pass.color", var, labels);
     EXPECT_EQ(var.get("mode"), "cones");
-    EXPECT_EQ(var.get("ctrl_cones"), "true");
+    EXPECT_TRUE(var.get("ctrl_cones").empty());  // left to the mapper profile (abc: true)
     EXPECT_EQ(var.get("max_gate"), "30000");
     EXPECT_EQ(color_count(f.g.get()), std::string_view{mode} == "false" ? 3u : 1u) << mode;
   }

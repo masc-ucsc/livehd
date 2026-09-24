@@ -19,14 +19,14 @@
 set -u
 
 # One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
-# and MAPPER=synth runs `lhd pass synth`. Every claim below is mapper-agnostic
+# and MAPPER=usyn runs `lhd pass usyn`. Every claim below is mapper-agnostic
 # (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
-# `_synth` twin from this same file.
+# `_usyn` twin from this same file.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
-  abc | synth) ;;
+  abc | usyn) ;;
   *)
-    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|usyn)" >&2
     exit 1
     ;;
 esac

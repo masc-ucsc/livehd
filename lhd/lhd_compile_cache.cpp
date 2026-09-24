@@ -841,6 +841,9 @@ std::string scope_name(const Options& opts, const std::vector<std::string>& seed
 
 std::string context_descriptor(const Options& opts) {
   std::string text = std::format("top={}|pipeline=cprop,bitwidth|formal_preflight={}", opts.top, opts.compile_formal_preflight);
+  // The same explicit settings may compile differently under command defaults
+  // (LEC on, compile off); synthesis defers satopt to its private mapping copy.
+  text += std::format("|satopt={}", satopt_during_compile(opts));
   // Seed identity: scope_name alone is a stem/--top, so two different designs
   // in one workdir would otherwise alias one scope and inherit each other's
   // prior_units — which ghost pruning may then delete from a shared lg: dir.

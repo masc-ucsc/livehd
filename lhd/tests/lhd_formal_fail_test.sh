@@ -106,6 +106,35 @@ grep -q '"code":"onehot-violated"' "$DIAG" || fail "missing onehot-violated diag
 [ -s "$VOUT" ] || fail "compile must CONTINUE (not fatal-abort) and still emit on a refuted Hotmux"
 
 # ---------------------------------------------------------------------------
+# 3b. pass.satopt keeps every observable check (todo/livehd/2s-satopt B): the
+#     overlapping `unique if` feeds only an arm satopt proves never selected,
+#     so its data becomes dead -- the exclusivity obligation still fails the
+#     build. A failing assert survives satopt the same way.
+# ---------------------------------------------------------------------------
+cat >"$W/hotmux_masked.prp" <<'EOF'
+comb chk(p:bool, q:bool, a:u8, x:u8) -> (y:u8) {
+  mut t = 0
+  unique if p { t = 1 } elif q { t = 2 }
+  y = if x == x + 1 { t } else { a }
+}
+EOF
+compile_case hotmux_masked hotmux_masked_satopt --set pass.satopt=true
+[ "$RC" -ne 0 ] || fail "satopt must not hide an overlapping unique-if whose data it proved dead (got rc=0)"
+grep -q '"code":"onehot-violated"' "$DIAG" || fail "missing onehot-violated diagnostic after satopt: $(cat "$DIAG")"
+grep -q 'proven constant' "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log \
+  || fail "satopt did not see the masked arm, so this case tests nothing"
+grep -q ' 1 proven constant' "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log \
+  || fail "satopt did not prove the masking select constant: $(cat "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log)"
+cat >"$W/assert_satopt.prp" <<'EOF'
+comb chk(a:u8, x:u8) -> (y:u8) {
+  y = if x == x + 1 { a + 1 } else { a }
+  assert a != 7
+}
+EOF
+compile_case assert_satopt assert_satopt --set pass.satopt=true
+[ "$RC" -ne 0 ] || fail "satopt must not hide a failing assert (got rc=0)"
+
+# ---------------------------------------------------------------------------
 # 4. A provably one-hot `unique if` (distinct constant arms): PROVEN, so it
 #    compiles clean (no error) and the netlist is emitted. Proven is the only
 #    path that may elide/optimize.

@@ -1815,12 +1815,12 @@ _LEC_SOURCES = [
 ) for src in _ROUNDTRIP_SOURCES]
 
 # One fixture list x both technology mappers: `prp-synth-<stem>` maps with ABC
-# and `prp-synth-<stem>-synth` with pass.synth (`--set synth.mapper=synth`).
+# and `prp-synth-<stem>-usyn` with pass.usyn (`--set synth.mapper=usyn`).
 # Adding a design still needs no runner or BUILD edit, and a new mapper is one
 # entry in _SYNTH_MAPPERS -- the equivalence claim is the mapper-agnostic part.
 _SYNTH_MAPPERS = [
     ("", "abc"),
-    ("-synth", "synth"),
+    ("-usyn", "usyn"),
 ]
 
 [sh_test(

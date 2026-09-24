@@ -6,9 +6,9 @@
 //   * Boundary_table: the per-PI/PO `SC_Bnd` table the local ABC patch's SCL
 //     timer reads (packages/abc.patch, map/scl/sclSize.[ch]), owned and
 //     installed on the frame from LiveHD.
-//   * Phase A (Mapper::fill_static_boundary): the source-graph estimate a
+//   * Phase A (Abc_backend::fill_static_boundary): the source-graph estimate a
 //     region is mapped against, before any neighbour exists.
-//   * Phase B (Mapper::refine_boundaries): re-import every mapped region into
+//   * Phase B (Abc_backend::refine): re-import every mapped region into
 //     ABC, join every port bit through the wrappers to its real driver cell
 //     and real sink pins, re-size each region in place against that exact
 //     environment, and write the cell swaps back into the netlist.
@@ -28,9 +28,10 @@
 #include <utility>
 #include <vector>
 
-#include "abc_fanin_lookup.hpp"
-#include "abc_incr.hpp"
-#include "abc_map.hpp"
+#include "fanin_lookup.hpp"
+#include "region_cache.hpp"
+#include "abc_backend.hpp"
+#include "abc_flow.hpp"  // lib_has_nldm_timing
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
@@ -136,18 +137,6 @@ void Boundary_table::uninstall() {
 
 namespace {
 
-bool lib_can_size(const SC_Lib* lib) {
-  if (lib == nullptr) {
-    return false;
-  }
-  auto* inv = Abc_SclFindInvertor(const_cast<SC_Lib*>(lib), 0);
-  if (inv == nullptr || inv->n_inputs != 1) {
-    return false;
-  }
-  auto* timing = Scl_CellPinTime(inv, 0);
-  return timing != nullptr && Vec_FltSize(&timing->pCellRise.vIndex0) > 1 && Vec_FltSize(&timing->pCellRise.vIndex1) > 1;
-}
-
 // The library's "typical input pin": the mean input capacitance over the
 // smallest cell of every single-output class with up to four inputs -- what
 // an unmapped consumer beyond the partition most plausibly costs. In fF (ABC
@@ -173,23 +162,23 @@ float typical_input_cap_ff(SC_Lib* lib) {
 
 }  // namespace
 
-void Mapper::resolve_boundary_defaults() {
+void Abc_backend::resolve_boundary_defaults() {
   auto* scl   = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
-  scl_lib_ok_ = lib_can_size(scl);
+  scl_lib_ok_ = lib_has_nldm_timing(scl);
   drive_cell_ = nullptr;
   Abc_FrameSetDrivingCell(nullptr);  // never a name left over from a previous library
   if (!scl_lib_ok_) {
     return;
   }
   typical_cap_ff_  = typical_input_cap_ff(scl);
-  const auto& want = startup_opts_.boundary_drive;
+  const auto& want = base_.boundary_drive;
   if (want == "none") {
     drive_cell_ = nullptr;
   } else if (!want.empty()) {
     const int id = Abc_SclCellFind(scl, const_cast<char*>(want.c_str()));
     if (id < 0) {
       livehd::diag::err("pass.abc", "boundary-drive", "io")
-          .msg("pass.abc.boundary_drive names '{}', which is not a combinational cell of '{}'", want, startup_opts_.library)
+          .msg("pass.abc.boundary_drive names '{}', which is not a combinational cell of '{}'", want, base_.library)
           .hint("name a single-output cell of the Liberty (a buffer or inverter), or `none` for an ideal driver")
           .fatal();
       return;
@@ -237,14 +226,14 @@ void Mapper::resolve_boundary_defaults() {
   // `abc -constr` (set_driving_cell) flow gets them. The timer's per-CI table
   // still wins wherever the exact driver is known (Phase B), and the estimate
   // already assumed this very cell (Phase A).
-  if (drive_cell_ != nullptr && startup_opts_.boundary_buffer && startup_opts_.max_fanout != 0) {
+  if (drive_cell_ != nullptr && base_.boundary_buffer && base_.max_fanout != 0) {
     Abc_FrameSetDrivingCell(Extra_UtilStrsav(static_cast<SC_Cell*>(drive_cell_)->pName));
   }
-  if (startup_opts_.verbose) {
+  if (base_.verbose) {
     std::print("[pass.abc] boundary: typical input pin {:.3f} fF, stand-in driver {}, io_load {:.3f} fF\n",
                typical_cap_ff_,
                drive_cell_ != nullptr ? static_cast<SC_Cell*>(drive_cell_)->pName : "none",
-               startup_opts_.io_load >= 0.0f ? startup_opts_.io_load : typical_cap_ff_);
+               base_.io_load >= 0.0f ? base_.io_load : typical_cap_ff_);
   }
 }
 
@@ -252,10 +241,10 @@ void Mapper::resolve_boundary_defaults() {
 // Phase A: the static estimate
 // ---------------------------------------------------------------------------
 
-int Mapper::fill_static_boundary(Boundary_table& table, const livehd::partition::Region_body& rb,
+int Abc_backend::fill_static_boundary(Boundary_table& table, const livehd::partition::Region_body& rb,
                                  const absl::flat_hash_set<hhds::Node_class>& region, const std::vector<int>& pi_port,
                                  const std::vector<std::pair<size_t, int>>& po_order) {
-  const float        io_load = opts_.io_load >= 0.0f ? opts_.io_load : std::max(typical_cap_ff_, 0.0f);
+  const float        io_load = base_.io_load >= 0.0f ? base_.io_load : std::max(typical_cap_ff_, 0.0f);
   int                bits    = 0;
   // Per output port: consumer pins outside the region (each reads the whole
   // bus, the per-bit refinement is Phase B's) and whether it feeds a graph
@@ -362,7 +351,7 @@ struct Imp_def {
 };
 
 struct Refine {
-  Mapper&                                                     mapper;
+  Abc_backend&                                                mapper;
   hhds::GraphLibrary&                                         outlib;
   Abc_Frame_t*                                                frame = nullptr;
   Mio_Library_t*                                              mio   = nullptr;
@@ -375,14 +364,14 @@ struct Refine {
   float                                                       io_load     = 0.0f;
   SC_Cell*                                                    drive_cell  = nullptr;
   int                                                         top         = -1;
-  // Mio pin names of a gate, in pin order (Mapper::cell_desc_for -- the same
+  // Mio pin names of a gate, in pin order (Abc_backend::cell_desc_for -- the same
   // decl a region read-back mints, so the swap below keeps port ids).
   std::function<const std::vector<std::string>&(Mio_Gate_t*)> pin_names;
   // parents: def idx -> list of (parent def idx, instance idx)
   std::vector<std::vector<std::pair<int, int>>>               parents;
   uint64_t                                                    unresolved_bits = 0;
 
-  Refine(Mapper& m, hhds::GraphLibrary& lib) : mapper(m), outlib(lib) {}
+  Refine(Abc_backend& m, hhds::GraphLibrary& lib) : mapper(m), outlib(lib) {}
 
   SC_Cell* sc_cell(Mio_Gate_t* g) {
     if (g == nullptr) {
@@ -519,7 +508,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     opaque_port[out] = std::string{port};
     (void)node;
   };
-  Fanin_lookup driver_of_pid;
+  synth::Fanin_lookup driver_of_pid;
 
   // The node's CONNECTED driver pins. out_sorted_pins() is exactly that set --
   // each pin once, ascending port -- so it keeps the property this lambda was
@@ -1152,20 +1141,20 @@ std::optional<std::pair<float, double>> time_ntk(SC_Lib* scl, Abc_Ntk_t* ntk) {
 
 }  // namespace
 
-uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view top) {
-  if (!opts_.boundary || !start() || !scl_lib_ok_ || !scl_timing_ok_) {
+uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) {
+  if (!base_.boundary || !start_for_design(design) || !scl_lib_ok_ || !scl_timing_ok_) {
     return 0;
   }
   float delay_target = 0.0f;
   {
     char*       end = nullptr;
-    const float t   = std::strtof(startup_opts_.delay.c_str(), &end);
-    if (!startup_opts_.delay.empty() && end != startup_opts_.delay.c_str() && *end == '\0' && t > 0.0f) {
+    const float t   = std::strtof(base_.delay.c_str(), &end);
+    if (!base_.delay.empty() && end != base_.delay.c_str() && *end == '\0' && t > 0.0f) {
       delay_target = t;
     }
   }
   if (delay_target <= 0.0f
-      && std::none_of(region_delay_targets_.begin(), region_delay_targets_.end(), [](const auto& kv) { return kv.second > 0; })) {
+      && std::none_of(design.region_delay_targets.begin(), design.region_delay_targets.end(), [](const auto& kv) { return kv.second > 0; })) {
     return 0;  // nothing to size to
   }
   auto*  frame = static_cast<Abc_Frame_t*>(pabc_);
@@ -1174,17 +1163,17 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
   R.mio         = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
   R.scl         = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
   R.typical_cap = std::max(typical_cap_ff_, 0.0f);
-  R.io_load     = opts_.io_load >= 0.0f ? opts_.io_load : R.typical_cap;
+  R.io_load     = base_.io_load >= 0.0f ? base_.io_load : R.typical_cap;
   R.drive_cell  = static_cast<SC_Cell*>(drive_cell_);
-  R.pin_names   = [this](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(g).input_names; };
+  R.pin_names   = [this, &outlib](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(outlib, g).input_names; };
   if (R.mio == nullptr || R.scl == nullptr) {
     return 0;
   }
-  for (const auto& c : dff_ladder_) {
+  for (const auto& c : design.dff_ladder) {
     R.dff_names.insert(c.name);
   }
-  if (dff_.has_value()) {
-    R.dff_names.insert(dff_->name);
+  if (design.dff.has_value()) {
+    R.dff_names.insert(design.dff->name);
   }
 
   // 1. the defs reachable from top, children after parents does not matter:
@@ -1289,7 +1278,7 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
     d->po_arr.assign(npo, 0.0f);
     d->po_delay.assign(npo, 0.0f);
   }
-  const int rounds = std::max(opts_.boundary_rounds, 1);
+  const int rounds = std::max(base_.boundary_rounds, 1);
   for (int round = 0; round < rounds; ++round) {
     for (auto& d : R.defs) {
       d->pi_load.assign(static_cast<size_t>(d->ntk != nullptr ? Abc_NtkPiNum(d->ntk) : 0), -1.0f);
@@ -1401,9 +1390,9 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
       if (logic == nullptr) {
         continue;
       }
-      const auto  target_it = region_delay_targets_.find(d.name);
-      const float target    = target_it == region_delay_targets_.end() ? delay_target : target_it->second;
-      const float budget    = region_budget(target, d.latches > 0);
+      const auto  target_it = design.region_delay_targets.find(d.name);
+      const float target    = target_it == design.region_delay_targets.end() ? delay_target : target_it->second;
+      const float budget    = design.region_budget(target, d.latches > 0);
       table.install();
       Abc_FrameReplaceCurrentNetwork(frame, logic);
       const auto before   = time_ntk(R.scl, logic);
@@ -1454,7 +1443,7 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
         if (!cur || cur->get_name() == std::string_view{Mio_GateReadName(gate)}) {
           continue;
         }
-        const auto& nd  = cell_desc_for(gate);
+        const auto& nd  = cell_desc_for(outlib, gate);
         // Same pins in the same order, or the Sub's existing pin ids would land
         // on the wrong ports.
         const auto& ind = cur->get_input_pin_decls();
@@ -1477,7 +1466,7 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
         ++swapped;
       }
       resized += swapped;
-      for (auto& q : qor_) {
+      for (auto& q : design.rows) {
         if (q.module != d.name) {
           continue;
         }
@@ -1491,12 +1480,12 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
           q.delay = after->first;
           q.area  = after->second;
         }
-        if (incr_ != nullptr) {
-          incr_->refresh_qor(d.name, q);  // the cached body is the refined one
+        if (design.cache != nullptr) {
+          design.cache->refresh_qor(d.name, q);  // the cached body is the refined one
         }
         break;
       }
-      if (opts_.verbose) {
+      if (base_.verbose) {
         std::print(
             "[pass.abc] boundary round {}: module '{}': {} crossing bit(s), budget {:.0f} ps, {} -> {}, {} cell(s) re-sized\n",
             round,
@@ -1598,26 +1587,26 @@ uint64_t Mapper::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view 
 // cell. With a timing target, stitch a temporary ABC network across every
 // combinational region boundary and time its actual fanout with Liberty NLDM.
 // State outputs/inputs cut paths; the persistent graph is never flattened.
-Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_view top) {
-  const float target = ware_delay_target(startup_opts_.delay);
+synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) {
+  const float target = synth::ware_delay_target(base_.delay);
   const bool  timing
-      = std::any_of(region_delay_targets_.begin(), region_delay_targets_.end(), [](const auto& kv) { return kv.second > 0; });
-  if (!start() || (timing && (!scl_lib_ok_ || !scl_timing_ok_))) {
+      = std::any_of(design.region_delay_targets.begin(), design.region_delay_targets.end(), [](const auto& kv) { return kv.second > 0; });
+  if (!start_for_design(design) || (timing && (!scl_lib_ok_ || !scl_timing_ok_))) {
     return {};
   }
   const uint64_t memory_entry  = cost::process_footprint_bytes();
-  const uint64_t budget        = opts_.allow_oversize ? 0 : cost::budget_bytes(opts_.memory_budget_mb);
+  const uint64_t budget        = base_.allow_oversize ? 0 : cost::budget_bytes(base_.memory_budget_mb);
   const auto     within_budget = [&] {
     auto rss = cost::process_footprint_bytes();
     return budget == 0 || rss <= memory_entry || rss - memory_entry < budget;
   };
   uint64_t cells = 0;
-  for (const auto& q : qor_) {
+  for (const auto& q : design.rows) {
     cells += static_cast<uint64_t>(std::max(q.gates, 0));
   }
   // ABC netlist objects plus per-occurrence DFS arrays. Admission is repeated
   // during import; this estimate avoids allocating an obviously overlarge score.
-  if (budget && cells > budget / kAbcImportNodeBytes) {
+  if (budget && cells > budget / synth::kAbcImportNodeBytes) {
     std::print("[pass.abc] ware: QoR import estimate exceeds memory budget\n");
     return {};
   }
@@ -1637,17 +1626,17 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
   R.mio         = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
   R.scl         = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
   R.typical_cap = std::max(typical_cap_ff_, 0.0f);
-  R.io_load     = opts_.io_load >= 0.0f ? opts_.io_load : R.typical_cap;
+  R.io_load     = base_.io_load >= 0.0f ? base_.io_load : R.typical_cap;
   R.drive_cell  = static_cast<SC_Cell*>(drive_cell_);
-  R.pin_names   = [this](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(g).input_names; };
+  R.pin_names   = [this, &outlib](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(outlib, g).input_names; };
   if (R.mio == nullptr) {
     return {};
   }
-  for (const auto& c : dff_ladder_) {
+  for (const auto& c : design.dff_ladder) {
     R.dff_names.insert(c.name);
   }
-  if (dff_.has_value()) {
-    R.dff_names.insert(dff_->name);
+  if (design.dff.has_value()) {
+    R.dff_names.insert(design.dff->name);
   }
 
   // 1. the defs reachable from top, children after parents does not matter:
@@ -1761,7 +1750,7 @@ Mapper::Ware_score Mapper::score_ware(hhds::GraphLibrary& outlib, std::string_vi
       contexts.push_back({d.insts[i].idx, static_cast<int>(c), static_cast<int>(i), {}, {}, {}});
     }
   }
-  Ware_score score;
+  synth::Ware_score score;
   for (const auto& c : contexts) {
     Abc_Obj_t* obj = nullptr;
     int        i   = 0;

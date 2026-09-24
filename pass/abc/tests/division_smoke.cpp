@@ -2,7 +2,7 @@
 #include <cstdint>
 
 #include "gtest/gtest.h"
-#include "pass/abc/abc_arith.hpp"
+#include "pass/synth/arith.hpp"
 
 namespace {
 struct Bits {
@@ -30,7 +30,7 @@ uint64_t value(const std::vector<uint8_t>& x) {
 }  // namespace
 
 TEST(Division, ExhaustiveIndependentOperandSigns) {
-  using namespace livehd::abc::arith;
+  using namespace livehd::synth::arith;
   Bits ops;
   for (auto kind : {Adder_kind::rca, Adder_kind::cska, Adder_kind::cla}) {
     for (int w = 1; w <= 6; ++w) {
@@ -53,7 +53,7 @@ TEST(Division, ExhaustiveIndependentOperandSigns) {
 }
 
 TEST(Division, FullWidthUnsignedAndSignedMinimum) {
-  using namespace livehd::abc::arith;
+  using namespace livehd::synth::arith;
   Bits ops;
   for (uint64_t a : {uint64_t{0}, uint64_t{1}, uint64_t{1} << 63, UINT64_MAX}) {
     for (uint64_t b : {uint64_t{1}, uint64_t{3}, uint64_t{1} << 63, UINT64_MAX}) {

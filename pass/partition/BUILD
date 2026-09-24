@@ -3,8 +3,8 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
-# Hashed into //pass/abc:abc_salt: the partitioner decides region boundaries and
-# boundary port names, which is exactly what the ABC incremental cache keys on,
+# Hashed into //pass/synth:synth_salt: the partitioner decides region boundaries
+# and boundary port names, which is exactly what the region cache keys on,
 # so a change here must invalidate cached mapped bodies (docs/opt_loop_incr.md
 # L2, finding F8).
 filegroup(

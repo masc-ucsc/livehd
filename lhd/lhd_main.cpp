@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <exception>
 
-#include "abc_tmap.hpp"
 #include "diag.hpp"
 #include "host_mem.hpp"
 #include "iassert.hpp"
@@ -55,10 +54,6 @@ int main(int argc, char** argv) {
   // node-count gate produce the diagnosable refusal before it fires.
   if (const uint64_t limit = livehd::cost::install_memory_backstop(); limit != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
     std::fprintf(stderr, "lhd: memory backstop armed (RLIMIT_AS = %llu MiB)\n", static_cast<unsigned long long>(limit >> 20));
-  }
-
-  if (argc == 4 && std::string_view(argv[1]) == "--internal-synth-tmap") {
-    return livehd::synth::abc_tmap_worker_main(argv[2], argv[3]);
   }
 
   Trace_guard trace_guard;
@@ -191,7 +186,7 @@ int main(int argc, char** argv) {
   res.n_warnings = sink.count(livehd::diag::Severity::warning);
 
   if (opts.command == "synth"
-      || (opts.command == "pass" && !opts.files.empty() && (opts.files.front() == "synth" || opts.files.front() == "abc"))) {
+      || (opts.command == "pass" && !opts.files.empty() && lhd::find_mapper(opts.files.front()) != nullptr)) {
     res.synthesis_invocation.present               = true;
     res.synthesis_invocation.parent_peak_rss_bytes = livehd::cost::process_peak_rss_bytes();
     res.synthesis_invocation.wall_ms

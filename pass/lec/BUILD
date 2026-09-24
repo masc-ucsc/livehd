@@ -7,6 +7,25 @@ load("//tools:copt_default.bzl", "COPTS")
 # L0 encoder (LGraph -> cvc5 bit-vector terms) + L1 relational query
 # (prove_equal, a direct cvc5 combinational-miter checkSat). The reusable engine
 # core; the pass.lec plugin (L3) layers on top.
+# The encoder's sources, for the proof salts of the passes whose cached
+# verdicts it decides (//pass/satopt:satopt_salt).
+filegroup(
+    name = "lec_query_srcs",
+    srcs = [
+        "cone_abc.cpp",
+        "cone_abc.hpp",
+        "encode.cpp",
+        "encode.hpp",
+        "phase_sched.cpp",
+        "phase_sched.hpp",
+        "query.cpp",
+        "query.hpp",
+        "solve_stats.cpp",
+        "solve_stats.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "lec_query",
     srcs = [

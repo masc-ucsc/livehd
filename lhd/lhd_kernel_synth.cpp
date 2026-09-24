@@ -132,8 +132,8 @@ void synth_command(Options& opts, Result& res) {
   // (`pass.abc.library` is refused for every command by check_known_set_passes:
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
   const std::string liberty       = resolve_liberty(opts);
-  const auto        mapper        = synth_set(opts, "mapper", "abc");
-  const auto        mapper_method = std::string{"pass."} + mapper;
+  const auto*       mapper        = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
+  const auto        mapper_method = std::string{mapper->method};
   const bool        run_sta       = truthy(synth_set(opts, "opentimer", "true"));
   const bool        run_reduce    = truthy(synth_set(opts, "reduce", "false"));
   const std::string sdc           = synth_set(opts, "sdc", "");
@@ -269,7 +269,7 @@ void synth_command(Options& opts, Result& res) {
     // The coloring profile follows the mapper: ABC wants the stop_* cuts (small
     // regions), the unate/domino mapper wants register-to-register colors.
     // Merged BEFORE the user's sets so an explicit pass.color.synth.* wins.
-    labels["mapper"] = mapper;
+    labels["mapper"] = std::string{mapper->color_profile};
     merge_color_sets(opts, labels);
     if (labels["alg"] != "synth") {
       throw Lhd_error{"usage",
@@ -295,11 +295,11 @@ void synth_command(Options& opts, Result& res) {
     // synth.threads is the shared ABC worker limit for every command.
     labels["threads"] = synth_set(opts, "threads", "0");
     // Both mappers expose ABC's mapping labels: `abc.*` tuning survives a bare
-    // `--set synth.mapper=` switch, and an explicit `pass.synth.*` wins. The
+    // `--set synth.mapper=` switch, and an explicit `pass.usyn.*` wins. The
     // rule lives in merge_mapper_sets so `lhd pass <mapper>` answers the same.
     merge_mapper_sets(opts, mapper_method, labels);
     labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
-    if (mapper == "synth") {
+    if (mapper->timing_files) {
       labels["timing_files"] = liberty + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
     }
     if (opts.stats) {
@@ -308,7 +308,7 @@ void synth_command(Options& opts, Result& res) {
     // Incremental region reuse: the same <workdir>/abc_cache the standalone
     // `lhd pass abc` uses, under the same gate (a user workdir + lhd.incremental).
     if (user_workdir && opts.incremental) {
-      labels["cache_dir"] = (fs::path(opts.workdir) / (mapper == "synth" ? "synth_cache" : "abc_cache")).string();
+      labels["cache_dir"] = (fs::path(opts.workdir) / mapper->cache_dir).string();
     }
     run_step(mapper_method, var, labels, opts, res);
     if (user_workdir || lg_emit != nullptr) {
@@ -321,12 +321,13 @@ void synth_command(Options& opts, Result& res) {
     }
   }
   const std::string abc_qor               = slurp_json(qor_path);
-  const std::string unate_path            = qor_path + ".synth.json";
-  const std::string provenance_path       = qor_path + ".provenance";
-  const std::string unate_qor             = mapper == "synth" ? slurp_json(unate_path) : std::string{};
-  if (user_workdir && !unate_qor.empty()) {
-    res.outputs.push_back(unate_path);
-    res.outputs.push_back(qor_path + ".witness.jsonl");
+  // The mapper's own report (pass.usyn: the per-region cover and hand-off).
+  const bool        has_report      = !mapper->report.empty();
+  const std::string report_path     = has_report ? std::format("{}.{}.json", qor_path, mapper->report) : std::string{};
+  const std::string provenance_path = qor_path + ".provenance";
+  const std::string mapper_qor      = has_report ? slurp_json(report_path) : std::string{};
+  if (user_workdir && !mapper_qor.empty()) {
+    res.outputs.push_back(report_path);
     res.outputs.push_back(provenance_path);
   }
 
@@ -370,7 +371,8 @@ void synth_command(Options& opts, Result& res) {
   }
 
   // ---- reports ----------------------------------------------------------------
-  // The envelope's "qor" member: {kind:"synth", abc:<abc-map>, sta:<sta>} —
+  // The envelope's "qor" member: {kind:"synth", abc:<abc-map>, sta:<sta>} (plus
+  // the mapper's own report under its name, e.g. usyn:<cover report>) —
   // each sub-report byte-identical to what its pass alone embeds, so a
   // consumer keyed on `qor.abc.total` / `qor.sta.designs` reads the one-shot
   // and the manual steps alike.
@@ -378,7 +380,7 @@ void synth_command(Options& opts, Result& res) {
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
                              sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor),
-                             unate_qor.empty() ? std::string{} : std::format(R"(,"synth":{})", unate_qor));
+                             mapper_qor.empty() ? std::string{} : std::format(R"(,"{}":{})", mapper->report, mapper_qor));
   harvest_abc_incremental(res);           // the envelope's `incremental.abc` (one place for every reuse tier)
   harvest_sta_incremental(res, sta_qor);  // ... and `incremental.sta`
   if (report_emit != nullptr) {
@@ -386,9 +388,8 @@ void synth_command(Options& opts, Result& res) {
     // --workdir to keep them in (or a build system that declares outputs).
     ensure_dir(report_emit->path);
     std::error_code ec;
-    const auto      witness_path = qor_path + ".witness.jsonl";
-    for (const auto& src : {qor_path, timing_path, unate_path, witness_path}) {
-      if ((src == unate_path || src == witness_path) && mapper != "synth") {
+    for (const auto& src : {qor_path, timing_path, report_path}) {
+      if (src.empty()) {
         continue;
       }
       if (!fs::exists(src)) {
@@ -401,7 +402,7 @@ void synth_command(Options& opts, Result& res) {
       }
       res.outputs.push_back(dst);
     }
-    if (mapper == "synth" && fs::exists(provenance_path)) {
+    if (has_report && fs::exists(provenance_path)) {
       const auto dst = fs::path(report_emit->path) / fs::path(provenance_path).filename();
       // Replace the whole archive: leaving older blobs would misrepresent its
       // bounded content and could conceal missing files in the new capture.

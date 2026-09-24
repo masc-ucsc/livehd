@@ -1,0 +1,507 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
+
+// Backend-agnostic combinational arithmetic expansion for pass.abc (2i-abc_arith).
+//
+// Non-trivial cells (Sum, comparators) are expanded into a network of trivial
+// gates here, then handed to ABC's normal optimize+map flow (the chosen adder
+// only seeds the AIG; ABC is free to re-synthesize it). The builders speak an
+// abstract `Ops` bit-algebra so they carry no ABC dependency and can be unit
+// tested against a plain software bit model (see abc_arith_test.cpp). abc_map
+// instantiates them with Bit = Abc_Obj_t* and an Ops that emits Hop nodes.
+//
+// `Ops` is any type exposing (Bit is a small copyable handle):
+//     Bit zero();  Bit one();  Bit inv(Bit);
+//     Bit and_(Bit, Bit);  Bit or_(Bit, Bit);  Bit xor_(Bit, Bit);
+//
+// All bit vectors are LSB-first and equal length (== the operating width W).
+//
+// Extending to new architectures (e.g. Han-Carlson, Sklansky) or new complex
+// cells (the barrel shifter is next, see todo) means adding a builder here plus
+// a dispatch arm in abc_map.cpp; nothing else changes.
+
+#include <algorithm>
+#include <optional>
+#include <string_view>
+#include <vector>
+
+namespace livehd::synth::arith {
+
+enum class Adder_kind { rca, cska, cla };
+
+inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
+  if (s == "rca") {
+    return Adder_kind::rca;
+  }
+  if (s == "cska") {
+    return Adder_kind::cska;
+  }
+  if (s == "cla") {
+    return Adder_kind::cla;
+  }
+  return std::nullopt;
+}
+
+// Combinational multiplier architecture (mirrors Adder_kind). `array` is the
+// simple shift-and-add multiplier; `tree` sums partial products in balanced
+// pairs. Both reuse the selected adder. Tree is not a carry-save Wallace tree.
+enum class Mult_kind { array, tree };
+
+inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
+  if (s == "tree") {
+    return Mult_kind::tree;
+  }
+  if (s == "array") {
+    return Mult_kind::array;
+  }
+  return std::nullopt;
+}
+
+// Default CSKA skip-block / CLA lookahead-group width derived from the adder
+// width W: a few wide blocks for big adders, halves for medium, a single block
+// for small ones. Always >= 1. (RCA ignores block size.)
+inline int default_block_size(int w) {
+  int bs = w > 16 ? w / 4 : (w > 8 ? w / 2 : w);
+  return bs < 1 ? 1 : bs;
+}
+
+template <class Bit>
+struct Add_result {
+  std::vector<Bit> sum;
+  Bit              carry_out;
+};
+
+// sum = a ^ b ^ cin ; cout = majority(a,b,cin) = (a&b) | (cin & (a^b)).
+template <class Bit, class Ops>
+inline void full_adder(Ops& ops, Bit a, Bit b, Bit cin, Bit& sum, Bit& cout) {
+  Bit axb = ops.xor_(a, b);
+  sum     = ops.xor_(axb, cin);
+  cout    = ops.or_(ops.and_(a, b), ops.and_(cin, axb));
+}
+
+template <class Bit, class Ops>
+inline std::vector<Bit> bv_invert(Ops& ops, const std::vector<Bit>& v) {
+  std::vector<Bit> r;
+  r.reserve(v.size());
+  for (const auto& b : v) {
+    r.push_back(ops.inv(b));
+  }
+  return r;
+}
+
+// Ripple-carry: one full-adder per bit, carry chained LSB -> MSB.
+template <class Bit, class Ops>
+inline Add_result<Bit> rca_add(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b, Bit cin) {
+  int             w = static_cast<int>(a.size());
+  Add_result<Bit> r;
+  r.sum.resize(w);
+  Bit carry = cin;
+  for (int i = 0; i < w; ++i) {
+    Bit s;
+    Bit c;
+    full_adder(ops, a[i], b[i], carry, s, c);
+    r.sum[i] = s;
+    carry    = c;
+  }
+  r.carry_out = carry;
+  return r;
+}
+
+// Carry-skip: blocks of block_size ripple internally; a block whose bits all
+// propagate (p_i = a_i^b_i all 1) lets the incoming carry skip to the block
+// output via `ripple_cout | (P_block & block_cin)`. Functionally identical to
+// RCA (block_cout == ripple_cout); the skip OR is the structural distinction
+// that seeds a faster carry path for ABC.
+template <class Bit, class Ops>
+inline Add_result<Bit> cska_add(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b, Bit cin, int block_size) {
+  int w = static_cast<int>(a.size());
+  if (block_size < 1) {
+    block_size = 1;
+  }
+  Add_result<Bit> r;
+  r.sum.resize(w);
+  Bit block_cin = cin;
+  for (int base = 0; base < w; base += block_size) {
+    int  hi    = std::min(base + block_size, w);
+    Bit  carry = block_cin;
+    Bit  pall{};  // value-init: inner loop always runs (hi>base), so this is overwritten before use; silences -Wmaybe-uninitialized
+    bool first = true;
+    for (int i = base; i < hi; ++i) {
+      Bit p = ops.xor_(a[i], b[i]);
+      Bit s;
+      Bit c;
+      full_adder(ops, a[i], b[i], carry, s, c);
+      r.sum[i] = s;
+      carry    = c;
+      pall     = first ? p : ops.and_(pall, p);
+      first    = false;
+    }
+    // block carry-out = ripple carry-out OR (all-propagate AND block carry-in)
+    block_cin = ops.or_(carry, ops.and_(pall, block_cin));
+  }
+  r.carry_out = block_cin;
+  return r;
+}
+
+// Carry-lookahead: within each block of block_size, every carry is computed
+// directly (flattened) from the block carry-in and the per-bit generate/
+// propagate (g_i=a_i&b_i, p_i=a_i^b_i), so the in-block carry path is shallow;
+// block carries ripple between blocks (single-level CLA).
+template <class Bit, class Ops>
+inline Add_result<Bit> cla_add(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b, Bit cin, int block_size) {
+  int w = static_cast<int>(a.size());
+  if (block_size < 1) {
+    block_size = 1;
+  }
+  Add_result<Bit> r;
+  r.sum.resize(w);
+  Bit block_cin = cin;
+  for (int base = 0; base < w; base += block_size) {
+    int              hi = std::min(base + block_size, w);
+    int              n  = hi - base;
+    std::vector<Bit> g(n);
+    std::vector<Bit> p(n);
+    for (int k = 0; k < n; ++k) {
+      g[k] = ops.and_(a[base + k], b[base + k]);
+      p[k] = ops.xor_(a[base + k], b[base + k]);
+    }
+    Bit carry = block_cin;  // carry into the current bit (c_k)
+    for (int k = 0; k < n; ++k) {
+      r.sum[base + k] = ops.xor_(p[k], carry);
+      // c_{k+1} = g_k | (p_k & g_{k-1}) | ... | (p_k..p_1 & g_0) | (p_k..p_0 & block_cin)
+      Bit acc         = g[k];
+      Bit prodp       = p[k];
+      for (int j = k - 1; j >= 0; --j) {
+        acc   = ops.or_(acc, ops.and_(prodp, g[j]));
+        prodp = ops.and_(prodp, p[j]);
+      }
+      carry = ops.or_(acc, ops.and_(prodp, block_cin));
+    }
+    block_cin = carry;
+  }
+  r.carry_out = block_cin;
+  return r;
+}
+
+// Dispatch on the selected architecture. `a`, `b` equal length; `cin` the
+// incoming carry (one() for the +1 of a two's-complement subtract).
+template <class Bit, class Ops>
+inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
+                                 Bit cin) {
+  switch (kind) {
+    case Adder_kind::cska: return cska_add(ops, a, b, cin, block_size);
+    case Adder_kind::cla : return cla_add(ops, a, b, cin, block_size);
+    case Adder_kind::rca : break;
+  }
+  return rca_add(ops, a, b, cin);
+}
+
+// One independently sized operand of an n-input Sum. Subtract operands
+// contribute -value; signed operands extend from their own most significant bit.
+template <class Bit>
+struct Sum_operand {
+  std::vector<Bit> bits;
+  bool             is_signed = false;
+  bool             subtract  = false;
+};
+
+// A single modular n-input adder realization. Compress triples without carry
+// propagation, then use the selected architecture for the final two rows.
+// Width extension/truncation belongs here, so callers need not pad every input
+// to the largest source width. Each output realization requests its own width.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_sum(Adder_kind kind, int block_size, Ops& ops, const std::vector<Sum_operand<Bit>>& operands,
+                                  int out_w) {
+  if (out_w <= 0) {
+    return {};
+  }
+  std::vector<std::vector<Bit>> rows;
+  size_t                        negatives = 0;
+  for (const auto& operand : operands) {
+    Bit              fill = operand.is_signed && !operand.bits.empty() ? operand.bits.back() : ops.zero();
+    std::vector<Bit> row(out_w);
+    for (int i = 0; i < out_w; ++i) {
+      Bit bit = static_cast<size_t>(i) < operand.bits.size() ? operand.bits[i] : fill;
+      row[i]  = operand.subtract ? ops.inv(bit) : bit;
+    }
+    negatives += operand.subtract;
+    rows.push_back(std::move(row));
+  }
+  // The common binary subtract needs only a carry-in, not a third row.
+  if (rows.size() <= 2 && negatives <= 1) {
+    while (rows.size() < 2) {
+      rows.emplace_back(out_w, ops.zero());
+    }
+    return build_add(kind, block_size, ops, rows[0], rows[1], negatives ? ops.one() : ops.zero()).sum;
+  }
+  if (negatives) {
+    std::vector<Bit> correction(out_w, ops.zero());
+    for (int i = 0; i < out_w && negatives; ++i, negatives >>= 1) {
+      correction[i] = (negatives & 1) ? ops.one() : ops.zero();
+    }
+    rows.push_back(std::move(correction));
+  }
+  while (rows.size() > 2) {
+    std::vector<std::vector<Bit>> next;
+    size_t                        i = 0;
+    for (; i + 2 < rows.size(); i += 3) {
+      std::vector<Bit> sum(out_w), carry(out_w, ops.zero());
+      for (int bit = 0; bit < out_w; ++bit) {
+        Bit cout;
+        full_adder(ops, rows[i][bit], rows[i + 1][bit], rows[i + 2][bit], sum[bit], cout);
+        if (bit + 1 < out_w) {
+          carry[bit + 1] = cout;
+        }
+      }
+      next.push_back(std::move(sum));
+      next.push_back(std::move(carry));
+    }
+    for (; i < rows.size(); ++i) {
+      next.push_back(std::move(rows[i]));
+    }
+    rows = std::move(next);
+  }
+  return build_add(kind, block_size, ops, rows[0], rows[1], ops.zero()).sum;
+}
+
+// Restoring division. Operands have equal width; their signedness is
+// independent, so a mixed signed/unsigned expression keeps its numeric values.
+// Each step subtracts the divisor from the shifted partial remainder and keeps
+// that subtraction only if it did not borrow. The extra remainder bit prevents
+// overflow when the divisor occupies the full input width.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_div(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
+                                  bool a_signed, bool b_signed) {
+  const int w = static_cast<int>(a.size());
+  if (w == 0) {
+    return {};
+  }
+  const auto select             = [&](Bit sel, Bit yes, Bit no) { return ops.or_(ops.and_(sel, yes), ops.and_(ops.inv(sel), no)); };
+  const auto conditional_negate = [&](const std::vector<Bit>& value, Bit negative) {
+    std::vector<Bit> toggled;
+    toggled.reserve(value.size());
+    for (auto bit : value) {
+      toggled.push_back(ops.xor_(bit, negative));
+    }
+    return build_add(kind, block_size, ops, toggled, std::vector<Bit>(value.size(), ops.zero()), negative).sum;
+  };
+  const Bit  aneg     = a_signed ? a.back() : ops.zero();
+  const Bit  bneg     = b_signed ? b.back() : ops.zero();
+  const auto dividend = conditional_negate(a, aneg);
+  auto       divisor  = conditional_negate(b, bneg);
+  divisor.push_back(ops.zero());
+  const auto       inverse = bv_invert(ops, divisor);
+  std::vector<Bit> rem(w + 1, ops.zero());
+  std::vector<Bit> quotient(w, ops.zero());
+  for (int i = w; i-- > 0;) {
+    for (int j = w; j > 0; --j) {
+      rem[j] = rem[j - 1];
+    }
+    rem[0]      = dividend[i];
+    auto diff   = build_add(kind, block_size, ops, rem, inverse, ops.one());
+    quotient[i] = diff.carry_out;
+    for (int j = 0; j <= w; ++j) {
+      rem[j] = select(diff.carry_out, diff.sum[j], rem[j]);
+    }
+  }
+  // Division by zero yields all ones in the unsigned machine, and +/-1
+  // after restoring the dividend sign, as in SMT bit-vector division.
+  return conditional_negate(quotient, ops.xor_(aneg, bneg));
+}
+
+// a < b via the chosen subtractor: d = a + ~b + 1. Unsigned: a<b iff the
+// subtract borrows (no carry-out). Signed: callers pass operands extended by
+// one guard bit so a-b cannot overflow W bits, hence the sign bit d[W-1] is the
+// comparison result (mixed sign works: an unsigned operand zero-extends into a
+// non-negative signed value).
+template <class Bit, class Ops>
+inline Bit build_lt(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
+                    bool is_unsigned) {
+  auto diff = build_add(kind, block_size, ops, a, bv_invert(ops, b), ops.one());
+  if (is_unsigned) {
+    return ops.inv(diff.carry_out);
+  }
+  return diff.sum[a.size() - 1];
+}
+
+// Logical left shift `a << amount`, result truncated to `out_w` bits (out_w is
+// the bitwidth-resolved result width, already grown to hold the shift — the
+// cvc5 LEC encodes SHL the same way: fit `a` to W, BITVECTOR_SHL at W). `a` is
+// LSB-first; `amount` is the LSB-first shift-count bit vector, read UNSIGNED (a
+// shift count is a bit position; the negative-shift diagnostic lives in
+// upass.bitwidth, so any amount reaching here is non-negative). Built as a
+// barrel / log-shifter: one 2:1-mux level per amount bit k conditionally shifts
+// the running data by 2^k. A shift of 2^k >= out_w pushes the value entirely
+// out of the truncated result (=> 0), so high amount bits correctly force a 0
+// result. Needs only zero/inv/and_/or_ from Ops (mux built inline). A constant
+// amount works too (the muxes fold), but abc_map wires constants directly.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, int out_w,
+                                  bool reverse = false) {
+  std::vector<Bit> data(out_w);
+  int              aw = static_cast<int>(a.size());
+  for (int i = 0; i < out_w; ++i) {
+    data[i] = i < aw ? a[i] : ops.zero();  // a, zero-extended to the result width
+  }
+  int nb = static_cast<int>(amount.size());
+  for (int stage = 0; stage < nb; ++stage) {
+    const int        k    = reverse ? nb - 1 - stage : stage;
+    // sh = 2^k, capped to out_w (any shift >= out_w shifts everything out). The
+    // k >= 31 guard keeps 1<<k from overflowing int before the >= out_w compare.
+    int              sh   = (k >= 31 || (int64_t{1} << k) >= out_w) ? out_w : static_cast<int>(int64_t{1} << k);
+    Bit              sel  = amount[k];
+    Bit              nsel = ops.inv(sel);
+    std::vector<Bit> next(out_w);
+    for (int i = 0; i < out_w; ++i) {
+      Bit shifted = (i - sh) >= 0 ? data[i - sh] : ops.zero();                 // i-sh < out_w always (sh >= 1)
+      next[i]     = ops.or_(ops.and_(sel, shifted), ops.and_(nsel, data[i]));  // sel ? shifted : data
+    }
+    data = std::move(next);
+  }
+  return data;
+}
+
+// Right shift `a >> amount`, operating at the full width W == a.size(), with
+// `fill` shifted in from the top of every bit pulled past the MSB. Logical right
+// shift passes fill = zero(); arithmetic (sign-replicating) right shift passes
+// fill = a[W-1] (the sign bit). `a` is LSB-first; `amount` is the LSB-first
+// shift-count bit vector, read UNSIGNED (a shift count is a bit position). Built
+// as a barrel / log-shifter mirroring build_shl: one 2:1-mux level per amount bit
+// k conditionally shifts the running data DOWN by 2^k. A shift of 2^k >= W pulls
+// every bit past the MSB (=> all fill), so high amount bits correctly force an
+// all-fill result. Data and count vectors may have different widths: the caller
+// retains every count bit and requests only the observed output prefix. Needs only
+// zero/inv/and_/or_ from Ops (mux built inline).
+template <class Bit, class Ops>
+inline std::vector<Bit> build_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill, int out_w,
+                                         bool reverse = false) {
+  const int w  = static_cast<int>(a.size());
+  const int nb = static_cast<int>(amount.size());
+  out_w        = std::clamp(out_w, 0, w);
+
+  // Work backwards from the demanded low prefix. At stage k, producing N bits
+  // after a possible shift by 2^k needs only N+2^k bits from the preceding
+  // stage (clamped to W). For a narrow slice of a very wide shifted bus this
+  // avoids constructing every unused high output while preserving the exact
+  // full-width barrel-shifter semantics.
+  std::vector<int> need(static_cast<size_t>(nb) + 1);
+  need[static_cast<size_t>(nb)] = out_w;
+  for (int stage = nb - 1; stage >= 0; --stage) {
+    const int k  = reverse ? nb - 1 - stage : stage;
+    const int sh = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
+    need[static_cast<size_t>(stage)]
+        = sh >= w ? need[static_cast<size_t>(stage + 1)] : std::min(w, need[static_cast<size_t>(stage + 1)] + sh);
+  }
+
+  std::vector<Bit> data(a.begin(), a.begin() + need[0]);
+  for (int stage = 0; stage < nb; ++stage) {
+    const int        k    = reverse ? nb - 1 - stage : stage;
+    // sh = 2^k, capped to w (any shift >= w pulls everything past the MSB). The
+    // k >= 31 guard keeps 1<<k from overflowing int before the >= w compare.
+    int              sh   = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
+    Bit              sel  = amount[k];
+    Bit              nsel = ops.inv(sel);
+    std::vector<Bit> next(need[static_cast<size_t>(stage + 1)]);
+    for (int i = 0; i < static_cast<int>(next.size()); ++i) {
+      Bit shifted = (i + sh) < w ? data[i + sh] : fill;                        // bit i takes bit i+sh, or fill past the top
+      next[i]     = ops.or_(ops.and_(sel, shifted), ops.and_(nsel, data[i]));  // sel ? shifted : data
+    }
+    data = std::move(next);
+  }
+  return data;
+}
+
+template <class Bit, class Ops>
+inline std::vector<Bit> build_shr(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill) {
+  return build_shr_prefix(ops, a, amount, fill, static_cast<int>(a.size()));
+}
+
+// Low `out_w` bits of a >> (index*scale + bias). This is the packed-array
+// select form produced by front ends for a dynamic word extraction. Selecting
+// directly among the possible source words costs roughly out_w*2^index_width
+// muxes instead of width*amount_width for a full generic barrel shifter.
+// Callers bound index_width before using this builder.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& index, Bit fill,
+                                                int64_t scale, int64_t bias, int out_w) {
+  const int w              = static_cast<int>(a.size());
+  out_w                    = std::clamp(out_w, 0, w);
+  const size_t     choices = size_t{1} << index.size();
+  std::vector<Bit> result(static_cast<size_t>(out_w));
+  for (int bit = 0; bit < out_w; ++bit) {
+    std::vector<Bit> level(choices);
+    for (size_t v = 0; v < choices; ++v) {
+      const int64_t pos = static_cast<int64_t>(bit) + bias + scale * static_cast<int64_t>(v);
+      level[v]          = pos >= 0 && pos < w ? a[static_cast<size_t>(pos)] : fill;
+    }
+    for (size_t k = 0; k < index.size(); ++k) {
+      const Bit        sel  = index[k];
+      const Bit        nsel = ops.inv(sel);
+      std::vector<Bit> next(level.size() / 2);
+      for (size_t j = 0; j < next.size(); ++j) {
+        next[j] = ops.or_(ops.and_(sel, level[2 * j + 1]), ops.and_(nsel, level[2 * j]));
+      }
+      level = std::move(next);
+    }
+    result[static_cast<size_t>(bit)] = level[0];
+  }
+  return result;
+}
+
+// Unsigned array multiplier `a * b`, result truncated to out_w bits: the sum of
+// shifted partial products pp_k = (b_k ? a : 0) << k, accumulated with the chosen
+// adder architecture (one add per b bit). Both operands are pre-extended to out_w
+// by the caller (sign-extended for a signed operand, zero-extended otherwise), so
+// the product is computed mod 2^out_w and its low out_w bits are correct for
+// signed and unsigned operands alike — exactly what the cvc5 LEC encodes
+// (fit each operand to W, then BITVECTOR_MULT, which is mod 2^W). The `kind`
+// selects serial or balanced partial-product summation; `adder`/`block_size`
+// pick the architecture of the internal partial-product additions.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_size, Ops& ops, const std::vector<Bit>& a,
+                                  const std::vector<Bit>& b, int out_w) {
+  std::vector<std::vector<Bit>> rows;
+  int                           aw = static_cast<int>(a.size());
+  int                           bw = static_cast<int>(b.size());
+  std::vector<Bit>              acc(out_w, ops.zero());
+  for (int k = 0; k < bw && k < out_w; ++k) {
+    // partial product k = (b[k] ? a : 0) shifted up by k, within out_w bits
+    std::vector<Bit> pp(out_w);
+    for (int i = 0; i < out_w; ++i) {
+      int j = i - k;
+      pp[i] = (j >= 0 && j < aw) ? ops.and_(b[k], a[j]) : ops.zero();
+    }
+    if (kind == Mult_kind::tree) {
+      rows.push_back(std::move(pp));
+    } else {
+      acc = build_add(adder, block_size, ops, acc, pp, ops.zero()).sum;
+    }
+  }
+  while (rows.size() > 1) {
+    std::vector<std::vector<Bit>> next;
+    for (size_t i = 0; i < rows.size(); i += 2) {
+      next.push_back(i + 1 == rows.size() ? std::move(rows[i])
+                                          : build_add(adder, block_size, ops, rows[i], rows[i + 1], ops.zero()).sum);
+    }
+    rows = std::move(next);
+  }
+  return rows.empty() ? acc : rows.front();
+}
+
+// All operands equal the first, bitwise (n-ary ==). Operands equal length.
+template <class Bit, class Ops>
+inline Bit build_eq(Ops& ops, const std::vector<std::vector<Bit>>& operands) {
+  if (operands.size() <= 1) {
+    return ops.one();
+  }
+  int w  = static_cast<int>(operands[0].size());
+  Bit eq = ops.one();
+  for (size_t k = 1; k < operands.size(); ++k) {
+    for (int b = 0; b < w; ++b) {
+      eq = ops.and_(eq, ops.inv(ops.xor_(operands[k][b], operands[0][b])));
+    }
+  }
+  return eq;
+}
+
+}  // namespace livehd::synth::arith

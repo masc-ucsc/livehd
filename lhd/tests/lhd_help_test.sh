@@ -109,10 +109,8 @@ done
 # with no --set namespace do not print an empty options section.
 OPTION_LEAVES=(compile lec "formal verify" "formal lec" sim \
                "pass color" "pass partition" "pass abc" \
-               "pass opentimer" "pass formal" "pass liberty" "pass semdiff" "pass analyze")
-# `pass satopt` is a bare bool (--set pass.satopt), not a pass.satopt.* namespace,
-# so its page has no options section.
-NO_OPTION_LEAVES=("pass single_edge" scan "tool cat" "tool grep" "tool diff" "tool tree" "pass satopt" \
+               "pass opentimer" "pass formal" "pass liberty" "pass semdiff" "pass analyze" "pass satopt")
+NO_OPTION_LEAVES=("pass single_edge" scan "tool cat" "tool grep" "tool diff" "tool tree" \
                   "pyrope fmt" "pyrope lsp" list describe version)
 for X in "${OPTION_LEAVES[@]}"; do
   page=$("$LHD" help $X --diag-fmt pretty 2>&1)

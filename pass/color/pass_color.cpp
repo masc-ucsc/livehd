@@ -68,40 +68,49 @@ void Pass_color::setup() {
   // are registered WITHOUT a default: EPRP pre-fills a non-empty registered
   // default, and "omitted" must stay distinguishable from "set to true".
   m.add_label_optional("mapper",
-                       "abc|synth: the mapper whose DEFAULT profile applies. abc cuts colors at every stop_* operator "
-                       "(smaller ABC regions); synth turns the stop_* cuts off so colors run register to register, as "
+                       "abc|usyn: the mapper whose DEFAULT profile applies. abc cuts colors at every stop_* operator "
+                       "(smaller ABC regions); usyn turns the stop_* cuts off so colors run register to register, as "
                        "the unate/domino mapper needs. Explicit stop_* settings override either profile. `lhd synth` "
                        "sets this from synth.mapper",
                        "abc");
   m.add_label_optional("ctrl_cones",
-                       "merge overlapping mux/select and enable cones together, separately from data and within max_gate "
-                       "(default in cones mode; false disables)",
-                       "true");
+                       "cones mode: merge overlapping mux/select and enable cones together, separately from data and "
+                       "within max_gate; false disables. Default: true under mapper=abc, false under mapper=usyn",
+                       "");
   m.add_label_optional("stop_mux",
                        "cones: stop data colors at muxes and place muxes with control; false puts muxes in data colors "
                        "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true. "
-                       "Default: true under mapper=abc, false under mapper=synth",
+                       "Default: true under mapper=abc, false under mapper=usyn",
                        "");
   m.add_label_optional("stop_arith",
                        "stop colors at large adders (>8 bits), multipliers and dividers. Default: true under "
-                       "mapper=abc, false under mapper=synth",
+                       "mapper=abc, false under mapper=usyn",
                        "");
   m.add_label_optional("stop_cmp",
                        "keep wide comparisons (LT/GT with an operand over 8 bits, which lower to a subtraction) at "
                        "color boundaries. false merges them into the cone that consumes them. Default: true under "
-                       "mapper=abc, false under mapper=synth",
+                       "mapper=abc, false under mapper=usyn",
                        "");
   m.add_label_optional("stop_shift",
                        "keep RUNTIME shifters (SHL/SRA with a non-constant amount and a result over 8 bits -- a "
                        "barrel) at color boundaries. Constant shifts are wiring and are never cut. Independent of "
                        "`ctrl_cones`: turning control grouping off never arms this on its own. Default: true under "
-                       "mapper=abc, false under mapper=synth",
+                       "mapper=abc, false under mapper=usyn",
                        "");
+  // The ware sections follow the mapper profile too: the unate mapper covers
+  // arithmetic, comparisons and shifters inline with their cone.
   m.add_label_optional("ware_arith",
-                       "keep large (>8 bits) adders, multipliers and dividers as separate optimizable ware modules",
-                       "true");
-  m.add_label_optional("ware_cmp", "keep wide (>8 bits) comparisons (LT/GT) as separate optimizable ware modules", "true");
-  m.add_label_optional("ware_shift", "keep runtime shifters (SHL/SRA) as separate width-specialized ware modules", "true");
+                       "keep large (>8 bits) adders, multipliers and dividers as separate optimizable ware modules. "
+                       "Default: true under mapper=abc, false under mapper=usyn",
+                       "");
+  m.add_label_optional("ware_cmp",
+                       "keep wide (>8 bits) comparisons (LT/GT) as separate optimizable ware modules. Default: true under "
+                       "mapper=abc, false under mapper=usyn",
+                       "");
+  m.add_label_optional("ware_shift",
+                       "keep runtime shifters (SHL/SRA) as separate width-specialized ware modules. Default: true under "
+                       "mapper=abc, false under mapper=usyn",
+                       "");
   m.add_label_optional("ctrl_max_gate",
                        "optional tighter control-color size bound (predicted AIG); 0 uses max_gate. "
                        "An indivisible node above this explicit bound fails",
@@ -162,7 +171,7 @@ void Pass_color::setup() {
   m.add_label_optional("flop_to_flop",
                        "cones mode: every cone walks to the register boundary and all overlapping cones merge, whatever "
                        "max_gate says, so each combinational path lies inside one color (max_gate then only bounds the "
-                       "forward merge). Default: true under mapper=synth, false under mapper=abc",
+                       "forward merge). Default: true under mapper=usyn, false under mapper=abc",
                        "");
   // Phase 2 of cones' merge. Spelled pass.color.synth.forward on the CLI; the
   // kernel splits a --set key at the LAST dot and pass.color.synth is a
@@ -241,10 +250,11 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   s             += std::format("\"hier\":{},", opts.hier);
   s             += std::format("\"continuous\":{},", opts.continuous);
   s             += std::format("\"keep_colored\":{}", opts.keep_colored);
+  const char* ware_default = var.get("mapper", "abc") == "usyn" ? "false" : "true";  // the mapper profile (setup())
   s             += std::format(",\"ware_arith\":{},\"ware_cmp\":{},\"ware_shift\":{}",
-                               parse_bool(var.get("ware_arith", "true")),
-                               parse_bool(var.get("ware_cmp", "true")),
-                               parse_bool(var.get("ware_shift", "true")));
+                               parse_bool(var.get("ware_arith", ware_default)),
+                               parse_bool(var.get("ware_cmp", ware_default)),
+                               parse_bool(var.get("ware_shift", ware_default)));
 
   if (alg == "acyclic") {
     s += std::format(",\"cutoff\":{},\"merge\":{}", var.get("cutoff", "1"), parse_bool(var.get("merge", "false")));
@@ -451,23 +461,25 @@ void Pass_color::color(Eprp_var& var) {
   opts.max_ge        = parse_ge_bound(var, "max_ge", "5000");
   opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
   opts.max_gate      = parse_ge_bound(var, "max_gate", "30000");
-  opts.ctrl_cones    = parse_bool(var.get("ctrl_cones", "true"));
-  // The mapper profile supplies the stop_* DEFAULTS only (see setup()); an
-  // explicit setting of any one of them always wins.
+  // The mapper profile supplies the stop_*, ctrl_cones, flop_to_flop and ware_*
+  // DEFAULTS only (see setup()); an explicit setting of any one of them always
+  // wins.
   const auto mapper = std::string{var.get("mapper", "abc")};
-  if (mapper != "abc" && mapper != "synth") {
+  if (mapper != "abc" && mapper != "usyn") {
     livehd::diag::err("pass.color", "bad-mapper", "unsupported")
-        .msg("unknown mapper profile '{}' (expected abc|synth)", mapper)
-        .hint("abc cuts at every stop_* operator; synth keeps colors register to register")
+        .msg("unknown mapper profile '{}' (expected abc|usyn)", mapper)
+        .hint(mapper == "synth" ? "the unate-synthesis profile was renamed: use mapper=usyn"
+                                : "abc cuts at every stop_* operator; usyn keeps colors register to register")
         .fatal();
     return;
   }
-  const char* stop_default = mapper == "synth" ? "false" : "true";
+  const char* stop_default = mapper == "usyn" ? "false" : "true";
+  opts.ctrl_cones          = parse_bool(var.get("ctrl_cones", stop_default));
   opts.mux_in_data         = !parse_bool(var.get("stop_mux", stop_default));
   opts.stop_arith          = parse_bool(var.get("stop_arith", stop_default));
   opts.stop_cmp            = parse_bool(var.get("stop_cmp", stop_default));
   opts.stop_shift          = parse_bool(var.get("stop_shift", stop_default));
-  opts.flop_to_flop        = parse_bool(var.get("flop_to_flop", mapper == "synth" ? "true" : "false"));
+  opts.flop_to_flop        = parse_bool(var.get("flop_to_flop", mapper == "usyn" ? "true" : "false"));
   opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
   opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
   opts.min_nodes     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));

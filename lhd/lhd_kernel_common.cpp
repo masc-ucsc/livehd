@@ -30,6 +30,7 @@
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "satopt_stages.hpp"
 #include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
@@ -615,7 +616,8 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
     // it in the hint) has to happen with fd 1 already restored, and the
     // redirect only lifts when this scope ends.
     try {
-      if (method == "pass.synth") {
+      if (const auto* mapper = mapper_of_method(method); mapper != nullptr && !mapper->report.empty()) {
+        // A mapper with its own report archives its provenance: the lhd invocation record.
         auto contextual                  = labels;
         contextual["invocation_context"] = synth_invocation_context(opts, res, labels);
         Pass::eprp.run_method_now(method, var, contextual);
@@ -727,12 +729,31 @@ void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
 }
 
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
-  if (method == "pass.synth") {
-    // pass.synth exposes ABC's whole mapping vocabulary, so the ABC namespace is
+  if (const auto* mapper = mapper_of_method(method); mapper != nullptr && mapper->inherits_abc) {
+    // The mapper exposes ABC's whole mapping vocabulary, so the ABC namespace is
     // the shared spelling; the pass's own namespace is merged last and wins.
     merge_sets(opts, "pass.abc", labels);
   }
   merge_sets(opts, method, labels);
+  // The kernel resolves the shared switch; mapper-local labels are internal.
+  if (mapper_of_method(method) == nullptr) {
+    return;
+  }
+  labels["satopt"] = satopt_requested(opts) ? "true" : "false";
+  Eprp_var::Eprp_dict satopt_labels;
+  merge_sets(opts, "pass.satopt", satopt_labels);
+  if (auto it = satopt_labels.find("stages"); it != satopt_labels.end()) {
+    labels["satopt_stages"] = it->second;
+  }
+  std::string budget;
+  for (const auto key : livehd::satopt::kBudgetKeys) {
+    if (auto it = satopt_labels.find(std::string{key}); it != satopt_labels.end()) {
+      budget += std::format("{}{}={}", budget.empty() ? "" : ",", key, it->second);
+    }
+  }
+  if (!budget.empty()) {
+    labels["satopt_budget"] = budget;
+  }
 }
 
 // Validate every --set/--config entry against the live registry: a typo'd
@@ -784,6 +805,24 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    if (key == "pass.satopt.stages") {
+      // Validated eagerly: a typo must not wait for the pass to run (it may not).
+      std::string error;
+      if (!livehd::satopt::parse_stages(value, livehd::satopt::Profile::shared, &error)) {
+        throw Lhd_error{"usage", std::format("--set pass.satopt.stages: {}", error), ""};
+      }
+    }
+    if (key.starts_with("pass.satopt.")) {
+      const auto knob = std::string_view{key}.substr(std::string_view{"pass.satopt."}.size());
+      if (std::find(livehd::satopt::kBudgetKeys.begin(), livehd::satopt::kBudgetKeys.end(), knob)
+          != livehd::satopt::kBudgetKeys.end()) {
+        livehd::satopt::Budget budget;
+        std::string            error;
+        if (!livehd::satopt::set_budget(budget, knob, value, &error)) {
+          throw Lhd_error{"usage", std::format("--set {}", error), ""};
+        }
+      }
+    }
     auto pos = key.rfind('.');
     if (pos == std::string::npos) {
       throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};
@@ -834,7 +873,7 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
-    if ((pass == "pass.abc" || pass == "pass.synth") && flag == "library") {
+    if (mapper_of_method(pass) != nullptr && flag == "library") {
       // ONE Liberty spelling for the whole CLI: `synth.liberty`. Two knobs for
       // the same file is how `lhd pass abc --set synth.liberty=asap7.lib`
       // tech-mapped against the DEFAULT sky130 library and still reported
@@ -843,15 +882,15 @@ void check_known_set_passes(const Options& opts) {
       throw Lhd_error{"usage",
                       std::format("--set/--config '{}.library' was removed", pass),
                       std::format("use --set synth.liberty={0} instead (the one Liberty every reader shares: pass.abc, "
-                                  "pass.synth, pass.opentimer and `lhd synth`)",
+                                  "pass.usyn, pass.opentimer and `lhd synth`)",
                                   value)};
     }
-    if (pass == "pass.synth" && (flag == "timing_files" || flag == "invocation_context")) {
+    if (pass == "pass.usyn" && (flag == "timing_files" || flag == "invocation_context")) {
       // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef and the lhd
       // invocation record). synth_command overwrites them after merge_sets, so a
       // user --set silently did nothing; refuse it and name the real spelling.
       throw Lhd_error{"usage",
-                      std::format("--set/--config 'pass.synth.{}' is INTERNAL", flag),
+                      std::format("--set/--config 'pass.usyn.{}' is INTERNAL", flag),
                       flag == "timing_files"
                           ? "the timing environment comes from --set synth.liberty / synth.sdc / synth.spef"
                           : "the invocation record is captured by the lhd kernel, not by a --set"};
@@ -920,8 +959,10 @@ void check_known_set_passes(const Options& opts) {
                                     "opentimer.*)",
                                     known)};
       }
-      if (opt->kind == Synth_set_option::Kind::mapper && value != "abc" && value != "synth") {
-        throw Lhd_error{"usage", "synth.mapper expects abc|synth", ""};
+      if (opt->kind == Synth_set_option::Kind::mapper && find_mapper(value) == nullptr) {
+        throw Lhd_error{"usage",
+                        std::format("synth.mapper expects abc|usyn, got '{}'", value),
+                        value == "synth" ? "the unate-synthesis mapper was renamed: use --set synth.mapper=usyn" : ""};
       }
       if (opt->kind == Synth_set_option::Kind::integer) {
         unsigned parsed      = 0;
@@ -1164,6 +1205,49 @@ void check_known_set_passes(const Options& opts) {
 // loop is kept as ONE replicated instance (pass.upass `unroll=false`); the backends
 // that cannot consume the compact form expand it themselves. Validated by
 // check_known_set_passes; seeded into pass.upass by compile_sources.
+void run_satopt_step(Eprp_var& var, Eprp_var::Eprp_dict labels, Options& opts, Result& res) {
+  merge_sets(opts, "pass.satopt", labels);
+  if (opts.incremental && !opts.workdir.empty() && !opts.workdir_scratch) {
+    labels["cache_dir"] = opts.workdir + "/satopt_cache";
+  }
+  // Always harvested: workdir() makes the scratch one when none was named,
+  // and only the report's content reaches the result.
+  const auto      report = (fs::path(workdir(opts)) / "satopt_report.json").string();
+  std::error_code ec;
+  fs::remove(report, ec);  // never harvest a previous run's report
+  labels["report"] = report;
+  run_step("pass.satopt", var, labels, opts, res);
+  std::ifstream in(report, std::ios::binary);
+  std::string   text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  auto          current = livehd::satopt::Report::parse(text);
+  if (!current) {
+    return;
+  }
+  // Several runs in one command (`lhd lec` optimizes both sides): one report.
+  if (auto previous = livehd::satopt::Report::parse(res.satopt_json)) {
+    previous->merge(*current);
+    current = previous;
+  }
+  res.satopt_json = current->json();
+}
+
+bool satopt_requested(const Options& opts) {
+  bool requested = opts.command == "lec" || opts.command == "synth"
+                   || (opts.command == "pass" && !opts.files.empty() && find_mapper(opts.files.front()) != nullptr);
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "pass.satopt") {
+      requested = value == "true" || value == "1" || value == "on";
+    }
+  }
+  return requested;
+}
+
+bool satopt_during_compile(const Options& opts) {
+  // Synthesis runs the engine once on its private copy, including colored
+  // mux-arm proofs. Other graph consumers use the shared semantic profile.
+  return opts.command != "synth" && satopt_requested(opts);
+}
+
 bool compile_unroll_requested(const Options& opts) {
   bool unroll = false;
   for (const auto& [key, value] : opts.sets) {

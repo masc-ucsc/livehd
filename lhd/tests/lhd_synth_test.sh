@@ -22,15 +22,15 @@
 set -u
 
 # One script, both technology mappers: MAPPER=abc (default) drives pass.abc and
-# MAPPER=synth drives pass.synth through `--set synth.mapper=`. Everything the
+# MAPPER=usyn drives pass.usyn through `--set synth.mapper=`. Everything the
 # script asserts -- the workdir layout, the qor envelope, incremental reuse and
 # the negative controls -- is mapper-agnostic; lhd/tests/BUILD generates the
-# `_synth` twin from this same file.
+# `_usyn` twin from this same file.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
-  abc | synth) ;;
+  abc | usyn) ;;
   *)
-    echo "FAIL: bad MAPPER=$MAPPER (expected abc|synth)" >&2
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|usyn)" >&2
     exit 1
     ;;
 esac

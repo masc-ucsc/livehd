@@ -44,6 +44,10 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `inou/yosys/`: Yosys integration (`lgyosys_tolg.cpp` = Yosys→LGraph, `inou_yosys_read.ys` = Yosys script)
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
+- `pass/synth/`: the shared, ABC-free synthesis pipeline (private copy, ware/memory modules, region driver, `Lnet` translation, region cache, read-back); see `pass/synth/README.md`
+- `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, shared by compile (`--set pass.satopt=true`), `lhd pass satopt` and synthesis; see `pass/satopt/README.md`
+- `pass/abc/`: the ABC backend and `pass.abc` — the only synthesis code that includes or calls ABC
+- `pass/usyn/`: unate synthesis (`pass.usyn`, `synth.mapper=usyn`): a domino LUT cover as a region hook, mapped by the ABC backend
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)
 
 ## Tree library
@@ -86,10 +90,13 @@ Internally lhd drives the registered EPRP methods (conceptually the pipe
 **Measuring reuse after a rebuild — read this before believing a cache miss.**
 Each tier is salted by a build-time content hash of the code that produces what
 it stores, so **the first run after you touch that code is a full miss, by
-design**: `//pass/abc:abc_salt` hashes `pass/abc` + `pass/partition` +
-`MODULE.bazel`, `//pass/opentimer:sta_salt` hashes `pass/opentimer` +
-`pass/partition` + `MODULE.bazel`, `//lhd:formal_salt` and `//lhd:compile_salt`
-likewise. Even a `clang-format -i` counts. Always run the warm command **twice**
+design**: the synthesis salts are layered -- `//pass/synth:synth_salt` hashes
+`pass/synth` + the passes a mapped region depends on (graph, memory RTL,
+cprop, enableopt, bitwidth, color, the DFF pick, formal, `pass/partition`),
+`//pass/abc:abc_salt` hashes `pass/abc` + `synth_salt` + `MODULE.bazel` + the
+ABC patch, and `//pass/usyn:usyn_salt` hashes `pass/usyn` + `abc_salt` --
+`//pass/opentimer:sta_salt` hashes `pass/opentimer` + `pass/partition` +
+`MODULE.bazel`, `//lhd:formal_salt` and `//lhd:compile_salt` likewise. Even a `clang-format -i` counts. Always run the warm command **twice**
 after a rebuild and read the second number, and never rebuild in the middle of a
 measurement sweep — a cold pass stored under salt A and a warm pass loaded under
 salt B looks exactly like "the cache forgot everything".

@@ -140,6 +140,7 @@ struct Renamed_ns {
   bool             formal_split = false;
 };
 inline constexpr Renamed_ns kRenamedSetPasses[] = {
+    {      "pass.synth",       "pass.usyn", false},
     {             "lec",          "formal",  true},
     {     "compile.sim",             "sim", false},
     {"compile.isabelle", "formal.isabelle", false},
@@ -235,23 +236,66 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {         "pass.lec",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",
      "strict", "An UNKNOWN verdict always fails now (exit 7): an inconclusive run proved nothing, so it can never exit 0. Drop the setting."                                        },
-    {       "pass.synth",
-     "recipes", "pass.synth runs ONE recipe now: --set pass.synth.support=6, pass.synth.literals=16, pass.synth.series=4 and pass.synth.max_depth=0 (0 = unbounded depth)."},
-    {       "pass.synth",
-     "proof_seconds", "pass.synth no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
-    {       "pass.synth",
-     "proof_nodes", "pass.synth no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
-    {       "pass.synth",
-     "delay_tolerance", "pass.synth no longer compares its result against an ABC baseline. Drop the setting."},
+    {        "pass.usyn",
+     "recipes", "pass.usyn runs ONE recipe now: --set pass.usyn.support=6, pass.usyn.literals=16 and pass.usyn.series=4."},
+    {        "pass.usyn",
+     "proof_seconds", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
+    {        "pass.usyn",
+     "proof_nodes", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
+    {        "pass.usyn",
+     "delay_tolerance", "pass.usyn no longer compares its result against an ABC baseline. Drop the setting."},
+    {        "pass.usyn",
+     "max_depth", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "work", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "cuts", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "joint_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "joint_windows", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "image_inputs", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "reshape_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "encoding_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "encoding_code_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "encoding_pair_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "symbolic_nodes", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "cover_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "divisor_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+    {        "pass.usyn",
+     "split", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+    {        "pass.usyn",
+     "split_exact", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+    {        "pass.usyn",
+     "split_factor", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+    {        "pass.usyn",
+     "split_cut", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+    {        "pass.usyn",
+     "split_share", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+    {        "pass.usyn",
+     "reference", "The ABC `&if` LUT reference was removed. Drop the setting."},
+    {        "pass.usyn",
+     "witness_bytes", "pass.usyn no longer writes a witness archive; verify the mapped netlist with `lhd lec`. Drop the setting."},
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
+  if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
+    return "use --set pass.satopt=true|false (default true for LEC and synthesis, false otherwise)";
+  }
   for (int pass = 0; pass < 2; ++pass) {
     for (const auto& option : kRetiredSetOptions) {
       if (option.method == method && option.flag == flag) {
         return option.hint;
       }
     }
-    if (method != "pass.synth") {
+    if (method != "pass.usyn") {
       break;
     }
     method = "pass.abc";  // shared mapping labels have the same kernel-owned slots
@@ -277,7 +321,8 @@ inline constexpr Set_pass kSetPasses[] = {
     {    "pass.partition",    "pass.partition",      Set_pass::List::all},
     {  "pass.single_edge",  "pass.single_edge",      Set_pass::List::all},
     {          "pass.abc",          "pass.abc",      Set_pass::List::all},
-    {        "pass.synth",        "pass.synth",      Set_pass::List::all},
+    {       "pass.satopt",       "pass.satopt",      Set_pass::List::all},
+    {         "pass.usyn",         "pass.usyn",      Set_pass::List::all},
     {      "pass.liberty",      "pass.liberty",      Set_pass::List::all},
     {    "pass.opentimer",    "pass.opentimer",      Set_pass::List::all},
     {            "formal",          "pass.lec",   Set_pass::List::common},
@@ -364,6 +409,9 @@ void              mirror_log_to_stderr(const std::string& log_path);
 std::string       map_diag_category(std::string_view category);
 void              setup_diag(const Options& opts, std::string_view step);
 void              run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict& labels, Options& opts, Result& res);
+// pass.satopt over `var` with the caller's labels plus the --set pass.satopt.*
+// options, the workdir proof cache and the report harvest (res.satopt_json).
+void              run_satopt_step(Eprp_var& var, Eprp_var::Eprp_dict labels, Options& opts, Result& res);
 std::string       synth_invocation_context(const Options& opts, const Result& res, const Eprp_var::Eprp_dict& labels);
 // Park "which step, which log" where the SIGSEGV handler can read it without
 // allocating (see install_crash_reporter). Empty strings clear the slot.
@@ -371,9 +419,9 @@ void              set_crash_context(std::string_view step, std::string_view log)
 std::string_view  set_pass_method(std::string_view set_name);
 bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);
-// merge_sets for a MAPPER method (`pass.abc` / `pass.synth`). pass.synth
-// registers ABC's mapping labels (Pass_abc::add_mapping_labels), so `abc.*`
-// tuning applies to both mappers; an explicit `pass.synth.*` wins. Both the
+// merge_sets for a MAPPER method (lhd.hpp kMappers). pass.usyn registers
+// ABC's mapping labels (Pass_abc::add_mapping_labels), so `abc.*` tuning
+// applies to both mappers; an explicit `pass.usyn.*` wins. Both the
 // fused `lhd synth` and the standalone `lhd pass <mapper>` go through here so
 // the precedence rule cannot drift between the two entry points.
 void              merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels);
@@ -393,6 +441,8 @@ bool              lnastfmt_enabled(const Options& opts);
 // default only in debug builds (same policy as lnast_fmt).
 bool              verify_frozen_enabled(const Options& opts);
 bool              compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
+bool              satopt_requested(const Options& opts);  // explicit setting overrides the command default
+bool              satopt_during_compile(const Options& opts);
 bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);

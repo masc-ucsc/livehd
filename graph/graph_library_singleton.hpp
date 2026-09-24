@@ -52,4 +52,13 @@ public:
   };
 };
 
+// Copies module `name` from `src` into `dst` (replacing a stale one), and
+// every module its body calls, transitively, that `dst` lacks: a body is
+// copied, a body-less declaration (a property marker such as lgassert, a
+// blackbox) is declared again with the same pins. hhds::GraphLibrary::copy_from
+// copies one module, and a Sub naming a module `dst` lacks breaks every later
+// reader of the saved library. False when `src` has no module `name` or a
+// copy fails.
+[[nodiscard]] bool copy_with_callees(hhds::GraphLibrary& dst, hhds::GraphLibrary& src, std::string_view name);
+
 }  // namespace livehd

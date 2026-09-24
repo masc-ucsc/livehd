@@ -11,7 +11,7 @@ The current cones defaults are `mode=cones`, `ctrl_cones=true`,
 **2026-09-22:** synth-only color knobs are spelled `pass.color.synth.<flag>`
 (`synth_alg` is now `pass.color.synth.mode`), and the stop_* defaults come from
 a mapper profile: `pass.color.synth.mapper=abc` (the default) cuts at every
-`stop_*` operator; `=synth` (set by `lhd synth --set synth.mapper=synth`)
+`stop_*` operator; `=usyn` (set by `lhd synth --set synth.mapper=usyn`)
 turns every `stop_*` off so a color runs register to register. An explicit
 `stop_*` setting overrides either profile.
 Primary-input sharing now counts as cone overlap. See the
@@ -352,7 +352,7 @@ today, for the record:
 | `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |
 | `pass.color.synth.mode` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`mode`) |
 | `pass.color.synth.mapper` | `abc` (`lhd synth` sets it from `synth.mapper`); picks the `stop_*` default profile | `pass_color.cpp` (`mapper`) |
-| `pass.color.synth.stop_{mux,arith,cmp,shift}` | `true` under `mapper=abc`, `false` under `mapper=synth`; an explicit value wins | `pass_color.cpp` (`stop_*`) |
+| `pass.color.synth.stop_{mux,arith,cmp,shift}` | `true` under `mapper=abc`, `false` under `mapper=usyn`; an explicit value wins | `pass_color.cpp` (`stop_*`) |
 | `pass.color.synth.min_ge` | `500` GE (`synth`/`pipe` only; `cones` does not honour it) | `pass_color.cpp` (`min_ge`) |
 | `pass.color.synth.max_ge` | `5000` synthesis GE (`mode=synth` \| `pipe` only) | `pass_color.cpp` (`max_ge`) |
 | `pass.color.synth.max_gate` | `30000` PREDICTED AIG (`mode=cones` -- the shipped default) | `pass_color.cpp` (`max_gate`) |
