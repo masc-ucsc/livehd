@@ -17,14 +17,19 @@
 #      through one bits-wide Mux per lane.
 #        - N=32 (256 storage bits, the reported tile): maps through the hermetic
 #          Liberty; no memory instance survives; 256 DFF cells; and two guards
-#          pinned at 2x their measured value so the fold cannot silently grow
-#          back: ABC input nodes <= 2 per storage bit (measured 359 = 1.4/bit;
-#          the old fold handed ABC 26,434 = 103/bit for the resetless tile) and
-#          mapped comb cells <= 12 per storage bit (measured 2,674 = 10.4/bit:
-#          ~5 for the reset+enable write muxes, ~5 for the two 32:1 read
-#          ports; in an ASAP7 lib that write path is ONE O2A1O1I/AO22 per bit,
-#          the report's "<= 1 mux-class cell per storage bit" -- the hermetic
-#          2-input lib spells a 2:1 mux as 3 NAND2 + 1 INV).
+#          pinned about 1.25x above their measured value so the fold cannot
+#          silently grow back: memory-region ABC input nodes <= 3 per storage
+#          bit (measured 617 = 2.4/bit; the old fold handed ABC 26,434 =
+#          103/bit for the resetless tile) and mapped comb cells <= 12 per
+#          storage bit (measured 2,484 = 9.7/bit: the reset+enable write muxes
+#          plus the two 32:1 read ports; in an ASAP7 lib that write path is ONE
+#          O2A1O1I/AO22 per bit, the report's "<= 1 mux-class cell per storage
+#          bit" -- the hermetic 2-input lib spells a 2:1 mux as 3 NAND2 + 1
+#          INV). pass.abc runs no satopt, so each entry's reset and data write
+#          stay two ports (cgen_memory_2rd_64wr). The synthesis-profile port
+#          merge used to halve the memory region (329 nodes), but it moved the
+#          muxing into the parent and raised the total to 3,066 cells, so the
+#          cell count is the guard that tracks area.
 #        - N=8: the same shape LEC'd against the compiled source with gensim
 #          cell models through the default LEC engine, using both graph and
 #          emitted-Verilog inputs. N=8 keeps the array proof tractable.
@@ -193,8 +198,8 @@ PYCODE
 )
 gates=$(metric gates "$D/abc.json")
 [ -n "$nodes" ] && [ -n "$gates" ] || fail "tile32: no qor in $(cat "$D/abc.json")"
-[ "$nodes" -le $((2 * bits)) ] \
-  || fail "tile32: $nodes ABC input nodes for $bits storage bits (> 2/bit): the memory implementation grew beyond its node budget"
+[ "$nodes" -le $((3 * bits)) ] \
+  || fail "tile32: $nodes ABC input nodes for $bits storage bits (> 3/bit): the memory implementation grew beyond its node budget"
 [ "$gates" -le $((12 * bits)) ] \
   || fail "tile32: $gates mapped cells for $bits storage bits (> 12/bit): write path is no longer one mux per lane"
 ncells=$(cells "$D/netv")
@@ -276,11 +281,17 @@ echo "PASS: memory_max_bits=0 lifts the size limit; malformed memory/memory_max_
 D="$W/eqt"
 map_wait "$D"
 [ "$(cells "$D/netv")" -eq 0 ] || fail "eqt: a compare against a constant wider than its operand mapped to logic: $(cat "$D/netv/"*.v)"
-# Both outputs read constant 0: ABC's constant net, or (when satopt proved
-# the compares constant before mapping) a zero literal.
+# Both outputs read constant 0: a zero literal (when satopt proved the
+# compares constant before mapping), or a net driven by ABC's `_const0_` cell
+# (`_const0_ g0__const0_(.z(g0__const0__o1));` ... `y = g0__const0__o1;`).
 for out in y z; do
-  cat "$D/netv/"*.v | grep -qE "(assign +)?$out *= *(_const0_|\('sb0\)|1'b0|'sb0)" \
-    || fail "eqt: expected output $out driven by constant 0: $(cat "$D/netv/"*.v)"
+  rhs=$(cat "$D/netv/"*.v | sed -nE "s/^ *(assign +)?$out *= *([^;]*);.*/\2/p" | head -1)
+  case "$rhs" in
+    "('sb0)" | "1'b0" | "'sb0") ;;
+    "") fail "eqt: output $out is never assigned: $(cat "$D/netv/"*.v)" ;;
+    *) cat "$D/netv/"*.v | tr -d '\n' | grep -qE "_const0_ +[A-Za-z0-9_]+ *\( *\.z\( *$rhs *\)" \
+         || fail "eqt: expected output $out driven by constant 0, got '$rhs': $(cat "$D/netv/"*.v)" ;;
+  esac
 done
 echo "PASS: x[3:0] == 8'd100 maps to constant 0"
 
