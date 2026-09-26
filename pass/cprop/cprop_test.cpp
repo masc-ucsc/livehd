@@ -7,6 +7,7 @@
 #include <functional>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "bitwidth.hpp"
 #include "enableopt.hpp"
@@ -470,6 +471,72 @@ TEST(CpropMux, NonzeroConstantConditionSelectsTrueArm) {
       EXPECT_EQ(drivers.front(), std::string_view(literal) == "0" ? false_arm : true_arm) << literal;
     }
   }
+}
+
+// A yosys bmuxmap SRAM read tree over a non-power-of-two memory: the pair of
+// missing entries (30, 31 of a 30-entry array) reads two UNDRIVEN wires, which
+// yosys2lg imports as input-less placeholder Or nodes. The mux over them shares
+// its select (addr[0]) with every sibling pair mux. Whatever cprop does with
+// the undefined pair, the defined pair must keep selecting on addr[0].
+TEST(CpropMux, UndrivenArmsDoNotDropASharedSelect) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_undriven_mux_arms");
+  auto  io     = lib.create_io("undriven_arms");
+  io->add_input("ra", 1);
+  io->set_bits("ra", 5);
+  io->set_unsign("ra", true);
+  io->add_input("d0", 2);
+  io->set_bits("d0", 32);
+  io->set_unsign("d0", true);
+  io->add_input("d1", 3);
+  io->set_bits("d1", 32);
+  io->set_unsign("d1", true);
+  io->add_output("y", 4);
+  io->set_bits("y", 32);
+  auto g    = io->create_graph();
+  auto ra   = g->get_input_pin("ra");
+  auto sel0 = gu::create_get_mask(*g, ra, 0, 1).create_driver_pin(0);
+  auto sel1 = gu::create_get_mask(*g, ra, 1, 2).create_driver_pin(0);
+  gu::set_ubits(sel0, 1);
+  gu::set_ubits(sel1, 1);
+  auto mux2 = [&](const hhds::Pin_class& s, const hhds::Pin_class& a, const hhds::Pin_class& b) {
+    auto m = gu::create_typed_node(*g, Ntype_op::Mux, 32);
+    m.create_sink_pin(0).connect_driver(s);
+    m.create_sink_pin(1).connect_driver(a);
+    m.create_sink_pin(2).connect_driver(b);
+    return m.create_driver_pin(0);
+  };
+  auto u0 = gu::create_typed_node(*g, Ntype_op::Or, 32).create_driver_pin(0);  // undriven placeholders
+  auto u1 = gu::create_typed_node(*g, Ntype_op::Or, 32).create_driver_pin(0);
+  auto m0 = mux2(sel0, g->get_input_pin("d0"), g->get_input_pin("d1"));
+  auto m1 = mux2(sel0, u0, u1);
+  mux2(sel1, m0, m1).connect_sink(g->get_output_pin("y"));
+  optimize_state(g);
+
+  // y must still depend on ra[0] (through the d0/d1 pair).
+  bool                          reaches_d1 = false;
+  std::vector<hhds::Node_class> stack{g->get_output_pin("y").get_driver_pin().get_master_node()};
+  std::unordered_set<uint64_t>  seen;
+  while (!stack.empty()) {
+    auto n = stack.back();
+    stack.pop_back();
+    if (!seen.insert(static_cast<uint64_t>(n.get_class_index().value)).second) {
+      continue;
+    }
+    for (const auto& sink : n.inp_sorted_pins()) {
+      auto d = sink.get_driver_pin();
+      if (d.is_invalid()) {
+        continue;
+      }
+      if (d == g->get_input_pin("d1")) {
+        reaches_d1 = true;
+      }
+      if (!d.is_const() && !gu::is_graph_input_pin(d)) {
+        stack.push_back(d.get_master_node());
+      }
+    }
+  }
+  EXPECT_TRUE(reaches_d1) << "the defined pair lost its addr[0] select (d1 unreachable)";
 }
 
 }  // namespace

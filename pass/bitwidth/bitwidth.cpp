@@ -466,9 +466,21 @@ void Bitwidth::process_mux(hhds::Node_class& node, Inp_pins& inp_edges) {
       // cgen keys the emitted comparison's signedness off exactly that pin
       // (cgen_verilog.cpp `signed_compare = !is_unsign(dpin)`), so an unsigned
       // compare silently became a signed one.
-      const auto     n_data = inp_edges.size() - 1;
-      Bitwidth_range bw2(0, n_data ? static_cast<int64_t>(n_data) - 1 : 0);
-      adjust_bw(e.get_driver_pin(), bw2);
+      //
+      // With fewer than two CONNECTED data arms (the others undriven: yosys2lg
+      // imports an undriven wire as an input-less placeholder Or, which folds
+      // away) the envelope degenerates to [0..0]. That says nothing about the
+      // selector's VALUE, yet adjust_bw folds any min==max range into a
+      // constant for EVERY consumer of the driver: the select of a bmuxmap
+      // SRAM read tree (addr[0], shared by every pair mux) was replaced by 0
+      // in all of them because the one pair mux over the missing entries of a
+      // non-power-of-two array had no data arms left. Only a real envelope
+      // is a hint worth recording.
+      const auto n_data = inp_edges.size() - 1;
+      if (n_data >= 2) {
+        Bitwidth_range bw2(0, static_cast<int64_t>(n_data) - 1);
+        adjust_bw(e.get_driver_pin(), bw2);
+      }
       continue;
     }
     auto it = bwmap.find(e.get_driver_pin().get_class_index());
