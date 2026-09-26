@@ -32,7 +32,9 @@
 # Broken twins
 # (wrong enable polarity, swapped D, a dropped clear/reset, an ungated
 # enable) must refute, and a library without latch cells keeps the latches
-# native with the precise reason.
+# native with the precise reason -- the active-low ones enabled by a mapped
+# inverter cell of the clock, which the graph LEC must see through (prove; its
+# wrong-polarity / swapped-D twins refute).
 set -u
 
 MAPPER="${MAPPER:-abc}"
@@ -132,15 +134,16 @@ p1=$!
 run_lib qn &
 p2=$!
 # Fallback: a library without latch cells keeps every latch native, naming why.
-# (lgcheck only: the native netlist drives the active-low latches' enable from
-# a mapped inverter of the clock, which the graph LEC falsely refutes -- the
-# same netlist the pre-latch-cell flow wrote; the cell mapping above avoids it
-# by taking the clock natively on an active-low cell.)
+# The native active-low latches (b, p1) are enabled by a mapped INVERTER CELL
+# of the clock: the graph LEC must see through it (pass/single_edge/proof_prep
+# inline_clock_lib_cells walks a latch's enable) and prove, where it used to
+# read the enable as data and falsely refute.
 (
-  synth "$W/none" "$PWD/lhd/tests/abc_icg_q.lib" abc_latch_mix "$SRC" "$SRC" skip prove
-  grep -q '"latch-native".*latch(es) kept native — the Liberty has no usable transparent latch cell' "$W/none/synth.log" \
+  synth "$W/none/mix" "$PWD/lhd/tests/abc_icg_q.lib" abc_latch_mix "$SRC" "$SRC" prove prove
+  grep -q '"latch-native".*latch(es) kept native — the Liberty has no usable transparent latch cell' "$W/none/mix/synth.log" \
     || fail "none: the latches must stay native, naming the missing latch cell"
-  grep -q "always_latch" "$W/none/net.v" || fail "none: the latches must stay native"
+  grep -q "always_latch" "$W/none/mix/net.v" || fail "none: the latches must stay native"
+  grep -q "^INVx1 .*" "$W/none/mix/net.v" || fail "none: expected a mapped inverter cell (the enable of b/p1)"
 ) &
 p3=$!
 wait "$p1" || exit 1
@@ -177,7 +180,7 @@ N="$W/qn/mix/net.v"
 N="$W/qn/rst/net.v"
 [ "$(count "$N" '^DHLx1 ')" = 4 ] || fail "qn: the reset latch must fold into 4 plain DHLx1: $(grep '^D' "$N")"
 echo "PASS: ASAP7-shaped latch cells (QN low latch with D inverted, resets folded), graph LEC proven, lgcheck not refuted"
-echo "PASS: fallback (a library without latch cells) keeps the latches native with the precise reason (lgcheck proves)"
+echo "PASS: fallback (a library without latch cells) keeps the latches native with the precise reason (graph LEC and lgcheck prove)"
 
 # neg <tag> <top> <name> <sed> <cvc5|lgcheck> [prp]: the source with one latch
 # broken must refute against the <tag>/<top> netlist.
@@ -215,10 +218,19 @@ neg q abc_latch_rst reset "/if (reset)/d; s/else if (en)/if (en)/" lgcheck &
 p5=$!
 neg qn abc_latch_gated ungated "s/always_latch if (gclk) g = d;/always_latch if (clk) g = d;/" lgcheck &
 p6=$!
+# the native fallback: seeing through the inverter-cell enable must not hide a
+# wrong polarity or a wrong D from the graph LEC
+neg none abc_latch_mix invpol "s/always_latch if (!clk) b = d ^ e;/always_latch if (clk) b = d ^ e;/" cvc5 &
+p7=$!
+neg none abc_latch_mix invswapd "s/always_latch if (!clk) p1 = d;/always_latch if (!clk) p1 = e;/" cvc5 &
+p8=$!
 wait "$p1" || exit 1
 wait "$p2" || exit 1
 wait "$p3" || exit 1
 wait "$p4" || exit 1
 wait "$p5" || exit 1
 wait "$p6" || exit 1
+wait "$p7" || exit 1
+wait "$p8" || exit 1
 echo "PASS: a wrong enable polarity / dropped clear (cvc5) and a swapped D / dropped reset / ungated enable (lgcheck) all refute"
+echo "PASS: behind the fallback's inverter-cell enable, a wrong polarity and a swapped D refute (cvc5)"

@@ -42,7 +42,8 @@ int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*
 }
 
 // Clock analysis runs before the encoder's ordinary combinational --lib
-// expansion, so expose modeled gates on clock cones before scheduling edges.
+// expansion, so expose modeled gates on clock cones (and buffer/inverter chains
+// on latch enables) before scheduling edges.
 void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* graph) {
   if (graph == nullptr || sub_lib.empty()) {
     return;
@@ -66,16 +67,63 @@ void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& 
     }
   }
   std::vector<hhds::Pin_class> pending;
+  std::vector<hhds::Pin_class> latch_enables;
   for (auto node : graph->body().nodes()) {
     const auto op = livehd::graph_util::type_op_of(node);
     if (op == Ntype_op::Memory) {
       livehd::graph_util::for_each_memory_clock_driver(node, [&](auto pin) { pending.push_back(pin); });
+    } else if (op == Ntype_op::Latch) {
+      latch_enables.push_back(livehd::graph_util::get_driver_of_sink_name(node, "enable"));
     } else if (livehd::graph_util::is_type_register(node)) {
       pending.push_back(livehd::graph_util::get_driver_of_sink_name(node, "clock_pin"));
     }
   }
   absl::flat_hash_set<hhds::Class_index> seen;
   std::vector<hhds::Node_class>          cells;
+  // A latch's gate IS its `enable` (its `clock_pin` is reserved and never
+  // driven), so seeding only `clock_pin` left a mapped `INVx1(clk)` on an
+  // active-low latch's enable an opaque Sub: the commit-class walk then saw a
+  // DATA-gated latch on the netlist side against the source's `!clk`
+  // CLOCK-gated one, slotted the two differently, and REFUTED an equivalent
+  // pair (abc_latch_mix `b`/`p1` against a Liberty with no latch cell).
+  //
+  // Only the UNARY chain is exposed: buffer/inverter cells and the one-operand
+  // shaping nodes between them, exactly what `control_root` peels. A latch's
+  // enable is often a data cone (a folded reset, `rst | clk`), and inlining a
+  // multi-input gate there re-spells it (NOR2 = `~a & ~b` reads as a gated
+  // `~clk`) into a shape the source side never has, moving the latch to a
+  // different commit class than its reference twin.
+  absl::flat_hash_set<hhds::Class_index> queued;
+  for (auto pin : latch_enables) {
+    absl::flat_hash_set<hhds::Class_index> walked;
+    while (!pin.is_invalid() && !pin.is_const() && !livehd::graph_util::is_graph_input_pin(pin)) {
+      auto node = pin.get_master_node();
+      if (!walked.insert(node.get_class_index()).second || livehd::graph_util::is_type_register(node)) {
+        break;
+      }
+      const bool is_sub = livehd::graph_util::type_op_of(node) == Ntype_op::Sub;
+      if (is_sub && !combinational.contains(node.get_subnode_gid())) {
+        break;
+      }
+      hhds::Pin_class next;
+      int             n_drivers = 0;
+      for (auto sink : node.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          if (!drv.is_const()) {
+            next = drv;
+            ++n_drivers;
+          }
+        }
+      }
+      if (n_drivers != 1) {
+        break;  // a multi-operand node is the cone's root, not a polarity step
+      }
+      if (is_sub && queued.insert(node.get_class_index()).second) {
+        cells.push_back(node);
+      }
+      pin = next;
+    }
+  }
   while (!pending.empty()) {
     const auto pin = pending.back();
     pending.pop_back();
@@ -90,7 +138,9 @@ void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& 
       if (!combinational.contains(node.get_subnode_gid())) {
         continue;
       }
-      cells.push_back(node);
+      if (queued.insert(node.get_class_index()).second) {
+        cells.push_back(node);
+      }
     }
     for (auto sink : node.inp_sorted_pins()) {
       // PLURAL: a compact loop's carry-in sink holds two drivers
