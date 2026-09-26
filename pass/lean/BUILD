@@ -7,10 +7,12 @@ cc_library(
     name = "pass_lean",
     srcs = [
         "pass_lean.cpp",
+        "verified-compiler.cpp",
     ],
     hdrs = [
         "design_cert_export.hpp",
         "pass_lean.hpp",
+        "verified-compiler.hpp",
     ],
     copts = COPTS,
     includes = ["."],
