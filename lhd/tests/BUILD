@@ -1473,6 +1473,19 @@ sh_test(
     ],
 )
 
+# A false word-level loop through two pure-comb instances (arbiter
+# request/can_grant handshake): bitwidth must bound the per-element output
+# reassembly chain, and abc/usyn must map it LEC-equivalently.
+sh_test(
+    name = "lhd_synth_false_loop_test",
+    size = "small",
+    srcs = ["lhd_synth_false_loop_test.sh"],
+    data = _FLOW_DATA + [
+        "synth_false_loop_arb.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2c-color: every coloring algorithm (acyclic|cgen|synth|path|mincut|flat) +
 # continuous + clear run through the lhd CLI on a real design.
 sh_test(

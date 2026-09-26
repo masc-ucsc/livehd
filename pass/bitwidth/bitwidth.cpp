@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "bitwidth_range.hpp"
@@ -23,6 +24,7 @@
 #include "node_util.hpp"
 #include "pass_bitwidth.hpp"
 #include "perf_tracing.hpp"
+#include "split_selfref.hpp"
 
 // "sbits not constrained/known" sentinel. Bits are a plain int32 attr now
 // (livehd::attrs::bits); the old packed-format width cap is gone.
@@ -1849,8 +1851,36 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
     // Forward-iterate nodes, collect work.
     pending_added_nodes.clear();
     std::vector<hhds::Node_class> to_visit;
-    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-      to_visit.push_back(node);
+    if (n_iterations == 0) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+        to_visit.push_back(node);
+      }
+    } else {
+      // A re-run means the first walk met an operand before its driver. On an
+      // acyclic body hhds's forward order never does that, so the usual cause
+      // is a FALSE word-level loop through a pure-comb `Sub` (a parent wiring
+      // one instance's output back into another's input, e.g. an arbiter's
+      // request/can_grant handshake). hhds does not treat such a Sub as a cut,
+      // so its whole SCC -- plus everything downstream of it -- lands in the
+      // raw-storage-index tail with no dependency check. A reader that builds
+      // a chain outermost-first (slang's per-element output reassembly) then
+      // presents it consumer-before-producer, and every whole-graph pass only
+      // resolved one link of it: a 6-lane chain outran the 3-iteration budget
+      // and left the or/shl reassembly unbounded, which pass.abc then refused
+      // to materialize. For bitwidth a Sub's outputs come from its DECLARED
+      // interface, never from its inputs, so breaking the cycle at a Sub is
+      // exact. comb_emit_order does precisely that (and is the same stable
+      // storage-index Kahn as hhds on an acyclic body); state/Memory are
+      // sources, visited first as with Cut_placement::first.
+      std::vector<hhds::Node_class> comb_order;
+      livehd::graph_util::comb_emit_order(g, comb_order);
+      absl::flat_hash_set<hhds::Node_class> placed(comb_order.begin(), comb_order.end());
+      for (auto node : g->body().nodes()) {
+        if (!placed.contains(node)) {
+          to_visit.push_back(node);
+        }
+      }
+      to_visit.insert(to_visit.end(), comb_order.begin(), comb_order.end());
     }
     // Also include any deferred-added nodes from prior iterations.
     for (size_t i = 0; i < to_visit.size(); ++i) {
