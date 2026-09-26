@@ -6,10 +6,16 @@ load("//tools:copt_default.bzl", "COPTS")
 cc_library(
     name = "pass_lean",
     srcs = [
-        "pass_lean.cpp",
+        # One target, several TUs: the Eprp plugin registration lives in
+        # pass_lean.cpp and must stay single, but each DIRECTION gets its own
+        # translation unit so a change to one cannot reach another.
+        "IR_Semantics_pass.cpp",  # Direction 2: the DesignCert certificate
+        "lean_common.cpp",        # shared graph -> certificate machinery
+        "pass_lean.cpp",          # Eprp surface + legacy fast-model emission
     ],
     hdrs = [
         "design_cert_export.hpp",
+        "lean_common.hpp",
         "pass_lean.hpp",
     ],
     copts = COPTS,

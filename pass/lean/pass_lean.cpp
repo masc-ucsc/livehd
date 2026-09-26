@@ -6,6 +6,8 @@
 //  incrementally.
 
 #include "pass_lean.hpp"
+
+#include "lean_common.hpp"
 #include "design_cert_export.hpp"
 
 #include <algorithm>
@@ -119,61 +121,11 @@ std::string sanitize_lean(std::string_view name) {
   return out;
 }
 
-using Node     = hhds::Node_class;
-using Node_pin = hhds::Pin_class;
-using Edge     = hhds::Edge_class;
+using namespace livehd::lean_ir;  // shared types + graph helpers (lean_common.hpp)
+
 namespace lc   = livehd::latch_contract;
 namespace gu   = livehd::graph_util;
 
-struct Emit_error : std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
-
-uint32_t node_id(const Node& node) { return static_cast<uint32_t>(node.get_debug_nid()); }
-
-Node pin_node(const Node_pin& pin) { return pin.get_master_node(); }
-
-Ntype_op node_op(const Node& node) { return livehd::graph_util::type_op_of(node); }
-
-bool node_is_flop(const Node& node) { return livehd::graph_util::is_type_flop(node); }
-
-bool node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory; }
-
-bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
-
-bool pin_is_const(const Node_pin& pin) { return livehd::graph_util::is_const_pin(pin); }
-
-livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
-  auto edges = node.inp_edges();
-  std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
-    const auto ap = a.sink.get_port_id();
-    const auto bp = b.sink.get_port_id();
-    if (ap != bp) {
-      return ap < bp;
-    }
-    return a.driver.get_class_index().value < b.driver.get_class_index().value;
-  });
-  return edges;
-}
-
-std::string sink_pin_name(const Edge& edge) {
-  const auto sink_node = pin_node(edge.sink);
-  return std::string(Ntype::get_sink_name(node_op(sink_node), edge.sink.get_port_id()));
-}
-
-uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(livehd::graph_util::bits_of(pin)); }
-
-uint32_t raw_node_width(const Node& node) { return raw_pin_width(node.create_driver_pin(0)); }
-
-Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::hydrate_const(pin); }
-
-Dlop node_const_value(const Node& node) { return livehd::graph_util::hydrate_const(node); }
-
-bool node_output_is_signed(const Node& node) {
-  auto n    = node;
-  auto dpin = n.create_driver_pin(0);
-  return !dpin.is_invalid() && !livehd::graph_util::is_unsign(dpin);
-}
 
 std::string make_field_name(std::string_view role, std::string_view rtl_name, absl::flat_hash_set<std::string>& used) {
   std::string base = std::string(role) + sanitize_lean(rtl_name);
@@ -187,104 +139,7 @@ std::string make_field_name(std::string_view role, std::string_view rtl_name, ab
   return name;
 }
 
-struct Memory_port_info {
-  size_t   port_id = 0;
-  bool     rdport  = false;
-  Node_pin addr;
-  Node_pin din;
-  Node_pin enable;
-  Node_pin clock;
-  uint32_t driver_pid = 0;  // read-output driver pin id, valid only for rdport
-};
 
-struct Memory_info {
-  Node                          node;
-  uint32_t                      nid        = 0;
-  std::string                   field;
-  std::string                   raw_name;
-  uint32_t                      bits       = 0;
-  uint32_t                      addr_width = 1;
-  uint64_t                      size       = 0;
-  uint32_t                      wensize    = 0;
-  int64_t                       type       = 0;
-  // Read-during-write forwarding MATRIX (graph/cell.cpp pid 5), NOT a bool: bit
-  // (r * n_write_ports + w) set => read ordinal r sees write ordinal w's new data
-  // on a same-cycle same-address collision.  `fwd_known` is false when the pin is
-  // non-constant or the matrix does not fit an i64; the emitter then refuses any
-  // memory where the policy is observable (>=1 read and >=1 write port) rather
-  // than silently assuming read-first.
-  int64_t                       fwd        = 0;
-  bool                          fwd_known  = true;
-  int64_t                       posclk     = 1;
-  // ordering="none" (graph/cell.cpp pid 15): is ANY (read,write) collision
-  // window undefined? Kept as a bool, not the matrix — the emitter refuses the
-  // whole memory on the first set bit, and a wide matrix does not fit an i64.
-  bool                          undef      = false;
-  std::vector<Memory_port_info> ports;
-  std::vector<size_t>           read_ports;
-  std::vector<size_t>           write_ports;
-  bool                          sync = false;                   // type == 1 (registered read data)
-  std::map<size_t, std::string> read_reg_field;                 // port_id -> st_ read-data register field (sync only)
-
-  // Initialization / whole-array pins (graph/cell.cpp pids 11..14).  RECORDED
-  // during the pin walk and CLASSIFIED after it: the strict ROM test needs the
-  // read/write port split, and `memory_policy_summary` needs it too -- reporting
-  // from inside the walk printed `rdports=0 wrports=0 addr_width=1` (struct
-  // defaults) for memories that in fact have a read port, because a ROM's port
-  // pins sit at raw pids 0/2/4/10, all BELOW `init` at 11.
-  Node_pin init_pin;
-  Node_pin update_pin;
-  Node_pin update_enable_pin;
-  Node_pin bulk_reset_pin;
-
-  // Immutable ROM: `init` is a constant AND no write port is active AND `update`
-  // is not driven AND the type is one whose read semantics we model.  A WRITABLE
-  // initialized memory is RAM-with-initial-contents, which is a different thing
-  // and is refused rather than silently treated as constant.
-  bool                     is_rom = false;
-  std::vector<std::string> rom_contents;  // `size` entries, each `bits` wide, entry 0 first
-};
-
-struct LeanCtx {
-  hhds::Graph* g = nullptr;
-  std::string  top_name;
-  std::string  base_name;
-  bool         strict = true;
-  // `formal.lean.mode=verified_compiler`.  Read by parse_memory_info: features
-  // whose Lean counterpart exists ONLY in the verified-compiler model (ROM
-  // contents, async reset, a nonzero reset value) are accepted there and still
-  // refused on the legacy path, where the corresponding state is unconstrained.
-  bool         verified_compiler = false;
-  size_t       max_width = 1024;
-
-  absl::flat_hash_set<std::string> used_fields;
-
-  std::map<std::string, std::string> input_field;
-  std::map<std::string, uint32_t>    input_width;
-  std::map<std::string, uint32_t>    input_source_id;
-
-  std::map<std::string, std::string> output_field;
-  std::map<std::string, uint32_t>    output_width;
-
-  std::map<uint32_t, std::string> flop_field;
-  std::map<uint32_t, uint32_t>    flop_width;
-
-  std::map<uint32_t, Memory_info> memory_info;
-  // (memory nid << 32 | read driver_pid) -> certificate id of that read port's
-  // Op_MemRead node.  Populated by cert_memory_expand; read by driver_expr, which
-  // in bridge mode must name the factored `fv` def (there is no let-chain to bind
-  // `n_<mem>_p<pid>`).
-  std::map<uint64_t, uint32_t>    mem_read_fv;
-
-  // Fast-view bridge (step 5) emission: when bridge_fv_mode is set, driver_expr
-  // references an internal node's value as a factored top-level def
-  // `<base>_fv<id><bridge_fv_args>` (e.g. " i" or " i s") instead of the local
-  // let name `n_<id>`, so φ and the per-node have-chain can name each value.
-  bool         bridge_fv_mode = false;
-  std::string  bridge_fv_args;
-};
-
-[[noreturn]] void fatal(const LeanCtx& /*ctx*/, const std::string& msg) { throw Emit_error("[ERROR] pass.lean: " + msg); }
 
 void check_width(const LeanCtx& ctx, const Node& node, uint32_t w, std::string_view what) {
   if (w == 0) {
@@ -796,55 +651,7 @@ std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v) {
   return lean_int_literal(v.to_decimal_string());
 }
 
-std::string input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin) {
-  // pin_name_of resolves a graph-input pin's declared port name directly (via
-  // the graph's IO maps); no need to identity-match against get_input_pin.
-  auto pname = std::string(livehd::graph_util::pin_name_of(pin));
-  if (!pname.empty() && ctx.input_field.contains(pname)) {
-    return pname;
-  }
-  return {};
-}
 
-// Follow width-only reshaping back to the pin that really drives a signal.
-//
-// After yosys + cprop a top-level port does not reach its consumers directly: it
-// arrives through resize nodes -- an arity-1 Or, or a Get_mask against an
-// all-ones constant mask (get_mask(a,-1) == zext(a), per the LiveHD spec).  Both
-// preserve the value, so for the purpose of asking "is this signal a primary
-// input?" they are transparent.  Testing the immediate driver instead reports
-// "computed inside the design" for what is plainly a port.
-//
-// Only single-input reshaping is followed; anything else stops the walk, and a
-// bounded loop count guards against a malformed graph.
-Node_pin resolve_resize_chain(const Node_pin& start) {
-  Node_pin cur = start;
-  for (int guard = 0; guard < 32; ++guard) {
-    if (cur.is_invalid() || pin_is_input(cur) || pin_is_const(cur)) {
-      return cur;
-    }
-    auto n  = pin_node(cur);
-    auto op = node_op(n);
-    auto es = inp_edges_ordered(n);
-    if (op == Ntype_op::Or && es.size() == 1) {
-      cur = es[0].driver;  // arity-1 Or is the emitter's resize
-      continue;
-    }
-    if (op == Ntype_op::Get_mask && es.size() == 2) {
-      // Transparent only when the mask is a constant all-ones: get_mask(a,-1) is zext(a).
-      const auto& mask = es[1].driver;
-      if (pin_is_const(mask)) {
-        auto v = pin_const_value(mask);
-        if (v.is_just_i64() && v.to_just_i64() == -1) {
-          cur = es[0].driver;
-          continue;
-        }
-      }
-    }
-    return cur;
-  }
-  return cur;
-}
 
 std::string driver_expr_at(const LeanCtx& ctx, const Node_pin& dpin, uint32_t expected_w);
 
@@ -1430,63 +1237,6 @@ std::string nat_list(const std::vector<uint32_t>& xs) {
   return oss.str();
 }
 
-struct CertBuild {
-  std::set<uint32_t> source_ids;
-  std::map<uint32_t, std::string> source_exprs;
-  // Fast-view bridge (step 5): per-source `bvenc`-able BitVec leaf + kind, so the
-  // emitter can generate `<base>_src<id> : sourceEnv id = bvenc <leaf>` facts.
-  std::map<uint32_t, std::string> source_leaf;  // BitVec expr: i.f / s.f / BitVec.ofInt w c
-  std::map<uint32_t, int>         source_kind;  // 0 = input, 1 = const, 2 = flop
-  std::map<uint32_t, uint32_t>    source_width; // BitVec width of the source leaf
-  // Verified-compiler exporter: the constant's Lean `Int` text, kept verbatim so
-  // `SourceDesc.const` need not re-parse it out of `source_exprs`.
-  std::map<uint32_t, std::string> source_const_int;
-  // ROM tables, by array-source id: `size` entries, each `bits` wide, entry 0
-  // first.  Source kind 4 (an IMMUTABLE table) as opposed to kind 3 (a mutable
-  // array image carried in RuntimeState).
-  std::map<uint32_t, std::vector<std::string>> source_rom_contents;
-  // Synthetic read-data registers of SYNC memories, by their source id ->
-  // (width, cert id of the next value).  A sync memory is not stateless even
-  // when its table is immutable: the registered read port IS state, and the
-  // certificate already models it as `if read_enable then table[addr] else old`
-  // (an Op_MuxBool).  These become ordinary FlopDescs in the DesignCert.
-  std::map<uint32_t, std::pair<uint32_t, uint32_t>> sync_read_regs;
-  // ...and the memory each one belongs to (source id -> memory nid), so the
-  // register inherits its memory's CLOCK ordinal in the certificate.
-  std::map<uint32_t, uint32_t> sync_read_owner;
-  uint32_t next_synth_id = 1000000000;
-
-  // ---- Memory decomposition (step 5 memory path) --------------------------
-  // A Memory node is multi-output (N read-data values plus the array next state)
-  // while NodeCert carries ONE width and ONE value, so a memory is decomposed
-  // into single-valued cert nodes -- see cert_memory_expand.  These maps let a
-  // consumer's cert_dep_id resolve a memory read-data pin, and let the bridge
-  // codegen tell a `.mem`-valued id from a `.bv`-valued one.
-  std::set<uint32_t>              mem_valued;   // cert ids whose CertVal is `.mem`
-  std::set<uint32_t>              mem_raw_reads; // Op_MemRead ids with a literal enable (sync raw read)
-  std::map<uint64_t, uint32_t>    mem_read_id;  // (mem nid<<32 | driver_pid) -> cert id
-  // Emitted-text side of the decomposition, keyed by cert id: the fast-model
-  // expression each synthetic node's `fv` def must carry.
-  std::map<uint32_t, std::string> synth_fv_expr;
-  std::map<uint32_t, std::string> synth_fv_type;
-};
-
-// Certificate ids of one memory node's decomposition.
-struct MemCertIds {
-  uint32_t                   array_src  = 0;  // source id: the committed array image
-  uint32_t                   next_chain = 0;  // all-writes chain tail (== array_src if write-less)
-  std::map<size_t, uint32_t> read_out;        // port_id -> id whose value is the port's read DATA
-  std::map<size_t, uint32_t> rdreg_src;       // port_id -> read-data register source id (sync only)
-  std::map<size_t, uint32_t> rdreg_next;      // port_id -> cert id of that register's next value
-};
-
-// Structured view of one emitted node certificate, captured for bridge codegen.
-struct CertNodeInfo {
-  uint32_t              nid = 0;
-  std::string           op_expr;   // e.g. "LGraphOp.Op_And"
-  uint32_t              width = 0;
-  std::vector<uint32_t> deps;
-};
 
 uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, uint32_t expected_w) {
   auto n = pin_node(pin);
@@ -2397,441 +2147,37 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // its correctness proof come from `Compiler.compileDesign`, proved once for all
   // designs.  See pass/lean/design_cert_export.hpp.
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // mode=verified_compiler: DIRECTION 2's certificate.
+  //
+  // The emitter itself lives in IR_Semantics_pass.cpp.  Everything above this
+  // line is the SHARED scan -- the topo walk, the `cert_node_expr` operator
+  // spellings, the memory decomposition -- which the legacy path below consumes
+  // too.  `Design_scan` is the whole of what crosses over: eighteen results, by
+  // reference.  Keeping that boundary narrow is what lets one direction change
+  // without reaching into another.
+  // ---------------------------------------------------------------------------
   if (verified_compiler) {
-    lean_design_cert::DesignIn din;
-
-    // Ordinals must match the runtime arrays: `RuntimeInput[k]`, `.flops[k]`,
-    // `.mems[k]`.  Both maps below are std::map, so the order is deterministic.
-    std::map<uint32_t, uint32_t> input_ordinal;   // source id -> input index
-    {
-      uint32_t k = 0;
-      for (const auto& kv : ctx.input_field) {
-        if (auto it = ctx.input_source_id.find(kv.first); it != ctx.input_source_id.end()) {
-          input_ordinal[it->second] = k++;
-        }
-      }
-    }
-    std::map<uint32_t, uint32_t> flop_ordinal;    // flop nid (== its Q source id) -> index
-    std::vector<uint32_t>        flop_order;
-    {
-      uint32_t k = 0;
-      for (const auto& kv : ctx.flop_field) {
-        flop_ordinal[kv.first] = k++;
-        flop_order.push_back(kv.first);
-      }
-      // A SYNC memory's registered read port is state, even when its table is
-      // immutable.  cert_memory_expand already models it as
-      // `if read_enable then table[addr] else old` (an Op_MuxBool over the
-      // register's own source), so it is an ordinary flop here -- appended after
-      // the real flops so `RuntimeState.flops` indices stay stable.  Without
-      // this the export fatals on "flop source id N has no flop ordinal",
-      // because these source ids are synthetic (>= 1e9), not LGraph nids.
-      for (const auto& kv : cert_build.sync_read_regs) {
-        flop_ordinal[kv.first] = k++;
-        flop_order.push_back(kv.first);
-      }
-    }
-    std::map<uint32_t, uint32_t> mem_ordinal;     // array_src id -> index
-    std::vector<uint32_t>        mem_order;
-    {
-      uint32_t k = 0;
-      for (const auto& kv : mem_cert_ids) {
-        // ROMs are immutable: no RuntimeState.mems entry, so no ordinal and no
-        // MemoryDesc.  Their contents ride SourceDesc.memConst instead.
-        if (ctx.memory_info.at(kv.first).is_rom) {
-          continue;
-        }
-        mem_ordinal[kv.second.array_src] = k++;
-        mem_order.push_back(kv.first);
-      }
-    }
-
-    for (auto sid : source_ids) {
-      lean_design_cert::SourceIn s;
-      s.id    = sid;
-      auto width_it = cert_build.source_width.find(sid);
-      if (width_it == cert_build.source_width.end()) {
-        fatal(ctx, "internal: certificate source id " + std::to_string(sid) + " has no width");
-      }
-      s.width = width_it->second;
-      auto kind_it = cert_build.source_kind.find(sid);
-      const int kind = kind_it == cert_build.source_kind.end() ? -1 : kind_it->second;
-      switch (kind) {
-        case 0:
-          s.kind    = lean_design_cert::SourceKind::Input;
-          if (auto it = input_ordinal.find(sid); it != input_ordinal.end()) {
-            s.ordinal = it->second;
-          } else {
-            fatal(ctx, "internal: input source id " + std::to_string(sid) + " has no input ordinal");
-          }
-          break;
-        case 1:
-          s.kind      = lean_design_cert::SourceKind::Const;
-          if (auto it = cert_build.source_const_int.find(sid); it != cert_build.source_const_int.end()) {
-            s.const_int = it->second;
-          } else {
-            fatal(ctx, "internal: constant source id " + std::to_string(sid) + " has no value");
-          }
-          break;
-        case 2: {
-          s.kind    = lean_design_cert::SourceKind::Flop;
-          if (auto it = flop_ordinal.find(sid); it != flop_ordinal.end()) {
-            s.ordinal = it->second;
-          } else {
-            fatal(ctx, "internal: flop source id " + std::to_string(sid) + " has no flop ordinal");
-          }
-          // `sid` IS the flop's nid (see cert_dep_id's flop arm).  An ASYNCHRONOUS
-          // reset changes Q immediately, so a combinational reader in the same
-          // cycle must already see the reset value -- a plain `flopQ`, which reads
-          // only the stored state, would give SYNCHRONOUS semantics.
-          if (flop_async.count(sid) != 0) {
-            // `sourceValue` runs before any slot exists, so it can only read
-            // `RuntimeInput`; the async reset must therefore be a primary input.
-            // That is the hardware pattern (`negedge rst_ni` off a top-level
-            // port).  Anything else is refused, never modeled as synchronous.
-            Node_pin rp;
-            if (auto it2 = flop_reset.find(sid); it2 != flop_reset.end()) {
-              rp = it2->second;
-            } else {
-              fatal(ctx, "flop n_" + std::to_string(sid)
-                             + " is marked `async` but drives no `reset_pin` net.");
-            }
-            // Follow width-only reshaping.  After cprop a top-level `rst_ni` reaches
-            // the flop through resize nodes (arity-1 Op_Or / all-ones Op_GetMask),
-            // so testing the immediate driver for graph-input-ness reports "computed
-            // inside the design" for what is plainly a port.
-            Node_pin src = resolve_resize_chain(rp);
-            if (!pin_is_input(src)) {
-              fatal(ctx, "flop n_" + std::to_string(sid)
-                             + " has an ASYNCHRONOUS reset that is not driven by a primary input. "
-                               "`SourceDesc.flopQAsync` reads the reset out of RuntimeInput, so it cannot "
-                               "express a reset computed inside the design.");
-            }
-            const auto rname = input_name_for_pin(ctx, src);
-            auto       rsid  = ctx.input_source_id.find(rname);
-            if (rsid == ctx.input_source_id.end() || input_ordinal.count(rsid->second) == 0) {
-              fatal(ctx, "flop n_" + std::to_string(sid) + " async reset input `" + std::string(rname)
-                             + "` has no input ordinal.");
-            }
-            const bool active_low = flop_active_low.count(sid) != 0;
-            s.async_reset      = true;
-            s.reset_input      = input_ordinal.at(rsid->second);
-            s.reset_active_low = active_low;
-            if (auto it3 = flop_initial.find(sid); it3 != flop_initial.end()) {
-              s.reset_value = it3->second;
-            }
-          }
-          break;
-        }
-        case 4: {
-          // Immutable table.  No `RuntimeState.mems` entry and no ordinal: a ROM
-          // carries nothing from cycle to cycle.
-          s.kind = lean_design_cert::SourceKind::RomConst;
-          auto it = cert_build.source_rom_contents.find(sid);
-          if (it == cert_build.source_rom_contents.end() || it->second.empty()) {
-            fatal(ctx, "internal: ROM source id " + std::to_string(sid) + " has no contents");
-          }
-          s.rom_contents = it->second;
-          for (const auto& kv : mem_cert_ids) {
-            if (kv.second.array_src == sid) {
-              s.addr_w = ctx.memory_info.at(kv.first).addr_width;
-              break;
-            }
-          }
-          break;
-        }
-        case 3: {
-          s.kind    = lean_design_cert::SourceKind::MemImage;
-          if (auto it = mem_ordinal.find(sid); it != mem_ordinal.end()) {
-            s.ordinal = it->second;
-          } else {
-            fatal(ctx, "internal: memory source id " + std::to_string(sid) + " has no memory ordinal");
-          }
-          // address width of the owning memory
-          bool found_owner = false;
-          for (const auto& kv : mem_cert_ids) {
-            if (kv.second.array_src == sid) {
-              s.addr_w = ctx.memory_info.at(kv.first).addr_width;
-              found_owner = true;
-              break;
-            }
-          }
-          if (!found_owner) {
-            fatal(ctx, "internal: memory source id " + std::to_string(sid) + " has no owning memory");
-          }
-          break;
-        }
-        default:
-          fatal(ctx, "internal: certificate source id " + std::to_string(sid) + " has no kind");
-      }
-      din.sources.push_back(s);
-    }
-
-    for (size_t i = 0; i < cert_infos.size(); ++i) {
-      const auto& ci = cert_infos[i];
-      din.nodes.push_back({ci.nid, ci.op_expr, ci.width, ci.deps});
-    }
-
-    for (const auto& kv : ctx.output_field) {
-      auto it = output_cert_ids.find(kv.first);
-      if (it == output_cert_ids.end()) {
-        continue;  // undriven output: no slot to name
-      }
-      din.outputs.push_back({it->second, ctx.output_width.at(kv.first)});
-    }
-
-    // ---- Clock provenance -------------------------------------------------
-    // The certificate names its clock DOMAINS and every flop / memory carries
-    // the ordinal of the one it commits on, so the Lean step semantics can be
-    // told which clocks fire (`interpretDesign D edges i s`). Identity is
-    // latch_contract's resolved ROOT net -- the same notion pass.single_edge
-    // and the LEC clock forest use -- so a domain here is a domain there.
-    //
-    // Before this the exporter READ the clock (`Memory_port_info::clock`, the
-    // flop `clock_pin` arm above) and dropped it, which is what made single-edge
-    // normalization a wholly trusted precondition: the certificate could not
-    // even say which edge an element committed on. Two things are refused here
-    // rather than silently modelled:
-    //   * a GATED clock still on `clock_pin` (`clk & en`): this model has no
-    //     per-step commit term for a gate. pass.single_edge folds it into the
-    //     element's enable; a design that reached here with the gate in place
-    //     would have every gated element modelled as committing on every edge;
-    //   * a FALLING-edge commit spelled as an inversion in the clock cone: the
-    //     `posclk` arm only sees the pin form, and `always @(posedge ~clk)` is
-    //     the same machine as a negedge flop.
-    // Ordinal 0 is the domain carrying the most state (ties by key), the same
-    // rule pass.single_edge picks its reference by. A Pyrope `reg x = 0`
-    // (implicit clock) joins the unique other root when there is exactly one --
-    // it IS the module clock, which tolg spells `clock` -- and is otherwise a
-    // domain of its own, named `clock`.
-    const lc::Design_clocks            dclocks(g);
-    std::map<std::string, int>         clock_weight;   // net key -> #elements committing on it
-    std::map<std::string, std::string> clock_display;  // net key -> name written to the certificate
-    std::map<uint32_t, std::string>    flop_clock_key; // flop nid -> net key
-    std::map<uint32_t, std::string>    mem_clock_key;  // memory nid -> net key
-    const std::string implicit_key = [] {
-      lc::Commit_class c;
-      c.implicit_clock = true;
-      return c.net_key();
-    }();
-    const auto display_of = [](const lc::Commit_class& cc) -> std::string {
-      if (cc.implicit_clock) {
-        return "clock";
-      }
-      if (!cc.net.is_invalid() && gu::is_graph_input_pin(cc.net)) {
-        return std::string(gu::pin_name_of(cc.net));
-      }
-      return "derived:" + gu::debug_name(cc.net.get_master_node());
-    };
-    const auto note_clock = [&](const lc::Commit_class& cc) {
-      const auto k = cc.net_key();
-      ++clock_weight[k];
-      clock_display.try_emplace(k, display_of(cc));
-      return k;
-    };
-    for (auto& fn : flop_nodes) {
-      const auto nid = node_id(fn);
-      if (auto clk = gu::get_driver_of_sink_name(fn, "clock_pin"); !clk.is_invalid()) {
-        if (auto icg = lc::resolve_icg(clk, dclocks)) {
-          fatal(ctx, "flop n_" + std::to_string(nid) + " is clocked through a gated-clock cone (`clk & en`, "
-                         + std::to_string(icg->enables.size())
-                         + " enable(s)) that pass.single_edge has not folded into its enable. This model has no "
-                           "per-step commit term for a gate; run pass.single_edge first.");
-        }
-      }
-      auto cc = lc::commit_class_of(fn, &dclocks);
-      if (!cc) {
-        fatal(ctx, "flop n_" + std::to_string(nid)
-                       + " has a clock cone that does not resolve to a root net, so the certificate cannot name "
-                         "its clock domain.");
-      }
-      if (!cc->rising) {
-        fatal(ctx, "flop n_" + std::to_string(nid)
-                       + " commits on a FALLING edge (an inversion in its clock cone). pass.single_edge normalizes "
-                         "negedge state away; it evidently did not run.");
-      }
-      flop_clock_key[nid] = note_clock(*cc);
-    }
-    // Every memory that COMMITS something needs a domain -- which is not the same
-    // set as `mem_order`.  A SYNCHRONOUS ROM is immutable, so it has no ordinal
-    // and no `MemoryDesc` (its contents ride `SourceDesc.memConst`), but its
-    // registered read port IS state: `cert_memory_expand` gives it a synthetic
-    // flop in `flop_order`, and that flop asks this map for its clock.  Keying
-    // the walk on `mem_order` left the sync ROM out and turned the lookup below
-    // into an undiagnosed `map::at` crash -- measured on `txfma_f1`, which used
-    // to fail with a diagnosed memory refusal.  An ASYNCHRONOUS ROM is skipped:
-    // it commits nothing and owns no register, so giving it a domain would
-    // invent a clock for a combinational table.
-    std::vector<uint32_t> mem_clocked;
-    for (const auto& kv : mem_cert_ids) {
-      const auto& mi = ctx.memory_info.at(kv.first);
-      if (mi.is_rom && !mi.sync) {
-        continue;
-      }
-      mem_clocked.push_back(kv.first);
-    }
-    for (auto mnid : mem_clocked) {
-      const auto& mi = ctx.memory_info.at(mnid);
-      if (mi.posclk == Ntype::Memory_posclk_mixed) {
-        fatal(ctx, "memory n_" + std::to_string(mnid)
-                       + " commits on more than one clock edge across its ports (posclk=mixed); one MemoryDesc "
-                         "carries one clock, and pass.single_edge refuses this shape too.");
-      }
-      std::optional<lc::Commit_class> mcc;
-      for (const auto& port : mi.ports) {
-        if (port.rdport && !mi.sync) {
-          continue;  // an async read commits nothing
-        }
-        if (port.clock.is_invalid()) {
-          continue;  // implicit module clock
-        }
-        if (gu::is_const_pin(port.clock)) {
-          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
-                         + " has a constant clock: a level-sensitive (latch-array) write, which this "
-                           "edge-triggered model does not represent.");
-        }
-        if (auto icg = lc::resolve_icg(port.clock, dclocks)) {
-          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
-                         + " is clocked through a gated-clock cone that pass.single_edge has not folded into the "
-                           "port's enable; run pass.single_edge first.");
-        }
-        const auto cr = lc::control_root(port.clock);
-        if (cr.net.is_invalid() || gu::is_const_pin(cr.net)) {
-          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
-                         + " has a clock cone that does not resolve to a root net.");
-        }
-        lc::Commit_class cc;
-        cc.role   = lc::Net_role::Clock;
-        cc.net    = cr.net;
-        cc.rising = (mi.posclk != 0) != cr.inverted;
-        if (!cc.rising) {
-          fatal(ctx, "memory n_" + std::to_string(mnid) + " port " + std::to_string(port.port_id)
-                         + " commits on a FALLING edge; pass.single_edge normalizes negedge state away.");
-        }
-        if (mcc && mcc->net_key() != cc.net_key()) {
-          fatal(ctx, "memory n_" + std::to_string(mnid) + " has committing ports on different clock nets (`"
-                         + display_of(*mcc) + "` and `" + display_of(cc) + "`); one MemoryDesc carries one clock.");
-        }
-        mcc = cc;
-      }
-      if (!mcc) {
-        lc::Commit_class cc;
-        cc.implicit_clock = true;
-        cc.role           = lc::Net_role::Clock;
-        cc.rising         = true;
-        mcc               = cc;
-      }
-      mem_clock_key[mnid] = note_clock(*mcc);
-    }
-    if (clock_weight.count(implicit_key) != 0 && clock_weight.size() == 2) {
-      // The implicit module clock IS the one named root (the LEC clock forest's
-      // "unique other root" rule); two spellings of one domain must not become two.
-      std::string other;
-      for (const auto& [k, w] : clock_weight) {
-        if (k != implicit_key) {
-          other = k;
-        }
-      }
-      clock_weight[other] += clock_weight[implicit_key];
-      clock_weight.erase(implicit_key);
-      for (auto& [n, k] : flop_clock_key) {
-        if (k == implicit_key) {
-          k = other;
-        }
-      }
-      for (auto& [n, k] : mem_clock_key) {
-        if (k == implicit_key) {
-          k = other;
-        }
-      }
-    }
-    std::vector<std::pair<std::string, int>> clock_order(clock_weight.begin(), clock_weight.end());
-    std::sort(clock_order.begin(), clock_order.end(), [](const auto& a, const auto& b) {
-      return a.second != b.second ? a.second > b.second : a.first < b.first;
-    });
-    std::map<std::string, uint32_t> clock_ordinal;
-    for (const auto& [k, w] : clock_order) {
-      clock_ordinal[k] = static_cast<uint32_t>(din.clocks.size());
-      din.clocks.push_back({clock_display.at(k)});
-    }
-    if (din.clocks.empty()) {
-      // A purely combinational design still declares its (unused) domain:
-      // `checkDesign` requires ordinal 0 to exist.
-      din.clocks.push_back({"clock"});
-    }
-    const auto flop_clock = [&](uint32_t fid) -> uint32_t {
-      if (auto it = flop_clock_key.find(fid); it != flop_clock_key.end()) {
-        return clock_ordinal.at(it->second);
-      }
-      if (auto ow = cert_build.sync_read_owner.find(fid); ow != cert_build.sync_read_owner.end()) {
-        if (auto mk = mem_clock_key.find(ow->second); mk != mem_clock_key.end()) {
-          return clock_ordinal.at(mk->second);
-        }
-        fatal(ctx, "internal: sync read register of memory n_" + std::to_string(ow->second)
-                       + " has no clock domain");
-      }
-      fatal(ctx, "internal: flop source id " + std::to_string(fid) + " has no clock domain");
-      return 0;
-    };
-
-    for (auto fid : flop_order) {
-      lean_design_cert::FlopIn f;
-      f.clock = flop_clock(fid);
-      // A synthetic sync-read register: width and next value come from the
-      // memory decomposition, and it has no enable and no reset -- the enable is
-      // already folded into its next value by cert_memory_expand.
-      if (auto sr = cert_build.sync_read_regs.find(fid); sr != cert_build.sync_read_regs.end()) {
-        f.width = sr->second.first;
-        f.din   = sr->second.second;
-        din.flops.push_back(f);
-        continue;
-      }
-      f.width = ctx.flop_width.at(fid);
-      if (auto it = flop_din_cert_ids.find(fid); it != flop_din_cert_ids.end()) {
-        f.din = it->second;
-      } else {
-        fatal(ctx, "flop n_" + std::to_string(fid) + " has no `din` driver.");
-      }
-      if (auto it = flop_enable_cert_ids.find(fid); it != flop_enable_cert_ids.end()) {
-        f.enable = it->second;
-      }
-      if (auto it = flop_reset_cert_ids.find(fid); it != flop_reset_cert_ids.end()) {
-        f.reset_pin = it->second;
-      }
-      if (auto it = flop_initial.find(fid); it != flop_initial.end()) {
-        f.reset_value = it->second;
-      }
-      f.reset_active_low = flop_negreset.count(fid) != 0;
-      f.async_reset      = flop_async.count(fid) != 0;
-      din.flops.push_back(f);
-    }
-
-    for (auto mnid : mem_order) {
-      const auto& mi = ctx.memory_info.at(mnid);
-      din.memories.push_back(
-          {mi.addr_width, mi.bits, mem_cert_ids.at(mnid).next_chain, clock_ordinal.at(mem_clock_key.at(mnid))});
-    }
-
-    const std::string vc_tmp = lean_path + ".tmp";
-    std::ofstream     vofs(vc_tmp);
-    if (!vofs) {
-      livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not write {}", vc_tmp).emit();
-      return;
-    }
-    lean_design_cert::RemapError err;
-    if (!lean_design_cert::emit_design_cert(base_name, din, vofs, err)) {
-      vofs.close();
-      std::remove(vc_tmp.c_str());
-      fatal(ctx, "verified_compiler export: " + err.message);
-    }
-    vofs.close();
-    if (std::rename(vc_tmp.c_str(), lean_path.c_str()) != 0) {
-      livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", vc_tmp).emit();
-      return;
-    }
-    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (verified_compiler: " << din.sources.size()
-              << " sources, " << din.nodes.size() << " nodes, " << din.flops.size() << " flops, "
-              << din.memories.size() << " memories)\n";
+    const livehd::lean_ir::Design_scan scan{ctx,
+                                            g,
+                                            raw_name,
+                                            base_name,
+                                            lean_path,
+                                            flop_nodes,
+                                            flop_reset,
+                                            flop_async,
+                                            flop_active_low,
+                                            flop_initial,
+                                            flop_negreset,
+                                            cert_build,
+                                            cert_infos,
+                                            mem_cert_ids,
+                                            output_cert_ids,
+                                            flop_din_cert_ids,
+                                            flop_reset_cert_ids,
+                                            flop_enable_cert_ids,
+                                            source_ids};
+    livehd::lean_ir::ir_semantics::emit(scan);
     return;
   }
 
