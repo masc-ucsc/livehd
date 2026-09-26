@@ -46,6 +46,28 @@ struct Seq_flop {
   // whether an init must keep a native flop, and `rst_drv` is a source-side
   // handle the rewritten region no longer resolves).
   bool                    has_reset = false;
+  // The reset is ASYNCHRONOUS and the Liberty has a clear/preset flop cell for
+  // every bit's reset value: the register still crosses as a latch, but the
+  // reset stays OUT of the D cone (D = en ? din : Q) and the read-back drives
+  // the cell's asynchronous pin from `arst_src` instead. has_reset is set too
+  // (the `initial` is the reset value, never a power-on one).
+  bool                    async_reset = false;
+  // The region-input driver the async reset traces to (through 1-bit
+  // Get_mask/Sext identities and Nots), a source-side handle compared against
+  // the region's input ports like clk_drv; `arst_low` = it asserts the reset
+  // at 0 (negreset XOR the Nots peeled on the way). Invalid when the reset is
+  // computed inside the region (a reset synchronizer's flop, a scan-mode mux):
+  // the reset then crosses as an ABC PO at the level the cell pin wants,
+  // `arst_po[pin_low]` (an index into the Lnet outputs, after the region and
+  // black-box POs), so the mapped logic drives the pin -- exactly how a
+  // Liberty flow maps the same logic in front of a reset pin.
+  hhds::Pin_class         arst_src;
+  bool                    arst_low  = false;
+  int32_t                 arst_po[2] = {-1, -1};
+  bool                    neg_reset_hint = false;  // the `negreset` flavour, read while classifying
+  // Per bit, the value the async reset loads (the `initial` bit; 0 without
+  // one; an unknown bit takes whichever cell the library has).
+  std::vector<bool>       arst_val;
   // The `initial` (power-on / reset) value, SNAPSHOT at crossing time. The
   // read-back below runs after map_region has rewritten the region, so the
   // source const node behind `rval_drv` may already be gone -- re-reading the
@@ -124,6 +146,7 @@ struct Region_blast {
   std::vector<bool>                                 direct_native_output;
   bool                                              has_dummy_po = false;  // a sentinel PO no read-back target reads
   size_t                                            blast_total  = 0;      // nodes scheduled for blasting
+  size_t                                            arst_pos     = 0;      // internal async-reset POs, after bbox_po
   uint64_t                                          rss_before   = 0;      // the admission baseline (0: no admission)
 };
 

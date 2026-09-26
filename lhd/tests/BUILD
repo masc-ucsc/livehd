@@ -1401,6 +1401,21 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# Asynchronous-reset registers map onto the Liberty's clear/preset flop cells
+# (sky130-shaped single-pin cells and an ASAP7-shaped dual QN cell), proven by
+# the graph-native LEC and by lgyosys on the Verilog netlist + gensim models;
+# a flipped reset value and an async-made-sync reset must refute.
+[sh_test(
+    name = "lhd_abc_arst_test" + suffix,
+    srcs = ["lhd_abc_arst_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_mix.v",
+        "abc_arst_q.lib",
+        "abc_arst_qn.lib",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
 # 2a-abc subtask 5: sequential tech-mapping (seq=true). Flops cross into ABC as
 # latches and return as native flops (name + reset preserved); memories and Sub
 # instances are blackbox boundaries. Each region is sequentially LEC-equivalent

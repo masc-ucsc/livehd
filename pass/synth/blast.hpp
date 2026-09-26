@@ -35,6 +35,17 @@ struct Blast_options {
   // A crossing latch without a power-on value stores ~next_state: the QN-only
   // DFF encoding, exact only under a flow that preserves the latches.
   bool              qn_encode      = false;
+  // Asynchronous-reset register cells for reset value v: -1 none, else that
+  // cell's q_inverted (0/1). A register whose async reset the cells can
+  // express crosses as a latch (reset left OUT of D, Seq_flop::async_reset);
+  // otherwise it stays a native boundary.
+  int8_t            areset_cell[2] = {-1, -1};
+  // Whether that cell's reset pin asserts at 0 (Dff_cell::reset_low): the
+  // level an internally computed reset crosses at (Seq_flop::arst_po).
+  bool              areset_low[2]  = {false, false};
+  // The flow keeps every latch as crossed (why an async cell may be absent:
+  // reported precisely in the reset-native diagnostic).
+  bool              areset_flow_ok = true;
   bool              verbose        = false;
 };
 

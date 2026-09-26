@@ -1172,6 +1172,11 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
   for (const auto& c : design.dff_ladder) {
     R.dff_names.insert(c.name);
   }
+  for (const auto* l : {&design.areset0_ladder, &design.areset1_ladder}) {
+    for (const auto& c : *l) {
+      R.dff_names.insert(c.name);
+    }
+  }
   if (design.dff.has_value()) {
     R.dff_names.insert(design.dff->name);
   }
@@ -1634,6 +1639,11 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
   }
   for (const auto& c : design.dff_ladder) {
     R.dff_names.insert(c.name);
+  }
+  for (const auto* l : {&design.areset0_ladder, &design.areset1_ladder}) {
+    for (const auto& c : *l) {
+      R.dff_names.insert(c.name);
+    }
   }
   if (design.dff.has_value()) {
     R.dff_names.insert(design.dff->name);

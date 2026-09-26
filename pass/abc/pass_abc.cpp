@@ -429,7 +429,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     // inverters) and an area/timing reader comparing against yosys's Q-side
     // INV needs to know which encoding it is looking at.
     std::map<std::string, uint64_t> dff_count;  // ladder rung -> instances (std::map: stable JSON order)
-    for (const auto& c : dff_sel.ladder) {
+    for (const auto& c : livehd::liberty::selection_cells(dff_sel)) {  // plain ladder + async clear/preset cells
       dff_count.emplace(c.name, 0);
     }
     for (const auto& [src, kids] : hier.children) {
@@ -447,7 +447,11 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     for (size_t i = 0; i < dff_sel.ladder.size(); ++i) {
       j += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(dff_sel.ladder[i].name));
     }
-    j          += "],\"cells\":{";
+    // The asynchronous clear/preset picks (empty: that reset value stays native).
+    j += std::format("],\"clear\":\"{}\",\"preset\":\"{}\"",
+                     dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
+                     dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
+    j          += ",\"cells\":{";
     bool first  = true;
     for (const auto& [name, n] : dff_count) {
       j     += std::format("{}\"{}\":{}", first ? "" : ",", jesc(name), n);
@@ -1136,7 +1140,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     // Salt on the RESOLVED cell: an unresolved pick (no DFF in the library, or
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
-    const std::string dff_desc = dff_sel.base.has_value() ? livehd::liberty::dff_descriptor(*dff_sel.base) : opts.dff_cell;
+    const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell);
     incr                       = std::make_shared<livehd::synth::Region_cache>(
         cache_dir,
         livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt, opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc),

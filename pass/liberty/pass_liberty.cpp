@@ -286,18 +286,21 @@ void Pass_liberty::gensim(Eprp_var& var) {
   // the state IS the pin (see emit_dff_model) -- so its mapped-DFF Subs resolve
   // for LEC/sim. The whole drive ladder is modeled: pass.abc instantiates any
   // rung by Q-net fanout (DFFHQNx1/x2/x3 on ASAP7), and an unmodeled rung would
-  // leave the LEC a blackbox.
-  for (const auto& dff : livehd::liberty::resolve_dff_cells(files).ladder) {
+  // leave the LEC a blackbox. So are the asynchronous clear/preset cells
+  // pass.abc maps async-reset registers onto (Flop with async reset_pin).
+  for (const auto& dff : livehd::liberty::selection_cells(livehd::liberty::resolve_dff_cells(files))) {
     livehd::liberty::emit_dff_model(outlib, dff);
     ++modeled;
     if (verbose) {
-      std::print("[pass.liberty] gensim: DFF model '{}' (d={}, clk={}, {}={}{}, area={})\n",
+      std::print("[pass.liberty] gensim: DFF model '{}' (d={}, clk={}, {}={}{}{}{}, area={})\n",
                  dff.name,
                  dff.d_pin,
                  dff.clk_pin,
                  dff.q_inverted ? "qn" : "q",
                  dff.q_pin,
                  dff.q_inverted ? " = Flop(Not(d))" : "",
+                 dff.reset0_pin.empty() ? "" : std::format(", async 0<-{}{}", dff.reset0_low ? "!" : "", dff.reset0_pin),
+                 dff.reset1_pin.empty() ? "" : std::format(", async 1<-{}{}", dff.reset1_low ? "!" : "", dff.reset1_pin),
                  dff.area);
     }
   }

@@ -35,6 +35,9 @@ public:
     bool                                  map = true;
     const std::optional<liberty::Dff_cell>* cell   = nullptr;
     const std::vector<liberty::Dff_cell>*   ladder = nullptr;
+    // Asynchronous clear (0) / preset (1) cell ladders; null or empty = none.
+    const std::vector<liberty::Dff_cell>*   areset0 = nullptr;
+    const std::vector<liberty::Dff_cell>*   areset1 = nullptr;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

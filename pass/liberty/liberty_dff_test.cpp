@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -342,4 +343,155 @@ TEST(LibertyDff, RegisterOverheadFollowsTheChosenOutputPin) {
   EXPECT_EQ(c->q_pin, "Q");
   EXPECT_DOUBLE_EQ(c->clk_to_q_ps, 7.0);
   EXPECT_DOUBLE_EQ(c->setup_ps, 0.0);
+}
+
+// --- asynchronous clear/preset register cells (Dff_selection::areset_ladder) --
+
+namespace {
+
+// A flop with the given ff head/attributes and extra input pins, whose one
+// output `out` shows state var `fn`.
+std::string async_cell(const std::string& name, double area, const std::string& head, const std::string& ff_attrs,
+                       const std::vector<std::string>& pins, const std::string& out, const std::string& fn,
+                       const std::string& next = "D", bool dont_use = false, const std::string& clk = "CLK") {
+  std::string s = "  cell (" + name + ") {\n    area : " + std::to_string(area) + ";\n";
+  if (dont_use) {
+    s += "    dont_use : true;\n";
+  }
+  s += "    ff (" + head + ") {\n      clocked_on : \"" + clk + "\";\n      next_state : \"" + next + "\";\n" + ff_attrs + "    }\n";
+  s += "    pin (CLK) { direction : input; clock : true; }\n    pin (D) { direction : input; }\n";
+  for (const auto& p : pins) {
+    s += "    pin (" + p + ") { direction : input; }\n";
+  }
+  s += "    pin (" + out + ") { direction : output; function : \"" + fn + "\"; }\n  }\n";
+  return s;
+}
+
+}  // namespace
+
+TEST(LibertyDff, Asap7AsyncCellIsStatedInQnTerms) {
+  // DFFASRHQNx1 exactly as ASAP7 spells it: the state var is IQN (QN = IQN),
+  // `clear : "!SETN"` drives IQN -- hence QN -- to 0 and `preset : "!RESETN"`
+  // to 1. So the register bit resetting to 0 takes SETN, the one resetting to 1
+  // RESETN, both active low; clear_preset_var1 L = QN 0 while both assert.
+  const auto path = write_lib("asap7_async.lib",
+                              lib(qn_cell("DFFHQNx1", 0.2916)
+                                  + async_cell("DFFASRHQNx1",
+                                               0.37908,
+                                               "IQN,IQNN",
+                                               "      clear : \"!SETN\";\n      clear_preset_var1 : L;\n      "
+                                               "clear_preset_var2 : L;\n      preset : \"!RESETN\";\n",
+                                               {"RESETN", "SETN"},
+                                               "QN",
+                                               "IQN",
+                                               "!D")));
+  auto sel = livehd::liberty::resolve_dff_cells(path);
+  ASSERT_TRUE(sel.base.has_value());
+  EXPECT_EQ(sel.base->name, "DFFHQNx1");  // the async cell never becomes the plain pick
+  EXPECT_FALSE(sel.base->is_async());
+  for (int v = 0; v < 2; ++v) {
+    ASSERT_EQ(sel.areset_ladder[v].size(), 1U) << v;
+    const auto& c = sel.areset_ladder[v].front();
+    EXPECT_EQ(c.name, "DFFASRHQNx1");
+    EXPECT_TRUE(c.q_inverted);
+    EXPECT_EQ(c.q_pin, "QN");
+    EXPECT_EQ(c.reset0_pin, "SETN");
+    EXPECT_TRUE(c.reset0_low);
+    EXPECT_EQ(c.reset1_pin, "RESETN");
+    EXPECT_TRUE(c.reset1_low);
+    EXPECT_EQ(c.both_value, 0);
+  }
+  EXPECT_EQ(livehd::liberty::scan_async_dff_cells(path).size(), 1U);
+  const auto cells = livehd::liberty::selection_cells(sel);
+  ASSERT_EQ(cells.size(), 2U);  // DFFHQNx1 + the async cell, once for both values
+  EXPECT_EQ(cells[1].name, "DFFASRHQNx1");
+  EXPECT_NE(livehd::liberty::dff_selection_descriptor(sel).find("areset0=DFFASRHQNx1"), std::string::npos);
+}
+
+TEST(LibertyDff, Sky130AsyncPicksClearAndPresetCellsByArea) {
+  // dfrtp_1/_2 (clear) and dfstp_1 (preset) are the single-purpose picks; the
+  // dual dfbbp_1 is dearer. Never qualifying although cheaper: a clear cell
+  // marked dont_use, a negedge clear cell and a gated clear (`!RESET_B & EN`).
+  // dfrbn_1 exposes only Q_N (the complement var), so its CLEAR forces Q_N to
+  // 1: it is the cheapest PRESET cell, inverted.
+  const std::string ff_clear  = "      clear : \"!RESET_B\";\n";
+  const std::string ff_preset = "      preset : \"!SET_B\";\n";
+  const std::string head      = "\"IQ\",\"IQ_N\"";
+  const auto        path      = write_lib(
+      "sky130_async.lib",
+      lib(q_cell("dfxtp_1", 20.02) + async_cell("dfrtp_1", 25.02, head, ff_clear, {"RESET_B"}, "Q", "IQ")
+          + async_cell("dfrtp_2", 26.0, head, ff_clear, {"RESET_B"}, "Q", "IQ")
+          + async_cell("dfstp_1", 26.28, head, ff_preset, {"SET_B"}, "Q", "IQ")
+          + async_cell("dfbbp_1",
+                       32.5,
+                       head,
+                       ff_clear + ff_preset + "      clear_preset_var1 : \"H\";\n      clear_preset_var2 : \"L\";\n",
+                       {"RESET_B", "SET_B"},
+                       "Q",
+                       "IQ")
+          + async_cell("dfrtp_cheap", 10.0, head, ff_clear, {"RESET_B"}, "Q", "IQ", "D", /*dont_use=*/true)
+          + async_cell("dfrtn_1", 9.0, head, ff_clear, {"RESET_B"}, "Q", "IQ", "D", false, "!CLK")
+          + async_cell("dfgated_1", 8.0, head, "      clear : \"!RESET_B & EN\";\n", {"RESET_B", "EN"}, "Q", "IQ")
+          + async_cell("dfrbn_1", 25.5, head, ff_clear, {"RESET_B"}, "Q_N", "IQ_N")));
+  auto sel = livehd::liberty::resolve_dff_cells(path);
+  ASSERT_TRUE(sel.base.has_value());
+  EXPECT_EQ(sel.base->name, "dfxtp_1");
+  ASSERT_EQ(sel.areset_ladder[0].size(), 2U);  // dfrtp_1, dfrtp_2: same pins/polarity
+  EXPECT_EQ(sel.areset_ladder[0][0].name, "dfrtp_1");
+  EXPECT_EQ(sel.areset_ladder[0][1].name, "dfrtp_2");
+  EXPECT_EQ(sel.areset_ladder[0][0].reset0_pin, "RESET_B");
+  EXPECT_TRUE(sel.areset_ladder[0][0].reset0_low);
+  EXPECT_TRUE(sel.areset_ladder[0][0].reset1_pin.empty());
+  EXPECT_FALSE(sel.areset_ladder[0][0].q_inverted);
+  ASSERT_EQ(sel.areset_ladder[1].size(), 1U);
+  const auto& pre = sel.areset_ladder[1].front();
+  EXPECT_EQ(pre.name, "dfrbn_1");  // 25.5 < dfstp_1's 26.28
+  EXPECT_EQ(pre.q_pin, "Q_N");
+  EXPECT_TRUE(pre.q_inverted);
+  EXPECT_EQ(pre.reset1_pin, "RESET_B");
+  EXPECT_TRUE(pre.reset1_low);
+  EXPECT_TRUE(pre.reset0_pin.empty());
+  for (const auto& c : livehd::liberty::scan_async_dff_cells(path)) {
+    EXPECT_NE(c.name, "dfrtp_cheap") << "dont_use";
+    EXPECT_NE(c.name, "dfrtn_1") << "negedge";
+    EXPECT_NE(c.name, "dfgated_1") << "a gated clear is not a reset pin";
+  }
+}
+
+TEST(LibertyDff, AsyncDualCellServesBothValues) {
+  // Only the dual cell: it serves both values; `RN'` is an active-low clear,
+  // `S` an active-high preset, and both_value comes from clear_preset_var1
+  // (Q shows IQ: H = 1).
+  const auto path = write_lib("dual.lib",
+                              lib(q_cell("DFFx1", 6)
+                                  + async_cell("DFFRSx1",
+                                               9,
+                                               "IQ,IQN",
+                                               "      clear : \"RN'\";\n      preset : \"S\";\n      clear_preset_var1 : H;\n",
+                                               {"RN", "S"},
+                                               "Q",
+                                               "IQ")));
+  auto sel = livehd::liberty::resolve_dff_cells(path);
+  for (int v = 0; v < 2; ++v) {
+    ASSERT_EQ(sel.areset_ladder[v].size(), 1U) << v;
+    const auto& c = sel.areset_ladder[v].front();
+    EXPECT_EQ(c.name, "DFFRSx1");
+    EXPECT_EQ(c.reset0_pin, "RN");
+    EXPECT_TRUE(c.reset0_low);
+    EXPECT_EQ(c.reset1_pin, "S");
+    EXPECT_FALSE(c.reset1_low);
+    EXPECT_EQ(c.both_value, 1);
+  }
+}
+
+TEST(LibertyDff, PlainOnlyLibraryHasNoAsyncPick) {
+  // test.lib / test_qn.lib carry no clear/preset cell: an async-reset register
+  // stays a native flop there (lhd_abc_seq_test's abc_async_reset contract),
+  // and the cache descriptor is exactly the plain one.
+  const auto t   = write_lib("plain_only.lib", lib(q_cell("DFFx1", 6) + qn_cell("DFFNx1", 5)));
+  auto       sel = livehd::liberty::resolve_dff_cells(t);
+  EXPECT_TRUE(sel.areset_ladder[0].empty());
+  EXPECT_TRUE(sel.areset_ladder[1].empty());
+  ASSERT_TRUE(sel.base.has_value());
+  EXPECT_EQ(livehd::liberty::dff_selection_descriptor(sel), livehd::liberty::dff_descriptor(*sel.base));
 }

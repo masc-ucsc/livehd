@@ -82,9 +82,11 @@ public:
   // when the incremental-cache salt needs the pick before any region maps.
   // Without this call the first region resolves them itself.
   void set_dff_cells(const liberty::Dff_selection& sel) {
-    dff_        = sel.base;
-    dff_ladder_ = sel.ladder;
-    dff_preset_ = true;
+    dff_              = sel.base;
+    dff_ladder_       = sel.ladder;
+    areset_ladder_[0] = sel.areset_ladder[0];
+    areset_ladder_[1] = sel.areset_ladder[1];
+    dff_preset_       = true;
   }
 
   // QoR rows accumulated by map_region, one per successfully mapped region.
@@ -162,6 +164,10 @@ private:
   // Below ~8 loads x1 is the FASTEST rung (73 vs 80 ps clk->Q against DFFHQx4
   // per the NLDM tables) and 97% of registers sit there.
   std::vector<liberty::Dff_cell>   dff_ladder_;
+  // The asynchronous clear (index 0) / preset (index 1) register cells, each
+  // a drive ladder like dff_ladder_ (liberty::Dff_selection::areset_ladder).
+  // Empty: an async-reset register needing that value stays a native flop.
+  std::vector<liberty::Dff_cell>   areset_ladder_[2];
   bool                             dff_preset_     = false;
   hhds::GraphLibrary*              outlib_         = nullptr;  // where blackbox cell defs are declared
   Region_cache*                    incr_           = nullptr;  // optional region cache (2opt-incr)

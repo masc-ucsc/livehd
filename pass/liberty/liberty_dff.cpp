@@ -453,9 +453,43 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
   if (!parse_next_state(next_state, next_pin, next_inv) || !is_bare_ident(clocked_on)) {
     return std::nullopt;
   }
-  if (!scalar_attr(ff_body, "clear").empty() || !scalar_attr(ff_body, "preset").empty()) {
+  // An asynchronous clear/preset must be one input pin or its complement
+  // (`!RESET_B`, `RN'`): anything richer (a gated clear, a clock-qualified
+  // preset) is not a reset pin pass.abc can drive. The cell is then an async
+  // candidate (Dff_cell::is_async), never a plain one -- scan_cells splits them.
+  const std::string clear_expr  = scalar_attr(ff_body, "clear");
+  const std::string preset_expr = scalar_attr(ff_body, "preset");
+  std::string       clear_pin;
+  std::string       preset_pin;
+  bool              clear_low  = false;
+  bool              preset_low = false;
+  if (!clear_expr.empty() && !parse_next_state(clear_expr, clear_pin, clear_low)) {
     return std::nullopt;
   }
+  if (!preset_expr.empty() && !parse_next_state(preset_expr, preset_pin, preset_low)) {
+    return std::nullopt;
+  }
+  if (!clear_pin.empty() && clear_pin == preset_pin) {
+    return std::nullopt;
+  }
+  for (const auto* rp : {&clear_pin, &preset_pin}) {
+    if (!rp->empty() && (*rp == next_pin || *rp == clocked_on)) {
+      return std::nullopt;
+    }
+  }
+  // clear_preset_var1/2: the state var / its complement while both are asserted.
+  auto cp_value = [](const std::string& raw) -> int {
+    const std::string v = unquote_trim(raw);
+    if (v == "L") {
+      return 0;
+    }
+    if (v == "H") {
+      return 1;
+    }
+    return -1;
+  };
+  const int both_state  = cp_value(scalar_attr(ff_body, "clear_preset_var1"));
+  const int both_nstate = cp_value(scalar_attr(ff_body, "clear_preset_var2"));
   // ff state vars: the first head arg is the stored state, the second its
   // complement. An output whose function is the state var is a Q candidate,
   // one that reads the complement is a QN candidate.
@@ -476,6 +510,8 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
   int         n_output = 0;
   bool        has_d    = false;
   bool        has_clk  = false;
+  bool        has_clr  = clear_pin.empty();
+  bool        has_pre  = preset_pin.empty();
   double      setup    = 0;
   // Per output pin: its clk->Q first-entry delay, resolved once the Q/QN choice
   // below is made (the overhead is the pin the netlist actually uses).
@@ -509,6 +545,12 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
       if (pin_name == clocked_on) {
         has_clk = true;
       }
+      if (pin_name == clear_pin) {
+        has_clr = true;
+      }
+      if (pin_name == preset_pin) {
+        has_pre = true;
+      }
     }
   }
   // Prefer the non-inverted output (a dfxbp exposes both; Q keeps the netlist
@@ -527,7 +569,15 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
       return std::nullopt;
     }
   }
-  if (!has_d || !has_clk || next_pin == clocked_on) {
+  if (!has_d || !has_clk || next_pin == clocked_on || !has_clr || !has_pre) {
+    return std::nullopt;
+  }
+  // Which output value each async pin forces: clear drives the STATE var to 0,
+  // preset to 1, so on a pin showing the complement var (out_inv) they swap. A
+  // sole output whose function names neither var leaves that unknown: such a
+  // cell cannot be an async candidate.
+  const bool is_async = !clear_pin.empty() || !preset_pin.empty();
+  if (is_async && out_pin != q_pin && out_pin != qn_pin) {
     return std::nullopt;
   }
   Dff_cell c;
@@ -547,6 +597,15 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
     }
   }
   c.setup_ps = setup * unit_ps;
+  if (is_async) {
+    // clear: state var -> 0, preset: state var -> 1; a complement-var output
+    // sees them swapped.
+    c.reset0_pin = out_inv ? preset_pin : clear_pin;
+    c.reset0_low = out_inv ? preset_low : clear_low;
+    c.reset1_pin = out_inv ? clear_pin : preset_pin;
+    c.reset1_low = out_inv ? clear_low : preset_low;
+    c.both_value = out_inv ? both_nstate : both_state;
+  }
   return c;
 }
 
@@ -569,7 +628,26 @@ bool rank_less(const Dff_cell& a, const Dff_cell& b) {
 }
 
 bool same_shape(const Dff_cell& a, const Dff_cell& b) {
-  return a.d_pin == b.d_pin && a.clk_pin == b.clk_pin && a.q_pin == b.q_pin && a.q_inverted == b.q_inverted;
+  return a.d_pin == b.d_pin && a.clk_pin == b.clk_pin && a.q_pin == b.q_pin && a.q_inverted == b.q_inverted
+         && a.reset0_pin == b.reset0_pin && a.reset0_low == b.reset0_low && a.reset1_pin == b.reset1_pin
+         && a.reset1_low == b.reset1_low && a.both_value == b.both_value;
+}
+
+// The async pick for one reset value: area first (like rank_less), then a
+// single-purpose cell over one that also carries the other pin (it ties that
+// pin off for nothing), then rank_less's remaining tie-breaks.
+bool async_rank_less(const Dff_cell& a, const Dff_cell& b) {
+  const double aa = a.area > 0 ? a.area : std::numeric_limits<double>::infinity();
+  const double ba = b.area > 0 ? b.area : std::numeric_limits<double>::infinity();
+  if (aa != ba) {
+    return aa < ba;
+  }
+  const int ap = (a.reset0_pin.empty() ? 0 : 1) + (a.reset1_pin.empty() ? 0 : 1);
+  const int bp = (b.reset0_pin.empty() ? 0 : 1) + (b.reset1_pin.empty() ? 0 : 1);
+  if (ap != bp) {
+    return ap < bp;
+  }
+  return rank_less(a, b);
 }
 
 }  // namespace
@@ -588,7 +666,8 @@ bool cell_is_dont_use(const std::string& body) {
 }
 
 struct Cell_scan {
-  std::vector<Dff_cell>    dffs;      // the flop cells, dont_use ones excluded
+  std::vector<Dff_cell>    dffs;      // the plain flop cells, dont_use ones excluded
+  std::vector<Dff_cell>    async;     // the async clear/preset flop cells, dont_use ones excluded
   std::vector<std::string> dont_use;  // every cell marked `dont_use : true`, in file order
 };
 
@@ -639,7 +718,7 @@ Cell_scan scan_cells(const std::string& lib_files) {
       continue;
     }
     if (auto dff = parse_cell(name, body, unit_at(p))) {
-      out.dffs.push_back(std::move(*dff));
+      (dff->is_async() ? out.async : out.dffs).push_back(std::move(*dff));
     }
   }
   return out;
@@ -649,6 +728,8 @@ Cell_scan scan_cells(const std::string& lib_files) {
 
 std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).dffs; }
 
+std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).async; }
+
 std::vector<std::string> scan_dont_use_cells(const std::string& lib_files) { return scan_cells(lib_files).dont_use; }
 
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer) {
@@ -656,6 +737,24 @@ Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view p
   auto          scan  = scan_cells(lib_files);
   auto&         cells = scan.dffs;
   sel.dont_use        = std::move(scan.dont_use);
+  for (int v = 0; v < 2; ++v) {
+    std::vector<Dff_cell> cand;
+    for (const auto& c : scan.async) {
+      if (!c.reset_pin(v != 0).empty()) {
+        cand.push_back(c);
+      }
+    }
+    auto best = std::min_element(cand.begin(), cand.end(), async_rank_less);
+    if (best == cand.end()) {
+      continue;
+    }
+    for (const auto& c : cand) {
+      if (same_shape(c, *best)) {
+        sel.areset_ladder[v].push_back(c);
+      }
+    }
+    std::stable_sort(sel.areset_ladder[v].begin(), sel.areset_ladder[v].end(), async_rank_less);
+  }
   if (!prefer.empty()) {
     // Explicit request: take it as-is (the ladder is that one cell -- the user
     // named a drive strength, so no fanout-driven swap to a sibling).
@@ -682,6 +781,27 @@ Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view p
   return sel;
 }
 
+std::vector<Dff_cell> selection_cells(const Dff_selection& sel) {
+  std::vector<Dff_cell> out;
+  auto                  add = [&](const Dff_cell& c) {
+    if (std::none_of(out.begin(), out.end(), [&](const Dff_cell& o) { return o.name == c.name; })) {
+      out.push_back(c);
+    }
+  };
+  if (sel.base.has_value()) {
+    add(*sel.base);
+  }
+  for (const auto& c : sel.ladder) {
+    add(c);
+  }
+  for (const auto& l : sel.areset_ladder) {
+    for (const auto& c : l) {
+      add(c);
+    }
+  }
+  return out;
+}
+
 std::optional<Dff_cell> find_dff_cell(const std::string& lib_files, std::string_view prefer) {
   return resolve_dff_cells(lib_files, prefer).base;
 }
@@ -701,20 +821,46 @@ std::string dff_descriptor(const Dff_cell& dff) {
   return std::format("{}:{}:{}:{}:{}", dff.name, dff.d_pin, dff.clk_pin, dff.q_pin, dff.q_inverted ? 1 : 0);
 }
 
+std::string dff_selection_descriptor(const Dff_selection& sel, std::string_view fallback) {
+  std::string d = sel.base.has_value() ? dff_descriptor(*sel.base) : std::string{fallback};
+  for (int v = 0; v < 2; ++v) {
+    if (sel.areset_ladder[v].empty()) {
+      continue;
+    }
+    const auto& c = sel.areset_ladder[v].front();
+    d += std::format("|areset{}={}:r0={}{}:r1={}{}:b{}",
+                     v,
+                     dff_descriptor(c),
+                     c.reset0_pin,
+                     c.reset0_low ? "/L" : "",
+                     c.reset1_pin,
+                     c.reset1_low ? "/L" : "",
+                     c.both_value);
+  }
+  return d;
+}
+
 std::shared_ptr<hhds::GraphIO> create_dff_io(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
   if (auto existing = outlib.find_io(dff.name)) {
     return existing;
   }
-  auto io = outlib.create_io(dff.name);
-  io->add_input(dff.d_pin, 1);
-  io->set_bits(dff.d_pin, 1);
-  io->set_unsign(dff.d_pin, true);
-  io->add_input(dff.clk_pin, 2);
-  io->set_bits(dff.clk_pin, 1);
-  io->set_unsign(dff.clk_pin, true);
+  auto io  = outlib.create_io(dff.name);
+  auto in1 = [&](const std::string& pin, hhds::Port_id pid) {
+    io->add_input(pin, pid);
+    io->set_bits(pin, 1);
+    io->set_unsign(pin, true);
+  };
+  in1(dff.d_pin, 1);
+  in1(dff.clk_pin, 2);
   io->add_output(dff.q_pin, 3);
   io->set_bits(dff.q_pin, 1);
   io->set_unsign(dff.q_pin, true);
+  if (!dff.reset0_pin.empty()) {
+    in1(dff.reset0_pin, 4);
+  }
+  if (!dff.reset1_pin.empty()) {
+    in1(dff.reset1_pin, 5);
+  }
   return io;
 }
 
@@ -753,6 +899,43 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
     gu::set_unsign(din);
   }
   din.connect_sink(gu::setup_sink_by_name(F, "din"));
+  if (dff.is_async()) {
+    // The state is the q_pin value (see above), and reset0/reset1 are stated in
+    // q_pin terms, so the reset loads the forced value straight into the state.
+    auto one_bit = [](hhds::Pin_class p) {
+      gu::set_bits(p, 1);
+      gu::set_unsign(p);
+      return p;
+    };
+    auto konst = [&](int v) { return gu::create_const(*body, *Dlop::create_integer(v)); };
+    auto node1 = [&](Ntype_op op, const std::vector<hhds::Pin_class>& ins) {
+      auto n = gu::create_typed_node(*body, op);
+      for (const auto& p : ins) {
+        p.connect_sink(op == Ntype_op::Not ? gu::setup_sink_by_name(n, "a") : gu::setup_sink_pid(n, 0));
+      }
+      return one_bit(n.create_driver_pin(0));
+    };
+    konst(1).connect_sink(gu::setup_sink_by_name(F, "async"));
+    if (dff.reset0_pin.empty() || dff.reset1_pin.empty()) {
+      const bool v = dff.reset0_pin.empty();
+      body->get_input_pin(dff.reset_pin(v)).connect_sink(gu::setup_sink_by_name(F, "reset_pin"));
+      if (dff.reset_low(v)) {
+        konst(1).connect_sink(gu::setup_sink_by_name(F, "negreset"));
+      }
+      konst(v ? 1 : 0).connect_sink(gu::setup_sink_by_name(F, "initial"));
+    } else {
+      // Both pins: one reset (either asserted) loading a computed value.
+      auto act = [&](bool v) {
+        auto p = body->get_input_pin(dff.reset_pin(v));
+        return dff.reset_low(v) ? node1(Ntype_op::Not, {p}) : p;
+      };
+      const auto act0 = act(false);
+      const auto act1 = act(true);
+      node1(Ntype_op::Or, {act0, act1}).connect_sink(gu::setup_sink_by_name(F, "reset_pin"));
+      const auto init = dff.both_value == 1 ? act1 : node1(Ntype_op::And, {act1, node1(Ntype_op::Not, {act0})});
+      init.connect_sink(gu::setup_sink_by_name(F, "initial"));
+    }
+  }
   Fq.connect_sink(body->get_output_pin(dff.q_pin));
   body->commit();
 }

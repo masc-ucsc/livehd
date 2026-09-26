@@ -176,6 +176,9 @@ struct Design_ctx {
   const std::map<std::string, float>&     region_delay_targets;
   const std::optional<liberty::Dff_cell>& dff;
   const std::vector<liberty::Dff_cell>&   dff_ladder;
+  // The asynchronous clear / preset register cells (Region_driver::areset_ladder_).
+  const std::vector<liberty::Dff_cell>&   areset0_ladder;
+  const std::vector<liberty::Dff_cell>&   areset1_ladder;
   // A region's delay budget: `target` minus the register margin when the
   // region holds flops (floored at 1 ps; <= 0 target: no budget).
   std::function<float(float target, bool has_flops)> region_budget;

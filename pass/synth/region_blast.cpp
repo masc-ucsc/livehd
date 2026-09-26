@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
 #include <print>
+#include <string>
 
 #include "absl/container/btree_map.h"
 #include "absl/container/node_hash_map.h"
@@ -509,7 +511,8 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // stay native boundaries. A derived clock has no native source after latch
   // read-back. An ASYNCHRONOUS reset is an event, not data: folding it into D
   // would make the reset land only on a clock edge (and pass/lec's encode.cpp
-  // models async and sync resets differently under the phase schedule). A
+  // models async and sync resets differently under the phase schedule), so it
+  // needs a Liberty clear/preset cell (async_reset_blocker below). A
   // SYNCHRONOUS reset is exactly a D-cone mux with priority over the enable
   // (`if (rst) q <= rval; else if (en) q <= din;` is what cgen emits and what
   // the LEC encodes, ITE(rst, init, ITE(en, din, q))), so it crosses ABC like
@@ -521,7 +524,108 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // (18.196 vs 17.729 um^2, 114.5 vs 102.8 ps on ASAP7), and left every
   // reset-cone node native with fanout 77-113 (br_amba_axi_demux 2045 ps).
   absl::flat_hash_set<hhds::Node_class> clk_demoted;
-  absl::flat_hash_set<hhds::Node_class> reset_demoted;
+  // Async-reset registers kept native, keyed by the precise reason (std::map:
+  // a stable report order).
+  std::map<std::string, absl::flat_hash_set<hhds::Node_class>> reset_demoted_by;
+  absl::flat_hash_set<hhds::Node_class>                        reset_demoted;
+  // Why an asynchronous-reset register cannot map to a clear/preset flop cell
+  // (empty: it can, and `f` is filled in). The cell's reset pin is wired
+  // straight from a region input (like the clock pin), so the reset must trace
+  // to one through wire identities and inverters; the reset value must be a
+  // constant the library has a cell for, bit by bit.
+  auto async_reset_blocker = [&](const hhds::Node_class& n, Seq_flop& f) -> std::string {
+    if (!options.areset_flow_ok) {
+      return "asynchronous-reset register(s) kept as native flops — the synthesis flow is a user command list that may "
+             "reshape latches, so a clear/preset cell's reset pin could not be attributed to its register; their "
+             "surrounding data cones are still mapped";
+    }
+    if (options.areset_cell[0] < 0 && options.areset_cell[1] < 0) {
+      return "asynchronous-reset register(s) kept as native flops — the Liberty has no usable asynchronous clear/preset "
+             "flop cell (posedge, a bare-pin clear/preset, not dont_use); a synchronous reset is folded into D and "
+             "mapped; their surrounding data cones are still mapped";
+    }
+    const bool has_rval = f.rval_drv.is_const();
+    if (!f.rval_drv.is_invalid() && !has_rval) {
+      return "asynchronous-reset register(s) kept as native flops — the reset value is not a constant, which no "
+             "clear/preset flop cell can load; their surrounding data cones are still mapped";
+    }
+    const Dlop rval = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
+    f.arst_val.assign(static_cast<size_t>(f.bits), false);
+    for (int b = 0; b < f.bits; ++b) {
+      bool v = false;
+      if (has_rval && rval.unknown_bit_test(b)) {
+        v = options.areset_cell[0] < 0;  // either value is the source's; take a cell the library has
+      } else if (has_rval) {
+        v = rval.bit_test(b);
+      }
+      if (options.areset_cell[v ? 1 : 0] < 0) {
+        return v ? "asynchronous-reset register(s) kept as native flops — a bit resets to 1 and the Liberty has no "
+                   "asynchronous PRESET flop cell (only a clear); their surrounding data cones are still mapped"
+                 : "asynchronous-reset register(s) kept as native flops — a bit resets to 0 and the Liberty has no "
+                   "asynchronous CLEAR flop cell (only a preset); their surrounding data cones are still mapped";
+      }
+      f.arst_val[static_cast<size_t>(b)] = v;
+    }
+    bool low = false;
+    if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
+      low = gu::const_of(nr).bit_test(0);
+    }
+    f.neg_reset_hint = low;
+    // A 1-bit reset asserts on its bit 0, and every step below preserves bit 0
+    // (Not complements it, Sext and a bit-0 Get_mask keep it) whatever the
+    // intermediate widths are: slang spells `~rst_n` as a signed 2-bit Not
+    // under a Get_mask. Only the traced region input itself must be one bit.
+    const auto multi_bit = "asynchronous-reset register(s) kept as native flops — the reset is a multi-bit value "
+                           "(asserted when non-zero), not one wire a cell's reset pin can take; their surrounding data "
+                           "cones are still mapped";
+    auto       src       = f.rst_drv;
+    if (real_width(src) != 1) {
+      return multi_bit;
+    }
+    for (int guard = 0; guard < 64; ++guard) {  // guard: a cycle through wiring, > any sane chain
+      if (region_in_name.contains(src)) {
+        break;
+      }
+      if (src.is_const()) {
+        return "asynchronous-reset register(s) kept as native flops — the reset is a constant; their surrounding data "
+               "cones are still mapped";
+      }
+      auto       m  = src.get_master_node();
+      const auto op = gu::type_op_of(m);
+      if (op == Ntype_op::Not || op == Ntype_op::Sext) {
+        auto a = gu::get_driver_of_sink_name(m, "a");
+        if (a.is_invalid()) {
+          break;
+        }
+        low ^= op == Ntype_op::Not;
+        src = a;
+        continue;
+      }
+      if (op == Ntype_op::Get_mask) {
+        auto a    = gu::get_driver_of_sink_name(m, "a");
+        auto mask = gu::get_driver_of_sink_name(m, "mask");
+        if (a.is_invalid() || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+          break;
+        }
+        src = a;
+        continue;
+      }
+      break;
+    }
+    if (region_in_name.contains(src) && real_width(src) != 1) {
+      return multi_bit;
+    }
+    if (!region_in_name.contains(src)) {
+      // Computed inside the region: it crosses as a PO (Seq_flop::arst_po,
+      // created after the black-box POs) and the mapped logic drives the pin.
+      f.arst_src = {};
+      f.arst_low = f.neg_reset_hint;
+      return {};
+    }
+    f.arst_src = src;
+    f.arst_low = low;
+    return {};
+  };
   if (options.map_register) {
     for (const auto& n : rb.nodes) {
       if (!gu::is_type_flop(n)) {
@@ -559,8 +663,14 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       if (!f.rst_drv.is_invalid()) {
         auto async = gu::get_driver_of_sink_name(n, "async");
         if (async.is_const() && !gu::const_of(async).is_known_false()) {
-          reset_demoted.insert(n);
-          continue;
+          // An asynchronous reset maps only onto a clear/preset flop cell whose
+          // pin takes the reset straight from a region input.
+          if (auto why = async_reset_blocker(n, f); !why.empty()) {
+            reset_demoted_by[why].insert(n);
+            reset_demoted.insert(n);
+            continue;
+          }
+          f.async_reset = true;
         }
         f.has_reset = true;
       }
@@ -629,6 +739,14 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       // into D below, and the bit maps to a cell like an init-less one.
       const bool power_on_init          = has_rval && !f.has_reset;
       f.d_inverted                      = options.qn_encode && !power_on_init;
+      if (f.async_reset) {
+        // The AIG-side QN encoding holds for an async register only when every
+        // bit's clear/preset cell is itself a QN cell; otherwise the read-back
+        // absorbs or inverts per bit (region_writer: cell.q_inverted vs this).
+        for (int b = 0; b < f.bits && f.d_inverted; ++b) {
+          f.d_inverted = options.areset_cell[f.arst_val[static_cast<size_t>(b)] ? 1 : 0] == 1;
+        }
+      }
       // pipe_min encodes real clocked storage, not an optimization hint.
       // Cross every stage into ABC and expose only the final Q to graph users.
       const int               depth     = pipeline_depth(n);
@@ -694,11 +812,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
                    "derived-clock-native",
                    "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — a DFF "
                    "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected");
-    report_demoted(reset_demoted,
-                   "reset-native",
-                   "asynchronous-reset register(s) kept as native flops — the selected plain DFF cell has no "
-                   "asynchronous reset pin (a synchronous reset is folded into D and mapped); their surrounding data "
-                   "cones are still mapped");
+    for (const auto& [why, set] : reset_demoted_by) {
+      report_demoted(set, "reset-native", why);
+    }
   }
 
   // A very wide OR of non-overlapping, constant-position shifts is a packed-bus
@@ -1397,9 +1513,11 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   trace_stage("blast-complete");
 
   // --- sequential: wire each latch's data-in (D) to the folded next-state ---
-  // Asynchronous-reset flops were kept as native boundaries above because the
-  // selected plain DFF cannot represent the reset event. Every crossed flop's
-  // next state is therefore `rst ? rval : (en ? din : Q)` -- a synchronous
+  // An asynchronous reset never enters D (Seq_flop::async_reset: its register
+  // maps onto a clear/preset cell whose pin takes the reset; one no cell can
+  // represent stayed a native boundary above), so such a latch's next state is
+  // `en ? din : Q`. Every other crossed flop's
+  // next state is `rst ? rval : (en ? din : Q)` -- a synchronous
   // reset has priority over the enable, exactly cgen's
   // `if (rst) q <= rval; else if (en) q <= din;` and pass/lec's
   // ITE(rst, init, ITE(en, din, q)) -- and a missing `initial` resets to 0
@@ -1427,7 +1545,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     if (!f.en_drv.is_invalid()) {
       en_active = reduce_or(f.en_drv);
     }
-    if (!f.rst_drv.is_invalid()) {
+    if (!f.rst_drv.is_invalid() && !f.async_reset) {  // an async reset drives the cell's pin, not D
       rst_active = reduce_or(f.rst_drv);
       if (f.neg_reset) {
         rst_active = ops.inv(*rst_active);
@@ -1517,6 +1635,37 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     }
   }
   trace_stage("bbox-pos");
+
+  // --- asynchronous resets computed inside the region -> ABC POs ---
+  // (after the black-box POs, so both read-backs above stay index-aligned) One
+  // PO per (reset driver, level): the cell pin asserting at `pin_low` reads
+  // the raw reset bit complemented exactly when that disagrees with the
+  // register's own polarity (negreset). ABC maps the inversion with the rest.
+  {
+    absl::flat_hash_map<std::pair<hhds::Pin_class, bool>, int32_t> arst_index;
+    const size_t                                                    first = lnet.outputs().size();
+    for (auto& f : flops) {
+      if (!f.async_reset || !f.arst_src.is_invalid()) {
+        continue;
+      }
+      for (int b = 0; b < f.bits; ++b) {
+        const bool pin_low = options.areset_low[f.arst_val[static_cast<size_t>(b)] ? 1 : 0];
+        auto&      slot    = f.arst_po[pin_low ? 1 : 0];
+        if (slot >= 0) {
+          continue;
+        }
+        const bool invert = pin_low != f.arst_low;
+        auto [it, fresh]  = arst_index.try_emplace({f.rst_drv, invert}, static_cast<int32_t>(lnet.outputs().size()));
+        if (fresh) {
+          const Lid raw = abc_bit(f.rst_drv, 0);
+          lnet.add_output(invert ? ops.inv(raw) : raw, std::format("__arst{}_{}", it->second, pin_low ? "n" : "p"));
+        }
+        slot = it->second;
+      }
+    }
+    result.arst_pos = lnet.outputs().size() - first;
+  }
+  trace_stage("arst-pos");
 
   // A region made entirely of direct native boundaries has no real ABC
   // outputs. ABC's dch implementation crashes on that empty network; retain a

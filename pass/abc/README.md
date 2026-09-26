@@ -229,11 +229,25 @@ the source register's own cgen). Keeping those registers native cost br_delay's
 Pyrope flow 32 native flops that yosys's normalize then mapped to DFFHQNx1 +
 64 INVx1 + 24 extra HB1 (18.196 vs 17.729 um^2, 114.5 vs 102.8 ps on ASAP7),
 and left every reset-cone node native with fanout 77-113 (br_amba_axi_demux
-2045 ps). Only an **asynchronous-reset** register (`async` pin asserted: tolg's
-`sync=false` / `reset_style=async`, slang's `posedge clk or posedge rst`) stays
-a native boundary (`reset-native` diagnostic), because the selected plain DFF
-has no reset pin and folding the event into D would make it land only on a
-clock edge; its surrounding data logic is still mapped. Latch init comes from a
+2045 ps). An **asynchronous-reset** register (`async` pin asserted: tolg's
+`sync=false` / `reset_style=async`, slang's `posedge clk or posedge rst`) can
+not fold its reset into D (the event would land only on a clock edge). It maps
+onto the Liberty's **clear/preset flop cells** instead
+(`Dff_selection::areset_ladder`): it still crosses as a latch, with D =
+`en ? din : Q` and the reset left out, and on read-back each bit takes the
+cheapest cell whose asynchronous pin forces that bit's reset value (a clear
+for 0, a preset for 1 -- stated in terms of the output pin, so ASAP7's
+DFFASRHQNx1, whose QN shows IQN, resets a bit to 0 through `SETN`); a dual
+cell's other pin is tied inactive, and the QN D-side inversion works as for
+the plain cell. The pin is wired straight from the region input the reset
+traces to (through 1-bit identities and `Not`s; one shared INV per input when
+the polarities disagree), or -- for a reset computed inside the region (a
+reset synchronizer's register, a scan-mode mux) -- from an extra ABC PO at the
+level the pin wants, so mapped logic drives it. The register stays a native
+boundary (`reset-native`, naming the precise reason) only when the Liberty has
+no clear (or preset) cell for a needed value, the reset value is not a
+constant, the reset is multi-bit, or a user `flow` may reshape latches; its
+surrounding data logic is still mapped. Latch init comes from a
 resetless power-on constant only (a reset-backed latch is a don't-care to ABC:
 the cell it maps to powers on X). On read-back, latches rebuild into native
 flops or plain Liberty DFF cells according to the `register` option:

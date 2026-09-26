@@ -124,6 +124,12 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   const bool  map_register         = registers.map;
   const auto& dff                  = *registers.cell;
   const auto& dff_ladder           = *registers.ladder;
+  static const std::vector<liberty::Dff_cell> kNoCells;
+  // The asynchronous clear (false) / preset (true) cell ladders.
+  auto areset_ladder = [&](bool v) -> const std::vector<liberty::Dff_cell>& {
+    const auto* l = v ? registers.areset1 : registers.areset0;
+    return l != nullptr ? *l : kNoCells;
+  };
   bool        unsupported          = false;  // a black box whose child def is missing
 
   // --- read back: each mapped gate -> a 1-bit blackbox Sub in the body ---
@@ -633,6 +639,26 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // resetless power-on init: such a bit must keep a native flop so the value
   // survives (a plain DFF cell has no init pin)
   auto needs_native = [&](int k) -> bool { return source_init_bit(k).has_value(); };
+  // The asynchronous-reset register latch k belongs to (Seq_flop::async_reset),
+  // or null. Only reachable with the latch count preserved: the guard in pass
+  // 1c refuses a reshaped set that carries one.
+  auto async_owner = [&](int k) -> const Seq_flop* {
+    if (k < static_cast<int>(latch_owner.size()) && latch_owner[k]->async_reset) {
+      return latch_owner[k];
+    }
+    return nullptr;
+  };
+  // The value latch k's async reset loads (async_owner(k) != null).
+  auto async_value = [&](int k) -> bool { return latch_owner[k]->arst_val[static_cast<size_t>(latch_owner_bit[k])]; };
+  // Whether the cell latch k maps to shows the complement (a QN cell): the
+  // plain pick, or the clear/preset pick for an async-reset bit.
+  auto cell_inverted = [&](int k) -> bool {
+    if (async_owner(k) != nullptr) {
+      const auto& l = areset_ladder(async_value(k));
+      return !l.empty() && l.front().q_inverted;
+    }
+    return dff.has_value() && dff->q_inverted;
+  };
 
   // QN cell (dff->q_inverted): the cell computes QN(t+1) = !D(t) and the
   // read-back wires its QN pin as the register's Q, so the D pin must see ~f.
@@ -653,9 +679,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // fanout.
   absl::flat_hash_set<uint32_t> qn_dnet;
   absl::flat_hash_set<uint32_t> qn_absorbed;  // subset whose driver now computes ~f
-  if (dff.has_value() && dff->q_inverted) {
+  if (dff.has_value()) {
     for (size_t k = 0; k < lat.size(); ++k) {
-      if (needs_native(static_cast<int>(k)) || (k < latch_owner.size() && latch_owner[k]->d_inverted)) {
+      if (!cell_inverted(static_cast<int>(k)) || needs_native(static_cast<int>(k))
+          || (k < latch_owner.size() && latch_owner[k]->d_inverted)) {
         continue;
       }
       const auto dnet = lat[k]->d;
@@ -770,7 +797,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     bool                     d_inv;  // QN cell whose D-cone root could not absorb the inversion: add an inverter on D
   };
   std::vector<Recon_dff> dff_recon;
+  // An async reset computed inside the region reaches its cell pin through a
+  // PO (Seq_flop::arst_po) whose driver may be another register's cell Q,
+  // minted later in this pass: (cell Sub, pin, PO index) wired in pass 2b.
+  struct Pending_reset {
+    hhds::Node_class sub;
+    std::string      pin;
+    int32_t          po;
+  };
+  std::vector<Pending_reset> pending_resets;
   int                    clock_inv_cells = 0;
+  int                    reset_inv_cells = 0;
   bool                   init_dropped    = false;  // a concrete power-on init lost to a plain DFF cell
   if (map_register && !flops.empty()) {
     // src external driver -> body driver pin (region input port, or recreated const)
@@ -941,6 +978,20 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       // pin as Q on the wrong one is a silent miscompile. Unreachable (only the
       // built-in flow sets d_inverted, and it never retimes); a guard, not a
       // path -- every other flow takes the read-back absorption.
+      if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.async_reset; })) {
+        // Seq_flop::async_reset crosses only under a latch-preserving flow
+        // (Blast_options::areset_flow_ok); without the per-latch owner there
+        // is no telling which register's reset a clear/preset pin must take.
+        livehd::diag::err("pass.abc", "abc-readback", "internal")
+            .msg(
+                "pass.abc region '{}': the latch set was reshaped ({} latches for {} register bits) with an "
+                "asynchronous-reset register crossed -- its clear/preset pin cannot be attributed",
+                rb.module_name,
+                m,
+                crossed_bits)
+            .fatal();
+        return false;
+      }
       if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.d_inverted; })) {
         livehd::diag::err("pass.abc", "abc-readback", "internal")
             .msg(
@@ -953,21 +1004,47 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
             .fatal();
         return false;
       }
-      // One IO decl per ladder rung actually used (create_dff_io is find-or-
-      // create, so an unused rung leaves no stray decl in the output library).
-      std::vector<std::shared_ptr<hhds::GraphIO>> rung_io(dff_ladder.size());
-      auto                                        rung_for_fanout = [&](int fanout) -> size_t {
+      auto rung_for_fanout = [&](int fanout, size_t rungs) -> size_t {
         // <=8 loads: x1 (the fastest rung there per the NLDM tables, and 97%
         // of registers); <=16: x2; above: x3 -- clamped to the ladder the
         // library has (test.lib / sky130 have one rung; ASAP7 three).
         const size_t want = fanout <= 8 ? 0 : (fanout <= 16 ? 1 : 2);
-        return std::min(want, dff_ladder.size() - 1);
+        return std::min(want, rungs - 1);
       };
-      auto rung_io_for = [&](size_t r) {
-        if (!rung_io[r]) {
-          rung_io[r] = liberty::create_dff_io(*outlib_, dff_ladder[r]);
+      // One IO decl per cell actually used (create_dff_io is find-or-create,
+      // so an unused rung leaves no stray decl in the output library).
+      absl::flat_hash_map<std::string, std::shared_ptr<hhds::GraphIO>> cell_io;
+      auto                                                              io_for = [&](const liberty::Dff_cell& c) {
+        auto& io = cell_io[c.name];
+        if (!io) {
+          io = liberty::create_dff_io(*outlib_, c);
         }
-        return rung_io[r];
+        return io;
+      };
+      // An async register's reset, as the level a clear/preset pin asserts at:
+      // the region input it traces to (Seq_flop::arst_src), through one shared
+      // min-size inverter per input when the polarities disagree -- the same
+      // treatment a negedge clock gets above.
+      absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> inverted_resets;
+      auto                                                  reset_drive = [&](const Seq_flop& f, bool pin_low) -> hhds::Pin_class {
+        auto src = body_pin_for_src(f.arst_src);
+        if (src.is_invalid() || f.arst_low == pin_low) {
+          return src;
+        }
+        if (auto it = inverted_resets.find(src); it != inverted_resets.end()) {
+          return it->second;
+        }
+        I(mio_inv.has_value());
+        const auto& desc = cell_desc(*mio_inv);
+        auto        inv  = gu::create_typed_node(*body, Ntype_op::Sub);
+        inv.set_subnode(desc.io);
+        inv.attr(hhds::attrs::name).set(std::format("abc_reset_inv_{}", reset_inv_cells));
+        src.connect_sink(inv.create_sink_pin(desc.input_names.front()));
+        auto inverted = inv.create_driver_pin(desc.output_name);
+        gu::set_ubits(inverted, 1);
+        inverted_resets.emplace(src, inverted);
+        ++reset_inv_cells;
+        return inverted;
       };
       // `owner` names the SOURCE register bit this latch came from (empty when
       // the latch count was reshaped and no correspondence survives). A mapped
@@ -996,10 +1073,14 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         const auto* L    = lat[k];
         const auto  qnet = L->q;
         const auto  dnet = L->d;
-        const auto  r    = rung_for_fanout(static_cast<int>(readers[qnet]));
-        const auto& cell = dff_ladder[r];
+        const auto* af     = async_owner(k);
+        const bool  aval   = af != nullptr && async_value(k);
+        const auto& ladder = af != nullptr ? areset_ladder(aval) : dff_ladder;
+        I(!ladder.empty());  // the blaster crossed an async register only when its cell exists
+        const auto  r    = rung_for_fanout(static_cast<int>(readers[qnet]), ladder.size());
+        const auto& cell = ladder[r];
         auto        sub  = gu::create_typed_node(*body, Ntype_op::Sub);
-        sub.set_subnode(rung_io_for(r));
+        sub.set_subnode(io_for(cell));
         sub.attr(hhds::attrs::name).set(owner.empty() ? std::format("g{}_{}", k, cell.name) : unique_flop_name(owner));
         // The cell's output pin IS the register's Q for every consumer -- for
         // a QN cell because the D side carries ~f: crossed that way
@@ -1012,6 +1093,21 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         if (auto lclk = mapped_owner_clk(k); !lclk.is_invalid()) {
           lclk.connect_sink(sub.create_sink_pin(cell.clk_pin));
         }
+        if (af != nullptr) {
+          // The pin that loads this bit's reset value takes the register's
+          // reset; a clear+preset cell's other pin is tied inactive.
+          if (af->arst_src.is_invalid()) {
+            const int32_t po = af->arst_po[cell.reset_low(aval) ? 1 : 0];
+            I(po >= 0);  // the blaster made one for every (register, pin level) it crossed
+            pending_resets.push_back({sub, cell.reset_pin(aval), po});
+          } else if (auto rdrv = reset_drive(*af, cell.reset_low(aval)); !rdrv.is_invalid()) {
+            rdrv.connect_sink(sub.create_sink_pin(cell.reset_pin(aval)));
+          }
+          if (const auto& other = cell.reset_pin(!aval); !other.empty()) {
+            gu::create_const(*body, *Dlop::create_integer(cell.reset_low(!aval) ? 1 : 0))
+                .connect_sink(sub.create_sink_pin(other));
+          }
+        }
         if (lane != nullptr) {
           sub.attr(livehd::attrs::aggregate_origin).set(*lane->root);
           sub.attr(livehd::attrs::aggregate_extent).set(lane->extent);
@@ -1023,7 +1119,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
           sub.attr(livehd::attrs::aggregate_bit_width).set(1);
         }
         const bool crossed_inverted = k < static_cast<int>(latch_owner.size()) && latch_owner[k]->d_inverted;
-        dff_recon.push_back({sub, dnet, &cell, cell.q_inverted && !crossed_inverted && !qn_absorbed.contains(dnet)});
+        // The D pin needs one more inversion exactly when the cell's output
+        // polarity and the crossed encoding disagree, unless pass 1b already
+        // folded it into the D-cone root (qn_absorbed: a QN cell, honest latch).
+        dff_recon.push_back({sub, dnet, &cell, cell.q_inverted != crossed_inverted && !qn_absorbed.contains(dnet)});
       };
       auto native_single = [&](int k) {
         init_dropped = true;
@@ -1243,13 +1342,24 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
     d.connect_sink(rd.sub.create_sink_pin(rd.cell->d_pin));
   }
+  for (const auto& pr : pending_resets) {
+    auto drv = pr.po < static_cast<int32_t>(mapped.outputs.size()) ? get_net_driver(mapped.outputs[static_cast<size_t>(pr.po)])
+                                                                   : hhds::Pin_class{};
+    if (drv.is_invalid()) {
+      livehd::diag::err("pass.abc", "abc-readback", "internal")
+          .msg("pass.abc region '{}': asynchronous-reset PO {} has no read-back driver", rb.module_name, pr.po)
+          .fatal();
+      return false;
+    }
+    drv.connect_sink(pr.sub.create_sink_pin(pr.pin));
+  }
   // Those inverters are minted standard cells the mapped LOGIC network never
   // saw: count them where the identity-buffer bypass corrected the same row,
   // so abc.json `gates`/`area` (what lhdtrack scores as lhd_area, and what the
   // incremental cache persists) describe the netlist that was actually written.
-  if (qn_inv_cells != 0 || clock_inv_cells != 0) {
-    counts.gates += qn_inv_cells + clock_inv_cells;
-    counts.area  += qn_inv_area + clock_inv_cells * inv_area;
+  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0) {
+    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells;
+    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells) * inv_area;
   }
   trace_stage("readback-fanins");
 
@@ -1260,20 +1370,25 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     int w = rb.outputs[po].bits == 0 ? 1 : rb.outputs[po].bits;
     out_bits[po].resize(w);
   }
-  if (mapped.outputs.size() != po_order.size() + bbox_po.size() + (has_dummy_po ? 1 : 0)) {
+  if (mapped.outputs.size() != po_order.size() + bbox_po.size() + blast.arst_pos + (has_dummy_po ? 1 : 0)) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
-        .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {}) — read-back misaligned",
+        .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {}) — read-back "
+             "misaligned",
              rb.module_name,
              mapped.outputs.size(),
-             po_order.size() + bbox_po.size(),
+             po_order.size() + bbox_po.size() + blast.arst_pos,
              po_order.size(),
-             bbox_po.size())
+             bbox_po.size(),
+             blast.arst_pos)
         .emit();
   }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {
     if (has_dummy_po && i >= static_cast<int>(po_order.size() + bbox_po.size())) {
       continue;  // the all-native sentinel PO: no read-back target, and its net
                  // has no driver entry (a lookup here would warn and leak a const)
+    }
+    if (i >= static_cast<int>(po_order.size() + bbox_po.size())) {
+      continue;  // an internal async-reset PO: wired to its cell pins in pass 2b
     }
     auto drv = get_net_driver(mapped.outputs[static_cast<size_t>(i)]);
     if (drv.is_invalid()) {

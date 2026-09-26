@@ -43,6 +43,25 @@ struct Dff_cell {
   // clk_to_q_ps + setup_ps.
   double      clk_to_q_ps = 0;
   double      setup_ps    = 0;
+  // Asynchronous clear/preset, stated in terms of the OUTPUT pin the netlist
+  // uses as Q (q_pin), never in the Liberty's clear/preset vocabulary: when
+  // asserted, `reset0_pin` forces q_pin to 0 and `reset1_pin` forces it to 1.
+  // The two differ exactly when q_pin shows the complement state var. ASAP7's
+  // DFFASRHQNx1 (`ff(IQN,IQNN) {clear:"!SETN"; preset:"!RESETN"}`, QN=IQN) is
+  // therefore reset0=SETN, reset1=RESETN, both active low; sky130 dfrtp_1
+  // (`clear:"!RESET_B"`, Q=IQ) is reset0=RESET_B. `*_low` = asserted at 0.
+  // Empty on a plain flop (scan_dff_cells / resolve_dff_cells base+ladder).
+  std::string reset0_pin;
+  bool        reset0_low = false;
+  std::string reset1_pin;
+  bool        reset1_low = false;
+  // q_pin while BOTH pins are asserted (clear_preset_var1/2 of the var q_pin
+  // shows: L=0, H=1), -1 when the library leaves it unstated or N/T/X.
+  // pass.abc never asserts both; the model (emit_dff_model) needs a value.
+  int         both_value = -1;
+  [[nodiscard]] bool is_async() const { return !reset0_pin.empty() || !reset1_pin.empty(); }
+  [[nodiscard]] const std::string& reset_pin(bool value) const { return value ? reset1_pin : reset0_pin; }
+  [[nodiscard]] bool               reset_low(bool value) const { return value ? reset1_low : reset0_low; }
 };
 
 // Every plain POSEDGE D-flop in the whitespace-separated Liberty file list: a
@@ -52,6 +71,12 @@ struct Dff_cell {
 // logic), no async clear/preset, exactly one data + one clock input, and a Q
 // (preferred) or QN output. File order; unranked.
 std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files);
+// Every posedge D-flop that is plain except for an asynchronous clear and/or
+// preset -- each a bare input pin or its complement (`!RESET_B`, `RN'`),
+// distinct from D and CLK -- with a Q/QN output whose function names a state
+// var (so which pin forces which output value is known). File order; unranked;
+// dont_use cells excluded.
+std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files);
 // The names of every cell marked `dont_use : true` (a separate full read;
 // resolve_dff_cells fills Dff_selection::dont_use from the same pass).
 std::vector<std::string> scan_dont_use_cells(const std::string& lib_files);
@@ -82,21 +107,42 @@ struct Dff_selection {
   // Every cell marked `dont_use : true`, in file order: the set ABC's reader
   // skips (so no rung above names one); pass.abc reports it once per run.
   std::vector<std::string> dont_use;
+  // The asynchronous-reset register cells: areset_ladder[v] maps a register
+  // whose asynchronous reset loads bit value v (0: a clear to 0, 1: a preset to
+  // 1). Ranked like the plain pick (area, outputs, fewest async pins, Q over
+  // QN, name); front() is the pick, the rest its same-shaped drive ladder.
+  // Empty = the library has no such cell, and those register bits stay native
+  // flops. Independent of `prefer` (which names the plain register cell).
+  std::vector<Dff_cell> areset_ladder[2];
 };
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer = "");
+
+// Every distinct cell a register may be mapped to under `sel`: the plain
+// ladder, then each asynchronous-reset ladder (a cell serving both reset values
+// once). What gensim models and what a netlist reader treats as a register.
+std::vector<Dff_cell> selection_cells(const Dff_selection& sel);
 
 // `name:d:clk:q:inverted` -- the resolved pick as one string, for the pass.abc
 // incremental-cache salt (a cached mapped body names its DFF Sub decl, so the
 // pick has to be part of the key, not just the raw `dff_cell` option).
 std::string dff_descriptor(const Dff_cell& dff);
+// dff_descriptor of the base pick plus both asynchronous-reset picks (an
+// `areset` suffix per non-empty ladder, with its reset pins and polarities):
+// the incremental-cache salt, since a cached mapped body names those cells too.
+std::string dff_selection_descriptor(const Dff_selection& sel, std::string_view fallback = "");
 
 // Create-or-find the 1-bit blackbox IO decl (inputs d_pin, clk_pin; output q_pin)
-// for `dff` in `outlib`. Port ids: d=1, clk=2, q=3 (a fixed convention so the
+// for `dff` in `outlib`. Port ids: d=1, clk=2, q=3, and for an asynchronous
+// cell reset0_pin=4 / reset1_pin=5 when present (a fixed convention so the
 // pass.abc netlist Sub and the gensim model agree). Idempotent (find-or-create).
 std::shared_ptr<hhds::GraphIO> create_dff_io(hhds::GraphLibrary& outlib, const Dff_cell& dff);
 
 // Emit a behavioral model graph for `dff` into `outlib`: `q = Flop(clock_pin=clk,
-// din=d)`, wrapped in a Not when the cell's output is QN (q_inverted). Mirrors
+// din=d)`, wrapped in a Not when the cell's output is QN (q_inverted). An
+// asynchronous cell's Flop also carries `async` + `reset_pin` + `initial` in
+// q_pin terms: one pin => reset_pin=that pin (`negreset` when active low),
+// initial=its forced value; both pins => reset_pin = act0|act1 and initial =
+// act1 (both_value 1) or act1&!act0 (otherwise). Mirrors
 // pass.liberty gensim's combinational cell models so a mapped DFF Sub resolves
 // for LEC/sim. No-op when a model of that name already exists.
 void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff);

@@ -144,8 +144,10 @@ void Region_driver::ensure_dff_cells() {
     return;
   }
   auto sel    = liberty::resolve_dff_cells(startup_opts_.library, startup_opts_.dff_cell);
-  dff_        = sel.base;
-  dff_ladder_ = sel.ladder;
+  dff_              = sel.base;
+  dff_ladder_       = sel.ladder;
+  areset_ladder_[0] = sel.areset_ladder[0];
+  areset_ladder_[1] = sel.areset_ladder[1];
   if (dff_.has_value() && dff_ladder_.empty()) {
     dff_ladder_.push_back(*dff_);  // a ladder always has its base rung
   }
@@ -693,6 +695,8 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
           worker->graph_ware_policy_ = graph_ware_policy_;
           worker->dff_               = dff_;
           worker->dff_ladder_        = dff_ladder_;
+          worker->areset_ladder_[0]  = areset_ladder_[0];
+          worker->areset_ladder_[1]  = areset_ladder_[1];
           worker->dff_preset_        = dff_preset_;
           lane.driver                = worker.get();
           parallel_drivers_.push_back(std::move(worker));
@@ -1095,6 +1099,16 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // ~next_state and the mapper folds the inversion into its phase assignment
   // (Seq_flop::d_inverted).
   blast_options.qn_encode      = dff_.has_value() && dff_->q_inverted && plan.preserves_latches;
+  // Asynchronous-reset registers cross as latches only under a flow that keeps
+  // every latch as crossed: the read-back attributes each cell's reset pin to
+  // its source register by latch position (Seq_flop::async_reset).
+  for (int v = 0; v < 2; ++v) {
+    blast_options.areset_cell[v] = dff_.has_value() && plan.preserves_latches && !areset_ladder_[v].empty()
+                                       ? static_cast<int8_t>(areset_ladder_[v].front().q_inverted ? 1 : 0)
+                                       : static_cast<int8_t>(-1);
+    blast_options.areset_low[v]  = !areset_ladder_[v].empty() && areset_ladder_[v].front().reset_low(v != 0);
+  }
+  blast_options.areset_flow_ok = plan.preserves_latches;
   blast_options.verbose        = opts_.verbose;
   Blast_hooks hooks;
   hooks.stage      = trace_stage;
@@ -1194,7 +1208,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
 
   // --- read back: the mapped cells -> the region body ---
   Region_writer::Counts          counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
-  const Region_writer::Registers registers{opts_.map_register, &dff_, &dff_ladder_};
+  const Region_writer::Registers registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1]};
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {
@@ -1608,6 +1622,8 @@ Design_ctx Region_driver::design_ctx() {
                     region_delay_targets_,
                     dff_,
                     dff_ladder_,
+                    areset_ladder_[0],
+                    areset_ladder_[1],
                     [this](float target, bool has_flops) { return region_budget(target, has_flops); },
                     timing_requested()};
 }
