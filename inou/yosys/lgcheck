@@ -985,7 +985,6 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # (reset at 1-2, release at 3); only an asynchronous reset is then assured.
   bmc_start=1
   BMC_RESET_STMT=""
-  BMC_INIT="-set-init-zero"
   if [ "${RESET_STMT}" != "" ]; then
     if [ "${#clock_names[@]}" -gt 0 ]; then
       echo "INFO: bounded check clocks the reset window (2 rising edges) on: ${clock_names[*]}"
@@ -996,34 +995,35 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
         BMC_RESET_STMT+=" -set-at 1 in_${clk_name} 0 -set-at 2 in_${clk_name} 1 -set-at 3 in_${clk_name} 0 -set-at 4 in_${clk_name} 1"
       done
       bmc_start=5
-      # The design has really been reset, so its power-on state is UNDEFINED,
-      # not zero: only an explicit init value or the reset defines a
-      # register, everything else starts as X. With the miter's
-      # -ignore_gold_x an output that still depends on un-reset GOLD state is
-      # a don't-care, while every output the reset (or the inputs) defines on
-      # the gold side must still match the gate exactly -- including a gate X
-      # there, so a netlist that fails to reset a register the RTL resets
-      # still refutes. -set-init-zero is unsound for mapped netlists: a
-      # QN-output flop (ASAP7 DFFHQN + inverter) stores the complement, so
-      # "all state zero" is Q=0 on the RTL but Q=1 on the netlist, and an
-      # un-reset register manufactured a counterexample (picorv32 trap/eoi,
-      # proven by the native cvc5 LEC).
-      BMC_INIT="-set-init-undef"
+      # Power-on state stays ZERO on both sides after the clocked reset (the
+      # init policy below). An all-X start (-set-init-undef) is unsound in
+      # the REFUTING direction: sat's X model is pessimistic, so a
+      # structurally different but equivalent gate (e.g. a mux whose select
+      # is un-reset X but whose arms agree) yields X where the gold side
+      # computes a defined bit, and the miter reports that X as a mismatch
+      # (br_fifo_shared_pop_ctrl pop_data: native cvc5 LEC proves, the
+      # all-X BMC "refuted"). Zero init is consistent across RTL and a
+      # QN-mapped netlist because the Liberty model's state IS the QN pin
+      # that pass.abc wires as the register (emit_dff_model: Flop(Not(D))),
+      # so zero state is Q=0 on both sides. The historical picorv32 refute
+      # blamed on QN init was the UNCLOCKED reset window: the first edge
+      # sampled un-reset (unreachable, synthesis don't-care) state.
     else
       echo "WARN: no clock input found on ${GOLD_TOP}; the bounded check cannot drive a synchronous reset"
       BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert} -set-at 3 ${reset_signal} ${reset_release}"
       bmc_start=4
     fi
   fi
-  # Without a reset protocol there is no defined starting state to compare
-  # from; an all-X start would leave e.g. a resetless LFSR undefined forever
-  # and the gold X mask would hide every difference. Keep the historical
-  # shared zero initialization there: it assumes the two designs encode their
-  # power-on state identically (a QN-mapped resetless register can still
-  # false-refute; the native cvc5 LEC pairs states instead).
+  # Shared zero initialization: it assumes the two designs encode their
+  # power-on state identically (true for the Q-polarity register state of RTL
+  # and of lhd netlists; a netlist that stores a register inverted without
+  # reset can still false-refute -- the native cvc5 LEC pairs states instead).
+  # An all-X start is not an option: with a reset it manufactures X-pessimism
+  # refutes (above), without one it leaves e.g. a resetless LFSR undefined
+  # forever and the gold X mask hides every difference.
   bmc_sat_cmds=""
   for ((t = bmc_start; t < bmc_start + LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 ${BMC_INIT} -set-def-inputs -show-ports miter; "
+    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
   done
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
@@ -1033,8 +1033,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # constant, including at time zero.  The structurally different mapped side
   # can retain the flop until after flattening; the later `-set-init-zero` then
   # compares constant-one GOLD against zero-initialized GATE and manufactures
-  # (after a clocked reset `-set-init-undef` does the same: an X gate bit
-  # against a defined gold bit is not masked) a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
+  # a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
   # two equivalent machines intact before the shared initialization policy is
   # applied by SAT.
   run_equiv_yosys --bmc -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
