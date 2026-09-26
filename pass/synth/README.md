@@ -32,7 +32,11 @@ code.
 5. **Mapping** is the backend's (`region_backend.hpp`, below).
 6. **Read-back.** `region_writer.cpp` writes the backend's `Cell_netlist`
    (`cell_netlist.hpp`) into the region body: cells, registers with their
-   LEC-visible names, native boundaries, source attribution.
+   LEC-visible names, native boundaries, source attribution. A register
+   split into one-bit cells names bit i `reg[i]` and a lowered memory entry
+   i `<mem>._mem[i]` (bit b: `<mem>._mem[i][b]`), following the
+   bus-expansion standard in `core/bus_name.hpp`; semdiff and pass/lec parse
+   the same spelling back to pair the cells with the source register.
 
 ## The Lnet (`lnet.hpp`)
 

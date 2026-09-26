@@ -725,13 +725,14 @@ fi
 # Track definedness too: cgen preserves don't-care padding and uninitialized
 # memory lanes; independent two-state guesses for those bits block valid proofs.
 # %co walks one edge from state cells to their output wires (including aliases).
-# Split internal packed state names to the mapper spelling (state_0, state_1,
-# ...). Ports stay intact. Every proposed state match is still an equiv proof
+# Split internal packed state names to the mapper spelling (state[0],
+# state[1], ... -- LiveHD's bus-expansion standard, core/bus_name.hpp, which is
+# also splitnets' default). Ports stay intact. Every proposed state match is still an equiv proof
 # obligation; this gives induction the relation lost during register bitblasting.
 yosys_state_prep="${yosys_read}; memory; opt -full;
     select -set state_outputs t:\$*ff* t:\$*latch* %u %co w:* %i;
     rename -hide w:* @state_outputs %d; select -unset state_outputs;
-    splitnets -format _"
+    splitnets"
 rm -f lgcheck1n.json lgcheck_memory_names.ys
 run_clock_blind_yosys --heuristic -p "${yosys_state_prep};
     equiv_make gold gate equiv; hierarchy -top equiv;
@@ -773,18 +774,22 @@ for name, net in nets.items():
     base = name[:-5]
     other = nets.get(base + "_gate")
     # Restrict to literal names; never interpolate Yosys selection wildcards.
-    if other and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*", base):
+    # A bus-bit index (`state[3]`, core/bus_name.hpp) is the one exception: a
+    # select pattern would read `[3]` as a character class, so each bracket
+    # becomes the single-character wildcard `?`. Over-matching only hides MORE
+    # names, i.e. proposes fewer correspondences -- never an unproven one.
+    if other and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[[0-9]+\])*", base):
         if any((a, b) in unproven for a, b in zip(net["bits"], other["bits"])):
-            names.add("w:" + base)
+            names.add("w:" + base.replace("[", "?").replace("]", "?"))
 # Cgen encodes the source Memory name reversibly in its wrapper instance.
-# memory_module.cpp preserves <source>._mem<word>_<bit> after mapping.
+# memory_module.cpp preserves <source>._mem[<word>][<bit>] after mapping.
 # Restore only existing pairs, without collisions or port changes. A fresh
 # comparison below must prove every proposed memory state and public output.
 memory_commands = []
 ports = module.get("ports", {})
 for name in nets:
     match = re.fullmatch(
-        r"(.*?)__lhdmem_h([0-9a-f]+)_e\.data\[([0-9]+)\]_([0-9]+)_(gold|gate)", name
+        r"(.*?)__lhdmem_h([0-9a-f]+)_e\.data\[([0-9]+)\]\[([0-9]+)\]_(gold|gate)", name
     )
     if not match:
         continue
@@ -794,9 +799,9 @@ for name in nets:
     except (ValueError, UnicodeError):
         continue
     old = name[:-(len(side) + 1)]
-    new = f"{prefix}{decoded}._mem{word}_{bit}"
+    new = f"{prefix}{decoded}._mem[{word}][{bit}]"
     other = "gate" if side == "gold" else "gold"
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*", new):
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[[0-9]+\])*", new):
         continue
     if new + "_" + other not in nets or new + "_" + side in nets:
         continue

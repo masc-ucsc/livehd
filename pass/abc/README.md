@@ -222,7 +222,7 @@ D-cone mux with priority over the enable, exactly cgen's
 `if (rst) q <= rval; else if (en) q <= din;` and pass/lec's
 `ITE(rst, init, ITE(en, din, q))`, so it crosses like any other next-state
 logic and its register maps to a plain DFF cell under the register name
-(`r`, `r_<bit>`), with the `initial` dropped: it is the reset value, realized
+(`r`, `r[<bit>]` -- the bus-expansion standard, `core/bus_name.hpp`), with the `initial` dropped: it is the reset value, realized
 on D, not a power-on value (cvc5 and lgyosys both prove the folded netlist
 against the `reset_pin`+`initial` source; a plain DFF powers on X exactly like
 the source register's own cgen). Keeping those registers native cost br_delay's

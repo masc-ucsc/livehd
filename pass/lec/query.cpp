@@ -29,6 +29,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "bus_name.hpp"
 #include "cone_abc.hpp"
 #include "cprop.hpp"
 #include "encode.hpp"
@@ -196,6 +197,83 @@ std::string bbin_models_hint(const std::vector<std::string>& unmatched_impl) {
   return "; hint: the impl instantiates library cells with no definition (a tech-mapped netlist without its cell models) — "
          "generate models with `lhd pass liberty gensim <file.lib> --emit-dir lg:models` and re-run with `--lib lg:models`";
 }
+
+// Regroup one-bit state keys named by the bus-expansion standard
+// (core/bus_name.hpp): bit i of register `r` is `r[i]`. A standard-cell
+// netlist read back as Verilog with its cell models inlined carries each
+// cell's state one hierarchy level down (`r[i].flop_16`, `r[i].IQ`); a
+// one-bit register keeps its plain name and so reads back as `r.flop_16`
+// (bus_name::cell_state_owner, which also undoes cgen's `_cgen<N>` instance
+// uniquifier).
+// `raw` maps a key to the hierarchical name it was made from (canon_flop_name
+// flattens '.' to '_', which would make the model segment ambiguous); a key
+// without one is parsed in its canonical spelling.
+//
+// Returns base key -> member keys, LSB first, for every base whose members are
+// width 1, absent from `other`, and cover EXACTLY the indices 0..n-1 with one
+// key each (a lone `r.<state>` is the one-member group of `r`). A base with a
+// duplicated index (two state elements inside one bit's cell), a gap, or a
+// mix of the two shapes is dropped whole: an ambiguous regroup is no
+// correspondence. The caller still requires the reference's `base` to be
+// exactly n bits wide, and every relation built from these groups is
+// re-verified by the miter.
+absl::flat_hash_map<std::string, std::vector<std::string>> bus_bit_groups(const Io_name_map<int>&         side,
+                                                                          const Io_name_map<int>&         other,
+                                                                          const Io_name_map<std::string>& raw = {}) {
+  struct Group {
+    std::map<int64_t, std::string> bits;
+    int                            model_only = 0;  // members of the lone `r.<state>` shape
+    bool                           broken     = false;
+  };
+  absl::flat_hash_map<std::string, Group> indexed;
+  for (const auto& [key, width] : side) {
+    if (width != 1 || other.contains(key)) {
+      continue;
+    }
+    std::string base;
+    int64_t     index = 0;
+    bool        lone  = false;
+    if (auto rit = raw.find(key); rit != raw.end()) {
+      const auto logical = gu::logical_hier_name(rit->second);
+      if (auto p = livehd::bus_name::parse_bus_piece(logical, /*allow_model_suffix=*/true)) {
+        base  = canon_flop_name(p->base);
+        index = p->index;
+      } else if (auto owner = livehd::bus_name::cell_state_owner(logical)) {
+        base = canon_flop_name(*owner);
+        lone = true;
+      } else {
+        continue;
+      }
+    } else if (auto p = livehd::bus_name::parse_bus_piece(key, /*allow_model_suffix=*/true, '_')) {
+      base  = std::string{p->base};
+      index = p->index;
+    } else {
+      continue;
+    }
+    if (base.empty()) {
+      continue;
+    }
+    auto& g = indexed[base];
+    g.model_only += lone ? 1 : 0;
+    if (!g.bits.emplace(index, key).second) {
+      g.broken = true;
+    }
+  }
+  absl::flat_hash_map<std::string, std::vector<std::string>> out;
+  for (auto& [base, g] : indexed) {
+    const auto n = static_cast<int64_t>(g.bits.size());
+    if (g.broken || g.bits.rbegin()->first + 1 != n || (g.model_only != 0 && n != 1)) {
+      continue;  // duplicated or non-contiguous index set, or mixed shapes
+    }
+    std::vector<std::string> bits;
+    bits.reserve(g.bits.size());
+    for (auto& [index, key] : g.bits) {
+      bits.push_back(std::move(key));
+    }
+    out.emplace(base, std::move(bits));
+  }
+  return out;
+}
 }  // namespace
 
 std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text) {
@@ -305,33 +383,29 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   };
   // An exact same-base packed/scalar split is stronger evidence than semdiff's
   // speculative one-to-one signature match.  In particular, a mapped N-bit
-  // register named `state` becomes `state_0 .. state_(N-1)`.  Pairing just one
-  // of those scalar cells (often `state_1`) to the packed `state` aliases a
-  // 1-bit term onto an N-bit cut and also hides that member from the exact
-  // packed-to-bits bridge used by both proof engines.  Reject only the complete,
-  // lossless shape here; unrelated width-changing tier-2 pairs remain legal and
-  // retain their ordinary self-certifying/reset-backed discipline.
-  auto exact_packed_scalar_member = [&](const std::string& rc, const std::string& ic) {
+  // register named `state` becomes `state[0] .. state[N-1]` (core/bus_name.hpp).
+  // Pairing just one of those scalar cells (often `state[1]`) to the packed
+  // `state` aliases a 1-bit term onto an N-bit cut and also hides that member
+  // from the exact packed-to-bits bridge used by both proof engines.  Reject
+  // only the complete, lossless shape here; unrelated width-changing tier-2
+  // pairs remain legal and retain their ordinary self-certifying/reset-backed
+  // discipline.
+  Io_name_map<int> rwidth, iwidth;
+  for (const auto& [k, f] : rmap) {
+    rwidth[k] = f.count == 1 ? f.width : 0;
+  }
+  for (const auto& [k, f] : imap) {
+    iwidth[k] = f.count == 1 ? f.width : 0;
+  }
+  const auto impl_groups                = bus_bit_groups(iwidth, rwidth);
+  auto       exact_packed_scalar_member = [&](const std::string& rc, const std::string& ic) {
     auto ri = rmap.find(rc);
-    auto ii = imap.find(ic);
-    if (ri == rmap.end() || ii == imap.end() || ri->second.width <= 1 || ii->second.width != 1 || imap.contains(rc)) {
+    if (ri == rmap.end() || ri->second.width <= 1 || imap.contains(rc)) {
       return false;
     }
-    const std::string prefix = rc + "_";
-    if (!ic.starts_with(prefix) || ic.size() == prefix.size()
-        || !std::all_of(ic.begin() + static_cast<std::ptrdiff_t>(prefix.size()), ic.end(), [](unsigned char ch) {
-             return std::isdigit(ch);
-           })) {
-      return false;
-    }
-    for (int bit = 0; bit < ri->second.width; ++bit) {
-      auto bi = imap.find(prefix + std::to_string(bit));
-      if (bi == imap.end() || bi->second.count != 1 || bi->second.width != 1) {
-        return false;
-      }
-    }
-    // Exact means exactly N cells, not merely an N-bit prefix of a larger bank.
-    return !imap.contains(prefix + std::to_string(ri->second.width));
+    auto grp = impl_groups.find(rc);
+    return grp != impl_groups.end() && static_cast<int>(grp->second.size()) == ri->second.width
+           && std::find(grp->second.begin(), grp->second.end(), ic) != grp->second.end();
   };
   for (const auto& [rn, in] : pairs) {
     std::string rc = canon_flop_name(rn);
@@ -2671,11 +2745,12 @@ inline void merge_top_in(Top_in& slot, int w, bool sgn) {
 }
 
 // ── pass.abc memory=true storage-flop bank of a Memory ─────────────────────
-// pass/abc/mem_lower.cpp bit-blasts a Memory `<mem>` (size x bits) into one
-// bits-wide storage flop per entry named `<mem>__mem<i>`, and the DFF-cell
-// read-back (abc_map.cpp map_dff_cell) then splits each into one-bit library
-// cells `<mem>__mem<i>_<b>` (b = 0..bits-1, LSB first). The mapped design thus
-// carries EITHER shape per entry -- the whole flop when the register stayed
+// pass/synth/memory_module.cpp bit-blasts a Memory `<mem>` (size x bits) into
+// one bits-wide storage flop per entry named `<mem>._mem[i]` (canonical key
+// `<mem>__mem[i]`), and the DFF-cell read-back (region_writer.cpp
+// map_dff_cell) then splits each into one-bit library cells `<mem>._mem[i][b]`
+// (b = 0..bits-1, LSB first) -- the bus-expansion standard, core/bus_name.hpp.
+// The mapped design thus carries EITHER shape per entry -- the whole flop when the register stayed
 // native (a Liberty without a DFF cell, register_max_bits), the bit cells
 // otherwise -- while the source design carries the Memory. Both LEC engines
 // need that correspondence: without it the entry cuts and the Memory's array
@@ -2721,8 +2796,11 @@ std::string memory_bank_correspondence_name(std::string_view name, bool strip_re
     }
   }
   auto suffix = key.substr(entry + 2);
-  if (const auto model = suffix.rfind("_flop_"); model != std::string::npos && digits(std::string_view(suffix).substr(model + 6))) {
-    suffix.resize(model);
+  // A Liberty cell model read back inline leaves its own state one segment
+  // below the entry (bit) cell: `_mem[i][b]_flop_16` (core/bus_name.hpp).
+  if (const auto piece = livehd::bus_name::parse_bus_piece(suffix, /*allow_model_suffix=*/true, '_');
+      piece && !piece->suffix.empty()) {
+    suffix.resize(suffix.size() - piece->suffix.size() - 1);
   }
   return prefix + decoded->substr(marker) + suffix;
 }
@@ -2767,7 +2845,7 @@ std::optional<Mem_entry_bank> find_mem_entry_bank(const std::string& mem_name, c
   out.entry_keys.assign(static_cast<size_t>(sig.size), std::string{});
   out.bit_keys.assign(static_cast<size_t>(sig.size), {});
   for (int i = 0; i < sig.size; ++i) {
-    const std::string ek = std::format("{}__mem{}", name, i);
+    const std::string ek = livehd::bus_name::entry(name + "__mem", i);
     if (auto it = candidates.find(ek); it != candidates.end()) {
       if (it->second.second != sig.bits || matched.contains(ek)) {
         return std::nullopt;
@@ -2778,7 +2856,7 @@ std::optional<Mem_entry_bank> find_mem_entry_bank(const std::string& mem_name, c
     std::vector<std::string> bits;
     bits.reserve(static_cast<size_t>(sig.bits));
     for (int b = 0; b < sig.bits; ++b) {
-      std::string bk  = std::format("{}_{}", ek, b);
+      std::string bk  = livehd::bus_name::bit(ek, b);
       auto        bit = candidates.find(bk);
       if (bit == candidates.end() || bit->second.second != 1 || matched.contains(bk)) {
         return std::nullopt;
@@ -2853,7 +2931,8 @@ bool split_loop_replica_key(std::string_view key, std::string& group, int& repli
 // does NOT justify it. The inductive step and reset-reachable BMC base are both
 // proved before the portfolio may turn it into a full equivalence result.
 std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side, const Io_name_map<int>& impl_side,
-                                                              const Io_name_map<uint64_t>& impl_order) {
+                                                              const Io_name_map<uint64_t>&    impl_order,
+                                                              const Io_name_map<std::string>& impl_raw) {
   std::map<std::string, std::map<int, std::string>> groups;
   for (const auto& [key, width] : impl_side) {
     if (width != 1 || ref_side.contains(key)) {
@@ -2901,38 +2980,20 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
     out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front()), false, {}});
   }
 
-  // Standard-cell mapping uses `<source-register>_<bit>` rather than the
-  // loop-replica spelling above. The EXACT-base form (`data_0..data_N` against a
-  // ref `data`) is already related by the ordinary bit-blast bridge and is not
-  // re-proposed here, but a flattened implementation may retain a hierarchy
-  // prefix that the source front-end did not (`child_data_0` versus packed
-  // `data`). Admit that suffix relation only when it selects one complete,
-  // contiguous group of exactly N bits AND that group could serve no OTHER
+  // Standard-cell mapping names bit i of a register `<source-register>[i]`
+  // (core/bus_name.hpp) rather than the loop-replica spelling above. The
+  // EXACT-base form (`data[0]..data[N-1]` against a ref `data`) is already
+  // related by the ordinary bit-blast bridge and is not re-proposed here, but a
+  // flattened implementation may retain a hierarchy prefix that the source
+  // front-end did not (`child_data[0]` versus packed `data`). Admit that
+  // suffix relation only when it selects one complete, contiguous group of
+  // exactly N bits (bus_bit_groups) AND that group could serve no OTHER
   // reference key. This remains an UNCERTAIN bridge: the caller requires both an
   // inductive transition proof and a reset-reachable base proof before it can
   // contribute to PROVEN.
-  std::map<std::string, std::map<int, std::string>> indexed;
-  for (const auto& [key, width] : impl_side) {
-    if (width != 1 || ref_side.contains(key)) {
-      continue;
-    }
-    const auto underscore = key.rfind('_');
-    if (underscore == std::string::npos || underscore + 1 == key.size()) {
-      continue;
-    }
-    int  index  = 0;
-    bool digits = true;
-    for (size_t i = underscore + 1; i < key.size(); ++i) {
-      // The bound also keeps a pathological all-digit tail from overflowing.
-      if (std::isdigit(static_cast<unsigned char>(key[i])) == 0 || index > 1000000) {
-        digits = false;
-        break;
-      }
-      index = index * 10 + (key[i] - '0');
-    }
-    if (digits) {
-      indexed[key.substr(0, underscore)].emplace(index, key);
-    }
+  std::map<std::string, std::vector<std::string>> indexed;
+  for (auto& [base, bits] : bus_bit_groups(impl_side, ref_side, impl_raw)) {
+    indexed.emplace(base, std::move(bits));
   }
   // A wide key the loop-replica pass above already bridged is spoken for: a
   // second relation would map the same reference bits onto two scalar groups.
@@ -2944,24 +3005,13 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
   // handful per name) rather than testing every reference key against every
   // group: the latter is quadratic in the state-key count and allocated a
   // `"_" + wide` temporary per pair. BOTH directions must be unique -- a group
-  // that could serve two reference keys (`u_w_data_0..7` fits `data` and
+  // that could serve two reference keys (`u_w_data[0..7]` fits `data` and
   // `w_data`), or a reference key with two candidate groups, is an arbitrary
   // choice and not a correspondence. `std::map` keeps the emitted bridge order
   // independent of hash iteration order.
   std::map<std::string, std::vector<std::string>> wide_to_bases;  // ref wide -> candidate group bases
   std::map<std::string, int>                      base_claims;    // group base -> ref wides it could serve
   for (const auto& [base, members] : indexed) {
-    int  expected   = 0;
-    bool contiguous = true;
-    for (const auto& [index, key] : members) {
-      if (index != expected++) {
-        contiguous = false;
-        break;
-      }
-    }
-    if (!contiguous) {
-      continue;
-    }
     const auto n = static_cast<int>(members.size());
     if (n <= 1) {
       continue;
@@ -2981,11 +3031,7 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
       continue;  // ambiguous in one direction or the other
     }
     const auto&              base = bases.front();
-    std::vector<std::string> bits;
-    bits.reserve(indexed.at(base).size());
-    for (const auto& [index, key] : indexed.at(base)) {
-      bits.push_back(key);
-    }
+    std::vector<std::string> bits = indexed.at(base);
     const auto prefix = std::string_view(base).substr(0, base.size() - wide.size() - 1);
     out.push_back(Packed_scalar_bridge{wide, std::move(bits), is_synthetic_partition_prefix(prefix), {}});
   }
@@ -4581,6 +4627,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
       // cannot tell "this key exists on both sides" from "only one side has it".
       Io_name_map<int>  fw_side[2];
+      // key -> the hierarchical name it came from (first wins), so the
+      // bus-bit bridge below can tell a cell model's state segment apart.
+      Io_name_map<std::string> fw_raw[2];
       // Keys with a reset pin on either side: the reset-prologue power-on
       // policy below.
       absl::flat_hash_set<std::string> reset_state_keys;
@@ -4628,6 +4677,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (auto sit = fw_side[side_ix].find(key); sit == fw_side[side_ix].end() || w < sit->second) {
             fw_side[side_ix][key] = w;  // min-wins, exactly like `fw` below
           }
+          fw_raw[side_ix].try_emplace(key, node.get_hier_name());
           if (auto it = fw.find(key); it == fw.end() || w < it->second) {
             fw[key]   = w;
             fsgn[key] = !graph_util::is_unsign(q);
@@ -4664,12 +4714,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       collect_flops(ref);
       side_ix = 1;
       collect_flops(impl);
-      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1], impl_state_order);
+      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1], impl_state_order, fw_raw[1]);
 
       // ── bit-blasted state correspondence ──────────────────────────────────
       // Synthesis can implement ONE N-bit register as N one-bit library DFF
       // cells; pass/abc names each mapped instance after its source register bit,
-      // so the impl ends up with cuts `<reg>_0 .. <reg>_{N-1}` of width 1 where
+      // so the impl ends up with cuts `<reg>[0] .. <reg>[N-1]` of width 1 where
       // the ref has a single `<reg>` of width N. The two key sets are then
       // DISJOINT: nothing corresponds, every cone reading the register compares
       // unrelated free symbols, and the def can only come back inconclusive.
@@ -4681,29 +4731,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // ambiguous).
       absl::flat_hash_map<std::string, std::vector<std::string>> bitblast;  // ref key -> impl bit keys, LSB first
       absl::flat_hash_set<std::string>                           bitblast_bits;
-      for (const auto& [key, w] : fw_side[0]) {
-        if (w < 1 || fw_side[1].count(key) != 0) {
-          continue;
-        }
-        // Longest contiguous run; the implementation has one cell per literal
-        // state bit.
-        std::vector<std::string> bits;
-        for (int i = 0;; ++i) {
-          const std::string bk = key + "_" + std::to_string(i);
-          auto              it = fw_side[1].find(bk);
-          if (it == fw_side[1].end() || it->second != 1 || fw_side[0].count(bk) != 0) {
-            break;
+      {
+        const auto groups = bus_bit_groups(fw_side[1], fw_side[0], fw_raw[1]);
+        for (const auto& [key, w] : fw_side[0]) {
+          if (w < 1 || fw_side[1].count(key) != 0) {
+            continue;
           }
-          bits.push_back(bk);
+          // The implementation has one cell per literal state bit, named
+          // `<key>[i]` (core/bus_name.hpp). Same exact-width bound as the
+          // inductive twin.
+          auto grp = groups.find(key);
+          if (grp == groups.end() || static_cast<int>(grp->second.size()) != w) {
+            continue;
+          }
+          for (const auto& b : grp->second) {
+            bitblast_bits.insert(b);
+          }
+          bitblast.emplace(key, grp->second);
         }
-        // Same exact-width bound as the inductive twin.
-        if (const int m = static_cast<int>(bits.size()); m != w) {
-          continue;
-        }
-        for (const auto& b : bits) {
-          bitblast_bits.insert(b);
-        }
-        bitblast.emplace(key, std::move(bits));
       }
       // A mapped region's synthetic `sub_<partition-id>` boundary was already
       // inlined by the hierarchy driver. Relate its per-bit cells immediately:
@@ -4924,7 +4969,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
               }
             }
           }
-          // A bit-blasted register's cuts look exactly like a bank (`<reg>_0..`,
+          // A bit-blasted register's cuts look exactly like a bank (`<reg>[0]..`,
           // no constant init once abc folds the reset into D) but they are NOT
           // one. The ordinary bitblast bridge excludes same-base splits above.
           // A differently named split (e.g. Pyrope `stage0` against mapped
@@ -5082,8 +5127,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
 
       // ── Memory <-> storage-flop bank init bridge ────────────────────────
       // The pass.abc memory=true shape (find_mem_entry_bank): the other design
-      // holds the Memory `<mem>` as per-entry flops `<mem>__mem<i>` or their
-      // one-bit DFF cells `<mem>__mem<i>_<b>`. Same construction as the wide-flop
+      // holds the Memory `<mem>` as per-entry flops `<mem>._mem[i]` or their
+      // one-bit DFF cells `<mem>._mem[i][b]`. Same construction as the wide-flop
       // bridge above -- entry i of the shared initial array := that entry's
       // power-on symbol (the bit cells concatenated MSB first), so the array is
       // a deterministic FUNCTION of the bank's free init, never a constant:
@@ -6208,6 +6253,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // Per-side key/width sets, for the bit-blast pairing after add_flops runs:
   // `shared` alone cannot tell "both sides have this key" from "only one does".
   Io_name_map<int> ind_side[2];
+  Io_name_map<std::string> ind_raw[2];  // key -> hierarchical name (see fw_raw)
   int              ind_side_ix = 0;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
@@ -6313,6 +6359,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (auto sit = ind_side[ind_side_ix].find(key); sit == ind_side[ind_side_ix].end() || w < sit->second) {
         ind_side[ind_side_ix][key] = w;  // min-wins, exactly like `shared` below
       }
+      ind_raw[ind_side_ix].try_emplace(key, node.get_hier_name());
       if (auto it = shared.find(key); it != shared.end() && it->second.width <= w) {
         continue;
       }
@@ -6325,39 +6372,36 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   add_flops(ref);
   ind_side_ix = 1;
   add_flops(impl);
-  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1], impl_state_order);
+  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1], impl_state_order, ind_raw[1]);
 
   // ── bit-blasted state correspondence (see the twin in the BMC seeding) ─────
   // Synthesis can implement ONE N-bit register as N one-bit library DFF cells;
   // pass/abc names each mapped instance after its source register bit, so the
-  // impl carries cuts `<reg>_0 .. <reg>_{N-1}` of width 1 where the ref has a
+  // impl carries cuts `<reg>[0] .. <reg>[N-1]` of width 1 where the ref has a
   // single `<reg>` of width N. Disjoint key sets mean NOTHING corresponds: each
   // side mints its own free symbols and every cone reading the register diverges,
   // which is exactly the "inconclusive in milliseconds" post-synthesis LEC. Bind
   // the impl's bit i to bit i of the ref's one symbol.
   absl::flat_hash_map<std::string, std::vector<std::string>> ind_bitblast;  // ref key -> impl bit keys, LSB first
+  const auto ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1]);
   for (const auto& [key, w] : ind_side[0]) {
     if (w < 1 || ind_side[1].count(key) != 0) {
       continue;
     }
-    // Longest contiguous run `<key>_0, _1, ...`.
-    std::vector<std::string> bits;
-    for (int i = 0;; ++i) {
-      const std::string bk = key + "_" + std::to_string(i);
-      auto              it = ind_side[1].find(bk);
-      if (it == ind_side[1].end() || it->second != 1 || ind_side[0].count(bk) != 0) {
-        break;
-      }
-      bits.push_back(bk);
+    // The complete `<key>[0..n-1]` group (core/bus_name.hpp), if any.
+    auto grp = ind_bus_groups.find(key);
+    if (grp == ind_bus_groups.end()) {
+      continue;
     }
-    auto pit = shared.find(key);
+    const auto& bits = grp->second;
+    auto        pit  = shared.find(key);
     if (pit == shared.end()) {
       continue;
     }
     // The bit-blasted implementation has one cell per literal state bit. A
     // longer run is a different register that merely shares a prefix. Without
     // the exact bound, a ref `flag` (w=1) beside
-    // unrelated impl flops `flag_0`/`flag_1` pairs, and `flag_1` gets PINNED to a
+    // unrelated impl flops `flag[0]`/`flag[1]` pairs, and `flag[1]` gets PINNED to a
     // constant in the induction hypothesis — narrowing it over states the design
     // really reaches, i.e. a false PROVEN.
     const int m = static_cast<int>(bits.size());
@@ -6375,7 +6419,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       shared[bits[i]] = Val{t, 1, false};
     }
-    ind_bitblast.emplace(key, std::move(bits));
+    ind_bitblast.emplace(key, bits);
   }
   int ind_packed_scalar_applied = 0;
   for (const auto& bridge : ind_packed_scalar) {
@@ -6557,8 +6601,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     pair_wide_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl wide flop <-> ref memory
 
     // The pass.abc memory=true storage bank (find_mem_entry_bank): the Memory
-    // `<mem>` on one side, per-entry flops `<mem>__mem<i>` or their one-bit DFF
-    // cells `<mem>__mem<i>_<b>` on the other. Name-directed, so it claims the
+    // `<mem>` on one side, per-entry flops `<mem>._mem[i]` or their one-bit DFF
+    // cells `<mem>._mem[i][b]` on the other. Name-directed, so it claims the
     // memory BEFORE the suffix-shape detector below, whose `<base>_<idx>` split
     // sees each bit-blasted entry as its own N-bit "bank" and would pair a
     // 16x16 memory with the 16 cells of ONE entry (a wrong relation is only an

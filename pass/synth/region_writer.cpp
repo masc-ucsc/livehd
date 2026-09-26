@@ -9,6 +9,7 @@
 #include <numeric>
 
 #include "absl/container/flat_hash_set.h"
+#include "bus_name.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "dlop.hpp"
@@ -1138,7 +1139,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       // back inconclusive (every //bench:*_synth_lec_* target).
       // Scalar-replacement provenance for a bit-blasted register. `pass.semdiff`
       // reassembles the group from these and pairs it with the ref's single wide
-      // flop; without them a mapped `q_0..q_7` faces a ref `q` that tier-1 cannot
+      // flop; without them a mapped `q[0]..q[7]` faces a ref `q` that tier-1 cannot
       // match one-to-many, the whole register lands in `tier-2 unpaired state`,
       // and the flop-cut inductive miter then cuts only the flops that DID pair
       // and returns PROVEN off an obligation set covering a fraction of the
@@ -1236,16 +1237,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
             // degrades to per-bit handling, never to a dropped init
             for (int b = 0; b < sp.f->bits; ++b) {
               int k = sp.start + b;
-              // Per-bit name under the source register: a 1-bit register keeps
-              // its plain name, a wider one indexes (`id_q[0]`) — the spelling a
-              // hand-flattened design uses, which canon_flop_name already folds.
+              // Per-bit name under the source register (core/bus_name.hpp): a
+              // 1-bit register keeps its plain name, a wider one indexes
+              // Verilog-style (`id_q[0]`), which semdiff and the LEC bit-blast
+              // bridge regroup into the source register.
               if (needs_native(k)) {
                 native_single(k);
               } else if (sp.f->bits == 1) {
                 map_dff_cell(k, sp.f->root);  // pairs by name; nothing was blasted
               } else {
                 const Blast_lane lane{&sp.f->root, b, sp.f->bits, blast_source_index};
-                map_dff_cell(k, std::format("{}_{}", sp.f->root, b), &lane);
+                map_dff_cell(k, livehd::bus_name::bit(sp.f->root, b), &lane);
               }
             }
           }

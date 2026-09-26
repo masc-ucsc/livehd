@@ -88,13 +88,13 @@ grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$D/netv/"*.v || fail "no stand
 # reset is a D-cone mux (reset has priority over the enable), so pass.abc folds
 # it into the latch and every one of the six 8-bit registers (delayer.r x4,
 # stage_unit.r x2) maps to plain DFFx1 cells named after the register under
-# its flattened hierarchical name (`\a.d1.r_<bit>`); no native `always` block
+# its flattened hierarchical name (`\a.d1.r[<bit>] `, core/bus_name.hpp); no native `always` block
 # survives (same contract lhd_abc_seq_test pins on abc_seq/abc_async_reset).
 ! grep -hq "posedge" "$D/netv/"*.v || fail "a synchronous-reset register stayed a native flop in the flat netlist"
 N_DFF=$(grep -h "^DFFx1 " "$D/netv/"*.v | wc -l | tr -d ' ')
 [ "$N_DFF" = 48 ] || fail "expected 48 DFFx1 cells (6 registers x 8 bits) in the flat netlist, got $N_DFF"
 for inst in a.d1 a.d2 a b.d1 b.d2 b; do
-  n=$(grep -hE "^DFFx1 \\\\${inst}\\.r_[0-7] " "$D/netv/"*.v | wc -l | tr -d ' ')
+  n=$(grep -hE "^DFFx1 \\\\${inst}\\.r\\[[0-7]\\] " "$D/netv/"*.v | wc -l | tr -d ' ')
   [ "$n" = 8 ] || fail "register '${inst}.r' did not map to 8 DFFx1 cells under its hierarchical name (got $n): $(grep -h '^DFFx1 ' "$D/netv/"*.v | head -12)"
 done
 ! grep -hq "__c[0-9]" "$D/netv/"*.v || fail "a __c<color> region module leaked into the flat netlist"
@@ -124,7 +124,7 @@ run compile lg:"$D2/re" --top "$TOP2" --emit-dir verilog:"$D2/rev" --workdir "$D
 # `a`/`b` are the INSTANCE names (the LHS variable of each `holder(...)` call),
 # so the preserved hierarchical flop is `a.r` / `b.r`. These registers carry NO
 # `initial` value in the IR, so pass.abc maps them to per-bit DFF cells — the
-# name has to survive as `\a.r_<bit>` on the cell instances. (It must NOT be
+# name has to survive as `\a.r[<bit>] ` on the cell instances. (It must NOT be
 # asserted as one multi-bit native `reg \a.r`: that only happened because ABC
 # picked a concrete value for the DON'T-CARE latch init, and materializing that
 # optimization witness as a hardware power-on value is exactly what pass.abc
@@ -134,7 +134,7 @@ run compile lg:"$D2/re" --top "$TOP2" --emit-dir verilog:"$D2/rev" --workdir "$D
 # the read-back rebuilds native flops.)
 for inst in a b; do
   grep -hqE "^reg \\[[0-9]+:0\\] \\\\${inst}\\.r " "$D2/netv/"*.v \
-    || grep -hqE "DFFx1 \\\\${inst}\\.r_[0-9]+ " "$D2/netv/"*.v \
+    || grep -hqE "DFFx1 \\\\${inst}\\.r\\[[0-9]+\\] " "$D2/netv/"*.v \
     || fail "hierarchical flop name lost in the flat netlist (expected '${inst}.r' as a multi-bit reg or per-bit DFF cells): $(grep -hE '^reg |DFFx1 ' "$D2/netv/"*.v | head -40)"
 done
 ! grep -hq "__rinit\|__r[0-9]" "$D2/netv/"*.v || fail "anonymous __rinit/__r flop leaked (original register names must survive)"

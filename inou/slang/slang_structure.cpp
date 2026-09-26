@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "bus_name.hpp"
 #include "dlop.hpp"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Lookup.h"
@@ -2927,7 +2928,9 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
     }
     std::vector<Lnast_builder::Concat_lane> lanes;
     for (int bit = 0; bit < ti.bits; ++bit) {
-      auto leaf = unique_suffixed(name, absl::StrCat("__bit", bit));
+      // Bit `bit` of the register, named by the bus-expansion standard
+      // (core/bus_name.hpp): `q[bit]`, quoted as one identifier.
+      auto leaf = suffixed_ref_of(name, livehd::bus_name::bit("", bit));
       it->second.push_back(leaf);
       auto lane_val = splittable ? packed_initial->get_mask_op_opt(bit, bit + 1) : decltype(packed_initial){};
       auto value    = initial == reg_init_vals_.end() || !lane_val ? std::string("nil") : std::string(lane_val->to_pyrope());
@@ -4481,7 +4484,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     const auto name = lname_of(*sym);
     set_pending_loc(sym->location);
     for (size_t bit = 0; bit < counts.size(); ++bit) {
-      auto leaf = suffixed_ref_of(name, absl::StrCat("__sub_", bit));
+      // Bit `bit` of the net, named by the bus-expansion standard
+      // (core/bus_name.hpp): `w[bit]`, quoted as one identifier.
+      auto leaf = suffixed_ref_of(name, livehd::bus_name::bit("", static_cast<int64_t>(bit)));
       builder_.create_declare_stmts(leaf, "wire", "1", "0");
       if (counts[bit] == 0) {
         builder_.create_assign_stmts(leaf, "0ub?");

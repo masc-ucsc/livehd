@@ -69,15 +69,19 @@ module packed_state(input clk, d, output y);
   assign y = ^state;
 endmodule
 """)
+# The mapped side names bit i of `state` as the escaped identifier
+# `\state[i] ` (LiveHD's bus-expansion standard, core/bus_name.hpp).
+def bit(i):
+    return f"\\state[{i}] "
 for variant in ("impl", "bad"):
     lines = ["module packed_state(input clk, d, output y);"]
-    lines += [f"reg state_{i};" for i in range(32)]
-    feedback = "state_31 ^ state_21 ^ state_1 ^ state_0 ^ d"
+    lines += [f"reg {bit(i)};" for i in range(32)]
+    feedback = f"{bit(31)} ^ {bit(21)} ^ {bit(1)} ^ {bit(0)} ^ d"
     if variant == "bad":
         feedback = "~(" + feedback + ")"
-    lines += [f"always @(posedge clk) state_0 <= {feedback};"]
-    lines += [f"always @(posedge clk) state_{i} <= state_{i-1};" for i in range(1, 32)]
-    lines += ["assign y = " + " ^ ".join(f"state_{i}" for i in range(32)) + ";", "endmodule"]
+    lines += [f"always @(posedge clk) {bit(0)} <= {feedback};"]
+    lines += [f"always @(posedge clk) {bit(i)} <= {bit(i-1)};" for i in range(1, 32)]
+    lines += ["assign y = " + " ^ ".join(bit(i) for i in range(32)) + ";", "endmodule"]
     (w / f"packed_state_{variant}.v").write_text("\n".join(lines) + "\n")
 PYSTATE
 # The proof and the refutation are independent yosys runs; start both, then
@@ -168,9 +172,10 @@ for variant in ("impl", "bad"):
              "endmodule", f"module mapped_memory({ports});"]
     for word in range(4):
         value = "d ^ 8'h01" if variant == "bad" and word == 0 else "d"
-        lines += [f"reg [7:0] _mem{word};",
-                  f"always @(posedge clk) if (we && wa == 2'd{word}) _mem{word} <= {value};"]
-    lines += ["assign y = " + "".join(f"ra == 2'd{i} ? _mem{i} : " for i in range(3)) + "_mem3;",
+        # entry `word` of the storage bus `_mem` (core/bus_name.hpp)
+        lines += [f"reg [7:0] \\_mem[{word}] ;",
+                  f"always @(posedge clk) if (we && wa == 2'd{word}) \\_mem[{word}]  <= {value};"]
+    lines += ["assign y = " + "".join(f"ra == 2'd{i} ? \\_mem[{i}]  : " for i in range(3)) + "\\_mem[3] ;",
               "endmodule"]
     (w / f"memory_names_{variant}.v").write_text("\n".join(lines) + "\n")
 PYMEMORY_NAMES

@@ -8,15 +8,16 @@
 # PROVE against the compiled design with cvc5 -- UNBOUNDED, the inductive
 # flop-cut miter pairs every storage cell with its array entry -- in the three
 # shapes the mapped netlist can take:
-#   1. one-bit DFF cells `mem__mem<i>_<b>` on a Q cell (test.lib DFFx1);
+#   1. one-bit DFF cells `mem._mem[i][b]` on a Q cell (test.lib DFFx1);
 #   2. the same cells on a QN-only cell (test_qn.lib DFFNx1, `Flop(Not(D))`
 #      model): the model's state must BE the pin, or the tie shares the
 #      complement and the unwritten read refutes on ASAP7's DFFHQNx1 only;
-#   3. whole bits-wide native flops `mem__mem<i>` (register_max_bits=1 keeps the
+#   3. whole bits-wide native flops `mem._mem[i]` (register_max_bits=1 keeps the
 #      region's registers native, so mem_lower's storage flops survive as
 #      `always @(posedge)` registers).
-# Storage lives inside the named memory module as _mem<i>[_<b>]; the
-# canonical hierarchy name is the legacy <memory>__mem<i>[_<b>] bank key.
+# Storage lives inside the named memory module as the bus `_mem`: entry i is
+# `_mem[i]` and its bit b `_mem[i][b]` (the bus-expansion standard,
+# core/bus_name.hpp); the canonical bank key is <memory>__mem[i][[b]].
 # Before the bridge every one of these refuted at checked step 1 on a read of a
 # never-written entry (rd_data ref=all-ones impl=all-ones-but-one: two free
 # power-on symbols). The negative control is the SAME bank shape with a
@@ -95,7 +96,7 @@ ncell() { cat "$1/netv/"*.v | grep -c "^\s*$2 "; }
 nhas() { cat "$1/netv/"*.v | grep -q "$2"; }
 
 [ "$(ncell "$D" DFFx1)" -eq 64 ] || fail "q: expected 64 DFFx1 storage cells (8 x 8), got $(ncell "$D" DFFx1)"
-nhas "$D" "_mem3_5" || fail "q: storage cells lack local _mem<i>_<b> entry names: $(cat "$D/netv/"*.v | grep -m3 DFFx1)"
+nhas "$D" "_mem\[3\]\[5\] " || fail "q: storage cells lack local _mem[i][b] entry names: $(cat "$D/netv/"*.v | grep -m3 DFFx1)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "q: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "q: cvc5 did not PROVE the bit-blasted register file: $(verdict "$D/lec.json")"
@@ -137,18 +138,18 @@ grep -q '"bounded":false' "$D/lec.json" || fail "qn: proof is only BOUNDED: $(ve
 echo "PASS: the same register file on QN-only DFFNx1 cells is PROVEN (unbounded) through the Flop(Not(D)) model"
 
 # ---------------------------------------------------------------------------
-# 3. whole native storage flops mem__mem<i> (register_max_bits=1)
+# 3. whole native storage flops mem._mem[i] (register_max_bits=1)
 # ---------------------------------------------------------------------------
 D="$W/native"
 mkdir -p "$D" && cp -r "$GOOD/lg" "$D/lg"
 map_design "$D" "$LIB" --set pass.abc.register_max_bits=1
 [ "$(ncell "$D" DFFx1)" -eq 0 ] || fail "native: register_max_bits=1 still mapped DFF cells"
-nhas "$D" "_mem3\b\|_mem3 " || fail "native: no whole storage register _mem<i> in the netlist: $(cat "$D/netv/"*.v | grep -m3 posedge)"
+nhas "$D" "_mem\[3\] " || fail "native: no whole storage register _mem[i] in the netlist: $(cat "$D/netv/"*.v | grep -m3 posedge)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "native: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec.json" || fail "native: cvc5 did not PROVE the native storage flops: $(verdict "$D/lec.json")"
 grep -q '"bounded":false' "$D/lec.json" || fail "native: proof is only BOUNDED: $(verdict "$D/lec.json")"
-echo "PASS: whole native storage flops mem__mem<i> are PROVEN (unbounded) against the Memory"
+echo "PASS: whole native storage flops mem._mem[i] are PROVEN (unbounded) against the Memory"
 
 # ---------------------------------------------------------------------------
 # 4. negative control: a corrupted write address in the SAME bank shape refutes

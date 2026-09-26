@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "attr_carry.hpp"
+#include "bus_name.hpp"
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
@@ -114,6 +115,9 @@ struct Connection {
 // array is named `data`; the instance name encodes the source Memory name
 // (inou/cgen/cgen_verilog.cpp, decoded back in pass/lec/query.cpp).
 constexpr std::string_view kEntryPrefix = "__lhdmem_h64617461_e.data[";
+// The lowered storage array inside the memory instance: entry N is the flop
+// `_mem[N]` (core/bus_name.hpp), so the whole-design name is `<memory>._mem[N]`.
+constexpr std::string_view kStorageBus = "_mem";
 
 bool all_digits(std::string_view v) {
   return !v.empty() && std::ranges::all_of(v, [](char c) { return c >= '0' && c <= '9'; });
@@ -472,7 +476,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       // constant (an entry hard-wired by a clockless constant write port, e.g.
       // minion's prim_rf_2r1w_preview `assign rf_q[0] = '0`) into that
       // constant -- an X-refinement at power-on that drops the entry from the
-      // `<mem>__mem<i>` storage bank, so pass/lec can no longer pair the bank
+      // `<mem>._mem[i]` storage bank, so pass/lec can no longer pair the bank
       // with the source Memory (find_mem_entry_bank needs every entry) and the
       // mapped netlist REFUTES on a read of a never-written entry. A scalar
       // constant-D reg keeps its flop the same way.
@@ -505,10 +509,12 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     // entry back into the whole-word flop the rename below expects.
     merge_entry_lanes(*result->get_graph(), mem_bits);
     for (const auto node : result->get_graph()->body().nodes()) {
-      // The parent instance carries the source memory name. Keep an entry's
-      // local name _mem<N>, so hierarchical canonicalization yields the same
-      // <memory>__mem<N> bank keys as the legacy flat lowering. LEC still proves
-      // the transition relation; the names only propose its state pairing.
+      // The parent instance carries the source memory name. An entry's local
+      // name is entry N of the storage bus `_mem` (core/bus_name.hpp):
+      // `_mem[N]`, so the hierarchical name is `<memory>._mem[N]` and a
+      // bit-blasted entry's DFF cells are `<memory>._mem[N][b]`. LEC still
+      // proves the transition relation; the names only propose its state
+      // pairing (pass/lec find_mem_entry_bank).
       if (gu::type_op_of(node) == Ntype_op::Flop) {
         const auto  old_name = gu::node_name_of(node);
         std::string index;
@@ -535,7 +541,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
           }
         }
         if (!index.empty() && std::ranges::all_of(index, [](char c) { return c >= '0' && c <= '9'; })) {
-          const auto local_name = "_mem" + index;
+          const auto local_name = livehd::bus_name::entry(kStorageBus, std::stoll(index));
           node.attr(hhds::attrs::name).set(local_name);
           gu::set_pin_name(node.create_driver_pin(0), local_name);
         }
@@ -564,15 +570,11 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         if (gu::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
-        const auto flop_name = gu::node_name_of(node);
-        if (!flop_name.starts_with("_mem")) {
+        const auto entry = livehd::bus_name::parse_bus_piece(gu::node_name_of(node));
+        if (!entry || entry->base != kStorageBus) {
           continue;
         }
-        const auto index_txt = flop_name.substr(4);
-        if (index_txt.empty() || !std::ranges::all_of(index_txt, [](char c) { return c >= '0' && c <= '9'; })) {
-          continue;
-        }
-        const int64_t index = std::stoll(std::string(index_txt));
+        const int64_t index = entry->index;
         // memory_map seeded the power-on value from INIT on the `initial`
         // sink; the same pin is the reset value on a reset flop, so redrive it
         // with the entry's lane (they agree by construction).

@@ -49,6 +49,7 @@ genrule(
     srcs = [
         ":synth_srcs",
         "//graph",
+        "//core:bus_name_srcs",  # per-bit register names (x[i])
         "//ware:cgen_memory_rtl",
         "//inou/cgen:memory_generator_srcs",
         "//inou/yosys:memory_import_srcs",

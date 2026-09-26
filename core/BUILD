@@ -88,8 +88,21 @@ cc_library(
 filegroup(
     name = "formal_srcs",
     srcs = [
+        ":bus_name_srcs",
         "hash_util.hpp",
         "str_tools.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The bus-expansion naming standard: synthesis mints per-bit register names
+# with it and state pairing parses them back, so both the synthesis salt
+# (//pass/synth:synth_salt) and the formal salt hash it.
+filegroup(
+    name = "bus_name_srcs",
+    srcs = [
+        "bus_name.cpp",
+        "bus_name.hpp",
     ],
     visibility = ["//visibility:public"],
 )
@@ -181,6 +194,17 @@ cc_test(
     srcs = [
         "tests/log_test.cpp",
     ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The bus-expansion naming standard (`x[i]`, `m[i][j]`) and its parser, which
+# semdiff / LEC state pairing use to regroup per-bit cells into a bus.
+cc_test(
+    name = "bus_name_test",
+    srcs = ["tests/bus_name_test.cpp"],
     deps = [
         ":core",
         "@googletest//:gtest_main",

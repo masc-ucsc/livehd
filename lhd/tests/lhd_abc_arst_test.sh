@@ -107,16 +107,16 @@ N="$W/q/net.v"
 [ "$(count "$N" '^DFFSx1 ')" = 9 ] || fail "q: expected 9 DFFSx1 (a, b, e bits resetting to 1 + all of c), got $(grep -h '^DFF' "$N")"
 [ "$(count "$N" '^DFFx1 ')" = 4 ] || fail "q: expected 4 DFFx1 for the synchronous-reset register"
 ! grep -q "DFFRx0\|DFFRSx1" "$N" || fail "q: a dont_use or dearer dual cell was used"
-for b in 0 2; do grep -A5 "^DFFRx1 a_$b(" "$N" | grep -q "RB(abc_reset_inv" || fail "q: a[$b] (resets to 0 on posedge rst) must take ~rst on RB"; done
-for b in 1 3; do grep -A5 "^DFFSx1 a_$b(" "$N" | grep -q "\.S(rst)" || fail "q: a[$b] (resets to 1 on posedge rst) must take rst on S"; done
-for b in 0 3; do grep -A5 "^DFFRx1 b_$b(" "$N" | grep -q "RB(rst_n)" || fail "q: b[$b] (resets to 0 on negedge rst_n) must take rst_n on RB"; done
-for b in 1 2; do grep -A5 "^DFFSx1 b_$b(" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: b[$b] (resets to 1 on negedge rst_n) must take ~rst_n on S"; done
-for b in 0 1 2 3; do grep -A5 "^DFFSx1 c_$b(" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: c[$b] (reset ~rst_n traced to rst_n) must take ~rst_n on S"; done
+for b in 0 2; do grep -A5 "^DFFRx1 \\\\a\\[$b\\] (" "$N" | grep -q "RB(abc_reset_inv" || fail "q: a[$b] (resets to 0 on posedge rst) must take ~rst on RB"; done
+for b in 1 3; do grep -A5 "^DFFSx1 \\\\a\\[$b\\] (" "$N" | grep -q "\.S(rst)" || fail "q: a[$b] (resets to 1 on posedge rst) must take rst on S"; done
+for b in 0 3; do grep -A5 "^DFFRx1 \\\\b\\[$b\\] (" "$N" | grep -q "RB(rst_n)" || fail "q: b[$b] (resets to 0 on negedge rst_n) must take rst_n on RB"; done
+for b in 1 2; do grep -A5 "^DFFSx1 \\\\b\\[$b\\] (" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: b[$b] (resets to 1 on negedge rst_n) must take ~rst_n on S"; done
+for b in 0 1 2 3; do grep -A5 "^DFFSx1 \\\\c\\[$b\\] (" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: c[$b] (reset ~rst_n traced to rst_n) must take ~rst_n on S"; done
 [ "$(count "$N" '^INVx1 abc_reset_inv')" = 2 ] || fail "q: expected one shared reset inverter per input (rst, rst_n)"
 # The synchronizer's resets are computed in the region (a scan mux, a register):
 # mapped logic, not a region input, drives those pins.
-for r in "DFFRx1 rst_q" "DFFSx1 e_0" "DFFRx1 e_1"; do
-  pin="$(grep -A5 "^$r(" "$N" | grep -o '\.\(RB\|S\)([^)]*)')"
+for r in "DFFRx1 rst_q(" "DFFSx1 \\\\e\\[0\\] (" "DFFRx1 \\\\e\\[1\\] ("; do
+  pin="$(grep -A5 "^$r" "$N" | grep -o '\.\(RB\|S\)([^)]*)')"
   case "$pin" in
     *"(g"*) ;;
     *) fail "q: '$r' reset pin must be driven by mapped logic, got '$pin'" ;;
@@ -128,11 +128,11 @@ echo "PASS: sky130-shaped clear/preset cells per reset bit, polarity through sha
 N="$W/qn/net.v"
 [ "$(count "$N" '^DFFASRNx1 ')" = 15 ] || fail "qn: expected 15 DFFASRNx1, got $(grep -h '^DFF' "$N")"
 [ "$(count "$N" '^DFFNx1 ')" = 4 ] || fail "qn: expected 4 DFFNx1 for the synchronous-reset register"
-grep -A6 "^DFFASRNx1 a_0(" "$N" | grep -q "SETN(abc_reset_inv" || fail "qn: a[0] resets to 0: SETN must take ~rst"
-grep -A6 "^DFFASRNx1 a_0(" "$N" | grep -q "RESETN(1'h1)" || fail "qn: a[0]: RESETN must be tied inactive"
-grep -A6 "^DFFASRNx1 a_1(" "$N" | grep -q "RESETN(abc_reset_inv" || fail "qn: a[1] resets to 1: RESETN must take ~rst"
-grep -A6 "^DFFASRNx1 b_0(" "$N" | grep -q "SETN(rst_n)" || fail "qn: b[0] resets to 0 on negedge rst_n: SETN must take rst_n"
-grep -A6 "^DFFASRNx1 c_0(" "$N" | grep -q "RESETN(rst_n)" || fail "qn: c[0] resets to 1 on ~rst_n: RESETN must take rst_n"
+grep -A6 "^DFFASRNx1 \\\\a\\[0\\] (" "$N" | grep -q "SETN(abc_reset_inv" || fail "qn: a[0] resets to 0: SETN must take ~rst"
+grep -A6 "^DFFASRNx1 \\\\a\\[0\\] (" "$N" | grep -q "RESETN(1'h1)" || fail "qn: a[0]: RESETN must be tied inactive"
+grep -A6 "^DFFASRNx1 \\\\a\\[1\\] (" "$N" | grep -q "RESETN(abc_reset_inv" || fail "qn: a[1] resets to 1: RESETN must take ~rst"
+grep -A6 "^DFFASRNx1 \\\\b\\[0\\] (" "$N" | grep -q "SETN(rst_n)" || fail "qn: b[0] resets to 0 on negedge rst_n: SETN must take rst_n"
+grep -A6 "^DFFASRNx1 \\\\c\\[0\\] (" "$N" | grep -q "RESETN(rst_n)" || fail "qn: c[0] resets to 1 on ~rst_n: RESETN must take rst_n"
 echo "PASS: ASAP7-shaped dual QN clear/preset cell (reset0=SETN, reset1=RESETN), cvc5 + lgyosys proven"
 
 # --- broken twins must refute --------------------------------------------------

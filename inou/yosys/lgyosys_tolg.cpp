@@ -25,6 +25,7 @@
 #pragma GCC diagnostic pop
 
 // LiveHD includes — HHDS only (no //lgraph dep)
+#include "bus_name.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
@@ -373,7 +374,11 @@ static void name_state_node(const hhds::Node_class& node, const RTLIL::Cell* cel
       const auto& q = chunks.at(0);
       if (q.wire && q.wire->name.c_str()[0] == '\\') {
         name = q.wire->name.str().substr(1);
-        if (q.offset != 0 || q.width != q.wire->width) {
+        if (q.width == 1 && q.wire->width > 1) {
+          // One bit of a bus: the bus-expansion standard (core/bus_name.hpp),
+          // which is also yosys `splitnets`' spelling.
+          name = livehd::bus_name::bit(name, q.offset);
+        } else if (q.offset != 0 || q.width != q.wire->width) {
           name += absl::StrCat("[", q.offset + q.width - 1, ":", q.offset, "]");
         }
       }

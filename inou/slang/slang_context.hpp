@@ -870,7 +870,7 @@ private:
   // `<base><suffix>1`, … on collision) and reserved there.
   std::string unique_suffixed(std::string_view base, std::string_view suffix);
   // A fresh LNAST ref derived from an EXISTING lname (`__wtmp`, `__wnet`,
-  // `__sub_<bit>`, …). The escape introducer is stripped first and the uniquing
+  // `[<bit>]` per-bit pieces, …). The escape introducer is stripped first and the uniquing
   // runs on the RAW spelling: `used_names_` holds pre-quote names (lname_of
   // inserts before quote_if_needed), so uniquing on the quoted form would
   // neither see a real collision nor be visible to a later lname_of. Only the

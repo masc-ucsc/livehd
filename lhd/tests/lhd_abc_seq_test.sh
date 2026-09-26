@@ -209,7 +209,8 @@ if selected registers; then
   # abc_seq/hier_seq declare concrete initial values, which request Pyrope's
   # implicit SYNCHRONOUS reset (`reset_pin` + `initial`, no `async`). That reset
   # is a D-cone mux, so register=true folds it into the latch and maps every
-  # register to plain DFFx1 cells named `<reg>_<bit>`; the `initial` is the reset
+  # register to plain DFFx1 cells named `<reg>[<bit>]` (core/bus_name.hpp,
+  # emitted as the escaped identifier `\<reg>[<bit>] `); the `initial` is the reset
   # value realized on D, never a power-on value, so no native `always` survives.
   # The default LEC LEC (reset pinned, then free) proves the fold; abc_async_reset
   # below adds the graph-native cvc5 proof, which seeds power-on state.
@@ -219,18 +220,18 @@ if selected registers; then
     || fail "abc_seq register=true: expected 8 DFFx1 cells (p, q x 4 bits), got $(grep -h '^DFFx1 ' "$NETV"/*.v | wc -l)"
   for r in p q; do
     for b in 0 1 2 3; do
-      has "$NETV" "^DFFx1 ${r}_${b}(" || fail "abc_seq register=true: DFF cell for '${r}[${b}]' is not named ${r}_${b}: $(grep -h '^DFFx1 ' "$NETV"/*.v)"
+      has "$NETV" "^DFFx1 \\\\${r}\\[${b}\\] (" || fail "abc_seq register=true: DFF cell for '${r}[${b}]' is not named \\${r}[${b}]: $(grep -h '^DFFx1 ' "$NETV"/*.v)"
     done
   done
   echo "PASS: register=true folds the synchronous reset into D and maps the registers to named DFF cells (abc_seq)"
 
   # hier_seq: six 8-bit registers (delayer.r x4, stage_unit.r x2) -> 48 DFFx1
-  # cells, each under its register's (hierarchical, `\a.d1.r_<bit>`) name.
+  # cells, each under its register's (hierarchical, `\a.d1.r[<bit>] `) name.
   run_abc_lec hier_seq hier_seq.top true false
   ! has "$NETV" "posedge" || fail "hier_seq register=true: a synchronous-reset register stayed a native flop"
   [ "$(grep -h '^DFFx1 ' "$NETV"/*.v | wc -l | tr -d ' ')" = 48 ] \
     || fail "hier_seq register=true: expected 48 DFFx1 cells (6 registers x 8 bits), got $(grep -h '^DFFx1 ' "$NETV"/*.v | wc -l)"
-  grep -hqE "^DFFx1 (\\\\[a-z0-9.]+\.)?r_[0-7][ (]" "$NETV"/*.v \
+  grep -hqE "^DFFx1 \\\\([a-z0-9.]+\.)?r\\[[0-7]\\] \(" "$NETV"/*.v \
     || fail "hier_seq register=true: registers did not map to DFFx1 cells under their name: $(grep -h '^DFFx1 ' "$NETV"/*.v | head -8)"
   echo "PASS: register=true maps synchronous-reset registers to DFF cells across hierarchy (hier_seq)"
 
@@ -373,7 +374,7 @@ fi
 # (lgcheck toggles reset independently of clk, so that miscompile is caught
 # directly). It stays native, `always @(posedge clk or posedge rst)`, with its
 # XOR data cone still mapped. The SYNCHRONOUS register is a D-cone mux and maps
-# to DFFx1 cells `sync_state_<bit>` with its 0ub1111 reset value realized on D;
+# to DFFx1 cells `sync_state[<bit>]` with its 0ub1111 reset value realized on D;
 # the default LEC LEC (reset pinned, then free) and the graph-native cvc5 LEC (which
 # seeds power-on state from the source's `initial` and encodes its `reset_pin`
 # as ITE(rst, initial, ...)) both prove the mixed netlist.
@@ -405,7 +406,7 @@ if selected registers; then
   [ "$(grep -h '^DFFx1 ' "$ARD/netv"/*.v | wc -l | tr -d ' ')" = 4 ] \
     || fail "abc_async_reset: expected 4 DFFx1 cells for sync_state, got $(grep -h '^DFFx1 ' "$ARD/netv"/*.v | wc -l)"
   for b in 0 1 2 3; do
-    has "$ARD/netv" "^DFFx1 sync_state_${b}(" || fail "abc_async_reset: sync_state[${b}] is not a DFFx1 named sync_state_${b}: $(grep -h '^DFFx1 ' "$ARD/netv"/*.v)"
+    has "$ARD/netv" "^DFFx1 \\\\sync_state\\[${b}\\] (" || fail "abc_async_reset: sync_state[${b}] is not a DFFx1 named \\sync_state[${b}]: $(grep -h '^DFFx1 ' "$ARD/netv"/*.v)"
   done
   ! has "$ARD/netv" "DFFx1 async_state" || fail "abc_async_reset: asynchronous-reset register incorrectly mapped to plain DFFx1"
   echo "PASS: asynchronous reset stays native, synchronous reset folds into D and maps to named DFF cells, LEC-equivalent (default LEC on Verilog and graphs)"
@@ -419,16 +420,16 @@ fi
 # register stays native either way; cvc5 proves both through Flop(Not(D)).
 if selected qn; then
   run_qn sreset_builtin abc_async_reset abc_async_reset
-  [ "$(count "$QNV" "^DFFNx1 sync_state_[0-3](")" = 4 ] \
-    || fail "qn sync reset (builtin): expected 4 DFFNx1 cells named sync_state_<bit>, got $(grep -h '^DFFNx1 ' "$QNV"/*.v)"
+  [ "$(count "$QNV" "^DFFNx1 \\\\sync_state\\[[0-3]\\] (")" = 4 ] \
+    || fail "qn sync reset (builtin): expected 4 DFFNx1 cells named sync_state[<bit>], got $(grep -h '^DFFNx1 ' "$QNV"/*.v)"
   has "$QNV" "or posedge rst" || fail "qn sync reset (builtin): asynchronous-reset register did not stay native"
   ! has "$QNV" "__dinv" || fail "qn sync reset (builtin): built-in flow minted a read-back inverter"
   ! has "$QNV" "DFFNx1 async_state" || fail "qn sync reset (builtin): asynchronous-reset register mapped to a cell"
   run_qn sreset_user abc_async_reset abc_async_reset --set "pass.$MAPPER.flow=strash; dc2; map"
-  [ "$(count "$QNV" "^DFFNx1 sync_state_[0-3](")" = 4 ] \
-    || fail "qn sync reset (user): expected 4 DFFNx1 cells named sync_state_<bit>, got $(grep -h '^DFFNx1 ' "$QNV"/*.v)"
+  [ "$(count "$QNV" "^DFFNx1 \\\\sync_state\\[[0-3]\\] (")" = 4 ] \
+    || fail "qn sync reset (user): expected 4 DFFNx1 cells named sync_state[<bit>], got $(grep -h '^DFFNx1 ' "$QNV"/*.v)"
   has "$QNV" "or posedge rst" || fail "qn sync reset (user): asynchronous-reset register did not stay native"
-  [ "$(count "$QNV" "^INVx1 sync_state_[0-3]__dinv(")" -le 4 ] \
+  [ "$(count "$QNV" "^INVx1 \\\\sync_state\\[[0-3]\\]__dinv (")" -le 4 ] \
     || fail "qn sync reset (user): more read-back inverters than cells"
   echo "PASS: synchronous reset composes with the QN cell's D-side inversion (built-in fold and read-back absorption), LEC proven"
 

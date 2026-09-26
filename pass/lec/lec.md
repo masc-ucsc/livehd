@@ -232,10 +232,26 @@ everything the encoder needs.
   comptime `init` constant — built **per design** (not pinned onto the shared
   symbol, which would be a vacuous proof when the two inits differ), so equal
   inits prove and differing inits refute.
+- **Register <-> per-bit cells (bus-expansion standard)**: every pass that
+  splits one named bus names the pieces Verilog-style (`core/bus_name.hpp`):
+  bit i of `x` is `x[i]`, entry i of a memory `m[i]`, bit j of that entry
+  `m[i][j]`; emitted Verilog spells them as escaped identifiers (`\x[3] `).
+  A netlist read back with its Liberty cell models inlined carries the model's
+  state one segment lower (`x[3].flop_16`, `x[3].IQ`), which the parser
+  accepts. The BMC and inductive bit-blast bridges (query.cpp
+  `bus_bit_groups`) tie impl cell i to bit i of the ref's one N-bit symbol
+  only when the one-bit keys cover EXACTLY `x[0]..x[N-1]`, once each, none
+  also on the ref side, and the ref's `x` is N bits wide; semdiff's tier-1
+  pairing regroups the same names (`reconstruct_bus_groups`) so the pair is not
+  reported as unpaired state. A duplicated index, a gap or a width mismatch
+  leaves every bit unpaired, and the miter re-verifies any tie it makes (a
+  wrong name can cost a proof, never produce one). Legacy `x_<i>` spellings
+  are not recognized.
 - **Memory <-> mapped storage bank** (query.cpp `find_mem_entry_bank` and the
   two bridges that consume it): `pass.abc memory=true` bit-blasts a Memory
-  `<mem>` into per-entry flops `<mem>__mem<i>` (pass/abc/mem_lower.cpp) and the
-  DFF-cell read-back splits each into one-bit cells `<mem>__mem<i>_<b>`, so a
+  `<mem>` into per-entry flops `<mem>._mem[i]` (pass/synth/memory_module.cpp;
+  canonical key `<mem>__mem[i]`) and the DFF-cell read-back splits each into
+  one-bit cells `<mem>._mem[i][b]` (the bus-expansion standard above), so a
   netlist LEC holds the array on one side and N (or N x bits) flop cuts on the
   other. When the bank is TOTAL -- every entry 0..N-1 present at the exact
   width, none of its keys on the memory side -- both engines tie them by name:

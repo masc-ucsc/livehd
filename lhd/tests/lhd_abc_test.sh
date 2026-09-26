@@ -344,10 +344,11 @@ grep -hq "^DFFx1 " "$FT/netv/"*.v || fail "the resetless register did not map to
 # The flop's Q reaches the module output as a plain wire, never through a cell.
 # The register cone is its own region under the shipped `cones` coloring, so the
 # concatenation of the four DFF Q pins lands on that region's OUTPUT port
-# (`state_o = ({state_3_o3,...})`) and the top wires the port straight to `out2`
+# (`state_o = ({\state[3]_o3 ,...})`, the per-bit cell names of core/bus_name.hpp)
+# and the top wires the port straight to `out2`
 # -- under `mode=synth` the single region assigns `out2` itself. Accept
 # either spelling; the "no cell in between" half is the BUFx1/ft_cells check.
-cat "$FT/netv/"*.v | grep -q "= ({state_3\|= {state_3" \
+cat "$FT/netv/"*.v | grep -q "= ({\\\\state\\[3\\]\|= {\\\\state\\[3\\]" \
   || fail "flop Q -> output is not a direct wire in the netlist"
 run pass liberty gensim "$LIB" --emit-dir lg:"$FT/models" --workdir "$FT/w6"
 run lec --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc_feedthrough.abc_feedthrough \

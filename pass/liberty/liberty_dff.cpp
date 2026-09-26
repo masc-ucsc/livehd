@@ -1075,8 +1075,8 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
     // the D pin ~f. Two models are functionally identical from the first clock
     // on -- Not(Flop(D)) (the Liberty's own wording) and Flop(Not(D)) -- but
     // they differ in WHICH bit the model's state cell holds, and pass/lec keys
-    // its cut correspondence on exactly that: the impl's `<reg>_<bit>` /
-    // `<mem>__mem<i>_<bit>` model flop SHARES its power-on symbol with the
+    // its cut correspondence on exactly that: the impl's `<reg>[<bit>]` /
+    // `<mem>._mem[i][<bit>]` model flop SHARES its power-on symbol with the
     // source register or memory entry (query.cpp bit-blast + memory-bank
     // bridges), so the state must BE the value the netlist observes at the pin.
     // Not(Flop(D)) shared the complement: every resetless register read before

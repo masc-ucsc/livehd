@@ -809,6 +809,112 @@ TEST(Semdiff, SroaRegisterLeavesReaggregateForNamePairing) {
   EXPECT_EQ(0U, r.state.b_unpaired);
 }
 
+// A netlist read back from Verilog has lost the aggregate_* attributes, but
+// its per-bit cells follow the bus-expansion standard (core/bus_name.hpp):
+// `bank[i]`, or `bank[i].flop_16` with the Liberty cell model inlined. The
+// names alone regroup them into the reference's one wide `bank` -- and only
+// when the regroup is complete, unique and width-consistent.
+TEST(Semdiff, BusBitNamesReaggregateWithoutProvenance) {
+  auto make = [](const std::string& dir, int wide_bits, const std::vector<std::string>& bit_names) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    auto  g   = gio->create_graph();
+    if (wide_bits > 0) {
+      auto flop = create_typed_node(*g, Ntype_op::Flop);
+      auto q    = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, wide_bits);
+      livehd::graph_util::set_pin_name(q, "bank");
+    }
+    for (const auto& nm : bit_names) {
+      auto flop = create_typed_node(*g, Ntype_op::Flop);
+      auto q    = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, 1);
+      livehd::graph_util::set_pin_name(q, nm);
+    }
+    return g;
+  };
+  auto bits = [](int n, std::string_view suffix) {
+    std::vector<std::string> v;
+    for (int i = 0; i < n; ++i) {
+      v.push_back(std::format("bank[{}]{}", i, suffix));
+    }
+    return v;
+  };
+  auto run = [](hhds::Graph* ref, hhds::Graph* impl) {
+    livehd::semdiff::Semdiff_options o;
+    o.matching_names = true;
+    o.state_pairing  = true;
+    return livehd::semdiff::structural_match(ref, impl, o);
+  };
+
+  {  // standard names and the inlined-model spelling both regroup
+    for (std::string_view suffix : {"", ".flop_16"}) {
+      auto ref  = make(std::format("lgdb_semdiff_busbit_ref{}", suffix.size()), 4, {});
+      auto impl = make(std::format("lgdb_semdiff_busbit_impl{}", suffix.size()), 0, bits(4, suffix));
+      auto r    = run(ref.get(), impl.get());
+      EXPECT_EQ(1U, r.state.b_total) << suffix;
+      EXPECT_EQ(1U, r.state.name_pairs) << suffix;
+      EXPECT_EQ(0U, r.state.a_unpaired) << suffix;
+      EXPECT_EQ(0U, r.state.b_unpaired) << suffix;
+    }
+  }
+  {  // width-inconsistent: 3 bit cells against a 4-bit register stay unpaired
+    auto ref  = make("lgdb_semdiff_busbit_w_ref", 4, {});
+    auto impl = make("lgdb_semdiff_busbit_w_impl", 0, bits(3, ""));
+    auto r    = run(ref.get(), impl.get());
+    EXPECT_EQ(0U, r.state.name_pairs);
+    EXPECT_EQ(1U, r.state.a_unpaired);
+    EXPECT_EQ(3U, r.state.b_unpaired);
+  }
+  {  // ambiguous: bit 1 appears twice (two state elements in one bit's cell)
+    auto names = bits(4, ".flop_16");
+    names.push_back("bank[1].flop_17");
+    auto ref  = make("lgdb_semdiff_busbit_d_ref", 4, {});
+    auto impl = make("lgdb_semdiff_busbit_d_impl", 0, names);
+    auto r    = run(ref.get(), impl.get());
+    EXPECT_EQ(0U, r.state.name_pairs);
+    EXPECT_EQ(1U, r.state.a_unpaired);
+    EXPECT_EQ(5U, r.state.b_unpaired);
+  }
+  {  // a gap (bit 2 missing, bit 4 present) is no regroup either
+    auto names = bits(5, "");
+    names.erase(names.begin() + 2);
+    auto ref  = make("lgdb_semdiff_busbit_g_ref", 4, {});
+    auto impl = make("lgdb_semdiff_busbit_g_impl", 0, names);
+    auto r    = run(ref.get(), impl.get());
+    EXPECT_EQ(0U, r.state.name_pairs);
+    EXPECT_EQ(4U, r.state.b_unpaired);
+  }
+  {  // per-bit names on BOTH sides keep their exact 1:1 pairs
+    auto ref  = make("lgdb_semdiff_busbit_s_ref", 0, bits(4, ""));
+    auto impl = make("lgdb_semdiff_busbit_s_impl", 0, bits(4, ""));
+    auto r    = run(ref.get(), impl.get());
+    EXPECT_EQ(4U, r.state.name_pairs);
+    EXPECT_EQ(0U, r.state.b_unpaired);
+  }
+  {  // an unsplit one-bit register read back through its cell model, also
+     // behind cgen's `_cgen<N>` collision uniquifier
+    int k = 0;
+    for (const char* impl_name : {"bank.flop_16", "bank_cgen1.IQ"}) {
+      auto ref  = make(std::format("lgdb_semdiff_busbit_l_ref{}", k), 1, {});
+      auto impl = make(std::format("lgdb_semdiff_busbit_l_impl{}", k++), 0, {impl_name});
+      auto r    = run(ref.get(), impl.get());
+      EXPECT_EQ(1U, r.state.name_pairs) << impl_name;
+      EXPECT_EQ(0U, r.state.b_unpaired) << impl_name;
+    }
+  }
+  {  // ...but not two state elements under one owner, nor a wider register
+    auto ref  = make("lgdb_semdiff_busbit_l2_ref", 1, {});
+    auto impl = make("lgdb_semdiff_busbit_l2_impl", 0, {"bank.flop_16", "bank.flop_17"});
+    auto r    = run(ref.get(), impl.get());
+    EXPECT_EQ(0U, r.state.name_pairs);
+    auto ref4  = make("lgdb_semdiff_busbit_l4_ref", 4, {});
+    auto impl4 = make("lgdb_semdiff_busbit_l4_impl", 0, {"bank.flop_16"});
+    auto r4    = run(ref4.get(), impl4.get());
+    EXPECT_EQ(0U, r4.state.name_pairs);
+  }
+}
+
 TEST(Semdiff, SroaStructArrayLeavesReaggregateForNamePairing) {
   auto make = [](const std::string& dir, bool split) {
     auto& lib = livehd::Hhds_graph_library::instance(dir);

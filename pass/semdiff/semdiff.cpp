@@ -17,6 +17,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "bus_name.hpp"
 #include "cell.hpp"
 #include "hash_util.hpp"
 #include "hhds/hash_mix.hpp"
@@ -349,6 +350,11 @@ struct State_cell {
   std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
   std::vector<std::pair<uint32_t, uint32_t>> reach_f;
   uint64_t                                   token = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
+  // Aggregate provenance reconstructed from a bus-expansion NAME (`x[i]`,
+  // core/bus_name.hpp) when the aggregate_* attributes did not survive (a
+  // netlist read back from Verilog). name_lane < 0 = not reconstructed.
+  int32_t                                    name_lane   = -1;
+  int32_t                                    name_extent = 0;
   bool     t1_pair = false, t1_group = false, t2_pair = false, physical_bridge = false, ambiguous = false;
   uint64_t kind_nw    = 0;      // `kind` WITHOUT the width term (see collect_state)
   bool     kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
@@ -588,12 +594,153 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) 
   return h;
 }
 
+// Regroup `side`'s per-bit state cells named by the bus-expansion standard
+// (core/bus_name.hpp: bit i of register `x` is `x[i]`; a Liberty cell model
+// read back inline adds one trailing state segment, `x[i].flop_16`) into ONE
+// logical aggregate `x`, so tier-1 pairs it with `other`'s single `x`
+// exactly like the aggregate_* attribute provenance the direct synthesis
+// graph carries. An unsplit one-bit register read back the same way
+// (`x.flop_16`, bus_name::cell_state_owner) is renamed to `x` for a 1:1 pair.
+// Deliberately narrow -- a hint, never an assumption:
+//   * only 1-bit, non-memory cells without attribute provenance;
+//   * the indices must be exactly 0..n-1, one cell each (a duplicate index,
+//     e.g. two state elements inside one bit's cell model, or a gap drops the
+//     whole group);
+//   * `other` must hold exactly ONE non-memory cell named `x`, of width n,
+//     and none of the group's own names; `side` must not also hold an `x`.
+// Anything else keeps its per-bit identity and stays unpaired as before.
+// The LEC consumer builds its own bit-level correspondence and re-verifies it.
+void reconstruct_bus_groups(State_side& side, const State_side& other) {
+  auto name_of = [](const State_cell& c) { return normalize_reg_name(c.node.get_hier_name()); };
+  // The DECLARED Q width (node_out_bits only sees connected driver pins).
+  auto q_bits = [](const State_cell& c) {
+    auto b = gu::bits_of(c.node.get_driver_pin(0));
+    return b != 0 ? b : node_out_bits(c.node);
+  };
+  absl::flat_hash_map<std::string, uint32_t> other_by_name;  // name -> cell (UINT32_MAX = more than one)
+  for (uint32_t i = 0; i < other.cells.size(); ++i) {
+    for (auto n : {name_of(other.cells[i]), other.cells[i].key.starts_with("n:") ? other.cells[i].key.substr(2) : std::string{}}) {
+      if (n.empty()) {
+        continue;
+      }
+      auto [it, fresh] = other_by_name.try_emplace(std::move(n), i);
+      if (!fresh && it->second != i) {
+        it->second = UINT32_MAX;
+      }
+    }
+  }
+  absl::flat_hash_set<std::string> own_names;
+  for (const auto& c : side.cells) {
+    own_names.insert(name_of(c));
+    if (c.key.starts_with("n:")) {
+      own_names.insert(c.key.substr(2));
+    }
+  }
+  struct Member {
+    uint32_t    cell;
+    int64_t     index;
+  };
+  absl::flat_hash_map<std::string, std::vector<Member>>   groups;
+  absl::flat_hash_map<std::string, std::vector<uint32_t>> lone;  // `r.<model state>` of an unsplit register
+  for (uint32_t i = 0; i < side.cells.size(); ++i) {
+    const auto& c = side.cells[i];
+    if (!c.aggregate_key.empty() || c.is_mem || q_bits(c) != 1) {
+      continue;
+    }
+    // The tier-1 key spelling first, then the hierarchical node name (a
+    // flattened cell model's state keys by its own local pin name).
+    // A name that already has an exact counterpart is not reconstructed.
+    const std::string key_name = c.key.starts_with("n:") ? c.key.substr(2) : std::string{};
+    const std::string hier     = name_of(c);
+    bool              placed   = false;
+    for (const auto& name : {key_name, hier}) {
+      if (auto p = livehd::bus_name::parse_bus_piece(name, /*allow_model_suffix=*/true)) {
+        if (!other_by_name.contains(name)) {
+          groups[std::string{p->base}].push_back(Member{i, p->index});
+        }
+        placed = true;
+        break;
+      }
+    }
+    for (const auto& name : {key_name, hier}) {
+      if (placed) {
+        break;
+      }
+      if (auto owner = livehd::bus_name::cell_state_owner(name)) {
+        if (!other_by_name.contains(name)) {
+          lone[std::string{*owner}].push_back(i);
+        }
+        placed = true;
+      }
+    }
+  }
+  for (auto& [base, members] : groups) {
+    const auto n = static_cast<int64_t>(members.size());
+    if (n < 2 || n > std::numeric_limits<int32_t>::max() || own_names.contains(base)) {
+      continue;
+    }
+    auto oit = other_by_name.find(base);
+    if (oit == other_by_name.end() || oit->second == UINT32_MAX) {
+      continue;
+    }
+    const auto& wide = other.cells[oit->second];
+    // Tier-1 pairs on the key, so the wide cell must carry exactly that key.
+    if (wide.is_mem || !wide.aggregate_key.empty() || wide.key != "n:" + base || q_bits(wide) != n) {
+      continue;
+    }
+    std::vector<uint8_t> seen(static_cast<size_t>(n), 0);
+    bool                 ok = true;
+    for (const auto& m : members) {
+      if (m.index >= n || seen[static_cast<size_t>(m.index)] != 0) {
+        ok = false;
+        break;
+      }
+      seen[static_cast<size_t>(m.index)] = 1;
+    }
+    if (!ok) {
+      continue;
+    }
+    for (const auto& m : members) {
+      auto& c         = side.cells[m.cell];
+      c.aggregate_key = base;
+      c.key           = "n:" + base;
+      c.name_lane     = static_cast<int32_t>(m.index);
+      c.name_extent   = static_cast<int32_t>(n);
+    }
+  }
+  // An unsplit register read back through its cell model: `r.flop_16` (or
+  // `r_cgen1.flop_16`) is `r` when it is the ONLY such state under `r` and the
+  // other side holds exactly one one-bit `r`.
+  for (const auto& [owner, cells] : lone) {
+    if (cells.size() != 1 || groups.contains(owner) || own_names.contains(owner)) {
+      continue;
+    }
+    auto oit = other_by_name.find(owner);
+    if (oit == other_by_name.end() || oit->second == UINT32_MAX) {
+      continue;
+    }
+    const auto& wide = other.cells[oit->second];
+    if (wide.is_mem || !wide.aggregate_key.empty() || wide.key != "n:" + owner || q_bits(wide) != 1) {
+      continue;
+    }
+    side.cells[cells.front()].key = "n:" + owner;
+  }
+}
+
 // Tier-1 (name) + tier-2 (full-match) state pairing. Fills stats + the exported
 // pair/unpaired lists, assigns resolved tokens, and reports per-cell outcomes
 // under dump_state.
 void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb, const Semdiff_options& opts, Match_result& res) {
-  State_stats& st            = res.state;
-  auto         logical_total = [](const State_side& ss) {
+  State_stats& st = res.state;
+  // Bus-expansion names (`x[i]`) stand in for lost aggregate provenance
+  // (before the logical totals, which count a regrouped bus once). Like the
+  // physical bridge below, this is representation-only and must not undo the
+  // name_noise experiment.
+  if (opts.matching_names && opts.name_noise == 0.0) {
+    reconstruct_bus_groups(sa, sb);
+    reconstruct_bus_groups(sb, sa);
+  }
+  auto logical_total = [](const State_side& ss) {
     absl::flat_hash_set<std::string> groups;
     for (const auto& c : ss.cells) {
       groups.insert(c.aggregate_key.empty() ? std::format("physical:{}", c.node.get_debug_nid())
@@ -698,6 +845,18 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         const auto& c = ss.cells[i];
         if (c.aggregate_key.empty()) {
           return false;
+        }
+        if (c.name_lane >= 0) {
+          // Name-reconstructed lane: one bit at its own index.
+          if (declared_extent == 0) {
+            declared_extent = c.name_extent;
+          } else if (declared_extent != c.name_extent) {
+            return false;
+          }
+          ordinals.insert(c.name_lane);
+          ordinal_to_source.try_emplace(c.name_lane, c.name_lane);
+          packed_ranges.emplace_back(c.name_lane, c.name_lane + 1);
+          continue;
         }
         auto extent = c.node.attr(livehd::attrs::aggregate_extent);
         auto lane   = c.node.attr(livehd::attrs::aggregate_lane_ordinal);

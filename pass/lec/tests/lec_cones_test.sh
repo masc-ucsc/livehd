@@ -156,7 +156,7 @@ MTOP=abc_mem.abc_mem
 if [ -f "$MSRC" ]; then
   # `abc.memory=false`: this section is about the array-vs-array cut, so the
   # Memory must SURVIVE mapping as a native instance. pass.abc defaults to
-  # memory=auto, which folds a memory this small (bit-blast: `mem__mem<i>`
+  # memory=auto, which folds a memory this small (bit-blast: `mem._mem[i]`
   # storage flops); under a fold the impl has no array at all -- the
   # memory<->storage-bank bridge pairs the flops with the ref array and cvc5
   # discharges those per-entry cuts, so "every cut discharged by the cone pass"
@@ -205,7 +205,7 @@ if [ -f "$MSRC" ]; then
   fi
 
   # The SAME pair under pass.abc's default memory=true: the impl carries 8 whole
-  # storage flops `mem__mem<i>` (register=false keeps them native) and no array.
+  # storage flops `mem._mem[i]` (register=false keeps them native) and no array.
   # pass/lec's memory<->storage-bank bridge pairs them with the ref's array in
   # both engines, so the good netlist is PROVEN -- unbounded, through the
   # inductive flop-cut miter -- and the corrupted write address still REFUTES

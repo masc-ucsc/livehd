@@ -1511,6 +1511,20 @@ sh_test(
     ],
 )
 
+# Bus-expansion naming standard (core/bus_name.hpp): a register split into
+# per-bit DFF cells `rot[i]` round-trips through the emitted netlist Verilog and
+# proves unbounded against the original RTL (state pairing regroups the bits);
+# D-swapped / D-inverted mutants refute.
+sh_test(
+    name = "lhd_lec_busbit_test",
+    size = "medium",
+    srcs = ["lhd_lec_busbit_test.sh"],
+    data = _FLOW_DATA + [
+        "lec_busbit.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # Whole-design flatten: `pass.color flat` + pass.abc/pass.partition inline the
 # hierarchy into ONE output module (flatten=auto), LEC-proven vs the original;
 # flatten=false keeps the classic per-def decomposition.

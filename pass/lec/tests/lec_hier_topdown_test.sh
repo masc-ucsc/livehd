@@ -395,8 +395,8 @@ else echo "ok: asymmetric hierarchy is flattened to paired machine state and pro
 
 # ---------------------------------------------------------------------------
 # 11. pass.partition's mapped-region wrappers are named `sub_<id>`. Inlining
-#     that synthetic hierarchy must expose its scalar DFFs as the bits of the
-#     source packed register; no reset edge is available to establish a merely
+#     that synthetic hierarchy must expose its scalar DFFs (`state[i]`,
+#     core/bus_name.hpp) as the bits of the source packed register; no reset edge is available to establish a merely
 #     speculative suffix relation.
 # ---------------------------------------------------------------------------
 cat > "$W/partition_ref.v" <<'EOF'
@@ -408,13 +408,13 @@ endmodule
 EOF
 cat > "$W/partition_impl.v" <<'EOF'
 module partition_top__c1(input clock, input d, output [1:0] q);
-  reg state_0;
-  reg state_1;
+  reg \state[0] ;
+  reg \state[1] ;
   always @(posedge clock) begin
-    state_0 <= d;
-    state_1 <= state_0;
+    \state[0]  <= d;
+    \state[1]  <= \state[0] ;
   end
-  assign q = {state_1, state_0};
+  assign q = {\state[1] , \state[0] };
 endmodule
 module partition_top(input clock, input d, output [1:0] q);
   partition_top__c1 sub_16(.clock(clock), .d(d), .q(q));
