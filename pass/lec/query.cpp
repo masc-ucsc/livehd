@@ -4571,6 +4571,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     Io_name_map<Val>                  ref_state, impl_state;
     std::vector<Packed_scalar_bridge> bmc_packed_scalar;
     absl::flat_hash_set<std::string>  bank_hold_keys;        // reset-less bank flops: hold across the reset prologue
+    absl::flat_hash_set<std::string>  ref_power_init_keys;   // ref keys with an explicit power-on value
     size_t                            unpaired_state_n = 0;  // state cuts with no counterpart (disclosed in the verdict)
     {
       Io_name_map<int>  fw;
@@ -4580,10 +4581,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
       // cannot tell "this key exists on both sides" from "only one side has it".
       Io_name_map<int>  fw_side[2];
-      // Keys with a reset pin on either side, and the distinct clock inputs
-      // across both designs: the reset-prologue power-on policy below.
+      // Keys with a reset pin on either side: the reset-prologue power-on
+      // policy below.
       absl::flat_hash_set<std::string> reset_state_keys;
-      absl::flat_hash_set<std::string> clk_inputs;
       int                              side_ix       = 0;
       auto                             collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
@@ -4657,9 +4657,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           if (nop == Ntype_op::Flop && has_reset_pin) {
             reset_state_keys.insert(key);
-          }
-          if (auto ci = flop_clock_input(node)) {
-            clk_inputs.insert(std::move(*ci));
           }
         }
       };
@@ -4779,21 +4776,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       // A reset prologue starts BEFORE reset has reached the registers, and
       // equal names do not justify equal power-on bits: mapping can invert a
-      // reset flop's state while preserving its name. Only with two or more
-      // clock inputs can another domain capture that arbitrary pre-reset value
-      // and retain it beyond the prologue, so only then is a reset-bearing
-      // key's power-on value tracked as unknown. Single-clock runs, and state
-      // no reset ever writes, keep the shared s0 relation: an uncorrelated
-      // per-bit unknown plane on unreset state would never clear and would
+      // reset flop's state while preserving its name (a sync reset folded into
+      // a complemented next-state). Whatever samples that arbitrary pre-reset
+      // value during the prologue can retain it past reset: a synchronizer in
+      // another clock domain, but equally an UNRESET register of the same
+      // domain whose load enable reads a reset-bearing flop on the first reset
+      // cycle (bedrock br_flow_reg_fwd `pop_data`, BR_REGLN under
+      // `!pop_valid && push_valid`; inou/prp/tests/equiv/lec/reset_capture*.v).
+      // Sharing s0 there pairs the ref's state with the impl's COMPLEMENT and
+      // refutes on a value the hardware leaves undefined. So under a detected
+      // reset every reset-bearing key's power-on value is tracked unknown on
+      // the reference: the plane clears when the reset lands, and only what
+      // was captured from it pre-reset stays masked until its next known
+      // write. State no reset ever writes keeps the shared s0 relation: an
+      // uncorrelated per-bit unknown plane on it would never clear and would
       // mask every output it reaches.
-      const bool multi_clock_prologue = phase_run && !reset_negset.empty() && clk_inputs.size() >= 2;
+      const bool reset_prologue = phase_run && !reset_negset.empty();
       for (const auto& [key, w] : fw) {
         if (bitblast_bits.count(key) != 0) {
           continue;  // seeded below as a bit-slice of its N-bit ref counterpart
         }
         Val        v;
         const bool synth_init  = init_no_reset || unpaired_state.count(key) != 0;
-        const bool pre_reset_x = multi_clock_prologue && reset_state_keys.contains(key);
+        const bool pre_reset_x = reset_prologue && reset_state_keys.contains(key);
         if (synth_init && opts.gold_x == "zero") {
           v = Val{tm.mkBitVector(static_cast<uint32_t>(w), 0), w, fsgn.at(key)};
         } else if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
@@ -4824,6 +4829,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // a correct pair.
       for (const auto& [key, value] : power_init[0]) {
         ref_state[key] = value;
+        ref_power_init_keys.insert(key);
       }
       for (const auto& [key, value] : power_init[1]) {
         impl_state[key] = value;
@@ -5351,6 +5357,84 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // an unjustified shared-box assumption — so the verdict is gated to
     // Unknown below whenever these are non-empty (the inductive engine's rule).
     std::set<std::string>    bmc_unmatched_ref, bmc_unmatched_impl;  // ordered: deterministic detail text
+
+    // Reset-written state without a reset pin. A synchronous reset is usually
+    // folded into the next-state logic (`busy <= !rst & start`), so the
+    // reset_pin census above (reset_state_keys) misses exactly the flops a
+    // netlist is most likely to store complemented. Encode the reference's
+    // FIRST prologue cycle once more, off the miter, with every reset input
+    // bound to its asserted CONSTANT level: a key whose next-state rewrites to
+    // a constant is overwritten by that first reset cycle whatever its power-on
+    // value was. Its pre-reset value gets the same tracked-unknown reference
+    // plane as a reset-pin key (see pre_reset_x above): anything captured from
+    // it on that first cycle is hardware-undefined. Detection is a pure rewrite
+    // (no solver query, nothing asserted), and a constant next-state IS a total
+    // write, so a miss only keeps the shared s0 relation.
+    if (phase_run && !reset_negset.empty() && P == 1 && opts.gold_x != "zero") {
+      Io_name_map<Val> dry;
+      for (const auto& [name, info] : ins) {
+        if (bundle_in_leaves.count(name) > 0) {
+          continue;
+        }
+        cvc5::Term t;
+        if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
+          t = rit->second ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
+        } else {
+          t = mint_top_in(tm, info, "rdry_" + std::string(name));
+        }
+        dry[name] = Val{t, info.w, info.sgn};
+      }
+      for (const auto* b : in_bundles) {
+        cvc5::Term flat;
+        if (auto bit = dry.find(b->base); bit != dry.end() && bit->second.width == b->width) {
+          flat = bit->second.term;
+        } else {
+          flat         = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), "rdry_" + b->base);
+          dry[b->base] = Val{flat, b->width, b->flat_signed};
+        }
+        for (auto& [ln, lv] : bundle_leaf_vals(*b, flat)) {
+          dry[ln] = lv;
+        }
+      }
+      for (const auto& [k, v] : ref_state) {
+        dry[k] = Val{v.term, v.width, v.is_signed};  // value only: the probe asks what reset writes
+      }
+      Io_name_map<Val> dry_bbox;
+      for (const auto& [bk, bv] : shared_bbox) {
+        dry_bbox[bk] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
+      }
+      enc.set_shared_bbox(&dry_bbox);
+      enc.set_emit_props(false);
+      enc.set_x_dontcare(false);
+      enc.set_box_keys(&ref_box_keys);
+      const bool dry_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
+      enc.set_phase_plan(dry_use_plan ? &ref_plan : nullptr, steps[0]);
+      enc.set_memory_x_state(nullptr);
+      Encoded dre = enc.encode(ref, &dry, "rdry_", &ref_mem, &ref_reads);
+      enc.set_shared_bbox(&shared_bbox);
+      if (dre.ok) {
+        for (const auto& [name, nv] : dre.outputs) {
+          if (name.rfind("\x01nxt:", 0) != 0) {
+            continue;
+          }
+          const std::string key = name.substr(5);
+          if (key.empty() || key[0] == '\x01' || ref_power_init_keys.contains(key)) {
+            continue;  // box state cut, or an explicit power-on value (already known)
+          }
+          auto it = ref_state.find(key);
+          if (it == ref_state.end() || !it->second.x_mask.isNull()) {
+            continue;
+          }
+          if (!solver.simplify(nv.term).isBitVectorValue()) {
+            continue;
+          }
+          it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
+          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+            std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked unknown on the reference\n", key.c_str());
+          }
+        }
+      }
+    }
 
     // Input snapshot for the current HALF period, shared between REF and IMPL.
     // Hoisted out of the loop because a latch-close microstep and the edge batch
