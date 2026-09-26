@@ -658,13 +658,59 @@ if [ -n "${lib}" ]; then
   yosys_read="${yosys_read}; ${lib}"
 fi
 
+# Clock-domain guard. Every engine below except 1c and the bounded miter is
+# CLOCK-BLIND: equiv_simple/equiv_induct/`sat -tempinduct` advance every
+# flip-flop once per solver step whatever clock or edge drives it, and do not
+# model latches. They PROVED posedge vs negedge registers, a register moved to
+# another clock, a gated clock vs the ungated one, and a mixed-edge pipeline vs
+# its edge-swapped twin. That abstraction is exact only when every state
+# element of BOTH designs is clocked by the SAME edge of the SAME primary input
+# (clock traced through buffers/inverters, the edge folded through each
+# inversion, so a negedge register and a posedge netlist flop on `~clk` agree).
+# Anything else (two clocks or edges, a derived/gated clock, a latch, an
+# asynchronous-write memory, a constant clock) may only be decided by the
+# clk2fflogic engines, stage 1c (proof) and the bounded miter (refutation).
+# A helper failure is treated as "not single-domain": never a verdict.
+CLOCK_BLIND_OK=0
+ASYNC_FF=1  # unknown until the helper says otherwise
+clock_domains_tool="${SELF_DIR}/clock_domains.py"
+if [ -f "$clock_domains_tool" ] && ${YOSYS} -p "${yosys_read}; flatten gold gate;
+    select -set lgc_state t:*ff* t:*FF* t:*latch* t:*LATCH* t:\$mem* t:\$_SR_* t:\$sr;
+    select -set lgc_clock t:\$not t:\$_NOT_ t:\$buf t:\$pos t:\$_BUF_;
+    setattr -set keep 1 @lgc_state; delete c:* @lgc_state %d @lgc_clock %d;
+    opt_clean -purge; write_json lgcheck_clock_domains.json" \
+    >lgcheck_clock_domains.log 2>&1 \
+    && clock_domains=$(python3 "$clock_domains_tool" --json lgcheck_clock_domains.json); then
+  echo "INFO: clock domains: ${clock_domains}"
+  case "$clock_domains" in
+  single*) CLOCK_BLIND_OK=1 ;;
+  esac
+  case "$clock_domains" in
+  single+async* | multi+async*) ;;
+  *) ASYNC_FF=0 ;;
+  esac
+else
+  echo "WARN: could not extract the clock domains (see lgcheck_clock_domains.log)"
+fi
+if [ "$CLOCK_BLIND_OK" -eq 0 ]; then
+  echo "INFO: state is not a single primary-input clock edge; clock-blind engines (1/1n/1r/1p/1m/2/4) skipped"
+fi
+# The guard is preparation, not an equivalence strategy: restart the budget.
+equiv_start=$SECONDS
+# Run a clock-blind strategy only when the guard allows it; a skipped strategy
+# produces no log line, so its "proven" grep fails and the flow falls through.
+run_clock_blind_yosys() {
+  [ "$CLOCK_BLIND_OK" -eq 1 ] || return 125
+  run_equiv_yosys "$@"
+}
+
 yosys_prep="proc; bmuxmap; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; bmuxmap; opt_clean;"
 
 yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
 
-run_equiv_yosys --heuristic -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
+run_clock_blind_yosys --heuristic -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
   2>/dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
@@ -687,7 +733,7 @@ yosys_state_prep="${yosys_read}; memory; opt -full;
     rename -hide w:* @state_outputs %d; select -unset state_outputs;
     splitnets -format _"
 rm -f lgcheck1n.json lgcheck_memory_names.ys
-run_equiv_yosys --heuristic -p "${yosys_state_prep};
+run_clock_blind_yosys --heuristic -p "${yosys_state_prep};
     equiv_make gold gate equiv; hierarchy -top equiv;
     equiv_simple -undef; equiv_induct -undef -seq 4;
     write_json lgcheck1n.json; equiv_status -assert" \
@@ -762,7 +808,7 @@ print(" ".join(sorted(names)))
 PYSTATE_RETRY
 )
 if [ -s lgcheck_memory_names.ys ]; then
-  run_equiv_yosys --heuristic -p "${yosys_state_prep}; script lgcheck_memory_names.ys;
+  run_clock_blind_yosys --heuristic -p "${yosys_state_prep}; script lgcheck_memory_names.ys;
       equiv_make gold gate equiv; hierarchy -top equiv;
       equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
     2>lgcheck1r.err | tee lgcheck1r.log | grep "Equivalence successfully proven!"
@@ -773,7 +819,7 @@ if [ -s lgcheck_memory_names.ys ]; then
 fi
 
 if [ -n "$state_retry_names" ]; then
-  run_equiv_yosys --heuristic -p "${yosys_state_prep}; rename -hide ${state_retry_names};
+  run_clock_blind_yosys --heuristic -p "${yosys_state_prep}; rename -hide ${state_retry_names};
       equiv_make gold gate equiv; hierarchy -top equiv;
       equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
     2>lgcheck1p.err | tee lgcheck1p.log | grep "Equivalence successfully proven!"
@@ -787,7 +833,7 @@ fi
 # Map memories and propose structural correspondence, then PROVE every added
 # $equiv obligation. Leaving $mem cells opaque makes equiv_simple inconclusive;
 # a monolithic temporal SAT query also misses this useful state correspondence.
-run_equiv_yosys --heuristic -p "${yosys_read}; memory; opt -full;
+run_clock_blind_yosys --heuristic -p "${yosys_read}; memory; opt -full;
     equiv_make gold gate equiv; hierarchy -top equiv;
     equiv_struct -icells; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
   2>lgcheck1m.err | tee lgcheck1m.log | grep "Equivalence successfully proven!"
@@ -940,7 +986,7 @@ fi
 # Primary hardware inputs are defined bit vectors, as in cvc5 and the BMC
 # check below. Allowing X inputs makes equivalent mux/gate implementations
 # disagree only in undefined propagation and prematurely fails the base case.
-run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+run_clock_blind_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
               $(gate_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
@@ -968,7 +1014,15 @@ fi
 #  exit 0
 #fi
 
-run_equiv_yosys -p "${yosys_read};
+# Stage 4 rewrites every $adff with +/adff2dff.v, i.e. as a SYNCHRONOUS reset
+# register: an async-reset design would prove equal to its sync-reset twin.
+# Run it only when neither design has an asynchronous set/reset/load register.
+if [ "$ASYNC_FF" -eq 0 ]; then
+  stage4_runner=run_clock_blind_yosys
+else
+  stage4_runner=false
+fi
+$stage4_runner -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \

@@ -198,10 +198,13 @@ echo "PASS: memory word/bit correspondence proves, corrupted write refutes"
 
 # An expensive correspondence guess must leave time for another strategy.
 # The fake solver isolates scheduling: the first attempt would outlast the
-# whole three-second budget; the next attempt returns an explicit proof.
+# whole three-second budget; the next attempt returns an explicit proof. The
+# clock-domain guard gets a stateless design so the clock-blind strategies run.
 cat >"$W/strategy_budget_yosys" <<'SHSTRATEGY'
 #!/bin/sh
 case "$*" in
+  *"write_json lgcheck_clock_domains.json"*)
+    echo '{"modules":{"gold":{},"gate":{}}}' >lgcheck_clock_domains.json ;;
   *"write_verilog trace1.v"*) exec sleep 4 ;;
   *"select -set state_outputs"*) echo 'Equivalence successfully proven!' ;;
 esac

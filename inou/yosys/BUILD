@@ -35,6 +35,7 @@ sh_library(
         ":yosys2",
     ],
     data = [
+        "clock_domains.py",
         "rtlil_children.py",
         "rtlil_split_port_adapter.py",
         "//ware:cgen_memory_rtl",
@@ -147,5 +148,16 @@ sh_test(
 sh_test(
     name = "yosys_reset_soundness_test",
     srcs = ["tests/yosys_reset_soundness_test.sh"],
+    data = [":scripts"],
+)
+
+# The structural/induction engines ignore which clock and edge drive a
+# register; lgcheck runs them only on single-clock-edge designs. Clock/edge
+# mismatches (edge flip, another clock, gated clock, mixed edges, latch
+# polarity, memory port edge) must never be proven; mapped netlists with
+# inverted/buffered clocks, QN state and an ICG vs an enable must still prove.
+sh_test(
+    name = "yosys_clock_domain_test",
+    srcs = ["tests/yosys_clock_domain_test.sh"],
     data = [":scripts"],
 )
