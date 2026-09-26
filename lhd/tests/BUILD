@@ -1242,6 +1242,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# A dynamic word select maps as an affine word mux with satopt on and off,
+# on is not larger, and both netlists LEC against their compiled reference.
+sh_test(
+    name = "lhd_satopt_word_select_test",
+    size = "large",
+    srcs = ["lhd_satopt_word_select_test.sh"],
+    data = _FLOW_DATA + [
+        "satopt_word_select.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 sh_test(
     name = "lhd_satopt_noctrl_test",
     size = "large",

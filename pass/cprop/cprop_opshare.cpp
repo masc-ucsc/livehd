@@ -282,6 +282,29 @@ void Cprop::mux_op_share_pass() {
       continue;
     }
     const auto& base = shapes.front();
+    // A shift by a constant is wiring, not an operator: sharing `a << 32` and
+    // `b << 65` as `mux(a,b) << mux(32,65)` saves nothing and manufactures a
+    // barrel shifter over the whole carrier (satopt's hotmux stage exposed
+    // this in dino's ALU sign-extension, +40% on that shift). Share a shift
+    // only when its amounts agree or none of them is a constant.
+    if (base.op == Ntype_op::SHL || base.op == Ntype_op::SRA) {
+      for (size_t j = 0; j < base.operands.size(); ++j) {
+        if (base.operands[j].role == 0) {
+          continue;  // the shifted value
+        }
+        const auto value   = base.operands[j].value;
+        const bool same    = std::all_of(shapes.begin() + 1, shapes.end(), [&](const auto& s) {
+          const auto& other = s.operands[j].value;
+          return other == value
+                 || (other.is_const() && value.is_const() && gu::const_of(other).is_known_eq(gu::const_of(value)));
+        });
+        const bool any_cst = std::any_of(shapes.begin(), shapes.end(), [&](const auto& s) { return s.operands[j].value.is_const(); });
+        valid              = valid && (same || !any_cst);
+      }
+      if (!valid) {
+        continue;
+      }
+    }
     // An UNSTAMPED Mux result means "as wide as the selected arm" (the LEC
     // encoder models it that way), but an unstamped result of any other op is
     // read as one bit by the encoder and cgen. The root is re-typed in place,

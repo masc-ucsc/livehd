@@ -265,6 +265,28 @@ TEST(abc_arith, affine_shift_right_prefix) {
   }
 }
 
+// An explicit per-index amount table, e.g. a wrapped `(index*8 + 8) mod 32`
+// (satopt's odc narrowing of the amount): index 3 selects amount 0.
+TEST(abc_arith, table_shift_right_prefix) {
+  ByteOps              ops;
+  const int            w      = 32;
+  const uint64_t       value  = 0xD6B79A5Cu;
+  std::vector<uint64_t> amounts = {8, 16, 24, 0};
+  for (int out_w = 1; out_w <= 8; ++out_w) {
+    for (uint64_t index = 0; index < 4; ++index) {
+      auto           r    = build_table_shr_prefix(ops, to_bits(value, w), to_bits(index, 2), ops.zero(), amounts, out_w);
+      const uint64_t mask = (uint64_t{1} << out_w) - 1;
+      EXPECT_EQ(from_bits(r), (value >> amounts[index]) & mask) << "index=" << index << " out_w=" << out_w;
+    }
+  }
+  // An amount at or past the width fills.
+  amounts = {32, 40, 31, 1};
+  auto r  = build_table_shr_prefix(ops, to_bits(value, w), to_bits(uint64_t{0}, 2), ops.one(), amounts, 4);
+  EXPECT_EQ(from_bits(r), 0xFu);
+  r = build_table_shr_prefix(ops, to_bits(value, w), to_bits(uint64_t{2}, 2), ops.zero(), amounts, 4);
+  EXPECT_EQ(from_bits(r), (value >> 31) & 0xFu);
+}
+
 TEST(abc_arith, multiply_array) {
   ByteOps ops;
   // Operands are already extended to out_w by the caller, so this checks the

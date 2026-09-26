@@ -21,6 +21,7 @@
 // a dispatch arm in abc_map.cpp; nothing else changes.
 
 #include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -421,9 +422,14 @@ inline std::vector<Bit> build_shr(Ops& ops, const std::vector<Bit>& a, const std
 // directly among the possible source words costs roughly out_w*2^index_width
 // muxes instead of width*amount_width for a full generic barrel shifter.
 // Callers bound index_width before using this builder.
+//
+// build_table_shr_prefix is the same selection with the amount of each index
+// value given explicitly (`amounts[v]`, one per index value), so an amount
+// chain that wraps (a truncated `index*scale + bias`) selects exactly what the
+// barrel over the truncated amount net would.
 template <class Bit, class Ops>
-inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& index, Bit fill,
-                                                int64_t scale, int64_t bias, int out_w) {
+inline std::vector<Bit> build_table_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& index, Bit fill,
+                                               const std::vector<uint64_t>& amounts, int out_w) {
   const int w              = static_cast<int>(a.size());
   out_w                    = std::clamp(out_w, 0, w);
   const size_t     choices = size_t{1} << index.size();
@@ -431,8 +437,8 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
   for (int bit = 0; bit < out_w; ++bit) {
     std::vector<Bit> level(choices);
     for (size_t v = 0; v < choices; ++v) {
-      const int64_t pos = static_cast<int64_t>(bit) + bias + scale * static_cast<int64_t>(v);
-      level[v]          = pos >= 0 && pos < w ? a[static_cast<size_t>(pos)] : fill;
+      const uint64_t amt = v < amounts.size() ? amounts[v] : static_cast<uint64_t>(w);
+      level[v]           = amt < static_cast<uint64_t>(w - bit) ? a[static_cast<size_t>(bit) + amt] : fill;
     }
     for (size_t k = 0; k < index.size(); ++k) {
       const Bit        sel  = index[k];
@@ -446,6 +452,17 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
     result[static_cast<size_t>(bit)] = level[0];
   }
   return result;
+}
+
+template <class Bit, class Ops>
+inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& index, Bit fill,
+                                                int64_t scale, int64_t bias, int out_w) {
+  std::vector<uint64_t> amounts(size_t{1} << index.size());
+  for (size_t v = 0; v < amounts.size(); ++v) {
+    const int64_t amt = bias + scale * static_cast<int64_t>(v);
+    amounts[v]        = amt < 0 ? static_cast<uint64_t>(a.size()) : static_cast<uint64_t>(amt);
+  }
+  return build_table_shr_prefix(ops, a, index, fill, amounts, out_w);
 }
 
 // Unsigned array multiplier `a * b`, result truncated to out_w bits: the sum of

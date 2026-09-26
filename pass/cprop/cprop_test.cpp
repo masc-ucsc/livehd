@@ -1732,7 +1732,7 @@ TEST(CpropOpSharing, PositionalAndBankedOperatorsPreserveValues) {
         Ntype_op::Sext, Ntype_op::Rxor, Ntype_op::Popcount, Ntype_op::Get_mask, Ntype_op::Set_mask, Ntype_op::Concat}) {
     SCOPED_TRACE(std::string{Ntype::get_name(op)});
     Mux_graph  f("opshare_" + std::string{Ntype::get_name(op)}, 2, 8, false, true);
-    const auto expr = [&](Test_pin value, bool second) {
+    const auto expr = [&](Test_pin value) {
       auto n = f.node(op);
       if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
         gu::connect_mask_operands(n, value, f.constant(15), op == Ntype_op::Set_mask ? f.controls[1] : Test_pin{});
@@ -1748,12 +1748,12 @@ TEST(CpropOpSharing, PositionalAndBankedOperatorsPreserveValues) {
         if (Ntype::sink_bank_count(op)) {
           gu::setup_sink_pid(n, Ntype::sink_bank_count(op) == 2 && op != Ntype_op::Sum ? 1 : 0).connect_driver(f.controls[1]);
         } else if (op != Ntype_op::Not) {
-          n.create_sink_pin(1).connect_driver(f.constant(op == Ntype_op::SHL || op == Ntype_op::SRA ? (second ? 2 : 1) : 3));
+          n.create_sink_pin(1).connect_driver(f.constant(op == Ntype_op::SHL || op == Ntype_op::SRA ? 2 : 3));
         }
       }
       return n.create_driver_pin(0);
     };
-    auto root = f.mux(f.controls[0], expr(f.a, false), expr(f.b, true));
+    auto root = f.mux(f.controls[0], expr(f.a), expr(f.b));
     root.connect_sink(f.graph->get_output_pin("out"));
     std::vector<int64_t> expected;
     for (unsigned mask = 0; mask < 4; ++mask) {
@@ -1769,6 +1769,36 @@ TEST(CpropOpSharing, PositionalAndBankedOperatorsPreserveValues) {
       for (int a : {1, 7, 15, 31}) {
         auto inputs = f.inputs(mask, a, 5, true, true);
         EXPECT_EQ(mux_eval(f.output(), inputs), expected[i++]);
+      }
+    }
+  }
+}
+
+// A constant shift is wiring: `mux(s, a << 1, b << 2)` must not become
+// `mux(s, a, b) << mux(s, 1, 2)`, a barrel shifter. A shared variable amount
+// still shares (it saves a whole shifter).
+TEST(CpropOpSharing, ConstantShiftAmountsAreNotShared) {
+  for (auto op : {Ntype_op::SHL, Ntype_op::SRA}) {
+    for (const bool variable : {false, true}) {
+      SCOPED_TRACE(std::string{Ntype::get_name(op)} + (variable ? " variable" : " constant"));
+      Mux_graph  f(std::string{"opshare_amount_"} + std::string{Ntype::get_name(op)} + (variable ? "_v" : "_c"), 3, 8, false, true);
+      const auto expr = [&](Test_pin value, int amount) {
+        auto n = f.node(op);
+        gu::setup_sink_pid(n, 0).connect_driver(value);
+        n.create_sink_pin(1).connect_driver(variable ? f.controls[amount] : f.constant(amount));
+        return n.create_driver_pin(0);
+      };
+      f.mux(f.controls[0], expr(f.a, 1), expr(f.b, 2)).connect_sink(f.graph->get_output_pin("out"));
+      std::vector<int64_t> expected;
+      for (unsigned mask = 0; mask < 8; ++mask) {
+        auto values = f.inputs(mask, 23, 5);
+        expected.push_back(mux_eval(f.output(), values));
+      }
+      Cprop{}.do_trans(f.graph);
+      EXPECT_EQ(f.count(op), variable ? 1u : 2u);
+      for (unsigned mask = 0; mask < 8; ++mask) {
+        auto values = f.inputs(mask, 23, 5);
+        EXPECT_EQ(mux_eval(f.output(), values), expected[mask]);
       }
     }
   }

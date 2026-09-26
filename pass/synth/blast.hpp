@@ -746,78 +746,61 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       for (int i = 0; i < nb; ++i) {
         bv[i] = abc_bit(b_d, i);  // unsigned shift count (i < eff width, so the real bit)
       }
-      // Recognize amount = index*scale + bias. This is the canonical packed
-      // dynamic word-select lowering. With a narrow demanded prefix, select
-      // directly among source words rather than building a full-width barrel.
-      hhds::Pin_class index;
-      int64_t         scale  = 1;
-      int64_t         bias   = 0;
-      bool            affine = false;
+      // Recognize amount = f(index) for an affine index*scale + bias chain.
+      // This is the canonical packed dynamic word-select lowering. With a
+      // narrow demanded prefix, select directly among source words rather
+      // than building a full-width barrel.
+      //
       // The affine form needs a NARROW demand, not specifically a sliced one: a
       // shift whose own result is already narrower than its operand (a ware
       // module narrows its output port to the demanded width, so its consumer
       // is a module port, never an in-region Get_mask) is the same word select.
-      // affine_fits below keeps the two lowerings bit-identical and the cost
-      // check keeps the choice a pure performance decision.
       const bool narrow_demand = sliced_demand || demand_w < cw;
+      hhds::Pin_class       index;
+      std::vector<uint64_t> amounts;  // the amount net's value for each index value
       if (narrow_demand) {
         // index*scale + bias in any spelling (affine_amount.hpp), every link
-        // in this region. The identity only holds when no link drops a bit
-        // of its value and the index reads as the non-negative value the
-        // affine builder assumes.
+        // in this region and the index read as a non-negative value.
         if (const auto chain = affine_chain(b_d); chain && gu::is_unsign(chain->index)) {
-          const int  iw    = eff_width(chain->index);
-          bool       valid = iw > 0 && iw <= 16;
+          const int iw    = eff_width(chain->index);
+          bool      valid = iw > 0 && iw <= 16
+                       && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
+                              < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
           for (size_t i = 0; valid && i < chain->links.size(); ++i) {
-            const auto& [node, out] = chain->links[i];
-            const auto [sc, bi]     = chain->link_affine[i];
-            const auto max_value    = static_cast<uint64_t>(sc) * ((uint64_t{1} << iw) - 1) + static_cast<uint64_t>(bi);
-            valid = region.contains(node) && gu::bits_of(out) >= static_cast<int>(std::bit_width(max_value));
+            valid = region.contains(chain->links[i].first);
+          }
+          // The two lowerings must agree, because only a COST heuristic picks
+          // between them. The generic barrel reads the amount as the nb-bit
+          // net it is, so each index value's table entry is the EXACT value
+          // of that net: every link computed and truncated to its own width
+          // (a wrapping link, like satopt's odc narrowing of the amount, stays
+          // a wrap), then the low nb bits the barrel reads.
+          for (uint64_t v = 0; valid && v < (uint64_t{1} << iw); ++v) {
+            const auto amt = chain->eval(v);
+            valid          = amt.has_value();
+            if (valid) {
+              amounts.push_back(nb < 63 ? (*amt & ((uint64_t{1} << nb) - 1)) : *amt);
+            }
           }
           if (valid) {
-            index  = chain->index;
-            scale  = chain->scale;
-            bias   = chain->bias;
-            affine = true;
+            index = chain->index;
+          } else {
+            amounts.clear();
           }
         }
       }
-      const int  index_w     = affine ? eff_width(index) : 0;
-      // The two lowerings must agree, because only a COST heuristic picks
-      // between them. The generic barrel reads the amount as the nb-bit net it
-      // actually is, so an index*scale+bias that overflows that net WRAPS to a
-      // small shift and selects real data; build_affine_shr_prefix rebuilds the
-      // untruncated math value instead and would fill those bits. Take the
-      // affine form only when no reachable index can overflow the amount net,
-      // so the choice stays a pure performance decision.
-      const bool affine_fits = [&] {
-        if (!affine || index_w <= 0 || index_w > 16) {
-          return false;
-        }
-        if (nb >= 62) {
-          return true;  // any 16-bit index * scale below fits; avoids the shift UB
-        }
-        const int64_t max_index = (int64_t{1} << index_w) - 1;
-        if (max_index != 0 && scale > (INT64_MAX - bias) / max_index) {
-          return false;  // the product alone overflows int64: certainly not nb bits
-        }
-        return scale * max_index + bias < (int64_t{1} << nb);
-      }();
-      if (affine_fits
-          && (uint64_t{1} << index_w) * static_cast<uint64_t>(demand_w)
-                 < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1))) {
+      if (!amounts.empty()) {
+        const int        index_w = eff_width(index);
         std::vector<Bit> iv(index_w);
         for (int i = 0; i < index_w; ++i) {
           iv[i] = abc_bit(index, i);
         }
-        res = arith::build_affine_shr_prefix(ops, av, iv, fill, scale, bias, demand_w);
+        res = arith::build_table_shr_prefix(ops, av, iv, fill, amounts, demand_w);
         if (opts_.verbose) {
-          std::print("[pass.abc] region '{}': affine right shift selected ({} output bits, {}-bit index, scale {}, bias {})\n",
+          std::print("[pass.abc] region '{}': affine right shift selected ({} output bits, {}-bit index)\n",
                      rb.module_name,
                      demand_w,
-                     index_w,
-                     scale,
-                     bias);
+                     index_w);
         }
       } else {
         res = arith::build_shr_prefix(ops, av, bv, fill, demand_w, opts_.reverse_barrel);

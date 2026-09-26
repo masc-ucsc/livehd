@@ -58,7 +58,10 @@ bool ware_qor_better(const Ware_qor& baseline, const Ware_qor& candidate, bool t
       }
     }
     for (size_t i = 0; i < baseline.delays.size(); ++i) {
-      if (std::abs(candidate.delays[i] - baseline.delays[i]) > 0.001f) {
+      // A delay change below 0.1% of the path is estimation noise, not a
+      // reason to trade area (dino: a +54 um2 barrel kept for 0.23 ps).
+      const float tolerance = std::max(0.001f, 0.001f * std::abs(baseline.delays[i]));
+      if (std::abs(candidate.delays[i] - baseline.delays[i]) > tolerance) {
         return candidate.delays[i] < baseline.delays[i];
       }
     }

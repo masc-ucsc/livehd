@@ -325,6 +325,18 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     }
   }
   node.del_node();
+  if (affine) {
+    // The shift now reads the index; the parent's own copy of the amount
+    // chain is dead unless something else reads it. Retire it here, amount
+    // side first, so a dead Sum link never becomes an orphan ware instance.
+    for (auto it = affine->chain.links.rbegin(); it != affine->chain.links.rend(); ++it) {
+      auto link = it->first;
+      if (link.has_out_edges()) {
+        break;
+      }
+      link.del_node();
+    }
+  }
   return io->get_graph();
 }
 }  // namespace
@@ -336,18 +348,27 @@ std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<s
     if (!graph || graph->get_input_node().attr(attrs::ware_module).has()) {
       continue;
     }
-    auto                                                  policy = ware_policy(*graph, fallback);
-    std::vector<std::pair<hhds::Node_class, std::string>> nodes;
-    for (auto node : graph->body().nodes()) {
-      auto kind = family(node, policy);
-      if (!kind.empty()) {
-        nodes.emplace_back(node, kind);
+    auto policy = ware_policy(*graph, fallback);
+    // Shifts first: a word select's amount chain (`(index << 6) + 64`) may
+    // hold a wide Sum that is itself a ware family. Enclosed first, that Sum
+    // became an opaque instance and the shift's affine amount was lost -- the
+    // module then took the full amount as an input and built a generic barrel
+    // over a wide word array (dino's ALU result select: 4x the area of the
+    // word mux). Enclosing the shift clones the chain into its body, and the
+    // second scan only sees the Sums that still have other readers.
+    for (const bool shifts : {true, false}) {
+      std::vector<std::pair<hhds::Node_class, std::string>> nodes;
+      for (auto node : graph->body().nodes()) {
+        auto kind = family(node, policy);
+        if (!kind.empty() && (kind == "shl" || kind == "sra") == shifts) {
+          nodes.emplace_back(node, kind);
+        }
       }
-    }
-    for (const auto& [node, kind] : nodes) {
-      auto child = enclose(*graph, node, kind, policy);
-      if (std::find(modules.begin(), modules.end(), child) == modules.end()) {
-        modules.push_back(child);
+      for (const auto& [node, kind] : nodes) {
+        auto child = enclose(*graph, node, kind, policy);
+        if (std::find(modules.begin(), modules.end(), child) == modules.end()) {
+          modules.push_back(child);
+        }
       }
     }
   }
