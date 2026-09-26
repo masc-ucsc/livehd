@@ -748,6 +748,70 @@ exporter would have written it out as if it were single-clock.  That is the
 class this change actually serves — not `multi_clock=true`, which so far has
 unblocked one module.
 
+### Direction 2 has its own file now, and the emitter no longer hangs
+
+`pass_lean.cpp` hosted three things in one anonymous namespace -- shared
+graph->certificate machinery, Direction 2's emitter, and legacy fast-model
+emission -- so nothing could be scoped out of it and a change to one direction
+could reach another.  Measuring the seam first made the split small: Direction 2
+calls **five** functions from the surrounding scope and otherwise only READS
+eighteen results the shared scan already computed.  So:
+
+| file | contents |
+|---|---|
+| `lean_common.hpp/.cpp` | `Emit_error`, the graph accessors, `Memory_info`, `LeanCtx`, `CertBuild`/`MemCertIds`/`CertNodeInfo`, and `Design_scan` -- the eighteen results that cross over, by reference |
+| `IR_Semantics_pass.cpp` | Direction 2 only: `DesignIn`, the clock-provenance walk, `emit_design_cert` |
+| `pass_lean.cpp` | Eprp surface + legacy emission; 3,987 -> 3,335 lines |
+
+The move was proved, not asserted: all 98 covered CORE-ET modules emitted before
+and after, **98/98 byte-identical** (23,680,502 bytes), by md5 manifest and by
+`diff -r`.
+
+**The topo walk had no cycle guard, and that was nine modules.**
+`reachable_topo_order` inserted into `reached` only on the POST-visit -- a black
+set with no gray set -- so it could not tell a forward edge from a back edge.  On
+a word-level combinational cycle it pushed one frame per iteration and popped
+none, allocating an `Edge_vec` each time: unbounded growth, linear in wall time,
+with no diagnostic.  That is what 55 GB on `txfmafrac_top`, 11 GB on
+`minion_dcache_top`, and the census's `std::bad_alloc` readings for the `txfma_f*`
+family all were.  It is not stack overflow (the stack is heap-allocated) and not
+a slow fixpoint (no frame is ever popped).
+
+With a gray set and a back-edge refusal, **all nine terminate in 1-131 seconds**,
+each naming both endpoints:
+
+| module | was | now |
+|---|---|---|
+| `txfma_f0` / `f2` / `f3` / `f5` | 1 h+, `split_selfref` warned | cycle named, 2-12 s |
+| `txfma_e5`, `txfma_f6` | 1 h+, **no** `split_selfref` warning | cycle named, 1-2 s |
+| `intpipe_csr_file` | 2 h / 4.5 GB, filed as "emitter scale" | cycle named, 31 s |
+| `minion_dcache_top` | 90 min / 11 GB, filed as "emitter scale" | cycle named, 88 s |
+| `txfmafrac_top` | 39 min / 55 GB, filed as "emitter OOM" | cycle named, 131 s |
+
+**All nine are cycles. None is a scale problem.** The "emitter scale" bucket was
+an artifact of the missing guard -- unbounded allocation reads as a big design.
+Two consequences worth carrying forward: the ROM `size^2` repack (a real latent
+issue) is *not* what gated `txfmafrac_top`, and `split_selfref`'s warning
+**undercounts** -- four of the nine produced no warning at all, because its
+reader selection bails silently on ops it has no rule for (the named endpoints
+are `shl_`, `sra_`, `and_`, `sext_` nodes).
+
+A guard scaled to the graph (`64 * (nodes + 1024)` traversal steps) backs it up
+for shapes the cycle test misses; on a DAG this walk costs one step per edge, so
+it cannot fire on a legitimate design.  An opt-in `formal.lean.max_nodes` caps
+the cone's size, defaulting to unlimited so it can refuse nothing that works
+today.  Regression: the same 98 modules re-emitted **byte-identical** afterwards,
+so the guard fires on no working design.
+
+**A refusal no longer looks like a crash.**  `fatal()` throws `Emit_error`, and
+the only handler lived inside the legacy emission block -- so every refusal from
+the shared scan or from a direction's emitter (the whole `verified_compiler`
+path, including every Phase B memory and clock refusal) escaped to the kernel's
+catch-all and was reported as `"class":"internal"` with `"errors":0`: exactly
+what a genuine tool bug reports.  Since the sweeps classify on that JSON, "this
+design is outside the model, here is why" and "pass.lean fell over" were the same
+row.  Now: `exit_code 7`, `class "unsupported"`, `errors 1`.
+
 ### Porting to the other branches
 
 `DesignCert.lean` was byte-identical across `livehd-new`, `d3`, `d4` and

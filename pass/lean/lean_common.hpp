@@ -15,6 +15,7 @@
 // a proper header (latch_contract, node_util, design_cert_export).
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -129,6 +130,12 @@ struct LeanCtx {
   // refused on the legacy path, where the corresponding state is unconstrained.
   bool         verified_compiler = false;
   size_t       max_width = 1024;
+  // Refuse a combinational cone larger than this many nodes.  Spelled through
+  // `parse_max_width`, so "0"/"unlimited"/"inf"/"none" all arrive here as
+  // SIZE_MAX -- which is the DEFAULT, deliberately: a node budget that fires out
+  // of the box could refuse a design that emits fine today.  The traversal's own
+  // push ceiling is the automatic guard; this is the one an operator sets.
+  size_t       max_nodes = std::numeric_limits<size_t>::max();
 
   absl::flat_hash_set<std::string> used_fields;
 

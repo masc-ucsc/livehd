@@ -1164,10 +1164,49 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
   }
 }
 
-std::vector<Node> reachable_topo_order(const std::vector<Node_pin>& roots, const absl::flat_hash_set<uint32_t>& flop_nids) {
-  absl::flat_hash_set<uint32_t> reached;
-  std::vector<Node>             order;
+// Post-order DFS over the combinational cone feeding `roots`, stopping at graph
+// inputs, constants and flop Qs.  The result is a dependency order: every node
+// appears after everything it reads.
+//
+// THE GRAY SET IS LOAD-BEARING.  `reached` is the BLACK set -- inserted on the
+// POST-visit, so it means "this node and its whole cone are already in `order`".
+// Black alone cannot tell a forward edge from a BACK edge.  Without `on_stack`,
+// a word-level combinational cycle `a -> b -> a` pushes one frame per iteration
+// and pops none: `a` greys and pushes `b`; `b` greys, sees `a` is not yet black,
+// and pushes it again; forever.  Each iteration also allocates and sorts an
+// `Edge_vec`, so the process grows linearly in wall time with NO diagnostic --
+// measured at 55 GB after 39 minutes on `txfmafrac_top`, and recorded as
+// `std::bad_alloc` for the `txfma_f*` family in the 2026-08 census.  It is not
+// stack overflow and not a slow fixpoint: the stack is heap-allocated and no
+// frame is ever popped.
+//
+// cprop's `split_packed_selfref_wires` (graph/split_selfref.cpp) is what is
+// supposed to dissolve these, and it WARNS when it cannot -- but that warning is
+// non-fatal, the caller discards it, and the pipeline walks straight in here.
+// `pass/lec/encode.cpp` refuses such a graph by name and `cgen_sim` detects it
+// too; pass.lean was the only consumer that hung instead, because it is the only
+// one that bypasses `forward_class` for its own DFS.  So refuse, naming BOTH
+// endpoints of the back edge -- that is what separates "a cycle survived cprop"
+// from "the emitter is merely slow", which is the distinction the whole
+// txfma_f0/f2/f3/f5 + txfmafrac_top group turned on.
+std::vector<Node> reachable_topo_order(const LeanCtx& ctx, const std::vector<Node_pin>& roots,
+                                       const absl::flat_hash_set<uint32_t>& flop_nids) {
+  absl::flat_hash_set<uint32_t>      reached;   // BLACK: node and its cone are in `order`
+  absl::flat_hash_set<uint32_t>      on_stack;  // GRAY: node is being explored right now
+  std::vector<Node>                  order;
   std::vector<std::pair<Node, bool>> stack;
+
+  // Belt and braces for a shape the cycle test misses.  On a DAG this DFS pushes
+  // at most once per edge, so a bound that scales with the graph cannot fire on
+  // a legitimate design; a runaway trips it in seconds instead of filling RAM.
+  size_t graph_nodes = 0;
+  if (ctx.g != nullptr) {
+    for ([[maybe_unused]] auto n : ctx.g->fast_class()) {
+      ++graph_nodes;
+    }
+  }
+  const size_t push_cap = 64 * (graph_nodes + 1024);
+  size_t       pushes   = 0;
 
   for (const auto& dpin : roots) {
     auto n = pin_node(dpin);
@@ -1181,6 +1220,7 @@ std::vector<Node> reachable_topo_order(const std::vector<Node_pin>& roots, const
     while (!stack.empty()) {
       auto& [cur, visited] = stack.back();
       if (visited) {
+        on_stack.erase(node_id(cur));
         if (reached.insert(node_id(cur)).second) {
           order.push_back(cur);
         }
@@ -1188,17 +1228,47 @@ std::vector<Node> reachable_topo_order(const std::vector<Node_pin>& roots, const
         continue;
       }
       visited = true;
-      for (const auto& e : inp_edges_ordered(cur)) {
+      // COPY the node and its id before the loop below: `stack.emplace_back` may
+      // reallocate, which invalidates the `cur` reference bound from
+      // `stack.back()`.  (The original code got away with reading `cur` only in
+      // the range-for initializer; a diagnostic that names `cur` after a push
+      // would not.)
+      const Node     cur_node = cur;
+      const uint32_t cur_id   = node_id(cur_node);
+      on_stack.insert(cur_id);
+      for (const auto& e : inp_edges_ordered(cur_node)) {
         auto child = pin_node(e.driver);
         if (pin_is_input(e.driver) || pin_is_const(e.driver) || flop_nids.count(node_id(child)) > 0) {
           continue;
         }
-        if (reached.count(node_id(child)) > 0) {
+        const uint32_t child_id = node_id(child);
+        if (reached.count(child_id) > 0) {
           continue;
+        }
+        if (on_stack.count(child_id) > 0) {
+          fatal(ctx, "COMBINATIONAL CYCLE: node n_" + std::to_string(cur_id) + " (" + gu::debug_name(cur_node)
+                         + ") reads n_" + std::to_string(child_id) + " (" + gu::debug_name(child)
+                         + "), which is still being resolved -- the two are on a word-level combinational loop. "
+                           "cprop's split_packed_selfref_wires should have dissolved it; check its "
+                           "`unresolved-cycle` warning earlier in this run. A surviving loop has no dependency "
+                           "order, so there is no certificate to emit.");
+        }
+        if (++pushes > push_cap) {
+          fatal(ctx, "the combinational traversal exceeded " + std::to_string(push_cap) + " steps on a graph of "
+                         + std::to_string(graph_nodes)
+                         + " nodes. On an acyclic graph this walk costs one step per edge, so this is a structural "
+                           "problem rather than a large design -- most likely a combinational loop the cycle check "
+                           "above did not catch.");
         }
         stack.emplace_back(child, false);
       }
     }
+  }
+
+  if (ctx.max_nodes != 0 && order.size() > ctx.max_nodes) {
+    fatal(ctx, "the design's combinational cone has " + std::to_string(order.size()) + " nodes, over the "
+                   + std::to_string(ctx.max_nodes)
+                   + "-node budget (formal.lean.max_nodes). Raise it, or emit a smaller block.");
   }
   return order;
 }
@@ -1750,6 +1820,11 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
   }
 
   max_width = parse_max_width(var.get("max_width"));
+  // Same spelling as max_width ("0"/"unlimited"/"inf"/"none" = no cap), but the
+  // DEFAULT is unlimited: a node budget that fires out of the box could refuse a
+  // design that emits fine today, and the traversal's push ceiling is already
+  // the automatic guard against a runaway.
+  max_nodes = parse_max_width(var.get("max_nodes"), 0);
 }
 
 void Pass_lean::setup() {
@@ -1767,6 +1842,9 @@ void Pass_lean::setup() {
                         "the proved compiler Compiler.compileDesign instead of from this pass.",
                         "legacy");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
+  m1.add_label_optional("max_nodes",
+                        "Hard cap on the combinational cone's node count; 0 or 'unlimited' = no cap (default 0).",
+                        "0");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
   m1.add_label_optional("cert_chunk_size", "Number of node certificates per chunk for cert_wf:chunked.", "25");
@@ -1777,7 +1855,21 @@ void Pass_lean::setup() {
 void Pass_lean::work(Eprp_var& var) {
   Pass_lean pass(var);
   for (const auto& g : var.graphs) {
-    pass.emit_for_graph(g);
+    // A DIAGNOSED REFUSAL MUST NOT LOOK LIKE A CRASH.  `fatal()` throws
+    // `Emit_error`, and the only handler used to be inside the LEGACY emission
+    // block -- so every refusal raised by the shared scan or by a direction's
+    // emitter (the whole verified_compiler path, including every Phase B memory
+    // and clock refusal) escaped to the kernel's catch-all and was reported as
+    //   "error":{"class":"internal", ...}, "diagnostics_count":{"errors":0}
+    // i.e. exactly what a genuine tool bug reports.  The result JSON is what the
+    // sweeps classify on, so "this design is outside the model, here is why" and
+    // "pass.lean fell over" were the same row.  Catch it here, where every
+    // direction's throw passes, and report it as the error it is.
+    try {
+      pass.emit_for_graph(g);
+    } catch (const Emit_error& err) {
+      livehd::diag::err("pass.lean", "lean-error", "unsupported").msg("{}", err.what()).fatal();
+    }
   }
 }
 
@@ -1802,6 +1894,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ctx.top_name  = base_name;
   ctx.strict    = strict;
   ctx.max_width = max_width;
+  ctx.max_nodes = max_nodes;
   ctx.verified_compiler = verified_compiler;
 
   auto gio = g->get_io();
@@ -2065,7 +2158,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
                 "function-valued state a meaning to bridge to.");
   }
 
-  auto topo = reachable_topo_order(roots, flop_nids);
+  auto topo = reachable_topo_order(ctx, roots, flop_nids);
   CertBuild cert_build;
   std::vector<std::string> cert_nodes;
   std::vector<uint32_t> topo_ids;
