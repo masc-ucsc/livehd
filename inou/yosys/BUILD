@@ -130,3 +130,13 @@ sh_test(
     srcs = ["tests/yosys_state_match_test.sh"],
     data = [":scripts"],
 )
+
+# Bounded-check reset protocol: the reset window must clock the design and
+# un-reset power-on state is X (a don't-care on gold), so a QN-flop netlist of
+# a synchronous-reset design is not falsely refuted while real post-reset
+# divergences still are.
+sh_test(
+    name = "lgcheck_qn_reset_test",
+    srcs = ["tests/yosys_qn_reset_test.sh"],
+    data = [":scripts"],
+)

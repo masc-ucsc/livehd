@@ -54,6 +54,72 @@ def collect_port_shapes(lines: list[str], wanted: set[str]) -> dict[str, PortSha
     return shapes
 
 
+CLOCK_PORTS = {"CLK", "C", "RD_CLK", "WR_CLK"}
+ALIAS_CELLS = {"$buf", "$pos", "$_BUF_"}
+
+
+def clock_inputs(lines: list[str], top: str) -> list[str] | None:
+    """Return the top module's input ports that clock a state cell.
+
+    A clock usually reaches the flop through slang's `$buf` copies or a plain
+    `connect` alias (`cpu.clk` <- `clk`), so follow whole-wire aliases back to
+    an input port. Constant clocks (unused memory ports) and bit slices are
+    ignored. Returns None when the module is absent.
+    """
+    wanted = f"module \\{top}"
+    in_module = found = False
+    inputs: list[str] = []
+    alias: dict[str, str] = {}
+    clock_sigs: list[str] = []
+    cell_type = ""
+    cell_ports: dict[str, str] = {}
+
+    def plain(sig: str) -> str:
+        sig = sig.strip()
+        return unescape(sig) if sig.startswith("\\") and " " not in sig else ""
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not in_module:
+            if line == wanted:
+                in_module = found = True
+            continue
+        if raw_line == "end":
+            break
+        words = line.split()
+        if not words:
+            continue
+        if words[0] == "wire" and "input" in words:
+            inputs.append(unescape(words[-1]))
+        elif words[0] == "cell" and len(words) >= 3:
+            cell_type, cell_ports = words[1], {}
+        elif words[0] == "connect" and len(words) >= 3:
+            lhs, rhs = words[1], " ".join(words[2:])
+            if cell_type:
+                cell_ports[unescape(lhs)] = rhs
+                if unescape(lhs) in CLOCK_PORTS and cell_type.startswith("$"):
+                    clock_sigs.append(rhs)
+            elif plain(lhs) and plain(rhs):
+                alias[plain(lhs)] = plain(rhs)
+        elif words[0] == "end" and cell_type:
+            if cell_type in ALIAS_CELLS and plain(cell_ports.get("Y", "")) and plain(cell_ports.get("A", "")):
+                alias[plain(cell_ports["Y"])] = plain(cell_ports["A"])
+            cell_type = ""
+    if not found:
+        return None
+    input_set = set(inputs)
+    clocks: set[str] = set()
+    for sig in clock_sigs:
+        name = plain(sig)
+        seen: set[str] = set()
+        while name and name not in input_set and name in alias and name not in seen:
+            seen.add(name)
+            name = alias[name]
+        if name in input_set:
+            clocks.add(name)
+    return [name for name in inputs if name in clocks]
+
+
 def compatible_specialization(
     child: str,
     mapped_modules: set[str],
@@ -98,6 +164,11 @@ def main() -> int:
         help="prefer an occurrence-specialized child name when that module exists in this RTLIL",
     )
     parser.add_argument("--has-input")
+    parser.add_argument(
+        "--clock-inputs",
+        action="store_true",
+        help="print the top's input ports that (through whole-wire aliases) clock a state cell",
+    )
     args = parser.parse_args()
 
     try:
@@ -105,6 +176,15 @@ def main() -> int:
     except OSError as error:
         print(f"rtlil_children: {error}", file=sys.stderr)
         return 1
+
+    if args.clock_inputs:
+        clocks = clock_inputs(lines, args.top)
+        if clocks is None:
+            print(f"rtlil_children: top module {args.top!r} not found in {args.rtlil}", file=sys.stderr)
+            return 1
+        for name in clocks:
+            print(name)
+        return 0
 
     modules = {unescape(line.split(maxsplit=1)[1]) for line in lines if line.startswith("module ")}
     mapped_modules: set[str] = set()

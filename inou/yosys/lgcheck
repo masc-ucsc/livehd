@@ -880,6 +880,43 @@ else
   RESET_STMT=""
 fi
 
+# Clock inputs of the SELECTED gold module (only needed to drive a reset). The
+# bounded check below runs under clk2fflogic, where a sat step is a global-
+# clock tick and the design clock is an ordinary free input: holding reset for
+# a few steps does NOT reset a synchronous-reset register unless the clock
+# actually rises while reset is asserted. picorv32 (sync resetn) false-refuted
+# because the solver kept in_clk low for the whole reset window, so the
+# "post-reset" comparison started from the power-on state. Trace the clock
+# pins of the gold state cells back to input ports; fall back to conventional
+# names when the RTLIL cache is unavailable or hierarchical.
+clock_names=()
+if [ "$reset_name" != "" ]; then
+  if [ "$GOLD_RTLIL" != "" ]; then
+    if ! clock_list=$(python3 "${SELF_DIR}/rtlil_children.py" --rtlil "$GOLD_RTLIL" --top "$GOLD_TOP" --clock-inputs); then
+      echo "lgcheck: could not inspect clock ports of $GOLD_TOP"
+      exit 5
+    fi
+    for clk_candidate in $clock_list; do
+      clock_names+=("$clk_candidate")
+    done
+    if [ "${#clock_names[@]}" -eq 0 ]; then
+      for clk_candidate in clk clock clk_i clock_i i_clk clk_in aclk; do
+        if [ "$(python3 "${SELF_DIR}/rtlil_children.py" --rtlil "$GOLD_RTLIL" --top "$GOLD_TOP" --has-input "$clk_candidate")" = yes ]; then
+          clock_names+=("$clk_candidate")
+          break
+        fi
+      done
+    fi
+  else
+    for clk_candidate in clk clock clk_i clock_i i_clk clk_in aclk; do
+      if sed 's|//.*||' "${GOLD}" | grep -qw "$clk_candidate"; then
+        clock_names+=("$clk_candidate")
+        break
+      fi
+    done
+  fi
+fi
+
 # Primary hardware inputs are defined bit vectors, as in cvc5 and the BMC
 # check below. Allowing X inputs makes equivalent mux/gate implementations
 # disagree only in undefined propagation and prematurely fails the base case.
@@ -933,20 +970,60 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # shallow depths are not masked by the deepest step.
   # Reset-bearing gold: hold the miter's shared reset for the first cycles and
   # only check AFTER the release (mirrors the tempinduct stage's RESET_STMT and
-  # cvc5's after_reset phase). Without it the miter compares un-reset zero-init
-  # states — unreachable in real hardware — and a state-encoding difference
-  # between two EQUIVALENT designs falsely refutes (XiangShan DcsrModule/Fence:
-  # cvc5 proves, the un-reset BMC "found a mismatch"). sat timesteps are
-  # 1-based: reset high at 1-2, released at 3, trigger checked from 4.
+  # cvc5's after_reset phase). Without it the miter compares un-reset
+  # power-on states — unreachable in real hardware — and a state-encoding
+  # difference between two EQUIVALENT designs falsely refutes (XiangShan
+  # DcsrModule/Fence: cvc5 proves, the un-reset BMC "found a mismatch").
+  #
+  # Under clk2fflogic a sat step is a global-clock tick, not a design cycle,
+  # so the reset window must also DRIVE the design clock(s): 0,1,0,1 gives two
+  # rising (and one falling) edges while reset is asserted. clk2fflogic's
+  # sampled clock starts at the inactive level, so step 1 can never be an
+  # edge that samples the power-on D. Reset is released at step 5 with the
+  # clock free again, and the trigger is checked from there. sat timesteps
+  # are 1-based. Without a known clock keep the historical 3-step window
+  # (reset at 1-2, release at 3); only an asynchronous reset is then assured.
   bmc_start=1
   BMC_RESET_STMT=""
+  BMC_INIT="-set-init-zero"
   if [ "${RESET_STMT}" != "" ]; then
-    BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert} -set-at 3 ${reset_signal} ${reset_release}"
-    bmc_start=4
+    if [ "${#clock_names[@]}" -gt 0 ]; then
+      echo "INFO: bounded check clocks the reset window (2 rising edges) on: ${clock_names[*]}"
+      BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert}"
+      BMC_RESET_STMT+=" -set-at 3 ${reset_signal} ${reset_assert} -set-at 4 ${reset_signal} ${reset_assert}"
+      BMC_RESET_STMT+=" -set-at 5 ${reset_signal} ${reset_release}"
+      for clk_name in "${clock_names[@]}"; do
+        BMC_RESET_STMT+=" -set-at 1 in_${clk_name} 0 -set-at 2 in_${clk_name} 1 -set-at 3 in_${clk_name} 0 -set-at 4 in_${clk_name} 1"
+      done
+      bmc_start=5
+      # The design has really been reset, so its power-on state is UNDEFINED,
+      # not zero: only an explicit init value or the reset defines a
+      # register, everything else starts as X. With the miter's
+      # -ignore_gold_x an output that still depends on un-reset GOLD state is
+      # a don't-care, while every output the reset (or the inputs) defines on
+      # the gold side must still match the gate exactly -- including a gate X
+      # there, so a netlist that fails to reset a register the RTL resets
+      # still refutes. -set-init-zero is unsound for mapped netlists: a
+      # QN-output flop (ASAP7 DFFHQN + inverter) stores the complement, so
+      # "all state zero" is Q=0 on the RTL but Q=1 on the netlist, and an
+      # un-reset register manufactured a counterexample (picorv32 trap/eoi,
+      # proven by the native cvc5 LEC).
+      BMC_INIT="-set-init-undef"
+    else
+      echo "WARN: no clock input found on ${GOLD_TOP}; the bounded check cannot drive a synchronous reset"
+      BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert} -set-at 3 ${reset_signal} ${reset_release}"
+      bmc_start=4
+    fi
   fi
+  # Without a reset protocol there is no defined starting state to compare
+  # from; an all-X start would leave e.g. a resetless LFSR undefined forever
+  # and the gold X mask would hide every difference. Keep the historical
+  # shared zero initialization there: it assumes the two designs encode their
+  # power-on state identically (a QN-mapped resetless register can still
+  # false-refute; the native cvc5 LEC pairs states instead).
   bmc_sat_cmds=""
   for ((t = bmc_start; t < bmc_start + LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
+    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 ${BMC_INIT} -set-def-inputs -show-ports miter; "
   done
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
@@ -956,7 +1033,8 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # constant, including at time zero.  The structurally different mapped side
   # can retain the flop until after flattening; the later `-set-init-zero` then
   # compares constant-one GOLD against zero-initialized GATE and manufactures
-  # a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
+  # (after a clocked reset `-set-init-undef` does the same: an X gate bit
+  # against a defined gold bit is not masked) a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
   # two equivalent machines intact before the shared initialization policy is
   # applied by SAT.
   run_equiv_yosys --bmc -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
