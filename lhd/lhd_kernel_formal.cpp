@@ -684,8 +684,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   absl::flat_hash_map<std::string, std::vector<std::string>>         impl_children;
   for (const auto& [name, g] : impl_by_name) {
     for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-      if (gu::type_op_of(node) == Ntype_op::Sub) {
-        impl_children[name].push_back(canon_impl(node.get_subnode_io()->get_name()));
+      // A Sub with NO subnode binding has no def to pair: a mapped netlist
+      // keeps a runtime property marker (`lgassert`/`fproperty`, see
+      // gu::is_property_marker) as a body-less Sub whose def is not in the
+      // netlist library -- minion's `minion_tlb.sv:372` bit-range guard.
+      // Dereferencing its null io here crashed `lhd lec` on the netlist.
+      if (gu::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      if (auto sio = node.get_subnode_io(); sio != nullptr) {
+        impl_children[name].push_back(canon_impl(sio->get_name()));
       }
     }
   }
@@ -720,8 +728,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (gu::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
-        auto        sio = node.get_subnode_io();
-        std::string cn  = canon_ref(sio->get_name());
+        auto sio = node.get_subnode_io();
+        if (sio == nullptr) {
+          continue;  // body-less marker Sub (see impl_children above): no def to pair
+        }
+        std::string cn = canon_ref(sio->get_name());
         auto        rit = ref_by_name.find(cn);
         if (rit == ref_by_name.end()) {
           continue;
