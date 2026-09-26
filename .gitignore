@@ -62,3 +62,6 @@ difftest_*/
 # ABC writes its interactive command history into the CWD whenever pass.abc runs
 # a script through the embedded shell.
 /abc.history
+
+# lhd --emit-dir lg: scratch output dirs (lg1, lg2, ...)
+/lg[0-9]*/
