@@ -268,7 +268,14 @@ everything the encoder needs.
   a QN cell is modeled `Flop(Not(D))` so the model's state IS the pin the
   netlist observes -- `Not(Flop(D))` shared the complement and refuted every
   resetless register read before its first write on ASAP7 only. Regression:
-  `lhd/tests/lhd_lec_membank_test.sh`.
+  `lhd/tests/lhd_lec_membank_test.sh`. A cell model read back inline leaves
+  its state one segment below the cell (`<mem>._mem[i][b].flop_16`); the
+  alias drops that segment both behind cgen's hex `__lhdmem_h..._e` wrapper
+  AND on a memory module instance that kept its source name (the `lhd synth`
+  netlist of bedrock br_ram_flops: `\gen_row_0_gen_col_0_br_ram_flops_tile.mem `
+  of a `cgen_memory_*_blasted` module). Missing the latter left all 4096
+  ASAP7 storage cells unpaired and false-REFUTED an unwritten read
+  (`inou/prp/tests/equiv/lec/mem_bank_cell*`).
 - **Hierarchy**: a **combinational** `Sub` whose def is supplied via `lhd lec
   --lib lg:DIR` is **flattened inline** (def encoded with inputs bound to the
   instance's input Vals, outputs wired onto its output pins) — the prime use is

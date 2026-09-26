@@ -2744,6 +2744,17 @@ inline void merge_top_in(Top_in& slot, int w, bool sgn) {
   return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {ones});
 }
 
+// A Liberty cell model read back inline leaves its own state one segment below
+// the entry (bit) cell: `_mem[i][b]_flop_16` (core/bus_name.hpp). Drop that
+// segment so the alias is the storage cell's own bus name.
+std::string strip_bank_model_suffix(std::string key) {
+  if (const auto piece = livehd::bus_name::parse_bus_piece(key, /*allow_model_suffix=*/true, '_');
+      piece && !piece->suffix.empty()) {
+    key.resize(key.size() - piece->suffix.size() - 1);
+  }
+  return key;
+}
+
 // ── pass.abc memory=true storage-flop bank of a Memory ─────────────────────
 // pass/synth/memory_module.cpp bit-blasts a Memory `<mem>` (size x bits) into
 // one bits-wide storage flop per entry named `<mem>._mem[i]` (canonical key
@@ -2773,7 +2784,15 @@ std::string memory_bank_correspondence_name(std::string_view name, bool strip_re
   const auto marker = key.find(cgen_memory_state_marker);
   const auto entry  = key.find("_e__mem", marker);
   if (marker == std::string::npos || entry == std::string::npos) {
-    return key;
+    // A memory instance that kept its SOURCE name -- the synth netlist's
+    // `<mem>` instance of a `cgen_memory_*_blasted` module, not cgen's
+    // hex-encoded wrapper -- still carries the inlined cell model's state
+    // segment. Without this strip no such bank ever matched its Memory, so
+    // every never-written entry was two unrelated free symbols (lhdtrack
+    // br_ram_flops 64x64 on ASAP7 DFFHQNx1 cells, --impl verilog: netlist +
+    // models: a false REFUTE of an unwritten read, rd_data ref=all-ones
+    // impl=0).
+    return strip_bank_model_suffix(key);
   }
   const auto decoded = decode_cgen_memory_correspondence(key.substr(0, entry + 2) + "_data");
   if (!decoded) {
@@ -2795,14 +2814,7 @@ std::string memory_bank_correspondence_name(std::string_view name, bool strip_re
       prefix.clear();
     }
   }
-  auto suffix = key.substr(entry + 2);
-  // A Liberty cell model read back inline leaves its own state one segment
-  // below the entry (bit) cell: `_mem[i][b]_flop_16` (core/bus_name.hpp).
-  if (const auto piece = livehd::bus_name::parse_bus_piece(suffix, /*allow_model_suffix=*/true, '_');
-      piece && !piece->suffix.empty()) {
-    suffix.resize(suffix.size() - piece->suffix.size() - 1);
-  }
-  return prefix + decoded->substr(marker) + suffix;
+  return prefix + decoded->substr(marker) + strip_bank_model_suffix(key.substr(entry + 2));
 }
 
 struct Mem_entry_bank {
